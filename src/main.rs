@@ -1,9 +1,14 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use structopt::StructOpt;
 
+mod context;
 mod drive;
+mod error;
+mod host;
 mod http;
+mod transaction;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -23,7 +28,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Tinychain version {}", VERSION);
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
 
-    let _workspace = drive::Drive::new(config.workspace);
-    http::listen(config.http_port).await?;
+    let workspace = drive::Drive::new(config.workspace);
+    let host = Arc::new(host::HostContext::new(workspace));
+    http::listen(host, config.http_port).await?;
     Ok(())
 }
