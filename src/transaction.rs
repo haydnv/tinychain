@@ -1,8 +1,32 @@
+use std::sync::Arc;
+
+use rand::Rng;
+
+use crate::context::*;
+use crate::host::HostContext;
+
 pub struct TransactionId {
-    timestamp: u64, // nanoseconds since Unix epoch
+    timestamp: u128, // nanoseconds since Unix epoch
     nonce: u16,
+}
+
+impl TransactionId {
+    fn new(timestamp: u128) -> TransactionId {
+        let nonce: u16 = rand::thread_rng().gen();
+        TransactionId { timestamp, nonce }
+    }
 }
 
 pub struct Transaction {
     id: TransactionId,
+    parent: Arc<dyn TCContext>,
+}
+
+impl Transaction {
+    pub fn new(host: Arc<HostContext>) -> Transaction {
+        Transaction {
+            id: TransactionId::new(host.time()),
+            parent: host,
+        }
+    }
 }
