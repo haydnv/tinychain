@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use structopt::StructOpt;
 
+mod cache;
 mod context;
 mod drive;
 mod error;

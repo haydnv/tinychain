@@ -12,10 +12,12 @@ pub type TCResult<T> = Result<T, error::TCError>;
 #[derive(Deserialize, Serialize)]
 pub struct TCOp {
     method: String,
+
+    #[serde(default="HashMap::new")]
     args: HashMap<String, TCValue>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Hash)]
 pub enum TCValue {
     Int32(i32),
     r#String(String),
@@ -28,6 +30,7 @@ pub enum TCRequest {
     Value(TCValue),
 }
 
+#[derive(Hash)]
 pub enum TCState {
     Value(TCValue),
 }

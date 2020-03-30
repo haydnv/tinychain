@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use rand::Rng;
 
+use crate::cache::Map;
 use crate::context::*;
 use crate::error;
 use crate::host::HostContext;
@@ -23,6 +24,7 @@ impl TransactionId {
 pub struct Transaction {
     id: TransactionId,
     parent: Arc<dyn TCContext>,
+    resolved: Map<String, TCState>,
 }
 
 impl Transaction {
@@ -30,6 +32,7 @@ impl Transaction {
         Arc::new(Transaction {
             id: TransactionId::new(host.time()),
             parent: host,
+            resolved: Map::new(),
         })
     }
 
@@ -37,6 +40,7 @@ impl Transaction {
         Arc::new(Transaction {
             id: self.id.clone(),
             parent: self.clone(),
+            resolved: Map::new(),
         })
     }
 

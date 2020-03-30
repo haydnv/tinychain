@@ -78,11 +78,11 @@ async fn handle(
 
             let result = result.and_then(|values| {
                 serde_json::to_string_pretty(&values)
-                .and_then(|s| Ok(s.into_bytes()))
-                .or_else(|e| {
-                    let msg = "Your request completed successfully but there was an error serializing the response";
-                    Err(error::bad_request(msg, e))
-                })
+                    .and_then(|s| Ok(s.into_bytes()))
+                    .or_else(|e| {
+                        let msg = "Your request completed successfully but there was an error serializing the response";
+                        Err(error::bad_request(msg, e))
+                    })
             });
 
             transform_error(result)
