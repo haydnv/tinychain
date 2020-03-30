@@ -2,6 +2,7 @@ use std::fmt;
 
 pub enum Code {
     BadRequest,
+    Internal,
     MethodNotAllowed,
     NotFound,
     NotImplemented,
@@ -28,6 +29,10 @@ impl TCError {
 
 pub fn bad_request<T: fmt::Display>(message: &str, info: T) -> TCError {
     TCError::of(Code::BadRequest, format!("{}: {}", message, info))
+}
+
+pub fn internal(message: &str) -> TCError {
+    TCError::of(Code::Internal, message.to_string())
 }
 
 pub fn method_not_allowed() -> TCError {

@@ -17,7 +17,7 @@ pub struct TCOp {
     args: HashMap<String, TCValue>,
 }
 
-#[derive(Deserialize, Serialize, Hash)]
+#[derive(Clone, Deserialize, Serialize, Hash)]
 pub enum TCValue {
     Int32(i32),
     r#String(String),

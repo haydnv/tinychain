@@ -29,7 +29,7 @@ pub struct Transaction {
     stack: RwLock<Vec<Arc<Transaction>>>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum State {
     Open,
     Closed,
@@ -51,17 +51,68 @@ impl Transaction {
         Self::of(TransactionId::new(host.time()), host)
     }
 
-    pub fn extend(self: Arc<Self>, _name: String, _context: String, _op: TCOp) {
+    pub fn extend(self: Arc<Self>, _name: String, _context: String, _op: TCOp) -> TCResult<()> {
+        if self.state.get() != State::Open {
+            return Err(error::internal(
+                "Attempted to extend a transaction already in progress",
+            ));
+        }
+
         let txn = Self::of(self.id.clone(), self.clone());
         self.stack.write().unwrap().push(txn);
-    }
-
-    pub fn provide(self: Arc<Self>, _name: String, _value: TCValue) -> TCResult<()> {
         Ok(())
     }
 
-    pub async fn resolve(&self, _capture: Vec<&str>) -> TCResult<HashMap<String, TCValue>> {
-        Err(error::not_implemented())
+    pub fn provide(self: Arc<Self>, name: String, value: TCValue) -> TCResult<()> {
+        if self.state.get() != State::Open {
+            return Err(error::internal(
+                "Attempted to provide a value to a transaction already in progress",
+            ));
+        }
+
+        if self.resolved.contains_key(&name) {
+            Err(error::bad_request(
+                "This transaction already contains a value called",
+                name,
+            ))
+        } else {
+            self.resolved.insert(name, Arc::new(TCState::Value(value)));
+            Ok(())
+        }
+    }
+
+    pub async fn resolve(&self, capture: Vec<&str>) -> TCResult<HashMap<String, TCValue>> {
+        if self.state.get() != State::Open {
+            return Err(error::internal(
+                "Attempt to resolve the same transaction multiple times",
+            ));
+        }
+
+        self.state.set(State::Closed);
+
+        // TODO: resolve all child transactions
+
+        self.state.set(State::Resolved);
+
+        let mut results: HashMap<String, TCValue> = HashMap::new();
+        for name in capture {
+            let name = name.to_string();
+            match self.resolved.get(&name) {
+                Some(arc_ref) => match &*arc_ref {
+                    TCState::Value(val) => {
+                        results.insert(name, val.clone());
+                    }
+                },
+                None => {
+                    return Err(error::bad_request(
+                        "Attempted to read value not in transaction",
+                        name,
+                    ));
+                }
+            }
+        }
+
+        Ok(results)
     }
 }
 

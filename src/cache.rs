@@ -40,11 +40,11 @@ impl<T: Copy> Value<T> {
         }
     }
 
-    pub fn get(self: Arc<Self>) -> T {
+    pub fn get(&self) -> T {
         self.val.read().unwrap().clone()
     }
 
-    pub fn set(self: Arc<Self>, value: T) {
+    pub fn set(&self, value: T) {
         *self.val.write().unwrap() = value;
     }
 }
