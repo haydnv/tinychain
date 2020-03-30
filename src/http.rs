@@ -89,7 +89,7 @@ async fn handle(
         }
         _ => {
             let mut response = Response::new(Body::from(""));
-            *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
+            *response.status_mut() = StatusCode::NOT_FOUND;
             Ok(response)
         }
     }

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use async_trait::async_trait;
 use rand::Rng;
 
 use crate::cache::{Map, Set, Value};
@@ -29,7 +28,7 @@ impl TransactionId {
 
 pub struct Transaction {
     id: TransactionId,
-    parent: Arc<dyn TCContext>,
+    host: Arc<HostContext>,
     known: Set<String>,
     queue: RwLock<Vec<Pending>>,
     resolved: Map<String, TCState>,
@@ -44,10 +43,10 @@ enum State {
 }
 
 impl Transaction {
-    fn of(id: TransactionId, parent: Arc<dyn TCContext>) -> Arc<Transaction> {
+    fn of(id: TransactionId, host: Arc<HostContext>) -> Arc<Transaction> {
         Arc::new(Transaction {
             id,
-            parent,
+            host,
             known: Set::new(),
             queue: RwLock::new(vec![]),
             resolved: Map::new(),
@@ -66,12 +65,12 @@ impl Transaction {
             ));
         }
 
-        let txn = Self::of(self.id.clone(), self.clone());
+        let txn = Self::of(self.id.clone(), self.host.clone());
         for (name, arg) in op.args() {
             txn.clone().provide(name, arg)?;
         }
 
-        match &*self.parent.clone().get(context).await? {
+        match &*self.host.clone().get(context).await? {
             TCState::Table(table) => {
                 let pending = table.clone().post(op.method())?;
                 self.queue.write().unwrap().push(pending);
@@ -138,16 +137,5 @@ impl Transaction {
         }
 
         Ok(results)
-    }
-}
-
-#[async_trait]
-impl TCContext for Transaction {
-    async fn get(self: Arc<Self>, name: String) -> TCResult<Arc<TCState>> {
-        if self.resolved.contains_key(&name) {
-            Ok(self.resolved.get(&name).unwrap())
-        } else {
-            self.parent.clone().get(name).await
-        }
     }
 }

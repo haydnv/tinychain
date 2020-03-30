@@ -46,6 +46,13 @@ pub fn missing(message: &str) -> TCError {
     TCError::of(Code::BadRequest, message.to_string())
 }
 
+pub fn not_found<T: fmt::Display>(id: T) -> TCError {
+    TCError::of(
+        Code::NotFound,
+        format!("The requested resource could not be found: {}", id),
+    )
+}
+
 pub fn not_implemented() -> TCError {
     TCError::of(
         Code::NotImplemented,

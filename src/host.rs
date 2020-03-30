@@ -1,17 +1,22 @@
 use std::sync::Arc;
 use std::time;
 
+use async_trait::async_trait;
+
 use crate::context::*;
 use crate::drive::Drive;
-use crate::transaction::Transaction;
+use crate::error;
+use crate::table::TableContext;
+use crate::transaction::{Pending, Transaction};
 
 pub struct HostContext {
-    workspace: Drive,
+    table_context: Arc<TableContext>,
 }
 
 impl HostContext {
-    pub fn new(workspace: Drive) -> HostContext {
-        HostContext { workspace }
+    pub fn new(_workspace: Drive) -> HostContext {
+        let table_context = TableContext::new();
+        HostContext { table_context }
     }
 
     pub fn time(&self) -> u128 {
@@ -26,4 +31,14 @@ impl HostContext {
     }
 }
 
-impl TCContext for HostContext {}
+#[async_trait]
+impl TCContext for HostContext {
+    fn post(self: Arc<Self>, path: String) -> TCResult<Pending> {
+        let segments: Vec<&str> = path.split('/').collect();
+
+        match segments[0..2] {
+            ["sbin", "table"] => self.table_context.clone().post(segments[2..].join("/")),
+            _ => Err(error::not_found(path)),
+        }
+    }
+}
