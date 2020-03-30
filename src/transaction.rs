@@ -1,12 +1,18 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use async_trait::async_trait;
 use rand::Rng;
 
-use crate::cache::{Map, Value};
-use crate::context::*;
+use crate::cache::{Map, Set, Value};
+use crate::context::{TCContext, TCOp, TCResult, TCState, TCValue};
 use crate::error;
 use crate::host::HostContext;
+
+pub type Pending = (
+    Vec<String>,
+    Arc<dyn FnOnce(HashMap<String, TCState>) -> TCResult<Arc<TCState>> + Send + Sync>,
+);
 
 #[derive(Clone)]
 pub struct TransactionId {
@@ -24,9 +30,10 @@ impl TransactionId {
 pub struct Transaction {
     id: TransactionId,
     parent: Arc<dyn TCContext>,
+    known: Set<String>,
+    queue: RwLock<Vec<Pending>>,
     resolved: Map<String, TCState>,
     state: Value<State>,
-    stack: RwLock<Vec<Arc<Transaction>>>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -41,9 +48,10 @@ impl Transaction {
         Arc::new(Transaction {
             id,
             parent,
+            known: Set::new(),
+            queue: RwLock::new(vec![]),
             resolved: Map::new(),
             state: Value::of(State::Open),
-            stack: RwLock::new(vec![]),
         })
     }
 
@@ -51,7 +59,7 @@ impl Transaction {
         Self::of(TransactionId::new(host.time()), host)
     }
 
-    pub fn extend(self: Arc<Self>, _name: String, _context: String, _op: TCOp) -> TCResult<()> {
+    pub async fn extend(self: Arc<Self>, name: String, context: String, op: TCOp) -> TCResult<()> {
         if self.state.get() != State::Open {
             return Err(error::internal(
                 "Attempted to extend a transaction already in progress",
@@ -59,7 +67,21 @@ impl Transaction {
         }
 
         let txn = Self::of(self.id.clone(), self.clone());
-        self.stack.write().unwrap().push(txn);
+        for (name, arg) in op.args() {
+            txn.clone().provide(name, arg)?;
+        }
+
+        match &*self.parent.clone().get(context).await? {
+            TCState::Table(table) => {
+                let pending = table.clone().post(op.method())?;
+                self.queue.write().unwrap().push(pending);
+                self.known.insert(name);
+            }
+            TCState::Value(value) => {
+                self.provide(name, value.clone())?;
+            }
+        }
+
         Ok(())
     }
 
@@ -70,7 +92,7 @@ impl Transaction {
             ));
         }
 
-        if self.resolved.contains_key(&name) {
+        if self.known.contains(&name) {
             Err(error::bad_request(
                 "This transaction already contains a value called",
                 name,
@@ -101,6 +123,9 @@ impl Transaction {
                 Some(arc_ref) => match &*arc_ref {
                     TCState::Value(val) => {
                         results.insert(name, val.clone());
+                    },
+                    TCState::Table(_) => {
+                        return Err(error::bad_request("The transaction completed successfully but some captured values could not be serialized", name))
                     }
                 },
                 None => {
@@ -116,16 +141,13 @@ impl Transaction {
     }
 }
 
+#[async_trait]
 impl TCContext for Transaction {
-    fn post(
-        self: Arc<Self>,
-        _method: String,
-        args: HashMap<String, TCValue>,
-    ) -> TCResult<Arc<Transaction>> {
-        for (name, value) in args {
-            self.clone().provide(name, value)?;
+    async fn get(self: Arc<Self>, name: String) -> TCResult<Arc<TCState>> {
+        if self.resolved.contains_key(&name) {
+            Ok(self.resolved.get(&name).unwrap())
+        } else {
+            self.parent.clone().get(name).await
         }
-
-        Ok(self)
     }
 }

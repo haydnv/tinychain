@@ -42,6 +42,10 @@ pub fn method_not_allowed() -> TCError {
     )
 }
 
+pub fn missing(message: &str) -> TCError {
+    TCError::of(Code::BadRequest, message.to_string())
+}
+
 pub fn not_implemented() -> TCError {
     TCError::of(
         Code::NotImplemented,

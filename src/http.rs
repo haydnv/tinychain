@@ -105,7 +105,7 @@ async fn transact(
         match request {
             TCRequest::Value(value) => txn.provide(name, value)?,
             TCRequest::Op(context, op) => {
-                txn.extend(name, context, op)?;
+                txn.extend(name, context, op).await?;
             }
         }
     }

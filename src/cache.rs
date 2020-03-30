@@ -1,31 +1,51 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
 
 pub struct Map<K: Eq + Hash, V: Hash> {
-    cache: RwLock<HashMap<K, Arc<V>>>,
+    map: RwLock<HashMap<K, Arc<V>>>,
 }
 
 impl<K: Eq + Hash, V: Hash> Map<K, V> {
     pub fn new() -> Map<K, V> {
         Map {
-            cache: RwLock::new(HashMap::new()),
+            map: RwLock::new(HashMap::new()),
         }
     }
 
     pub fn contains_key(&self, key: &K) -> bool {
-        self.cache.read().unwrap().contains_key(key)
+        self.map.read().unwrap().contains_key(key)
     }
 
     pub fn get(&self, key: &K) -> Option<Arc<V>> {
-        match self.cache.read().unwrap().get(key) {
+        match self.map.read().unwrap().get(key) {
             Some(state) => Some(state.clone()),
             None => None,
         }
     }
 
     pub fn insert(&self, key: K, value: Arc<V>) -> Option<Arc<V>> {
-        self.cache.write().unwrap().insert(key, value)
+        self.map.write().unwrap().insert(key, value)
+    }
+}
+
+pub struct Set<T: Hash> {
+    set: RwLock<HashSet<T>>,
+}
+
+impl<T: Eq + Hash> Set<T> {
+    pub fn new() -> Set<T> {
+        Set {
+            set: RwLock::new(HashSet::new()),
+        }
+    }
+
+    pub fn insert(&self, value: T) -> bool {
+        self.set.write().unwrap().insert(value)
+    }
+
+    pub fn contains(&self, value: &T) -> bool {
+        self.set.read().unwrap().contains(value)
     }
 }
 
