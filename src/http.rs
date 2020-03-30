@@ -6,15 +6,16 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use serde::{Deserialize, Serialize};
 
-use crate::context::*;
+use crate::context::{TCContext, TCResult, TCValue};
 use crate::error;
 use crate::host::HostContext;
+use crate::transaction::Transaction;
 
 #[derive(Deserialize, Serialize)]
 struct Op {
-    Context: String,
-    Method: String,
-    Args: HashMap<String, TCValue>,
+    context: String,
+    method: String,
+    args: HashMap<String, TCValue>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -50,15 +51,39 @@ async fn handle(
 ) -> Result<Response<Body>, hyper::Error> {
     match *req.method() {
         Method::POST => {
-            if req.uri().path() != "/" {
-                return transform_error(Err(error::method_not_allowed()));
-            }
+            let context = req.uri().path().to_string();
+            let params: HashMap<String, String> = req
+                .uri()
+                .query()
+                .map(|v| {
+                    url::form_urlencoded::parse(v.as_bytes())
+                        .into_owned()
+                        .collect()
+                })
+                .unwrap_or_else(HashMap::new);
 
-            let result = match serde_json::from_slice::<Vec<PostRequest>>(
-                &hyper::body::to_bytes(req.into_body()).await?,
-            ) {
-                Ok(requests) => post(host, requests).await,
-                Err(cause) => Err(error::bad_request("Unable to parse request", cause)),
+            let capture = if let Some(param) = params.get("capture") {
+                param.split('/').collect()
+            } else {
+                vec![]
+            };
+
+            let body = &hyper::body::to_bytes(req.into_body()).await?;
+            let result = match serde_json::from_slice::<Vec<PostRequest>>(body) {
+                Ok(requests) => match post(host.transaction(context), requests, capture).await {
+                    Ok(values) => {
+                        serde_json::to_string_pretty(&values)
+                            .and_then(|s| Ok(s.into_bytes()))
+                            .or_else(|e| {
+                                let msg = "Your request completed successfully but there was an error serializing the response";
+                                Err(error::bad_request(msg, e))
+                            })
+                    },
+                    Err(cause) => Err(cause)
+                },
+                Err(cause) => {
+                    Err(error::bad_request("Unable to parse request", cause))
+                }
             };
             transform_error(result)
         }
@@ -70,27 +95,36 @@ async fn handle(
     }
 }
 
-async fn post(host: Arc<HostContext>, _requests: Vec<PostRequest>) -> TCResult<TCValue> {
-    let _txn = Arc::new(host.transaction());
-    Err(error::not_implemented())
+async fn post(
+    txn: Arc<Transaction>,
+    requests: Vec<PostRequest>,
+    capture: Vec<&str>,
+) -> TCResult<HashMap<String, TCValue>> {
+    for request in requests {
+        let txn = txn.clone();
+        match request {
+            PostRequest::Val(name, value) => txn.provide(name, value)?,
+            PostRequest::Op(op) => {
+                let child_txn = txn.extend(op.context);
+                child_txn.post(op.method, op.args)?;
+            }
+        }
+    }
+
+    Ok(txn.resolve(capture).await?)
 }
 
-fn transform_error(result: TCResult<TCValue>) -> Result<Response<Body>, hyper::Error> {
+fn transform_error(result: TCResult<Vec<u8>>) -> Result<Response<Body>, hyper::Error> {
     match result {
-		Ok(value) => {
-			match serde_json::to_string_pretty(&value) {
-				Ok(s) => Ok(Response::new(Body::from(s))),
-				Err(e) => transform_error(Err(error::bad_request("Your request completed successfully but there was an error serializing the response:", e)))
-			}
-		},
-		Err(cause) => {
-			let mut response = Response::new(Body::from(cause.message().to_string()));
-			*response.status_mut() = match cause.reason() {
-				error::Code::BadRequest => StatusCode::BAD_REQUEST,
-				error::Code::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
-				error::Code::NotImplemented => StatusCode::NOT_IMPLEMENTED,
-			};
-			Ok(response)
-		}
-	}
+        Ok(contents) => Ok(Response::new(Body::from(contents))),
+        Err(cause) => {
+            let mut response = Response::new(Body::from(cause.message().to_string()));
+            *response.status_mut() = match cause.reason() {
+                error::Code::BadRequest => StatusCode::BAD_REQUEST,
+                error::Code::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
+                error::Code::NotImplemented => StatusCode::NOT_IMPLEMENTED,
+            };
+            Ok(response)
+        }
+    }
 }

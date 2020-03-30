@@ -21,8 +21,8 @@ impl HostContext {
         since_the_epoch.as_nanos()
     }
 
-    pub fn transaction(self: Arc<Self>) -> Transaction {
-        Transaction::new(self)
+    pub fn transaction(self: Arc<Self>, context: String) -> Arc<Transaction> {
+        Transaction::new(self, context)
     }
 }
 
