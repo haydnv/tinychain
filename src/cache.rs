@@ -28,3 +28,23 @@ impl<K: Eq + Hash, V: Hash> Map<K, V> {
         self.cache.write().unwrap().insert(key, value)
     }
 }
+
+pub struct Value<T: Copy> {
+    val: RwLock<T>,
+}
+
+impl<T: Copy> Value<T> {
+    pub fn of(value: T) -> Value<T> {
+        Value {
+            val: RwLock::new(value),
+        }
+    }
+
+    pub fn get(self: Arc<Self>) -> T {
+        self.val.read().unwrap().clone()
+    }
+
+    pub fn set(self: Arc<Self>, value: T) {
+        *self.val.write().unwrap() = value;
+    }
+}

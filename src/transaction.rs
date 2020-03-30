@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use rand::Rng;
 
-use crate::cache::Map;
+use crate::cache::{Map, Value};
 use crate::context::*;
 use crate::error;
 use crate::host::HostContext;
@@ -25,23 +25,35 @@ pub struct Transaction {
     id: TransactionId,
     parent: Arc<dyn TCContext>,
     resolved: Map<String, TCState>,
+    state: Value<State>,
+    stack: RwLock<Vec<Arc<Transaction>>>,
+}
+
+#[derive(Clone, Copy)]
+enum State {
+    Open,
+    Closed,
+    Resolved,
 }
 
 impl Transaction {
-    pub fn new(host: Arc<HostContext>) -> Arc<Transaction> {
+    fn of(id: TransactionId, parent: Arc<dyn TCContext>) -> Arc<Transaction> {
         Arc::new(Transaction {
-            id: TransactionId::new(host.time()),
-            parent: host,
+            id,
+            parent,
             resolved: Map::new(),
+            state: Value::of(State::Open),
+            stack: RwLock::new(vec![]),
         })
     }
 
-    pub fn extend(self: Arc<Self>, _name: String, _context: String, _op: TCOp) -> Arc<Transaction> {
-        Arc::new(Transaction {
-            id: self.id.clone(),
-            parent: self.clone(),
-            resolved: Map::new(),
-        })
+    pub fn new(host: Arc<HostContext>) -> Arc<Transaction> {
+        Self::of(TransactionId::new(host.time()), host)
+    }
+
+    pub fn extend(self: Arc<Self>, _name: String, _context: String, _op: TCOp) {
+        let txn = Self::of(self.id.clone(), self.clone());
+        self.stack.write().unwrap().push(txn);
     }
 
     pub fn provide(self: Arc<Self>, _name: String, _value: TCValue) -> TCResult<()> {
@@ -62,6 +74,7 @@ impl TCContext for Transaction {
         for (name, value) in args {
             self.clone().provide(name, value)?;
         }
+
         Ok(self)
     }
 }

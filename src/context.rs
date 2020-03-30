@@ -13,7 +13,7 @@ pub type TCResult<T> = Result<T, error::TCError>;
 pub struct TCOp {
     method: String,
 
-    #[serde(default="HashMap::new")]
+    #[serde(default = "HashMap::new")]
     args: HashMap<String, TCValue>,
 }
 
