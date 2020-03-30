@@ -3,6 +3,7 @@ use std::fmt;
 pub enum Code {
     BadRequest,
     MethodNotAllowed,
+    NotFound,
     NotImplemented,
 }
 

@@ -23,23 +23,20 @@ impl TransactionId {
 pub struct Transaction {
     id: TransactionId,
     parent: Arc<dyn TCContext>,
-    context: String,
 }
 
 impl Transaction {
-    pub fn new(host: Arc<HostContext>, context: String) -> Arc<Transaction> {
+    pub fn new(host: Arc<HostContext>) -> Arc<Transaction> {
         Arc::new(Transaction {
             id: TransactionId::new(host.time()),
             parent: host,
-            context,
         })
     }
 
-    pub fn extend(self: Arc<Self>, context: String) -> Arc<Transaction> {
+    pub fn extend(self: Arc<Self>, _name: String, _context: String, _op: TCOp) -> Arc<Transaction> {
         Arc::new(Transaction {
             id: self.id.clone(),
             parent: self.clone(),
-            context,
         })
     }
 

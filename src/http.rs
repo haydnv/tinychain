@@ -4,25 +4,11 @@ use std::sync::Arc;
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
-use serde::{Deserialize, Serialize};
 
-use crate::context::{TCContext, TCResult, TCValue};
+use crate::context::{TCContext, TCOp, TCRequest, TCResult, TCValue};
 use crate::error;
 use crate::host::HostContext;
 use crate::transaction::Transaction;
-
-#[derive(Deserialize, Serialize)]
-struct Op {
-    context: String,
-    method: String,
-    args: HashMap<String, TCValue>,
-}
-
-#[derive(Deserialize, Serialize)]
-enum PostRequest {
-    Op(Op),
-    Val(String, TCValue),
-}
 
 pub async fn listen(
     host: Arc<HostContext>,
@@ -51,7 +37,7 @@ async fn handle(
 ) -> Result<Response<Body>, hyper::Error> {
     match *req.method() {
         Method::POST => {
-            let context = req.uri().path().to_string();
+            let path = req.uri().path().to_string();
             let params: HashMap<String, String> = req
                 .uri()
                 .query()
@@ -69,22 +55,36 @@ async fn handle(
             };
 
             let body = &hyper::body::to_bytes(req.into_body()).await?;
-            let result = match serde_json::from_slice::<Vec<PostRequest>>(body) {
-                Ok(requests) => match post(host.transaction(context), requests, capture).await {
-                    Ok(values) => {
-                        serde_json::to_string_pretty(&values)
-                            .and_then(|s| Ok(s.into_bytes()))
-                            .or_else(|e| {
-                                let msg = "Your request completed successfully but there was an error serializing the response";
-                                Err(error::bad_request(msg, e))
-                            })
-                    },
-                    Err(cause) => Err(cause)
-                },
-                Err(cause) => {
-                    Err(error::bad_request("Unable to parse request", cause))
+            let txn = host.clone().transaction();
+
+            let result = if path == "/" {
+                match serde_json::from_slice::<HashMap<String, TCRequest>>(body) {
+                    Ok(requests) => transact(txn, requests, capture).await,
+                    Err(cause) => {
+                        return transform_error(Err(error::bad_request(
+                            "Unable to parse request",
+                            cause,
+                        )));
+                    }
+                }
+            } else {
+                match serde_json::from_slice::<TCOp>(body) {
+                    Ok(_op) => host.get(path).await.and_then(|c| match c {
+                        _ => Err(error::not_implemented()),
+                    }),
+                    Err(cause) => Err(error::bad_request("Unable to parse request", cause)),
                 }
             };
+
+            let result = result.and_then(|values| {
+                serde_json::to_string_pretty(&values)
+                .and_then(|s| Ok(s.into_bytes()))
+                .or_else(|e| {
+                    let msg = "Your request completed successfully but there was an error serializing the response";
+                    Err(error::bad_request(msg, e))
+                })
+            });
+
             transform_error(result)
         }
         _ => {
@@ -95,18 +95,17 @@ async fn handle(
     }
 }
 
-async fn post(
+async fn transact(
     txn: Arc<Transaction>,
-    requests: Vec<PostRequest>,
+    requests: HashMap<String, TCRequest>,
     capture: Vec<&str>,
 ) -> TCResult<HashMap<String, TCValue>> {
-    for request in requests {
+    for (name, request) in requests {
         let txn = txn.clone();
         match request {
-            PostRequest::Val(name, value) => txn.provide(name, value)?,
-            PostRequest::Op(op) => {
-                let child_txn = txn.extend(op.context);
-                child_txn.post(op.method, op.args)?;
+            TCRequest::Value(value) => txn.provide(name, value)?,
+            TCRequest::Op(context, op) => {
+                txn.extend(name, context, op);
             }
         }
     }
@@ -122,6 +121,7 @@ fn transform_error(result: TCResult<Vec<u8>>) -> Result<Response<Body>, hyper::E
             *response.status_mut() = match cause.reason() {
                 error::Code::BadRequest => StatusCode::BAD_REQUEST,
                 error::Code::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
+                error::Code::NotFound => StatusCode::NOT_FOUND,
                 error::Code::NotImplemented => StatusCode::NOT_IMPLEMENTED,
             };
             Ok(response)
