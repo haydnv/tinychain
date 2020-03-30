@@ -3,6 +3,7 @@ use std::sync::Arc;
 use rand::Rng;
 
 use crate::context::*;
+use crate::error;
 use crate::host::HostContext;
 
 pub struct TransactionId {
@@ -28,5 +29,9 @@ impl Transaction {
             id: TransactionId::new(host.time()),
             parent: host,
         }
+    }
+
+    pub fn resolve(&self) -> TCResult<TCValue> {
+        Err(error::not_implemented())
     }
 }
