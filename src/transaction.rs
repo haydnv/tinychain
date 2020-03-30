@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use rand::Rng;
 
 use crate::cache::{Map, Set, Value};
-use crate::context::{TCContext, TCOp, TCResult, TCState, TCValue};
+use crate::context::{TCContext, TCResult, TCState, TCValue};
 use crate::error;
 use crate::host::HostContext;
 
@@ -30,7 +30,7 @@ pub struct Transaction {
     id: TransactionId,
     host: Arc<HostContext>,
     known: Set<String>,
-    queue: RwLock<Vec<Pending>>,
+    queue: RwLock<Vec<(String, Pending)>>,
     resolved: Map<String, TCState>,
     state: Value<State>,
 }
@@ -58,7 +58,12 @@ impl Transaction {
         Self::of(TransactionId::new(host.time()), host)
     }
 
-    pub async fn extend(self: Arc<Self>, name: String, context: String, op: TCOp) -> TCResult<()> {
+    pub fn include(
+        self: Arc<Self>,
+        name: String,
+        context: String,
+        args: HashMap<String, TCValue>,
+    ) -> TCResult<()> {
         if self.state.get() != State::Open {
             return Err(error::internal(
                 "Attempted to extend a transaction already in progress",
@@ -66,20 +71,13 @@ impl Transaction {
         }
 
         let txn = Self::of(self.id.clone(), self.host.clone());
-        for (name, arg) in op.args() {
+        for (name, arg) in args {
             txn.clone().provide(name, arg)?;
         }
 
-        match &*self.host.clone().get(context).await? {
-            TCState::Table(table) => {
-                let pending = table.clone().post(op.method())?;
-                self.queue.write().unwrap().push(pending);
-                self.known.insert(name);
-            }
-            TCState::Value(value) => {
-                self.provide(name, value.clone())?;
-            }
-        }
+        let pending = self.host.clone().post(context)?;
+        self.queue.write().unwrap().push((name.clone(), pending));
+        self.known.insert(name);
 
         Ok(())
     }

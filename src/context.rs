@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -10,24 +9,6 @@ use crate::table::Table;
 use crate::transaction::Pending;
 
 pub type TCResult<T> = Result<T, error::TCError>;
-
-#[derive(Deserialize, Serialize)]
-pub struct TCOp {
-    method: String,
-
-    #[serde(default = "HashMap::new")]
-    args: HashMap<String, TCValue>,
-}
-
-impl TCOp {
-    pub fn args(&self) -> HashMap<String, TCValue> {
-        self.args.clone()
-    }
-
-    pub fn method(&self) -> String {
-        self.method.clone()
-    }
-}
 
 #[derive(Clone, Deserialize, Serialize, Hash)]
 pub enum TCValue {
@@ -44,12 +25,6 @@ impl fmt::Display for TCValue {
             TCValue::Vector(v) => write!(f, "vector of length {}", v.len()),
         }
     }
-}
-
-#[derive(Deserialize, Serialize)]
-pub enum TCRequest {
-    Op(String, TCOp),
-    Value(TCValue),
 }
 
 #[derive(Hash)]

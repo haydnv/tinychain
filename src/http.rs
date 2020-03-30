@@ -5,10 +5,9 @@ use std::sync::Arc;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 
-use crate::context::{TCContext, TCOp, TCRequest, TCResult, TCValue};
+use crate::context::{TCResult, TCValue};
 use crate::error;
 use crate::host::HostContext;
-use crate::transaction::Transaction;
 
 pub async fn listen(
     host: Arc<HostContext>,
@@ -55,28 +54,23 @@ async fn handle(
             };
 
             let body = &hyper::body::to_bytes(req.into_body()).await?;
-            let txn = host.clone().transaction();
-
-            let result = if path == "/" {
-                match serde_json::from_slice::<HashMap<String, TCRequest>>(body) {
-                    Ok(requests) => transact(txn, requests, capture).await,
-                    Err(cause) => {
-                        return transform_error(Err(error::bad_request(
-                            "Unable to parse request",
-                            cause,
-                        )));
-                    }
-                }
-            } else {
-                match serde_json::from_slice::<TCOp>(body) {
-                    Ok(_op) => host.get(path).await.and_then(|c| match c {
-                        _ => Err(error::not_implemented()),
-                    }),
-                    Err(cause) => Err(error::bad_request("Unable to parse request", cause)),
+            let args = match serde_json::from_slice::<HashMap<String, TCValue>>(body) {
+                Ok(args) => args,
+                Err(cause) => {
+                    return transform_error(Err(error::bad_request(
+                        "Unable to parse request",
+                        cause,
+                    )));
                 }
             };
 
-            let result = result.and_then(|values| {
+            let txn = host.clone().transaction();
+            match txn.clone().include("result".to_string(), path, args) {
+                Ok(()) => (),
+                Err(cause) => return transform_error(Err(cause)),
+            }
+
+            let result = txn.resolve(capture).await.and_then(|values| {
                 serde_json::to_string_pretty(&values)
                     .and_then(|s| Ok(s.into_bytes()))
                     .or_else(|e| {
@@ -93,24 +87,6 @@ async fn handle(
             Ok(response)
         }
     }
-}
-
-async fn transact(
-    txn: Arc<Transaction>,
-    requests: HashMap<String, TCRequest>,
-    capture: Vec<&str>,
-) -> TCResult<HashMap<String, TCValue>> {
-    for (name, request) in requests {
-        let txn = txn.clone();
-        match request {
-            TCRequest::Value(value) => txn.provide(name, value)?,
-            TCRequest::Op(context, op) => {
-                txn.extend(name, context, op).await?;
-            }
-        }
-    }
-
-    Ok(txn.resolve(capture).await?)
 }
 
 fn transform_error(result: TCResult<Vec<u8>>) -> Result<Response<Body>, hyper::Error> {

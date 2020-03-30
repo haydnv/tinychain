@@ -5,6 +5,8 @@ pub enum Code {
     Internal,
     MethodNotAllowed,
     NotFound,
+
+    #[allow(dead_code)]
     NotImplemented,
 }
 
@@ -53,6 +55,7 @@ pub fn not_found<T: fmt::Display>(id: T) -> TCError {
     )
 }
 
+#[allow(dead_code)]
 pub fn not_implemented() -> TCError {
     TCError::of(
         Code::NotImplemented,

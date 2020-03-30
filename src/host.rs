@@ -34,9 +34,16 @@ impl HostContext {
 #[async_trait]
 impl TCContext for HostContext {
     fn post(self: Arc<Self>, path: String) -> TCResult<Pending> {
-        let segments: Vec<&str> = path.split('/').collect();
+        if !path.starts_with('/') {
+            return Err(error::bad_request(
+                "Expected an absolute path starting with '/' but found",
+                path,
+            ));
+        }
 
-        match segments[0..2] {
+        let segments: Vec<&str> = path[1..].split('/').collect();
+
+        match segments[..2] {
             ["sbin", "table"] => self.table_context.clone().post(segments[2..].join("/")),
             _ => Err(error::not_found(path)),
         }
