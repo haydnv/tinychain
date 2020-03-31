@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use rand::Rng;
 
@@ -7,11 +7,6 @@ use crate::cache::{Map, Set, Value};
 use crate::context::{TCContext, TCResult, TCState, TCValue};
 use crate::error;
 use crate::host::HostContext;
-
-pub type Pending = (
-    Vec<String>,
-    Arc<dyn FnOnce(HashMap<String, TCState>) -> TCResult<Arc<TCState>> + Send + Sync>,
-);
 
 #[derive(Clone)]
 pub struct TransactionId {
@@ -30,7 +25,6 @@ pub struct Transaction {
     id: TransactionId,
     host: Arc<HostContext>,
     known: Set<String>,
-    queue: RwLock<Vec<(String, Pending)>>,
     resolved: Map<String, TCState>,
     state: Value<State>,
 }
@@ -48,7 +42,6 @@ impl Transaction {
             id,
             host,
             known: Set::new(),
-            queue: RwLock::new(vec![]),
             resolved: Map::new(),
             state: Value::of(State::Open),
         })
@@ -74,10 +67,8 @@ impl Transaction {
         for (name, arg) in args {
             txn.clone().provide(name, arg)?;
         }
-
-        let pending = self.host.clone().post(context)?;
-        self.queue.write().unwrap().push((name.clone(), pending));
-        self.known.insert(name);
+        self.resolved
+            .insert(name, self.host.clone().post(context, self.clone())?);
 
         Ok(())
     }
@@ -100,6 +91,13 @@ impl Transaction {
         }
     }
 
+    pub fn require(self: Arc<Self>, name: &str) -> TCResult<Arc<TCState>> {
+        match self.resolved.get(&name.to_string()) {
+            Some(state) => Ok(state),
+            None => Err(error::bad_request("Required value was not provided", name)),
+        }
+    }
+
     pub async fn resolve(&self, capture: Vec<&str>) -> TCResult<HashMap<String, TCValue>> {
         if self.state.get() != State::Open {
             return Err(error::internal(
@@ -109,7 +107,7 @@ impl Transaction {
 
         self.state.set(State::Closed);
 
-        // TODO: resolve all child transactions
+        // TODO: handle asyncronous I/O
 
         self.state.set(State::Resolved);
 
@@ -117,7 +115,7 @@ impl Transaction {
         for name in capture {
             let name = name.to_string();
             match self.resolved.get(&name) {
-                Some(arc_ref) => match &*arc_ref {
+                Some(arc_ref) => match &*arc_ref.clone() {
                     TCState::Value(val) => {
                         results.insert(name, val.clone());
                     },

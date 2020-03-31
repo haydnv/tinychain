@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::table::Table;
-use crate::transaction::Pending;
+use crate::transaction::Transaction;
 
 pub type TCResult<T> = Result<T, error::TCError>;
 
@@ -48,7 +48,7 @@ pub trait TCContext: Send + Sync {
         Err(error::method_not_allowed())
     }
 
-    fn post(self: Arc<Self>, _method: String) -> TCResult<Pending> {
+    fn post(self: Arc<Self>, _method: String, _txn: Arc<Transaction>) -> TCResult<Arc<TCState>> {
         Err(error::method_not_allowed())
     }
 }

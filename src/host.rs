@@ -7,7 +7,7 @@ use crate::context::*;
 use crate::drive::Drive;
 use crate::error;
 use crate::table::TableContext;
-use crate::transaction::{Pending, Transaction};
+use crate::transaction::Transaction;
 
 pub struct HostContext {
     table_context: Arc<TableContext>,
@@ -33,7 +33,7 @@ impl HostContext {
 
 #[async_trait]
 impl TCContext for HostContext {
-    fn post(self: Arc<Self>, path: String) -> TCResult<Pending> {
+    fn post(self: Arc<Self>, path: String, txn: Arc<Transaction>) -> TCResult<Arc<TCState>> {
         if !path.starts_with('/') {
             return Err(error::bad_request(
                 "Expected an absolute path starting with '/' but found",
@@ -44,7 +44,10 @@ impl TCContext for HostContext {
         let segments: Vec<&str> = path[1..].split('/').collect();
 
         match segments[..2] {
-            ["sbin", "table"] => self.table_context.clone().post(segments[2..].join("/")),
+            ["sbin", "table"] => self
+                .table_context
+                .clone()
+                .post(segments[2..].join("/"), txn),
             _ => Err(error::not_found(path)),
         }
     }

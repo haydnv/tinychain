@@ -65,6 +65,14 @@ async fn handle(
             };
 
             let txn = host.clone().transaction();
+            for (name, arg) in &args {
+                match txn.clone().provide(name.to_string(), arg.clone()) {
+                    Ok(()) => (),
+                    Err(cause) => {
+                        return transform_error(Err(cause));
+                    }
+                }
+            }
             match txn.clone().include("result".to_string(), path, args) {
                 Ok(()) => (),
                 Err(cause) => return transform_error(Err(cause)),

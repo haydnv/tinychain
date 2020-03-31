@@ -1,5 +1,6 @@
 use std::fmt;
 
+#[derive(Clone)]
 pub enum Code {
     BadRequest,
     Internal,
@@ -10,6 +11,7 @@ pub enum Code {
     NotImplemented,
 }
 
+#[derive(Clone)]
 pub struct TCError {
     reason: Code,
     message: String,
@@ -42,10 +44,6 @@ pub fn method_not_allowed() -> TCError {
         Code::MethodNotAllowed,
         "This resource does not support this request method".to_string(),
     )
-}
-
-pub fn missing(message: &str) -> TCError {
-    TCError::of(Code::BadRequest, message.to_string())
 }
 
 pub fn not_found<T: fmt::Display>(id: T) -> TCError {
