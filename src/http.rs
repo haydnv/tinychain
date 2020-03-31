@@ -7,10 +7,10 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 
 use crate::context::{TCResult, TCValue};
 use crate::error;
-use crate::host::HostContext;
+use crate::host::Host;
 
 pub async fn listen(
-    host: Arc<HostContext>,
+    host: Arc<Host>,
     port: u16,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let make_svc = make_service_fn(|_conn| {
@@ -30,10 +30,7 @@ pub async fn listen(
     Ok(())
 }
 
-async fn handle(
-    host: Arc<HostContext>,
-    req: Request<Body>,
-) -> Result<Response<Body>, hyper::Error> {
+async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     match *req.method() {
         Method::POST => {
             let path = req.uri().path().to_string();
@@ -73,7 +70,7 @@ async fn handle(
                     }
                 }
             }
-            match txn.clone().include("result".to_string(), path, args) {
+            match txn.clone().include("result".to_string(), path, args).await {
                 Ok(()) => (),
                 Err(cause) => return transform_error(Err(cause)),
             }

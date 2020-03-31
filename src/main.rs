@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
 
     let workspace = drive::Drive::new(config.workspace);
-    let host = Arc::new(host::HostContext::new(workspace));
+    let host = Arc::new(host::Host::new(workspace));
     http::listen(host, config.http_port).await?;
     Ok(())
 }

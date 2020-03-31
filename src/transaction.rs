@@ -4,9 +4,9 @@ use std::sync::Arc;
 use rand::Rng;
 
 use crate::cache::{Map, Set, Value};
-use crate::context::{TCContext, TCResult, TCState, TCValue};
+use crate::context::{TCResult, TCState, TCValue};
 use crate::error;
-use crate::host::HostContext;
+use crate::host::Host;
 
 #[derive(Clone)]
 pub struct TransactionId {
@@ -23,7 +23,7 @@ impl TransactionId {
 
 pub struct Transaction {
     id: TransactionId,
-    host: Arc<HostContext>,
+    host: Arc<Host>,
     known: Set<String>,
     resolved: Map<String, TCState>,
     state: Value<State>,
@@ -37,7 +37,7 @@ enum State {
 }
 
 impl Transaction {
-    fn of(id: TransactionId, host: Arc<HostContext>) -> Arc<Transaction> {
+    fn of(id: TransactionId, host: Arc<Host>) -> Arc<Transaction> {
         Arc::new(Transaction {
             id,
             host,
@@ -47,11 +47,11 @@ impl Transaction {
         })
     }
 
-    pub fn new(host: Arc<HostContext>) -> Arc<Transaction> {
+    pub fn new(host: Arc<Host>) -> Arc<Transaction> {
         Self::of(TransactionId::new(host.time()), host)
     }
 
-    pub fn include(
+    pub async fn include(
         self: Arc<Self>,
         name: String,
         context: String,
@@ -68,7 +68,7 @@ impl Transaction {
             txn.clone().provide(name, arg)?;
         }
         self.resolved
-            .insert(name, self.host.clone().post(context, self.clone())?);
+            .insert(name, self.host.clone().post(context, self.clone()).await?);
 
         Ok(())
     }
