@@ -5,7 +5,7 @@ use std::sync::Arc;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 
-use crate::context::{TCResult, TCValue};
+use crate::context::{Link, TCResult, TCValue};
 use crate::error;
 use crate::host::Host;
 
@@ -31,19 +31,26 @@ pub async fn listen(
 }
 
 async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    let path = req.uri().path().to_string();    
+    let path = match Link::to(path) {
+        Ok(link) => link,
+        Err(cause) => {
+            return transform_error(Err(cause));
+        }
+    };
+
+    let params: HashMap<String, String> = req
+        .uri()
+        .query()
+        .map(|v| {
+            url::form_urlencoded::parse(v.as_bytes())
+                .into_owned()
+                .collect()
+        })
+        .unwrap_or_else(HashMap::new);
+
     match *req.method() {
         Method::POST => {
-            let path = req.uri().path().to_string();
-            let params: HashMap<String, String> = req
-                .uri()
-                .query()
-                .map(|v| {
-                    url::form_urlencoded::parse(v.as_bytes())
-                        .into_owned()
-                        .collect()
-                })
-                .unwrap_or_else(HashMap::new);
-
             let capture = if let Some(param) = params.get("capture") {
                 param.split('/').collect()
             } else {

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::join_all;
 
-use crate::context::{TCContext, TCResult, TCState, TCValue};
+use crate::context::{Link, TCContext, TCResult, TCState, TCValue};
 use crate::error;
 use crate::host::Host;
 use crate::state::chain::ChainContext;
@@ -54,9 +54,9 @@ impl TableContext {
             }
         }
 
-        let mut data_types: Vec<String> = vec![];
+        let mut data_types: Vec<Link> = vec![];
         for (_, link) in &valid_columns {
-            data_types.push(TCValue::link_string(&link)?);
+            data_types.push(TCValue::link(link)?);
         }
         let data_types = data_types.iter().map(|d| host.clone().get(d.clone()));
         for result in join_all(data_types).await {

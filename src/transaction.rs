@@ -4,7 +4,7 @@ use std::sync::Arc;
 use rand::Rng;
 
 use crate::cache::{Map, Set, Value};
-use crate::context::{TCResult, TCState, TCValue};
+use crate::context::{Link, TCResult, TCState, TCValue};
 use crate::error;
 use crate::host::Host;
 
@@ -54,7 +54,7 @@ impl Transaction {
     pub async fn include(
         self: Arc<Self>,
         name: String,
-        context: String,
+        context: Link,
         args: HashMap<String, TCValue>,
     ) -> TCResult<()> {
         if self.state.get() != State::Open {
