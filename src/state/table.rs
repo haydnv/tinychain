@@ -3,15 +3,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::join_all;
 
-use crate::context::{Link, TCContext, TCResult, TCState, TCValue};
+use crate::context::*;
 use crate::error;
-use crate::host::Host;
-use crate::state::chain::ChainContext;
+use crate::state::chain::{Chain, ChainContext};
 use crate::transaction::Transaction;
 
 #[derive(Hash)]
 pub struct Table {
-    schema: Vec<(TCValue, TCValue)>,
+    chain: Arc<Chain>,
+    schema: Vec<(String, Link)>,
     key: String,
 }
 
@@ -19,25 +19,23 @@ impl Table {
     async fn insert(self: Arc<Self>, _key: TCValue, _value: TCValue) -> TCResult<()> {
         Err(error::not_implemented())
     }
-
-    async fn update(self: Arc<Self>, _key: TCValue, _value: TCValue) -> TCResult<()> {
-        Err(error::not_implemented())
-    }
-
-    async fn delete(self: Arc<Self>, _key: TCValue, _value: TCValue) -> TCResult<()> {
-        Err(error::not_implemented())
-    }
 }
 
 #[async_trait]
 impl TCContext for Table {
-    async fn post(
-        self: Arc<Self>,
-        _host: Arc<Host>,
-        method: String,
-        txn: Arc<Transaction>,
-    ) -> TCResult<Arc<TCState>> {
-        match method.as_str() {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, key: Link) -> TCResult<Arc<TCState>> {
+        let _key = match &key.segments()[..] {
+            [key] => key,
+            _ => {
+                return Err(error::bad_request("Invalid key specified for table", key));
+            }
+        };
+
+        Err(error::not_implemented())
+    }
+
+    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: &str) -> TCResult<Arc<TCState>> {
+        match method {
             "insert" => {
                 let key = TCState::value(txn.clone().require("key")?)?;
                 let value = TCState::value(txn.require("value")?)?;
@@ -60,14 +58,19 @@ impl TableContext {
         Arc::new(TableContext { chain_context })
     }
 
-    async fn new_table(host: Arc<Host>, schema: Vec<TCValue>, key: String) -> TCResult<Table> {
-        let mut valid_columns: Vec<(TCValue, TCValue)> = vec![];
+    async fn new_table(
+        self: Arc<Self>,
+        txn: Arc<Transaction>,
+        schema: Vec<TCValue>,
+        key: String,
+    ) -> TCResult<Table> {
+        let mut valid_columns: Vec<(String, Link)> = vec![];
         let mut key_present = false;
 
         for column in schema {
             let column = &TCValue::vector(&column)?;
-            if let [TCValue::r#String(name), TCValue::Link(_)] = &column[..] {
-                valid_columns.push((column[0].clone(), column[1].clone()));
+            if let [TCValue::r#String(name), TCValue::Link(datatype)] = &column[..] {
+                valid_columns.push((name.clone(), datatype.clone()));
 
                 if name == &key {
                     key_present = true;
@@ -84,11 +87,9 @@ impl TableContext {
             return Err(error::bad_request("No such column was specified", key));
         }
 
-        let mut data_types: Vec<Link> = vec![];
-        for (_, link) in &valid_columns {
-            data_types.push(TCValue::link(link)?);
-        }
-        let data_types = data_types.iter().map(|d| host.clone().get(d.clone()));
+        let data_types = valid_columns
+            .iter()
+            .map(|(_, d)| txn.clone().get(d.clone()));
         for result in join_all(data_types).await {
             match result {
                 Ok(_) => (),
@@ -99,6 +100,7 @@ impl TableContext {
         }
 
         Ok(Table {
+            chain: TCState::chain(self.chain_context.clone().post(txn, "new").await?)?,
             schema: valid_columns,
             key,
         })
@@ -107,12 +109,7 @@ impl TableContext {
 
 #[async_trait]
 impl TCContext for TableContext {
-    async fn post(
-        self: Arc<Self>,
-        host: Arc<Host>,
-        method: String,
-        txn: Arc<Transaction>,
-    ) -> TCResult<Arc<TCState>> {
+    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: &str) -> TCResult<Arc<TCState>> {
         if method != "new" {
             return Err(error::bad_request(
                 "TableContext has no such method",
@@ -121,10 +118,10 @@ impl TCContext for TableContext {
         }
 
         let key = TCValue::string(&TCState::value(txn.clone().require("key")?)?)?;
-        let schema = TCValue::vector(&TCState::value(txn.require("schema")?)?)?;
+        let schema = TCValue::vector(&TCState::value(txn.clone().require("schema")?)?)?;
 
         Ok(Arc::new(TCState::Table(Arc::new(
-            Self::new_table(host, schema, key).await?,
+            self.new_table(txn, schema, key).await?,
         ))))
     }
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use rand::Rng;
 
 use crate::cache::{Map, Set, Value};
-use crate::context::{Link, TCResult, TCState, TCValue};
+use crate::context::*;
 use crate::error;
 use crate::host::Host;
 
@@ -133,5 +133,9 @@ impl Transaction {
         }
 
         Ok(results)
+    }
+
+    pub async fn get(self: Arc<Self>, path: Link) -> TCResult<Arc<TCState>> {
+        self.host.clone().get(self, path).await
     }
 }

@@ -38,7 +38,7 @@ impl Host {
         Transaction::new(self)
     }
 
-    pub async fn get(self: Arc<Self>, path: Link) -> TCResult<Arc<TCState>> {
+    pub async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
         let segments = path.segments();
         let segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
 
@@ -46,13 +46,13 @@ impl Host {
             ["sbin", "table"] => {
                 self.table_context
                     .clone()
-                    .get(path.from("/sbin/table")?)
+                    .get(txn, path.from("/sbin/table")?)
                     .await
             }
             ["sbin", "value"] => {
                 self.value_context
                     .clone()
-                    .get(path.from("/sbin/value")?)
+                    .get(txn, path.from("/sbin/value")?)
                     .await
             }
             _ => Err(error::not_found(path)),
@@ -67,14 +67,23 @@ impl Host {
         let segments = path.segments();
         let segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
 
-        match segments[..2] {
-            ["sbin", "table"] => {
-                self.table_context
-                    .clone()
-                    .post(self, segments[2..].join("/"), txn)
-                    .await
+        let resource = match segments[..2] {
+            ["sbin", "table"] => self.table_context.clone(),
+            _ => {
+                return Err(error::not_found(path));
             }
-            _ => Err(error::not_found(path)),
+        };
+
+        match resource.post(txn, &segments[2..].join("/")).await {
+            Ok(state) => Ok(state),
+            Err(cause) => {
+                let reason = cause.reason();
+                let message = cause.message();
+                Err(error::TCError::of(
+                    reason.clone(),
+                    format!("{}: {}", path, message),
+                ))
+            }
         }
     }
 }

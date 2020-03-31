@@ -6,7 +6,6 @@ use serde;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
-use crate::host::Host;
 use crate::state::block::Block;
 use crate::state::chain::Chain;
 use crate::state::table::Table;
@@ -112,6 +111,17 @@ pub enum TCState {
 }
 
 impl TCState {
+    pub fn chain(self: Arc<Self>) -> TCResult<Arc<Chain>> {
+        match &*self {
+            TCState::Chain(chain) => Ok(chain.clone()),
+            other => Err(error::bad_request("Expected chain but found", other)),
+        }
+    }
+
+    pub fn from_chain(chain: Arc<Chain>) -> Arc<TCState> {
+        Arc::new(TCState::Chain(chain))
+    }
+
     pub fn from_string(s: String) -> Arc<TCState> {
         Arc::new(TCState::Value(TCValue::r#String(s)))
     }
@@ -141,15 +151,14 @@ impl fmt::Display for TCState {
 
 #[async_trait]
 pub trait TCContext: Send + Sync {
-    async fn get(self: Arc<Self>, _path: Link) -> TCResult<Arc<TCState>> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<Arc<TCState>> {
         Err(error::method_not_allowed())
     }
 
     async fn post(
         self: Arc<Self>,
-        _host: Arc<Host>,
-        _method: String,
         _txn: Arc<Transaction>,
+        _method: &str,
     ) -> TCResult<Arc<TCState>> {
         Err(error::method_not_allowed())
     }

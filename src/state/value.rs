@@ -4,6 +4,7 @@ use async_trait::async_trait;
 
 use crate::context::*;
 use crate::error;
+use crate::transaction::Transaction;
 
 struct StringContext {}
 
@@ -15,7 +16,7 @@ impl StringContext {
 
 #[async_trait]
 impl TCContext for StringContext {
-    async fn get(self: Arc<Self>, path: Link) -> TCResult<Arc<TCState>> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
         let segments = path.segments();
         let segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
 
@@ -40,7 +41,7 @@ impl ValueContext {
 
 #[async_trait]
 impl TCContext for ValueContext {
-    async fn get(self: Arc<Self>, path: Link) -> TCResult<Arc<TCState>> {
+    async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
         let segments = path.segments();
         let segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
 
@@ -48,7 +49,7 @@ impl TCContext for ValueContext {
             "string" => Ok(self
                 .string_context
                 .clone()
-                .get(path.from("/string")?)
+                .get(txn, path.from("/string")?)
                 .await?),
             _ => Err(error::not_found(path)),
         }
