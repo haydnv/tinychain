@@ -55,6 +55,7 @@ impl fmt::Display for Link {
 
 #[derive(Clone, Deserialize, Serialize, Hash)]
 pub enum TCValue {
+    None,
     Int32(i32),
     Link(Link),
     r#String(String),
@@ -66,6 +67,13 @@ impl TCValue {
         match self {
             TCValue::Link(l) => Ok(l.clone()),
             other => Err(error::bad_request("Expected link but found", other)),
+        }
+    }
+
+    pub fn string(&self) -> TCResult<String> {
+        match self {
+            TCValue::r#String(s) => Ok(s.clone()),
+            other => Err(error::bad_request("Expected string but found", other)),
         }
     }
 
@@ -86,6 +94,7 @@ impl fmt::Debug for TCValue {
 impl fmt::Display for TCValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            TCValue::None => write!(f, "None"),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::r#String(s) => write!(f, "string: {}", s),
@@ -105,6 +114,17 @@ pub enum TCState {
 impl TCState {
     pub fn from_string(s: String) -> Arc<TCState> {
         Arc::new(TCState::Value(TCValue::r#String(s)))
+    }
+
+    pub fn none() -> Arc<TCState> {
+        Arc::new(TCState::Value(TCValue::None))
+    }
+
+    pub fn value(self: Arc<Self>) -> TCResult<TCValue> {
+        match &*self {
+            TCState::Value(val) => Ok(val.clone()),
+            other => Err(error::bad_request("Expected value but found", other)),
+        }
     }
 }
 

@@ -2,11 +2,19 @@ use std::fmt;
 
 #[derive(Clone)]
 pub enum Code {
+    // "I know that what you're asking for doesn't make sense"
     BadRequest,
+
+    // "Something that really should have worked didn't work--you should file a bug report"
     Internal,
+
+    // "I found this but it doesn't support the request method you used (e.g. GET, PUT, POST...)"
     MethodNotAllowed,
+
+    // "I don't know what this is--maybe you're looking in the wrong place?"
     NotFound,
 
+    // "This is marked for implementation in the future"
     #[allow(dead_code)]
     NotImplemented,
 }
