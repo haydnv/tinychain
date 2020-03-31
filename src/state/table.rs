@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::context::{TCContext, TCResult, TCState, TCValue};
 use crate::error;
+use crate::state::chain::ChainContext;
 use crate::transaction::Transaction;
 
 #[derive(Hash)]
@@ -11,11 +12,13 @@ pub struct Table {
 
 impl TCContext for Table {}
 
-pub struct TableContext {}
+pub struct TableContext {
+    chain_context: Arc<ChainContext>,
+}
 
 impl TableContext {
-    pub fn new() -> Arc<TableContext> {
-        Arc::new(TableContext {})
+    pub fn new(chain_context: Arc<ChainContext>) -> Arc<TableContext> {
+        Arc::new(TableContext { chain_context })
     }
 }
 

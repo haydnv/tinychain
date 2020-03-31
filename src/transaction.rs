@@ -119,7 +119,7 @@ impl Transaction {
                     TCState::Value(val) => {
                         results.insert(name, val.clone());
                     },
-                    TCState::Table(_) => {
+                    _ => {
                         return Err(error::bad_request("The transaction completed successfully but some captured values could not be serialized", name))
                     }
                 },

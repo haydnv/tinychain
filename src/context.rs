@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
-use crate::table::Table;
+use crate::state::block::Block;
+use crate::state::chain::Chain;
+use crate::state::table::Table;
 use crate::transaction::Transaction;
 
 pub type TCResult<T> = Result<T, error::TCError>;
@@ -29,13 +31,17 @@ impl fmt::Display for TCValue {
 
 #[derive(Hash)]
 pub enum TCState {
-    Value(TCValue),
+    Block(Arc<Block>),
+    Chain(Arc<Chain>),
     Table(Arc<Table>),
+    Value(TCValue),
 }
 
 impl fmt::Display for TCState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            TCState::Block(_) => write!(f, "(block)"),
+            TCState::Chain(_) => write!(f, "(chain)"),
             TCState::Table(_) => write!(f, "(table)"),
             TCState::Value(v) => write!(f, "value: {}", v),
         }

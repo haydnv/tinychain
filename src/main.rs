@@ -9,7 +9,7 @@ mod drive;
 mod error;
 mod host;
 mod http;
-mod table;
+mod state;
 mod transaction;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");

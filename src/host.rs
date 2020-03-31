@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use crate::context::*;
 use crate::drive::Drive;
 use crate::error;
-use crate::table::TableContext;
+use crate::state::block::BlockContext;
+use crate::state::chain::ChainContext;
+use crate::state::table::TableContext;
 use crate::transaction::Transaction;
 
 pub struct HostContext {
@@ -14,16 +16,18 @@ pub struct HostContext {
 }
 
 impl HostContext {
-    pub fn new(_workspace: Drive) -> HostContext {
-        let table_context = TableContext::new();
+    pub fn new(workspace: Arc<Drive>) -> HostContext {
+        let block_context = BlockContext::new(workspace);
+        let chain_context = ChainContext::new(block_context);
+        let table_context = TableContext::new(chain_context);
         HostContext { table_context }
     }
 
     pub fn time(&self) -> u128 {
-        let since_the_epoch = time::SystemTime::now()
+        time::SystemTime::now()
             .duration_since(time::UNIX_EPOCH)
-            .unwrap();
-        since_the_epoch.as_nanos()
+            .unwrap()
+            .as_nanos()
     }
 
     pub fn transaction(self: Arc<Self>) -> Arc<Transaction> {
