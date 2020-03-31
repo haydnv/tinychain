@@ -31,7 +31,7 @@ pub async fn listen(
 }
 
 async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    let path = req.uri().path().to_string();    
+    let path = req.uri().path().to_string();
     let path = match Link::to(path) {
         Ok(link) => link,
         Err(cause) => {

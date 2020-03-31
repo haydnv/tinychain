@@ -13,7 +13,18 @@ impl StringContext {
     }
 }
 
-impl TCContext for StringContext {}
+#[async_trait]
+impl TCContext for StringContext {
+    async fn get(self: Arc<Self>, path: Link) -> TCResult<Arc<TCState>> {
+        let segments = path.segments();
+        let segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
+
+        match segments[..] {
+            ["new"] => Ok(TCState::from_string(String::new())),
+            _ => Err(error::not_found(path)),
+        }
+    }
+}
 
 pub struct ValueContext {
     string_context: Arc<StringContext>,
@@ -22,7 +33,7 @@ pub struct ValueContext {
 impl ValueContext {
     pub fn new() -> Arc<ValueContext> {
         Arc::new(ValueContext {
-            string_context: StringContext::new()
+            string_context: StringContext::new(),
         })
     }
 }
@@ -34,8 +45,12 @@ impl TCContext for ValueContext {
         let segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
 
         match segments[0] {
-            "string" => Ok(self.string_context.clone().get(path.from("/string".to_string())?).await?),
-            _ => Err(error::not_found(path))
+            "string" => Ok(self
+                .string_context
+                .clone()
+                .get(path.from("/string")?)
+                .await?),
+            _ => Err(error::not_found(path)),
         }
     }
 }

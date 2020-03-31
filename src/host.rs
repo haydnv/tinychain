@@ -21,7 +21,10 @@ impl Host {
         let chain_context = ChainContext::new(block_context);
         let table_context = TableContext::new(chain_context);
         let value_context = ValueContext::new();
-        Host { table_context, value_context }
+        Host {
+            table_context,
+            value_context,
+        }
     }
 
     pub fn time(&self) -> u128 {
@@ -43,13 +46,13 @@ impl Host {
             ["sbin", "table"] => {
                 self.table_context
                     .clone()
-                    .get(path.from(segments[..2].join("/"))?)
+                    .get(path.from("/sbin/table")?)
                     .await
-            },
+            }
             ["sbin", "value"] => {
                 self.value_context
                     .clone()
-                    .get(path.from(segments[..2].join("/"))?)
+                    .get(path.from("/sbin/value")?)
                     .await
             }
             _ => Err(error::not_found(path)),

@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
@@ -15,7 +16,7 @@ pub type TCResult<T> = Result<T, error::TCError>;
 
 #[derive(Clone, Deserialize, Serialize, Hash)]
 pub struct Link {
-    to: String
+    to: String,
 }
 
 impl Link {
@@ -30,11 +31,14 @@ impl Link {
         }
     }
 
-    pub fn from(&self, context: String) -> TCResult<Link> {
-        if self.to.starts_with(&context) {
+    pub fn from(&self, context: &str) -> TCResult<Link> {
+        if self.to.starts_with(context) {
             Link::to(self.to[context.len()..].to_string())
         } else {
-            Err(error::bad_request(format!("Cannot link {} from", self).as_str(), context))
+            Err(error::bad_request(
+                format!("Cannot link {} from", self).as_str(),
+                context,
+            ))
         }
     }
 
@@ -61,7 +65,7 @@ impl TCValue {
     pub fn link(&self) -> TCResult<Link> {
         match self {
             TCValue::Link(l) => Ok(l.clone()),
-            other => Err(error::bad_request("Expected link but found", other))
+            other => Err(error::bad_request("Expected link but found", other)),
         }
     }
 
