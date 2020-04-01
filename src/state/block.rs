@@ -7,7 +7,7 @@ use crate::drive::Drive;
 use crate::error;
 use crate::transaction::Transaction;
 
-#[derive(Hash)]
+#[derive(Eq, PartialEq, Ord, PartialOrd)]
 pub struct Block {}
 
 impl Block {

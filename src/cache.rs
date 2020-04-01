@@ -1,15 +1,15 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
 
-pub struct Map<K: Eq + Hash, V: Hash> {
-    map: RwLock<HashMap<K, Arc<V>>>,
+pub struct Map<K: Eq + Ord, V> {
+    map: RwLock<BTreeMap<K, Arc<V>>>,
 }
 
-impl<K: Eq + Hash, V: Hash> Map<K, V> {
+impl<K: Eq + Ord, V> Map<K, V> {
     pub fn new() -> Map<K, V> {
         Map {
-            map: RwLock::new(HashMap::new()),
+            map: RwLock::new(BTreeMap::new()),
         }
     }
 

@@ -11,7 +11,7 @@ use crate::error;
 use crate::state::chain::Chain;
 use crate::transaction::Transaction;
 
-#[derive(Hash)]
+#[derive(Eq, PartialEq, Ord, PartialOrd)]
 pub struct Table {
     chain: Arc<Chain>,
     schema: Vec<(String, Link)>,

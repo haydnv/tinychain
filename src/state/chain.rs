@@ -8,7 +8,7 @@ use crate::error;
 use crate::state::block::Block;
 use crate::transaction::Transaction;
 
-#[derive(Hash)]
+#[derive(Eq, PartialEq, Ord, PartialOrd)]
 pub struct Chain {
     block_count: u64,
     latest_block: Arc<Block>,
