@@ -1,11 +1,13 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::join_all;
+use serde::{Deserialize, Serialize};
 
 use crate::context::*;
 use crate::error;
-use crate::state::chain::{Chain, ChainContext};
+use crate::state::chain::Chain;
 use crate::transaction::Transaction;
 
 #[derive(Hash)]
@@ -15,9 +17,22 @@ pub struct Table {
     key: String,
 }
 
+#[derive(Deserialize, Serialize)]
+enum Delta {
+    Insert(TCValue, TCValue),
+}
+
 impl Table {
-    async fn insert(self: Arc<Self>, _key: TCValue, _value: TCValue) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn insert(
+        self: Arc<Self>,
+        txn: Arc<Transaction>,
+        key: TCValue,
+        value: TCValue,
+    ) -> TCResult<()> {
+        let delta = Delta::Insert(key, value);
+        let delta = serde_json::to_string_pretty(&delta)?;
+        let delta = TCValue::from_string(&delta);
+        self.chain.clone().put(txn, delta).await
     }
 }
 
@@ -34,28 +49,42 @@ impl TCContext for Table {
         Err(error::not_implemented())
     }
 
-    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: &str) -> TCResult<Arc<TCState>> {
-        match method {
-            "insert" => {
-                let key = TCState::value(txn.clone().require("key")?)?;
-                let value = TCState::value(txn.require("value")?)?;
-                self.insert(key, value).await?;
-                Ok(TCState::none())
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
+        let values = TCValue::vector(&value)?;
+        let mut row: HashMap<String, TCValue> = HashMap::new();
+        for value in values {
+            let value = TCValue::vector(&value)?;
+            if let [TCValue::r#String(column), value] = &value[..] {
+                row.insert(column.clone(), value.clone());
             }
-            "update" => Err(error::not_implemented()),
-            "delete" => Err(error::not_implemented()),
+        }
+
+        if !row.contains_key(&self.key) {
+            return Err(error::bad_request(
+                "You must specify the key of the row",
+                self.key.clone(),
+            ));
+        }
+
+        // TODO
+
+        Err(error::not_implemented())
+    }
+
+    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {
+        match method.as_str() {
+            "/update" => Err(error::not_implemented()),
+            "/delete" => Err(error::not_implemented()),
             _ => Err(error::bad_request("Table has no such method", method)),
         }
     }
 }
 
-pub struct TableContext {
-    chain_context: Arc<ChainContext>,
-}
+pub struct TableContext {}
 
 impl TableContext {
-    pub fn new(chain_context: Arc<ChainContext>) -> Arc<TableContext> {
-        Arc::new(TableContext { chain_context })
+    pub fn new() -> Arc<TableContext> {
+        Arc::new(TableContext {})
     }
 
     async fn new_table(
@@ -99,8 +128,9 @@ impl TableContext {
             }
         }
 
+        let new_chain = Link::to("/sbin/chain/new")?;
         Ok(Table {
-            chain: TCState::chain(self.chain_context.clone().post(txn, "new").await?)?,
+            chain: TCState::chain(txn.post(new_chain).await?)?,
             schema: valid_columns,
             key,
         })
@@ -109,8 +139,8 @@ impl TableContext {
 
 #[async_trait]
 impl TCContext for TableContext {
-    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: &str) -> TCResult<Arc<TCState>> {
-        if method != "new" {
+    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {
+        if method.as_str() != "/new" {
             return Err(error::bad_request(
                 "TableContext has no such method",
                 method,

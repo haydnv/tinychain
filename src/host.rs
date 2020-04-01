@@ -11,19 +11,19 @@ use crate::state::value::ValueContext;
 use crate::transaction::Transaction;
 
 pub struct Host {
+    block_context: Arc<BlockContext>,
+    chain_context: Arc<ChainContext>,
     table_context: Arc<TableContext>,
     value_context: Arc<ValueContext>,
 }
 
 impl Host {
     pub fn new(workspace: Arc<Drive>) -> Host {
-        let block_context = BlockContext::new(workspace);
-        let chain_context = ChainContext::new(block_context);
-        let table_context = TableContext::new(chain_context);
-        let value_context = ValueContext::new();
         Host {
-            table_context,
-            value_context,
+            block_context: BlockContext::new(workspace),
+            chain_context: ChainContext::new(),
+            table_context: TableContext::new(),
+            value_context: ValueContext::new(),
         }
     }
 
@@ -40,50 +40,50 @@ impl Host {
 
     pub async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
         let segments = path.segments();
-        let segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
-
-        match segments[..2] {
-            ["sbin", "table"] => {
-                self.table_context
-                    .clone()
-                    .get(txn, path.from("/sbin/table")?)
-                    .await
-            }
-            ["sbin", "value"] => {
-                self.value_context
-                    .clone()
-                    .get(txn, path.from("/sbin/value")?)
-                    .await
-            }
+        match segments[0] {
+            "sbin" => match segments[1] {
+                "table" => {
+                    self.table_context
+                        .clone()
+                        .get(txn, path.from("/sbin/table")?)
+                        .await
+                }
+                "value" => {
+                    self.value_context
+                        .clone()
+                        .get(txn, path.from("/sbin/value")?)
+                        .await
+                }
+                _ => Err(error::not_found(path)),
+            },
             _ => Err(error::not_found(path)),
         }
     }
 
     pub async fn post(
         self: Arc<Self>,
-        path: Link,
         txn: Arc<Transaction>,
+        path: Link,
     ) -> TCResult<Arc<TCState>> {
         let segments = path.segments();
-        let segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
 
-        let resource = match segments[..2] {
-            ["sbin", "table"] => self.table_context.clone(),
-            _ => {
-                return Err(error::not_found(path));
-            }
-        };
-
-        match resource.post(txn, &segments[2..].join("/")).await {
-            Ok(state) => Ok(state),
-            Err(cause) => {
-                let reason = cause.reason();
-                let message = cause.message();
-                Err(error::TCError::of(
-                    reason.clone(),
-                    format!("{}: {}", path, message),
-                ))
-            }
+        match segments[0] {
+            "sbin" => match segments[1] {
+                "table" => {
+                    self.table_context
+                        .clone()
+                        .post(txn, path.from("/sbin/table")?)
+                        .await
+                }
+                "value" => {
+                    self.value_context
+                        .clone()
+                        .post(txn, path.from("/sbin/value")?)
+                        .await
+                }
+                _ => Err(error::not_found(path)),
+            },
+            _ => Err(error::not_found(path)),
         }
     }
 }

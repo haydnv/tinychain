@@ -31,8 +31,7 @@ pub async fn listen(
 }
 
 async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    let path = req.uri().path().to_string();
-    let path = match Link::to(path) {
+    let path = match Link::to(req.uri().path()) {
         Ok(link) => link,
         Err(cause) => {
             return transform_error(Err(cause));
@@ -71,12 +70,13 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
             let txn = host.clone().transaction();
             for (name, arg) in &args {
                 match txn.clone().provide(name.to_string(), arg.clone()) {
-                    Ok(()) => (),
+                    Ok(_) => (),
                     Err(cause) => {
                         return transform_error(Err(cause));
                     }
                 }
             }
+
             match txn.clone().include("result".to_string(), path, args).await {
                 Ok(()) => (),
                 Err(cause) => return transform_error(Err(cause)),

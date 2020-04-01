@@ -19,20 +19,31 @@ pub struct Link {
 }
 
 impl Link {
-    pub fn to(destination: String) -> TCResult<Link> {
+    pub fn as_str(&self) -> &str {
+        &self.to
+    }
+
+    pub fn to(destination: &str) -> TCResult<Link> {
         if !destination.starts_with('/') {
             Err(error::bad_request(
                 "Expected an absolute path starting with '/' but found",
                 destination,
             ))
+        } else if destination != "/" && destination.ends_with('/') {
+            Err(error::bad_request(
+                "Trailing slash is not allowed",
+                destination,
+            ))
         } else {
-            Ok(Link { to: destination })
+            Ok(Link {
+                to: destination.to_string(),
+            })
         }
     }
 
     pub fn from(&self, context: &str) -> TCResult<Link> {
         if self.to.starts_with(context) {
-            Link::to(self.to[context.len()..].to_string())
+            Link::to(&self.to[context.len()..].to_string())
         } else {
             Err(error::bad_request(
                 format!("Cannot link {} from", self).as_str(),
@@ -41,14 +52,14 @@ impl Link {
         }
     }
 
-    pub fn segments(&self) -> Vec<String> {
-        self.to[1..].split('/').map(|s| s.to_string()).collect()
+    pub fn segments(&self) -> Vec<&str> {
+        self.to[1..].split('/').collect()
     }
 }
 
 impl fmt::Display for Link {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "tc://{}", self.to)
+        write!(f, "{}", self.to)
     }
 }
 
@@ -62,6 +73,10 @@ pub enum TCValue {
 }
 
 impl TCValue {
+    pub fn from_string(s: &str) -> TCValue {
+        TCValue::r#String(s.to_string())
+    }
+
     pub fn link(&self) -> TCResult<Link> {
         match self {
             TCValue::Link(l) => Ok(l.clone()),
@@ -111,6 +126,13 @@ pub enum TCState {
 }
 
 impl TCState {
+    pub fn block(self: Arc<Self>) -> TCResult<Arc<Block>> {
+        match &*self {
+            TCState::Block(block) => Ok(block.clone()),
+            other => Err(error::bad_request("Expected block but found", other)),
+        }
+    }
+
     pub fn chain(self: Arc<Self>) -> TCResult<Arc<Chain>> {
         match &*self {
             TCState::Chain(chain) => Ok(chain.clone()),
@@ -155,10 +177,14 @@ pub trait TCContext: Send + Sync {
         Err(error::method_not_allowed())
     }
 
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _value: TCValue) -> TCResult<()> {
+        Err(error::method_not_allowed())
+    }
+
     async fn post(
         self: Arc<Self>,
         _txn: Arc<Transaction>,
-        _method: &str,
+        _method: Link,
     ) -> TCResult<Arc<TCState>> {
         Err(error::method_not_allowed())
     }

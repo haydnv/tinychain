@@ -51,6 +51,10 @@ impl Transaction {
         Self::of(TransactionId::new(host.time()), host)
     }
 
+    pub fn extend(self: Arc<Self>) -> Arc<Transaction> {
+        Transaction::of(self.id.clone(), self.host.clone())
+    }
+
     pub async fn include(
         self: Arc<Self>,
         name: String,
@@ -67,13 +71,13 @@ impl Transaction {
         for (name, arg) in args {
             txn.clone().provide(name, arg)?;
         }
-        self.resolved
-            .insert(name, self.host.clone().post(context, self.clone()).await?);
+        let state = self.host.clone().post(self.clone(), context).await?;
+        self.resolved.insert(name, state);
 
         Ok(())
     }
 
-    pub fn provide(self: Arc<Self>, name: String, value: TCValue) -> TCResult<()> {
+    pub fn provide(self: Arc<Self>, name: String, value: TCValue) -> TCResult<Arc<Transaction>> {
         if self.state.get() != State::Open {
             return Err(error::internal(
                 "Attempted to provide a value to a transaction already in progress",
@@ -86,8 +90,10 @@ impl Transaction {
                 name,
             ))
         } else {
-            self.resolved.insert(name, Arc::new(TCState::Value(value)));
-            Ok(())
+            self.resolved
+                .insert(name.clone(), Arc::new(TCState::Value(value)));
+            self.known.insert(name);
+            Ok(self)
         }
     }
 
@@ -137,5 +143,9 @@ impl Transaction {
 
     pub async fn get(self: Arc<Self>, path: Link) -> TCResult<Arc<TCState>> {
         self.host.clone().get(self, path).await
+    }
+
+    pub async fn post(self: Arc<Self>, path: Link) -> TCResult<Arc<TCState>> {
+        self.host.clone().post(self, path).await
     }
 }

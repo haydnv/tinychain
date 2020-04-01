@@ -17,13 +17,11 @@ impl StringContext {
 #[async_trait]
 impl TCContext for StringContext {
     async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
-        let segments = path.segments();
-        let segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
-
-        match segments[..] {
-            ["new"] => Ok(TCState::from_string(String::new())),
-            _ => Err(error::not_found(path)),
+        if path.as_str() != "/new" {
+            return Err(error::not_found(path));
         }
+
+        Ok(TCState::from_string(String::new()))
     }
 }
 
@@ -43,7 +41,6 @@ impl ValueContext {
 impl TCContext for ValueContext {
     async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
         let segments = path.segments();
-        let segments: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
 
         match segments[0] {
             "string" => Ok(self

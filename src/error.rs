@@ -1,3 +1,4 @@
+use std::convert;
 use std::fmt;
 
 #[derive(Clone)]
@@ -36,6 +37,12 @@ impl TCError {
 
     pub fn reason(&self) -> &Code {
         &self.reason
+    }
+}
+
+impl convert::From<serde_json::error::Error> for TCError {
+    fn from(e: serde_json::error::Error) -> TCError {
+        bad_request("Serialization error", e)
     }
 }
 
