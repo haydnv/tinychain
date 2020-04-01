@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -9,11 +10,11 @@ use crate::transaction::Transaction;
 
 #[derive(Hash)]
 pub struct Block {
-    path: Link,
+    path: PathBuf,
 }
 
 impl Block {
-    fn new(path: Link) -> Arc<Block> {
+    fn new(path: PathBuf) -> Arc<Block> {
         Arc::new(Block { path })
     }
 }
@@ -40,6 +41,8 @@ impl TCContext for BlockContext {
             ));
         }
 
-        Ok(TCState::from_block(Block::new(txn.context())))
+        let name = txn.clone().require("name")?.to_value()?.to_string()?;
+        let path = self.drive.clone().fs_path(&txn.context(), &name);
+        Ok(TCState::from_block(Block::new(path)))
     }
 }

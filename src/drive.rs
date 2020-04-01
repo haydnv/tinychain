@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::context::Link;
+
 pub struct Drive {
     mount_point: PathBuf,
 }
@@ -8,5 +10,14 @@ pub struct Drive {
 impl Drive {
     pub fn new(mount_point: PathBuf) -> Arc<Drive> {
         Arc::new(Drive { mount_point })
+    }
+
+    pub fn fs_path(self: Arc<Self>, context: &Link, name: &str) -> PathBuf {
+        let mut path = self.mount_point.clone();
+        for dir in context.segments() {
+            path.push(dir);
+        }
+        path.push(name);
+        path
     }
 }

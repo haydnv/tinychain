@@ -21,7 +21,7 @@ impl TCContext for StringContext {
             return Err(error::not_found(path));
         }
 
-        Ok(TCState::from_string(String::new()))
+        Ok(TCState::from_value(TCValue::String(String::new())))
     }
 }
 

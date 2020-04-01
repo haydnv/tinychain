@@ -4,12 +4,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde;
 use serde::{Deserialize, Serialize};
+use regex::Regex;
 
 use crate::error;
 use crate::state::block::Block;
 use crate::state::chain::Chain;
 use crate::state::table::Table;
 use crate::transaction::Transaction;
+
+const LINK_BLACKLIST: [&str; 11] = ["..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "="];
 
 pub type TCResult<T> = Result<T, error::TCError>;
 
@@ -24,6 +27,12 @@ impl Link {
     }
 
     pub fn to(destination: &str) -> TCResult<Link> {
+        for pattern in LINK_BLACKLIST.iter() {
+            if destination.contains(pattern) {
+                return Err(error::bad_request("Tinychain links do not allow this pattern", pattern));
+            }
+        }
+
         if !destination.starts_with('/') {
             Err(error::bad_request(
                 "Expected an absolute path starting with '/' but found",
@@ -34,6 +43,8 @@ impl Link {
                 "Trailing slash is not allowed",
                 destination,
             ))
+        } else if Regex::new(r"\s").unwrap().find(destination).is_some() {
+            Err(error::bad_request("Tinychain links do not allow whitespace", destination))
         } else {
             Ok(Link {
                 to: destination.to_string(),
@@ -147,8 +158,8 @@ impl TCState {
         Arc::new(TCState::Chain(chain))
     }
 
-    pub fn from_string(s: String) -> Arc<TCState> {
-        Arc::new(TCState::Value(TCValue::r#String(s)))
+    pub fn from_value(value: TCValue) -> Arc<TCState> {
+        Arc::new(TCState::Value(value))
     }
 
     pub fn none() -> Arc<TCState> {
