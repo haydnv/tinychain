@@ -66,6 +66,7 @@ impl fmt::Display for Link {
 #[derive(Clone, Deserialize, Serialize, Hash)]
 pub enum TCValue {
     None,
+    Bytes(Vec<u8>),
     Int32(i32),
     Link(Link),
     r#String(String),
@@ -73,6 +74,10 @@ pub enum TCValue {
 }
 
 impl TCValue {
+    pub fn from_bytes(b: Vec<u8>) -> TCValue {
+        TCValue::Bytes(b)
+    }
+
     pub fn from_string(s: &str) -> TCValue {
         TCValue::r#String(s.to_string())
     }
@@ -109,6 +114,7 @@ impl fmt::Display for TCValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             TCValue::None => write!(f, "None"),
+            TCValue::Bytes(b) => write!(f, "binary of length {}", b.len()),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::r#String(s) => write!(f, "string: {}", s),
@@ -138,6 +144,10 @@ impl TCState {
             TCState::Chain(chain) => Ok(chain.clone()),
             other => Err(error::bad_request("Expected chain but found", other)),
         }
+    }
+
+    pub fn from_block(block: Arc<Block>) -> Arc<TCState> {
+        Arc::new(TCState::Block(block))
     }
 
     pub fn from_chain(chain: Arc<Chain>) -> Arc<TCState> {

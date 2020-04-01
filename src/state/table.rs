@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::iter::FromIterator;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -19,20 +20,43 @@ pub struct Table {
 
 #[derive(Deserialize, Serialize)]
 enum Delta {
-    Insert(TCValue, TCValue),
+    Insert(TCValue, Vec<(String, TCValue)>),
+}
+
+impl Delta {
+    fn insert_from(key: String, row: &HashMap<String, TCValue>) -> TCResult<Delta> {
+        if let Some(row_id) = row.get(&key) {
+            let values = row
+                .iter()
+                .map(|(column, value)| (column.clone(), value.clone()))
+                .collect();
+            Ok(Delta::Insert(row_id.clone(), values))
+        } else {
+            Err(error::bad_request(
+                "Cannot insert into a table without a value for the primary key",
+                key,
+            ))
+        }
+    }
+
+    fn to_bytes(&self) -> TCResult<TCValue> {
+        let serialized = serde_json::to_string_pretty(self)?;
+        Ok(TCValue::from_bytes(serialized.as_bytes().to_vec()))
+    }
+
+    fn to_string(&self) -> TCResult<TCValue> {
+        let serialized = serde_json::to_string_pretty(self)?;
+        Ok(TCValue::from_string(&serialized))
+    }
 }
 
 impl Table {
-    async fn insert(
-        self: Arc<Self>,
-        txn: Arc<Transaction>,
-        key: TCValue,
-        value: TCValue,
-    ) -> TCResult<()> {
-        let delta = Delta::Insert(key, value);
-        let delta = serde_json::to_string_pretty(&delta)?;
-        let delta = TCValue::from_string(&delta);
-        self.chain.clone().put(txn, delta).await
+    fn schema_map(self: Arc<Self>) -> HashMap<String, Link> {
+        HashMap::from_iter(
+            self.schema
+                .iter()
+                .map(|(name, constructor)| (name.clone(), constructor.clone())),
+        )
     }
 }
 
@@ -49,26 +73,73 @@ impl TCContext for Table {
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
+    async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
+        let key = self.key.clone();
         let values = TCValue::vector(&value)?;
         let mut row: HashMap<String, TCValue> = HashMap::new();
         for value in values {
             let value = TCValue::vector(&value)?;
             if let [TCValue::r#String(column), value] = &value[..] {
                 row.insert(column.clone(), value.clone());
+            } else {
+                return Err(error::bad_request(
+                    "Expected [name, value], found",
+                    format!("{:?}", value),
+                ));
             }
         }
 
-        if !row.contains_key(&self.key) {
+        if !row.contains_key(&key) {
             return Err(error::bad_request(
                 "You must specify the key of the row",
-                self.key.clone(),
+                key,
             ));
         }
 
-        // TODO
+        if row.len() == 1 {
+            return Err(error::bad_request(
+                "You must specify at least one value to update",
+                value,
+            ));
+        }
 
-        Err(error::not_implemented())
+        let schema = self.clone().schema_map();
+        let mut columns: Vec<String> = Vec::with_capacity(schema.len());
+        let mut constructors: Vec<(Link, TCValue)> = Vec::with_capacity(schema.len());
+        for (name, value) in row {
+            if let Some(ctr) = schema.get(&name) {
+                columns.push(name);
+                constructors.push((ctr.clone(), value.clone()));
+            } else {
+                return Err(error::bad_request(
+                    "Value specified for unknown column",
+                    name,
+                ));
+            }
+        }
+
+        let results = join_all(constructors.iter().map(|(c, v)| {
+            txn.clone()
+                .extend()
+                .post_with(c.clone(), vec![("from", v.clone())])
+        }))
+        .await;
+
+        let mut row: HashMap<String, TCValue> = HashMap::new();
+        for i in 0..results.len() {
+            match results[i].clone() {
+                Ok(state) => {
+                    let value = TCState::value(state)?;
+                    row.insert(columns[i].clone(), value);
+                }
+                Err(cause) => {
+                    return Err(cause);
+                }
+            }
+        }
+
+        let delta = Delta::insert_from(key, &row)?;
+        self.chain.clone().put(txn, delta.to_bytes()?).await
     }
 
     async fn post(self: Arc<Self>, _txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {

@@ -148,4 +148,16 @@ impl Transaction {
     pub async fn post(self: Arc<Self>, path: Link) -> TCResult<Arc<TCState>> {
         self.host.clone().post(self, path).await
     }
+
+    pub async fn post_with(
+        self: Arc<Self>,
+        path: Link,
+        args: Vec<(&str, TCValue)>,
+    ) -> TCResult<Arc<TCState>> {
+        for (name, val) in args {
+            self.clone().provide(name.to_string(), val)?;
+        }
+
+        self.post(path).await
+    }
 }
