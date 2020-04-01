@@ -13,7 +13,7 @@ use crate::transaction::Transaction;
 
 pub type TCResult<T> = Result<T, error::TCError>;
 
-#[derive(Clone, Deserialize, Serialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Deserialize, Serialize, Hash)]
 pub struct Link {
     to: String,
 }
@@ -63,7 +63,7 @@ impl fmt::Display for Link {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Deserialize, Serialize, Hash)]
 pub enum TCValue {
     None,
     Bytes(Vec<u8>),
@@ -130,7 +130,7 @@ impl fmt::Display for TCValue {
     }
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Hash)]
 pub enum TCState {
     Block(Arc<Block>),
     Chain(Arc<Chain>),
