@@ -7,6 +7,7 @@ pub enum Code {
     BadRequest,
 
     // "Something that really should have worked didn't work--you should file a bug report"
+    #[allow(dead_code)]
     Internal,
 
     // "I found this but it doesn't support the request method you used (e.g. GET, PUT, POST...)"

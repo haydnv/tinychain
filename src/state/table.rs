@@ -61,7 +61,10 @@ impl TCContext for Table {
         let _row_id = match &row_id.segments()[..] {
             [row_id] => row_id,
             _ => {
-                return Err(error::bad_request("Invalid key specified for table", row_id));
+                return Err(error::bad_request(
+                    "Invalid key specified for table",
+                    row_id,
+                ));
             }
         };
 
@@ -115,11 +118,11 @@ impl TCContext for Table {
             }
         }
 
-        let results = join_all(constructors.iter().map(|(c, v)| {
-            txn.clone()
-                .extend()
-                .post_with(c.clone(), vec![("from", v.clone())])
-        }))
+        let results = join_all(
+            constructors
+                .iter()
+                .map(|(c, v)| txn.clone().post(c.clone(), vec![("from", v.clone())])),
+        )
         .await;
 
         let mut row: HashMap<String, TCValue> = HashMap::new();
@@ -183,13 +186,16 @@ impl TableContext {
         let key = match key {
             Some(key) => key,
             None => {
-                return Err(error::bad_request("No column was defined for the primary key", key_column));
+                return Err(error::bad_request(
+                    "No column was defined for the primary key",
+                    key_column,
+                ));
             }
         };
 
         let data_types = valid_columns
             .iter()
-            .map(|(_, d)| txn.clone().get(d.clone()));
+            .map(|(_, d)| txn.clone().extend(d.clone()).get());
         for result in join_all(data_types).await {
             match result {
                 Ok(_) => (),
@@ -201,7 +207,7 @@ impl TableContext {
 
         let new_chain = Link::to("/sbin/chain/new")?;
         Ok(Table {
-            chain: txn.post(new_chain).await?.to_chain()?,
+            chain: txn.post(new_chain, vec![]).await?.to_chain()?,
             schema: valid_columns,
             key,
         })

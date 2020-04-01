@@ -8,11 +8,13 @@ use crate::error;
 use crate::transaction::Transaction;
 
 #[derive(Hash)]
-pub struct Block {}
+pub struct Block {
+    path: Link,
+}
 
 impl Block {
-    fn new() -> Arc<Block> {
-        Arc::new(Block {})
+    fn new(path: Link) -> Arc<Block> {
+        Arc::new(Block { path })
     }
 }
 
@@ -30,7 +32,7 @@ impl BlockContext {
 
 #[async_trait]
 impl TCContext for BlockContext {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {
+    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {
         if method.as_str() != "/new" {
             return Err(error::bad_request(
                 "BlockContext has no such method",
@@ -38,6 +40,6 @@ impl TCContext for BlockContext {
             ));
         }
 
-        Ok(TCState::from_block(Block::new()))
+        Ok(TCState::from_block(Block::new(txn.context())))
     }
 }

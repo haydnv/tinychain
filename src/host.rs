@@ -34,7 +34,7 @@ impl Host {
             .as_nanos()
     }
 
-    pub fn transaction(self: Arc<Self>) -> Arc<Transaction> {
+    pub fn new_transaction(self: Arc<Self>) -> TCResult<Arc<Transaction>> {
         Transaction::new(self)
     }
 
@@ -58,7 +58,27 @@ impl Host {
             Ok(state) => Ok(state),
             Err(cause) => Err(error::TCError::of(
                 cause.reason().clone(),
-                format!("{}: {}", path, cause.message()),
+                format!("\n{}: {}", path, cause.message()),
+            )),
+        }
+    }
+
+    pub async fn put(
+        self: Arc<Self>,
+        txn: Arc<Transaction>,
+        path: Link,
+        value: TCValue,
+    ) -> TCResult<()> {
+        let (context, child_path) = self.route(&path)?;
+        if child_path.as_str() != "/" {
+            return Err(error::method_not_allowed());
+        }
+
+        match context.put(txn, value).await {
+            Ok(state) => Ok(state),
+            Err(cause) => Err(error::TCError::of(
+                cause.reason().clone(),
+                format!("\n{}: {}", path, cause.message()),
             )),
         }
     }

@@ -38,7 +38,7 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
         }
     };
 
-    let params: HashMap<String, String> = req
+    let _params: HashMap<String, String> = req
         .uri()
         .query()
         .map(|v| {
@@ -50,12 +50,6 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
 
     match *req.method() {
         Method::POST => {
-            let capture = if let Some(param) = params.get("capture") {
-                param.split('/').collect()
-            } else {
-                vec![]
-            };
-
             let body = &hyper::body::to_bytes(req.into_body()).await?;
             let args = match serde_json::from_slice::<HashMap<String, TCValue>>(body) {
                 Ok(args) => args,
@@ -67,29 +61,41 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
                 }
             };
 
-            let txn = host.clone().transaction();
-            for (name, arg) in &args {
-                match txn.clone().provide(name.to_string(), arg.clone()) {
-                    Ok(_) => (),
-                    Err(cause) => {
-                        return transform_error(Err(cause));
-                    }
+            let txn = match host.clone().new_transaction() {
+                Ok(txn) => txn,
+                Err(cause) => {
+                    return transform_error(Err(cause));
                 }
-            }
+            };
 
-            match txn.clone().include("result".to_string(), path, args).await {
-                Ok(()) => (),
-                Err(cause) => return transform_error(Err(cause)),
-            }
+            let args = args
+                .iter()
+                .map(|(name, arg)| (name.as_str(), arg.clone()))
+                .collect();
 
-            let result = txn.resolve(capture).await.and_then(|values| {
-                serde_json::to_string_pretty(&values)
-                    .and_then(|s| Ok(s.into_bytes()))
-                    .or_else(|e| {
-                        let msg = "Your request completed successfully but there was an error serializing the response";
-                        Err(error::bad_request(msg, e))
-                    })
-            });
+            let result = match txn.post(path, args).await {
+                Ok(result) => match result.to_value() {
+                    Ok(value) => value,
+                    Err(cause) => {
+                        let msg = "The request completed successfully but the result could not be transmitted via HTTP";
+                        let err = error::TCError::of(
+                            cause.reason().clone(),
+                            format!("{}: {}", msg, cause.message()),
+                        );
+                        return transform_error(Err(err));
+                    }
+                },
+                Err(cause) => {
+                    return transform_error(Err(cause));
+                }
+            };
+
+            let result = serde_json::to_string_pretty(&result)
+                .and_then(|s| Ok(s.into_bytes()))
+                .or_else(|e| {
+                    let msg = "Your request completed successfully but there was an error serializing the response";
+                    Err(error::bad_request(msg, e))
+                });
 
             transform_error(result)
         }

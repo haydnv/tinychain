@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 use rand::Rng;
 
-use crate::cache::{Map, Set, Value};
+use crate::cache::Map;
 use crate::context::*;
 use crate::error;
 use crate::host::Host;
@@ -21,143 +21,84 @@ impl TransactionId {
     }
 }
 
+impl fmt::Display for TransactionId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}-{}", self.timestamp, self.nonce)
+    }
+}
+
 pub struct Transaction {
     id: TransactionId,
     host: Arc<Host>,
-    known: Set<String>,
-    resolved: Map<String, TCState>,
-    state: Value<State>,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum State {
-    Open,
-    Closed,
-    Resolved,
+    context: Link,
+    env: Map<String, TCState>,
 }
 
 impl Transaction {
-    fn of(id: TransactionId, host: Arc<Host>) -> Arc<Transaction> {
+    fn of(id: TransactionId, host: Arc<Host>, context: Link) -> Arc<Transaction> {
         Arc::new(Transaction {
             id,
             host,
-            known: Set::new(),
-            resolved: Map::new(),
-            state: Value::of(State::Open),
+            context,
+            env: Map::new(),
         })
     }
 
-    pub fn new(host: Arc<Host>) -> Arc<Transaction> {
-        Self::of(TransactionId::new(host.time()), host)
+    pub fn new(host: Arc<Host>) -> TCResult<Arc<Transaction>> {
+        let id = TransactionId::new(host.time());
+        let context = Link::to(&format!("/transaction/{}", id))?;
+        Ok(Self::of(id, host, context))
     }
 
-    pub fn extend(self: Arc<Self>) -> Arc<Transaction> {
-        Transaction::of(self.id.clone(), self.host.clone())
+    pub fn extend(self: Arc<Self>, new_context: Link) -> Arc<Transaction> {
+        Transaction::of(self.id.clone(), self.host.clone(), new_context)
     }
 
-    pub async fn include(
-        self: Arc<Self>,
-        name: String,
-        context: Link,
-        args: HashMap<String, TCValue>,
-    ) -> TCResult<()> {
-        if self.state.get() != State::Open {
-            return Err(error::internal(
-                "Attempted to extend a transaction already in progress",
-            ));
-        }
-
-        let txn = Self::of(self.id.clone(), self.host.clone());
-        for (name, arg) in args {
-            txn.clone().provide(name, arg)?;
-        }
-        let state = self.host.clone().post(self.clone(), context).await?;
-        self.resolved.insert(name, state);
-
-        Ok(())
+    pub fn context(self: Arc<Self>) -> Link {
+        self.context.clone()
     }
 
     pub fn provide(self: Arc<Self>, name: String, value: TCValue) -> TCResult<Arc<Transaction>> {
-        if self.state.get() != State::Open {
-            return Err(error::internal(
-                "Attempted to provide a value to a transaction already in progress",
-            ));
-        }
-
-        if self.known.contains(&name) {
+        if self.env.contains_key(&name) {
             Err(error::bad_request(
                 "This transaction already contains a value called",
                 name,
             ))
         } else {
-            self.resolved
-                .insert(name.clone(), Arc::new(TCState::Value(value)));
-            self.known.insert(name);
+            self.env.insert(name, Arc::new(TCState::Value(value)));
             Ok(self)
         }
     }
 
     pub fn require(self: Arc<Self>, name: &str) -> TCResult<Arc<TCState>> {
-        match self.resolved.get(&name.to_string()) {
+        match self.env.get(&name.to_string()) {
             Some(state) => Ok(state),
             None => Err(error::bad_request("Required value was not provided", name)),
         }
     }
 
-    pub async fn resolve(&self, capture: Vec<&str>) -> TCResult<HashMap<String, TCValue>> {
-        if self.state.get() != State::Open {
-            return Err(error::internal(
-                "Attempt to resolve the same transaction multiple times",
-            ));
-        }
-
-        self.state.set(State::Closed);
-
-        // TODO: handle asyncronous I/O
-
-        self.state.set(State::Resolved);
-
-        let mut results: HashMap<String, TCValue> = HashMap::new();
-        for name in capture {
-            let name = name.to_string();
-            match self.resolved.get(&name) {
-                Some(arc_ref) => match &*arc_ref.clone() {
-                    TCState::Value(val) => {
-                        results.insert(name, val.clone());
-                    },
-                    _ => {
-                        return Err(error::bad_request("The transaction completed successfully but some captured values could not be serialized", name))
-                    }
-                },
-                None => {
-                    return Err(error::bad_request(
-                        "Attempted to read value not in transaction",
-                        name,
-                    ));
-                }
-            }
-        }
-
-        Ok(results)
+    pub async fn get(self: Arc<Self>) -> TCResult<Arc<TCState>> {
+        self.host.clone().get(self.clone(), self.context()).await
     }
 
-    pub async fn get(self: Arc<Self>, path: Link) -> TCResult<Arc<TCState>> {
-        self.host.clone().get(self, path).await
+    pub async fn put(self: Arc<Self>, value: TCValue) -> TCResult<()> {
+        self.host
+            .clone()
+            .put(self.clone(), self.context(), value)
+            .await
     }
 
-    pub async fn post(self: Arc<Self>, path: Link) -> TCResult<Arc<TCState>> {
-        self.host.clone().post(self, path).await
-    }
-
-    pub async fn post_with(
+    pub async fn post(
         self: Arc<Self>,
-        path: Link,
+        method: Link,
         args: Vec<(&str, TCValue)>,
     ) -> TCResult<Arc<TCState>> {
+        // for POST, maintain the same context, so that the method executes in the caller's context
+        let txn = self.clone().extend(self.context());
         for (name, val) in args {
-            self.clone().provide(name.to_string(), val)?;
+            txn.clone().provide(name.to_string(), val)?;
         }
 
-        self.post(path).await
+        txn.host.clone().post(txn, method).await
     }
 }
