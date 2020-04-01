@@ -38,25 +38,28 @@ impl Host {
         Transaction::new(self)
     }
 
-    pub async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
+    fn route(self: Arc<Self>, path: &Link) -> TCResult<(Arc<dyn TCContext>, Link)> {
         let segments = path.segments();
         match segments[0] {
             "sbin" => match segments[1] {
-                "table" => {
-                    self.table_context
-                        .clone()
-                        .get(txn, path.from("/sbin/table")?)
-                        .await
-                }
-                "value" => {
-                    self.value_context
-                        .clone()
-                        .get(txn, path.from("/sbin/value")?)
-                        .await
-                }
+                "block" => Ok((self.block_context.clone(), path.from("/sbin/block")?)),
+                "chain" => Ok((self.chain_context.clone(), path.from("/sbin/chain")?)),
+                "table" => Ok((self.table_context.clone(), path.from("/sbin/table")?)),
+                "value" => Ok((self.value_context.clone(), path.from("/sbin/value")?)),
                 _ => Err(error::not_found(path)),
             },
             _ => Err(error::not_found(path)),
+        }
+    }
+
+    pub async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
+        let (context, child_path) = self.route(&path)?;
+        match context.get(txn, child_path).await {
+            Ok(state) => Ok(state),
+            Err(cause) => Err(error::TCError::of(
+                cause.reason().clone(),
+                format!("{}: {}", path, cause.message()),
+            )),
         }
     }
 
@@ -65,25 +68,13 @@ impl Host {
         txn: Arc<Transaction>,
         path: Link,
     ) -> TCResult<Arc<TCState>> {
-        let segments = path.segments();
-
-        match segments[0] {
-            "sbin" => match segments[1] {
-                "table" => {
-                    self.table_context
-                        .clone()
-                        .post(txn, path.from("/sbin/table")?)
-                        .await
-                }
-                "value" => {
-                    self.value_context
-                        .clone()
-                        .post(txn, path.from("/sbin/value")?)
-                        .await
-                }
-                _ => Err(error::not_found(path)),
-            },
-            _ => Err(error::not_found(path)),
+        let (context, child_path) = self.route(&path)?;
+        match context.post(txn, child_path).await {
+            Ok(state) => Ok(state),
+            Err(cause) => Err(error::TCError::of(
+                cause.reason().clone(),
+                format!("\n{}: {}", path, cause.message()),
+            )),
         }
     }
 }
