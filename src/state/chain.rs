@@ -63,7 +63,7 @@ impl TCContext for ChainContext {
         }
 
         let new_block = Link::to("/sbin/block/new")?;
-        let block = TCState::block(txn.post(new_block).await?)?;
+        let block = txn.post(new_block).await?.to_block()?;
 
         Ok(TCState::from_chain(Chain::new(block)))
     }

@@ -15,7 +15,7 @@ use crate::transaction::Transaction;
 pub struct Table {
     chain: Arc<Chain>,
     schema: Vec<(String, Link)>,
-    key: String,
+    key: (String, Link),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -43,11 +43,6 @@ impl Delta {
         let serialized = serde_json::to_string_pretty(self)?;
         Ok(TCValue::from_bytes(serialized.as_bytes().to_vec()))
     }
-
-    fn to_string(&self) -> TCResult<TCValue> {
-        let serialized = serde_json::to_string_pretty(self)?;
-        Ok(TCValue::from_string(&serialized))
-    }
 }
 
 impl Table {
@@ -62,23 +57,25 @@ impl Table {
 
 #[async_trait]
 impl TCContext for Table {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, key: Link) -> TCResult<Arc<TCState>> {
-        let _key = match &key.segments()[..] {
-            [key] => key,
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, row_id: Link) -> TCResult<Arc<TCState>> {
+        let _row_id = match &row_id.segments()[..] {
+            [row_id] => row_id,
             _ => {
-                return Err(error::bad_request("Invalid key specified for table", key));
+                return Err(error::bad_request("Invalid key specified for table", row_id));
             }
         };
+
+        // TODO
 
         Err(error::not_implemented())
     }
 
     async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
-        let key = self.key.clone();
-        let values = TCValue::vector(&value)?;
+        let (key_col, _) = self.key.clone();
+        let values = value.to_vec()?;
         let mut row: HashMap<String, TCValue> = HashMap::new();
         for value in values {
-            let value = TCValue::vector(&value)?;
+            let value = value.to_vec()?;
             if let [TCValue::r#String(column), value] = &value[..] {
                 row.insert(column.clone(), value.clone());
             } else {
@@ -89,10 +86,10 @@ impl TCContext for Table {
             }
         }
 
-        if !row.contains_key(&key) {
+        if !row.contains_key(&key_col) {
             return Err(error::bad_request(
                 "You must specify the key of the row",
-                key,
+                key_col,
             ));
         }
 
@@ -129,7 +126,7 @@ impl TCContext for Table {
         for i in 0..results.len() {
             match results[i].clone() {
                 Ok(state) => {
-                    let value = TCState::value(state)?;
+                    let value = state.to_value()?;
                     row.insert(columns[i].clone(), value);
                 }
                 Err(cause) => {
@@ -138,7 +135,7 @@ impl TCContext for Table {
             }
         }
 
-        let delta = Delta::insert_from(key, &row)?;
+        let delta = Delta::insert_from(key_col, &row)?;
         self.chain.clone().put(txn, delta.to_bytes()?).await
     }
 
@@ -162,18 +159,18 @@ impl TableContext {
         self: Arc<Self>,
         txn: Arc<Transaction>,
         schema: Vec<TCValue>,
-        key: String,
+        key_column: String,
     ) -> TCResult<Table> {
         let mut valid_columns: Vec<(String, Link)> = vec![];
-        let mut key_present = false;
+        let mut key = None;
 
         for column in schema {
-            let column = &TCValue::vector(&column)?;
+            let column = column.to_vec()?;
             if let [TCValue::r#String(name), TCValue::Link(datatype)] = &column[..] {
                 valid_columns.push((name.clone(), datatype.clone()));
 
-                if name == &key {
-                    key_present = true;
+                if name == &key_column {
+                    key = Some((name.clone(), datatype.clone()));
                 }
             } else {
                 return Err(error::bad_request(
@@ -183,9 +180,12 @@ impl TableContext {
             }
         }
 
-        if !key_present {
-            return Err(error::bad_request("No such column was specified", key));
-        }
+        let key = match key {
+            Some(key) => key,
+            None => {
+                return Err(error::bad_request("No column was defined for the primary key", key_column));
+            }
+        };
 
         let data_types = valid_columns
             .iter()
@@ -201,7 +201,7 @@ impl TableContext {
 
         let new_chain = Link::to("/sbin/chain/new")?;
         Ok(Table {
-            chain: TCState::chain(txn.post(new_chain).await?)?,
+            chain: txn.post(new_chain).await?.to_chain()?,
             schema: valid_columns,
             key,
         })
@@ -218,8 +218,8 @@ impl TCContext for TableContext {
             ));
         }
 
-        let key = TCValue::string(&TCState::value(txn.clone().require("key")?)?)?;
-        let schema = TCValue::vector(&TCState::value(txn.clone().require("schema")?)?)?;
+        let key = txn.clone().require("key")?.to_value()?.to_string()?;
+        let schema = txn.clone().require("schema")?.to_value()?.to_vec()?;
 
         Ok(Arc::new(TCState::Table(Arc::new(
             self.new_table(txn, schema, key).await?,

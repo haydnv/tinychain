@@ -82,21 +82,28 @@ impl TCValue {
         TCValue::r#String(s.to_string())
     }
 
-    pub fn link(&self) -> TCResult<Link> {
+    pub fn to_bytes(&self) -> TCResult<Vec<u8>> {
+        match self {
+            TCValue::Bytes(b) => Ok(b.clone()),
+            other => Err(error::bad_request("Expected bytes but found", other)),
+        }
+    }
+
+    pub fn to_link(&self) -> TCResult<Link> {
         match self {
             TCValue::Link(l) => Ok(l.clone()),
             other => Err(error::bad_request("Expected link but found", other)),
         }
     }
 
-    pub fn string(&self) -> TCResult<String> {
+    pub fn to_string(&self) -> TCResult<String> {
         match self {
             TCValue::r#String(s) => Ok(s.clone()),
             other => Err(error::bad_request("Expected string but found", other)),
         }
     }
 
-    pub fn vector(&self) -> TCResult<Vec<TCValue>> {
+    pub fn to_vec(&self) -> TCResult<Vec<TCValue>> {
         match self {
             TCValue::Vector(vec) => Ok(vec.clone()),
             other => Err(error::bad_request("Expected vector but found", other)),
@@ -132,20 +139,6 @@ pub enum TCState {
 }
 
 impl TCState {
-    pub fn block(self: Arc<Self>) -> TCResult<Arc<Block>> {
-        match &*self {
-            TCState::Block(block) => Ok(block.clone()),
-            other => Err(error::bad_request("Expected block but found", other)),
-        }
-    }
-
-    pub fn chain(self: Arc<Self>) -> TCResult<Arc<Chain>> {
-        match &*self {
-            TCState::Chain(chain) => Ok(chain.clone()),
-            other => Err(error::bad_request("Expected chain but found", other)),
-        }
-    }
-
     pub fn from_block(block: Arc<Block>) -> Arc<TCState> {
         Arc::new(TCState::Block(block))
     }
@@ -162,7 +155,21 @@ impl TCState {
         Arc::new(TCState::Value(TCValue::None))
     }
 
-    pub fn value(self: Arc<Self>) -> TCResult<TCValue> {
+    pub fn to_block(self: Arc<Self>) -> TCResult<Arc<Block>> {
+        match &*self {
+            TCState::Block(block) => Ok(block.clone()),
+            other => Err(error::bad_request("Expected block but found", other)),
+        }
+    }
+
+    pub fn to_chain(self: Arc<Self>) -> TCResult<Arc<Chain>> {
+        match &*self {
+            TCState::Chain(chain) => Ok(chain.clone()),
+            other => Err(error::bad_request("Expected chain but found", other)),
+        }
+    }
+
+    pub fn to_value(self: Arc<Self>) -> TCResult<TCValue> {
         match &*self {
             TCState::Value(val) => Ok(val.clone()),
             other => Err(error::bad_request("Expected value but found", other)),
