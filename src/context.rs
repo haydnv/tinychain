@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use regex::Regex;
 use serde;
+use serde::de;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
@@ -19,16 +20,13 @@ pub type TCResult<T> = Result<T, error::TCError>;
 #[derive(Clone, Deserialize, Serialize, Hash)]
 pub struct Link {
     to: String,
+    segments: Vec<String>,
 }
 
 impl Link {
-    pub fn as_str(&self) -> &str {
-        &self.to
-    }
-
-    pub fn to(destination: &str) -> TCResult<Link> {
+    fn _validate(to: &str) -> TCResult<()> {
         for pattern in LINK_BLACKLIST.iter() {
-            if destination.contains(pattern) {
+            if to.contains(pattern) {
                 return Err(error::bad_request(
                     "Tinychain links do not allow this pattern",
                     pattern,
@@ -36,26 +34,37 @@ impl Link {
             }
         }
 
-        if !destination.starts_with('/') {
+        if !to.starts_with('/') {
             Err(error::bad_request(
                 "Expected an absolute path starting with '/' but found",
-                destination,
+                to,
             ))
-        } else if destination != "/" && destination.ends_with('/') {
+        } else if to != "/" && to.ends_with('/') {
             Err(error::bad_request(
                 "Trailing slash is not allowed",
-                destination,
+                to,
             ))
-        } else if Regex::new(r"\s").unwrap().find(destination).is_some() {
+        } else if Regex::new(r"\s").unwrap().find(to).is_some() {
             Err(error::bad_request(
                 "Tinychain links do not allow whitespace",
-                destination,
+                to,
             ))
         } else {
-            Ok(Link {
-                to: destination.to_string(),
-            })
+            Ok(())
         }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.to
+    }
+
+    pub fn to(destination: &str) -> TCResult<Link> {
+        Link::_validate(destination)?;
+
+        Ok(Link {
+            to: destination.to_string(),
+            segments: destination[1..].split('/').map(|s| s.to_string()).collect()
+        })
     }
 
     pub fn from(&self, context: &str) -> TCResult<Link> {
@@ -68,10 +77,14 @@ impl Link {
             ))
         }
     }
+}
 
-    pub fn segments(&self) -> Vec<&str> {
-        self.to[1..].split('/').collect()
-    }
+fn deserialize_link<'de, D>(deserializer: D) -> Result<Link, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: &str = de::Deserialize::deserialize(deserializer)?;
+    Link::to(s).map_err(de::Error::custom)
 }
 
 impl fmt::Display for Link {
@@ -80,11 +93,25 @@ impl fmt::Display for Link {
     }
 }
 
+
+impl<Idx> std::ops::Index<Idx> for Link
+where
+    Idx: std::slice::SliceIndex<[String]>,
+{
+    type Output = Idx::Output;
+
+    fn index(&self, index: Idx) -> &Self::Output {
+        &self.segments[index]
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, Hash)]
 pub enum TCValue {
     None,
     Bytes(Vec<u8>),
     Int32(i32),
+
+    #[serde(deserialize_with = "deserialize_link")]
     Link(Link),
     r#String(String),
     Vector(Vec<TCValue>),

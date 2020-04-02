@@ -40,9 +40,7 @@ impl ValueContext {
 #[async_trait]
 impl TCContext for ValueContext {
     async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
-        let segments = path.segments();
-
-        match segments[0] {
+        match path[0].as_str() {
             "string" => Ok(self
                 .string_context
                 .clone()

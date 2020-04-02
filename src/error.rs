@@ -21,6 +21,18 @@ pub enum Code {
     NotImplemented,
 }
 
+impl fmt::Display for Code {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Code::BadRequest => write!(f, "Bad request"),
+            Code::Internal => write!(f, "Internal server error"),
+            Code::MethodNotAllowed => write!(f, "Method not allowed"),
+            Code::NotFound => write!(f, "Not found"),
+            Code::NotImplemented => write!(f, "Not implemented"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct TCError {
     reason: Code,
@@ -44,6 +56,12 @@ impl TCError {
 impl convert::From<serde_json::error::Error> for TCError {
     fn from(e: serde_json::error::Error) -> TCError {
         bad_request("Serialization error", e)
+    }
+}
+
+impl fmt::Display for TCError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}: {}", self.reason, self.message)
     }
 }
 

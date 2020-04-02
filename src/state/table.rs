@@ -58,7 +58,7 @@ impl Table {
 #[async_trait]
 impl TCContext for Table {
     async fn get(self: Arc<Self>, _txn: Arc<Transaction>, row_id: Link) -> TCResult<Arc<TCState>> {
-        let _row_id = match &row_id.segments()[..] {
+        let _row_id = match &row_id[..] {
             [row_id] => row_id,
             _ => {
                 return Err(error::bad_request(

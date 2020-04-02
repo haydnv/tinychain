@@ -14,7 +14,7 @@ impl Drive {
 
     pub fn fs_path(self: Arc<Self>, context: &Link, name: &str) -> PathBuf {
         let mut path = self.mount_point.clone();
-        for dir in context.segments() {
+        for dir in &context[..] {
             path.push(dir);
         }
         path.push(name);

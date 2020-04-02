@@ -39,9 +39,8 @@ impl Host {
     }
 
     fn route(self: Arc<Self>, path: &Link) -> TCResult<(Arc<dyn TCContext>, Link)> {
-        let segments = path.segments();
-        match segments[0] {
-            "sbin" => match segments[1] {
+        match path[0].as_str() {
+            "sbin" => match path[1].as_str() {
                 "block" => Ok((self.block_context.clone(), path.from("/sbin/block")?)),
                 "chain" => Ok((self.chain_context.clone(), path.from("/sbin/chain")?)),
                 "table" => Ok((self.table_context.clone(), path.from("/sbin/table")?)),
