@@ -17,7 +17,7 @@ const LINK_BLACKLIST: [&str; 11] = ["..", "~", "$", "&", "?", "|", "{", "}", "//
 
 pub type TCResult<T> = Result<T, error::TCError>;
 
-#[derive(Clone, Deserialize, Serialize, Hash)]
+#[derive(Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
 pub struct Link {
     to: String,
     segments: Vec<String>,
@@ -40,10 +40,7 @@ impl Link {
                 to,
             ))
         } else if to != "/" && to.ends_with('/') {
-            Err(error::bad_request(
-                "Trailing slash is not allowed",
-                to,
-            ))
+            Err(error::bad_request("Trailing slash is not allowed", to))
         } else if Regex::new(r"\s").unwrap().find(to).is_some() {
             Err(error::bad_request(
                 "Tinychain links do not allow whitespace",
@@ -54,8 +51,11 @@ impl Link {
         }
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.to
+    pub fn new() -> Link {
+        Link {
+            to: "/".to_string(),
+            segments: vec![],
+        }
     }
 
     pub fn to(destination: &str) -> TCResult<Link> {
@@ -63,19 +63,42 @@ impl Link {
 
         Ok(Link {
             to: destination.to_string(),
-            segments: destination[1..].split('/').map(|s| s.to_string()).collect()
+            segments: destination[1..].split('/').map(|s| s.to_string()).collect(),
         })
     }
 
-    pub fn from(&self, context: &str) -> TCResult<Link> {
-        if self.to.starts_with(context) {
-            Link::to(&self.to[context.len()..].to_string())
-        } else {
-            Err(error::bad_request(
-                format!("Cannot link {} from", self).as_str(),
-                context,
-            ))
+    pub fn as_str(&self) -> &str {
+        &self.to
+    }
+
+    pub fn len(&self) -> usize {
+        self.segments.len()
+    }
+
+    pub fn segment(&self, i: usize) -> Link {
+        let to = format!("/{}", self.segments[i]);
+        Link {
+            to,
+            segments: vec![self.segments[i].clone()],
         }
+    }
+
+    pub fn split(&self, idx: usize) -> TCResult<(Link, Link)> {
+        if idx > self.segments.len() {
+            return Err(error::bad_request(
+                &format!(
+                    "Tried to read segment {} of a link with {} segments",
+                    idx,
+                    self.segments.len()
+                ),
+                self,
+            ));
+        }
+
+        let left = Link::to(&format!("/{}", &self.segments[..idx].join("/")))?;
+        let right = Link::to(&format!("/{}", &self.segments[(idx + 1)..].join("/")))?;
+
+        Ok((left, right))
     }
 }
 
@@ -93,6 +116,18 @@ impl fmt::Display for Link {
     }
 }
 
+impl IntoIterator for Link {
+    type Item = Link;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let mut segments = Vec::with_capacity(self.len());
+        for i in 0..self.len() {
+            segments.push(self.segment(i));
+        }
+        segments.into_iter()
+    }
+}
 
 impl<Idx> std::ops::Index<Idx> for Link
 where
@@ -195,10 +230,6 @@ impl TCState {
         Arc::new(TCState::Value(value))
     }
 
-    pub fn none() -> Arc<TCState> {
-        Arc::new(TCState::Value(TCValue::None))
-    }
-
     pub fn to_block(self: Arc<Self>) -> TCResult<Arc<Block>> {
         match &*self {
             TCState::Block(block) => Ok(block.clone()),
@@ -233,20 +264,37 @@ impl fmt::Display for TCState {
 }
 
 #[async_trait]
-pub trait TCContext: Send + Sync {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<Arc<TCState>> {
-        Err(error::method_not_allowed())
+impl TCContext for TCState {
+    async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
+        match &*self {
+            TCState::Block(b) => b.clone().get(txn, path).await,
+            TCState::Chain(c) => c.clone().get(txn, path).await,
+            TCState::Table(t) => t.clone().get(txn, path).await,
+            TCState::Value(_) => Err(error::method_not_allowed(path)),
+        }
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _value: TCValue) -> TCResult<()> {
-        Err(error::method_not_allowed())
-    }
-
-    async fn post(
-        self: Arc<Self>,
-        _txn: Arc<Transaction>,
-        _method: Link,
-    ) -> TCResult<Arc<TCState>> {
-        Err(error::method_not_allowed())
+    async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
+        match &*self {
+            TCState::Block(b) => b.clone().put(txn, value).await,
+            TCState::Chain(c) => c.clone().put(txn, value).await,
+            TCState::Table(t) => t.clone().put(txn, value).await,
+            TCState::Value(_) => Err(error::method_not_allowed("TCValue")),
+        }
     }
 }
+
+#[async_trait]
+pub trait TCContext: Send + Sync {
+    async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>>;
+
+    async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()>;
+}
+
+#[async_trait]
+pub trait TCExecutable: Send + Sync {
+    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>>;
+}
+
+#[async_trait]
+pub trait TCObject: TCContext + TCExecutable {}

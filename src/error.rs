@@ -59,6 +59,14 @@ impl convert::From<serde_json::error::Error> for TCError {
     }
 }
 
+impl std::error::Error for TCError {}
+
+impl fmt::Debug for TCError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{{ file: {}, line: {} }}", file!(), line!())
+    }
+}
+
 impl fmt::Display for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}: {}", self.reason, self.message)
@@ -73,10 +81,10 @@ pub fn internal(message: &str) -> TCError {
     TCError::of(Code::Internal, message.to_string())
 }
 
-pub fn method_not_allowed() -> TCError {
+pub fn method_not_allowed<T: fmt::Display>(context: T) -> TCError {
     TCError::of(
         Code::MethodNotAllowed,
-        "This resource does not support this request method".to_string(),
+        format!("{} does not support this request method", context),
     )
 }
 

@@ -24,6 +24,23 @@ impl Block {
 
 #[async_trait]
 impl TCContext for Block {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
+        if path.as_str() == "/" {
+            match fs::read(&self.path).await {
+                Ok(content) => Ok(TCState::from_value(TCValue::from_bytes(content))),
+                Err(cause) => {
+                    eprintln!("Error reading block: {}", cause);
+                    Err(error::internal("The host encountered a filesystem error"))
+                }
+            }
+        } else {
+            Err(error::bad_request(
+                "A block itself has no inner directory structure",
+                path,
+            ))
+        }
+    }
+
     async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
         let value = value.to_bytes()?;
 
@@ -61,7 +78,7 @@ impl BlockContext {
 }
 
 #[async_trait]
-impl TCContext for BlockContext {
+impl TCExecutable for BlockContext {
     async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {
         if method.as_str() != "/new" {
             return Err(error::bad_request(
@@ -71,7 +88,7 @@ impl TCContext for BlockContext {
         }
 
         let name = txn.clone().require("name")?.to_value()?.to_string()?;
-        let path = self.drive.clone().fs_path(&txn.context(), &name);
+        let path = self.drive.clone().fs_path(txn.context(), &name);
         Ok(TCState::from_block(Block::new(path)))
     }
 }

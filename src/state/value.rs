@@ -3,50 +3,37 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::context::*;
+use crate::dir::Dir;
 use crate::error;
 use crate::transaction::Transaction;
 
 struct StringContext {}
 
-impl StringContext {
-    fn new() -> Arc<StringContext> {
-        Arc::new(StringContext {})
-    }
-}
-
 #[async_trait]
-impl TCContext for StringContext {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
-        if path.as_str() != "/new" {
-            return Err(error::not_found(path));
+impl TCExecutable for StringContext {
+    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {
+        match method.as_str() {
+            "/new" => Ok(TCState::from_value(TCValue::from_string(""))),
+            "/from" => {
+                let source = txn.require("value")?;
+                source.clone().to_value()?.to_string()?; // Return an error if it's not a string
+                Ok(source)
+            }
+            _ => Err(error::bad_request(
+                "StringContext has no such method",
+                method,
+            )),
         }
-
-        Ok(TCState::from_value(TCValue::String(String::new())))
     }
 }
 
-pub struct ValueContext {
-    string_context: Arc<StringContext>,
-}
+pub struct ValueContext {}
 
 impl ValueContext {
-    pub fn new() -> Arc<ValueContext> {
-        Arc::new(ValueContext {
-            string_context: StringContext::new(),
-        })
-    }
-}
-
-#[async_trait]
-impl TCContext for ValueContext {
-    async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
-        match path[0].as_str() {
-            "string" => Ok(self
-                .string_context
-                .clone()
-                .get(txn, path.from("/string")?)
-                .await?),
-            _ => Err(error::not_found(path)),
-        }
+    pub fn init() -> TCResult<Arc<Dir>> {
+        let dir = Dir::new();
+        dir.clone()
+            .put_exe(Link::to("/string")?, Arc::new(StringContext {}));
+        Ok(dir)
     }
 }

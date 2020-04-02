@@ -1,10 +1,10 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use structopt::StructOpt;
 
 mod cache;
 mod context;
+mod dir;
 mod drive;
 mod error;
 mod host;
@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
 
     let workspace = drive::Drive::new(config.workspace);
-    let host = Arc::new(host::Host::new(workspace));
+    let host = host::Host::new(workspace)?;
     http::listen(host, config.http_port).await?;
     Ok(())
 }

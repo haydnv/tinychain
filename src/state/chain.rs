@@ -25,10 +25,17 @@ impl Chain {
 
 #[async_trait]
 impl TCContext for Chain {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<Arc<TCState>> {
+        Err(error::not_implemented())
+    }
+
     async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
         self.latest_block.clone().put(txn, value).await
     }
+}
 
+#[async_trait]
+impl TCExecutable for Chain {
     async fn post(
         self: Arc<Self>,
         _txn: Arc<Transaction>,
@@ -53,7 +60,7 @@ struct Request {
 }
 
 #[async_trait]
-impl TCContext for ChainContext {
+impl TCExecutable for ChainContext {
     async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {
         if method.as_str() != "/new" {
             return Err(error::bad_request(

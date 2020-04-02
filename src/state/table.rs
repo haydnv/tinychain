@@ -141,7 +141,10 @@ impl TCContext for Table {
         let delta = Delta::insert_from(key_col, &row)?;
         self.chain.clone().put(txn, delta.to_bytes()?).await
     }
+}
 
+#[async_trait]
+impl TCExecutable for Table {
     async fn post(self: Arc<Self>, _txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {
         match method.as_str() {
             "/update" => Err(error::not_implemented()),
@@ -150,6 +153,8 @@ impl TCContext for Table {
         }
     }
 }
+
+impl TCObject for Table {}
 
 pub struct TableContext {}
 
@@ -193,18 +198,6 @@ impl TableContext {
             }
         };
 
-        let data_types = valid_columns
-            .iter()
-            .map(|(_, d)| txn.clone().extend(d.clone()).get());
-        for result in join_all(data_types).await {
-            match result {
-                Ok(_) => (),
-                Err(cause) => {
-                    return Err(cause);
-                }
-            }
-        }
-
         let chain = txn
             .post(Link::to("/sbin/chain/new")?, vec![])
             .await?
@@ -219,7 +212,7 @@ impl TableContext {
 }
 
 #[async_trait]
-impl TCContext for TableContext {
+impl TCExecutable for TableContext {
     async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {
         if method.as_str() != "/new" {
             return Err(error::bad_request(

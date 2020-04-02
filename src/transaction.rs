@@ -102,7 +102,7 @@ impl Transaction {
 
     pub async fn post(
         self: Arc<Self>,
-        method: Link,
+        path: Link,
         args: Vec<(&str, TCValue)>,
     ) -> TCResult<Arc<TCState>> {
         // for POST, maintain the same context, so that the method executes in the caller's context
@@ -111,6 +111,6 @@ impl Transaction {
             txn.clone().provide(name.to_string(), val)?;
         }
 
-        txn.host.clone().post(txn, method).await
+        txn.host.clone().post(txn, path).await
     }
 }

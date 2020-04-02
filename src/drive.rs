@@ -12,10 +12,10 @@ impl Drive {
         Arc::new(Drive { mount_point })
     }
 
-    pub fn fs_path(self: Arc<Self>, context: &Link, name: &str) -> PathBuf {
+    pub fn fs_path(self: Arc<Self>, context: Link, name: &str) -> PathBuf {
         let mut path = self.mount_point.clone();
-        for dir in &context[..] {
-            path.push(dir);
+        for dir in context.into_iter() {
+            path.push(&dir.as_str()[1..]);
         }
         path.push(name);
         path
