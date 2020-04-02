@@ -19,6 +19,14 @@ impl TransactionId {
         let nonce: u16 = rand::thread_rng().gen();
         TransactionId { timestamp, nonce }
     }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        [
+            &self.timestamp.to_be_bytes()[..],
+            &self.nonce.to_be_bytes()[..],
+        ]
+        .concat()
+    }
 }
 
 impl fmt::Display for TransactionId {
@@ -50,12 +58,16 @@ impl Transaction {
         Ok(Self::of(id, host, context))
     }
 
+    pub fn context(self: Arc<Self>) -> Link {
+        self.context.clone()
+    }
+
     pub fn extend(self: Arc<Self>, new_context: Link) -> Arc<Transaction> {
         Transaction::of(self.id.clone(), self.host.clone(), new_context)
     }
 
-    pub fn context(self: Arc<Self>) -> Link {
-        self.context.clone()
+    pub fn id(self: Arc<Self>) -> TransactionId {
+        self.id.clone()
     }
 
     pub fn provide(self: Arc<Self>, name: String, value: TCValue) -> TCResult<Arc<Transaction>> {

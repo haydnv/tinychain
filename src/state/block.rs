@@ -2,11 +2,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tokio::fs;
 
 use crate::context::*;
 use crate::drive::Drive;
 use crate::error;
 use crate::transaction::Transaction;
+
+const EOT_CHAR: char = 4 as char;
 
 #[derive(Hash)]
 pub struct Block {
@@ -19,7 +22,33 @@ impl Block {
     }
 }
 
-impl TCContext for Block {}
+#[async_trait]
+impl TCContext for Block {
+    async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
+        let value = value.to_bytes()?;
+
+        if value.contains(&(EOT_CHAR as u8)) {
+            let msg = "Attempted to write a block containing the ASCII EOT control character";
+            return Err(error::internal(msg));
+        }
+
+        let content = [
+            &txn.id().to_bytes()[..],
+            &[EOT_CHAR as u8],
+            &value[..],
+            &[EOT_CHAR as u8],
+        ]
+        .concat();
+
+        match fs::write(&self.path, content).await {
+            Ok(()) => Ok(()),
+            Err(cause) => {
+                eprintln!("Error writing block: {}", cause);
+                Err(error::internal("The host encountered a filesystem error"))
+            }
+        }
+    }
+}
 
 pub struct BlockContext {
     drive: Arc<Drive>,

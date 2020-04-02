@@ -2,9 +2,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use regex::Regex;
 use serde;
 use serde::{Deserialize, Serialize};
-use regex::Regex;
 
 use crate::error;
 use crate::state::block::Block;
@@ -29,7 +29,10 @@ impl Link {
     pub fn to(destination: &str) -> TCResult<Link> {
         for pattern in LINK_BLACKLIST.iter() {
             if destination.contains(pattern) {
-                return Err(error::bad_request("Tinychain links do not allow this pattern", pattern));
+                return Err(error::bad_request(
+                    "Tinychain links do not allow this pattern",
+                    pattern,
+                ));
             }
         }
 
@@ -44,7 +47,10 @@ impl Link {
                 destination,
             ))
         } else if Regex::new(r"\s").unwrap().find(destination).is_some() {
-            Err(error::bad_request("Tinychain links do not allow whitespace", destination))
+            Err(error::bad_request(
+                "Tinychain links do not allow whitespace",
+                destination,
+            ))
         } else {
             Ok(Link {
                 to: destination.to_string(),

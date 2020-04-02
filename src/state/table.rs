@@ -13,9 +13,9 @@ use crate::transaction::Transaction;
 
 #[derive(Hash)]
 pub struct Table {
-    chain: Arc<Chain>,
     schema: Vec<(String, Link)>,
     key: (String, Link),
+    chain: Arc<Chain>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -205,11 +205,15 @@ impl TableContext {
             }
         }
 
-        let new_chain = Link::to("/sbin/chain/new")?;
+        let chain = txn
+            .post(Link::to("/sbin/chain/new")?, vec![])
+            .await?
+            .to_chain()?;
+
         Ok(Table {
-            chain: txn.post(new_chain, vec![]).await?.to_chain()?,
-            schema: valid_columns,
             key,
+            schema: valid_columns,
+            chain,
         })
     }
 }
