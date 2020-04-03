@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::state::block::Block;
 use crate::state::chain::Chain;
+use crate::state::graph::Graph;
 use crate::state::table::Table;
+use crate::state::tensor::Tensor;
 use crate::transaction::Transaction;
 
 const LINK_BLACKLIST: [&str; 11] = ["..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "="];
@@ -213,7 +215,9 @@ impl fmt::Display for TCValue {
 pub enum TCState {
     Block(Arc<Block>),
     Chain(Arc<Chain>),
+    Graph(Arc<Graph>),
     Table(Arc<Table>),
+    Tensor(Arc<Tensor>),
     Value(TCValue),
 }
 
@@ -257,7 +261,9 @@ impl fmt::Display for TCState {
         match self {
             TCState::Block(_) => write!(f, "(block)"),
             TCState::Chain(_) => write!(f, "(chain)"),
+            TCState::Graph(_) => write!(f, "(graph)"),
             TCState::Table(_) => write!(f, "(table)"),
+            TCState::Tensor(_) => write!(f, "(tensor)"),
             TCState::Value(v) => write!(f, "value: {}", v),
         }
     }
@@ -269,7 +275,9 @@ impl TCContext for TCState {
         match &*self {
             TCState::Block(b) => b.clone().get(txn, path).await,
             TCState::Chain(c) => c.clone().get(txn, path).await,
+            TCState::Graph(g) => g.clone().get(txn, path).await,
             TCState::Table(t) => t.clone().get(txn, path).await,
+            TCState::Tensor(t) => t.clone().get(txn, path).await,
             TCState::Value(_) => Err(error::method_not_allowed(path)),
         }
     }
@@ -278,7 +286,9 @@ impl TCContext for TCState {
         match &*self {
             TCState::Block(b) => b.clone().put(txn, value).await,
             TCState::Chain(c) => c.clone().put(txn, value).await,
+            TCState::Graph(g) => g.clone().put(txn, value).await,
             TCState::Table(t) => t.clone().put(txn, value).await,
+            TCState::Tensor(t) => t.clone().put(txn, value).await,
             TCState::Value(_) => Err(error::method_not_allowed("TCValue")),
         }
     }

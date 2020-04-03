@@ -7,7 +7,9 @@ use crate::drive::Drive;
 use crate::error;
 use crate::state::block::BlockContext;
 use crate::state::chain::ChainContext;
+use crate::state::graph::GraphContext;
 use crate::state::table::TableContext;
+use crate::state::tensor::TensorContext;
 use crate::state::value::ValueContext;
 use crate::transaction::Transaction;
 
@@ -26,7 +28,13 @@ impl Host {
             .put_exe(Link::to("/chain")?, ChainContext::new());
         kernel
             .clone()
+            .put_exe(Link::to("/chain")?, GraphContext::new());
+        kernel
+            .clone()
             .put_exe(Link::to("/table")?, TableContext::new());
+        kernel
+            .clone()
+            .put_exe(Link::to("/tensor")?, TensorContext::new());
         kernel
             .clone()
             .put_dir(Link::to("/value")?, ValueContext::init()?);
