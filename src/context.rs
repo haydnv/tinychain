@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use regex::Regex;
 use serde::de;
-use serde::ser;
+use serde::ser::{Serializer, SerializeSeq};
 use serde::{Deserialize, Serialize};
 
 use crate::error;
@@ -41,7 +41,7 @@ impl fmt::Display for TCResponse {
     }
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize, Hash, Eq, PartialEq)]
+#[derive(Clone, Hash, Eq, PartialEq)]
 pub struct Link {
     to: String,
     segments: Vec<String>,
@@ -117,21 +117,18 @@ impl Link {
             segments: vec![self.segments[i].clone()],
         }
     }
+}
 
-    #[allow(dead_code)]
-    fn deserialize<'de, D>(deserializer: D) -> Result<Link, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
+impl<'de> serde::Deserialize<'de> for Link {
+    fn deserialize<D>(deserializer: D) -> Result<Link, D::Error> where D: de::Deserializer<'de> {
         let s: &str = de::Deserialize::deserialize(deserializer)?;
         Link::to(s).map_err(de::Error::custom)
     }
+}
 
+impl serde::Serialize for Link {
     #[allow(dead_code)]
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error> where S: Serializer {
         s.serialize_str(self.as_str())
     }
 }
@@ -172,6 +169,7 @@ pub enum TCValue {
     Int32(i32),
     Link(Link),
     r#String(String),
+    Vector(Vec<TCValue>),
 }
 
 impl TCValue {
@@ -191,15 +189,19 @@ impl TCValue {
 }
 
 impl Serialize for TCValue {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error> where S: Serializer {
         match self {
             TCValue::Bytes(b) => s.serialize_bytes(b),
             TCValue::Int32(i) => s.serialize_i32(*i),
             TCValue::Link(l) => l.serialize(s),
             TCValue::r#String(v) => s.serialize_str(v),
+            TCValue::Vector(v) => {
+                let mut seq = s.serialize_seq(Some(v.len()))?;
+                for element in v {
+                    seq.serialize_element(element)?;
+                }
+                seq.end()
+            }
         }
     }
 }
@@ -217,6 +219,7 @@ impl fmt::Display for TCValue {
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::r#String(s) => write!(f, "string: {}", s),
+            TCValue::Vector(v) => write!(f, "vector: {:?}", v),
         }
     }
 }

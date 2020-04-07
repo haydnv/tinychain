@@ -62,7 +62,7 @@ pub struct Op {
 #[derive(Clone, Deserialize, Serialize, Hash)]
 pub enum Provider {
     Op(Op),
-    Value(String),
+    Value(TCValue),
 }
 
 #[derive(Clone, Deserialize, Serialize, Hash)]
@@ -147,7 +147,7 @@ impl Transaction {
                     Provider::Value(val) => {
                         self.state.write().unwrap().insert(
                             next.clone(),
-                            TCResponse::Value(TCValue::r#String(val.clone())),
+                            TCResponse::Value(val.clone()),
                         );
                     }
                     Provider::Op(op) => {
