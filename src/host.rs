@@ -8,6 +8,7 @@ use crate::state::block::BlockContext;
 use crate::state::chain::ChainContext;
 use crate::state::table::TableContext;
 use crate::transaction::{Request, Transaction};
+use crate::value::{Link, TCValue};
 
 pub struct Host {
     block_context: Arc<BlockContext>,

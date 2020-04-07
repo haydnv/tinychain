@@ -5,10 +5,11 @@ use std::sync::Arc;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 
-use crate::context::{Link, TCResponse, TCResult, TCValue};
+use crate::context::{TCResponse, TCResult};
 use crate::error;
 use crate::host::Host;
 use crate::transaction;
+use crate::value::{Link, TCValue};
 
 pub async fn listen(
     host: Arc<Host>,

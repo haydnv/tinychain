@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::context::*;
 use crate::error;
 use crate::host::Host;
+use crate::value::{Link, TCValue};
 
 #[derive(Clone)]
 pub struct TransactionId {
@@ -145,10 +146,10 @@ impl Transaction {
             match self.nodes.get(&next) {
                 Some(provider) => match provider {
                     Provider::Value(val) => {
-                        self.state.write().unwrap().insert(
-                            next.clone(),
-                            TCResponse::Value(val.clone()),
-                        );
+                        self.state
+                            .write()
+                            .unwrap()
+                            .insert(next.clone(), TCResponse::Value(val.clone()));
                     }
                     Provider::Op(op) => {
                         queue.push((next.clone(), op.clone()));

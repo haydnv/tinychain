@@ -9,6 +9,7 @@ use crate::drive::Drive;
 use crate::error;
 use crate::state::TCState;
 use crate::transaction::Transaction;
+use crate::value::{Link, TCValue};
 
 const EOT_CHAR: char = 4 as char;
 

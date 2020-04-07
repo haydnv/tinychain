@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::context::{Link, TCResult};
+use crate::context::TCResult;
 use crate::error;
+use crate::value::Link;
 
 pub struct Drive {
     mount_point: PathBuf,

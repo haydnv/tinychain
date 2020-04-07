@@ -9,6 +9,7 @@ mod host;
 mod http;
 mod state;
 mod transaction;
+mod value;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 

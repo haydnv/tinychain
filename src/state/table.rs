@@ -7,15 +7,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::*;
 use crate::error;
-use crate::state::chain;
+use crate::state::chain::Chain;
 use crate::state::TCState;
 use crate::transaction::Transaction;
+use crate::value::{Link, TCValue};
 
 #[derive(Hash)]
 pub struct Table {
     schema: Vec<(String, Link)>,
     key: (String, Link),
-    chain: Arc<chain::Chain>,
+    chain: Arc<Chain>,
 }
 
 impl Table {
@@ -92,7 +93,7 @@ impl TableContext {
         txn.clone()
             .put(Link::to("/sbin/chain")?, TCValue::Link(chain_path.clone()))
             .await?;
-        let chain = txn.get(chain_path.clone()).await?.to_state()?.to_chain()?;
+        let chain: Arc<Chain> = txn.get(chain_path.clone()).await?.to_state()?.to_chain()?;
 
         Ok(Arc::new(Table {
             key,

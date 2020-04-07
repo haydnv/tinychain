@@ -6,6 +6,7 @@ use crate::context::*;
 use crate::error;
 use crate::state::block::Block;
 use crate::transaction::Transaction;
+use crate::value::{Link, TCValue};
 
 #[derive(Hash)]
 pub struct Chain {
