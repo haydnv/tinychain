@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 use crate::context::*;
 use crate::error;
@@ -25,7 +24,7 @@ impl Chain {
 
 #[async_trait]
 impl TCContext for Chain {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<Arc<TCState>> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<TCResponse> {
         Err(error::not_implemented())
     }
 
@@ -36,11 +35,7 @@ impl TCContext for Chain {
 
 #[async_trait]
 impl TCExecutable for Chain {
-    async fn post(
-        self: Arc<Self>,
-        _txn: Arc<Transaction>,
-        _method: Link,
-    ) -> TCResult<Arc<TCState>> {
+    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<TCResponse> {
         Err(error::not_implemented())
     }
 }
@@ -53,26 +48,19 @@ impl ChainContext {
     }
 }
 
-#[derive(Deserialize, Serialize)]
-struct Request {
-    key: TCValue,
-    value: TCValue,
-}
-
 #[async_trait]
-impl TCExecutable for ChainContext {
-    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>> {
-        if method.as_str() != "/new" {
-            return Err(error::bad_request(
-                "ChainContext has no such method",
-                method,
-            ));
-        }
+impl TCContext for ChainContext {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<TCResponse> {
+        // TODO: check if the chain already exists
+        // if so, load it
+        // otherwise, return a NOT FOUND error
+        Err(error::not_implemented())
+    }
 
-        let new_block = Link::to("/sbin/block/new")?;
-        let args = vec![("name", TCValue::from_string("0"))];
-        let block = txn.post(new_block, args).await?.to_block()?;
-
-        Ok(TCState::from_chain(Chain::new(block)))
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _value: TCValue) -> TCResult<()> {
+        // TODO: check if the chain already exists
+        // if so, return an error
+        // otherwise, create a new empty chain at the specified path and return it
+        Err(error::not_implemented())
     }
 }

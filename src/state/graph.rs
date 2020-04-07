@@ -11,7 +11,7 @@ pub struct Graph {}
 
 #[async_trait]
 impl TCContext for Graph {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _node: Link) -> TCResult<Arc<TCState>> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _node: Link) -> TCResult<TCResponse> {
         Err(error::not_implemented())
     }
 
@@ -22,24 +22,7 @@ impl TCContext for Graph {
 
 #[async_trait]
 impl TCExecutable for Graph {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<Arc<TCState>> {
-        Err(error::not_implemented())
-    }
-}
-
-impl TCObject for Graph {}
-
-pub struct GraphContext {}
-
-impl GraphContext {
-    pub fn new() -> Arc<GraphContext> {
-        Arc::new(GraphContext {})
-    }
-}
-
-#[async_trait]
-impl TCExecutable for GraphContext {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<Arc<TCState>> {
+    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<TCResponse> {
         Err(error::not_implemented())
     }
 }

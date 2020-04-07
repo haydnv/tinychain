@@ -1,13 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::sync::Arc;
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 
-use crate::context::{Link, TCResult, TCValue};
+use crate::context::{Link, TCResponse, TCResult, TCValue};
 use crate::error;
 use crate::host::Host;
+use crate::transaction;
 
 pub async fn listen(
     host: Arc<Host>,
@@ -31,14 +32,14 @@ pub async fn listen(
 }
 
 async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    let path = match Link::to(req.uri().path()) {
+    let _path = match Link::to(req.uri().path()) {
         Ok(link) => link,
         Err(cause) => {
             return transform_error(Err(cause));
         }
     };
 
-    let _params: HashMap<String, String> = req
+    let params: HashMap<String, String> = req
         .uri()
         .query()
         .map(|v| {
@@ -50,9 +51,16 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
 
     match *req.method() {
         Method::POST => {
+            let mut capture: HashSet<&str> = HashSet::new();
+            if let Some(param) = params.get("capture") {
+                for id in param.split(',') {
+                    capture.insert(&id);
+                }
+            }
+
             let body = &hyper::body::to_bytes(req.into_body()).await?;
-            let args = match serde_json::from_slice::<HashMap<String, TCValue>>(body) {
-                Ok(args) => args,
+            let graph = match serde_json::from_slice::<transaction::Request>(body) {
+                Ok(graph) => graph,
                 Err(cause) => {
                     return transform_error(Err(error::bad_request(
                         "Unable to parse request",
@@ -61,36 +69,36 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
                 }
             };
 
-            let txn = match host.clone().new_transaction() {
+            let txn = match host.clone().new_transaction(graph) {
                 Ok(txn) => txn,
                 Err(cause) => {
                     return transform_error(Err(cause));
                 }
             };
 
-            let args = args
-                .iter()
-                .map(|(name, arg)| (name.as_str(), arg.clone()))
-                .collect();
-
-            let result = match txn.post(path, args).await {
-                Ok(result) => match result.to_value() {
-                    Ok(value) => value,
-                    Err(cause) => {
-                        let msg = "The request completed successfully but the result could not be transmitted via HTTP";
-                        let err = error::TCError::of(
-                            cause.reason().clone(),
-                            format!("{}: {}", msg, cause.message()),
-                        );
-                        return transform_error(Err(err));
+            let mut results: HashMap<String, TCValue> = HashMap::new();
+            match txn.execute(capture).await {
+                Ok(responses) => {
+                    for (id, r) in responses {
+                        match r {
+                            TCResponse::Value(val) => {
+                                results.insert(id, val);
+                            }
+                            other => {
+                                return transform_error(Err(error::bad_request(
+                                    "Attempt to capture an unserializable value",
+                                    other,
+                                )));
+                            }
+                        }
                     }
-                },
+                }
                 Err(cause) => {
                     return transform_error(Err(cause));
                 }
             };
 
-            let result = serde_json::to_string_pretty(&result)
+            let result = serde_json::to_string_pretty(&results)
                 .and_then(|s| Ok(s.into_bytes()))
                 .or_else(|e| {
                     let msg = "Your request completed successfully but there was an error serializing the response";

@@ -3,23 +3,45 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use regex::Regex;
-use serde;
 use serde::de;
+use serde::ser;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
-use crate::state::block::Block;
-use crate::state::chain::Chain;
-use crate::state::graph::Graph;
-use crate::state::table::Table;
-use crate::state::tensor::Tensor;
-use crate::transaction::Transaction;
+use crate::state::TCState;
+use crate::transaction::{Request, Transaction};
 
 const LINK_BLACKLIST: [&str; 11] = ["..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "="];
 
 pub type TCResult<T> = Result<T, error::TCError>;
 
-#[derive(Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
+#[derive(Clone, Hash)]
+pub enum TCResponse {
+    Exe(Request),
+    State(Arc<TCState>),
+    Value(TCValue),
+}
+
+impl TCResponse {
+    pub fn to_state(&self) -> TCResult<Arc<TCState>> {
+        match self {
+            TCResponse::State(state) => Ok(state.clone()),
+            other => Err(error::bad_request("Expected state but found", other)),
+        }
+    }
+}
+
+impl fmt::Display for TCResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TCResponse::Exe(_exe) => write!(f, "(executable)"),
+            TCResponse::State(state) => write!(f, "{}", state),
+            TCResponse::Value(value) => write!(f, "{}", value),
+        }
+    }
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize, Hash, Eq, PartialEq)]
 pub struct Link {
     to: String,
     segments: Vec<String>,
@@ -53,13 +75,6 @@ impl Link {
         }
     }
 
-    pub fn new() -> Link {
-        Link {
-            to: "/".to_string(),
-            segments: vec![],
-        }
-    }
-
     pub fn to(destination: &str) -> TCResult<Link> {
         Link::_validate(destination)?;
 
@@ -71,6 +86,24 @@ impl Link {
 
     pub fn as_str(&self) -> &str {
         &self.to
+    }
+
+    pub fn append(&self, suffix: Link) -> Link {
+        Link::to(&format!("{}{}", self.to, suffix.to)).unwrap()
+    }
+
+    pub fn from(&self, prefix: &str) -> TCResult<Link> {
+        if prefix.ends_with('/') {
+            return Err(error::bad_request("Link prefix cannot end in a /", prefix));
+        }
+        if !self.to.starts_with(prefix) {
+            return Err(error::bad_request(
+                &format!("Cannot link {} from", self),
+                prefix,
+            ));
+        }
+
+        Link::to(&self.to[prefix.len()..])
     }
 
     pub fn len(&self) -> usize {
@@ -85,31 +118,22 @@ impl Link {
         }
     }
 
-    pub fn split(&self, idx: usize) -> TCResult<(Link, Link)> {
-        if idx > self.segments.len() {
-            return Err(error::bad_request(
-                &format!(
-                    "Tried to read segment {} of a link with {} segments",
-                    idx,
-                    self.segments.len()
-                ),
-                self,
-            ));
-        }
-
-        let left = Link::to(&format!("/{}", &self.segments[..idx].join("/")))?;
-        let right = Link::to(&format!("/{}", &self.segments[(idx + 1)..].join("/")))?;
-
-        Ok((left, right))
+    #[allow(dead_code)]
+    fn deserialize<'de, D>(deserializer: D) -> Result<Link, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let s: &str = de::Deserialize::deserialize(deserializer)?;
+        Link::to(s).map_err(de::Error::custom)
     }
-}
 
-fn deserialize_link<'de, D>(deserializer: D) -> Result<Link, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let s: &str = de::Deserialize::deserialize(deserializer)?;
-    Link::to(s).map_err(de::Error::custom)
+    #[allow(dead_code)]
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        s.serialize_str(self.as_str())
+    }
 }
 
 impl fmt::Display for Link {
@@ -142,27 +166,15 @@ where
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Hash)]
+#[derive(Clone, Deserialize, Hash, Eq, PartialEq)]
 pub enum TCValue {
-    None,
     Bytes(Vec<u8>),
     Int32(i32),
-
-    #[serde(deserialize_with = "deserialize_link")]
     Link(Link),
     r#String(String),
-    Vector(Vec<TCValue>),
 }
 
 impl TCValue {
-    pub fn from_bytes(b: Vec<u8>) -> TCValue {
-        TCValue::Bytes(b)
-    }
-
-    pub fn from_string(s: &str) -> TCValue {
-        TCValue::r#String(s.to_string())
-    }
-
     pub fn to_bytes(&self) -> TCResult<Vec<u8>> {
         match self {
             TCValue::Bytes(b) => Ok(b.clone()),
@@ -173,21 +185,21 @@ impl TCValue {
     pub fn to_link(&self) -> TCResult<Link> {
         match self {
             TCValue::Link(l) => Ok(l.clone()),
-            other => Err(error::bad_request("Expected link but found", other)),
+            other => Err(error::bad_request("Expected a Link but found", other)),
         }
     }
+}
 
-    pub fn to_string(&self) -> TCResult<String> {
+impl Serialize for TCValue {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
         match self {
-            TCValue::r#String(s) => Ok(s.clone()),
-            other => Err(error::bad_request("Expected string but found", other)),
-        }
-    }
-
-    pub fn to_vec(&self) -> TCResult<Vec<TCValue>> {
-        match self {
-            TCValue::Vector(vec) => Ok(vec.clone()),
-            other => Err(error::bad_request("Expected vector but found", other)),
+            TCValue::Bytes(b) => s.serialize_bytes(b),
+            TCValue::Int32(i) => s.serialize_i32(*i),
+            TCValue::Link(l) => l.serialize(s),
+            TCValue::r#String(v) => s.serialize_str(v),
         }
     }
 }
@@ -201,110 +213,22 @@ impl fmt::Debug for TCValue {
 impl fmt::Display for TCValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TCValue::None => write!(f, "None"),
             TCValue::Bytes(b) => write!(f, "binary of length {}", b.len()),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::r#String(s) => write!(f, "string: {}", s),
-            TCValue::Vector(v) => write!(f, "vector of length {}", v.len()),
-        }
-    }
-}
-
-#[derive(Hash)]
-pub enum TCState {
-    Block(Arc<Block>),
-    Chain(Arc<Chain>),
-    Graph(Arc<Graph>),
-    Table(Arc<Table>),
-    Tensor(Arc<Tensor>),
-    Value(TCValue),
-}
-
-impl TCState {
-    pub fn from_block(block: Arc<Block>) -> Arc<TCState> {
-        Arc::new(TCState::Block(block))
-    }
-
-    pub fn from_chain(chain: Arc<Chain>) -> Arc<TCState> {
-        Arc::new(TCState::Chain(chain))
-    }
-
-    pub fn from_value(value: TCValue) -> Arc<TCState> {
-        Arc::new(TCState::Value(value))
-    }
-
-    pub fn to_block(self: Arc<Self>) -> TCResult<Arc<Block>> {
-        match &*self {
-            TCState::Block(block) => Ok(block.clone()),
-            other => Err(error::bad_request("Expected block but found", other)),
-        }
-    }
-
-    pub fn to_chain(self: Arc<Self>) -> TCResult<Arc<Chain>> {
-        match &*self {
-            TCState::Chain(chain) => Ok(chain.clone()),
-            other => Err(error::bad_request("Expected chain but found", other)),
-        }
-    }
-
-    pub fn to_value(self: Arc<Self>) -> TCResult<TCValue> {
-        match &*self {
-            TCState::Value(val) => Ok(val.clone()),
-            other => Err(error::bad_request("Expected value but found", other)),
-        }
-    }
-}
-
-impl fmt::Display for TCState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            TCState::Block(_) => write!(f, "(block)"),
-            TCState::Chain(_) => write!(f, "(chain)"),
-            TCState::Graph(_) => write!(f, "(graph)"),
-            TCState::Table(_) => write!(f, "(table)"),
-            TCState::Tensor(_) => write!(f, "(tensor)"),
-            TCState::Value(v) => write!(f, "value: {}", v),
-        }
-    }
-}
-
-#[async_trait]
-impl TCContext for TCState {
-    async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
-        match &*self {
-            TCState::Block(b) => b.clone().get(txn, path).await,
-            TCState::Chain(c) => c.clone().get(txn, path).await,
-            TCState::Graph(g) => g.clone().get(txn, path).await,
-            TCState::Table(t) => t.clone().get(txn, path).await,
-            TCState::Tensor(t) => t.clone().get(txn, path).await,
-            TCState::Value(_) => Err(error::method_not_allowed(path)),
-        }
-    }
-
-    async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
-        match &*self {
-            TCState::Block(b) => b.clone().put(txn, value).await,
-            TCState::Chain(c) => c.clone().put(txn, value).await,
-            TCState::Graph(g) => g.clone().put(txn, value).await,
-            TCState::Table(t) => t.clone().put(txn, value).await,
-            TCState::Tensor(t) => t.clone().put(txn, value).await,
-            TCState::Value(_) => Err(error::method_not_allowed("TCValue")),
         }
     }
 }
 
 #[async_trait]
 pub trait TCContext: Send + Sync {
-    async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>>;
+    async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCResponse>;
 
     async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()>;
 }
 
 #[async_trait]
 pub trait TCExecutable: Send + Sync {
-    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<Arc<TCState>>;
+    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<TCResponse>;
 }
-
-#[async_trait]
-pub trait TCObject: TCContext + TCExecutable {}

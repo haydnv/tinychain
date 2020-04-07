@@ -11,7 +11,7 @@ pub struct Tensor {}
 
 #[async_trait]
 impl TCContext for Tensor {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _node: Link) -> TCResult<Arc<TCState>> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _node: Link) -> TCResult<TCResponse> {
         Err(error::not_implemented())
     }
 
@@ -22,22 +22,7 @@ impl TCContext for Tensor {
 
 #[async_trait]
 impl TCExecutable for Tensor {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<Arc<TCState>> {
-        Err(error::not_implemented())
-    }
-}
-
-pub struct TensorContext {}
-
-impl TensorContext {
-    pub fn new() -> Arc<TensorContext> {
-        Arc::new(TensorContext {})
-    }
-}
-
-#[async_trait]
-impl TCExecutable for TensorContext {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<Arc<TCState>> {
+    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<TCResponse> {
         Err(error::not_implemented())
     }
 }

@@ -2,9 +2,7 @@ use std::path::PathBuf;
 
 use structopt::StructOpt;
 
-mod cache;
 mod context;
-mod dir;
 mod drive;
 mod error;
 mod host;

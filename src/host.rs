@@ -2,47 +2,29 @@ use std::sync::Arc;
 use std::time;
 
 use crate::context::*;
-use crate::dir::{Dir, DirEntry};
 use crate::drive::Drive;
 use crate::error;
 use crate::state::block::BlockContext;
 use crate::state::chain::ChainContext;
-use crate::state::graph::GraphContext;
 use crate::state::table::TableContext;
-use crate::state::tensor::TensorContext;
-use crate::state::value::ValueContext;
-use crate::transaction::Transaction;
+use crate::transaction::{Request, Transaction};
 
 pub struct Host {
-    root: Arc<Dir>,
+    block_context: Arc<BlockContext>,
+    chain_context: Arc<ChainContext>,
+    table_context: Arc<TableContext>,
 }
 
 impl Host {
     pub fn new(workspace: Arc<Drive>) -> TCResult<Arc<Host>> {
-        let kernel = Dir::new();
-        kernel
-            .clone()
-            .put_exe(Link::to("/block")?, BlockContext::new(workspace));
-        kernel
-            .clone()
-            .put_exe(Link::to("/chain")?, ChainContext::new());
-        kernel
-            .clone()
-            .put_exe(Link::to("/chain")?, GraphContext::new());
-        kernel
-            .clone()
-            .put_exe(Link::to("/table")?, TableContext::new());
-        kernel
-            .clone()
-            .put_exe(Link::to("/tensor")?, TensorContext::new());
-        kernel
-            .clone()
-            .put_dir(Link::to("/value")?, ValueContext::init()?);
-
-        let root = Dir::new();
-        root.clone().put_dir(Link::to("/sbin")?, kernel);
-
-        Ok(Arc::new(Host { root }))
+        let block_context = BlockContext::new(workspace);
+        let chain_context = ChainContext::new();
+        let table_context = TableContext::new();
+        Ok(Arc::new(Host {
+            block_context,
+            chain_context,
+            table_context,
+        }))
     }
 
     pub fn time(&self) -> u128 {
@@ -52,37 +34,28 @@ impl Host {
             .as_nanos()
     }
 
-    pub fn new_transaction(self: Arc<Self>) -> TCResult<Arc<Transaction>> {
-        Transaction::new(self)
+    pub fn new_transaction(self: Arc<Self>, request: Request) -> TCResult<Arc<Transaction>> {
+        Transaction::from_request(self, request)
     }
 
-    fn route(
-        self: Arc<Self>,
-        txn: Arc<Transaction>,
-        path: Link,
-    ) -> TCResult<(DirEntry, Link, Link)> {
-        let mut pwd = self.root.clone();
-        for i in 0..path.len() {
-            let (from, to) = path.split(i)?;
-            let dir_entry = pwd.clone().get(txn.clone(), &path.segment(i))?;
-            if let DirEntry::Dir(d) = dir_entry {
-                pwd = d.clone();
-            } else {
-                return Ok((dir_entry, from, to));
-            }
-        }
-
-        Err(error::not_found(path))
-    }
-
-    pub async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<Arc<TCState>> {
-        match self.route(txn.clone(), path)? {
-            (dir_entry, from, to) => match dir_entry {
-                DirEntry::Dir(_) => Err(error::method_not_allowed(from)),
-                DirEntry::Executable(_) => Err(error::method_not_allowed(from)),
-                DirEntry::Context(cxt) => cxt.get(txn, to).await,
-                DirEntry::Object(obj) => obj.get(txn, to).await,
+    pub async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCResponse> {
+        match path[0].as_str() {
+            "sbin" => match path[1].as_str() {
+                "block" => {
+                    self.block_context
+                        .clone()
+                        .get(txn, path.from("/sbin/block")?)
+                        .await
+                }
+                "chain" => {
+                    self.block_context
+                        .clone()
+                        .get(txn, path.from("/sbin/chain")?)
+                        .await
+                }
+                _ => Err(error::not_found(path)),
             },
+            _ => Err(error::not_found(path)),
         }
     }
 
@@ -92,31 +65,32 @@ impl Host {
         path: Link,
         value: TCValue,
     ) -> TCResult<()> {
-        let (dir_entry, from, to) = self.route(txn.clone(), path)?;
-        if to != Link::new() {
-            return Err(error::method_not_allowed(from));
+        if path.len() != 2 {
+            return Err(error::not_found(path));
         }
 
-        match dir_entry {
-            DirEntry::Dir(_) => Err(error::method_not_allowed(from)),
-            DirEntry::Executable(_) => Err(error::method_not_allowed(from)),
-            DirEntry::Context(cxt) => cxt.put(txn, value).await,
-            DirEntry::Object(obj) => obj.put(txn, value).await,
+        match path[0].as_str() {
+            "sbin" => match path[1].as_str() {
+                "block" => self.block_context.clone().put(txn, value).await,
+                "chain" => self.block_context.clone().put(txn, value).await,
+                _ => Err(error::not_found(path)),
+            },
+            _ => Err(error::not_found(path)),
         }
     }
 
-    pub async fn post(
-        self: Arc<Self>,
-        txn: Arc<Transaction>,
-        path: Link,
-    ) -> TCResult<Arc<TCState>> {
-        match self.route(txn.clone(), path)? {
-            (dir_entry, from, to) => match dir_entry {
-                DirEntry::Dir(_) => Err(error::method_not_allowed(from)),
-                DirEntry::Context(_) => Err(error::method_not_allowed(from)),
-                DirEntry::Object(obj) => obj.post(txn, to).await,
-                DirEntry::Executable(exe) => exe.post(txn, to).await,
+    pub async fn post(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCResponse> {
+        match path[0].as_str() {
+            "sbin" => match path[1].as_str() {
+                "table" => {
+                    self.table_context
+                        .clone()
+                        .post(txn, path.from("/sbin/table")?)
+                        .await
+                }
+                _ => Err(error::not_found(path)),
             },
+            _ => Err(error::not_found(path)),
         }
     }
 }
