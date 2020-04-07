@@ -7,8 +7,8 @@ use crate::error;
 use crate::state::block::BlockContext;
 use crate::state::chain::ChainContext;
 use crate::state::table::TableContext;
-use crate::transaction::{Request, Transaction};
-use crate::value::{Link, TCValue};
+use crate::transaction::Transaction;
+use crate::value::{Link, Op, TCValue};
 
 pub struct Host {
     block_context: Arc<BlockContext>,
@@ -35,8 +35,8 @@ impl Host {
             .as_nanos()
     }
 
-    pub fn new_transaction(self: Arc<Self>, request: Request) -> TCResult<Arc<Transaction>> {
-        Transaction::from_request(self, request)
+    pub fn new_transaction(self: Arc<Self>, op: Op) -> TCResult<Arc<Transaction>> {
+        Transaction::with(self, op)
     }
 
     pub async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCResponse> {

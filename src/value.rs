@@ -1,15 +1,16 @@
-use std::collections::HashMap;
 use std::fmt;
 
 use regex::Regex;
 use serde::de;
-use serde::ser::{SerializeSeq, Serializer};
+use serde::ser::{SerializeSeq, SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 
 use crate::context::TCResult;
 use crate::error;
 
 const LINK_BLACKLIST: [&str; 11] = ["..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "="];
+
+pub type ValueId = String;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct Link {
@@ -138,11 +139,38 @@ where
     }
 }
 
+#[derive(Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
+pub struct Op {
+    action: Link,
+    requires: Vec<(String, TCValue)>,
+}
+
+impl Op {
+    pub fn new(action: Link, requires: Vec<(String, TCValue)>) -> Op {
+        Op { action, requires }
+    }
+
+    pub fn action(&self) -> Link {
+        self.action.clone()
+    }
+
+    pub fn requires(&self) -> Vec<(String, TCValue)> {
+        self.requires.clone()
+    }
+}
+
+impl fmt::Display for Op {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}({:?})", self.action, self.requires)
+    }
+}
+
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub enum TCValue {
     Bytes(Vec<u8>),
     Int32(i32),
     Link(Link),
+    Op(Op),
     r#String(String),
     Vector(Vec<TCValue>),
 }
@@ -172,6 +200,12 @@ impl Serialize for TCValue {
             TCValue::Bytes(b) => s.serialize_bytes(b),
             TCValue::Int32(i) => s.serialize_i32(*i),
             TCValue::Link(l) => l.serialize(s),
+            TCValue::Op(o) => {
+                let mut op = s.serialize_struct("Op", 2)?;
+                op.serialize_field("action", &o.action)?;
+                op.serialize_field("requires", &o.requires)?;
+                op.end()
+            }
             TCValue::r#String(v) => s.serialize_str(v),
             TCValue::Vector(v) => {
                 let mut seq = s.serialize_seq(Some(v.len()))?;
@@ -211,16 +245,25 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
     where
         M: de::MapAccess<'de>,
     {
-        if let Some((link, value)) = access.next_entry::<String, HashMap<String, TCValue>>()? {
-            if value.is_empty() && link.starts_with('/') {
-                match Link::to(&link) {
-                    Ok(l) => Ok(TCValue::Link(l)),
-                    Err(cause) => Err(de::Error::custom(cause)),
+        if let Some((key, value)) = access.next_entry::<String, Vec<(String, TCValue)>>()? {
+            if key.starts_with('/') {
+                let link = match Link::to(&key) {
+                    Ok(l) => l,
+                    Err(cause) => {
+                        return Err(de::Error::custom(cause));
+                    }
+                };
+
+                if value.is_empty() {
+                    Ok(TCValue::Link(link))
+                } else {
+                    Ok(TCValue::Op(Op {
+                        action: link,
+                        requires: value,
+                    }))
                 }
             } else {
-                Err(de::Error::custom(
-                    "Link must start with a '/' and does not support any options",
-                ))
+                Err(de::Error::custom("Link must start with a '/'"))
             }
         } else {
             Err(de::Error::custom("Unable to parse map entry"))
@@ -262,6 +305,7 @@ impl fmt::Display for TCValue {
             TCValue::Bytes(b) => write!(f, "binary of length {}", b.len()),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
+            TCValue::Op(o) => write!(f, "Op: {}", o),
             TCValue::r#String(s) => write!(f, "string: {}", s),
             TCValue::Vector(v) => write!(f, "vector: {:?}", v),
         }

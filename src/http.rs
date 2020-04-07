@@ -8,8 +8,7 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use crate::context::{TCResponse, TCResult};
 use crate::error;
 use crate::host::Host;
-use crate::transaction;
-use crate::value::{Link, TCValue};
+use crate::value::{Link, Op, TCValue, ValueId};
 
 pub async fn listen(
     host: Arc<Host>,
@@ -33,7 +32,7 @@ pub async fn listen(
 }
 
 async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    let _path = match Link::to(req.uri().path()) {
+    let path = match Link::to(req.uri().path()) {
         Ok(link) => link,
         Err(cause) => {
             return transform_error(Err(cause));
@@ -52,15 +51,14 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
 
     match *req.method() {
         Method::POST => {
-            let mut capture: HashSet<&str> = HashSet::new();
-            if let Some(param) = params.get("capture") {
-                for id in param.split(',') {
-                    capture.insert(&id);
-                }
-            }
+            let capture: HashSet<ValueId> = if let Some(c) = params.get("capture") {
+                c.split('/').map(|s| s.to_string()).collect()
+            } else {
+                HashSet::new()
+            };
 
             let body = &hyper::body::to_bytes(req.into_body()).await?;
-            let graph = match serde_json::from_slice::<transaction::Request>(body) {
+            let values = match serde_json::from_slice::<Vec<(ValueId, TCValue)>>(body) {
                 Ok(graph) => graph,
                 Err(cause) => {
                     return transform_error(Err(error::bad_request(
@@ -70,7 +68,7 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
                 }
             };
 
-            let txn = match host.clone().new_transaction(graph) {
+            let txn = match host.clone().new_transaction(Op::new(path, values)) {
                 Ok(txn) => txn,
                 Err(cause) => {
                     return transform_error(Err(cause));
@@ -83,7 +81,7 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
                     for (id, r) in responses {
                         match r {
                             TCResponse::Value(val) => {
-                                results.insert(id, val);
+                                results.insert(id.clone(), val.clone());
                             }
                             other => {
                                 return transform_error(Err(error::bad_request(

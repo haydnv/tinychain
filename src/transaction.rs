@@ -2,14 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, RwLock};
 
+use futures::future::try_join_all;
 use rand::Rng;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 
 use crate::context::*;
 use crate::error;
 use crate::host::Host;
-use crate::value::{Link, TCValue};
+use crate::value::{Link, Op, TCValue};
 
 #[derive(Clone)]
 pub struct TransactionId {
@@ -54,52 +54,28 @@ impl fmt::Display for TransactionId {
 
 pub type ValueId = String;
 
-#[derive(Clone, Deserialize, Serialize, Hash)]
-pub struct Op {
-    action: Link,
-    requires: Vec<(String, ValueId)>,
-}
-
-#[derive(Clone, Deserialize, Serialize, Hash)]
-pub enum Provider {
-    Op(Op),
-    Value(TCValue),
-}
-
-#[derive(Clone, Deserialize, Serialize, Hash)]
-pub struct Request {
-    values: Vec<(ValueId, Provider)>,
-}
-
 pub struct Transaction {
     host: Arc<Host>,
     id: TransactionId,
     context: Link,
-    nodes: HashMap<ValueId, Provider>,
-    state: RwLock<HashMap<ValueId, TCResponse>>,
+    nodes: HashMap<ValueId, TCValue>,
+    state: RwLock<HashMap<String, TCResponse>>,
+}
+
+struct _Op {
+    action: Link,
+    requires: Vec<(String, ValueId)>,
 }
 
 impl Transaction {
-    pub fn from_request(host: Arc<Host>, request: Request) -> TCResult<Arc<Transaction>> {
-        let mut nodes: HashMap<ValueId, Provider> = HashMap::new();
-        let mut edges: Vec<(ValueId, ValueId)> = vec![];
-        for (value_id, provider) in request.values {
+    pub fn with(host: Arc<Host>, op: Op) -> TCResult<Arc<Transaction>> {
+        let mut nodes: HashMap<ValueId, TCValue> = HashMap::new();
+        for (value_id, provider) in op.requires() {
             if nodes.contains_key(&value_id) {
                 return Err(error::bad_request("Duplicate value provided for", value_id));
             }
 
             nodes.insert(value_id.clone(), provider.clone());
-            if let Provider::Op(op) = provider {
-                for (_, dep) in op.requires {
-                    edges.push((dep, value_id.clone()));
-                }
-            }
-        }
-
-        for (dep, _) in &edges {
-            if !nodes.contains_key(dep) {
-                return Err(error::bad_request("Required value not provided", dep));
-            }
         }
 
         let id = TransactionId::new(host.time());
@@ -113,6 +89,20 @@ impl Transaction {
         }))
     }
 
+    fn extend(
+        self: Arc<Self>,
+        context: Link,
+        state: HashMap<String, TCResponse>,
+    ) -> Arc<Transaction> {
+        Arc::new(Transaction {
+            host: self.host.clone(),
+            id: self.id.clone(),
+            context: self.context.append(context),
+            nodes: HashMap::new(),
+            state: RwLock::new(state),
+        })
+    }
+
     pub fn context(self: Arc<Self>) -> Link {
         self.context.clone()
     }
@@ -121,45 +111,41 @@ impl Transaction {
         self.id.clone()
     }
 
-    fn extend(
-        self: Arc<Self>,
-        context: Link,
-        deps: HashMap<ValueId, TCResponse>,
-    ) -> Arc<Transaction> {
-        Arc::new(Transaction {
-            host: self.host.clone(),
-            id: self.id.clone(),
-            context: self.context.append(context),
-            nodes: HashMap::new(),
-            state: RwLock::new(deps),
-        })
+    fn known(self: Arc<Self>) -> HashSet<ValueId> {
+        self.state
+            .read()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
     }
 
     fn enqueue(
         self: Arc<Self>,
-        mut unvisited: Vec<ValueId>,
-        mut visited: HashSet<ValueId>,
-        queue: &mut Vec<(ValueId, Op)>,
+        mut unvisited: Vec<(ValueId, Op)>,
+        queue: &mut Vec<(ValueId, _Op)>,
     ) -> TCResult<()> {
-        while let Some(next) = unvisited.pop() {
-            visited.insert(next.clone());
-            match self.nodes.get(&next) {
-                Some(provider) => match provider {
-                    Provider::Value(val) => {
-                        self.state
-                            .write()
-                            .unwrap()
-                            .insert(next.clone(), TCResponse::Value(val.clone()));
+        let mut visited: HashSet<ValueId> = HashSet::new();
+        let mut state = self.state.write().unwrap();
+        while let Some((value_id, op)) = unvisited.pop() {
+            if visited.contains(&value_id) {
+                continue;
+            } else {
+                queue.push((value_id.clone(), _Op {
+                    action: op.action(),
+                    requires: op.requires().iter().map(|(id, _)| (id.clone(), id.clone())).collect()
+                }));
+                visited.insert(value_id.clone());
+            }
+
+            for (id, provider) in op.requires() {
+                match provider {
+                    TCValue::Op(dep) => {
+                        unvisited.push((id, dep.clone()));
                     }
-                    Provider::Op(op) => {
-                        queue.push((next.clone(), op.clone()));
-                        for (_, value_id) in &op.requires {
-                            unvisited.push(value_id.clone())
-                        }
+                    value => {
+                        state.insert(id.clone(), TCResponse::Value(value.clone()));
                     }
-                },
-                None => {
-                    return Err(error::bad_request("Required value is not provided", next));
                 }
             }
         }
@@ -167,40 +153,90 @@ impl Transaction {
         Ok(())
     }
 
-    pub async fn execute(
+    pub async fn execute<'a>(
         self: Arc<Self>,
-        capture: HashSet<&str>,
+        capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, TCResponse>> {
-        // BFS backward from the captured values to enqueue futures
-        // then resolve them synchronously (in order)
+        // TODO: add a TCValue::Ref type and it to support discrete namespaces for each child txn
 
-        let capture: Vec<ValueId> = capture.iter().map(|s| (*s).to_string()).collect();
-        let mut queue: Vec<(ValueId, Op)> = vec![];
-        self.clone().enqueue(capture, HashSet::new(), &mut queue)?;
-        while let Some((value_id, op)) = queue.pop() {
-            // TODO: compute deps
-            let mut deps: HashMap<ValueId, TCResponse> = HashMap::new();
+        let mut unvisited: Vec<(ValueId, Op)> = vec![];
+        for value_id in &capture {
+            if let Some(provider) = self.nodes.get(value_id) {
+                match provider {
+                    TCValue::Op(op) => {
+                        unvisited.push((value_id.clone(), op.clone()));
+                    }
+                    value => {
+                        println!("captured {}", value_id);
+                        self.state
+                            .write()
+                            .unwrap()
+                            .insert(value_id.to_string(), TCResponse::Value(value.clone()));
+                    }
+                }
+            } else {
+                return Err(error::bad_request("No such value to capture", value_id));
+            }
+        }
 
-            for (name_in_this_context, name_in_child_txn) in op.requires {
-                match self.state.read().unwrap().get(&name_in_this_context) {
-                    Some(r) => {
-                        deps.insert(name_in_child_txn, r.clone());
+        let mut queue: Vec<(ValueId, _Op)> = vec![];
+        self.clone().enqueue(unvisited, &mut queue)?;
+
+        while !queue.is_empty() {
+            let known = self.clone().known();
+            let mut ready: Vec<(ValueId, Link, Arc<Transaction>)> = vec![];
+            while let Some((value_id, op)) = queue.pop() {
+                if known.is_superset(&op.requires.iter().map(|(_, id)| id.clone()).collect()) {
+                    let mut captured: HashMap<String, TCResponse> = HashMap::new();
+                    let state = self.state.read().unwrap();
+                    for (name, id) in op.requires {
+                        if let Some(r) = state.get(&id) {
+                            captured.insert(name, r.clone());
+                        }
                     }
-                    None => {
-                        return Err(error::bad_request(
-                            "Required value not provided",
-                            name_in_this_context,
-                        ));
-                    }
+
+                    ready.push((
+                        value_id.clone(),
+                        op.action,
+                        self.clone().extend(Link::to(&format!("/{}", value_id))?, captured),
+                    ));
+                } else {
+                    println!("still need {:?}", op.requires);
+                    queue.push((value_id, op));
+                    break;
                 }
             }
 
-            let txn = self.clone().extend(value_context(&value_id)?, deps);
-            let response = self.host.clone().post(txn, op.action).await?;
-            self.state.write().unwrap().insert(value_id, response);
+            if ready.is_empty() {
+                return Err(error::bad_request(
+                    "Transaction graph stalled before completing",
+                    format!(
+                        "{:?}",
+                        queue.iter().map(|(id, _)| id).collect::<Vec<&ValueId>>()
+                    ),
+                ));
+            }
+
+            let results = try_join_all(
+                ready
+                    .iter()
+                    .map(|(_, action, txn)| self.host.clone().post(txn.clone(), action.clone())),
+            )
+            .await?;
+            let mut state = self.state.write().unwrap();
+            for i in 0..results.len() {
+                state.insert(ready[i].0.to_string(), results[i].clone());
+            }
         }
 
-        Err(error::not_implemented())
+        Ok(self
+            .state
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|(id, _)| capture.contains(*id))
+            .map(|(id, r)| (id.clone(), r.clone()))
+            .collect())
     }
 
     pub fn require<T: DeserializeOwned>(self: Arc<Self>, value_id: &str) -> TCResult<T> {
@@ -227,15 +263,5 @@ impl Transaction {
 
     pub async fn put(self: Arc<Self>, path: Link, value: TCValue) -> TCResult<()> {
         self.host.clone().put(self.clone(), path, value).await
-    }
-}
-
-fn value_context(value_id: &str) -> TCResult<Link> {
-    match Link::to(value_id) {
-        Ok(value_id) => Ok(value_id),
-        Err(cause) => Err(error::bad_request(
-            &format!("{} is not a valid value name", value_id),
-            cause,
-        )),
     }
 }

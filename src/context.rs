@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::error;
 use crate::state::TCState;
-use crate::transaction::{Request, Transaction};
+use crate::transaction::Transaction;
 use crate::value::{Link, TCValue};
 
 const LINK_BLACKLIST: [&str; 11] = ["..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "="];
@@ -14,7 +14,6 @@ pub type TCResult<T> = Result<T, error::TCError>;
 
 #[derive(Clone, Hash)]
 pub enum TCResponse {
-    Exe(Request),
     State(Arc<TCState>),
     Value(TCValue),
 }
@@ -31,7 +30,6 @@ impl TCResponse {
 impl fmt::Display for TCResponse {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TCResponse::Exe(_exe) => write!(f, "(executable)"),
             TCResponse::State(state) => write!(f, "{}", state),
             TCResponse::Value(value) => write!(f, "{}", value),
         }
