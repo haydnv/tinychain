@@ -36,7 +36,7 @@ impl Host {
     }
 
     pub fn new_transaction(self: Arc<Self>, op: Op) -> TCResult<Arc<Transaction>> {
-        Transaction::with(self, op)
+        Transaction::of(self, op)
     }
 
     pub async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCResponse> {
