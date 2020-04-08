@@ -5,9 +5,10 @@ use std::sync::Arc;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 
-use crate::context::{TCResponse, TCResult};
+use crate::context::TCResult;
 use crate::error;
 use crate::host::Host;
+use crate::state::TCState;
 use crate::value::{Link, Op, TCValue, ValueId};
 
 pub async fn listen(
@@ -80,7 +81,7 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
                 Ok(responses) => {
                     for (id, r) in responses {
                         match r {
-                            TCResponse::Value(val) => {
+                            TCState::Value(val) => {
                                 results.insert(id.clone(), val.clone());
                             }
                             other => {

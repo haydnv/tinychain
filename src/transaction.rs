@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use crate::context::*;
 use crate::error;
 use crate::host::Host;
+use crate::state::TCState;
 use crate::value::{Link, Op, TCValue, ValueId};
 
 #[derive(Clone)]
@@ -56,7 +57,7 @@ pub struct Transaction {
     host: Arc<Host>,
     id: TransactionId,
     context: Link,
-    state: RwLock<HashMap<ValueId, TCResponse>>,
+    state: RwLock<HashMap<ValueId, TCState>>,
     pending: RwLock<HashMap<ValueId, _Op>>,
 }
 
@@ -65,7 +66,7 @@ struct _Op {
     requires: Vec<(String, ValueId)>,
 }
 
-fn calc_deps(op: Op, state: &mut HashMap<ValueId, TCResponse>, pending: &mut HashMap<ValueId, _Op>) -> TCResult<()> {
+fn calc_deps(op: Op, state: &mut HashMap<ValueId, TCState>, pending: &mut HashMap<ValueId, _Op>) -> TCResult<()> {
     for (id, provider) in op.requires() {
         match provider {
             TCValue::Op(dep) => {
@@ -81,7 +82,7 @@ fn calc_deps(op: Op, state: &mut HashMap<ValueId, TCResponse>, pending: &mut Has
                     return Err(error::bad_request("Duplicate values provided for", id));
                 }
 
-                state.insert(id, TCResponse::Value(value));
+                state.insert(id, TCState::Value(value));
             }
         }
     }
@@ -94,9 +95,9 @@ impl Transaction {
         let id = TransactionId::new(host.time());
         let context: Link = id.clone().into();
 
-        let mut state: HashMap<ValueId, TCResponse> = HashMap::new();
+        let mut state: HashMap<ValueId, TCState> = HashMap::new();
         let mut pending: HashMap<ValueId, _Op> = HashMap::new();
-        calc_deps(op, &mut state, &mut pending);
+        calc_deps(op, &mut state, &mut pending)?;
 
         Ok(Arc::new(Transaction {
             host,
@@ -110,7 +111,7 @@ impl Transaction {
     fn extend(
         self: Arc<Self>,
         context: Link,
-        required: HashMap<String, TCResponse>,
+        required: HashMap<String, TCState>,
     ) -> Arc<Transaction> {
         Arc::new(Transaction {
             host: self.host.clone(),
@@ -171,7 +172,7 @@ impl Transaction {
     pub async fn execute<'a>(
         self: Arc<Self>,
         capture: HashSet<ValueId>,
-    ) -> TCResult<HashMap<ValueId, TCResponse>> {
+    ) -> TCResult<HashMap<ValueId, TCState>> {
         // TODO: add a TCValue::Ref type and it to support discrete namespaces for each child txn
 
         let unvisited: Vec<ValueId> = capture.clone().into_iter().collect();
@@ -189,7 +190,7 @@ impl Transaction {
                 };
 
                 if known.is_superset(&op.requires.iter().map(|(_, id)| id.clone()).collect()) {
-                    let mut captured: HashMap<String, TCResponse> = HashMap::new();
+                    let mut captured: HashMap<String, TCState> = HashMap::new();
                     let state = self.state.read().unwrap();
                     for (name, id) in op.requires {
                         if let Some(r) = state.get(&id) {
@@ -228,7 +229,7 @@ impl Transaction {
         }
 
         let state = self.state.read().unwrap();
-        let mut responses: HashMap<String, TCResponse> = HashMap::new();
+        let mut responses: HashMap<String, TCState> = HashMap::new();
         for value_id in capture {
             match state.get(&value_id) {
                 Some(r) => {
@@ -246,7 +247,7 @@ impl Transaction {
     pub fn require<T: DeserializeOwned>(self: Arc<Self>, value_id: &str) -> TCResult<T> {
         match self.state.read().unwrap().get(value_id) {
             Some(response) => match response {
-                TCResponse::Value(value) => {
+                TCState::Value(value) => {
                     Ok(serde_json::from_str(&serde_json::to_string(&value)?)?)
                 }
                 other => Err(error::bad_request(
@@ -261,11 +262,11 @@ impl Transaction {
         }
     }
 
-    pub async fn get(self: Arc<Self>, path: Link) -> TCResult<TCResponse> {
+    pub async fn get(self: Arc<Self>, path: Link) -> TCResult<TCState> {
         self.host.clone().get(self.clone(), path).await
     }
 
-    pub async fn put(self: Arc<Self>, path: Link, value: TCValue) -> TCResult<()> {
-        self.host.clone().put(self.clone(), path, value).await
+    pub async fn put(self: Arc<Self>, path: Link, state: TCState) -> TCResult<()> {
+        self.host.clone().put(self.clone(), path, state).await
     }
 }

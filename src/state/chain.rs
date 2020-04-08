@@ -4,9 +4,10 @@ use async_trait::async_trait;
 
 use crate::context::*;
 use crate::error;
+use crate::state::TCState;
 use crate::state::block::Block;
 use crate::transaction::Transaction;
-use crate::value::{Link, TCValue};
+use crate::value::Link;
 
 #[derive(Hash)]
 pub struct Chain {
@@ -25,18 +26,18 @@ impl Chain {
 
 #[async_trait]
 impl TCContext for Chain {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<TCResponse> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
-        self.latest_block.clone().put(txn, value).await
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _state: TCState) -> TCResult<()> {
+        Err(error::not_implemented())
     }
 }
 
 #[async_trait]
 impl TCExecutable for Chain {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<TCResponse> {
+    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 }
@@ -51,14 +52,14 @@ impl ChainContext {
 
 #[async_trait]
 impl TCContext for ChainContext {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<TCResponse> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<TCState> {
         // TODO: check if the chain already exists
         // if so, load it
         // otherwise, return a NOT FOUND error
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _value: TCValue) -> TCResult<()> {
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _state: TCState) -> TCResult<()> {
         // TODO: check if the chain already exists
         // if so, return an error
         // otherwise, create a new empty chain at the specified path and return it

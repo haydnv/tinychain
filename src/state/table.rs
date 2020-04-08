@@ -21,11 +21,7 @@ pub struct Table {
 
 impl Table {
     fn schema_map(self: Arc<Self>) -> HashMap<String, Link> {
-        HashMap::from_iter(
-            self.schema
-                .iter()
-                .map(|(name, constructor)| (name.clone(), constructor.clone())),
-        )
+        HashMap::from_iter(self.schema.iter().cloned())
     }
 }
 
@@ -39,18 +35,18 @@ pub enum TableRequest {
 
 #[async_trait]
 impl TCContext for Table {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _row_id: Link) -> TCResult<TCResponse> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _row_id: Link) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _: TCValue) -> TCResult<()> {
-        Err(error::method_not_allowed("Table"))
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _state: TCState) -> TCResult<()> {
+        Err(error::not_implemented())
     }
 }
 
 #[async_trait]
 impl TCExecutable for Table {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<TCResponse> {
+    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 }
@@ -91,9 +87,9 @@ impl TableContext {
 
         let chain_path = txn.clone().context();
         txn.clone()
-            .put(Link::to("/sbin/chain")?, TCValue::Link(chain_path.clone()))
+            .put(Link::to("/sbin/chain")?, TCState::Value(TCValue::Link(chain_path.clone())))
             .await?;
-        let chain: Arc<Chain> = txn.get(chain_path.clone()).await?.to_state()?.to_chain()?;
+        let chain: Arc<Chain> = txn.get(chain_path.clone()).await?.to_chain()?;
 
         Ok(Arc::new(Table {
             key,
@@ -105,7 +101,7 @@ impl TableContext {
 
 #[async_trait]
 impl TCExecutable for TableContext {
-    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<TCResponse> {
+    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<TCState> {
         if method.as_str() != "/new" {
             return Err(error::bad_request(
                 "TableContext has no such method",
@@ -115,8 +111,8 @@ impl TCExecutable for TableContext {
 
         let schema: Vec<(String, Link)> = txn.clone().require("schema")?;
         let key: String = txn.clone().require("key")?;
-        Ok(TCResponse::State(TCState::from_table(
+        Ok(TCState::Table(
             self.new_table(txn, schema, key).await?,
-        )))
+        ))
     }
 }

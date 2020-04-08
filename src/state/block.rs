@@ -26,10 +26,10 @@ impl Block {
 
 #[async_trait]
 impl TCContext for Block {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: Link) -> TCResult<TCResponse> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: Link) -> TCResult<TCState> {
         if path.as_str() == "/" {
             match fs::read(&self.path).await {
-                Ok(content) => Ok(TCResponse::Value(TCValue::Bytes(content))),
+                Ok(content) => Ok(TCState::Value(TCValue::Bytes(content))),
                 Err(cause) => {
                     eprintln!("Error reading block: {}", cause);
                     Err(error::internal("The host encountered a filesystem error"))
@@ -43,8 +43,8 @@ impl TCContext for Block {
         }
     }
 
-    async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
-        let value = value.to_bytes()?;
+    async fn put(self: Arc<Self>, txn: Arc<Transaction>, state: TCState) -> TCResult<()> {
+        let value = state.to_value()?.to_bytes()?;
 
         if value.contains(&(EOT_CHAR as u8)) {
             let msg = "Attempted to write a block containing the ASCII EOT control character";
@@ -82,14 +82,14 @@ impl BlockContext {
 
 #[async_trait]
 impl TCContext for BlockContext {
-    async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCResponse> {
+    async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCState> {
         let path = self.drive.clone().fs_path(txn.context(), path)?;
         // TODO: check if the file actually exists before returning success
-        Ok(TCResponse::State(TCState::from_block(Block::new(path))))
+        Ok(TCState::Block(Block::new(path)))
     }
 
-    async fn put(self: Arc<Self>, txn: Arc<Transaction>, value: TCValue) -> TCResult<()> {
-        let _path = self.drive.clone().fs_path(txn.context(), value.to_link()?);
+    async fn put(self: Arc<Self>, txn: Arc<Transaction>, state: TCState) -> TCResult<()> {
+        let _path = self.drive.clone().fs_path(txn.context(), state.to_value()?.to_link()?);
         // TODO: touch the file at `path`
         Err(error::not_implemented())
     }
