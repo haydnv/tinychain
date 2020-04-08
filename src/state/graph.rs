@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::context::*;
 use crate::error;
-use crate::transaction::Transaction;
 use crate::state::TCState;
+use crate::transaction::Transaction;
 use crate::value::Link;
 
 #[derive(Hash)]

@@ -87,7 +87,10 @@ impl TableContext {
 
         let chain_path = txn.clone().context();
         txn.clone()
-            .put(Link::to("/sbin/chain")?, TCState::Value(TCValue::Link(chain_path.clone())))
+            .put(
+                Link::to("/sbin/chain")?,
+                TCState::Value(TCValue::Link(chain_path.clone())),
+            )
             .await?;
         let chain: Arc<Chain> = txn.get(chain_path.clone()).await?.to_chain()?;
 
@@ -111,8 +114,6 @@ impl TCExecutable for TableContext {
 
         let schema: Vec<(String, Link)> = txn.clone().require("schema")?;
         let key: String = txn.clone().require("key")?;
-        Ok(TCState::Table(
-            self.new_table(txn, schema, key).await?,
-        ))
+        Ok(TCState::Table(self.new_table(txn, schema, key).await?))
     }
 }

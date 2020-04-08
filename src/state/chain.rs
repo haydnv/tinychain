@@ -58,7 +58,11 @@ impl TCContext for ChainContext {
             i += 1;
         }
 
-        Ok(Arc::new(Chain { fs_dir: chain_dir, latest_block: i }).into())
+        Ok(Arc::new(Chain {
+            fs_dir: chain_dir,
+            latest_block: i,
+        })
+        .into())
     }
 
     async fn put(self: Arc<Self>, _txn: Arc<Transaction>, state: TCState) -> TCResult<()> {
@@ -69,7 +73,7 @@ impl TCContext for ChainContext {
             return Err(error::bad_request("There is already an entry at", path));
         }
 
-        self.fs_dir.clone().reserve(path);
+        self.fs_dir.clone().reserve(path)?;
 
         Ok(())
     }

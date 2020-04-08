@@ -36,13 +36,16 @@ impl Dir {
             mount_point,
             context,
             parent: None,
-            children: RwLock::new(HashMap::new())
+            children: RwLock::new(HashMap::new()),
         })
     }
 
     pub fn reserve(self: Arc<Self>, path: Link) -> TCResult<Arc<Dir>> {
         if self.children.read().unwrap().contains_key(&path) {
-            return Err(error::internal(&format!("Tried to reserve a fs::Dir that's already reserved! {}", path)));
+            return Err(error::internal(&format!(
+                "Tried to reserve a fs::Dir that's already reserved! {}",
+                path
+            )));
         }
 
         let dir = Dir::new(path.clone(), self.clone().fs_path(&path)?);
@@ -64,7 +67,10 @@ impl Dir {
 
     fn fs_path(&self, name: &Link) -> TCResult<PathBuf> {
         if name.len() != 1 {
-            return Err(error::bad_request("Block path must be a Link of length 1", name));
+            return Err(error::bad_request(
+                "Block path must be a Link of length 1",
+                name,
+            ));
         }
 
         let mut path = self.mount_point.clone();

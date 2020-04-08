@@ -59,7 +59,7 @@ impl Link {
         &self.to
     }
 
-    pub fn append(&self, suffix: Link) -> Link {
+    pub fn append(&self, suffix: &Link) -> Link {
         Link::to(&format!("{}{}", self.to, suffix.to)).unwrap()
     }
 

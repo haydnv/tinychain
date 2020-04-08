@@ -66,17 +66,29 @@ struct _Op {
     requires: Vec<(String, ValueId)>,
 }
 
-fn calc_deps(op: Op, state: &mut HashMap<ValueId, TCState>, pending: &mut HashMap<ValueId, _Op>) -> TCResult<()> {
+fn calc_deps(
+    op: Op,
+    state: &mut HashMap<ValueId, TCState>,
+    pending: &mut HashMap<ValueId, _Op>,
+) -> TCResult<()> {
     for (id, provider) in op.requires() {
         match provider {
             TCValue::Op(dep) => {
                 calc_deps(dep.clone(), state, pending)?;
 
-                pending.insert(id, _Op {
-                    action: op.action(),
-                    requires: dep.requires().iter().cloned().map(|(id, _)| (id.clone(), id)).collect(),
-                });
-            },
+                pending.insert(
+                    id,
+                    _Op {
+                        action: op.action(),
+                        requires: dep
+                            .requires()
+                            .iter()
+                            .cloned()
+                            .map(|(id, _)| (id.clone(), id))
+                            .collect(),
+                    },
+                );
+            }
             value => {
                 if state.contains_key(&id) {
                     return Err(error::bad_request("Duplicate values provided for", id));
@@ -116,7 +128,7 @@ impl Transaction {
         Arc::new(Transaction {
             host: self.host.clone(),
             id: self.id.clone(),
-            context: self.context.append(context),
+            context: self.context.append(&context),
             state: RwLock::new(required),
             pending: RwLock::new(HashMap::new()),
         })
@@ -127,12 +139,7 @@ impl Transaction {
     }
 
     fn known(self: Arc<Self>) -> HashSet<ValueId> {
-        self.state
-            .read()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect()
+        self.state.read().unwrap().keys().cloned().collect()
     }
 
     fn enqueue(
@@ -197,7 +204,8 @@ impl Transaction {
                     ready.push((
                         value_id.clone(),
                         op.action,
-                        self.clone().extend(Link::to(&format!("/{}", value_id))?, captured),
+                        self.clone()
+                            .extend(Link::to(&format!("/{}", value_id))?, captured),
                     ));
                 } else {
                     queue.push(value_id);
@@ -230,9 +238,12 @@ impl Transaction {
             match state.get(&value_id) {
                 Some(r) => {
                     responses.insert(value_id, r.clone());
-                },
+                }
                 None => {
-                    return Err(error::bad_request("Tried to capture unknown value", value_id));
+                    return Err(error::bad_request(
+                        "Tried to capture unknown value",
+                        value_id,
+                    ));
                 }
             }
         }
@@ -243,9 +254,7 @@ impl Transaction {
     pub fn require<T: DeserializeOwned>(self: Arc<Self>, value_id: &str) -> TCResult<T> {
         match self.state.read().unwrap().get(value_id) {
             Some(response) => match response {
-                TCState::Value(value) => {
-                    Ok(serde_json::from_str(&serde_json::to_string(&value)?)?)
-                }
+                TCState::Value(value) => Ok(serde_json::from_str(&serde_json::to_string(&value)?)?),
                 other => Err(error::bad_request(
                     &format!("Required value {} is not serialiable", value_id),
                     other,

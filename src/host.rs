@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::time;
 
 use crate::context::*;
-use crate::fs;
 use crate::error;
-use crate::state::TCState;
+use crate::fs;
 use crate::state::chain::ChainContext;
 use crate::state::table::TableContext;
+use crate::state::TCState;
 use crate::transaction::Transaction;
 use crate::value::{Link, Op};
 
