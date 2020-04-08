@@ -7,7 +7,7 @@ use crate::error;
 use crate::state::chain::Chain;
 use crate::state::TCState;
 use crate::transaction::Transaction;
-use crate::value::Link;
+use crate::value::{Link, TCValue};
 
 #[derive(Hash)]
 pub struct Dir {
@@ -16,26 +16,33 @@ pub struct Dir {
 
 #[async_trait]
 impl TCContext for Dir {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<TCState> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: TCValue) -> TCResult<TCState> {
+        let _path = path.as_link()?;
+
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, txn: Arc<Transaction>, args: TCState) -> TCResult<()> {
-        let path: Link = args.get_arg("path")?.to_value()?.to_link()?;
-        let state = args.get_arg("state")?;
+    async fn put(self: Arc<Self>, txn: Arc<Transaction>, path: TCValue, state: TCState) -> TCResult<()> {
+        let path: Link = path.as_link()?;
 
-        if let TCState::Value(val) = state {
-            return Err(error::bad_request(
-                "A Dir can only store States, not Values--found",
-                val,
-            ));
-        }
+        let constructor = match state {
+            TCState::Chain(_) => Link::to("/sbin/chain")?,
+            TCState::Value(val) => {
+                return Err(error::bad_request(
+                    "A Dir can only store States, not Values--found",
+                    val,
+                ));
+            },
+            _ => {
+                return Err(error::not_implemented())
+            }
+        };
 
         txn.clone()
             .put(txn.clone().context().append(&path), state)
             .await?;
 
-        self.chain.clone().put(txn, path.into()).await?;
+        self.chain.clone().put(txn, path.into(), constructor.into()).await?;
 
         Ok(())
     }

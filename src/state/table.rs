@@ -35,11 +35,11 @@ pub enum TableRequest {
 
 #[async_trait]
 impl TCContext for Table {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _row_id: Link) -> TCResult<TCState> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _row_id: TCValue) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _state: TCState) -> TCResult<()> {
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _row_id: TCValue, _state: TCState) -> TCResult<()> {
         Err(error::not_implemented())
     }
 }
@@ -92,7 +92,7 @@ impl TableContext {
                 TCState::Value(TCValue::Link(chain_path.clone())),
             )
             .await?;
-        let chain: Arc<Chain> = txn.get(chain_path.clone()).await?.to_chain()?;
+        let chain: Arc<Chain> = txn.get(chain_path.clone()).await?.as_chain()?;
 
         Ok(Arc::new(Table {
             key,

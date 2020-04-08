@@ -181,15 +181,21 @@ pub enum TCValue {
     Vector(Vec<TCValue>),
 }
 
+impl From<Link> for TCValue {
+    fn from(link: Link) -> TCValue {
+        TCValue::Link(link)
+    }
+}
+
 impl TCValue {
-    pub fn to_bytes(&self) -> TCResult<Vec<u8>> {
+    pub fn as_bytes(&self) -> TCResult<Vec<u8>> {
         match self {
             TCValue::Bytes(b) => Ok(b.clone()),
             other => Err(error::bad_request("Expected bytes but found", other)),
         }
     }
 
-    pub fn to_link(&self) -> TCResult<Link> {
+    pub fn as_link(&self) -> TCResult<Link> {
         match self {
             TCValue::Link(l) => Ok(l.clone()),
             other => Err(error::bad_request("Expected a Link but found", other)),

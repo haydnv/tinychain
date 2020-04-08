@@ -6,18 +6,18 @@ use crate::context::*;
 use crate::error;
 use crate::state::TCState;
 use crate::transaction::Transaction;
-use crate::value::Link;
+use crate::value::{Link, TCValue};
 
 #[derive(Hash)]
 pub struct Tensor {}
 
 #[async_trait]
 impl TCContext for Tensor {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _node: Link) -> TCResult<TCState> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _slice: TCValue) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _state: TCState) -> TCResult<()> {
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _slice: TCValue, _values: TCState) -> TCResult<()> {
         Err(error::not_implemented())
     }
 }

@@ -5,15 +5,15 @@ use async_trait::async_trait;
 use crate::error;
 use crate::state::TCState;
 use crate::transaction::Transaction;
-use crate::value::Link;
+use crate::value::{Link, TCValue};
 
 pub type TCResult<T> = Result<T, error::TCError>;
 
 #[async_trait]
 pub trait TCContext: Send + Sync {
-    async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCState>;
+    async fn get(self: Arc<Self>, txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState>;
 
-    async fn put(self: Arc<Self>, txn: Arc<Transaction>, state: TCState) -> TCResult<()>;
+    async fn put(self: Arc<Self>, txn: Arc<Transaction>, key: TCValue, state: TCState) -> TCResult<()>;
 }
 
 #[async_trait]

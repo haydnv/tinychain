@@ -7,7 +7,7 @@ use crate::error;
 use crate::fs;
 use crate::state::TCState;
 use crate::transaction::Transaction;
-use crate::value::Link;
+use crate::value::{Link, TCValue};
 
 #[derive(Hash)]
 pub struct Chain {
@@ -17,11 +17,11 @@ pub struct Chain {
 
 #[async_trait]
 impl TCContext for Chain {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<TCState> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _key: TCValue) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _state: TCState) -> TCResult<()> {
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _key: TCValue, _state: TCState) -> TCResult<()> {
         Err(error::not_implemented())
     }
 }
@@ -45,8 +45,9 @@ impl ChainContext {
 
 #[async_trait]
 impl TCContext for ChainContext {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: Link) -> TCResult<TCState> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: TCValue) -> TCResult<TCState> {
         // TODO: read the contents of each block and provide them to the caller
+        let path = path.as_link()?;
 
         if !self.fs_dir.clone().exists(path.clone()).await? {
             return Err(error::not_found(path));
@@ -65,10 +66,10 @@ impl TCContext for ChainContext {
         .into())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, state: TCState) -> TCResult<()> {
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _key: TCValue, state: TCState) -> TCResult<()> {
         // TODO: support the case where state == TCState::Chain(_) by copying the given chain
 
-        let path = state.to_value()?.to_link()?;
+        let path = state.as_value()?.as_link()?;
         if self.fs_dir.clone().exists(path.clone()).await? {
             return Err(error::bad_request("There is already an entry at", path));
         }
