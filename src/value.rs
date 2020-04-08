@@ -90,6 +90,12 @@ impl Link {
     }
 }
 
+impl From<u64> for Link {
+    fn from(i: u64) -> Link {
+        Link::to(&format!("/{}", i)).unwrap()
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for Link {
     fn deserialize<D>(deserializer: D) -> Result<Link, D::Error>
     where

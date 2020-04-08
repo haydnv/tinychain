@@ -37,6 +37,12 @@ impl TCState {
     }
 }
 
+impl From<Arc<chain::Chain>> for TCState {
+    fn from(chain: Arc<chain::Chain>) -> TCState {
+        TCState::Chain(chain)
+    }
+}
+
 impl fmt::Display for TCState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

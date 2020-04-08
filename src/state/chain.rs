@@ -11,7 +11,7 @@ use crate::value::Link;
 
 #[derive(Hash)]
 pub struct Chain {
-    mount_point: Arc<fs::Dir>,
+    fs_dir: Arc<fs::Dir>,
     latest_block: u64,
 }
 
@@ -34,28 +34,43 @@ impl TCExecutable for Chain {
 }
 
 pub struct ChainContext {
-    mount_point: Arc<fs::Dir>,
+    fs_dir: Arc<fs::Dir>,
 }
 
 impl ChainContext {
-    pub fn new(mount_point: Arc<fs::Dir>) -> Arc<ChainContext> {
-        Arc::new(ChainContext { mount_point })
+    pub fn new(fs_dir: Arc<fs::Dir>) -> Arc<ChainContext> {
+        Arc::new(ChainContext { fs_dir })
     }
 }
 
 #[async_trait]
 impl TCContext for ChainContext {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _path: Link) -> TCResult<TCState> {
-        // TODO: check if the chain already exists
-        // if so, load it
-        // otherwise, return a NOT FOUND error
-        Err(error::not_implemented())
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: Link) -> TCResult<TCState> {
+        // TODO: read the contents of each block and provide them to the caller
+
+        if !self.fs_dir.clone().exists(path.clone()).await? {
+            return Err(error::not_found(path));
+        }
+
+        let chain_dir = self.fs_dir.clone().reserve(path)?;
+        let mut i = 0;
+        while self.fs_dir.clone().exists(i.into()).await? {
+            i += 1;
+        }
+
+        Ok(Arc::new(Chain { fs_dir: chain_dir, latest_block: i }).into())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _state: TCState) -> TCResult<()> {
-        // TODO: check if the chain already exists
-        // if so, return an error
-        // otherwise, create a new empty chain at the specified path and return it
-        Err(error::not_implemented())
+    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, state: TCState) -> TCResult<()> {
+        // TODO: support the case where state == TCState::Chain(_) by copying the given chain
+
+        let path = state.to_value()?.to_link()?;
+        if self.fs_dir.clone().exists(path.clone()).await? {
+            return Err(error::bad_request("There is already an entry at", path));
+        }
+
+        self.fs_dir.clone().reserve(path);
+
+        Ok(())
     }
 }

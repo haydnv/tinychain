@@ -3,6 +3,8 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
+use tokio::fs;
+
 use crate::context::TCResult;
 use crate::error;
 use crate::value::Link;
@@ -48,7 +50,19 @@ impl Dir {
         Ok(dir)
     }
 
-    fn fs_path(self: Arc<Self>, name: &Link) -> TCResult<PathBuf> {
+    pub async fn exists(self: Arc<Self>, path: Link) -> TCResult<bool> {
+        let fs_path = self.clone().fs_path(&path)?;
+        if self.children.read().unwrap().contains_key(&path) {
+            return Ok(true);
+        }
+
+        match fs::metadata(fs_path).await {
+            Ok(_) => Ok(true),
+            Err(_) => Ok(false),
+        }
+    }
+
+    fn fs_path(&self, name: &Link) -> TCResult<PathBuf> {
         if name.len() != 1 {
             return Err(error::bad_request("Block path must be a Link of length 1", name));
         }
