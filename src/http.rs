@@ -123,7 +123,6 @@ fn transform_error(result: TCResult<Vec<u8>>) -> Result<Response<Body>, hyper::E
             *response.status_mut() = match cause.reason() {
                 error::Code::BadRequest => StatusCode::BAD_REQUEST,
                 error::Code::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-                error::Code::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
                 error::Code::NotFound => StatusCode::NOT_FOUND,
                 error::Code::NotImplemented => StatusCode::NOT_IMPLEMENTED,
             };

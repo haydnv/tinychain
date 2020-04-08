@@ -10,9 +10,6 @@ pub enum Code {
     #[allow(dead_code)]
     Internal,
 
-    // "I found this but it doesn't support the request method you used (e.g. GET, PUT, POST...)"
-    MethodNotAllowed,
-
     // "I don't know what this is--maybe you're looking in the wrong place?"
     NotFound,
 
@@ -26,7 +23,6 @@ impl fmt::Display for Code {
         match self {
             Code::BadRequest => write!(f, "Bad request"),
             Code::Internal => write!(f, "Internal server error"),
-            Code::MethodNotAllowed => write!(f, "Method not allowed"),
             Code::NotFound => write!(f, "Not found"),
             Code::NotImplemented => write!(f, "Not implemented"),
         }
@@ -79,13 +75,6 @@ pub fn bad_request<T: fmt::Display>(message: &str, info: T) -> TCError {
 
 pub fn internal(message: &str) -> TCError {
     TCError::of(Code::Internal, message.to_string())
-}
-
-pub fn method_not_allowed<T: fmt::Display>(context: T) -> TCError {
-    TCError::of(
-        Code::MethodNotAllowed,
-        format!("{} does not support this request method", context),
-    )
 }
 
 pub fn not_found<T: fmt::Display>(id: T) -> TCError {

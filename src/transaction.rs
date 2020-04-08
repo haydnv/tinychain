@@ -126,10 +126,6 @@ impl Transaction {
         self.context.clone()
     }
 
-    pub fn id(self: Arc<Self>) -> TransactionId {
-        self.id.clone()
-    }
-
     fn known(self: Arc<Self>) -> HashSet<ValueId> {
         self.state
             .read()

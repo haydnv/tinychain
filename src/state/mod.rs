@@ -5,7 +5,6 @@ use crate::context::TCResult;
 use crate::error;
 use crate::value::TCValue;
 
-pub mod block;
 pub mod chain;
 pub mod dir;
 pub mod graph;
@@ -14,7 +13,6 @@ pub mod tensor;
 
 #[derive(Clone, Hash)]
 pub enum TCState {
-    Block(Arc<block::Block>),
     Chain(Arc<chain::Chain>),
     Dir(Arc<dir::Dir>),
     Graph(Arc<graph::Graph>),
@@ -24,13 +22,6 @@ pub enum TCState {
 }
 
 impl TCState {
-    pub fn to_block(&self) -> TCResult<Arc<block::Block>> {
-        match self {
-            TCState::Block(block) => Ok(block.clone()),
-            other => Err(error::bad_request("Expected block but found", other)),
-        }
-    }
-
     pub fn to_chain(&self) -> TCResult<Arc<chain::Chain>> {
         match self {
             TCState::Chain(chain) => Ok(chain.clone()),
@@ -49,7 +40,6 @@ impl TCState {
 impl fmt::Display for TCState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TCState::Block(_) => write!(f, "(block)"),
             TCState::Chain(_) => write!(f, "(chain)"),
             TCState::Dir(_) => write!(f, "(dir)"),
             TCState::Graph(_) => write!(f, "(graph)"),

@@ -4,24 +4,15 @@ use async_trait::async_trait;
 
 use crate::context::*;
 use crate::error;
+use crate::fs;
 use crate::state::TCState;
-use crate::state::block::Block;
 use crate::transaction::Transaction;
 use crate::value::Link;
 
 #[derive(Hash)]
 pub struct Chain {
-    block_count: u64,
-    latest_block: Arc<Block>,
-}
-
-impl Chain {
-    fn new(first_block: Arc<Block>) -> Arc<Chain> {
-        Arc::new(Chain {
-            block_count: 1,
-            latest_block: first_block,
-        })
-    }
+    mount_point: Arc<fs::Dir>,
+    latest_block: u64,
 }
 
 #[async_trait]
@@ -42,11 +33,13 @@ impl TCExecutable for Chain {
     }
 }
 
-pub struct ChainContext {}
+pub struct ChainContext {
+    mount_point: Arc<fs::Dir>,
+}
 
 impl ChainContext {
-    pub fn new() -> Arc<ChainContext> {
-        Arc::new(ChainContext {})
+    pub fn new(mount_point: Arc<fs::Dir>) -> Arc<ChainContext> {
+        Arc::new(ChainContext { mount_point })
     }
 }
 

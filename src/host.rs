@@ -2,28 +2,24 @@ use std::sync::Arc;
 use std::time;
 
 use crate::context::*;
-use crate::drive::Drive;
+use crate::fs;
 use crate::error;
 use crate::state::TCState;
-use crate::state::block::BlockContext;
 use crate::state::chain::ChainContext;
 use crate::state::table::TableContext;
 use crate::transaction::Transaction;
 use crate::value::{Link, Op};
 
 pub struct Host {
-    block_context: Arc<BlockContext>,
     chain_context: Arc<ChainContext>,
     table_context: Arc<TableContext>,
 }
 
 impl Host {
-    pub fn new(workspace: Arc<Drive>) -> TCResult<Arc<Host>> {
-        let block_context = BlockContext::new(workspace);
-        let chain_context = ChainContext::new();
+    pub fn new(data_dir: Arc<fs::Dir>) -> TCResult<Arc<Host>> {
+        let chain_context = ChainContext::new(data_dir.reserve(Link::to("/chain")?)?);
         let table_context = TableContext::new();
         Ok(Arc::new(Host {
-            block_context,
             chain_context,
             table_context,
         }))
@@ -43,14 +39,8 @@ impl Host {
     pub async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCState> {
         match path[0].as_str() {
             "sbin" => match path[1].as_str() {
-                "block" => {
-                    self.block_context
-                        .clone()
-                        .get(txn, path.from("/sbin/block")?)
-                        .await
-                }
                 "chain" => {
-                    self.block_context
+                    self.chain_context
                         .clone()
                         .get(txn, path.from("/sbin/chain")?)
                         .await
@@ -73,8 +63,8 @@ impl Host {
 
         match path[0].as_str() {
             "sbin" => match path[1].as_str() {
-                "block" => self.block_context.clone().put(txn, state).await,
-                "chain" => self.block_context.clone().put(txn, state).await,
+                "block" => self.chain_context.clone().put(txn, state).await,
+                "chain" => self.chain_context.clone().put(txn, state).await,
                 _ => Err(error::not_found(path)),
             },
             _ => Err(error::not_found(path)),

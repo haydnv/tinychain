@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use structopt::StructOpt;
 
 mod context;
-mod drive;
 mod error;
+mod fs;
 mod host;
 mod http;
 mod state;
@@ -29,8 +29,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Tinychain version {}", VERSION);
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
 
-    let workspace = drive::Drive::new(config.workspace);
-    let host = host::Host::new(workspace)?;
+    let data_dir = fs::Dir::new(value::Link::to("/")?, config.workspace);
+    let host = host::Host::new(data_dir)?;
     http::listen(host, config.http_port).await?;
     Ok(())
 }
