@@ -18,11 +18,33 @@ pub struct Chain {
 #[async_trait]
 impl TCContext for Chain {
     async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _key: TCValue) -> TCResult<TCState> {
+        let mut i = self.latest_block;
+        loop {
+            // TODO: read each entry in each block until the key is found, then return the value
+            i -= 1;
+            if i == 0 {
+                break;
+            }
+        }
+
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _key: TCValue, _state: TCState) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn put(
+        self: Arc<Self>,
+        _txn: Arc<Transaction>,
+        key: TCValue,
+        value: TCState,
+    ) -> TCResult<()> {
+        let value = value.as_value()?;
+        let delta = serde_json::to_string_pretty(&(key, value))?
+            .as_bytes()
+            .to_vec();
+        self.fs_dir
+            .clone()
+            .append(self.latest_block.into(), delta)
+            .await?;
+        Ok(())
     }
 }
 
@@ -66,7 +88,12 @@ impl TCContext for ChainContext {
         .into())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _key: TCValue, state: TCState) -> TCResult<()> {
+    async fn put(
+        self: Arc<Self>,
+        _txn: Arc<Transaction>,
+        _key: TCValue,
+        state: TCState,
+    ) -> TCResult<()> {
         // TODO: support the case where state == TCState::Chain(_) by copying the given chain
 
         let path = state.as_value()?.as_link()?;

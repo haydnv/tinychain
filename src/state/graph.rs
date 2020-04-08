@@ -17,7 +17,12 @@ impl TCContext for Graph {
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _node_id: TCValue, _node: TCState) -> TCResult<()> {
+    async fn put(
+        self: Arc<Self>,
+        _txn: Arc<Transaction>,
+        _node_id: TCValue,
+        _node: TCState,
+    ) -> TCResult<()> {
         Err(error::not_implemented())
     }
 }

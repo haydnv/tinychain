@@ -9,11 +9,14 @@ use crate::context::TCResult;
 use crate::error;
 use crate::value::Link;
 
+const EOT_CHAR: char = 4 as char;
+
 pub struct Dir {
     mount_point: PathBuf,
     context: Link,
     parent: Option<Arc<Dir>>,
     children: RwLock<HashMap<Link, Arc<Dir>>>,
+    buffer: RwLock<HashMap<Link, Vec<u8>>>,
 }
 
 impl Drop for Dir {
@@ -37,6 +40,7 @@ impl Dir {
             context,
             parent: None,
             children: RwLock::new(HashMap::new()),
+            buffer: RwLock::new(HashMap::new()),
         })
     }
 
@@ -51,6 +55,27 @@ impl Dir {
         let dir = Dir::new(path.clone(), self.clone().fs_path(&path)?);
         self.children.write().unwrap().insert(path, dir.clone());
         Ok(dir)
+    }
+
+    pub async fn append(self: Arc<Self>, path: Link, data: Vec<u8>) -> TCResult<()> {
+        let _fs_path = self.fs_path(&path)?;
+
+        if data.contains(&(EOT_CHAR as u8)) {
+            let msg = "Attempted to write a block containing the ASCII EOT control character";
+            return Err(error::internal(msg));
+        }
+
+        let data = [&data[..], &[EOT_CHAR as u8]].concat();
+
+        let mut buffer = self.buffer.write().unwrap();
+        match buffer.get_mut(&path) {
+            Some(file_buffer) => file_buffer.extend(data),
+            None => {
+                buffer.insert(path, data);
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn exists(self: Arc<Self>, path: Link) -> TCResult<bool> {

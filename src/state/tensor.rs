@@ -17,7 +17,12 @@ impl TCContext for Tensor {
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _slice: TCValue, _values: TCState) -> TCResult<()> {
+    async fn put(
+        self: Arc<Self>,
+        _txn: Arc<Transaction>,
+        _slice: TCValue,
+        _values: TCState,
+    ) -> TCResult<()> {
         Err(error::not_implemented())
     }
 }

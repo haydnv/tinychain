@@ -39,7 +39,12 @@ impl TCContext for Table {
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, _txn: Arc<Transaction>, _row_id: TCValue, _state: TCState) -> TCResult<()> {
+    async fn put(
+        self: Arc<Self>,
+        _txn: Arc<Transaction>,
+        _row_id: TCValue,
+        _state: TCState,
+    ) -> TCResult<()> {
         Err(error::not_implemented())
     }
 }

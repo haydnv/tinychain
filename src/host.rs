@@ -63,7 +63,12 @@ impl Host {
 
         match path[0].as_str() {
             "sbin" => match path[1].as_str() {
-                "chain" => self.chain_context.clone().put(txn, path.from("/sbin/chain")?.into(), state).await,
+                "chain" => {
+                    self.chain_context
+                        .clone()
+                        .put(txn, path.from("/sbin/chain")?.into(), state)
+                        .await
+                }
                 _ => Err(error::not_found(path)),
             },
             _ => Err(error::not_found(path)),

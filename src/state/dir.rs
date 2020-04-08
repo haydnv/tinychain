@@ -22,7 +22,12 @@ impl TCContext for Dir {
         Err(error::not_implemented())
     }
 
-    async fn put(self: Arc<Self>, txn: Arc<Transaction>, path: TCValue, state: TCState) -> TCResult<()> {
+    async fn put(
+        self: Arc<Self>,
+        txn: Arc<Transaction>,
+        path: TCValue,
+        state: TCState,
+    ) -> TCResult<()> {
         let path: Link = path.as_link()?;
 
         let constructor = match state {
@@ -32,17 +37,18 @@ impl TCContext for Dir {
                     "A Dir can only store States, not Values--found",
                     val,
                 ));
-            },
-            _ => {
-                return Err(error::not_implemented())
             }
+            _ => return Err(error::not_implemented()),
         };
 
         txn.clone()
             .put(txn.clone().context().append(&path), state)
             .await?;
 
-        self.chain.clone().put(txn, path.into(), constructor.into()).await?;
+        self.chain
+            .clone()
+            .put(txn, path.into(), constructor.into())
+            .await?;
 
         Ok(())
     }
