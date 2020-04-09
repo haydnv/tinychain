@@ -94,7 +94,7 @@ impl TableContext {
             .clone()
             .post(
                 &Link::to("/sbin/chain/new")?,
-                vec![("path".to_string(), txn.context().into())],
+                vec![("path", txn.context().into())],
             )
             .await?
             .as_chain()?;

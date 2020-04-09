@@ -278,11 +278,16 @@ impl Transaction {
     pub async fn post(
         self: Arc<Self>,
         path: &Link,
-        args: Vec<(String, TCState)>,
+        args: Vec<(&str, TCValue)>,
     ) -> TCResult<TCState> {
-        let txn = self
-            .clone()
-            .extend(self.context.clone(), args.into_iter().collect());
+        // TODO: queue any Ops in args in the child txn
+
+        let txn = self.clone().extend(
+            self.context.clone(),
+            args.iter()
+                .map(|(k, v)| ((*k).to_string(), TCState::Value(v.clone())))
+                .collect(),
+        );
         self.host.clone().post(txn, path).await
     }
 }
