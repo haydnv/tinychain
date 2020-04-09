@@ -22,7 +22,7 @@ impl TCContext for Graph {
         _txn: Arc<Transaction>,
         _node_id: TCValue,
         _node: TCState,
-    ) -> TCResult<()> {
+    ) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 }

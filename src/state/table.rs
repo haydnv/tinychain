@@ -44,7 +44,7 @@ impl TCContext for Table {
         _txn: Arc<Transaction>,
         _row_id: TCValue,
         _state: TCState,
-    ) -> TCResult<()> {
+    ) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 }
@@ -91,13 +91,11 @@ impl TableContext {
         };
 
         let chain_path = txn.clone().context();
-        txn.clone()
-            .put(
-                Link::to("/sbin/chain")?,
-                TCState::Value(TCValue::Link(chain_path.clone())),
-            )
-            .await?;
-        let chain: Arc<Chain> = txn.get(chain_path.clone()).await?.as_chain()?;
+        let chain: Arc<Chain> = txn
+            .clone()
+            .put(Link::to("/sbin/chain")?, chain_path.clone().into())
+            .await?
+            .as_chain()?;
 
         Ok(Arc::new(Table {
             key,

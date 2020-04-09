@@ -35,7 +35,7 @@ impl TCContext for Chain {
         _txn: Arc<Transaction>,
         key: TCValue,
         value: TCState,
-    ) -> TCResult<()> {
+    ) -> TCResult<TCState> {
         let value = value.as_value()?;
         let delta = serde_json::to_string_pretty(&(key, value))?
             .as_bytes()
@@ -44,7 +44,7 @@ impl TCContext for Chain {
             .clone()
             .append(self.latest_block.into(), delta)
             .await?;
-        Ok(())
+        Ok(().into())
     }
 }
 
@@ -93,7 +93,7 @@ impl TCContext for ChainContext {
         _txn: Arc<Transaction>,
         _key: TCValue,
         state: TCState,
-    ) -> TCResult<()> {
+    ) -> TCResult<TCState> {
         // TODO: support the case where state == TCState::Chain(_) by copying the given chain
 
         let path = state.as_value()?.as_link()?;
@@ -101,8 +101,12 @@ impl TCContext for ChainContext {
             return Err(error::bad_request("There is already an entry at", path));
         }
 
-        self.fs_dir.clone().reserve(path)?;
+        let chain_dir = self.fs_dir.clone().reserve(path)?;
 
-        Ok(())
+        Ok(Arc::new(Chain {
+            fs_dir: chain_dir,
+            latest_block: 0,
+        })
+        .into())
     }
 }

@@ -271,7 +271,7 @@ impl Transaction {
         self.host.clone().get(self.clone(), path).await
     }
 
-    pub async fn put(self: Arc<Self>, path: Link, state: TCState) -> TCResult<()> {
+    pub async fn put(self: Arc<Self>, path: Link, state: TCState) -> TCResult<TCState> {
         self.host.clone().put(self.clone(), path, state).await
     }
 }

@@ -18,7 +18,7 @@ pub trait TCContext: Send + Sync {
         txn: Arc<Transaction>,
         key: TCValue,
         state: TCState,
-    ) -> TCResult<()>;
+    ) -> TCResult<TCState>;
 }
 
 #[async_trait]

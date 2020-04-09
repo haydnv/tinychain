@@ -67,6 +67,7 @@ impl Link {
         if prefix.ends_with('/') {
             return Err(error::bad_request("Link prefix cannot end in a /", prefix));
         }
+
         if !self.to.starts_with(prefix) {
             return Err(error::bad_request(
                 &format!("Cannot link {} from", self),
@@ -74,7 +75,11 @@ impl Link {
             ));
         }
 
-        Link::to(&self.to[prefix.len()..])
+        if self.to == prefix {
+            Link::to("/")
+        } else {
+            Link::to(&self.to[prefix.len()..])
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -173,7 +178,6 @@ impl fmt::Display for Op {
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub enum TCValue {
-    Bytes(Vec<u8>),
     Int32(i32),
     Link(Link),
     Op(Op),
@@ -188,13 +192,6 @@ impl From<Link> for TCValue {
 }
 
 impl TCValue {
-    pub fn as_bytes(&self) -> TCResult<Vec<u8>> {
-        match self {
-            TCValue::Bytes(b) => Ok(b.clone()),
-            other => Err(error::bad_request("Expected bytes but found", other)),
-        }
-    }
-
     pub fn as_link(&self) -> TCResult<Link> {
         match self {
             TCValue::Link(l) => Ok(l.clone()),
@@ -209,7 +206,6 @@ impl Serialize for TCValue {
         S: Serializer,
     {
         match self {
-            TCValue::Bytes(b) => s.serialize_bytes(b),
             TCValue::Int32(i) => s.serialize_i32(*i),
             TCValue::Link(l) => l.serialize(s),
             TCValue::Op(o) => {
@@ -314,7 +310,6 @@ impl fmt::Debug for TCValue {
 impl fmt::Display for TCValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TCValue::Bytes(b) => write!(f, "binary of length {}", b.len()),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::Op(o) => write!(f, "Op: {}", o),

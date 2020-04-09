@@ -22,7 +22,7 @@ impl TCContext for Tensor {
         _txn: Arc<Transaction>,
         _slice: TCValue,
         _values: TCState,
-    ) -> TCResult<()> {
+    ) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 }

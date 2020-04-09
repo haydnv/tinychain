@@ -13,6 +13,7 @@ pub mod tensor;
 
 #[derive(Clone, Hash)]
 pub enum TCState {
+    None,
     Chain(Arc<chain::Chain>),
     Dir(Arc<dir::Dir>),
     Graph(Arc<graph::Graph>),
@@ -37,6 +38,12 @@ impl TCState {
     }
 }
 
+impl From<()> for TCState {
+    fn from(_: ()) -> TCState {
+        TCState::None
+    }
+}
+
 impl From<Arc<chain::Chain>> for TCState {
     fn from(chain: Arc<chain::Chain>) -> TCState {
         TCState::Chain(chain)
@@ -52,6 +59,7 @@ impl From<Link> for TCState {
 impl fmt::Display for TCState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            TCState::None => write!(f, "None"),
             TCState::Chain(_) => write!(f, "(chain)"),
             TCState::Dir(_) => write!(f, "(dir)"),
             TCState::Graph(_) => write!(f, "(graph)"),

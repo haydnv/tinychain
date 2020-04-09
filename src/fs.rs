@@ -52,16 +52,14 @@ impl Dir {
             )));
         }
 
-        let dir = Dir::new(path.clone(), self.clone().fs_path(&path)?);
+        let dir = Dir::new(path.clone(), self.clone().fs_path(path.clone())?);
         self.children.write().unwrap().insert(path, dir.clone());
         Ok(dir)
     }
 
     pub async fn append(self: Arc<Self>, path: Link, data: Vec<u8>) -> TCResult<()> {
-        let _fs_path = self.fs_path(&path)?;
-
         if data.contains(&(EOT_CHAR as u8)) {
-            let msg = "Attempted to write a block containing the ASCII EOT control character";
+            let msg = "Attempted to write a block containing the ASCII EOT control character (0x4)";
             return Err(error::internal(msg));
         }
 
@@ -79,8 +77,9 @@ impl Dir {
     }
 
     pub async fn exists(self: Arc<Self>, path: Link) -> TCResult<bool> {
-        let fs_path = self.clone().fs_path(&path)?;
+        let fs_path = self.clone().fs_path(path.clone())?;
         if self.children.read().unwrap().contains_key(&path) {
+            println!("found it");
             return Ok(true);
         }
 
@@ -90,19 +89,17 @@ impl Dir {
         }
     }
 
-    fn fs_path(&self, name: &Link) -> TCResult<PathBuf> {
-        if name.len() != 1 {
-            return Err(error::bad_request(
-                "Block path must be a Link of length 1",
-                name,
-            ));
-        }
-
+    fn fs_path(&self, name: Link) -> TCResult<PathBuf> {
         let mut path = self.mount_point.clone();
+
         for dir in self.context.clone().into_iter() {
             path.push(&dir.as_str()[1..]);
         }
-        path.push(&name[0]);
+
+        for segment in name.into_iter() {
+            path.push(&segment.as_str()[1..]);
+        }
+
         Ok(path)
     }
 }

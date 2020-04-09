@@ -56,7 +56,7 @@ impl Host {
         txn: Arc<Transaction>,
         path: Link,
         state: TCState,
-    ) -> TCResult<()> {
+    ) -> TCResult<TCState> {
         if path.len() != 2 {
             return Err(error::not_found(path));
         }

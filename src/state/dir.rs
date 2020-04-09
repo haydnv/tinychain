@@ -27,7 +27,7 @@ impl TCContext for Dir {
         txn: Arc<Transaction>,
         path: TCValue,
         state: TCState,
-    ) -> TCResult<()> {
+    ) -> TCResult<TCState> {
         let path: Link = path.as_link()?;
 
         let constructor = match state {
@@ -50,6 +50,6 @@ impl TCContext for Dir {
             .put(txn, path.into(), constructor.into())
             .await?;
 
-        Ok(())
+        Ok(().into())
     }
 }
