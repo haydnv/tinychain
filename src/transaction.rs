@@ -223,7 +223,7 @@ impl Transaction {
             let results = try_join_all(
                 ready
                     .iter()
-                    .map(|(_, action, txn)| self.host.clone().post(txn.clone(), action.clone())),
+                    .map(|(_, action, txn)| self.host.clone().post(txn.clone(), action)),
             )
             .await?;
             let mut state = self.state.write().unwrap();
@@ -273,5 +273,16 @@ impl Transaction {
 
     pub async fn put(self: Arc<Self>, path: Link, state: TCState) -> TCResult<TCState> {
         self.host.clone().put(self.clone(), path, state).await
+    }
+
+    pub async fn post(
+        self: Arc<Self>,
+        path: &Link,
+        args: Vec<(String, TCState)>,
+    ) -> TCResult<TCState> {
+        let txn = self
+            .clone()
+            .extend(self.context.clone(), args.into_iter().collect());
+        self.host.clone().post(txn, path).await
     }
 }

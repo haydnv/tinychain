@@ -14,7 +14,6 @@ pub type ValueId = String;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct Link {
-    to: String,
     segments: Vec<String>,
 }
 
@@ -50,35 +49,21 @@ impl Link {
         Link::_validate(destination)?;
 
         Ok(Link {
-            to: destination.to_string(),
             segments: destination[1..].split('/').map(|s| s.to_string()).collect(),
         })
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.to
-    }
-
     pub fn append(&self, suffix: &Link) -> Link {
-        Link::to(&format!("{}{}", self.to, suffix.to)).unwrap()
+        Link::to(&format!("{}{}", self, suffix)).unwrap()
     }
 
-    pub fn from(&self, prefix: &str) -> TCResult<Link> {
-        if prefix.ends_with('/') {
-            return Err(error::bad_request("Link prefix cannot end in a /", prefix));
-        }
+    pub fn as_str(&self, index: usize) -> &str {
+        self.segments[index].as_str()
+    }
 
-        if !self.to.starts_with(prefix) {
-            return Err(error::bad_request(
-                &format!("Cannot link {} from", self),
-                prefix,
-            ));
-        }
-
-        if self.to == prefix {
-            Link::to("/")
-        } else {
-            Link::to(&self.to[prefix.len()..])
+    pub fn slice_from(&self, start: usize) -> Link {
+        Link {
+            segments: self.segments[start..].to_vec(),
         }
     }
 
@@ -86,11 +71,15 @@ impl Link {
         self.segments.len()
     }
 
-    pub fn segment(&self, i: usize) -> Link {
-        let to = format!("/{}", self.segments[i]);
+    pub fn nth(&self, i: usize) -> Link {
         Link {
-            to,
             segments: vec![self.segments[i].clone()],
+        }
+    }
+
+    pub fn slice_to(&self, end: usize) -> Link {
+        Link {
+            segments: self.segments[..end].to_vec(),
         }
     }
 }
@@ -98,6 +87,19 @@ impl Link {
 impl From<u64> for Link {
     fn from(i: u64) -> Link {
         Link::to(&format!("/{}", i)).unwrap()
+    }
+}
+
+impl IntoIterator for Link {
+    type Item = Link;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let mut segments = Vec::with_capacity(self.len());
+        for i in 0..self.len() {
+            segments.push(self.nth(i));
+        }
+        segments.into_iter()
     }
 }
 
@@ -116,37 +118,13 @@ impl serde::Serialize for Link {
     where
         S: Serializer,
     {
-        s.serialize_str(self.as_str())
+        s.serialize_str(&format!("{}", self))
     }
 }
 
 impl fmt::Display for Link {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.to)
-    }
-}
-
-impl IntoIterator for Link {
-    type Item = Link;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        let mut segments = Vec::with_capacity(self.len());
-        for i in 0..self.len() {
-            segments.push(self.segment(i));
-        }
-        segments.into_iter()
-    }
-}
-
-impl<Idx> std::ops::Index<Idx> for Link
-where
-    Idx: std::slice::SliceIndex<[String]>,
-{
-    type Output = Idx::Output;
-
-    fn index(&self, index: Idx) -> &Self::Output {
-        &self.segments[index]
+        write!(f, "{}", format!("/{}", self.segments.join("/")))
     }
 }
 
@@ -188,6 +166,12 @@ pub enum TCValue {
 impl From<Link> for TCValue {
     fn from(link: Link) -> TCValue {
         TCValue::Link(link)
+    }
+}
+
+impl PartialEq<str> for Link {
+    fn eq(&self, other: &str) -> bool {
+        self.to_string().as_str() == other
     }
 }
 

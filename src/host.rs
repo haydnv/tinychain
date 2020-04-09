@@ -17,7 +17,7 @@ pub struct Host {
 
 impl Host {
     pub fn new(data_dir: Arc<fs::Dir>) -> TCResult<Arc<Host>> {
-        let chain_context = ChainContext::new(data_dir.reserve(Link::to("/chain")?)?);
+        let chain_context = ChainContext::new(data_dir.reserve(&Link::to("/chain")?)?);
         let table_context = TableContext::new();
         Ok(Arc::new(Host {
             chain_context,
@@ -36,52 +36,36 @@ impl Host {
         Transaction::of(self, op)
     }
 
-    pub async fn get(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCState> {
-        match path[0].as_str() {
-            "sbin" => match path[1].as_str() {
-                "chain" => {
-                    self.chain_context
-                        .clone()
-                        .get(txn, path.from("/sbin/chain")?.into())
-                        .await
-                }
-                _ => Err(error::not_found(path)),
-            },
-            _ => Err(error::not_found(path)),
-        }
+    pub async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: Link) -> TCResult<TCState> {
+        println!("GET {}", path);
+        Err(error::not_found(path))
     }
 
     pub async fn put(
         self: Arc<Self>,
-        txn: Arc<Transaction>,
+        _txn: Arc<Transaction>,
         path: Link,
-        state: TCState,
+        _state: TCState,
     ) -> TCResult<TCState> {
-        if path.len() != 2 {
-            return Err(error::not_found(path));
-        }
+        println!("PUT {}", path);
+        Err(error::not_found(path))
+    }
 
-        match path[0].as_str() {
-            "sbin" => match path[1].as_str() {
+    pub async fn post(self: Arc<Self>, txn: Arc<Transaction>, path: &Link) -> TCResult<TCState> {
+        println!("POST {}", path);
+
+        match path.as_str(0) {
+            "sbin" => match path.as_str(1) {
                 "chain" => {
                     self.chain_context
                         .clone()
-                        .put(txn, path.from("/sbin/chain")?.into(), state)
+                        .post(txn, &path.slice_from(2))
                         .await
                 }
-                _ => Err(error::not_found(path)),
-            },
-            _ => Err(error::not_found(path)),
-        }
-    }
-
-    pub async fn post(self: Arc<Self>, txn: Arc<Transaction>, path: Link) -> TCResult<TCState> {
-        match path[0].as_str() {
-            "sbin" => match path[1].as_str() {
                 "table" => {
                     self.table_context
                         .clone()
-                        .post(txn, path.from("/sbin/table")?)
+                        .post(txn, &path.slice_from(2))
                         .await
                 }
                 _ => Err(error::not_found(path)),

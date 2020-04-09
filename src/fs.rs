@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use tokio::fs;
 
+use crate::cache::Map;
 use crate::context::TCResult;
 use crate::error;
 use crate::value::Link;
@@ -15,14 +16,14 @@ pub struct Dir {
     mount_point: PathBuf,
     context: Link,
     parent: Option<Arc<Dir>>,
-    children: RwLock<HashMap<Link, Arc<Dir>>>,
+    children: Map<Link, Dir>,
     buffer: RwLock<HashMap<Link, Vec<u8>>>,
 }
 
 impl Drop for Dir {
     fn drop(&mut self) {
         if let Some(parent) = &self.parent {
-            parent.children.write().unwrap().remove(&self.context);
+            parent.children.remove(&self.context);
         }
     }
 }
@@ -39,22 +40,49 @@ impl Dir {
             mount_point,
             context,
             parent: None,
-            children: RwLock::new(HashMap::new()),
+            children: Map::new(),
             buffer: RwLock::new(HashMap::new()),
         })
     }
 
-    pub fn reserve(self: Arc<Self>, path: Link) -> TCResult<Arc<Dir>> {
-        if self.children.read().unwrap().contains_key(&path) {
-            return Err(error::internal(&format!(
-                "Tried to reserve a fs::Dir that's already reserved! {}",
-                path
-            )));
+    fn child(self: Arc<Self>, context: Link, mount_point: PathBuf) -> Arc<Dir> {
+        Arc::new(Dir {
+            mount_point,
+            context,
+            parent: Some(self),
+            children: Map::new(),
+            buffer: RwLock::new(HashMap::new()),
+        })
+    }
+
+    pub fn reserve(self: Arc<Self>, path: &Link) -> TCResult<Arc<Dir>> {
+        if path == "/" {
+            return Err(error::internal("Tried to reserve empty dir name"));
         }
 
-        let dir = Dir::new(path.clone(), self.clone().fs_path(path.clone())?);
-        self.children.write().unwrap().insert(path, dir.clone());
-        Ok(dir)
+        if path.len() == 1 {
+            if self.children.contains_key(&path) {
+                return Err(error::internal(&format!(
+                    "Tried to reserve a directory that's already reserved! {}",
+                    path
+                )));
+            }
+
+            let dir = self.clone().child(path.clone(), self.fs_path(path));
+            self.children.insert(path.nth(0), dir.clone());
+            Ok(dir)
+        } else {
+            let dir = if let Some(dir) = self.children.get(&path.nth(0)) {
+                dir
+            } else {
+                let child_path = path.nth(0);
+                let dir = Dir::new(child_path.clone(), self.fs_path(&child_path));
+                self.children.insert(child_path, dir.clone());
+                dir
+            };
+
+            dir.reserve(&path.slice_from(1))
+        }
     }
 
     pub async fn append(self: Arc<Self>, path: Link, data: Vec<u8>) -> TCResult<()> {
@@ -76,9 +104,9 @@ impl Dir {
         Ok(())
     }
 
-    pub async fn exists(self: Arc<Self>, path: Link) -> TCResult<bool> {
-        let fs_path = self.clone().fs_path(path.clone())?;
-        if self.children.read().unwrap().contains_key(&path) {
+    pub async fn exists(self: Arc<Self>, path: &Link) -> TCResult<bool> {
+        let fs_path = self.clone().fs_path(path);
+        if self.children.contains_key(path) {
             println!("found it");
             return Ok(true);
         }
@@ -89,17 +117,21 @@ impl Dir {
         }
     }
 
-    fn fs_path(&self, name: Link) -> TCResult<PathBuf> {
+    fn fs_path(&self, name: &Link) -> PathBuf {
+        if !name.len() == 1 {
+            panic!("Tried to look up the filesystem path of {}", name);
+        }
+
         let mut path = self.mount_point.clone();
 
         for dir in self.context.clone().into_iter() {
-            path.push(&dir.as_str()[1..]);
+            path.push(&dir.to_string()[1..]);
         }
 
-        for segment in name.into_iter() {
-            path.push(&segment.as_str()[1..]);
+        for i in 0..name.len() {
+            path.push(name.as_str(i));
         }
 
-        Ok(path)
+        path
     }
 }

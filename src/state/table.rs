@@ -51,7 +51,7 @@ impl TCContext for Table {
 
 #[async_trait]
 impl TCExecutable for Table {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<TCState> {
+    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: &Link) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 }
@@ -90,10 +90,12 @@ impl TableContext {
             }
         };
 
-        let chain_path = txn.clone().context();
         let chain: Arc<Chain> = txn
             .clone()
-            .put(Link::to("/sbin/chain")?, chain_path.clone().into())
+            .post(
+                &Link::to("/sbin/chain/new")?,
+                vec![("path".to_string(), txn.context().into())],
+            )
             .await?
             .as_chain()?;
 
@@ -107,8 +109,8 @@ impl TableContext {
 
 #[async_trait]
 impl TCExecutable for TableContext {
-    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<TCState> {
-        if method.as_str() != "/new" {
+    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState> {
+        if method != "/new" {
             return Err(error::bad_request(
                 "TableContext has no such method",
                 method,

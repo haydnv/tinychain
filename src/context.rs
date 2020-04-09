@@ -23,5 +23,5 @@ pub trait TCContext: Send + Sync {
 
 #[async_trait]
 pub trait TCExecutable: Send + Sync {
-    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: Link) -> TCResult<TCState>;
+    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState>;
 }

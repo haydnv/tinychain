@@ -29,7 +29,7 @@ impl TCContext for Graph {
 
 #[async_trait]
 impl TCExecutable for Graph {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: Link) -> TCResult<TCState> {
+    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: &Link) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 }
