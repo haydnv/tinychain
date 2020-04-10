@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::TCResult;
 use crate::error;
+use crate::state::TCState;
 
 pub type ValueId = String;
 
-pub trait TCValueExt: TryFrom<TCValue, Error=error::TCError> {}
+pub trait TCValueExt: TryFrom<TCValue, Error = error::TCError> {}
 
 const RESERVED_CHARS: [&str; 17] = [
     "..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "=", "^", ">", "<", "'", "`", "\"",
@@ -302,7 +303,7 @@ impl TryFrom<TCValue> for Vec<TCValue> {
 }
 
 impl<T1: TCValueExt, T2: TCValueExt> std::iter::FromIterator<TCValue> for TCResult<Vec<(T1, T2)>> {
-    fn from_iter<I: IntoIterator<Item=TCValue>>(iter: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = TCValue>>(iter: I) -> Self {
         let mut v: Vec<(T1, T2)> = vec![];
         for item in iter {
             v.push(item.try_into()?);
@@ -329,6 +330,17 @@ impl<T1: TCValueExt, T2: TCValueExt> TryFrom<TCValue> for (T1, T2) {
             Ok((v[0].clone().try_into()?, v[1].clone().try_into()?))
         } else {
             Err(error::bad_request("Expected 2-tuple but found", value))
+        }
+    }
+}
+
+impl TryFrom<TCState> for TCValue {
+    type Error = error::TCError;
+
+    fn try_from(state: TCState) -> TCResult<TCValue> {
+        match state {
+            TCState::Value(value) => Ok(value),
+            other => Err(error::bad_request("Expected a Value but found", other)),
         }
     }
 }

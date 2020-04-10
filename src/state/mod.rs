@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 
@@ -22,22 +23,6 @@ pub enum TCState {
     Value(TCValue),
 }
 
-impl TCState {
-    pub fn as_chain(&self) -> TCResult<Arc<chain::Chain>> {
-        match self {
-            TCState::Chain(chain) => Ok(chain.clone()),
-            other => Err(error::bad_request("Expected chain but found", other)),
-        }
-    }
-
-    pub fn as_value(&self) -> TCResult<TCValue> {
-        match self {
-            TCState::Value(value) => Ok(value.clone()),
-            other => Err(error::bad_request("Expected value but found", other)),
-        }
-    }
-}
-
 impl From<()> for TCState {
     fn from(_: ()) -> TCState {
         TCState::None
@@ -53,6 +38,17 @@ impl From<Arc<chain::Chain>> for TCState {
 impl From<Link> for TCState {
     fn from(link: Link) -> TCState {
         TCState::Value(TCValue::Link(link))
+    }
+}
+
+impl TryFrom<TCState> for Arc<chain::Chain> {
+    type Error = error::TCError;
+
+    fn try_from(state: TCState) -> TCResult<Arc<chain::Chain>> {
+        match state {
+            TCState::Chain(chain) => Ok(chain),
+            other => Err(error::bad_request("Expected a Chain but found", other)),
+        }
     }
 }
 

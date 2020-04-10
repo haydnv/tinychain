@@ -37,7 +37,7 @@ impl TCContext for Chain {
         key: TCValue,
         value: TCState,
     ) -> TCResult<TCState> {
-        let value = value.as_value()?;
+        let value: TCValue = value.try_into()?;
         let delta = serde_json::to_string_pretty(&(key, value))?
             .as_bytes()
             .to_vec();

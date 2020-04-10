@@ -98,7 +98,7 @@ impl TableContext {
                 vec![("path", txn.context().into())],
             )
             .await?
-            .as_chain()?;
+            .try_into()?;
 
         Ok(Arc::new(Table {
             key,
