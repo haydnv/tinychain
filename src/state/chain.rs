@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -68,7 +69,7 @@ impl ChainContext {
 #[async_trait]
 impl TCExecutable for ChainContext {
     async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState> {
-        let path: Link = txn.require("path")?;
+        let path: Link = txn.require("path")?.try_into()?;
 
         if method == "/new" {
             if self.fs_dir.clone().exists(&path).await? {

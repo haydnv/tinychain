@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::iter::FromIterator;
 use std::sync::Arc;
 
@@ -117,8 +118,8 @@ impl TCExecutable for TableContext {
             ));
         }
 
-        let schema: Vec<(String, Link)> = txn.clone().require("schema")?;
-        let key: String = txn.clone().require("key")?;
+        let schema: Vec<(String, Link)> = txn.clone().require("schema")?.try_into()?;
+        let key: String = txn.clone().require("key")?.try_into()?;
         Ok(TCState::Table(self.new_table(txn, schema, key).await?))
     }
 }

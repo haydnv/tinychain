@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -17,7 +18,7 @@ pub struct Dir {
 #[async_trait]
 impl TCContext for Dir {
     async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: TCValue) -> TCResult<TCState> {
-        let _path = path.as_link()?;
+        let _path: Link = path.try_into()?;
 
         Err(error::not_implemented())
     }
@@ -28,7 +29,7 @@ impl TCContext for Dir {
         path: TCValue,
         state: TCState,
     ) -> TCResult<TCState> {
-        let path: Link = path.as_link()?;
+        let path: Link = path.try_into()?;
 
         let constructor = match state {
             TCState::Chain(_) => Link::to("/sbin/chain")?,

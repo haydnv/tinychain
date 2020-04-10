@@ -4,7 +4,6 @@ use std::sync::{Arc, RwLock};
 
 use futures::future::try_join_all;
 use rand::Rng;
-use serde::de::DeserializeOwned;
 
 use crate::context::*;
 use crate::error;
@@ -251,10 +250,10 @@ impl Transaction {
         Ok(responses)
     }
 
-    pub fn require<T: DeserializeOwned>(self: Arc<Self>, value_id: &str) -> TCResult<T> {
+    pub fn require(self: Arc<Self>, value_id: &str) -> TCResult<TCValue> {
         match self.state.read().unwrap().get(value_id) {
             Some(response) => match response {
-                TCState::Value(value) => Ok(serde_json::from_str(&serde_json::to_string(&value)?)?),
+                TCState::Value(value) => Ok(value.clone()),
                 other => Err(error::bad_request(
                     &format!("Required value {} is not serialiable", value_id),
                     other,

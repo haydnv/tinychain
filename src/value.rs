@@ -1,3 +1,4 @@
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use regex::Regex;
@@ -8,11 +9,13 @@ use serde::{Deserialize, Serialize};
 use crate::context::TCResult;
 use crate::error;
 
+pub type ValueId = String;
+
+pub trait TCValueExt: TryFrom<TCValue, Error=error::TCError> {}
+
 const RESERVED_CHARS: [&str; 17] = [
     "..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "=", "^", ">", "<", "'", "`", "\"",
 ];
-
-pub type ValueId = String;
 
 fn valid_id(id: &str) -> bool {
     let mut eot_char = [0];
@@ -95,6 +98,8 @@ impl Link {
         }
     }
 }
+
+impl TCValueExt for Link {}
 
 impl From<u64> for Link {
     fn from(i: u64) -> Link {
@@ -255,18 +260,76 @@ pub enum TCValue {
     Ref(Ref),
 }
 
-impl TCValue {
-    pub fn as_link(&self) -> TCResult<Link> {
-        match self {
-            TCValue::Link(l) => Ok(l.clone()),
-            other => Err(error::bad_request("Expected a Link but found", other)),
-        }
-    }
-}
+impl TCValueExt for String {}
 
 impl From<Link> for TCValue {
     fn from(link: Link) -> TCValue {
         TCValue::Link(link)
+    }
+}
+
+impl TryFrom<TCValue> for Link {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<Link> {
+        match v {
+            TCValue::Link(l) => Ok(l),
+            other => Err(error::bad_request("Expected Link but found", other)),
+        }
+    }
+}
+
+impl TryFrom<TCValue> for String {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<String> {
+        match v {
+            TCValue::r#String(s) => Ok(s),
+            other => Err(error::bad_request("Expected a String but found", other)),
+        }
+    }
+}
+
+impl TryFrom<TCValue> for Vec<TCValue> {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<Vec<TCValue>> {
+        match v {
+            TCValue::Vector(v) => Ok(v.to_vec()),
+            other => Err(error::bad_request("Expected Vector but found", other)),
+        }
+    }
+}
+
+impl<T1: TCValueExt, T2: TCValueExt> std::iter::FromIterator<TCValue> for TCResult<Vec<(T1, T2)>> {
+    fn from_iter<I: IntoIterator<Item=TCValue>>(iter: I) -> Self {
+        let mut v: Vec<(T1, T2)> = vec![];
+        for item in iter {
+            v.push(item.try_into()?);
+        }
+        Ok(v)
+    }
+}
+
+impl<T1: TCValueExt, T2: TCValueExt> TryFrom<TCValue> for Vec<(T1, T2)> {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<Vec<(T1, T2)>> {
+        let v: Vec<TCValue> = value.try_into()?;
+        v.into_iter().collect()
+    }
+}
+
+impl<T1: TCValueExt, T2: TCValueExt> TryFrom<TCValue> for (T1, T2) {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<(T1, T2)> {
+        let v: Vec<TCValue> = value.clone().try_into()?;
+        if v.len() == 2 {
+            Ok((v[0].clone().try_into()?, v[1].clone().try_into()?))
+        } else {
+            Err(error::bad_request("Expected 2-tuple but found", value))
+        }
     }
 }
 
