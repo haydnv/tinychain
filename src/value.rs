@@ -8,9 +8,30 @@ use serde::{Deserialize, Serialize};
 use crate::context::TCResult;
 use crate::error;
 
-const LINK_BLACKLIST: [&str; 11] = ["..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "="];
+const RESERVED_CHARS: [&str; 17] = [
+    "..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "=", "^", ">", "<", "'", "`", "\"",
+];
 
 pub type ValueId = String;
+
+fn valid_id(id: &str) -> bool {
+    let mut eot_char = [0];
+    let eot_char = (4 as char).encode_utf8(&mut eot_char);
+
+    let reserved = [&RESERVED_CHARS[..], &[eot_char]].concat();
+
+    for pattern in reserved.iter() {
+        if id.contains(pattern) {
+            return false;
+        }
+    }
+
+    if Regex::new(r"\s").unwrap().find(id).is_some() {
+        return false;
+    }
+
+    true
+}
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct Link {
@@ -19,27 +40,18 @@ pub struct Link {
 
 impl Link {
     fn _validate(to: &str) -> TCResult<()> {
-        for pattern in LINK_BLACKLIST.iter() {
-            if to.contains(pattern) {
-                return Err(error::bad_request(
-                    "Tinychain links do not allow this pattern",
-                    pattern,
-                ));
-            }
-        }
-
-        if !to.starts_with('/') {
+        if !valid_id(to) {
+            Err(error::bad_request(
+                "A link may not contain whitespace or any of these patterns",
+                RESERVED_CHARS.join(", "),
+            ))
+        } else if !to.starts_with('/') {
             Err(error::bad_request(
                 "Expected an absolute path starting with '/' but found",
                 to,
             ))
         } else if to != "/" && to.ends_with('/') {
             Err(error::bad_request("Trailing slash is not allowed", to))
-        } else if Regex::new(r"\s").unwrap().find(to).is_some() {
-            Err(error::bad_request(
-                "Tinychain links do not allow whitespace",
-                to,
-            ))
         } else {
             Ok(())
         }
@@ -103,6 +115,12 @@ impl IntoIterator for Link {
     }
 }
 
+impl PartialEq<str> for Link {
+    fn eq(&self, other: &str) -> bool {
+        self.to_string().as_str() == other
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for Link {
     fn deserialize<D>(deserializer: D) -> Result<Link, D::Error>
     where
@@ -128,15 +146,88 @@ impl fmt::Display for Link {
     }
 }
 
+#[derive(Clone, Eq, PartialEq, Hash)]
+pub struct Ref {
+    id: String,
+}
+
+impl Ref {
+    pub fn to(id: &str) -> TCResult<Ref> {
+        if valid_id(id) {
+            Ok(Ref { id: id.to_string() })
+        } else {
+            Err(error::bad_request(
+                "A reference id may not contain whitespace or any of these patterns",
+                RESERVED_CHARS.join(", "),
+            ))
+        }
+    }
+}
+
+impl fmt::Display for Ref {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "${}", self.id)
+    }
+}
+
+struct RefVisitor;
+
+impl<'de> de::Visitor<'de> for RefVisitor {
+    type Value = Ref;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("A reference to a local variable (e.g. '$foo')")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ref::to(value).map_err(de::Error::custom)
+    }
+}
+
+impl<'de> de::Deserialize<'de> for Ref {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        d.deserialize_str(RefVisitor)
+    }
+}
+
+impl Serialize for Ref {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        s.serialize_str(&format!("${}", self.id))
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
+pub enum OpMethod {
+    Get,
+    Put,
+    Post,
+}
+
 #[derive(Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
 pub struct Op {
+    method: OpMethod,
+    subject: Option<Ref>,
     action: Link,
     requires: Vec<(String, TCValue)>,
 }
 
 impl Op {
     pub fn new(action: Link, requires: Vec<(String, TCValue)>) -> Op {
-        Op { action, requires }
+        Op {
+            method: OpMethod::Post,
+            subject: None,
+            action,
+            requires,
+        }
     }
 
     pub fn action(&self) -> Link {
@@ -161,18 +252,7 @@ pub enum TCValue {
     Op(Op),
     r#String(String),
     Vector(Vec<TCValue>),
-}
-
-impl From<Link> for TCValue {
-    fn from(link: Link) -> TCValue {
-        TCValue::Link(link)
-    }
-}
-
-impl PartialEq<str> for Link {
-    fn eq(&self, other: &str) -> bool {
-        self.to_string().as_str() == other
-    }
+    Ref(Ref),
 }
 
 impl TCValue {
@@ -184,29 +264,9 @@ impl TCValue {
     }
 }
 
-impl Serialize for TCValue {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            TCValue::Int32(i) => s.serialize_i32(*i),
-            TCValue::Link(l) => l.serialize(s),
-            TCValue::Op(o) => {
-                let mut op = s.serialize_struct("Op", 2)?;
-                op.serialize_field("action", &o.action)?;
-                op.serialize_field("requires", &o.requires)?;
-                op.end()
-            }
-            TCValue::r#String(v) => s.serialize_str(v),
-            TCValue::Vector(v) => {
-                let mut seq = s.serialize_seq(Some(v.len()))?;
-                for element in v {
-                    seq.serialize_element(element)?;
-                }
-                seq.end()
-            }
-        }
+impl From<Link> for TCValue {
+    fn from(link: Link) -> TCValue {
+        TCValue::Link(link)
     }
 }
 
@@ -250,12 +310,36 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                     Ok(TCValue::Link(link))
                 } else {
                     Ok(TCValue::Op(Op {
+                        method: OpMethod::Post,
+                        subject: None,
                         action: link,
                         requires: value,
                     }))
                 }
+            } else if key.starts_with('$') {
+                if let Some(pos) = key.find('/') {
+                    let method = if value.is_empty() {
+                        OpMethod::Get
+                    } else {
+                        OpMethod::Post
+                    };
+                    let subject = Some(Ref::to(&key[1..pos]).map_err(de::Error::custom)?);
+                    let action = Link::to(&key[pos..]).map_err(de::Error::custom)?;
+
+                    Ok(TCValue::Op(Op {
+                        method,
+                        subject,
+                        action,
+                        requires: value,
+                    }))
+                } else {
+                    Ok(TCValue::Ref(Ref::to(&key).map_err(de::Error::custom)?))
+                }
             } else {
-                Err(de::Error::custom("Link must start with a '/'"))
+                Err(de::Error::custom(format!(
+                    "Expected a Link starting with '/' or a Ref starting with '$', found {}",
+                    key
+                )))
             }
         } else {
             Err(de::Error::custom("Unable to parse map entry"))
@@ -285,6 +369,33 @@ impl<'de> de::Deserialize<'de> for TCValue {
     }
 }
 
+impl Serialize for TCValue {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            TCValue::Int32(i) => s.serialize_i32(*i),
+            TCValue::Link(l) => l.serialize(s),
+            TCValue::Op(o) => {
+                let mut op = s.serialize_struct("Op", 2)?;
+                op.serialize_field("action", &o.action)?;
+                op.serialize_field("requires", &o.requires)?;
+                op.end()
+            }
+            TCValue::Ref(r) => r.serialize(s),
+            TCValue::r#String(v) => s.serialize_str(v),
+            TCValue::Vector(v) => {
+                let mut seq = s.serialize_seq(Some(v.len()))?;
+                for element in v {
+                    seq.serialize_element(element)?;
+                }
+                seq.end()
+            }
+        }
+    }
+}
+
 impl fmt::Debug for TCValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self)
@@ -297,6 +408,7 @@ impl fmt::Display for TCValue {
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::Op(o) => write!(f, "Op: {}", o),
+            TCValue::Ref(r) => write!(f, "Ref: {}", r),
             TCValue::r#String(s) => write!(f, "string: {}", s),
             TCValue::Vector(v) => write!(f, "vector: {:?}", v),
         }

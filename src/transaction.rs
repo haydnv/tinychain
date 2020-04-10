@@ -280,14 +280,13 @@ impl Transaction {
         path: &Link,
         args: Vec<(&str, TCValue)>,
     ) -> TCResult<TCState> {
-        // TODO: queue any Ops in args in the child txn
-
         let txn = self.clone().extend(
             self.context.clone(),
             args.iter()
                 .map(|(k, v)| ((*k).to_string(), TCState::Value(v.clone())))
                 .collect(),
         );
+
         self.host.clone().post(txn, path).await
     }
 }
