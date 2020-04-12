@@ -64,9 +64,13 @@ impl Link {
     pub fn to(destination: &str) -> TCResult<Link> {
         Link::_validate(destination)?;
 
-        Ok(Link {
-            segments: destination[1..].split('/').map(|s| s.to_string()).collect(),
-        })
+        let segments: Vec<String> = if destination == "/" {
+            vec![]
+        } else {
+            destination[1..].split('/').map(|s| s.to_string()).collect()
+        };
+
+        Ok(Link { segments })
     }
 
     pub fn append(&self, suffix: &Link) -> Link {
@@ -77,10 +81,8 @@ impl Link {
         self.segments[index].as_str()
     }
 
-    pub fn slice_from(&self, start: usize) -> Link {
-        Link {
-            segments: self.segments[start..].to_vec(),
-        }
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
     }
 
     pub fn len(&self) -> usize {
@@ -90,6 +92,12 @@ impl Link {
     pub fn nth(&self, i: usize) -> Link {
         Link {
             segments: vec![self.segments[i].clone()],
+        }
+    }
+
+    pub fn slice_from(&self, start: usize) -> Link {
+        Link {
+            segments: self.segments[start..].to_vec(),
         }
     }
 
@@ -253,6 +261,7 @@ impl fmt::Display for Op {
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub enum TCValue {
+    None,
     Int32(i32),
     Link(Link),
     Op(Op),
@@ -450,6 +459,7 @@ impl Serialize for TCValue {
         S: Serializer,
     {
         match self {
+            TCValue::None => s.serialize_none(),
             TCValue::Int32(i) => s.serialize_i32(*i),
             TCValue::Link(l) => l.serialize(s),
             TCValue::Op(o) => {
@@ -480,6 +490,7 @@ impl fmt::Debug for TCValue {
 impl fmt::Display for TCValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            TCValue::None => write!(f, "None"),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::Op(o) => write!(f, "Op: {}", o),

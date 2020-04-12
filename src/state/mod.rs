@@ -41,6 +41,12 @@ impl From<Link> for TCState {
     }
 }
 
+impl From<TCValue> for TCState {
+    fn from(value: TCValue) -> TCState {
+        TCState::Value(value)
+    }
+}
+
 impl TryFrom<TCState> for Arc<chain::Chain> {
     type Error = error::TCError;
 

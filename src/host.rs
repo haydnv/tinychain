@@ -8,7 +8,7 @@ use crate::state::chain::ChainContext;
 use crate::state::table::TableContext;
 use crate::state::TCState;
 use crate::transaction::Transaction;
-use crate::value::{Link, Op};
+use crate::value::{Link, Op, TCValue};
 
 pub struct Host {
     chain_context: Arc<ChainContext>,
@@ -53,6 +53,9 @@ impl Host {
 
     pub async fn post(self: Arc<Self>, txn: Arc<Transaction>, path: &Link) -> TCResult<TCState> {
         println!("POST {}", path);
+        if path.is_empty() {
+            return Ok(TCValue::None.into());
+        }
 
         match path.as_str(0) {
             "sbin" => match path.as_str(1) {
