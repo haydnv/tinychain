@@ -2,8 +2,9 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::context::TCResult;
+use crate::context::{TCContext, TCExecutable, TCResult};
 use crate::error;
+use crate::transaction::Transaction;
 use crate::value::{Link, TCValue};
 
 pub mod chain;
@@ -21,6 +22,45 @@ pub enum TCState {
     Table(Arc<table::Table>),
     Tensor(Arc<tensor::Tensor>),
     Value(TCValue),
+}
+
+impl TCState {
+    pub async fn get(&self, txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState> {
+        match self {
+            TCState::Chain(c) => c.clone().get(txn, key).await,
+            TCState::Dir(d) => d.clone().get(txn, key).await,
+            TCState::Graph(g) => g.clone().get(txn, key).await,
+            TCState::Table(t) => t.clone().get(txn, key).await,
+            TCState::Tensor(t) => t.clone().get(txn, key).await,
+            _ => Err(error::bad_request("Cannot GET from", self)),
+        }
+    }
+
+    pub async fn put(
+        &self,
+        txn: Arc<Transaction>,
+        key: TCValue,
+        value: TCState,
+    ) -> TCResult<TCState> {
+        match self {
+            TCState::Chain(c) => c.clone().put(txn, key, value).await,
+            TCState::Dir(d) => d.clone().put(txn, key, value).await,
+            TCState::Graph(g) => g.clone().put(txn, key, value).await,
+            TCState::Table(t) => t.clone().put(txn, key, value).await,
+            TCState::Tensor(t) => t.clone().put(txn, key, value).await,
+            _ => Err(error::bad_request("Cannot PUT to", self)),
+        }
+    }
+
+    pub async fn post(&self, txn: Arc<Transaction>, action: &Link) -> TCResult<TCState> {
+        match self {
+            TCState::Chain(c) => c.clone().post(txn, action).await,
+            TCState::Graph(g) => g.clone().post(txn, action).await,
+            TCState::Table(t) => t.clone().post(txn, action).await,
+            TCState::Tensor(t) => t.clone().post(txn, action).await,
+            _ => Err(error::bad_request("Cannot POST to", self)),
+        }
+    }
 }
 
 impl From<()> for TCState {
@@ -44,6 +84,12 @@ impl From<Link> for TCState {
 impl From<TCValue> for TCState {
     fn from(value: TCValue) -> TCState {
         TCState::Value(value)
+    }
+}
+
+impl From<&TCValue> for TCState {
+    fn from(value: &TCValue) -> TCState {
+        TCState::Value(value.clone())
     }
 }
 

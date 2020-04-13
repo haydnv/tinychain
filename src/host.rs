@@ -36,7 +36,12 @@ impl Host {
         Transaction::of(self, op)
     }
 
-    pub async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: Link) -> TCResult<TCState> {
+    pub async fn get(
+        self: Arc<Self>,
+        _txn: Arc<Transaction>,
+        path: Link,
+        _key: TCValue,
+    ) -> TCResult<TCState> {
         println!("GET {}", path);
         Err(error::not_found(path))
     }
@@ -45,6 +50,7 @@ impl Host {
         self: Arc<Self>,
         _txn: Arc<Transaction>,
         path: Link,
+        _key: TCValue,
         _state: TCState,
     ) -> TCResult<TCState> {
         println!("PUT {}", path);

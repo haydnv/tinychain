@@ -69,7 +69,7 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
                 }
             };
 
-            let txn = match host.clone().new_transaction(Op::new(path, values)) {
+            let txn = match host.clone().new_transaction(Op::post(None, path, values)) {
                 Ok(txn) => txn,
                 Err(cause) => {
                     return transform_error(Err(cause));

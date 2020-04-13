@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
 
+#[derive(Debug)]
 pub struct Map<K: Eq + Hash, V: Hash> {
     map: RwLock<HashMap<K, Arc<V>>>,
 }

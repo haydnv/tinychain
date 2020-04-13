@@ -3,7 +3,7 @@ use std::fmt;
 
 use regex::Regex;
 use serde::de;
-use serde::ser::{SerializeSeq, SerializeStruct, Serializer};
+use serde::ser::{SerializeSeq, SerializeStructVariant, Serializer};
 use serde::{Deserialize, Serialize};
 
 use crate::context::TCResult;
@@ -37,7 +37,7 @@ fn valid_id(id: &str) -> bool {
     true
 }
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Link {
     segments: Vec<String>,
 }
@@ -160,15 +160,13 @@ impl fmt::Display for Link {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
-pub struct Ref {
-    id: String,
-}
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Ref(ValueId);
 
 impl Ref {
     pub fn to(id: &str) -> TCResult<Ref> {
         if valid_id(id) {
-            Ok(Ref { id: id.to_string() })
+            Ok(Ref(id.to_string()))
         } else {
             Err(error::bad_request(
                 "A reference id may not contain whitespace or any of these patterns",
@@ -176,11 +174,15 @@ impl Ref {
             ))
         }
     }
+
+    pub fn value_id(&self) -> ValueId {
+        self.0.to_string()
+    }
 }
 
 impl fmt::Display for Ref {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "${}", self.id)
+        write!(f, "${}", self.0)
     }
 }
 
@@ -215,47 +217,104 @@ impl Serialize for Ref {
     where
         S: Serializer,
     {
-        s.serialize_str(&format!("${}", self.id))
+        s.serialize_str(&format!("${}", self))
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
-pub enum OpMethod {
-    Get,
-    Put,
-    Post,
+#[derive(Clone, Debug, Hash, Eq, PartialEq, Deserialize, Serialize)]
+pub enum Subject {
+    Link(Link),
+    Ref(Ref),
 }
 
-#[derive(Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
-pub struct Op {
-    method: OpMethod,
-    subject: Option<Ref>,
-    action: Link,
-    requires: Vec<(String, TCValue)>,
+impl fmt::Display for Subject {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Subject::Link(l) => write!(f, "{}", l),
+            Subject::Ref(r) => write!(f, "{}", r),
+        }
+    }
+}
+
+impl From<Link> for Subject {
+    fn from(l: Link) -> Subject {
+        Subject::Link(l)
+    }
+}
+
+impl From<Ref> for Subject {
+    fn from(r: Ref) -> Subject {
+        Subject::Ref(r)
+    }
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub enum Op {
+    Get {
+        subject: Subject,
+        key: Box<TCValue>,
+    },
+    Put {
+        subject: Subject,
+        key: Box<TCValue>,
+        value: Box<TCValue>,
+    },
+    Post {
+        subject: Option<Ref>,
+        action: Link,
+        requires: Vec<(String, TCValue)>,
+    },
 }
 
 impl Op {
-    pub fn new(action: Link, requires: Vec<(String, TCValue)>) -> Op {
-        Op {
-            method: OpMethod::Post,
-            subject: None,
-            action,
-            requires,
+    pub fn get(subject: Subject, key: TCValue) -> Op {
+        Op::Get {
+            subject,
+            key: Box::new(key),
         }
     }
 
-    pub fn action(&self) -> Link {
-        self.action.clone()
+    pub fn put(subject: Subject, key: TCValue, value: TCValue) -> Op {
+        Op::Put {
+            subject,
+            key: Box::new(key),
+            value: Box::new(value),
+        }
     }
 
-    pub fn requires(&self) -> Vec<(String, TCValue)> {
-        self.requires.clone()
+    pub fn post(subject: Option<Ref>, action: Link, requires: Vec<(String, TCValue)>) -> Op {
+        Op::Post {
+            subject,
+            action,
+            requires,
+        }
     }
 }
 
 impl fmt::Display for Op {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}({:?})", self.action, self.requires)
+        match self {
+            Op::Get { subject, key } => write!(f, "subject: {}, key: {}", subject, key),
+            Op::Put {
+                subject,
+                key,
+                value,
+            } => write!(f, "subject: {}, key: {}, value: {}", subject, key, value),
+            Op::Post {
+                subject,
+                action,
+                requires,
+            } => write!(
+                f,
+                "subject: {}, action: {}, requires: {:?}",
+                subject
+                    .clone()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| String::from("None")),
+                action,
+                requires
+            ),
+        }
     }
 }
 
@@ -275,6 +334,30 @@ impl TCValueExt for String {}
 impl From<Link> for TCValue {
     fn from(link: Link) -> TCValue {
         TCValue::Link(link)
+    }
+}
+
+impl From<Op> for TCValue {
+    fn from(op: Op) -> TCValue {
+        TCValue::Op(op)
+    }
+}
+
+impl From<Ref> for TCValue {
+    fn from(r: Ref) -> TCValue {
+        TCValue::Ref(r)
+    }
+}
+
+impl From<String> for TCValue {
+    fn from(s: String) -> TCValue {
+        TCValue::r#String(s)
+    }
+}
+
+impl From<Vec<TCValue>> for TCValue {
+    fn from(v: Vec<TCValue>) -> TCValue {
+        TCValue::Vector(v)
     }
 }
 
@@ -308,6 +391,28 @@ impl TryFrom<TCValue> for Vec<TCValue> {
             TCValue::Vector(v) => Ok(v.to_vec()),
             other => Err(error::bad_request("Expected Vector but found", other)),
         }
+    }
+}
+
+impl TryFrom<TCValue> for Vec<(ValueId, TCValue)> {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<Vec<(ValueId, TCValue)>> {
+        let v: Vec<(String, TCValue)> = value.try_into()?;
+        Ok(v.into_iter().collect())
+    }
+}
+
+impl From<Vec<(ValueId, TCValue)>> for TCValue {
+    fn from(values: Vec<(ValueId, TCValue)>) -> TCValue {
+        let mut result: Vec<TCValue> = vec![];
+        for (id, val) in values {
+            let mut r_item: Vec<TCValue> = vec![];
+            r_item.push(id.into());
+            r_item.push(val);
+            result.push(r_item.into());
+        }
+        result.into()
     }
 }
 
@@ -381,43 +486,42 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
     where
         M: de::MapAccess<'de>,
     {
-        if let Some((key, value)) = access.next_entry::<String, Vec<(String, TCValue)>>()? {
+        if let Some(key) = access.next_key::<String>()? {
             if key.starts_with('/') {
-                let link = match Link::to(&key) {
-                    Ok(l) => l,
-                    Err(cause) => {
-                        return Err(de::Error::custom(cause));
-                    }
-                };
+                let value = access.next_value::<Vec<(String, TCValue)>>()?;
+
+                let link = Link::to(&key).map_err(de::Error::custom)?;
 
                 if value.is_empty() {
-                    Ok(TCValue::Link(link))
+                    Ok(link.into())
                 } else {
-                    Ok(TCValue::Op(Op {
-                        method: OpMethod::Post,
-                        subject: None,
-                        action: link,
-                        requires: value,
-                    }))
+                    Ok(Op::post(None, link, value).into())
                 }
             } else if key.starts_with('$') {
-                if let Some(pos) = key.find('/') {
-                    let method = if value.is_empty() {
-                        OpMethod::Get
-                    } else {
-                        OpMethod::Post
-                    };
-                    let subject = Some(Ref::to(&key[1..pos]).map_err(de::Error::custom)?);
-                    let action = Link::to(&key[pos..]).map_err(de::Error::custom)?;
+                if key.contains('/') {
+                    let key: Vec<&str> = key.split('/').collect();
+                    let subject = Ref::to(&key[0][1..]).map_err(de::Error::custom)?;
+                    let method =
+                        Link::to(&format!("/{}", key[1..].join("/"))).map_err(de::Error::custom)?;
+                    let requires = access.next_value::<Vec<(String, TCValue)>>()?;
 
-                    Ok(TCValue::Op(Op {
-                        method,
-                        subject,
-                        action,
-                        requires: value,
-                    }))
+                    Ok(Op::post(subject.into(), method, requires).into())
                 } else {
-                    Ok(TCValue::Ref(Ref::to(&key).map_err(de::Error::custom)?))
+                    let subject = Ref::to(&key[1..].to_string()).map_err(de::Error::custom)?;
+                    let value = access.next_value::<Vec<TCValue>>()?;
+
+                    if value.is_empty() {
+                        Ok(subject.into())
+                    } else if value.len() == 1 {
+                        Ok(Op::get(subject.into(), value[0].clone()).into())
+                    } else if value.len() == 2 {
+                        Ok(Op::put(subject.into(), value[0].clone(), value[1].clone()).into())
+                    } else {
+                        Err(de::Error::custom(format!(
+                            "Expected a list of 0, 1, or 2 Values for {}",
+                            key
+                        )))
+                    }
                 }
             } else {
                 Err(de::Error::custom(format!(
@@ -462,12 +566,36 @@ impl Serialize for TCValue {
             TCValue::None => s.serialize_none(),
             TCValue::Int32(i) => s.serialize_i32(*i),
             TCValue::Link(l) => l.serialize(s),
-            TCValue::Op(o) => {
-                let mut op = s.serialize_struct("Op", 2)?;
-                op.serialize_field("action", &o.action)?;
-                op.serialize_field("requires", &o.requires)?;
-                op.end()
-            }
+            TCValue::Op(o) => match o {
+                Op::Get { subject, key } => {
+                    let mut op = s.serialize_struct_variant("Op", 0, "Get", 2)?;
+                    op.serialize_field("subject", subject)?;
+                    op.serialize_field("key", key)?;
+                    op.end()
+                }
+                Op::Put {
+                    subject,
+                    key,
+                    value,
+                } => {
+                    let mut op = s.serialize_struct_variant("Op", 1, "Put", 3)?;
+                    op.serialize_field("subject", subject)?;
+                    op.serialize_field("key", key)?;
+                    op.serialize_field("value", value)?;
+                    op.end()
+                }
+                Op::Post {
+                    subject,
+                    action,
+                    requires,
+                } => {
+                    let mut op = s.serialize_struct_variant("Op", 2, "Post", 3)?;
+                    op.serialize_field("subject", subject)?;
+                    op.serialize_field("action", action)?;
+                    op.serialize_field("requires", requires)?;
+                    op.end()
+                }
+            },
             TCValue::Ref(r) => r.serialize(s),
             TCValue::r#String(v) => s.serialize_str(v),
             TCValue::Vector(v) => {

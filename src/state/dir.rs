@@ -25,32 +25,12 @@ impl TCContext for Dir {
 
     async fn put(
         self: Arc<Self>,
-        txn: Arc<Transaction>,
+        _txn: Arc<Transaction>,
         path: TCValue,
-        state: TCState,
+        _state: TCState,
     ) -> TCResult<TCState> {
-        let path: Link = path.try_into()?;
+        let _path: Link = path.try_into()?;
 
-        let constructor = match state {
-            TCState::Chain(_) => Link::to("/sbin/chain")?,
-            TCState::Value(val) => {
-                return Err(error::bad_request(
-                    "A Dir can only store States, not Values--found",
-                    val,
-                ));
-            }
-            _ => return Err(error::not_implemented()),
-        };
-
-        txn.clone()
-            .put(txn.clone().context().append(&path), state)
-            .await?;
-
-        self.chain
-            .clone()
-            .put(txn, path.into(), constructor.into())
-            .await?;
-
-        Ok(().into())
+        Err(error::not_implemented())
     }
 }
