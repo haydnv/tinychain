@@ -7,19 +7,25 @@ use crate::error;
 use crate::transaction::Transaction;
 use crate::value::{Link, TCValue};
 
-pub mod chain;
-pub mod dir;
-pub mod graph;
-pub mod table;
-pub mod tensor;
+mod chain;
+mod dir;
+mod graph;
+mod table;
+mod tensor;
+
+pub type Chain = chain::Chain;
+pub type ChainContext = chain::ChainContext;
+pub type Dir = dir::Dir;
+pub type Table = table::Table;
+pub type TableContext = table::TableContext;
 
 #[derive(Clone, Hash)]
 pub enum TCState {
     None,
-    Chain(Arc<chain::Chain>),
-    Dir(Arc<dir::Dir>),
+    Chain(Arc<Chain>),
+    Dir(Arc<Dir>),
     Graph(Arc<graph::Graph>),
-    Table(Arc<table::Table>),
+    Table(Arc<Table>),
     Tensor(Arc<tensor::Tensor>),
     Value(TCValue),
 }
@@ -69,8 +75,8 @@ impl From<()> for TCState {
     }
 }
 
-impl From<Arc<chain::Chain>> for TCState {
-    fn from(chain: Arc<chain::Chain>) -> TCState {
+impl From<Arc<Chain>> for TCState {
+    fn from(chain: Arc<Chain>) -> TCState {
         TCState::Chain(chain)
     }
 }
@@ -93,10 +99,10 @@ impl From<&TCValue> for TCState {
     }
 }
 
-impl TryFrom<TCState> for Arc<chain::Chain> {
+impl TryFrom<TCState> for Arc<Chain> {
     type Error = error::TCError;
 
-    fn try_from(state: TCState) -> TCResult<Arc<chain::Chain>> {
+    fn try_from(state: TCState) -> TCResult<Arc<Chain>> {
         match state {
             TCState::Chain(chain) => Ok(chain),
             other => Err(error::bad_request("Expected a Chain but found", other)),
