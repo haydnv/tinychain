@@ -155,7 +155,7 @@ impl<'de> Visitor<'de> for OpVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for Op where {
+impl<'de> Deserialize<'de> for Op {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,

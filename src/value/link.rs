@@ -5,7 +5,7 @@ use serde::ser::Serializer;
 
 use crate::context::TCResult;
 use crate::error;
-use crate::value::{validate_id, TCValueExt};
+use crate::value::{validate_id, TCValueTryFrom};
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Link {
@@ -75,7 +75,7 @@ impl Link {
     }
 }
 
-impl TCValueExt for Link {}
+impl TCValueTryFrom for Link {}
 
 impl From<u64> for Link {
     fn from(i: u64) -> Link {

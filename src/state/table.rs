@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::iter::FromIterator;
+use std::iter::{repeat, FromIterator};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use futures::future::try_join_all;
 
 use crate::context::*;
 use crate::error;
@@ -13,25 +13,54 @@ use crate::state::TCState;
 use crate::transaction::Transaction;
 use crate::value::{Link, TCValue};
 
+struct Mutation {
+    schema: HashMap<String, usize>,
+    key: TCValue,
+    values: Vec<Option<TCValue>>,
+}
+
+impl Mutation {
+    fn set(&mut self, column: String, value: TCValue) -> TCResult<()> {
+        if let Some(index) = self.schema.get(&column) {
+            self.values[*index] = Some(value);
+            Ok(())
+        } else {
+            Err(error::internal(
+                "Table attempted to mutate nonexistent column",
+            ))
+        }
+    }
+
+    fn values(&self) -> TCValue {
+        self.values.clone().into_iter().collect()
+    }
+}
+
 #[derive(Hash)]
 pub struct Table {
-    schema: Vec<(String, Link)>,
     key: (String, Link),
+    columns: Vec<(String, Link)>,
     chain: Arc<Chain>,
 }
 
 impl Table {
-    fn schema_map(self: Arc<Self>) -> HashMap<String, Link> {
-        HashMap::from_iter(self.schema.iter().cloned())
-    }
-}
+    fn mutation(&self, key: TCValue) -> Mutation {
+        let mut schema: Vec<(String, usize)> = vec![];
+        for i in 0..self.columns.len() {
+            schema.push((self.columns[i].0.to_owned(), i));
+        }
+        let schema: HashMap<String, usize> = schema.into_iter().collect();
 
-#[derive(Deserialize, Serialize)]
-pub enum TableRequest {
-    Select,
-    Insert,
-    Update,
-    Delete,
+        Mutation {
+            schema,
+            key,
+            values: repeat(None).take(self.columns.len()).collect(),
+        }
+    }
+
+    fn schema_map(&self) -> HashMap<String, Link> {
+        HashMap::from_iter(self.columns.iter().cloned())
+    }
 }
 
 #[async_trait]
@@ -42,18 +71,47 @@ impl TCContext for Table {
 
     async fn put(
         self: Arc<Self>,
-        _txn: Arc<Transaction>,
-        _row_id: TCValue,
-        _state: TCState,
+        txn: Arc<Transaction>,
+        row_id: TCValue,
+        column_values: TCState,
     ) -> TCResult<TCState> {
-        Err(error::not_implemented())
-    }
-}
+        let column_values: Vec<TCValue> = column_values.try_into()?;
+        let schema = self.schema_map();
 
-#[async_trait]
-impl TCExecutable for Table {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: &Link) -> TCResult<TCState> {
-        Err(error::not_implemented())
+        let mut row = vec![];
+        row.push(txn.clone().post(&self.key.1, vec![("from", row_id)]));
+        for column_value in column_values.iter() {
+            let column_value: Vec<TCValue> = column_value.clone().try_into()?;
+            if column_value.len() != 2 {
+                return Err(error::bad_request(
+                    "Expected a 2-tuple of column name and value, found",
+                    format!("{:?}", column_value),
+                ));
+            }
+            let column: String = column_value[0].clone().try_into()?;
+            let value = column_value[1].clone();
+
+            if let Some(ctr) = schema.get(&column) {
+                row.push(txn.clone().post(ctr, vec![("from", value)]));
+            } else {
+                return Err(error::bad_request(
+                    "This table contains no such column",
+                    column,
+                ));
+            }
+        }
+        let mut row = try_join_all(row).await?;
+        let mut mutation = self.mutation(row.remove(0).try_into()?);
+        for (i, value) in row.iter().enumerate().take(self.columns.len()) {
+            mutation.set(self.columns[i].0.clone(), value.clone().try_into()?)?;
+        }
+
+        self.chain
+            .clone()
+            .put(txn.clone(), mutation.key.clone(), mutation.values().into())
+            .await?;
+
+        Ok(().into())
     }
 }
 
@@ -70,14 +128,14 @@ impl TableContext {
         schema: Vec<(String, Link)>,
         key_column: String,
     ) -> TCResult<Arc<Table>> {
-        let mut valid_columns: Vec<(String, Link)> = vec![];
+        let mut columns: Vec<(String, Link)> = vec![];
         let mut key = None;
 
         for (name, datatype) in schema {
-            valid_columns.push((name.clone(), datatype.clone()));
-
             if name == key_column {
                 key = Some((name, datatype));
+            } else {
+                columns.push((name.clone(), datatype.clone()));
             }
         }
 
@@ -102,7 +160,7 @@ impl TableContext {
 
         Ok(Arc::new(Table {
             key,
-            schema: valid_columns,
+            columns,
             chain,
         }))
     }

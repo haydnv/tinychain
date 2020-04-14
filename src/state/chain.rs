@@ -49,13 +49,6 @@ impl TCContext for Chain {
     }
 }
 
-#[async_trait]
-impl TCExecutable for Chain {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: &Link) -> TCResult<TCState> {
-        Err(error::not_implemented())
-    }
-}
-
 pub struct ChainContext {
     fs_dir: Arc<fs::Dir>,
 }

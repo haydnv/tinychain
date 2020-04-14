@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
@@ -60,9 +60,7 @@ impl TCState {
 
     pub async fn post(&self, txn: Arc<Transaction>, action: &Link) -> TCResult<TCState> {
         match self {
-            TCState::Chain(c) => c.clone().post(txn, action).await,
             TCState::Graph(g) => g.clone().post(txn, action).await,
-            TCState::Table(t) => t.clone().post(txn, action).await,
             TCState::Tensor(t) => t.clone().post(txn, action).await,
             _ => Err(error::bad_request("Cannot POST to", self)),
         }
@@ -106,6 +104,17 @@ impl TryFrom<TCState> for Arc<Chain> {
         match state {
             TCState::Chain(chain) => Ok(chain),
             other => Err(error::bad_request("Expected a Chain but found", other)),
+        }
+    }
+}
+
+impl TryFrom<TCState> for Vec<TCValue> {
+    type Error = error::TCError;
+
+    fn try_from(state: TCState) -> TCResult<Vec<TCValue>> {
+        match state {
+            TCState::Value(value) => Ok(value.try_into()?),
+            other => Err(error::bad_request("Expected a Value but found", other)),
         }
     }
 }

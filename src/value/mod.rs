@@ -19,7 +19,8 @@ pub type TCRef = reference::TCRef;
 pub type Subject = op::Subject;
 pub type ValueId = String;
 
-pub trait TCValueExt: TryFrom<TCValue, Error = error::TCError> {}
+pub trait TCValueTryInto: TryInto<TCValue, Error = error::TCError> {}
+pub trait TCValueTryFrom: TryFrom<TCValue, Error = error::TCError> {}
 
 const RESERVED_CHARS: [&str; 17] = [
     "..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "=", "^", ">", "<", "'", "`", "\"",
@@ -61,7 +62,13 @@ pub enum TCValue {
     Ref(TCRef),
 }
 
-impl TCValueExt for String {}
+impl TCValueTryFrom for String {}
+
+impl From<()> for TCValue {
+    fn from(_: ()) -> TCValue {
+        TCValue::None
+    }
+}
 
 impl From<Link> for TCValue {
     fn from(link: Link) -> TCValue {
@@ -72,6 +79,15 @@ impl From<Link> for TCValue {
 impl From<Op> for TCValue {
     fn from(op: Op) -> TCValue {
         TCValue::Op(op)
+    }
+}
+
+impl From<Option<TCValue>> for TCValue {
+    fn from(opt: Option<TCValue>) -> TCValue {
+        match opt {
+            Some(val) => val,
+            None => TCValue::None,
+        }
     }
 }
 
@@ -139,35 +155,32 @@ impl TryFrom<TCValue> for Vec<TCValue> {
     }
 }
 
-impl TryFrom<TCValue> for Vec<(ValueId, TCValue)> {
-    type Error = error::TCError;
+impl<T: Into<TCValue>> std::iter::FromIterator<T> for TCValue {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut v: Vec<TCValue> = vec![];
+        for item in iter {
+            v.push(item.into());
+        }
 
-    fn try_from(value: TCValue) -> TCResult<Vec<(ValueId, TCValue)>> {
-        let v: Vec<(String, TCValue)> = value.try_into()?;
-        Ok(v.into_iter().collect())
+        v.into()
     }
 }
 
-impl<T1: TCValueExt, T2: TCValueExt> std::iter::FromIterator<TCValue> for TCResult<Vec<(T1, T2)>> {
-    fn from_iter<I: IntoIterator<Item = TCValue>>(iter: I) -> Self {
-        let mut v: Vec<(T1, T2)> = vec![];
-        for item in iter {
-            v.push(item.try_into()?);
+impl<T1: TCValueTryFrom, T2: TCValueTryFrom> TryFrom<TCValue> for Vec<(T1, T2)> {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<Vec<(T1, T2)>> {
+        let value: Vec<TCValue> = value.try_into()?;
+        let mut v: Vec<(T1, T2)> = Vec::with_capacity(value.len());
+        for item in value {
+            let item: (T1, T2) = item.try_into()?;
+            v.push(item);
         }
         Ok(v)
     }
 }
 
-impl<T1: TCValueExt, T2: TCValueExt> TryFrom<TCValue> for Vec<(T1, T2)> {
-    type Error = error::TCError;
-
-    fn try_from(value: TCValue) -> TCResult<Vec<(T1, T2)>> {
-        let v: Vec<TCValue> = value.try_into()?;
-        v.into_iter().collect()
-    }
-}
-
-impl<T1: TCValueExt, T2: TCValueExt> TryFrom<TCValue> for (T1, T2) {
+impl<T1: TCValueTryFrom, T2: TCValueTryFrom> TryFrom<TCValue> for (T1, T2) {
     type Error = error::TCError;
 
     fn try_from(value: TCValue) -> TCResult<(T1, T2)> {
