@@ -228,7 +228,7 @@ impl Transaction {
 
         while !queue.is_empty() {
             let mut ready: Vec<(ValueId, QueuedOp)> = vec![];
-            while let Some(value_id) = queue.pop() {
+            while let Some(value_id) = queue.last() {
                 let state = self.state.read().unwrap();
                 let capture_state = |id| {
                     if let Some(s) = state.get(id) {
@@ -246,7 +246,6 @@ impl Transaction {
                                 if let Some(s) = capture_state(&r.value_id()) {
                                     QueuedOp::GetFrom(s.clone(), key.clone())
                                 } else {
-                                    queue.push(value_id);
                                     break;
                                 }
                             }
@@ -257,7 +256,6 @@ impl Transaction {
                                 if let Some(s) = capture_state(&r.value_id()) {
                                     QueuedOp::PutTo(s.clone(), key.clone(), value.into())
                                 } else {
-                                    queue.push(value_id.clone());
                                     break;
                                 }
                             }
@@ -268,7 +266,6 @@ impl Transaction {
                                 if let Some(s) = capture_state(current_id) {
                                     captured.insert(subjective_id.to_owned(), s.clone());
                                 } else {
-                                    queue.push(value_id.clone());
                                     break;
                                 }
                             }
@@ -281,8 +278,6 @@ impl Transaction {
                                 if let Some(subject) = capture_state(subject) {
                                     QueuedOp::PostTo(subject.clone(), action.clone(), txn)
                                 } else {
-                                    self.pending.insert(value_id.clone(), op.clone());
-                                    queue.push(value_id);
                                     break;
                                 }
                             } else {
@@ -291,12 +286,11 @@ impl Transaction {
                         }
                     }
                 } else {
-                    queue.push(value_id);
                     break;
                 };
 
                 self.pending.remove(&value_id);
-                ready.push((value_id, op));
+                ready.push((queue.pop().unwrap(), op));
             }
 
             if ready.is_empty() {
