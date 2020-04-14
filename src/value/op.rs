@@ -1,11 +1,11 @@
 use std::fmt;
 
-use serde::ser::{Serialize, SerializeStructVariant, Serializer};
+use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde::Deserialize;
 
 use crate::value::{Link, TCRef, TCValue};
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, Deserialize)]
 pub enum Subject {
     Link(Link),
     Ref(TCRef),
@@ -29,6 +29,15 @@ impl From<Link> for Subject {
 impl From<TCRef> for Subject {
     fn from(r: TCRef) -> Subject {
         Subject::Ref(r)
+    }
+}
+
+impl Serialize for Subject {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        s.serialize_str(&format!("{}", self))
     }
 }
 
@@ -109,9 +118,8 @@ impl Serialize for Op {
     {
         match self {
             Op::Get { subject, key } => {
-                let mut op = s.serialize_struct_variant("Op", 0, "Get", 2)?;
-                op.serialize_field("subject", subject)?;
-                op.serialize_field("key", key)?;
+                let mut op = s.serialize_map(Some(1))?;
+                op.serialize_entry(subject, &TCValue::Vector([*key.clone()].to_vec()))?;
                 op.end()
             }
             Op::Put {
@@ -119,10 +127,11 @@ impl Serialize for Op {
                 key,
                 value,
             } => {
-                let mut op = s.serialize_struct_variant("Op", 1, "Put", 3)?;
-                op.serialize_field("subject", subject)?;
-                op.serialize_field("key", key)?;
-                op.serialize_field("value", value)?;
+                let mut op = s.serialize_map(Some(1))?;
+                op.serialize_entry(
+                    subject,
+                    &TCValue::Vector([*key.clone(), *value.clone()].to_vec()),
+                )?;
                 op.end()
             }
             Op::Post {
@@ -130,10 +139,14 @@ impl Serialize for Op {
                 action,
                 requires,
             } => {
-                let mut op = s.serialize_struct_variant("Op", 2, "Post", 3)?;
-                op.serialize_field("subject", subject)?;
-                op.serialize_field("action", action)?;
-                op.serialize_field("requires", requires)?;
+                let subject = if let Some(subject) = subject {
+                    format!("{}{}", subject, action)
+                } else {
+                    format!("{}", action)
+                };
+
+                let mut op = s.serialize_map(Some(1))?;
+                op.serialize_entry(&subject, requires)?;
                 op.end()
             }
         }
