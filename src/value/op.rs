@@ -1,5 +1,6 @@
 use std::fmt;
 
+use serde::de::{Deserializer, Error, MapAccess, Visitor};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde::Deserialize;
 
@@ -108,6 +109,58 @@ impl fmt::Display for Op {
                 requires
             ),
         }
+    }
+}
+
+pub struct OpVisitor;
+
+impl<'de> Visitor<'de> for OpVisitor {
+    type Value = Op;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("A Tinychain Op, e.g. {\"/sbin/table/new\": [(\"columns\", [(\"foo\", \"/sbin/value/string\"), ...]]}")
+    }
+
+    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+    where
+        M: MapAccess<'de>,
+    {
+        if let Some(key) = access.next_key::<String>()? {
+            if key.contains('/') {
+                let key: Vec<&str> = key.split('/').collect();
+                let subject = TCRef::to(&key[0][1..]).map_err(Error::custom)?;
+                let method =
+                    Link::to(&format!("/{}", key[1..].join("/"))).map_err(Error::custom)?;
+                let requires = access.next_value::<Vec<(String, TCValue)>>()?;
+
+                Ok(Op::post(subject.into(), method, requires))
+            } else {
+                let subject = TCRef::to(&key[1..].to_string()).map_err(Error::custom)?;
+                let value = access.next_value::<Vec<TCValue>>()?;
+
+                if value.len() == 1 {
+                    Ok(Op::get(subject.into(), value[0].clone()))
+                } else if value.len() == 2 {
+                    Ok(Op::put(subject.into(), value[0].clone(), value[1].clone()))
+                } else {
+                    Err(Error::custom(format!(
+                        "Expected either 1 (for a Get), or 2 (for a Put) Values for {}",
+                        key
+                    )))
+                }
+            }
+        } else {
+            Err(Error::custom("Op subject must be a Link or Ref, e.g. \"/sbin/value/string\" or \"$result/filter\""))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Op where {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(OpVisitor)
     }
 }
 
