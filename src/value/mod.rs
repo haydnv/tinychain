@@ -3,13 +3,20 @@ use std::fmt;
 
 use regex::Regex;
 use serde::de;
-use serde::ser::{SerializeSeq, SerializeStructVariant, Serializer};
-use serde::{Deserialize, Serialize};
+use serde::ser::{Serialize, SerializeSeq, SerializeStructVariant, Serializer};
 
 use crate::context::TCResult;
 use crate::error;
 use crate::state::TCState;
 
+mod link;
+mod op;
+mod reference;
+
+pub type Link = link::Link;
+pub type Op = op::Op;
+pub type TCRef = reference::TCRef;
+pub type Subject = op::Subject;
 pub type ValueId = String;
 
 pub trait TCValueExt: TryFrom<TCValue, Error = error::TCError> {}
@@ -18,7 +25,7 @@ const RESERVED_CHARS: [&str; 17] = [
     "..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "=", "^", ">", "<", "'", "`", "\"",
 ];
 
-fn valid_id(id: &str) -> bool {
+fn validate_id(id: &str) -> TCResult<()> {
     let mut eot_char = [0];
     let eot_char = (4 as char).encode_utf8(&mut eot_char);
 
@@ -26,296 +33,15 @@ fn valid_id(id: &str) -> bool {
 
     for pattern in reserved.iter() {
         if id.contains(pattern) {
-            return false;
+            return Err(error::bad_request("A value ID may not contain this pattern", pattern));
         }
     }
 
-    if Regex::new(r"\s").unwrap().find(id).is_some() {
-        return false;
+    if let Some(w) = Regex::new(r"\s").unwrap().find(id) {
+        return Err(error::bad_request("A value ID may not contain whitespace", format!("{:?}", w)));
     }
 
-    true
-}
-
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
-pub struct Link {
-    segments: Vec<String>,
-}
-
-impl Link {
-    fn _validate(to: &str) -> TCResult<()> {
-        if !valid_id(to) {
-            Err(error::bad_request(
-                "A link may not contain whitespace or any of these patterns",
-                RESERVED_CHARS.join(", "),
-            ))
-        } else if !to.starts_with('/') {
-            Err(error::bad_request(
-                "Expected an absolute path starting with '/' but found",
-                to,
-            ))
-        } else if to != "/" && to.ends_with('/') {
-            Err(error::bad_request("Trailing slash is not allowed", to))
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn to(destination: &str) -> TCResult<Link> {
-        Link::_validate(destination)?;
-
-        let segments: Vec<String> = if destination == "/" {
-            vec![]
-        } else {
-            destination[1..].split('/').map(|s| s.to_string()).collect()
-        };
-
-        Ok(Link { segments })
-    }
-
-    pub fn append(&self, suffix: &Link) -> Link {
-        Link::to(&format!("{}{}", self, suffix)).unwrap()
-    }
-
-    pub fn as_str(&self, index: usize) -> &str {
-        self.segments[index].as_str()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.segments.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.segments.len()
-    }
-
-    pub fn nth(&self, i: usize) -> Link {
-        Link {
-            segments: vec![self.segments[i].clone()],
-        }
-    }
-
-    pub fn slice_from(&self, start: usize) -> Link {
-        Link {
-            segments: self.segments[start..].to_vec(),
-        }
-    }
-
-    pub fn slice_to(&self, end: usize) -> Link {
-        Link {
-            segments: self.segments[..end].to_vec(),
-        }
-    }
-}
-
-impl TCValueExt for Link {}
-
-impl From<u64> for Link {
-    fn from(i: u64) -> Link {
-        Link::to(&format!("/{}", i)).unwrap()
-    }
-}
-
-impl IntoIterator for Link {
-    type Item = Link;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        let mut segments = Vec::with_capacity(self.len());
-        for i in 0..self.len() {
-            segments.push(self.nth(i));
-        }
-        segments.into_iter()
-    }
-}
-
-impl PartialEq<str> for Link {
-    fn eq(&self, other: &str) -> bool {
-        self.to_string().as_str() == other
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Link {
-    fn deserialize<D>(deserializer: D) -> Result<Link, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
-        let s: &str = Deserialize::deserialize(deserializer)?;
-        Link::to(s).map_err(de::Error::custom)
-    }
-}
-
-impl serde::Serialize for Link {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        s.serialize_str(&format!("{}", self))
-    }
-}
-
-impl fmt::Display for Link {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", format!("/{}", self.segments.join("/")))
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Ref(ValueId);
-
-impl Ref {
-    pub fn to(id: &str) -> TCResult<Ref> {
-        if valid_id(id) {
-            Ok(Ref(id.to_string()))
-        } else {
-            Err(error::bad_request(
-                "A reference id may not contain whitespace or any of these patterns",
-                RESERVED_CHARS.join(", "),
-            ))
-        }
-    }
-
-    pub fn value_id(&self) -> ValueId {
-        self.0.to_string()
-    }
-}
-
-impl fmt::Display for Ref {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "${}", self.0)
-    }
-}
-
-struct RefVisitor;
-
-impl<'de> de::Visitor<'de> for RefVisitor {
-    type Value = Ref;
-
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("A reference to a local variable (e.g. '$foo')")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ref::to(value).map_err(de::Error::custom)
-    }
-}
-
-impl<'de> de::Deserialize<'de> for Ref {
-    fn deserialize<D>(d: D) -> Result<Self, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
-        d.deserialize_str(RefVisitor)
-    }
-}
-
-impl Serialize for Ref {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        s.serialize_str(&format!("${}", self))
-    }
-}
-
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Deserialize, Serialize)]
-pub enum Subject {
-    Link(Link),
-    Ref(Ref),
-}
-
-impl fmt::Display for Subject {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Subject::Link(l) => write!(f, "{}", l),
-            Subject::Ref(r) => write!(f, "{}", r),
-        }
-    }
-}
-
-impl From<Link> for Subject {
-    fn from(l: Link) -> Subject {
-        Subject::Link(l)
-    }
-}
-
-impl From<Ref> for Subject {
-    fn from(r: Ref) -> Subject {
-        Subject::Ref(r)
-    }
-}
-
-#[derive(Clone, Hash, Eq, PartialEq)]
-pub enum Op {
-    Get {
-        subject: Subject,
-        key: Box<TCValue>,
-    },
-    Put {
-        subject: Subject,
-        key: Box<TCValue>,
-        value: Box<TCValue>,
-    },
-    Post {
-        subject: Option<Ref>,
-        action: Link,
-        requires: Vec<(String, TCValue)>,
-    },
-}
-
-impl Op {
-    pub fn get(subject: Subject, key: TCValue) -> Op {
-        Op::Get {
-            subject,
-            key: Box::new(key),
-        }
-    }
-
-    pub fn put(subject: Subject, key: TCValue, value: TCValue) -> Op {
-        Op::Put {
-            subject,
-            key: Box::new(key),
-            value: Box::new(value),
-        }
-    }
-
-    pub fn post(subject: Option<Ref>, action: Link, requires: Vec<(String, TCValue)>) -> Op {
-        Op::Post {
-            subject,
-            action,
-            requires,
-        }
-    }
-}
-
-impl fmt::Display for Op {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Op::Get { subject, key } => write!(f, "subject: {}, key: {}", subject, key),
-            Op::Put {
-                subject,
-                key,
-                value,
-            } => write!(f, "subject: {}, key: {}, value: {}", subject, key, value),
-            Op::Post {
-                subject,
-                action,
-                requires,
-            } => write!(
-                f,
-                "subject: {}, action: {}, requires: {:?}",
-                subject
-                    .clone()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| String::from("None")),
-                action,
-                requires
-            ),
-        }
-    }
+    Ok(())
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
@@ -326,7 +52,7 @@ pub enum TCValue {
     Op(Op),
     r#String(String),
     Vector(Vec<TCValue>),
-    Ref(Ref),
+    Ref(TCRef),
 }
 
 impl TCValueExt for String {}
@@ -343,8 +69,8 @@ impl From<Op> for TCValue {
     }
 }
 
-impl From<Ref> for TCValue {
-    fn from(r: Ref) -> TCValue {
+impl From<TCRef> for TCValue {
+    fn from(r: TCRef) -> TCValue {
         TCValue::Ref(r)
     }
 }
@@ -358,6 +84,19 @@ impl From<String> for TCValue {
 impl From<Vec<TCValue>> for TCValue {
     fn from(v: Vec<TCValue>) -> TCValue {
         TCValue::Vector(v)
+    }
+}
+
+impl From<Vec<(ValueId, TCValue)>> for TCValue {
+    fn from(values: Vec<(ValueId, TCValue)>) -> TCValue {
+        let mut result: Vec<TCValue> = vec![];
+        for (id, val) in values {
+            let mut r_item: Vec<TCValue> = vec![];
+            r_item.push(id.into());
+            r_item.push(val);
+            result.push(r_item.into());
+        }
+        result.into()
     }
 }
 
@@ -400,19 +139,6 @@ impl TryFrom<TCValue> for Vec<(ValueId, TCValue)> {
     fn try_from(value: TCValue) -> TCResult<Vec<(ValueId, TCValue)>> {
         let v: Vec<(String, TCValue)> = value.try_into()?;
         Ok(v.into_iter().collect())
-    }
-}
-
-impl From<Vec<(ValueId, TCValue)>> for TCValue {
-    fn from(values: Vec<(ValueId, TCValue)>) -> TCValue {
-        let mut result: Vec<TCValue> = vec![];
-        for (id, val) in values {
-            let mut r_item: Vec<TCValue> = vec![];
-            r_item.push(id.into());
-            r_item.push(val);
-            result.push(r_item.into());
-        }
-        result.into()
     }
 }
 
@@ -500,14 +226,14 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
             } else if key.starts_with('$') {
                 if key.contains('/') {
                     let key: Vec<&str> = key.split('/').collect();
-                    let subject = Ref::to(&key[0][1..]).map_err(de::Error::custom)?;
+                    let subject = TCRef::to(&key[0][1..]).map_err(de::Error::custom)?;
                     let method =
                         Link::to(&format!("/{}", key[1..].join("/"))).map_err(de::Error::custom)?;
                     let requires = access.next_value::<Vec<(String, TCValue)>>()?;
 
                     Ok(Op::post(subject.into(), method, requires).into())
                 } else {
-                    let subject = Ref::to(&key[1..].to_string()).map_err(de::Error::custom)?;
+                    let subject = TCRef::to(&key[1..].to_string()).map_err(de::Error::custom)?;
                     let value = access.next_value::<Vec<TCValue>>()?;
 
                     if value.is_empty() {
