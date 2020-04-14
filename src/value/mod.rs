@@ -3,7 +3,7 @@ use std::fmt;
 
 use regex::Regex;
 use serde::de;
-use serde::ser::{Serialize, SerializeSeq, SerializeStructVariant, Serializer};
+use serde::ser::{Serialize, SerializeSeq, Serializer};
 
 use crate::context::TCResult;
 use crate::error;
@@ -33,12 +33,18 @@ fn validate_id(id: &str) -> TCResult<()> {
 
     for pattern in reserved.iter() {
         if id.contains(pattern) {
-            return Err(error::bad_request("A value ID may not contain this pattern", pattern));
+            return Err(error::bad_request(
+                "A value ID may not contain this pattern",
+                pattern,
+            ));
         }
     }
 
     if let Some(w) = Regex::new(r"\s").unwrap().find(id) {
-        return Err(error::bad_request("A value ID may not contain whitespace", format!("{:?}", w)));
+        return Err(error::bad_request(
+            "A value ID may not contain whitespace",
+            format!("{:?}", w),
+        ));
     }
 
     Ok(())
@@ -191,7 +197,7 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
     type Value = TCValue;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("A JSON value")
+        f.write_str("A Tinychain Value, e.g. \"foo\" or 123 or {\"$object_ref: [\"slice_id\", \"$state\"]\"}")
     }
 
     fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E>
@@ -292,36 +298,7 @@ impl Serialize for TCValue {
             TCValue::None => s.serialize_none(),
             TCValue::Int32(i) => s.serialize_i32(*i),
             TCValue::Link(l) => l.serialize(s),
-            TCValue::Op(o) => match o {
-                Op::Get { subject, key } => {
-                    let mut op = s.serialize_struct_variant("Op", 0, "Get", 2)?;
-                    op.serialize_field("subject", subject)?;
-                    op.serialize_field("key", key)?;
-                    op.end()
-                }
-                Op::Put {
-                    subject,
-                    key,
-                    value,
-                } => {
-                    let mut op = s.serialize_struct_variant("Op", 1, "Put", 3)?;
-                    op.serialize_field("subject", subject)?;
-                    op.serialize_field("key", key)?;
-                    op.serialize_field("value", value)?;
-                    op.end()
-                }
-                Op::Post {
-                    subject,
-                    action,
-                    requires,
-                } => {
-                    let mut op = s.serialize_struct_variant("Op", 2, "Post", 3)?;
-                    op.serialize_field("subject", subject)?;
-                    op.serialize_field("action", action)?;
-                    op.serialize_field("requires", requires)?;
-                    op.end()
-                }
-            },
+            TCValue::Op(o) => o.serialize(s),
             TCValue::Ref(r) => r.serialize(s),
             TCValue::r#String(v) => s.serialize_str(v),
             TCValue::Vector(v) => {

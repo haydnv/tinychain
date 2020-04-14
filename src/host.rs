@@ -5,8 +5,8 @@ use crate::context::*;
 use crate::error;
 use crate::fs;
 use crate::state::ChainContext;
-use crate::state::TableContext;
 use crate::state::TCState;
+use crate::state::TableContext;
 use crate::transaction::Transaction;
 use crate::value::{Link, Op, TCValue};
 

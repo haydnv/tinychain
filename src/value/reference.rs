@@ -40,7 +40,14 @@ impl<'de> de::Visitor<'de> for RefVisitor {
     where
         E: de::Error,
     {
-        TCRef::to(value).map_err(de::Error::custom)
+        if !value.starts_with('$') {
+            Err(de::Error::custom(format!(
+                "Expected Ref starting with $, found {}",
+                value
+            )))
+        } else {
+            TCRef::to(&value[1..]).map_err(de::Error::custom)
+        }
     }
 }
 
@@ -58,6 +65,6 @@ impl Serialize for TCRef {
     where
         S: Serializer,
     {
-        s.serialize_str(&format!("${}", self))
+        s.serialize_str(&format!("{}", self))
     }
 }

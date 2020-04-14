@@ -1,8 +1,7 @@
 use std::fmt;
 
 use serde::de;
-use serde::ser::{Serializer};
-use serde::{Deserialize};
+use serde::ser::Serializer;
 
 use crate::context::TCResult;
 use crate::error;
@@ -108,7 +107,7 @@ impl<'de> serde::Deserialize<'de> for Link {
     where
         D: de::Deserializer<'de>,
     {
-        let s: &str = Deserialize::deserialize(deserializer)?;
+        let s: &str = de::Deserialize::deserialize(deserializer)?;
         Link::to(s).map_err(de::Error::custom)
     }
 }

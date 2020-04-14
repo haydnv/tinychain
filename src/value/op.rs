@@ -1,10 +1,11 @@
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::ser::{Serialize, SerializeStructVariant, Serializer};
+use serde::Deserialize;
 
 use crate::value::{Link, TCRef, TCValue};
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, Deserialize, serde::Serialize)]
 pub enum Subject {
     Link(Link),
     Ref(TCRef),
@@ -97,6 +98,44 @@ impl fmt::Display for Op {
                 action,
                 requires
             ),
+        }
+    }
+}
+
+impl Serialize for Op {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Op::Get { subject, key } => {
+                let mut op = s.serialize_struct_variant("Op", 0, "Get", 2)?;
+                op.serialize_field("subject", subject)?;
+                op.serialize_field("key", key)?;
+                op.end()
+            }
+            Op::Put {
+                subject,
+                key,
+                value,
+            } => {
+                let mut op = s.serialize_struct_variant("Op", 1, "Put", 3)?;
+                op.serialize_field("subject", subject)?;
+                op.serialize_field("key", key)?;
+                op.serialize_field("value", value)?;
+                op.end()
+            }
+            Op::Post {
+                subject,
+                action,
+                requires,
+            } => {
+                let mut op = s.serialize_struct_variant("Op", 2, "Post", 3)?;
+                op.serialize_field("subject", subject)?;
+                op.serialize_field("action", action)?;
+                op.serialize_field("requires", requires)?;
+                op.end()
+            }
         }
     }
 }
