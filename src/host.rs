@@ -10,6 +10,7 @@ use crate::state::TableContext;
 use crate::transaction::Transaction;
 use crate::value::{Link, Op, TCValue};
 
+#[derive(Debug)]
 pub struct Host {
     chain_context: Arc<ChainContext>,
     table_context: Arc<TableContext>,

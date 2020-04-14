@@ -12,6 +12,7 @@ use crate::value::Link;
 
 const EOT_CHAR: char = 4 as char;
 
+#[derive(Debug)]
 pub struct Dir {
     mount_point: PathBuf,
     context: Link,
@@ -82,6 +83,17 @@ impl Dir {
             };
 
             dir.reserve(&path.slice_from(1))
+        }
+    }
+
+    pub async fn get(self: Arc<Self>, path: Link) -> TCResult<Vec<Vec<u8>>> {
+        if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
+            Ok(buffer
+                .split(|b| *b == EOT_CHAR as u8)
+                .map(|c| c.to_vec())
+                .collect())
+        } else {
+            Err(error::not_implemented())
         }
     }
 

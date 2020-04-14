@@ -20,6 +20,14 @@ struct Mutation {
 }
 
 impl Mutation {
+    fn apply(&mut self, values: Vec<Option<TCValue>>) {
+        for (i, value) in values.iter().enumerate() {
+            if let Some(value) = value {
+                self.values[i] = Some(value.clone());
+            }
+        }
+    }
+
     fn set(&mut self, column: String, value: TCValue) -> TCResult<()> {
         if let Some(index) = self.schema.get(&column) {
             self.values[*index] = Some(value);
@@ -36,7 +44,7 @@ impl Mutation {
     }
 }
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub struct Table {
     key: (String, Link),
     columns: Vec<(String, Link)>,
@@ -65,8 +73,15 @@ impl Table {
 
 #[async_trait]
 impl TCContext for Table {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _row_id: TCValue) -> TCResult<TCState> {
-        Err(error::not_implemented())
+    async fn get(self: Arc<Self>, txn: Arc<Transaction>, row_id: TCValue) -> TCResult<TCState> {
+        let mut row = self.mutation(row_id.clone());
+        let mutations: Vec<TCValue> = self.chain.clone().get(txn, row_id).await?.try_into()?;
+        for mutation in mutations {
+            let mutation: Vec<Option<TCValue>> = mutation.try_into()?;
+            row.apply(mutation);
+        }
+
+        Ok(row.values().into())
     }
 
     async fn put(
@@ -95,7 +110,7 @@ impl TCContext for Table {
         }
         let mut row = try_join_all(row).await?;
         let mut mutation = self.mutation(row.remove(0).try_into()?);
-        for (i, value) in row.iter().enumerate().take(self.columns.len()) {
+        for (i, value) in row.iter().enumerate() {
             mutation.set(self.columns[i].0.clone(), value.clone().try_into()?)?;
         }
 
@@ -108,6 +123,7 @@ impl TCContext for Table {
     }
 }
 
+#[derive(Debug)]
 pub struct TableContext {}
 
 impl TableContext {

@@ -73,8 +73,8 @@ pub fn bad_request<T: fmt::Display>(message: &str, info: T) -> TCError {
     TCError::of(Code::BadRequest, format!("{}: {}", message, info))
 }
 
-pub fn internal(message: &str) -> TCError {
-    TCError::of(Code::Internal, message.to_string())
+pub fn internal<T: fmt::Display>(cause: T) -> TCError {
+    TCError::of(Code::Internal, format!("{}", cause))
 }
 
 pub fn not_found<T: fmt::Display>(id: T) -> TCError {

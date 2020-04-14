@@ -19,7 +19,7 @@ pub type Dir = dir::Dir;
 pub type Table = table::Table;
 pub type TableContext = table::TableContext;
 
-#[derive(Clone, Hash)]
+#[derive(Clone, Debug, Hash)]
 pub enum TCState {
     None,
     Chain(Arc<Chain>),
@@ -94,6 +94,12 @@ impl From<TCValue> for TCState {
 impl From<&TCValue> for TCState {
     fn from(value: &TCValue) -> TCState {
         TCState::Value(value.clone())
+    }
+}
+
+impl From<Vec<TCValue>> for TCState {
+    fn from(value: Vec<TCValue>) -> TCState {
+        TCState::Value(value.into())
     }
 }
 

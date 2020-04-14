@@ -13,7 +13,7 @@ use crate::host::Host;
 use crate::state::TCState;
 use crate::value::*;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TransactionId {
     timestamp: u128, // nanoseconds since Unix epoch
     nonce: u16,
@@ -54,6 +54,7 @@ impl fmt::Display for TransactionId {
     }
 }
 
+#[derive(Debug)]
 pub struct Transaction {
     host: Arc<Host>,
     id: TransactionId,
@@ -211,8 +212,6 @@ impl Transaction {
         self: Arc<Self>,
         capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, TCState>> {
-        // TODO: add a TCValue::Ref type and it to support discrete namespaces for each child txn
-
         let unvisited: Vec<ValueId> = capture.clone().into_iter().collect();
         let mut queue: Vec<ValueId> = vec![];
         self.clone().enqueue(unvisited, &mut queue)?;
@@ -232,8 +231,10 @@ impl Transaction {
                 let state = self.state.read().unwrap();
                 let capture_state = |id| {
                     if let Some(s) = state.get(id) {
+                        println!("{} is {}", id, s);
                         Some(s)
                     } else {
+                        println!("{} is None", id);
                         None
                     }
                 };
@@ -298,6 +299,11 @@ impl Transaction {
                     "Transaction graph stalled before completing",
                     format!("{:?}", queue),
                 ));
+            } else {
+                println!(
+                    "calculating {:?}",
+                    ready.iter().map(|(id, _)| id).collect::<Vec<&ValueId>>()
+                );
             }
 
             let mut futures = vec![];
@@ -367,6 +373,7 @@ impl Transaction {
     }
 
     pub async fn get(self: Arc<Self>, path: Link, key: TCValue) -> TCResult<TCState> {
+        println!("txn::get {}", path);
         self.host.clone().get(self.clone(), path, key).await
     }
 
@@ -376,6 +383,7 @@ impl Transaction {
         key: TCValue,
         state: TCState,
     ) -> TCResult<TCState> {
+        println!("txn::put {} {}", path, key);
         self.host.clone().put(self.clone(), path, key, state).await
     }
 
@@ -384,6 +392,8 @@ impl Transaction {
         path: &Link,
         args: Vec<(&str, TCValue)>,
     ) -> TCResult<TCState> {
+        println!("txn::post {} {:?}", path, args);
+
         let txn = self.clone().extend(
             self.context.clone(),
             args.iter()

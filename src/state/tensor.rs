@@ -8,7 +8,7 @@ use crate::state::TCState;
 use crate::transaction::Transaction;
 use crate::value::{Link, TCValue};
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub struct Tensor {}
 
 #[async_trait]

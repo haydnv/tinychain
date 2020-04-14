@@ -10,7 +10,7 @@ use crate::state::TCState;
 use crate::transaction::Transaction;
 use crate::value::{Link, TCValue};
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub struct Chain {
     fs_dir: Arc<fs::Dir>,
     latest_block: u64,
@@ -18,17 +18,26 @@ pub struct Chain {
 
 #[async_trait]
 impl TCContext for Chain {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _key: TCValue) -> TCResult<TCState> {
+    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState> {
         let mut i = self.latest_block;
+        let mut matched: Vec<TCValue> = vec![];
         loop {
-            // TODO: read each entry in each block until the key is found, then return the value
-            i -= 1;
             if i == 0 {
                 break;
             }
+
+            i -= 1;
+
+            let contents = self.fs_dir.clone().get(i.into()).await?;
+            for entry in contents {
+                let (k, value) = serde_json::from_slice(&entry).map_err(error::internal)?;
+                if key == k {
+                    matched.push(value);
+                }
+            }
         }
 
-        Err(error::not_implemented())
+        Ok(matched.into())
     }
 
     async fn put(
@@ -49,6 +58,7 @@ impl TCContext for Chain {
     }
 }
 
+#[derive(Debug)]
 pub struct ChainContext {
     fs_dir: Arc<fs::Dir>,
 }

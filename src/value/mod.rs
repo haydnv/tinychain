@@ -155,6 +155,23 @@ impl TryFrom<TCValue> for Vec<TCValue> {
     }
 }
 
+impl TryFrom<TCValue> for Vec<Option<TCValue>> {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<Vec<Option<TCValue>>> {
+        let v: Vec<TCValue> = v.try_into()?;
+        let mut result = Vec::with_capacity(v.len());
+        for item in v {
+            let item = match item {
+                TCValue::None => None,
+                value => Some(value),
+            };
+            result.push(item)
+        }
+        Ok(result)
+    }
+}
+
 impl<T: Into<TCValue>> std::iter::FromIterator<T> for TCValue {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut v: Vec<TCValue> = vec![];
