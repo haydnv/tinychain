@@ -81,15 +81,8 @@ impl TCContext for Table {
         let mut row = vec![];
         row.push(txn.clone().post(&self.key.1, vec![("from", row_id)]));
         for column_value in column_values.iter() {
-            let column_value: Vec<TCValue> = column_value.clone().try_into()?;
-            if column_value.len() != 2 {
-                return Err(error::bad_request(
-                    "Expected a 2-tuple of column name and value, found",
-                    format!("{:?}", column_value),
-                ));
-            }
-            let column: String = column_value[0].clone().try_into()?;
-            let value = column_value[1].clone();
+            let column_value: (String, TCValue) = column_value.clone().try_into()?;
+            let (column, value) = column_value;
 
             if let Some(ctr) = schema.get(&column) {
                 row.push(txn.clone().post(ctr, vec![("from", value)]));

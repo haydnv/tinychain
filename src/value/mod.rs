@@ -193,6 +193,23 @@ impl<T1: TCValueTryFrom, T2: TCValueTryFrom> TryFrom<TCValue> for (T1, T2) {
     }
 }
 
+impl<T: TCValueTryFrom> TryFrom<TCValue> for (T, TCValue) {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<(T, TCValue)> {
+        let value: Vec<TCValue> = value.try_into()?;
+        if value.len() != 2 {
+            return Err(error::bad_request(
+                "Expected 2-tuple but found",
+                format!("{:?}", value),
+            ));
+        }
+
+        let item: T = value[0].clone().try_into()?;
+        Ok((item, value[1].clone()))
+    }
+}
+
 impl TryFrom<TCState> for TCValue {
     type Error = error::TCError;
 
