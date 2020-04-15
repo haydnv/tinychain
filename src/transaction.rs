@@ -6,7 +6,7 @@ use futures::future::try_join_all;
 use futures_util::future::FutureExt;
 use rand::Rng;
 
-use crate::cache::Map;
+use crate::cache::Queue;
 use crate::context::*;
 use crate::error;
 use crate::host::Host;
@@ -54,27 +54,89 @@ impl fmt::Display for TransactionId {
     }
 }
 
-#[derive(Debug)]
-pub struct Transaction {
-    host: Arc<Host>,
-    id: TransactionId,
-    context: Link,
-    state: RwLock<HashMap<ValueId, TCState>>,
-    pending: Map<ValueId, _Op>,
-}
-
-#[derive(Debug, Hash)]
 enum _Op {
     Get(Subject, TCValue),
     Put(Subject, TCValue, TCValue),
     Post(Option<ValueId>, Link, Vec<(String, ValueId)>),
 }
 
+enum QueuedOp {
+    Get(Link, TCValue),
+    Put(Link, TCValue, TCState),
+    Post(Link, Arc<Transaction>),
+    GetFrom(TCState, TCValue),
+    PutTo(TCState, TCValue, TCState),
+    PostTo(TCState, Link, Arc<Transaction>),
+}
+
+impl QueuedOp {
+    fn from(
+        parent_txn: Arc<Transaction>,
+        value_id: &ValueId,
+        op: &_Op,
+        state: &HashMap<ValueId, TCState>,
+    ) -> Option<QueuedOp> {
+        match op {
+            _Op::Get(subject, key) => match subject {
+                Subject::Link(l) => Some(QueuedOp::Get(l.clone(), key.clone())),
+                Subject::Ref(r) => {
+                    if let Some(s) = state.get(&r.value_id()) {
+                        Some(QueuedOp::GetFrom(s.clone(), key.clone()))
+                    } else {
+                        println!("{} not provided", r);
+                        None
+                    }
+                }
+            },
+            _Op::Put(subject, key, value) => match subject {
+                Subject::Link(l) => Some(QueuedOp::Put(l.clone(), key.clone(), value.into())),
+                Subject::Ref(r) => {
+                    if let Some(s) = state.get(&r.value_id()) {
+                        Some(QueuedOp::PutTo(s.clone(), key.clone(), value.into()))
+                    } else {
+                        println!("{} not provided", r);
+                        None
+                    }
+                }
+            },
+            _Op::Post(subject, action, requires) => {
+                let mut captured: HashMap<String, TCState> = HashMap::new();
+                for (subjective_id, current_id) in requires {
+                    if let Some(s) = state.get(current_id) {
+                        captured.insert(subjective_id.to_owned(), s.clone());
+                    } else {
+                        println!("{} not provided", current_id);
+                        return None;
+                    }
+                }
+                let txn = parent_txn.clone().extend(
+                    parent_txn
+                        .context
+                        .append(&Link::to(&format!("/{}", value_id)).unwrap()),
+                    captured,
+                );
+
+                if let Some(subject) = subject {
+                    if let Some(subject) = state.get(subject) {
+                        Some(QueuedOp::PostTo(subject.clone(), action.clone(), txn))
+                    } else {
+                        println!("{} not provided", subject);
+                        None
+                    }
+                } else {
+                    Some(QueuedOp::Post(action.clone(), txn))
+                }
+            }
+        }
+    }
+}
+
 fn calc_deps(
+    value_id: ValueId,
     op: Op,
     state: &mut HashMap<ValueId, TCState>,
-    pending: &Map<ValueId, _Op>,
-) -> TCResult<_Op> {
+    queue: Arc<Queue<(ValueId, _Op)>>,
+) -> TCResult<()> {
     let _op = match op {
         Op::Get { subject, key } => _Op::Get(subject, *key),
         Op::Put {
@@ -91,14 +153,13 @@ fn calc_deps(
             for (id, provider) in requires {
                 match provider {
                     TCValue::Op(dep) => {
-                        let pending_dep = calc_deps(dep.clone(), state, pending)?;
-                        pending.insert(id.clone(), Arc::new(pending_dep));
+                        calc_deps(id.clone(), dep.clone(), state, queue.clone())?;
                         required_value_ids.push((id.clone(), id.clone()));
                     }
                     TCValue::Ref(r) => {
                         required_value_ids.push((id, r.value_id()));
                     }
-                    value => {
+                    value if id != "_" => {
                         if state.contains_key(&id) {
                             return Err(error::bad_request("Duplicate values provided for", id));
                         }
@@ -106,6 +167,7 @@ fn calc_deps(
                         state.insert(id.clone(), TCState::Value(value));
                         required_value_ids.push((id.clone(), id.clone()));
                     }
+                    _discard => {}
                 }
             }
 
@@ -113,7 +175,16 @@ fn calc_deps(
         }
     };
 
-    Ok(_op)
+    queue.push((value_id, _op));
+    Ok(())
+}
+
+pub struct Transaction {
+    host: Arc<Host>,
+    id: TransactionId,
+    context: Link,
+    state: RwLock<HashMap<ValueId, TCState>>,
+    queue: Arc<Queue<(ValueId, _Op)>>,
 }
 
 impl Transaction {
@@ -122,15 +193,16 @@ impl Transaction {
         let context: Link = id.clone().into();
 
         let mut state: HashMap<ValueId, TCState> = HashMap::new();
-        let pending: Map<ValueId, _Op> = Map::new();
-        calc_deps(op, &mut state, &pending)?;
+        let queue: Arc<Queue<(ValueId, _Op)>> = Queue::new();
+        calc_deps(String::from("_"), op, &mut state, queue.clone())?;
+        queue.reverse();
 
         Ok(Arc::new(Transaction {
             host,
             id,
             context,
             state: RwLock::new(state),
-            pending,
+            queue,
         }))
     }
 
@@ -144,7 +216,7 @@ impl Transaction {
             id: self.id.clone(),
             context: self.context.append(&context),
             state: RwLock::new(required),
-            pending: Map::new(),
+            queue: Queue::new(),
         })
     }
 
@@ -152,152 +224,30 @@ impl Transaction {
         self.context.clone()
     }
 
-    fn enqueue(
-        self: Arc<Self>,
-        mut unvisited: Vec<ValueId>,
-        queue: &mut Vec<ValueId>,
-    ) -> TCResult<()> {
-        let mut visited: HashSet<ValueId> = HashSet::new();
-        while let Some(value_id) = unvisited.pop() {
-            if visited.contains(&value_id) {
-                continue;
-            }
-
-            if let Some(op) = self.pending.get(&value_id) {
-                queue.push(value_id.clone());
-
-                match &*op {
-                    _Op::Get(subject, key) => {
-                        if let Subject::Ref(r) = subject {
-                            unvisited.push(r.value_id());
-                        }
-                        if let TCValue::Ref(r) = key {
-                            unvisited.push(r.value_id());
-                        }
-                    }
-                    _Op::Put(subject, key, state) => {
-                        if let Subject::Ref(r) = subject {
-                            unvisited.push(r.value_id());
-                        }
-                        if let TCValue::Ref(r) = key {
-                            unvisited.push(r.value_id())
-                        }
-                        if let TCValue::Ref(r) = state {
-                            unvisited.push(r.value_id());
-                        }
-                    }
-                    _Op::Post(subject, _, requires) => {
-                        if let Some(id) = subject {
-                            unvisited.push(id.clone());
-                        }
-
-                        for (_, id) in requires {
-                            if self.pending.contains_key(&id) {
-                                unvisited.push(id.clone());
-                            }
-                        }
-                    }
-                }
-            } else if !self.state.read().unwrap().contains_key(&value_id) {
-                return Err(error::bad_request("Required value not provided", value_id));
-            }
-
-            visited.insert(value_id);
-        }
-
-        Ok(())
-    }
-
     pub async fn execute<'a>(
         self: Arc<Self>,
         capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, TCState>> {
-        let unvisited: Vec<ValueId> = capture.clone().into_iter().collect();
-        let mut queue: Vec<ValueId> = vec![];
-        self.clone().enqueue(unvisited, &mut queue)?;
-
-        enum QueuedOp {
-            Get(Link, TCValue),
-            Put(Link, TCValue, TCState),
-            Post(Link, Arc<Transaction>),
-            GetFrom(TCState, TCValue),
-            PutTo(TCState, TCValue, TCState),
-            PostTo(TCState, Link, Arc<Transaction>),
-        }
-
-        while !queue.is_empty() {
+        while !self.queue.is_empty() {
             let mut ready: Vec<(ValueId, QueuedOp)> = vec![];
-            while let Some(value_id) = queue.last() {
-                let state = self.state.read().unwrap();
-                let capture_state = |id| {
-                    if let Some(s) = state.get(id) {
-                        println!("{} is {}", id, s);
-                        Some(s)
-                    } else {
-                        println!("{} is None", id);
-                        None
-                    }
-                };
-
-                let op = if let Some(op) = self.pending.get(&value_id) {
-                    match &*op {
-                        _Op::Get(subject, key) => match subject {
-                            Subject::Link(l) => QueuedOp::Get(l.clone(), key.clone()),
-                            Subject::Ref(r) => {
-                                if let Some(s) = capture_state(&r.value_id()) {
-                                    QueuedOp::GetFrom(s.clone(), key.clone())
-                                } else {
-                                    break;
-                                }
-                            }
-                        },
-                        _Op::Put(subject, key, value) => match subject {
-                            Subject::Link(l) => QueuedOp::Put(l.clone(), key.clone(), value.into()),
-                            Subject::Ref(r) => {
-                                if let Some(s) = capture_state(&r.value_id()) {
-                                    QueuedOp::PutTo(s.clone(), key.clone(), value.into())
-                                } else {
-                                    break;
-                                }
-                            }
-                        },
-                        _Op::Post(subject, action, requires) => {
-                            let mut captured: HashMap<String, TCState> = HashMap::new();
-                            for (subjective_id, current_id) in requires {
-                                if let Some(s) = capture_state(current_id) {
-                                    captured.insert(subjective_id.to_owned(), s.clone());
-                                } else {
-                                    break;
-                                }
-                            }
-                            let txn = self.clone().extend(
-                                self.context.append(&Link::to(&format!("/{}", value_id))?),
-                                captured,
-                            );
-
-                            if let Some(subject) = subject {
-                                if let Some(subject) = capture_state(subject) {
-                                    QueuedOp::PostTo(subject.clone(), action.clone(), txn)
-                                } else {
-                                    break;
-                                }
-                            } else {
-                                QueuedOp::Post(action.clone(), txn)
-                            }
-                        }
-                    }
+            while let Some(entry) = self.queue.last() {
+                let (value_id, op) = &*entry;
+                if let Some(op) =
+                    QueuedOp::from(self.clone(), &value_id, &op, &*self.state.read().unwrap())
+                {
+                    println!("ready: {}", value_id);
+                    ready.push((value_id.clone(), op));
+                    self.queue.pop();
                 } else {
+                    println!("not ready: {}", value_id);
                     break;
-                };
-
-                self.pending.remove(&value_id);
-                ready.push((queue.pop().unwrap(), op));
+                }
             }
 
             if ready.is_empty() {
                 return Err(error::bad_request(
                     "Transaction graph stalled before completing",
-                    format!("{:?}", queue),
+                    "",
                 ));
             } else {
                 println!(
@@ -361,7 +311,7 @@ impl Transaction {
             Some(response) => match response {
                 TCState::Value(value) => Ok(value.clone()),
                 other => Err(error::bad_request(
-                    &format!("Required value {} is not serialiable", value_id),
+                    &format!("Required value {} is not serializable", value_id),
                     other,
                 )),
             },
