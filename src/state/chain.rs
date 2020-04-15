@@ -18,7 +18,7 @@ pub struct Chain {
 
 #[async_trait]
 impl TCContext for Chain {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState> {
+    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState> {
         let mut i = self.latest_block;
         let mut matched: Vec<TCValue> = vec![];
         loop {
@@ -41,7 +41,7 @@ impl TCContext for Chain {
     }
 
     async fn put(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         _txn: Arc<Transaction>,
         key: TCValue,
         value: TCState,
@@ -71,7 +71,7 @@ impl ChainContext {
 
 #[async_trait]
 impl TCExecutable for ChainContext {
-    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState> {
+    async fn post(self: &Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState> {
         let path: Link = txn.require("path")?.try_into()?;
 
         if method == "/new" {

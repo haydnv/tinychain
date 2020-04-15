@@ -17,14 +17,14 @@ pub struct Dir {
 
 #[async_trait]
 impl TCContext for Dir {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, path: TCValue) -> TCResult<TCState> {
+    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, path: TCValue) -> TCResult<TCState> {
         let _path: Link = path.try_into()?;
 
         Err(error::not_implemented())
     }
 
     async fn put(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         _txn: Arc<Transaction>,
         path: TCValue,
         _state: TCState,

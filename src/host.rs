@@ -33,12 +33,12 @@ impl Host {
             .as_nanos()
     }
 
-    pub fn new_transaction(self: Arc<Self>, op: Op) -> TCResult<Arc<Transaction>> {
-        Transaction::of(self, op)
+    pub fn new_transaction(self: &Arc<Self>, op: Op) -> TCResult<Arc<Transaction>> {
+        Transaction::of(self.clone(), op)
     }
 
     pub async fn get(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         _txn: Arc<Transaction>,
         path: Link,
         _key: TCValue,
@@ -48,7 +48,7 @@ impl Host {
     }
 
     pub async fn put(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         _txn: Arc<Transaction>,
         path: Link,
         _key: TCValue,
@@ -58,7 +58,7 @@ impl Host {
         Err(error::not_found(path))
     }
 
-    pub async fn post(self: Arc<Self>, txn: Arc<Transaction>, path: &Link) -> TCResult<TCState> {
+    pub async fn post(self: &Arc<Self>, txn: Arc<Transaction>, path: &Link) -> TCResult<TCState> {
         println!("POST {}", path);
         if path.is_empty() {
             return Ok(TCValue::None.into());

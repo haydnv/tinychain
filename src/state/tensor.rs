@@ -13,12 +13,12 @@ pub struct Tensor {}
 
 #[async_trait]
 impl TCContext for Tensor {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _slice: TCValue) -> TCResult<TCState> {
+    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, _slice: TCValue) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 
     async fn put(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         _txn: Arc<Transaction>,
         _slice: TCValue,
         _values: TCState,
@@ -29,7 +29,7 @@ impl TCContext for Tensor {
 
 #[async_trait]
 impl TCExecutable for Tensor {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: &Link) -> TCResult<TCState> {
+    async fn post(self: &Arc<Self>, _txn: Arc<Transaction>, _method: &Link) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 }

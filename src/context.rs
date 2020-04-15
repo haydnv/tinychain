@@ -11,10 +11,10 @@ pub type TCResult<T> = Result<T, error::TCError>;
 
 #[async_trait]
 pub trait TCContext: Send + Sync {
-    async fn get(self: Arc<Self>, txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState>;
+    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState>;
 
     async fn put(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         txn: Arc<Transaction>,
         key: TCValue,
         state: TCState,
@@ -23,5 +23,5 @@ pub trait TCContext: Send + Sync {
 
 #[async_trait]
 pub trait TCExecutable: Send + Sync {
-    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState>;
+    async fn post(self: &Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState>;
 }

@@ -135,7 +135,7 @@ fn calc_deps(
     value_id: ValueId,
     op: Op,
     state: &mut HashMap<ValueId, TCState>,
-    queue: Arc<Queue<(ValueId, _Op)>>,
+    queue: &Queue<(ValueId, _Op)>,
 ) -> TCResult<()> {
     let _op = match op {
         Op::Get { subject, key } => _Op::Get(subject, *key),
@@ -153,7 +153,7 @@ fn calc_deps(
             for (id, provider) in requires {
                 match provider {
                     TCValue::Op(dep) => {
-                        calc_deps(id.clone(), dep.clone(), state, queue.clone())?;
+                        calc_deps(id.clone(), dep.clone(), state, queue)?;
                         required_value_ids.push((id.clone(), id.clone()));
                     }
                     TCValue::Ref(r) => {
@@ -184,7 +184,7 @@ pub struct Transaction {
     id: TransactionId,
     context: Link,
     state: RwLock<HashMap<ValueId, TCState>>,
-    queue: Arc<Queue<(ValueId, _Op)>>,
+    queue: Queue<(ValueId, _Op)>,
 }
 
 impl Transaction {
@@ -193,8 +193,8 @@ impl Transaction {
         let context: Link = id.clone().into();
 
         let mut state: HashMap<ValueId, TCState> = HashMap::new();
-        let queue: Arc<Queue<(ValueId, _Op)>> = Queue::new();
-        calc_deps(String::from("_"), op, &mut state, queue.clone())?;
+        let queue: Queue<(ValueId, _Op)> = Queue::new();
+        calc_deps(String::from("_"), op, &mut state, &queue)?;
         queue.reverse();
 
         Ok(Arc::new(Transaction {
@@ -207,7 +207,7 @@ impl Transaction {
     }
 
     fn extend(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         context: Link,
         required: HashMap<String, TCState>,
     ) -> Arc<Transaction> {
@@ -220,12 +220,12 @@ impl Transaction {
         })
     }
 
-    pub fn context(self: Arc<Self>) -> Link {
+    pub fn context(self: &Arc<Self>) -> Link {
         self.context.clone()
     }
 
     pub async fn execute<'a>(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, TCState>> {
         while !self.queue.is_empty() {
@@ -259,12 +259,11 @@ impl Transaction {
             let mut futures = vec![];
             for (_, op) in &ready {
                 let f = match op {
-                    QueuedOp::Get(path, key) => self.clone().get(path.clone(), key.clone()).boxed(),
-                    QueuedOp::Put(path, key, state) => self
-                        .clone()
-                        .put(path.clone(), key.clone(), state.clone())
-                        .boxed(),
-                    QueuedOp::Post(path, txn) => self.host.clone().post(txn.clone(), path).boxed(),
+                    QueuedOp::Get(path, key) => self.get(path.clone(), key.clone()).boxed(),
+                    QueuedOp::Put(path, key, state) => {
+                        self.put(path.clone(), key.clone(), state.clone()).boxed()
+                    }
+                    QueuedOp::Post(path, txn) => self.host.post(txn.clone(), path).boxed(),
                     QueuedOp::GetFrom(subject, key) => {
                         subject.get(self.clone(), key.clone()).boxed()
                     }
@@ -306,7 +305,7 @@ impl Transaction {
         Ok(responses)
     }
 
-    pub fn require(self: Arc<Self>, value_id: &str) -> TCResult<TCValue> {
+    pub fn require(self: &Arc<Self>, value_id: &str) -> TCResult<TCValue> {
         match self.state.read().unwrap().get(value_id) {
             Some(response) => match response {
                 TCState::Value(value) => Ok(value.clone()),
@@ -322,13 +321,13 @@ impl Transaction {
         }
     }
 
-    pub async fn get(self: Arc<Self>, path: Link, key: TCValue) -> TCResult<TCState> {
+    pub async fn get(self: &Arc<Self>, path: Link, key: TCValue) -> TCResult<TCState> {
         println!("txn::get {}", path);
         self.host.clone().get(self.clone(), path, key).await
     }
 
     pub async fn put(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         path: Link,
         key: TCValue,
         state: TCState,
@@ -338,7 +337,7 @@ impl Transaction {
     }
 
     pub async fn post(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         path: &Link,
         args: Vec<(&str, TCValue)>,
     ) -> TCResult<TCState> {

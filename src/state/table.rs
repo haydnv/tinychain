@@ -73,7 +73,7 @@ impl Table {
 
 #[async_trait]
 impl TCContext for Table {
-    async fn get(self: Arc<Self>, txn: Arc<Transaction>, row_id: TCValue) -> TCResult<TCState> {
+    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: TCValue) -> TCResult<TCState> {
         let mut row = self.mutation(row_id.clone());
         let mutations: Vec<TCValue> = self.chain.clone().get(txn, row_id).await?.try_into()?;
         for mutation in mutations {
@@ -85,7 +85,7 @@ impl TCContext for Table {
     }
 
     async fn put(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         txn: Arc<Transaction>,
         row_id: TCValue,
         column_values: TCState,
@@ -94,13 +94,13 @@ impl TCContext for Table {
         let schema = self.schema_map();
 
         let mut row = vec![];
-        row.push(txn.clone().post(&self.key.1, vec![("from", row_id)]));
+        row.push(txn.post(&self.key.1, vec![("from", row_id)]));
         for column_value in column_values.iter() {
             let column_value: (String, TCValue) = column_value.clone().try_into()?;
             let (column, value) = column_value;
 
             if let Some(ctr) = schema.get(&column) {
-                row.push(txn.clone().post(ctr, vec![("from", value)]));
+                row.push(txn.post(ctr, vec![("from", value)]));
             } else {
                 return Err(error::bad_request(
                     "This table contains no such column",
@@ -132,7 +132,7 @@ impl TableContext {
     }
 
     async fn new_table<'a>(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         txn: Arc<Transaction>,
         schema: Vec<(String, Link)>,
         key_column: String,
@@ -177,7 +177,7 @@ impl TableContext {
 
 #[async_trait]
 impl TCExecutable for TableContext {
-    async fn post(self: Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState> {
+    async fn post(self: &Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState> {
         if method != "/new" {
             return Err(error::bad_request(
                 "TableContext has no such method",

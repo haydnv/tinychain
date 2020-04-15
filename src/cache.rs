@@ -40,23 +40,23 @@ pub struct Queue<V> {
 }
 
 impl<V> Queue<V> {
-    pub fn new() -> Arc<Queue<V>> {
-        Arc::new(Queue {
+    pub fn new() -> Queue<V> {
+        Queue {
             queue: RwLock::new(vec![]),
-        })
+        }
     }
 
-    pub fn with_capacity(i: usize) -> Arc<Queue<V>> {
-        Arc::new(Queue {
+    pub fn with_capacity(i: usize) -> Queue<V> {
+        Queue {
             queue: RwLock::new(Vec::with_capacity(i)),
-        })
+        }
     }
 
-    pub fn is_empty(self: &Arc<Self>) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.queue.read().unwrap().is_empty()
     }
 
-    pub fn last(self: &Arc<Self>) -> Option<Arc<V>> {
+    pub fn last(&self) -> Option<Arc<V>> {
         if let Some(v) = self.queue.read().unwrap().last() {
             Some(v.clone())
         } else {
@@ -64,15 +64,15 @@ impl<V> Queue<V> {
         }
     }
 
-    pub fn push(self: &Arc<Self>, item: V) {
+    pub fn push(&self, item: V) {
         self.queue.write().unwrap().push(Arc::new(item))
     }
 
-    pub fn pop(self: &Arc<Self>) -> Option<Arc<V>> {
+    pub fn pop(&self) -> Option<Arc<V>> {
         self.queue.write().unwrap().pop()
     }
 
-    pub fn reverse(self: &Arc<Self>) {
+    pub fn reverse(&self) {
         self.queue.write().unwrap().reverse()
     }
 }

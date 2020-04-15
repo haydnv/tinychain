@@ -13,12 +13,12 @@ pub struct Graph {}
 
 #[async_trait]
 impl TCContext for Graph {
-    async fn get(self: Arc<Self>, _txn: Arc<Transaction>, _node_id: TCValue) -> TCResult<TCState> {
+    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, _node_id: TCValue) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 
     async fn put(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         _txn: Arc<Transaction>,
         _node_id: TCValue,
         _node: TCState,
@@ -29,7 +29,7 @@ impl TCContext for Graph {
 
 #[async_trait]
 impl TCExecutable for Graph {
-    async fn post(self: Arc<Self>, _txn: Arc<Transaction>, _method: &Link) -> TCResult<TCState> {
+    async fn post(self: &Arc<Self>, _txn: Arc<Transaction>, _method: &Link) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 }
