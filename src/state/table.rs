@@ -44,7 +44,7 @@ impl Mutation {
     }
 }
 
-#[derive(Debug, Hash)]
+#[derive(Hash)]
 pub struct Table {
     key: (String, Link),
     columns: Vec<(String, Link)>,
@@ -119,7 +119,7 @@ impl TCContext for Table {
             .put(txn.clone(), mutation.key.clone(), mutation.values().into())
             .await?;
 
-        Ok(().into())
+        Ok(self.into())
     }
 }
 

@@ -10,7 +10,7 @@ use crate::state::TCState;
 use crate::transaction::Transaction;
 use crate::value::{Link, TCValue};
 
-#[derive(Debug, Hash)]
+#[derive(Hash)]
 pub struct Dir {
     chain: Arc<Chain>,
 }

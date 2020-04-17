@@ -29,10 +29,10 @@ const RESERVED_CHARS: [&str; 17] = [
 ];
 
 fn validate_id(id: &str) -> TCResult<()> {
-    let mut eot_char = [0];
-    let eot_char = (4 as char).encode_utf8(&mut eot_char);
+    let mut delimiter = [0];
+    let delimiter = crate::fs::DELIMITER.encode_utf8(&mut delimiter);
 
-    let reserved = [&RESERVED_CHARS[..], &[eot_char]].concat();
+    let reserved = [&RESERVED_CHARS[..], &[delimiter]].concat();
 
     for pattern in reserved.iter() {
         if id.contains(pattern) {

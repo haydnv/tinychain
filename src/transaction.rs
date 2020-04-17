@@ -234,6 +234,8 @@ impl Transaction {
         let providers: Map<ValueId, _Op> = Map::new();
         calc_deps(String::from("_"), op, &mut state, &providers)?;
 
+        println!();
+
         Ok(Arc::new(Transaction {
             host,
             id,
@@ -302,7 +304,6 @@ impl Transaction {
                     ready.push((value_id.clone(), op));
                 } else {
                     println!("not ready: {}", value_id);
-                    break;
                 }
             }
 
@@ -347,6 +348,7 @@ impl Transaction {
             let mut state = self.state.write().unwrap();
             for i in 0..results.len() {
                 state.insert(ready[i].0.to_string(), results[i].clone());
+                println!("calculated {}", ready[i].0.to_string());
             }
         }
 
@@ -365,6 +367,8 @@ impl Transaction {
                 }
             }
         }
+
+        println!();
 
         Ok(responses)
     }

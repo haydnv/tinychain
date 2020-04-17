@@ -10,7 +10,7 @@ use crate::context::TCResult;
 use crate::error;
 use crate::value::Link;
 
-const EOT_CHAR: char = 4 as char;
+pub const DELIMITER: char = 30 as char;
 
 #[derive(Debug)]
 pub struct Dir {
@@ -87,23 +87,27 @@ impl Dir {
     }
 
     pub async fn get(self: Arc<Self>, path: Link) -> TCResult<Vec<Vec<u8>>> {
+        println!("get file {}", path);
         if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
-            Ok(buffer
-                .split(|b| *b == EOT_CHAR as u8)
+            let mut records: Vec<Vec<u8>> = buffer
+                .split(|b| *b == DELIMITER as u8)
                 .map(|c| c.to_vec())
-                .collect())
+                .collect();
+            records.pop();
+            Ok(records)
         } else {
             Err(error::not_implemented())
         }
     }
 
     pub async fn append(self: Arc<Self>, path: Link, data: Vec<u8>) -> TCResult<()> {
-        if data.contains(&(EOT_CHAR as u8)) {
+        println!("append to file {}", path);
+        if data.contains(&(DELIMITER as u8)) {
             let msg = "Attempted to write a block containing the ASCII EOT control character (0x4)";
             return Err(error::internal(msg));
         }
 
-        let data = [&data[..], &[EOT_CHAR as u8]].concat();
+        let data = [&data[..], &[DELIMITER as u8]].concat();
 
         let mut buffer = self.buffer.write().unwrap();
         match buffer.get_mut(&path) {
@@ -117,6 +121,7 @@ impl Dir {
     }
 
     pub async fn exists(self: Arc<Self>, path: &Link) -> TCResult<bool> {
+        println!("check exists {}", path);
         let fs_path = self.clone().fs_path(path);
         if self.children.contains_key(path) {
             println!("found it");
