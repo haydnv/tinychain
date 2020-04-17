@@ -21,7 +21,6 @@ pub type TableContext = table::TableContext;
 
 #[derive(Clone, Debug, Hash)]
 pub enum TCState {
-    None,
     Chain(Arc<Chain>),
     Dir(Arc<Dir>),
     Graph(Arc<graph::Graph>),
@@ -69,7 +68,7 @@ impl TCState {
 
 impl From<()> for TCState {
     fn from(_: ()) -> TCState {
-        TCState::None
+        TCState::Value(TCValue::None)
     }
 }
 
@@ -128,7 +127,6 @@ impl TryFrom<TCState> for Vec<TCValue> {
 impl fmt::Display for TCState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TCState::None => write!(f, "None"),
             TCState::Chain(_) => write!(f, "(chain)"),
             TCState::Dir(_) => write!(f, "(dir)"),
             TCState::Graph(_) => write!(f, "(graph)"),
