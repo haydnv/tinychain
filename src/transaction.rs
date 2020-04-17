@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, RwLock};
 
@@ -6,7 +6,7 @@ use futures::future::try_join_all;
 use futures_util::future::FutureExt;
 use rand::Rng;
 
-use crate::cache::Queue;
+use crate::cache::Map;
 use crate::context::*;
 use crate::error;
 use crate::host::Host;
@@ -54,10 +54,49 @@ impl fmt::Display for TransactionId {
     }
 }
 
+#[derive(Hash)]
 enum _Op {
     Get(Subject, TCValue),
     Put(Subject, TCValue, TCValue),
     Post(Option<ValueId>, Link, Vec<(String, ValueId)>),
+}
+
+impl _Op {
+    fn deps(&self) -> Vec<ValueId> {
+        let mut value_ids = Vec::with_capacity(3);
+
+        match self {
+            _Op::Get(subject, key) => {
+                if let Subject::Ref(sr) = subject {
+                    value_ids.push(sr.value_id());
+                }
+                if let TCValue::Ref(kr) = key {
+                    value_ids.push(kr.value_id());
+                }
+            }
+            _Op::Put(subject, key, value) => {
+                if let Subject::Ref(sr) = subject {
+                    value_ids.push(sr.value_id());
+                }
+                if let TCValue::Ref(kr) = key {
+                    value_ids.push(kr.value_id());
+                }
+                if let TCValue::Ref(vr) = value {
+                    value_ids.push(vr.value_id());
+                }
+            }
+            _Op::Post(subject, _, requires) => {
+                if let Some(value_id) = subject {
+                    value_ids.push(value_id.clone());
+                }
+                for (_, value_id) in requires {
+                    value_ids.push(value_id.clone());
+                }
+            }
+        }
+
+        value_ids
+    }
 }
 
 enum QueuedOp {
@@ -135,7 +174,7 @@ fn calc_deps(
     value_id: ValueId,
     op: Op,
     state: &mut HashMap<ValueId, TCState>,
-    queue: &Queue<(ValueId, _Op)>,
+    providers: &Map<ValueId, _Op>,
 ) -> TCResult<()> {
     let _op = match op {
         Op::Get { subject, key } => _Op::Get(subject, *key),
@@ -153,13 +192,13 @@ fn calc_deps(
             for (id, provider) in requires {
                 match provider {
                     TCValue::Op(dep) => {
-                        calc_deps(id.clone(), dep.clone(), state, queue)?;
+                        calc_deps(id.clone(), dep.clone(), state, providers)?;
                         required_value_ids.push((id.clone(), id.clone()));
                     }
                     TCValue::Ref(r) => {
                         required_value_ids.push((id, r.value_id()));
                     }
-                    value if id != "_" => {
+                    value => {
                         if state.contains_key(&id) {
                             return Err(error::bad_request("Duplicate values provided for", id));
                         }
@@ -167,7 +206,6 @@ fn calc_deps(
                         state.insert(id.clone(), TCState::Value(value));
                         required_value_ids.push((id.clone(), id.clone()));
                     }
-                    _discard => {}
                 }
             }
 
@@ -175,7 +213,7 @@ fn calc_deps(
         }
     };
 
-    queue.push((value_id, _op));
+    providers.insert(value_id, Arc::new(_op));
     Ok(())
 }
 
@@ -184,7 +222,7 @@ pub struct Transaction {
     id: TransactionId,
     context: Link,
     state: RwLock<HashMap<ValueId, TCState>>,
-    queue: Queue<(ValueId, _Op)>,
+    providers: Map<ValueId, _Op>,
 }
 
 impl Transaction {
@@ -193,16 +231,15 @@ impl Transaction {
         let context: Link = id.clone().into();
 
         let mut state: HashMap<ValueId, TCState> = HashMap::new();
-        let queue: Queue<(ValueId, _Op)> = Queue::new();
-        calc_deps(String::from("_"), op, &mut state, &queue)?;
-        queue.reverse();
+        let providers: Map<ValueId, _Op> = Map::new();
+        calc_deps(String::from("_"), op, &mut state, &providers)?;
 
         Ok(Arc::new(Transaction {
             host,
             id,
             context,
             state: RwLock::new(state),
-            queue,
+            providers,
         }))
     }
 
@@ -216,7 +253,7 @@ impl Transaction {
             id: self.id.clone(),
             context: self.context.append(&context),
             state: RwLock::new(required),
-            queue: Queue::new(),
+            providers: Map::new(),
         })
     }
 
@@ -224,20 +261,45 @@ impl Transaction {
         self.context.clone()
     }
 
+    fn enqueue(&self, capture: &HashSet<ValueId>) -> TCResult<BTreeMap<ValueId, Arc<_Op>>> {
+        let mut providers = BTreeMap::new();
+        let mut unresolved = Vec::with_capacity(capture.len());
+        unresolved.extend(capture.iter().cloned());
+
+        let state = self.state.read().unwrap();
+        while let Some(value_id) = unresolved.pop() {
+            if !state.contains_key(&value_id) {
+                if let Some(provider) = self.providers.remove(&value_id) {
+                    providers.insert(value_id.clone(), provider.clone());
+                    for dep in provider.deps() {
+                        unresolved.push(dep);
+                    }
+                } else {
+                    return Err(error::bad_request("Required value not provided", value_id));
+                }
+            }
+        }
+
+        Ok(providers)
+    }
+
     pub async fn execute<'a>(
         self: &Arc<Self>,
         capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, TCState>> {
-        while !self.queue.is_empty() {
+        let mut providers = self.enqueue(&capture)?;
+
+        while !providers.is_empty() {
             let mut ready: Vec<(ValueId, QueuedOp)> = vec![];
-            while let Some(entry) = self.queue.last() {
-                let (value_id, op) = &*entry;
-                if let Some(op) =
-                    QueuedOp::from(self.clone(), &value_id, &op, &*self.state.read().unwrap())
-                {
-                    println!("ready: {}", value_id);
+            for (value_id, provider) in providers.iter().rev() {
+                if let Some(op) = QueuedOp::from(
+                    self.clone(),
+                    &value_id,
+                    &provider,
+                    &*self.state.read().unwrap(),
+                ) {
+                    println!("ready: {}", &value_id);
                     ready.push((value_id.clone(), op));
-                    self.queue.pop();
                 } else {
                     println!("not ready: {}", value_id);
                     break;
@@ -257,7 +319,9 @@ impl Transaction {
             }
 
             let mut futures = vec![];
-            for (_, op) in &ready {
+            for (value_id, op) in &ready {
+                providers.remove(value_id);
+
                 let f = match op {
                     QueuedOp::Get(path, key) => self.get(path.clone(), key.clone()).boxed(),
                     QueuedOp::Put(path, key, state) => {
