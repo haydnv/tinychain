@@ -57,7 +57,7 @@ impl fmt::Display for TransactionId {
 #[derive(Hash)]
 enum _Op {
     Get(Subject, TCValue),
-    Put(Subject, TCValue, TCValue),
+    Put(TCRef, TCValue, TCValue),
     Post(Option<ValueId>, Link, Vec<(String, ValueId)>),
 }
 
@@ -75,9 +75,8 @@ impl _Op {
                 }
             }
             _Op::Put(subject, key, value) => {
-                if let Subject::Ref(sr) = subject {
-                    value_ids.push(sr.value_id());
-                }
+                value_ids.push(subject.value_id());
+
                 if let TCValue::Ref(kr) = key {
                     value_ids.push(kr.value_id());
                 }
@@ -101,7 +100,6 @@ impl _Op {
 
 enum QueuedOp {
     Get(Link, TCValue),
-    Put(Link, TCValue, TCState),
     Post(Link, Arc<Transaction>),
     GetFrom(TCState, TCValue),
     PutTo(TCState, TCValue, TCState),
@@ -127,17 +125,14 @@ impl QueuedOp {
                     }
                 }
             },
-            _Op::Put(subject, key, value) => match subject {
-                Subject::Link(l) => Some(QueuedOp::Put(l.clone(), key.clone(), value.into())),
-                Subject::Ref(r) => {
-                    if let Some(s) = state.get(&r.value_id()) {
-                        Some(QueuedOp::PutTo(s.clone(), key.clone(), value.into()))
-                    } else {
-                        println!("{} not provided", r);
-                        None
-                    }
+            _Op::Put(subject, key, value) => {
+                if let Some(s) = state.get(&subject.value_id()) {
+                    Some(QueuedOp::PutTo(s.clone(), key.clone(), value.into()))
+                } else {
+                    println!("{} not provided", subject);
+                    None
                 }
-            },
+            }
             _Op::Post(subject, action, requires) => {
                 let mut captured: HashMap<String, TCState> = HashMap::new();
                 for (subjective_id, current_id) in requires {
@@ -325,9 +320,6 @@ impl Transaction {
 
                 let f = match op {
                     QueuedOp::Get(path, key) => self.get(path.clone(), key.clone()).boxed(),
-                    QueuedOp::Put(path, key, state) => {
-                        self.put(path.clone(), key.clone(), state.clone()).boxed()
-                    }
                     QueuedOp::Post(path, txn) => self.host.post(txn.clone(), path).boxed(),
                     QueuedOp::GetFrom(subject, key) => subject.get(self.clone(), key).boxed(),
                     QueuedOp::PutTo(subject, key, value) => subject
@@ -390,16 +382,6 @@ impl Transaction {
     pub async fn get(self: &Arc<Self>, path: Link, key: TCValue) -> TCResult<TCState> {
         println!("txn::get {}", path);
         self.host.get(path, key).await
-    }
-
-    pub async fn put(
-        self: &Arc<Self>,
-        path: Link,
-        key: TCValue,
-        state: TCState,
-    ) -> TCResult<TCState> {
-        println!("txn::put {} {}", path, key);
-        self.host.put(self.clone(), path, key, state).await
     }
 
     pub async fn post(
