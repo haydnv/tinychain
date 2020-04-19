@@ -4,7 +4,6 @@ use std::time;
 use crate::context::*;
 use crate::error;
 use crate::fs;
-use crate::state::ChainContext;
 use crate::state::TCState;
 use crate::state::TableContext;
 use crate::transaction::Transaction;
@@ -12,19 +11,16 @@ use crate::value::{Link, Op, TCValue, ValueContext};
 
 #[derive(Debug)]
 pub struct Host {
-    chain_context: Arc<ChainContext>,
     table_context: Arc<TableContext>,
     value_context: Arc<ValueContext>,
 }
 
 impl Host {
     pub fn new(data_dir: Arc<fs::Dir>) -> TCResult<Arc<Host>> {
-        let chain_context = ChainContext::new(data_dir.reserve(&Link::to("/chain")?)?);
-        let table_context = TableContext::new();
+        let table_context = TableContext::new(data_dir.reserve(&Link::to("/table")?)?);
         let value_context = ValueContext::new();
 
         Ok(Arc::new(Host {
-            chain_context,
             table_context,
             value_context,
         }))
@@ -70,7 +66,6 @@ impl Host {
 
         match path.as_str(0) {
             "sbin" => match path.as_str(1) {
-                "chain" => self.chain_context.post(txn, &path.slice_from(2)).await,
                 "table" => self.table_context.post(txn, &path.slice_from(2)).await,
                 "value" => self.value_context.post(txn, &path.slice_from(2)).await,
                 _ => Err(error::not_found(path)),

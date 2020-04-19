@@ -21,14 +21,6 @@ pub struct Dir {
     buffer: RwLock<HashMap<Link, Vec<u8>>>,
 }
 
-impl Drop for Dir {
-    fn drop(&mut self) {
-        if let Some(parent) = &self.parent {
-            parent.children.remove(&self.context);
-        }
-    }
-}
-
 impl Hash for Dir {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.mount_point.hash(state);
@@ -56,7 +48,7 @@ impl Dir {
         })
     }
 
-    pub fn reserve(self: Arc<Self>, path: &Link) -> TCResult<Arc<Dir>> {
+    pub fn reserve(self: &Arc<Self>, path: &Link) -> TCResult<Arc<Dir>> {
         if path == "/" {
             return Err(error::internal("Tried to reserve empty dir name"));
         }

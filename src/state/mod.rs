@@ -7,21 +7,17 @@ use crate::error;
 use crate::transaction::Transaction;
 use crate::value::{Link, TCValue};
 
-mod chain;
 mod dir;
 mod graph;
 mod table;
 mod tensor;
 
-pub type Chain = chain::Chain;
-pub type ChainContext = chain::ChainContext;
 pub type Dir = dir::Dir;
 pub type Table = table::Table;
 pub type TableContext = table::TableContext;
 
 #[derive(Clone, Hash)]
 pub enum TCState {
-    Chain(Arc<Chain>),
     Dir(Arc<Dir>),
     Graph(Arc<graph::Graph>),
     Table(Arc<Table>),
@@ -32,7 +28,6 @@ pub enum TCState {
 impl TCState {
     pub async fn get(&self, txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState> {
         match self {
-            TCState::Chain(c) => c.clone().get(txn, key).await,
             TCState::Dir(d) => d.clone().get(txn, key).await,
             TCState::Graph(g) => g.clone().get(txn, key).await,
             TCState::Table(t) => t.clone().get(txn, key).await,
@@ -48,7 +43,6 @@ impl TCState {
         value: TCState,
     ) -> TCResult<TCState> {
         match self {
-            TCState::Chain(c) => c.clone().put(txn, key, value).await,
             TCState::Dir(d) => d.clone().put(txn, key, value).await,
             TCState::Graph(g) => g.clone().put(txn, key, value).await,
             TCState::Table(t) => t.clone().put(txn, key, value).await,
@@ -69,12 +63,6 @@ impl TCState {
 impl From<()> for TCState {
     fn from(_: ()) -> TCState {
         TCState::Value(TCValue::None)
-    }
-}
-
-impl From<Arc<Chain>> for TCState {
-    fn from(chain: Arc<Chain>) -> TCState {
-        TCState::Chain(chain)
     }
 }
 
@@ -102,17 +90,6 @@ impl From<Vec<TCValue>> for TCState {
     }
 }
 
-impl TryFrom<TCState> for Arc<Chain> {
-    type Error = error::TCError;
-
-    fn try_from(state: TCState) -> TCResult<Arc<Chain>> {
-        match state {
-            TCState::Chain(chain) => Ok(chain),
-            other => Err(error::bad_request("Expected a Chain but found", other)),
-        }
-    }
-}
-
 impl TryFrom<TCState> for Vec<TCValue> {
     type Error = error::TCError;
 
@@ -127,7 +104,6 @@ impl TryFrom<TCState> for Vec<TCValue> {
 impl fmt::Display for TCState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TCState::Chain(_) => write!(f, "(chain)"),
             TCState::Dir(_) => write!(f, "(dir)"),
             TCState::Graph(_) => write!(f, "(graph)"),
             TCState::Table(_) => write!(f, "(table)"),

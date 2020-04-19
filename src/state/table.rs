@@ -7,8 +7,9 @@ use async_trait::async_trait;
 use futures::future::try_join_all;
 
 use crate::context::*;
+use crate::chain::Chain;
 use crate::error;
-use crate::state::chain::Chain;
+use crate::fs;
 use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
@@ -128,16 +129,18 @@ impl TCContext for Table {
 }
 
 #[derive(Debug)]
-pub struct TableContext {}
+pub struct TableContext {
+    root: Arc<fs::Dir>,
+}
 
 impl TableContext {
-    pub fn new() -> Arc<TableContext> {
-        Arc::new(TableContext {})
+    pub fn new(root: Arc<fs::Dir>) -> Arc<TableContext> {
+        Arc::new(TableContext { root })
     }
 
     async fn new_table<'a>(
         self: &Arc<Self>,
-        txn: Arc<Transaction>,
+        dir: Arc<fs::Dir>,
         schema: Vec<(String, Link)>,
         key_column: String,
     ) -> TCResult<Arc<Table>> {
@@ -162,14 +165,7 @@ impl TableContext {
             }
         };
 
-        let chain: Arc<Chain> = txn
-            .clone()
-            .post(
-                &Link::to("/sbin/chain/new")?,
-                vec![("path", txn.context().into())],
-            )
-            .await?
-            .try_into()?;
+        let chain = Chain::new(dir);
 
         Ok(Arc::new(Table {
             key,
@@ -191,6 +187,6 @@ impl TCExecutable for TableContext {
 
         let schema: Vec<(String, Link)> = txn.clone().require("schema")?.try_into()?;
         let key: String = txn.clone().require("key")?.try_into()?;
-        Ok(TCState::Table(self.new_table(txn, schema, key).await?))
+        Ok(TCState::Table(self.new_table(self.root.reserve(&txn.context())?, schema, key).await?))
     }
 }
