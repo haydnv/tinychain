@@ -26,7 +26,7 @@ pub enum TCState {
 }
 
 impl TCState {
-    pub async fn get(&self, txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState> {
+    pub async fn get(&self, txn: Arc<Transaction>, key: &TCValue) -> TCResult<TCState> {
         match self {
             TCState::Dir(d) => d.clone().get(txn, key).await,
             TCState::Graph(g) => g.clone().get(txn, key).await,

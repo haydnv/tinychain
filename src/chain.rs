@@ -18,7 +18,10 @@ pub struct Chain {
 
 impl Chain {
     pub fn new(fs_dir: Arc<fs::Dir>) -> Arc<Chain> {
-        Arc::new(Chain { fs_dir, latest_block: 0 })
+        Arc::new(Chain {
+            fs_dir,
+            latest_block: 0,
+        })
     }
 }
 
@@ -28,14 +31,15 @@ impl TCContext for Chain {
         // TODO
     }
 
-    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState> {
+    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, key: &TCValue) -> TCResult<TCState> {
         let mut i = self.latest_block;
         let mut matched: Vec<TCValue> = vec![];
         loop {
             let contents = self.fs_dir.clone().get(i.into()).await?;
             for entry in contents {
-                let (k, value) = serde_json::from_slice(&entry).map_err(error::internal)?;
-                if key == k {
+                let (k, value): (TCValue, TCValue) =
+                    serde_json::from_slice(&entry).map_err(error::internal)?;
+                if key == &k {
                     matched.push(value);
                 }
             }

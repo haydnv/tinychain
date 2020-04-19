@@ -6,8 +6,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::try_join_all;
 
-use crate::context::*;
 use crate::chain::Chain;
+use crate::context::*;
 use crate::error;
 use crate::fs;
 use crate::state::TCState;
@@ -78,7 +78,7 @@ impl TCContext for Table {
         // TODO
     }
 
-    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: TCValue) -> TCResult<TCState> {
+    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: &TCValue) -> TCResult<TCState> {
         let mut row = self.mutation(row_id.clone());
         let mutations: Vec<TCValue> = self.chain.clone().get(txn, row_id).await?.try_into()?;
         for mutation in mutations {
@@ -187,6 +187,9 @@ impl TCExecutable for TableContext {
 
         let schema: Vec<(String, Link)> = txn.clone().require("schema")?.try_into()?;
         let key: String = txn.clone().require("key")?.try_into()?;
-        Ok(TCState::Table(self.new_table(self.root.reserve(&txn.context())?, schema, key).await?))
+        Ok(TCState::Table(
+            self.new_table(self.root.reserve(&txn.context())?, schema, key)
+                .await?,
+        ))
     }
 }

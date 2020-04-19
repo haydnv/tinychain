@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::chain::Chain;
 use crate::context::*;
 use crate::error;
-use crate::chain::Chain;
 use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
@@ -21,9 +21,7 @@ impl TCContext for Dir {
         // TODO
     }
 
-    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, path: TCValue) -> TCResult<TCState> {
-        let _path: Link = path.try_into()?;
-
+    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, _path: &TCValue) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 

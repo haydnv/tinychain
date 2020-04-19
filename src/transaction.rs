@@ -329,9 +329,7 @@ impl Transaction {
                         self.put(path.clone(), key.clone(), state.clone()).boxed()
                     }
                     QueuedOp::Post(path, txn) => self.host.post(txn.clone(), path).boxed(),
-                    QueuedOp::GetFrom(subject, key) => {
-                        subject.get(self.clone(), key.clone()).boxed()
-                    }
+                    QueuedOp::GetFrom(subject, key) => subject.get(self.clone(), key).boxed(),
                     QueuedOp::PutTo(subject, key, value) => subject
                         .put(self.clone(), key.clone(), value.clone())
                         .boxed(),
@@ -391,7 +389,7 @@ impl Transaction {
 
     pub async fn get(self: &Arc<Self>, path: Link, key: TCValue) -> TCResult<TCState> {
         println!("txn::get {}", path);
-        self.host.clone().get(self.clone(), path, key).await
+        self.host.get(path, key).await
     }
 
     pub async fn put(
@@ -401,7 +399,7 @@ impl Transaction {
         state: TCState,
     ) -> TCResult<TCState> {
         println!("txn::put {} {}", path, key);
-        self.host.clone().put(self.clone(), path, key, state).await
+        self.host.put(self.clone(), path, key, state).await
     }
 
     pub async fn post(
@@ -418,6 +416,6 @@ impl Transaction {
                 .collect(),
         );
 
-        self.host.clone().post(txn, path).await
+        self.host.post(txn, path).await
     }
 }

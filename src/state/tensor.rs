@@ -17,7 +17,7 @@ impl TCContext for Tensor {
         // TODO
     }
 
-    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, _slice: TCValue) -> TCResult<TCState> {
+    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, _slice: &TCValue) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 

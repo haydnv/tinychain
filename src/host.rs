@@ -37,12 +37,7 @@ impl Host {
         Transaction::of(self.clone(), op)
     }
 
-    pub async fn get(
-        self: &Arc<Self>,
-        _txn: Arc<Transaction>,
-        path: Link,
-        _key: TCValue,
-    ) -> TCResult<TCState> {
+    pub async fn get(self: &Arc<Self>, path: Link, _key: TCValue) -> TCResult<TCState> {
         println!("GET {}", path);
         Err(error::not_found(path))
     }

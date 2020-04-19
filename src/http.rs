@@ -32,50 +32,49 @@ pub async fn listen(
     Ok(())
 }
 
-async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    let path = match Link::to(req.uri().path()) {
-        Ok(link) => link,
-        Err(cause) => {
-            return transform_error(Err(cause));
-        }
-    };
+async fn get(host: Arc<Host>, path: Link, params: HashMap<String, String>) -> TCResult<TCState> {
+    host.get(
+        path,
+        params
+            .get("key")
+            .cloned()
+            .map(|s| s.into())
+            .unwrap_or_else(|| TCValue::None),
+    )
+    .await
+}
 
-    let params: HashMap<String, String> = req
-        .uri()
-        .query()
-        .map(|v| {
-            url::form_urlencoded::parse(v.as_bytes())
-                .into_owned()
-                .collect()
-        })
-        .unwrap_or_else(HashMap::new);
+async fn route(
+    host: Arc<Host>,
+    method: Method,
+    path: &str,
+    params: HashMap<String, String>,
+    body: Vec<u8>,
+) -> TCResult<Vec<u8>> {
+    let path = Link::to(&path)?;
 
-    match *req.method() {
+    match method {
+        Method::GET => match get(host, path, params).await? {
+            TCState::Value(val) => Ok(serde_json::to_string_pretty(&val)?.as_bytes().to_vec()),
+            state => Err(error::bad_request(
+                "Attempt to GET unserializable state {}",
+                state,
+            )),
+        },
         Method::POST => {
             let capture: HashSet<ValueId> = if let Some(c) = params.get("capture") {
                 c.split('/').map(|s| s.to_string()).collect()
             } else {
                 HashSet::new()
             };
-
-            let body = &hyper::body::to_bytes(req.into_body()).await?;
-            let values = match serde_json::from_slice::<Vec<(ValueId, TCValue)>>(body) {
+            let values = match serde_json::from_slice::<Vec<(ValueId, TCValue)>>(&body) {
                 Ok(graph) => graph,
                 Err(cause) => {
-                    return transform_error(Err(error::bad_request(
-                        "Unable to parse request",
-                        cause,
-                    )));
+                    return Err(error::bad_request("Unable to parse request", cause));
                 }
             };
 
-            let txn = match host.clone().new_transaction(Op::post(None, path, values)) {
-                Ok(txn) => txn,
-                Err(cause) => {
-                    return transform_error(Err(cause));
-                }
-            };
-
+            let txn = host.clone().new_transaction(Op::post(None, path, values))?;
             let mut results: HashMap<String, TCValue> = HashMap::new();
             match txn.execute(capture).await {
                 Ok(responses) => {
@@ -85,34 +84,47 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
                                 results.insert(id.clone(), val.clone());
                             }
                             other => {
-                                return transform_error(Err(error::bad_request(
+                                return Err(error::bad_request(
                                     "Attempt to capture an unserializable value",
                                     other,
-                                )));
+                                ));
                             }
                         }
                     }
                 }
                 Err(cause) => {
-                    return transform_error(Err(cause));
+                    return Err(cause);
                 }
             };
 
-            let result = serde_json::to_string_pretty(&results)
+            serde_json::to_string_pretty(&results)
                 .and_then(|s| Ok(s.into_bytes()))
                 .or_else(|e| {
                     let msg = "Your request completed successfully but there was an error serializing the response";
                     Err(error::bad_request(msg, e))
-                });
-
-            transform_error(result)
+                })
         }
-        _ => {
-            let mut response = Response::new(Body::from(""));
-            *response.status_mut() = StatusCode::NOT_FOUND;
-            Ok(response)
-        }
+        _ => Err(error::not_found(path)),
     }
+}
+
+async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let path = uri.path();
+
+    let params: HashMap<String, String> = uri
+        .query()
+        .map(|v| {
+            url::form_urlencoded::parse(v.as_bytes())
+                .into_owned()
+                .collect()
+        })
+        .unwrap_or_else(HashMap::new);
+
+    let body = &hyper::body::to_bytes(req.into_body()).await?;
+
+    transform_error(route(host, method, path, params, body.to_vec()).await)
 }
 
 fn transform_error(result: TCResult<Vec<u8>>) -> Result<Response<Body>, hyper::Error> {

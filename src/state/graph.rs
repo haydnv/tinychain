@@ -17,7 +17,11 @@ impl TCContext for Graph {
         // TODO
     }
 
-    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, _node_id: TCValue) -> TCResult<TCState> {
+    async fn get(
+        self: &Arc<Self>,
+        _txn: Arc<Transaction>,
+        _node_id: &TCValue,
+    ) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 
