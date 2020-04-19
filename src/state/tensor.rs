@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::context::*;
 use crate::error;
 use crate::state::TCState;
-use crate::transaction::Transaction;
+use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
 
 #[derive(Debug, Hash)]
@@ -13,6 +13,10 @@ pub struct Tensor {}
 
 #[async_trait]
 impl TCContext for Tensor {
+    async fn commit(self: &Arc<Self>, _txn_id: TransactionId) {
+        // TODO
+    }
+
     async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, _slice: TCValue) -> TCResult<TCState> {
         Err(error::not_implemented())
     }

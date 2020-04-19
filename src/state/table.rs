@@ -10,7 +10,7 @@ use crate::context::*;
 use crate::error;
 use crate::state::chain::Chain;
 use crate::state::TCState;
-use crate::transaction::Transaction;
+use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
 
 struct Mutation {
@@ -73,6 +73,10 @@ impl Table {
 
 #[async_trait]
 impl TCContext for Table {
+    async fn commit(self: &Arc<Self>, _txn_id: TransactionId) {
+        // TODO
+    }
+
     async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: TCValue) -> TCResult<TCState> {
         let mut row = self.mutation(row_id.clone());
         let mutations: Vec<TCValue> = self.chain.clone().get(txn, row_id).await?.try_into()?;

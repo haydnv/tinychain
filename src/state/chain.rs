@@ -7,7 +7,7 @@ use crate::context::*;
 use crate::error;
 use crate::fs;
 use crate::state::TCState;
-use crate::transaction::Transaction;
+use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
 
 #[derive(Hash)]
@@ -18,6 +18,10 @@ pub struct Chain {
 
 #[async_trait]
 impl TCContext for Chain {
+    async fn commit(self: &Arc<Self>, _txn_id: TransactionId) {
+        // TODO
+    }
+
     async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, key: TCValue) -> TCResult<TCState> {
         let mut i = self.latest_block;
         let mut matched: Vec<TCValue> = vec![];
