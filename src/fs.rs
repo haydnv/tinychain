@@ -17,7 +17,7 @@ pub struct Dir {
     mount_point: PathBuf,
     context: Link,
     parent: Option<Arc<Dir>>,
-    children: Map<Link, Dir>,
+    children: Map<Link, Arc<Dir>>,
     buffer: RwLock<HashMap<Link, Vec<u8>>>,
 }
 
@@ -38,11 +38,11 @@ impl Dir {
         })
     }
 
-    fn child(self: Arc<Self>, context: Link, mount_point: PathBuf) -> Arc<Dir> {
+    fn child(self: &Arc<Self>, context: Link, mount_point: PathBuf) -> Arc<Dir> {
         Arc::new(Dir {
             mount_point,
             context,
-            parent: Some(self),
+            parent: Some(self.clone()),
             children: Map::new(),
             buffer: RwLock::new(HashMap::new()),
         })
@@ -61,12 +61,12 @@ impl Dir {
                 )));
             }
 
-            let dir = self.clone().child(path.clone(), self.fs_path(path));
+            let dir = self.child(path.clone(), self.fs_path(path));
             self.children.insert(path.nth(0), dir.clone());
             Ok(dir)
         } else {
             let dir = if let Some(dir) = self.children.get(&path.nth(0)) {
-                dir
+                dir.clone()
             } else {
                 let child_path = path.nth(0);
                 let dir = Dir::new(child_path.clone(), self.fs_path(&child_path));
@@ -78,7 +78,7 @@ impl Dir {
         }
     }
 
-    pub async fn get(self: Arc<Self>, path: Link) -> TCResult<Vec<Vec<u8>>> {
+    pub async fn get(self: &Arc<Self>, path: Link) -> TCResult<Vec<Vec<u8>>> {
         println!("get file {}", path);
         if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
             let mut records: Vec<Vec<u8>> = buffer
@@ -92,10 +92,10 @@ impl Dir {
         }
     }
 
-    pub async fn append(self: Arc<Self>, path: Link, data: Vec<u8>) -> TCResult<()> {
+    pub async fn append(self: &Arc<Self>, path: Link, data: Vec<u8>) -> TCResult<()> {
         println!("append to file {}", path);
         if data.contains(&(DELIMITER as u8)) {
-            let msg = "Attempted to write a block containing the ASCII EOT control character (0x4)";
+            let msg = "Attempted to write a block containing the ASCII record delimiter (0x30)";
             return Err(error::internal(msg));
         }
 
@@ -112,9 +112,9 @@ impl Dir {
         Ok(())
     }
 
-    pub async fn exists(self: Arc<Self>, path: &Link) -> TCResult<bool> {
+    pub async fn exists(self: &Arc<Self>, path: &Link) -> TCResult<bool> {
         println!("check exists {}", path);
-        let fs_path = self.clone().fs_path(path);
+        let fs_path = self.fs_path(path);
         if self.children.contains_key(path) {
             println!("found it");
             return Ok(true);

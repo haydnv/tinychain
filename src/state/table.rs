@@ -99,13 +99,13 @@ impl TCContext for Table {
         let schema = self.schema_map();
 
         let mut row = vec![];
-        row.push(txn.post(&self.key.1, vec![("from", row_id)]));
+        row.push(txn.post(&self.key.1, vec![("from".into(), row_id)]));
         for column_value in column_values.iter() {
             let column_value: (String, TCValue) = column_value.clone().try_into()?;
             let (column, value) = column_value;
 
             if let Some(ctr) = schema.get(&column) {
-                row.push(txn.post(ctr, vec![("from", value)]));
+                row.push(txn.post(ctr, vec![("from".into(), value)]));
             } else {
                 return Err(error::bad_request(
                     "This table contains no such column",
