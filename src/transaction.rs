@@ -59,12 +59,7 @@ fn calc_deps(
     state: &mut HashMap<ValueId, TCState>,
     queue: &Queue<(ValueId, Op)>,
 ) -> TCResult<()> {
-    if let Op::Post {
-        subject: _,
-        action: _,
-        requires,
-    } = &op
-    {
+    if let Op::Post { requires, .. } = &op {
         let mut required_value_ids: Vec<(String, ValueId)> = vec![];
         for (id, provider) in requires {
             match provider {
@@ -135,7 +130,6 @@ impl Transaction {
             state: required
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.into()))
-                .into_iter()
                 .collect(),
             queue: Queue::new(),
             mutated: Queue::new(),
@@ -218,7 +212,7 @@ impl Transaction {
 
     fn resolve(self: &Arc<Self>, id: &ValueId) -> TCResult<TCState> {
         match self.state.get(id) {
-            Some(s) => Ok(s.clone()),
+            Some(s) => Ok(s),
             None => Err(error::bad_request("Required value not provided", id)),
         }
     }
@@ -233,7 +227,7 @@ impl Transaction {
     pub fn require(self: &Arc<Self>, value_id: &str) -> TCResult<TCValue> {
         match self.state.get(&value_id.to_string()) {
             Some(response) => match response {
-                TCState::Value(value) => Ok(value.clone()),
+                TCState::Value(value) => Ok(value),
                 other => Err(error::bad_request(
                     &format!("Required value {} is not serializable", value_id),
                     other,
