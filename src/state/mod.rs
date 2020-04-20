@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::context::{TCContext, TCExecutable, TCResult};
 use crate::error;
-use crate::transaction::Transaction;
+use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
 
 mod dir;
@@ -26,6 +26,18 @@ pub enum TCState {
 }
 
 impl TCState {
+    pub async fn commit(&self, txn_id: TransactionId) {
+        match self {
+            TCState::Dir(d) => d.commit(txn_id).await,
+            TCState::Graph(g) => g.commit(txn_id).await,
+            TCState::Table(t) => t.commit(txn_id).await,
+            TCState::Tensor(t) => t.commit(txn_id).await,
+            _ => {
+                eprintln!("Tried to commit to a Value!");
+            }
+        }
+    }
+
     pub async fn get(&self, txn: Arc<Transaction>, key: &TCValue) -> TCResult<TCState> {
         match self {
             TCState::Dir(d) => d.clone().get(txn, key).await,

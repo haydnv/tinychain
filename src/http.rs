@@ -97,6 +97,8 @@ async fn route(
                 }
             };
 
+            txn.commit().await;
+
             serde_json::to_string_pretty(&results)
                 .and_then(|s| Ok(s.into_bytes()))
                 .or_else(|e| {

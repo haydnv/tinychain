@@ -3,6 +3,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
+use futures::future::join_all;
 use rand::Rng;
 
 use crate::cache::{Map, Queue};
@@ -138,6 +139,16 @@ impl Transaction {
 
     pub fn context(self: &Arc<Self>) -> Link {
         self.context.clone()
+    }
+
+    pub async fn commit(self: &Arc<Self>) {
+        join_all(
+            self.mutated
+                .to_vec()
+                .iter()
+                .map(|s| s.commit(self.id.clone())),
+        )
+        .await;
     }
 
     pub async fn execute<'a>(

@@ -48,11 +48,11 @@ impl<K: Eq + Hash, V: Hash> FromIterator<(K, V)> for Map<K, V> {
 }
 
 #[derive(Debug)]
-pub struct Queue<V> {
+pub struct Queue<V: Clone> {
     queue: RwLock<Vec<V>>,
 }
 
-impl<V> Queue<V> {
+impl<V: Clone> Queue<V> {
     pub fn new() -> Queue<V> {
         Queue {
             queue: RwLock::new(vec![]),
@@ -69,5 +69,9 @@ impl<V> Queue<V> {
 
     pub fn reverse(&self) {
         self.queue.write().unwrap().reverse()
+    }
+
+    pub fn to_vec(&self) -> Vec<V> {
+        self.queue.read().unwrap().iter().cloned().collect()
     }
 }
