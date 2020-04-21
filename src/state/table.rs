@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::hash;
 use std::iter::{repeat, FromIterator};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use futures::future::try_join_all;
@@ -14,14 +15,22 @@ use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
 
+#[derive(Clone)]
 struct Mutation {
     schema: HashMap<String, usize>,
     key: TCValue,
     values: Vec<Option<TCValue>>,
 }
 
+impl hash::Hash for Mutation {
+    fn hash<H: hash::Hasher>(&self, h: &mut H) {
+        self.key.hash(h);
+        self.values.hash(h);
+    }
+}
+
 impl Mutation {
-    fn apply(&mut self, values: Vec<Option<TCValue>>) {
+    fn apply(&mut self, values: &Vec<Option<TCValue>>) {
         for (i, value) in values.iter().enumerate() {
             if let Some(value) = value {
                 self.values[i] = Some(value.clone());
@@ -45,11 +54,11 @@ impl Mutation {
     }
 }
 
-#[derive(Hash)]
 pub struct Table {
     key: (String, Link),
     columns: Vec<(String, Link)>,
     chain: Arc<Chain>,
+    cache: RwLock<HashMap<TransactionId, Vec<Mutation>>>,
 }
 
 impl Table {
@@ -72,18 +81,42 @@ impl Table {
     }
 }
 
+impl hash::Hash for Table {
+    fn hash<H: hash::Hasher>(&self, h: &mut H) {
+        self.key.hash(h);
+        self.columns.hash(h);
+    }
+}
+
 #[async_trait]
 impl TCContext for Table {
-    async fn commit(self: &Arc<Self>, _txn_id: TransactionId) {
-        // TODO
+    async fn commit(self: &Arc<Self>, txn_id: TransactionId) {
+        let mutations = if let Some(mutations) = self.cache.read().unwrap().get(&txn_id) {
+            mutations
+                .iter()
+                .map(|m| (m.key.clone(), m.values()))
+                .collect()
+        } else {
+            vec![]
+        };
+
+        self.chain.put(txn_id, mutations).await;
     }
 
     async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: &TCValue) -> TCResult<TCState> {
+        // TODO: use the TransactionId to get the state of the chain at a specific point in time
+
         let mut row = self.mutation(row_id.clone());
-        let mutations: Vec<TCValue> = self.chain.clone().get(txn, row_id).await?.try_into()?;
+        let mutations: Vec<TCValue> = self.chain.get(txn.id(), row_id).await?.try_into()?;
         for mutation in mutations {
             let mutation: Vec<Option<TCValue>> = mutation.try_into()?;
-            row.apply(mutation);
+            row.apply(&mutation);
+        }
+
+        if let Some(mutations) = self.cache.read().unwrap().get(&txn.id()) {
+            for mutation in mutations {
+                row.apply(&mutation.values);
+            }
         }
 
         Ok(row.values().into())
@@ -119,10 +152,12 @@ impl TCContext for Table {
             mutation.set(self.columns[i].0.clone(), value.clone().try_into()?)?;
         }
 
-        self.chain
-            .clone()
-            .put(txn.clone(), mutation.key.clone(), mutation.values().into())
-            .await?;
+        let mut cache = self.cache.write().unwrap();
+        if let Some(mutations) = cache.get_mut(&txn.id()) {
+            mutations.push(mutation);
+        } else {
+            cache.insert(txn.id(), vec![mutation]);
+        }
 
         Ok(self.into())
     }
@@ -171,6 +206,7 @@ impl TableContext {
             key,
             columns,
             chain,
+            cache: RwLock::new(HashMap::new()),
         }))
     }
 }

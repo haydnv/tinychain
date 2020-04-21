@@ -66,7 +66,7 @@ impl Dir {
             Ok(dir)
         } else {
             let dir = if let Some(dir) = self.children.get(&path.nth(0)) {
-                dir.clone()
+                dir
             } else {
                 let child_path = path.nth(0);
                 let dir = Dir::new(child_path.clone(), self.fs_path(&child_path));
@@ -88,7 +88,8 @@ impl Dir {
             records.pop();
             Ok(records)
         } else {
-            Err(error::not_implemented())
+            // TODO
+            Ok(vec![])
         }
     }
 
@@ -124,6 +125,10 @@ impl Dir {
             Ok(_) => Ok(true),
             Err(_) => Ok(false),
         }
+    }
+
+    pub async fn flush(self: &Arc<Self>, _path: Link, _header: Vec<u8>, _data: Vec<Vec<u8>>) {
+        // TODO
     }
 
     fn fs_path(&self, name: &Link) -> PathBuf {

@@ -1,13 +1,10 @@
-use std::convert::TryInto;
 use std::sync::Arc;
-
-use async_trait::async_trait;
 
 use crate::context::*;
 use crate::error;
 use crate::fs;
 use crate::state::TCState;
-use crate::transaction::{Transaction, TransactionId};
+use crate::transaction::TransactionId;
 use crate::value::TCValue;
 
 #[derive(Hash)]
@@ -23,15 +20,10 @@ impl Chain {
             latest_block: 0,
         })
     }
-}
 
-#[async_trait]
-impl TCContext for Chain {
-    async fn commit(self: &Arc<Self>, _txn_id: TransactionId) {
-        // TODO
-    }
+    pub async fn get(self: &Arc<Self>, _txn_id: TransactionId, key: &TCValue) -> TCResult<TCState> {
+        // TODO: use txn_id to return the state of the chain at a specific point in time
 
-    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, key: &TCValue) -> TCResult<TCState> {
         let mut i = self.latest_block;
         let mut matched: Vec<TCValue> = vec![];
         loop {
@@ -54,20 +46,13 @@ impl TCContext for Chain {
         Ok(matched.into())
     }
 
-    async fn put(
-        self: &Arc<Self>,
-        _txn: Arc<Transaction>,
-        key: TCValue,
-        value: TCState,
-    ) -> TCResult<TCState> {
-        let value: TCValue = value.try_into()?;
-        let delta = serde_json::to_string_pretty(&(key, value))?
-            .as_bytes()
-            .to_vec();
+    pub async fn put(self: &Arc<Self>, txn_id: TransactionId, mutations: Vec<(TCValue, TCValue)>) {
+        let delta: Vec<Vec<u8>> = mutations
+            .iter()
+            .map(|e| serde_json::to_string_pretty(e).unwrap().as_bytes().to_vec())
+            .collect::<Vec<Vec<u8>>>();
         self.fs_dir
-            .clone()
-            .append(self.latest_block.into(), delta)
-            .await?;
-        Ok(().into())
+            .flush(self.latest_block.into(), txn_id.into(), delta)
+            .await;
     }
 }

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
 use crate::cache::{Map, Queue};
 use crate::context::*;
@@ -13,7 +14,7 @@ use crate::host::Host;
 use crate::state::TCState;
 use crate::value::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct TransactionId {
     timestamp: u128, // nanoseconds since Unix epoch
     nonce: u16,
@@ -139,6 +140,10 @@ impl Transaction {
 
     pub fn context(self: &Arc<Self>) -> Link {
         self.context.clone()
+    }
+
+    pub fn id(self: &Arc<Self>) -> TransactionId {
+        self.id.clone()
     }
 
     pub async fn commit(self: &Arc<Self>) {
