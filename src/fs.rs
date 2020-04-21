@@ -19,6 +19,7 @@ pub struct Dir {
     parent: Option<Arc<Dir>>,
     children: Map<Link, Arc<Dir>>,
     buffer: RwLock<HashMap<Link, Vec<u8>>>,
+    tmp: bool,
 }
 
 impl Hash for Dir {
@@ -35,6 +36,18 @@ impl Dir {
             parent: None,
             children: Map::new(),
             buffer: RwLock::new(HashMap::new()),
+            tmp: false,
+        })
+    }
+
+    pub fn new_tmp(context: Link, mount_point: PathBuf) -> Arc<Dir> {
+        Arc::new(Dir {
+            mount_point,
+            context,
+            parent: None,
+            children: Map::new(),
+            buffer: RwLock::new(HashMap::new()),
+            tmp: true,
         })
     }
 
@@ -45,6 +58,7 @@ impl Dir {
             parent: Some(self.clone()),
             children: Map::new(),
             buffer: RwLock::new(HashMap::new()),
+            tmp: self.tmp,
         })
     }
 
@@ -128,6 +142,10 @@ impl Dir {
     }
 
     pub async fn flush(self: &Arc<Self>, _path: Link, _header: Vec<u8>, _data: Vec<Vec<u8>>) {
+        if self.tmp {
+            return;
+        }
+
         // TODO
     }
 

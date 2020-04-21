@@ -164,18 +164,16 @@ impl TCContext for Table {
 }
 
 #[derive(Debug)]
-pub struct TableContext {
-    root: Arc<fs::Dir>,
-}
+pub struct TableContext {}
 
 impl TableContext {
-    pub fn new(root: Arc<fs::Dir>) -> Arc<TableContext> {
-        Arc::new(TableContext { root })
+    pub fn new() -> Arc<TableContext> {
+        Arc::new(TableContext {})
     }
 
     async fn new_table<'a>(
         self: &Arc<Self>,
-        dir: Arc<fs::Dir>,
+        fs_dir: Arc<fs::Dir>,
         schema: Vec<(String, Link)>,
         key_column: String,
     ) -> TCResult<Arc<Table>> {
@@ -200,7 +198,7 @@ impl TableContext {
             }
         };
 
-        let chain = Chain::new(dir);
+        let chain = Chain::new(fs_dir.reserve(&Link::to("/chain")?)?);
 
         Ok(Arc::new(Table {
             key,
@@ -224,8 +222,7 @@ impl TCExecutable for TableContext {
         let schema: Vec<(String, Link)> = txn.clone().require("schema")?.try_into()?;
         let key: String = txn.clone().require("key")?.try_into()?;
         Ok(TCState::Table(
-            self.new_table(self.root.reserve(&txn.context())?, schema, key)
-                .await?,
+            self.new_table(txn.context(), schema, key).await?,
         ))
     }
 }

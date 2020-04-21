@@ -13,16 +13,18 @@ use crate::value::{Link, Op, TCValue, ValueContext};
 pub struct Host {
     table_context: Arc<TableContext>,
     value_context: Arc<ValueContext>,
+    workspace: Arc<fs::Dir>,
 }
 
 impl Host {
-    pub fn new(data_dir: Arc<fs::Dir>) -> TCResult<Arc<Host>> {
-        let table_context = TableContext::new(data_dir.reserve(&Link::to("/table")?)?);
+    pub fn new(_data_dir: Arc<fs::Dir>, workspace: Arc<fs::Dir>) -> TCResult<Arc<Host>> {
+        let table_context = TableContext::new();
         let value_context = ValueContext::new();
 
         Ok(Arc::new(Host {
             table_context,
             value_context,
+            workspace,
         }))
     }
 
@@ -34,7 +36,7 @@ impl Host {
     }
 
     pub fn new_transaction(self: &Arc<Self>, op: Op) -> TCResult<Arc<Transaction>> {
-        Transaction::of(self.clone(), op)
+        Transaction::of(self.clone(), op, self.workspace.clone())
     }
 
     pub async fn get(self: &Arc<Self>, path: Link, _key: TCValue) -> TCResult<TCState> {

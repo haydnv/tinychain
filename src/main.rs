@@ -20,7 +20,10 @@ pub struct HostConfig {
     #[structopt(long = "http_port", default_value = "8702")]
     pub http_port: u16,
 
-    #[structopt(long = "workspace", default_value = "/tmp/tc")]
+    #[structopt(long = "data_dir", default_value = "/tmp/tc/data")]
+    pub data_dir: PathBuf,
+
+    #[structopt(long = "workspace", default_value = "/tmp/tc/tmp")]
     pub workspace: PathBuf,
 }
 
@@ -31,8 +34,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Tinychain version {}", VERSION);
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
 
-    let data_dir = fs::Dir::new(value::Link::to("/")?, config.workspace);
-    let host = host::Host::new(data_dir)?;
+    let data_dir = fs::Dir::new(value::Link::to("/")?, config.data_dir);
+    let workspace = fs::Dir::new_tmp(value::Link::to("/")?, config.workspace);
+    let host = host::Host::new(data_dir, workspace)?;
     http::listen(host, config.http_port).await?;
     Ok(())
 }

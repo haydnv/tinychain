@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::cache::{Map, Queue};
 use crate::context::*;
 use crate::error;
+use crate::fs;
 use crate::host::Host;
 use crate::state::TCState;
 use crate::value::*;
@@ -92,16 +93,16 @@ fn calc_deps(
 pub struct Transaction {
     host: Arc<Host>,
     id: TransactionId,
-    context: Link,
+    context: Arc<fs::Dir>,
     state: Map<ValueId, TCState>,
     queue: Queue<(ValueId, Op)>,
     mutated: Queue<TCState>,
 }
 
 impl Transaction {
-    pub fn of(host: Arc<Host>, op: Op) -> TCResult<Arc<Transaction>> {
+    pub fn of(host: Arc<Host>, op: Op, root: Arc<fs::Dir>) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
-        let context: Link = id.clone().into();
+        let context = root.reserve(&id.clone().into())?;
 
         let mut state: HashMap<ValueId, TCState> = HashMap::new();
         let queue: Queue<(ValueId, Op)> = Queue::new();
@@ -122,13 +123,13 @@ impl Transaction {
 
     fn extend(
         self: &Arc<Self>,
-        context: Link,
+        context: Arc<fs::Dir>,
         required: HashMap<ValueId, TCValue>,
     ) -> Arc<Transaction> {
         Arc::new(Transaction {
             host: self.host.clone(),
             id: self.id.clone(),
-            context: self.context.append(&context),
+            context,
             state: required
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.into()))
@@ -138,7 +139,7 @@ impl Transaction {
         })
     }
 
-    pub fn context(self: &Arc<Self>) -> Link {
+    pub fn context(self: &Arc<Self>) -> Arc<fs::Dir> {
         self.context.clone()
     }
 
@@ -194,7 +195,8 @@ impl Transaction {
                         deps.insert(dest_id, dep.try_into()?);
                     }
 
-                    let txn = self.extend(Link::to(&format!("/{}", value_id))?, deps);
+                    let subcontext = Link::to(&format!("/{}", value_id))?;
+                    let txn = self.extend(self.context.reserve(&subcontext)?, deps);
                     match subject {
                         Some(r) => {
                             let subject = self.resolve(&r.value_id())?;
@@ -249,10 +251,7 @@ impl Transaction {
                     other,
                 )),
             },
-            None => Err(error::bad_request(
-                &format!("{}: no value was provided for", self.context),
-                value_id,
-            )),
+            None => Err(error::bad_request("No value was provided for", value_id)),
         }
     }
 
@@ -267,11 +266,7 @@ impl Transaction {
         args: Vec<(ValueId, TCValue)>,
     ) -> TCResult<TCState> {
         println!("txn::post {} {:?}", path, args);
-
-        let txn = self
-            .clone()
-            .extend(self.context.clone(), args.into_iter().collect());
-
+        let txn = self.extend(self.context.clone(), args.into_iter().collect());
         self.host.post(txn, path).await
     }
 }
