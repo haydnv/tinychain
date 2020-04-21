@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::fmt;
 
 use serde::de;
@@ -99,6 +100,20 @@ impl IntoIterator for Link {
 impl PartialEq<str> for Link {
     fn eq(&self, other: &str) -> bool {
         self.to_string().as_str() == other
+    }
+}
+
+impl PartialEq<&str> for Link {
+    fn eq(&self, other: &&str) -> bool {
+        &self.to_string().as_str() == other
+    }
+}
+
+impl TryFrom<&str> for Link {
+    type Error = error::TCError;
+
+    fn try_from(s: &str) -> TCResult<Link> {
+        Link::to(s)
     }
 }
 

@@ -29,10 +29,6 @@ impl<K: Eq + Hash, V: Clone + Hash> Map<K, V> {
     pub fn insert(&self, key: K, value: V) -> Option<V> {
         self.map.write().unwrap().insert(key, value)
     }
-
-    pub fn remove(&self, key: &K) -> Option<V> {
-        self.map.write().unwrap().remove(key)
-    }
 }
 
 impl<K: Eq + Hash, V: Hash> FromIterator<(K, V)> for Map<K, V> {

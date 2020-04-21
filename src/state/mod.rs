@@ -78,6 +78,12 @@ impl From<()> for TCState {
     }
 }
 
+impl From<Arc<Dir>> for TCState {
+    fn from(dir: Arc<Dir>) -> TCState {
+        TCState::Dir(dir)
+    }
+}
+
 impl From<&Arc<Table>> for TCState {
     fn from(table: &Arc<Table>) -> TCState {
         TCState::Table(table.clone())

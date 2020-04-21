@@ -17,7 +17,11 @@ pub struct Host {
 }
 
 impl Host {
-    pub fn new(_data_dir: Arc<fs::Dir>, workspace: Arc<fs::Dir>) -> TCResult<Arc<Host>> {
+    pub fn new(
+        _data_dir: Arc<fs::Dir>,
+        workspace: Arc<fs::Dir>,
+        _hosted: Vec<Link>,
+    ) -> TCResult<Arc<Host>> {
         let table_context = TableContext::new();
         let value_context = ValueContext::new();
 

@@ -36,3 +36,19 @@ impl TCContext for Dir {
         Err(error::not_implemented())
     }
 }
+
+struct DirContext;
+
+#[async_trait]
+impl TCExecutable for DirContext {
+    async fn post(self: &Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState> {
+        if method != "/new" {
+            return Err(error::bad_request("DirContext has no such method", method));
+        }
+
+        Ok(Arc::new(Dir {
+            chain: Chain::new(txn.context().reserve(&"/.chain".try_into()?)?),
+        })
+        .into())
+    }
+}
