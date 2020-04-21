@@ -13,6 +13,7 @@ mod table;
 mod tensor;
 
 pub type Dir = dir::Dir;
+pub type DirContext = dir::DirContext;
 pub type Table = table::Table;
 pub type TableContext = table::TableContext;
 

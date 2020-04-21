@@ -1,35 +1,64 @@
+use std::convert::TryInto;
 use std::sync::Arc;
 use std::time;
 
 use crate::context::*;
 use crate::error;
 use crate::fs;
-use crate::state::TCState;
-use crate::state::TableContext;
+use crate::state::{Dir, DirContext, TCState, TableContext};
 use crate::transaction::Transaction;
 use crate::value::{Link, Op, TCValue, ValueContext};
 
+const RESERVED: [&str; 1] = ["/sbin"];
+
 #[derive(Debug)]
 pub struct Host {
+    dir_context: Arc<DirContext>,
     table_context: Arc<TableContext>,
     value_context: Arc<ValueContext>,
     workspace: Arc<fs::Dir>,
+    root: Arc<Dir>,
 }
 
 impl Host {
-    pub fn new(
-        _data_dir: Arc<fs::Dir>,
-        workspace: Arc<fs::Dir>,
-        _hosted: Vec<Link>,
-    ) -> TCResult<Arc<Host>> {
+    pub fn new(data_dir: Arc<fs::Dir>, workspace: Arc<fs::Dir>) -> TCResult<Arc<Host>> {
+        let dir_context = DirContext::new();
         let table_context = TableContext::new();
         let value_context = ValueContext::new();
 
+        let root = Dir::new(data_dir)?;
+
         Ok(Arc::new(Host {
+            dir_context,
             table_context,
             value_context,
             workspace,
+            root,
         }))
+    }
+
+    pub async fn claim(self: &Arc<Self>, path: Link) -> TCResult<()> {
+        let txn = Transaction::new(self.clone(), self.workspace.clone())?;
+        for reserved in RESERVED.iter() {
+            if path.starts_with(reserved) {
+                return Err(error::bad_request(
+                    "Attempted to host a reserved path",
+                    reserved,
+                ));
+            }
+        }
+
+        self.root
+            .put(
+                txn.clone(),
+                path.into(),
+                self.dir_context
+                    .post(txn.clone(), &"/new".try_into()?)
+                    .await?,
+            )
+            .await?;
+        txn.commit().await;
+        Ok(())
     }
 
     pub fn time(&self) -> u128 {

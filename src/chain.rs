@@ -7,7 +7,7 @@ use crate::state::TCState;
 use crate::transaction::TransactionId;
 use crate::value::TCValue;
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub struct Chain {
     fs_dir: Arc<fs::Dir>,
     latest_block: u64,

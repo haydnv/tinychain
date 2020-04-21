@@ -6,13 +6,22 @@ use async_trait::async_trait;
 use crate::chain::Chain;
 use crate::context::*;
 use crate::error;
+use crate::fs;
 use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub struct Dir {
     chain: Arc<Chain>,
+}
+
+impl Dir {
+    pub fn new(fs_dir: Arc<fs::Dir>) -> TCResult<Arc<Dir>> {
+        Ok(Arc::new(Dir {
+            chain: Chain::new(fs_dir.reserve(&"/.chain".try_into()?)?),
+        }))
+    }
 }
 
 #[async_trait]
@@ -37,7 +46,14 @@ impl TCContext for Dir {
     }
 }
 
-struct DirContext;
+#[derive(Debug)]
+pub struct DirContext;
+
+impl DirContext {
+    pub fn new() -> Arc<DirContext> {
+        Arc::new(DirContext)
+    }
+}
 
 #[async_trait]
 impl TCExecutable for DirContext {
@@ -46,9 +62,6 @@ impl TCExecutable for DirContext {
             return Err(error::bad_request("DirContext has no such method", method));
         }
 
-        Ok(Arc::new(Dir {
-            chain: Chain::new(txn.context().reserve(&"/.chain".try_into()?)?),
-        })
-        .into())
+        Ok(Dir::new(txn.context())?.into())
     }
 }

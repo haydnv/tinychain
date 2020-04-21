@@ -74,6 +74,15 @@ impl Link {
             segments: self.segments[..end].to_vec(),
         }
     }
+
+    pub fn starts_with(&self, path: &str) -> bool {
+        let link: String = self.into();
+        if link.len() < path.len() {
+            false
+        } else {
+            &link[0..path.len()] == path
+        }
+    }
 }
 
 impl TCValueTryFrom for Link {}
@@ -81,6 +90,12 @@ impl TCValueTryFrom for Link {}
 impl From<u64> for Link {
     fn from(i: u64) -> Link {
         Link::to(&format!("/{}", i)).unwrap()
+    }
+}
+
+impl From<&Link> for String {
+    fn from(l: &Link) -> String {
+        format!("{}", l)
     }
 }
 

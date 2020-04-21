@@ -59,7 +59,7 @@ impl std::error::Error for TCError {}
 
 impl fmt::Debug for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{{ file: {}, line: {} }}", file!(), line!())
+        write!(f, "{}", self)
     }
 }
 

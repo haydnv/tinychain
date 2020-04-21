@@ -100,6 +100,19 @@ pub struct Transaction {
 }
 
 impl Transaction {
+    pub fn new(host: Arc<Host>, root: Arc<fs::Dir>) -> TCResult<Arc<Transaction>> {
+        let id = TransactionId::new(host.time());
+        let context = root.reserve(&id.clone().into())?;
+        Ok(Arc::new(Transaction {
+            host,
+            id,
+            context,
+            state: Map::new(),
+            queue: Queue::new(),
+            mutated: Queue::new(),
+        }))
+    }
+
     pub fn of(host: Arc<Host>, op: Op, root: Arc<fs::Dir>) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context = root.reserve(&id.clone().into())?;
