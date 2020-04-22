@@ -5,10 +5,10 @@ use std::sync::{Arc, RwLock};
 
 use tokio::fs;
 
-use crate::cache::Map;
 use crate::context::TCResult;
 use crate::error;
 use crate::internal::DELIMITER;
+use crate::internal::cache::Map;
 use crate::value::Link;
 
 #[derive(Debug)]

@@ -7,11 +7,11 @@ use futures::future::join_all;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::cache::{Map, Queue};
 use crate::context::*;
 use crate::error;
 use crate::host::Host;
 use crate::internal::FsDir;
+use crate::internal::cache::{Map, Queue};
 use crate::state::TCState;
 use crate::value::*;
 
