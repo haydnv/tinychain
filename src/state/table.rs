@@ -7,10 +7,10 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use futures::future::try_join_all;
 
-use crate::chain::Chain;
 use crate::context::*;
 use crate::error;
 use crate::fs;
+use crate::internal::Chain;
 use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
@@ -30,7 +30,7 @@ impl hash::Hash for Mutation {
 }
 
 impl Mutation {
-    fn apply(&mut self, values: &Vec<Option<TCValue>>) {
+    fn apply(&mut self, values: &[Option<TCValue>]) {
         for (i, value) in values.iter().enumerate() {
             if let Some(value) = value {
                 self.values[i] = Some(value.clone());

@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use structopt::StructOpt;
 
 mod cache;
-mod chain;
 mod context;
 mod error;
 mod fs;
 mod host;
 mod http;
+mod internal;
 mod state;
 mod transaction;
 mod value;

@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::chain::Chain;
 use crate::context::*;
 use crate::error;
 use crate::fs;
+use crate::internal::Chain;
 use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
