@@ -4,7 +4,7 @@ use std::time;
 
 use crate::context::*;
 use crate::error;
-use crate::fs;
+use crate::internal::FsDir;
 use crate::state::{Dir, DirContext, TCState, TableContext};
 use crate::transaction::Transaction;
 use crate::value::{Link, Op, TCValue, ValueContext};
@@ -16,12 +16,12 @@ pub struct Host {
     dir_context: Arc<DirContext>,
     table_context: Arc<TableContext>,
     value_context: Arc<ValueContext>,
-    workspace: Arc<fs::Dir>,
+    workspace: Arc<FsDir>,
     root: Arc<Dir>,
 }
 
 impl Host {
-    pub fn new(data_dir: Arc<fs::Dir>, workspace: Arc<fs::Dir>) -> TCResult<Arc<Host>> {
+    pub fn new(data_dir: Arc<FsDir>, workspace: Arc<FsDir>) -> TCResult<Arc<Host>> {
         let dir_context = DirContext::new();
         let table_context = TableContext::new();
         let value_context = ValueContext::new();

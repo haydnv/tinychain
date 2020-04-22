@@ -9,8 +9,7 @@ use futures::future::try_join_all;
 
 use crate::context::*;
 use crate::error;
-use crate::fs;
-use crate::internal::Chain;
+use crate::internal::{Chain, FsDir};
 use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
@@ -173,7 +172,7 @@ impl TableContext {
 
     async fn new_table<'a>(
         self: &Arc<Self>,
-        fs_dir: Arc<fs::Dir>,
+        fs_dir: Arc<FsDir>,
         schema: Vec<(String, Link)>,
         key_column: String,
     ) -> TCResult<Arc<Table>> {

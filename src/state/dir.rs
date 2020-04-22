@@ -5,8 +5,7 @@ use async_trait::async_trait;
 
 use crate::context::*;
 use crate::error;
-use crate::fs;
-use crate::internal::Chain;
+use crate::internal::{Chain, FsDir};
 use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
@@ -17,7 +16,7 @@ pub struct Dir {
 }
 
 impl Dir {
-    pub fn new(fs_dir: Arc<fs::Dir>) -> TCResult<Arc<Dir>> {
+    pub fn new(fs_dir: Arc<FsDir>) -> TCResult<Arc<Dir>> {
         Ok(Arc::new(Dir {
             chain: Chain::new(fs_dir.reserve(&"/.chain".try_into()?)?),
         }))

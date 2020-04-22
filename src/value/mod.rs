@@ -30,7 +30,7 @@ const RESERVED_CHARS: [&str; 17] = [
 
 fn validate_id(id: &str) -> TCResult<()> {
     let mut delimiter = [0];
-    let delimiter = crate::fs::DELIMITER.encode_utf8(&mut delimiter);
+    let delimiter = crate::internal::DELIMITER.encode_utf8(&mut delimiter);
 
     let reserved = [&RESERVED_CHARS[..], &[delimiter]].concat();
 

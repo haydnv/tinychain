@@ -8,9 +8,8 @@ use tokio::fs;
 use crate::cache::Map;
 use crate::context::TCResult;
 use crate::error;
+use crate::internal::DELIMITER;
 use crate::value::Link;
-
-pub const DELIMITER: char = 30 as char;
 
 #[derive(Debug)]
 pub struct Dir {

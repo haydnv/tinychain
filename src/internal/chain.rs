@@ -2,19 +2,19 @@ use std::sync::Arc;
 
 use crate::context::*;
 use crate::error;
-use crate::fs;
+use crate::internal::FsDir;
 use crate::state::TCState;
 use crate::transaction::TransactionId;
 use crate::value::TCValue;
 
 #[derive(Debug, Hash)]
 pub struct Chain {
-    fs_dir: Arc<fs::Dir>,
+    fs_dir: Arc<FsDir>,
     latest_block: u64,
 }
 
 impl Chain {
-    pub fn new(fs_dir: Arc<fs::Dir>) -> Arc<Chain> {
+    pub fn new(fs_dir: Arc<FsDir>) -> Arc<Chain> {
         Arc::new(Chain {
             fs_dir,
             latest_block: 0,
