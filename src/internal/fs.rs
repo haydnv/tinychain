@@ -3,12 +3,13 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
+use futures::Future;
 use tokio::fs;
 
 use crate::context::TCResult;
 use crate::error;
-use crate::internal::DELIMITER;
 use crate::internal::cache::Map;
+use crate::internal::DELIMITER;
 use crate::value::Link;
 
 #[derive(Debug)]
@@ -91,18 +92,20 @@ impl Dir {
         }
     }
 
-    pub async fn get(self: &Arc<Self>, path: Link) -> TCResult<Vec<Vec<u8>>> {
+    pub fn get(self: Arc<Self>, path: Link) -> impl Future<Output = TCResult<Vec<Vec<u8>>>> {
         println!("get file {}", path);
-        if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
-            let mut records: Vec<Vec<u8>> = buffer
-                .split(|b| *b == DELIMITER as u8)
-                .map(|c| c.to_vec())
-                .collect();
-            records.pop();
-            Ok(records)
-        } else {
-            // TODO
-            Ok(vec![])
+        async move {
+            if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
+                let mut records: Vec<Vec<u8>> = buffer
+                    .split(|b| *b == DELIMITER as u8)
+                    .map(|c| c.to_vec())
+                    .collect();
+                records.pop();
+                Ok(records)
+            } else {
+                // TODO
+                Ok(vec![])
+            }
         }
     }
 

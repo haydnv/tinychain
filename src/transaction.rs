@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::context::*;
 use crate::error;
 use crate::host::Host;
-use crate::internal::FsDir;
 use crate::internal::cache::{Map, Queue};
+use crate::internal::FsDir;
 use crate::state::TCState;
 use crate::value::*;
 

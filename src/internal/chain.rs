@@ -1,5 +1,9 @@
 use std::sync::Arc;
 
+use futures::stream::{FuturesOrdered, Stream};
+use futures::Future;
+use futures_util::{FutureExt, TryFutureExt};
+
 use crate::context::*;
 use crate::error;
 use crate::internal::FsDir;
@@ -54,5 +58,31 @@ impl Chain {
         self.fs_dir
             .flush(self.latest_block.into(), txn_id.into(), delta)
             .await;
+    }
+}
+
+impl From<Chain> for Box<dyn Stream<Item = TCResult<Vec<(TCValue, TCValue)>>>> {
+    fn from(chain: Chain) -> Box<dyn Stream<Item = TCResult<Vec<(TCValue, TCValue)>>>> {
+        let mut stream: FuturesOrdered<
+            Box<dyn Future<Output = TCResult<Vec<(TCValue, TCValue)>>> + Unpin>,
+        > = FuturesOrdered::new();
+
+        for i in 0..chain.latest_block {
+            let fut = chain
+                .fs_dir
+                .clone()
+                .get(i.into())
+                .and_then(|contents| async {
+                    let mut results: Vec<(TCValue, TCValue)> = Vec::with_capacity(contents.len());
+                    for entry in contents {
+                        let result = serde_json::from_slice(&entry).map_err(error::internal)?;
+                        results.push(result);
+                    }
+                    Ok(results)
+                });
+            stream.push(Box::new(fut.boxed()));
+        }
+
+        Box::new(stream)
     }
 }
