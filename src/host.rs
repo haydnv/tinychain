@@ -5,7 +5,7 @@ use std::time;
 use crate::context::*;
 use crate::error;
 use crate::internal::FsDir;
-use crate::state::{Dir, DirContext, TCState, TableContext};
+use crate::state::{TCState, TableContext};
 use crate::transaction::Transaction;
 use crate::value::{Link, Op, TCValue};
 
@@ -13,24 +13,17 @@ const RESERVED: [&str; 1] = ["/sbin"];
 
 #[derive(Debug)]
 pub struct Host {
-    dir_context: Arc<DirContext>,
     table_context: Arc<TableContext>,
     workspace: Arc<FsDir>,
-    root: Arc<Dir>,
 }
 
 impl Host {
-    pub fn new(data_dir: Arc<FsDir>, workspace: Arc<FsDir>) -> TCResult<Arc<Host>> {
-        let dir_context = DirContext::new();
+    pub fn new(_data_dir: Arc<FsDir>, workspace: Arc<FsDir>) -> TCResult<Arc<Host>> {
         let table_context = TableContext::new();
 
-        let root = Dir::new(data_dir)?;
-
         Ok(Arc::new(Host {
-            dir_context,
             table_context,
             workspace,
-            root,
         }))
     }
 
@@ -45,15 +38,8 @@ impl Host {
             }
         }
 
-        self.root
-            .put(
-                txn.clone(),
-                path.into(),
-                self.dir_context
-                    .post(txn.clone(), &"/new".try_into()?)
-                    .await?,
-            )
-            .await?;
+        // TODO
+
         txn.commit().await;
         Ok(())
     }

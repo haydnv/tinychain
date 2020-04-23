@@ -6,7 +6,7 @@ use crate::context::*;
 use crate::error;
 use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCValue};
+use crate::value::TCValue;
 
 #[derive(Debug)]
 pub struct Graph {}
@@ -31,13 +31,6 @@ impl TCContext for Graph {
         _node_id: TCValue,
         _node: TCState,
     ) -> TCResult<TCState> {
-        Err(error::not_implemented())
-    }
-}
-
-#[async_trait]
-impl TCExecutable for Graph {
-    async fn post(self: &Arc<Self>, _txn: Arc<Transaction>, _method: &Link) -> TCResult<TCState> {
         Err(error::not_implemented())
     }
 }

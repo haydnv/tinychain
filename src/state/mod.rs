@@ -2,37 +2,29 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
-use crate::context::{TCContext, TCExecutable, TCResult};
+use crate::context::{TCContext, TCResult};
 use crate::error;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
 
-mod dir;
 mod graph;
 mod table;
-mod tensor;
 
-pub type Dir = dir::Dir;
-pub type DirContext = dir::DirContext;
 pub type Table = table::Table;
 pub type TableContext = table::TableContext;
 
 #[derive(Clone)]
 pub enum TCState {
-    Dir(Arc<Dir>),
     Graph(Arc<graph::Graph>),
     Table(Arc<Table>),
-    Tensor(Arc<tensor::Tensor>),
     Value(TCValue),
 }
 
 impl TCState {
     pub async fn commit(&self, txn_id: TransactionId) {
         match self {
-            TCState::Dir(d) => d.commit(txn_id).await,
             TCState::Graph(g) => g.commit(txn_id).await,
             TCState::Table(t) => t.commit(txn_id).await,
-            TCState::Tensor(t) => t.commit(txn_id).await,
             _ => {
                 eprintln!("Tried to commit to a Value!");
             }
@@ -41,10 +33,8 @@ impl TCState {
 
     pub async fn get(&self, txn: Arc<Transaction>, key: &TCValue) -> TCResult<TCState> {
         match self {
-            TCState::Dir(d) => d.clone().get(txn, key).await,
             TCState::Graph(g) => g.clone().get(txn, key).await,
             TCState::Table(t) => t.clone().get(txn, key).await,
-            TCState::Tensor(t) => t.clone().get(txn, key).await,
             _ => Err(error::bad_request("Cannot GET from", self)),
         }
     }
@@ -56,20 +46,14 @@ impl TCState {
         value: TCState,
     ) -> TCResult<TCState> {
         match self {
-            TCState::Dir(d) => d.clone().put(txn, key, value).await,
             TCState::Graph(g) => g.clone().put(txn, key, value).await,
             TCState::Table(t) => t.clone().put(txn, key, value).await,
-            TCState::Tensor(t) => t.clone().put(txn, key, value).await,
             _ => Err(error::bad_request("Cannot PUT to", self)),
         }
     }
 
-    pub async fn post(&self, txn: Arc<Transaction>, action: &Link) -> TCResult<TCState> {
-        match self {
-            TCState::Graph(g) => g.clone().post(txn, action).await,
-            TCState::Tensor(t) => t.clone().post(txn, action).await,
-            _ => Err(error::bad_request("Cannot POST to", self)),
-        }
+    pub async fn post(&self, _txn: Arc<Transaction>, _method: &Link) -> TCResult<TCState> {
+        Err(error::not_implemented())
     }
 }
 
@@ -79,15 +63,9 @@ impl From<()> for TCState {
     }
 }
 
-impl From<Arc<Dir>> for TCState {
-    fn from(dir: Arc<Dir>) -> TCState {
-        TCState::Dir(dir)
-    }
-}
-
 impl From<Arc<Table>> for TCState {
     fn from(table: Arc<Table>) -> TCState {
-        TCState::Table(table.clone())
+        TCState::Table(table)
     }
 }
 
@@ -123,10 +101,8 @@ impl TryFrom<TCState> for Vec<TCValue> {
 impl fmt::Display for TCState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TCState::Dir(_) => write!(f, "(dir)"),
             TCState::Graph(_) => write!(f, "(graph)"),
             TCState::Table(_) => write!(f, "(table)"),
-            TCState::Tensor(_) => write!(f, "(tensor)"),
             TCState::Value(value) => write!(f, "value: {}", value),
         }
     }
