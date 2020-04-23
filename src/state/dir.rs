@@ -17,9 +17,11 @@ pub struct Dir {
 
 impl Dir {
     pub fn new(fs_dir: Arc<FsDir>) -> TCResult<Arc<Dir>> {
-        Ok(Arc::new(Dir {
-            chain: Chain::new(fs_dir.reserve(&"/.chain".try_into()?)?),
-        }))
+        let chain: Chain = Chain::new(fs_dir.reserve(&"/.chain".try_into()?)?);
+        let dir = Dir {
+            chain: Arc::new(chain),
+        };
+        Ok(Arc::new(dir))
     }
 }
 

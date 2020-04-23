@@ -12,13 +12,14 @@ use crate::state::TCState;
 mod link;
 mod op;
 mod reference;
+mod version;
 
 pub type Link = link::Link;
 pub type Op = op::Op;
 pub type TCRef = reference::TCRef;
 pub type Subject = op::Subject;
 pub type ValueId = String;
-pub type Version = semver::Version;
+pub type Version = version::Version;
 
 pub trait TCValueTryInto: TryInto<TCValue, Error = error::TCError> {}
 pub trait TCValueTryFrom: TryFrom<TCValue, Error = error::TCError> {}

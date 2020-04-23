@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use futures::future::try_join_all;
+use serde::{Deserialize, Serialize};
 
 use crate::context::*;
 use crate::error;
@@ -15,15 +16,15 @@ use crate::value::{Link, TCValue, Version};
 
 type Mutation = (Vec<TCValue>, Vec<Option<TCValue>>);
 
+#[derive(Deserialize, Serialize)]
 struct Schema {
     version: Version,
     key: Vec<(String, Link)>,
     columns: Vec<(String, Link)>,
-    chain: Arc<Chain>,
 }
 
 impl Schema {
-    fn into_map(self: &Arc<Self>) -> HashMap<String, Link> {
+    fn as_map(self: &Arc<Self>) -> HashMap<String, Link> {
         let mut map: HashMap<String, Link> = HashMap::new();
         for (name, ctr) in &self.key {
             map.insert(name.clone(), ctr.clone());
@@ -155,10 +156,7 @@ impl TCContext for Table {
         // TODO: use the TransactionId to get the state of the chain at a specific point in time
 
         let mut row = self.new_row(&txn, row_id.clone()).await?;
-        let mutations = self
-            .chain
-            .get::<Mutation>(txn.id(), &row.key.clone().into())
-            .await?;
+        let mutations: Vec<Mutation> = self.chain.get(txn.id(), &row.key.clone().into()).await?;
         for mutation in mutations {
             row.update(&mutation)?;
         }
@@ -180,7 +178,7 @@ impl TCContext for Table {
     ) -> TCResult<TCState> {
         let row_id = self.row_id(&txn, row_id).await?;
         let column_values: Vec<TCValue> = column_values.try_into()?;
-        let schema: HashMap<String, Link> = self.schema.into_map();
+        let schema: HashMap<String, Link> = self.schema.as_map();
 
         let mut names = vec![];
         let mut values = vec![];
@@ -250,14 +248,20 @@ impl TCExecutable for TableContext {
 
         let key: Vec<(String, Link)> = txn.require("key")?.try_into()?;
         let columns: Vec<(String, Link)> = txn.require("columns")?.try_into()?;
+
+        let schema = Arc::new(Schema {
+            key,
+            columns,
+            version: Version::parse("1.0.0")?,
+        });
+
+        let table_chain = Chain::new(
+            txn.context()
+                .reserve(&Link::to(&format!("/{}", schema.version))?)?,
+        );
         Ok(Arc::new(Table {
-            schema: Arc::new(Schema {
-                key,
-                columns,
-                chain: Chain::new(txn.context().reserve(&Link::to("/schema")?)?),
-                version: Version::parse("1.0.0").map_err(error::internal)?,
-            }),
-            chain: Chain::new(txn.context().reserve(&Link::to("/chain")?)?),
+            schema,
+            chain: Arc::new(table_chain),
             cache: RwLock::new(HashMap::new()),
         })
         .into())

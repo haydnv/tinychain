@@ -81,12 +81,12 @@ impl Host {
                     "string" => {
                         let s: String = key.try_into()?;
                         Ok(TCState::Value(s.into()))
-                    },
-                    _ => Err(error::not_found(path))
-                }
-                _ => Err(error::not_found(path))
-            }
-            _ => Err(error::not_found(path))
+                    }
+                    _ => Err(error::not_found(path)),
+                },
+                _ => Err(error::not_found(path)),
+            },
+            _ => Err(error::not_found(path)),
         }
     }
 
@@ -106,7 +106,7 @@ impl Host {
         if path.is_empty() {
             return Ok(TCValue::None.into());
         } else if path.len() < 3 {
-            return Err(error::not_found(path))
+            return Err(error::not_found(path));
         }
 
         match path.as_str(0) {
