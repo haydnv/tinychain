@@ -9,7 +9,6 @@ use crate::context::TCResult;
 use crate::error;
 use crate::state::TCState;
 
-mod context;
 mod link;
 mod op;
 mod reference;
@@ -19,7 +18,6 @@ pub type Op = op::Op;
 pub type TCRef = reference::TCRef;
 pub type Subject = op::Subject;
 pub type ValueId = String;
-pub type ValueContext = context::ValueContext;
 pub type Version = semver::Version;
 
 pub trait TCValueTryInto: TryInto<TCValue, Error = error::TCError> {}

@@ -109,7 +109,7 @@ impl Table {
             value
                 .iter()
                 .enumerate()
-                .map(|(i, v)| txn.post(&self.schema.key[i].1, vec![("from".into(), v.clone())])),
+                .map(|(i, v)| txn.get(&self.schema.key[i].1, v.clone())),
         )
         .await?
         {
@@ -189,7 +189,7 @@ impl TCContext for Table {
 
             if let Some(ctr) = schema.get(&column) {
                 names.push(column);
-                values.push(txn.post(ctr, vec![("from".into(), value)]));
+                values.push(txn.get(ctr, value));
             } else {
                 return Err(error::bad_request(
                     "This table contains no such column",

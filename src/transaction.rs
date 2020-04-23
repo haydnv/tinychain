@@ -178,7 +178,7 @@ impl Transaction {
             println!("resolving {}", value_id);
             let state = match op {
                 Op::Get { subject, key } => match subject {
-                    Subject::Link(l) => self.get(l, *key).await,
+                    Subject::Link(l) => self.get(&l, *key).await,
                     Subject::Ref(r) => match self.state.get(&r.value_id()) {
                         Some(s) => s.get(self.clone(), &*key).await,
                         None => Err(error::bad_request(
@@ -268,7 +268,7 @@ impl Transaction {
         }
     }
 
-    pub async fn get(self: &Arc<Self>, path: Link, key: TCValue) -> TCResult<TCState> {
+    pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<TCState> {
         println!("txn::get {}", path);
         self.host.get(path, key).await
     }
