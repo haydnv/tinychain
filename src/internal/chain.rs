@@ -83,9 +83,9 @@ impl Chain {
     }
 }
 
-impl From<&Chain> for Box<dyn Stream<Item = Vec<Bytes>>> {
-    fn from(chain: &Chain) -> Box<dyn Stream<Item = Vec<Bytes>>> {
-        let mut stream: FuturesOrdered<Box<dyn Future<Output = Vec<Bytes>> + Unpin>> =
+impl From<&Chain> for Box<dyn Stream<Item = Vec<Bytes>> + Send> {
+    fn from(chain: &Chain) -> Box<dyn Stream<Item = Vec<Bytes>> + Send> {
+        let mut stream: FuturesOrdered<Box<dyn Future<Output = Vec<Bytes>> + Unpin + Send>> =
             FuturesOrdered::new();
 
         for i in 0..chain.latest_block {

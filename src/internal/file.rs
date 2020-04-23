@@ -2,6 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 
@@ -9,7 +10,7 @@ use crate::internal::cache::Deque;
 use crate::internal::FsDir;
 use crate::value::{Link, TCResult};
 
-type FileData = (Link, Box<dyn Stream<Item = Vec<Bytes>>>);
+type FileData = (Link, Box<dyn Stream<Item = Vec<Bytes>> + Send>);
 
 pub struct FileWriter {
     open: bool,
@@ -28,7 +29,7 @@ impl FileWriter {
         self.open = false
     }
 
-    pub fn write_file(&mut self, path: Link, blocks: Box<dyn Stream<Item = Vec<Bytes>>>) {
+    pub fn write_file(&mut self, path: Link, blocks: Box<dyn Stream<Item = Vec<Bytes>> + Send>) {
         if path.len() != 1 {
             panic!("Tried to write file in subdirectory: {}", path);
         }
@@ -55,8 +56,9 @@ impl Stream for FileReader {
     }
 }
 
+#[async_trait]
 pub trait File {
-    fn copy(reader: FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Self>>;
+    async fn copy(reader: FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Self>>;
 
     fn into(&self, writer: &mut FileWriter);
 }

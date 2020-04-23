@@ -96,8 +96,9 @@ pub struct Table {
     cache: RwLock<HashMap<TransactionId, Vec<Mutation>>>,
 }
 
+#[async_trait]
 impl File for Table {
-    fn copy(_reader: FileReader, _dest: Arc<FsDir>) -> TCResult<Arc<Table>> {
+    async fn copy(_reader: FileReader, _dest: Arc<FsDir>) -> TCResult<Arc<Table>> {
         Err(error::not_implemented())
     }
 
