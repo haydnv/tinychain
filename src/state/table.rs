@@ -234,11 +234,12 @@ impl TableContext {
     pub fn new() -> Arc<TableContext> {
         Arc::new(TableContext {})
     }
-}
 
-#[async_trait]
-impl TCExecutable for TableContext {
-    async fn post(self: &Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState> {
+    pub async fn new_table(
+        self: &Arc<Self>,
+        txn: Arc<Transaction>,
+        method: &Link,
+    ) -> TCResult<TCState> {
         if method != "/new" {
             return Err(error::bad_request(
                 "TableContext has no such method",

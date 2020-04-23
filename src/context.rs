@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::error;
 use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCValue};
+use crate::value::TCValue;
 
 pub type TCResult<T> = Result<T, error::TCError>;
 
@@ -21,9 +21,4 @@ pub trait TCContext: Send + Sync {
         key: TCValue,
         state: TCState,
     ) -> TCResult<TCState>;
-}
-
-#[async_trait]
-pub trait TCExecutable: Send + Sync {
-    async fn post(self: &Arc<Self>, txn: Arc<Transaction>, method: &Link) -> TCResult<TCState>;
 }

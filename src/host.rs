@@ -97,7 +97,7 @@ impl Host {
 
         match path.as_str(0) {
             "sbin" => match path.as_str(1) {
-                "table" => self.table_context.post(txn, &path.slice_from(2)).await,
+                "table" => self.table_context.new_table(txn, &path.slice_from(2)).await,
                 _ => Err(error::not_found(path)),
             },
             _ => Err(error::not_found(path)),
