@@ -31,10 +31,10 @@ impl State {
         }
     }
 
-    pub async fn get(&self, txn: Arc<Transaction>, key: &TCValue) -> TCResult<State> {
+    pub async fn get(&self, txn: Arc<Transaction>, key: TCValue) -> TCResult<State> {
         match self {
-            State::Graph(g) => g.clone().get(txn, key).await,
-            State::Table(t) => t.clone().get(txn, key).await,
+            State::Graph(g) => g.clone().get(txn, &key).await,
+            State::Table(t) => t.clone().get(txn, &key.try_into()?).await,
             _ => Err(error::bad_request("Cannot GET from", self)),
         }
     }
@@ -42,7 +42,7 @@ impl State {
     pub async fn put(&self, txn: Arc<Transaction>, key: TCValue, value: State) -> TCResult<State> {
         match self {
             State::Graph(g) => g.clone().put(txn, key, value).await,
-            State::Table(t) => t.clone().put(txn, key, value).await,
+            State::Table(t) => t.clone().put(txn, key.try_into()?, value).await,
             _ => Err(error::bad_request("Cannot PUT to", self)),
         }
     }

@@ -180,7 +180,7 @@ impl Transaction {
                 Op::Get { subject, key } => match subject {
                     Subject::Link(l) => self.get(&l, *key).await,
                     Subject::Ref(r) => match self.state.get(&r.value_id()) {
-                        Some(s) => s.get(self.clone(), &*key).await,
+                        Some(s) => s.get(self.clone(), *key).await,
                         None => Err(error::bad_request(
                             "Required value not provided",
                             r.value_id(),

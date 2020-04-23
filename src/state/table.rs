@@ -97,13 +97,8 @@ pub struct Table {
 }
 
 impl Table {
-    async fn row_id(&self, txn: &Arc<Transaction>, value: TCValue) -> TCResult<Vec<TCValue>> {
+    async fn row_id(&self, txn: &Arc<Transaction>, value: &[TCValue]) -> TCResult<Vec<TCValue>> {
         let key_size = self.schema.key.len();
-        let value: Vec<TCValue> = if key_size == 1 {
-            vec![value]
-        } else {
-            value.try_into()?
-        };
 
         let mut row_id: Vec<TCValue> = Vec::with_capacity(key_size);
         for value in try_join_all(
@@ -119,7 +114,7 @@ impl Table {
         Ok(row_id)
     }
 
-    async fn new_row(&self, txn: &Arc<Transaction>, row_id: TCValue) -> TCResult<Row> {
+    async fn new_row(&self, txn: &Arc<Transaction>, row_id: &[TCValue]) -> TCResult<Row> {
         let row_id = self.row_id(txn, row_id).await?;
 
         if row_id.len() != self.schema.key.len() {
@@ -139,6 +134,8 @@ impl Table {
 
 #[async_trait]
 impl Persistent for Table {
+    type Key = Vec<TCValue>;
+
     async fn commit(self: &Arc<Self>, txn_id: TransactionId) {
         let mutations = if let Some(mutations) = self.cache.read().unwrap().get(&txn_id) {
             mutations
@@ -152,10 +149,10 @@ impl Persistent for Table {
         self.chain.put(txn_id, &mutations).await;
     }
 
-    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: &TCValue) -> TCResult<State> {
+    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: &Self::Key) -> TCResult<State> {
         // TODO: use the TransactionId to get the state of the chain at a specific point in time
 
-        let mut row = self.new_row(&txn, row_id.clone()).await?;
+        let mut row = self.new_row(&txn, row_id).await?;
         let mutations: Vec<Mutation> = self.chain.get(txn.id(), &row.key.clone().into()).await?;
         for mutation in mutations {
             row.update(&mutation)?;
@@ -173,10 +170,10 @@ impl Persistent for Table {
     async fn put(
         self: &Arc<Self>,
         txn: Arc<Transaction>,
-        row_id: TCValue,
+        row_id: Self::Key,
         column_values: State,
     ) -> TCResult<State> {
-        let row_id = self.row_id(&txn, row_id).await?;
+        let row_id = self.row_id(&txn, &row_id).await?;
         let column_values: Vec<TCValue> = column_values.try_into()?;
         let schema: HashMap<String, Link> = self.schema.as_map();
 

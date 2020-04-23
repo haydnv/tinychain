@@ -13,6 +13,8 @@ pub struct Graph {}
 
 #[async_trait]
 impl Persistent for Graph {
+    type Key = TCValue;
+
     async fn commit(self: &Arc<Self>, _txn_id: TransactionId) {
         // TODO
     }
