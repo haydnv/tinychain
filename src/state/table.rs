@@ -8,7 +8,8 @@ use futures::future::try_join_all;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
-use crate::internal::Chain;
+use crate::internal::{Chain, FsDir};
+use crate::internal::file::*;
 use crate::state::{Persistent, State};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue, Version};
@@ -23,7 +24,7 @@ struct Schema {
 }
 
 impl Schema {
-    fn as_map(self: &Arc<Self>) -> HashMap<String, Link> {
+    fn as_map(&self) -> HashMap<String, Link> {
         let mut map: HashMap<String, Link> = HashMap::new();
         for (name, ctr) in &self.key {
             map.insert(name.clone(), ctr.clone());
@@ -93,6 +94,18 @@ pub struct Table {
     schema: Arc<Schema>,
     chain: Arc<Chain>,
     cache: RwLock<HashMap<TransactionId, Vec<Mutation>>>,
+}
+
+impl File for Table {
+    fn copy(_reader: FileReader, _dest: Arc<FsDir>) -> TCResult<Arc<Table>> {
+        Err(error::not_implemented())
+    }
+
+    fn into(&self, writer: &mut FileWriter) {
+        let chain_path = format!("/{}", self.schema.version);
+        let chain: &Chain = &*self.chain;
+        writer.write_file(Link::to(&chain_path).unwrap(), chain.into());
+    }
 }
 
 impl Table {
@@ -223,7 +236,7 @@ impl Persistent for Table {
             cache.insert(txn.id(), vec![mutation]);
         }
 
-        Ok(self.clone().into())
+        Ok(self.clone())
     }
 }
 

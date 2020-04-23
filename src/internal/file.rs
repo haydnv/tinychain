@@ -9,7 +9,7 @@ use crate::internal::cache::Deque;
 use crate::internal::FsDir;
 use crate::value::{Link, TCResult};
 
-type FileData = (Link, Box<dyn Stream<Item = Bytes>>);
+type FileData = (Link, Box<dyn Stream<Item = Vec<Bytes>>>);
 
 pub struct FileWriter {
     open: bool,
@@ -28,7 +28,11 @@ impl FileWriter {
         self.open = false
     }
 
-    pub fn write_file(&mut self, path: Link, blocks: Box<dyn Stream<Item = Bytes>>) {
+    pub fn write_file(&mut self, path: Link, blocks: Box<dyn Stream<Item = Vec<Bytes>>>) {
+        if path.len() != 1 {
+            panic!("Tried to write file in subdirectory: {}", path);
+        }
+
         self.contents.push_back((path, blocks))
     }
 }
@@ -52,9 +56,7 @@ impl Stream for FileReader {
 }
 
 pub trait File {
-    fn create(fs_dir: Arc<FsDir>) -> Arc<Self>;
-
     fn copy(reader: FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Self>>;
 
-    fn into(&self, writer: FileWriter);
+    fn into(&self, writer: &mut FileWriter);
 }
