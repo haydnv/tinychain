@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::stream::{FuturesOrdered, Stream};
 use futures::Future;
-use futures_util::FutureExt;
+use futures_util::{FutureExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -23,6 +23,23 @@ impl Chain {
         Arc::new(Chain {
             fs_dir,
             latest_block: 0,
+        })
+    }
+
+    pub async fn from(
+        mut stream: Box<dyn Stream<Item = Vec<Bytes>> + Unpin>,
+        dest: Arc<FsDir>,
+    ) -> Arc<Chain> {
+        let mut latest_block: u64 = 0;
+        while let Some(block) = stream.next().await {
+            dest.flush(latest_block.into(), &block[0], &block[1..])
+                .await;
+            latest_block += 1;
+        }
+
+        Arc::new(Chain {
+            fs_dir: dest,
+            latest_block,
         })
     }
 
@@ -61,7 +78,7 @@ impl Chain {
             .map(|e| Bytes::from(serde_json::to_string_pretty(e).unwrap()))
             .collect();
         self.fs_dir
-            .flush(self.latest_block.into(), txn_id.into(), delta)
+            .flush(self.latest_block.into(), &txn_id.into(), &delta)
             .await;
     }
 }

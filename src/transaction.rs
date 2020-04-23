@@ -3,6 +3,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::future::join_all;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -39,13 +40,15 @@ impl Into<String> for TransactionId {
     }
 }
 
-impl Into<Vec<u8>> for TransactionId {
-    fn into(self) -> Vec<u8> {
-        [
-            &self.timestamp.to_be_bytes()[..],
-            &self.nonce.to_be_bytes()[..],
-        ]
-        .concat()
+impl Into<Bytes> for TransactionId {
+    fn into(self) -> Bytes {
+        Bytes::from(
+            [
+                &self.timestamp.to_be_bytes()[..],
+                &self.nonce.to_be_bytes()[..],
+            ]
+            .concat(),
+        )
     }
 }
 

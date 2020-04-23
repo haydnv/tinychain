@@ -143,7 +143,7 @@ impl Dir {
         }
     }
 
-    pub async fn flush(self: &Arc<Self>, _path: Link, _header: Vec<u8>, _data: Vec<Bytes>) {
+    pub async fn flush(self: &Arc<Self>, _path: Link, _header: &Bytes, _data: &[Bytes]) {
         if self.tmp {
             return;
         }
