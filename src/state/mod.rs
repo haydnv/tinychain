@@ -11,28 +11,31 @@ use crate::value::{Link, TCResult, TCValue};
 mod graph;
 mod table;
 
+type Graph = graph::Graph;
 pub type Table = table::Table;
 pub type TableContext = table::TableContext;
 
 #[async_trait]
 pub trait Persistent: Send + Sync {
     type Key: TryFrom<TCValue>;
+    type Value: TryFrom<TCValue>;
 
     async fn commit(self: &Arc<Self>, txn_id: TransactionId);
 
-    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, key: &Self::Key) -> TCResult<State>;
+    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, key: &Self::Key)
+        -> TCResult<Self::Value>;
 
     async fn put(
         self: &Arc<Self>,
         txn: Arc<Transaction>,
         key: Self::Key,
-        state: State,
-    ) -> TCResult<State>;
+        state: Self::Value,
+    ) -> TCResult<Arc<Self>>;
 }
 
 #[derive(Clone)]
 pub enum State {
-    Graph(Arc<graph::Graph>),
+    Graph(Arc<Graph>),
     Table(Arc<Table>),
     Value(TCValue),
 }
@@ -43,23 +46,32 @@ impl State {
             State::Graph(g) => g.commit(txn_id).await,
             State::Table(t) => t.commit(txn_id).await,
             _ => {
-                eprintln!("Tried to commit to a Value!");
+                panic!("Tried to commit to a non-persistent state: {}", self);
             }
         }
     }
 
     pub async fn get(&self, txn: Arc<Transaction>, key: TCValue) -> TCResult<State> {
         match self {
-            State::Graph(g) => g.clone().get(txn, &key).await,
-            State::Table(t) => t.clone().get(txn, &key.try_into()?).await,
+            State::Graph(g) => Ok(g.clone().get(txn, &key).await?.into()),
+            State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?).await?.into()),
             _ => Err(error::bad_request("Cannot GET from", self)),
         }
     }
 
-    pub async fn put(&self, txn: Arc<Transaction>, key: TCValue, value: State) -> TCResult<State> {
+    pub async fn put(
+        &self,
+        txn: Arc<Transaction>,
+        key: TCValue,
+        value: TCValue,
+    ) -> TCResult<State> {
         match self {
-            State::Graph(g) => g.clone().put(txn, key, value).await,
-            State::Table(t) => t.clone().put(txn, key.try_into()?, value).await,
+            State::Graph(g) => Ok(g.clone().put(txn, key, value).await?.into()),
+            State::Table(t) => Ok(t
+                .clone()
+                .put(txn, key.try_into()?, value.try_into()?)
+                .await?
+                .into()),
             _ => Err(error::bad_request("Cannot PUT to", self)),
         }
     }
@@ -72,6 +84,12 @@ impl State {
 impl From<()> for State {
     fn from(_: ()) -> State {
         State::Value(TCValue::None)
+    }
+}
+
+impl From<Arc<Graph>> for State {
+    fn from(graph: Arc<Graph>) -> State {
+        State::Graph(graph)
     }
 }
 

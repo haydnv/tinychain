@@ -134,6 +134,7 @@ impl Table {
 #[async_trait]
 impl Persistent for Table {
     type Key = Vec<TCValue>;
+    type Value = Vec<TCValue>;
 
     async fn commit(self: &Arc<Self>, txn_id: TransactionId) {
         let mutations = if let Some(mutations) = self.cache.read().unwrap().get(&txn_id) {
@@ -148,7 +149,11 @@ impl Persistent for Table {
         self.chain.put(txn_id, &mutations).await;
     }
 
-    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: &Self::Key) -> TCResult<State> {
+    async fn get(
+        self: &Arc<Self>,
+        txn: Arc<Transaction>,
+        row_id: &Self::Key,
+    ) -> TCResult<Self::Value> {
         // TODO: use the TransactionId to get the state of the chain at a specific point in time
 
         let mut row = self.new_row(&txn, row_id).await?;
@@ -163,17 +168,16 @@ impl Persistent for Table {
             }
         }
 
-        Ok(State::Value(row.into()))
+        Ok(row.values.iter().map(|o| o.into()).collect())
     }
 
     async fn put(
         self: &Arc<Self>,
         txn: Arc<Transaction>,
         row_id: Self::Key,
-        column_values: State,
-    ) -> TCResult<State> {
+        column_values: Self::Value,
+    ) -> TCResult<Arc<Self>> {
         let row_id = self.row_id(&txn, &row_id).await?;
-        let column_values: Vec<TCValue> = column_values.try_into()?;
         let schema: HashMap<String, Link> = self.schema.as_map();
 
         let mut names = vec![];

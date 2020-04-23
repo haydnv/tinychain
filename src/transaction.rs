@@ -194,7 +194,7 @@ impl Transaction {
                     let subject = self.resolve(&subject.value_id())?;
                     let value = self.resolve_val(*value)?;
                     self.mutated.push(subject.clone());
-                    subject.put(self.clone(), *key, value.clone()).await
+                    subject.put(self.clone(), *key, value.try_into()?).await
                 }
                 Op::Post {
                     subject,
