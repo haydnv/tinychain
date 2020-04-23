@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::error;
-use crate::state::Persistent;
+use crate::state::{Collection, Persistent};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{TCResult, TCValue};
 
@@ -11,13 +11,9 @@ use crate::value::{TCResult, TCValue};
 pub struct Graph {}
 
 #[async_trait]
-impl Persistent for Graph {
+impl Collection for Graph {
     type Key = TCValue;
     type Value = TCValue;
-
-    async fn commit(self: &Arc<Self>, _txn_id: TransactionId) {
-        // TODO
-    }
 
     async fn get(
         self: &Arc<Self>,
@@ -34,5 +30,12 @@ impl Persistent for Graph {
         _node: TCValue,
     ) -> TCResult<Arc<Self>> {
         Err(error::not_implemented())
+    }
+}
+
+#[async_trait]
+impl Persistent for Graph {
+    async fn commit(&self, _txn_id: TransactionId) {
+        // TODO
     }
 }

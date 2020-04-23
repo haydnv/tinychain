@@ -8,6 +8,7 @@ use futures::Stream;
 
 use crate::internal::cache::Deque;
 use crate::internal::FsDir;
+use crate::transaction::TransactionId;
 use crate::value::{Link, TCResult};
 
 type FileData = (Link, Box<dyn Stream<Item = Vec<Bytes>> + Send>);
@@ -60,5 +61,5 @@ impl Stream for FileReader {
 pub trait File {
     async fn copy(reader: FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Self>>;
 
-    fn into(&self, writer: &mut FileWriter);
+    fn into(&self, txn_id: &TransactionId, writer: &mut FileWriter);
 }

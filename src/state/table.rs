@@ -8,15 +8,16 @@ use futures::future::try_join_all;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
+use crate::internal::cache::Map;
 use crate::internal::file::*;
 use crate::internal::{Chain, FsDir};
-use crate::state::{Persistent, State};
+use crate::state::{Collection, Persistent};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue, Version};
 
 type Mutation = (Vec<TCValue>, Vec<Option<TCValue>>);
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct Schema {
     version: Version,
     key: Vec<(String, Link)>,
@@ -34,6 +35,75 @@ impl Schema {
         }
 
         map
+    }
+}
+
+struct SchemaHistory {
+    current: RwLock<(TransactionId, Schema)>,
+    chain: Arc<Chain>,
+    cache: Map<TransactionId, Schema>,
+}
+
+impl SchemaHistory {
+    fn new(txn: &Arc<Transaction>, schema: Schema) -> TCResult<Arc<SchemaHistory>> {
+        Ok(Arc::new(SchemaHistory {
+            current: RwLock::new((txn.id(), schema)),
+            chain: Chain::new(txn.context().reserve(&Link::to("/schema")?)?),
+            cache: Map::new(),
+        }))
+    }
+
+    fn alter(
+        &self,
+        txn_id: &TransactionId,
+        key: Vec<(String, Link)>,
+        columns: Vec<(String, Link)>,
+    ) -> TCResult<()> {
+        let (now, current) = &*self.current.read().unwrap();
+
+        if txn_id < now {
+            return Err(error::bad_request("Attempt to alter the past", now));
+        }
+
+        if key == current.key && columns == current.columns {
+            return Ok(());
+        }
+
+        let mut version = current.version.clone();
+        if key != current.key {
+            version.bump_major()
+        } else {
+            version.bump_minor()
+        }
+
+        let schema = Schema {
+            version,
+            key,
+            columns,
+        };
+        self.cache.insert(txn_id.clone(), schema);
+        Ok(())
+    }
+
+    fn current(&self, txn_id: &TransactionId) -> TCResult<Schema> {
+        let (now, current) = &*self.current.read().unwrap();
+        if let Some(schema) = self.cache.get(txn_id) {
+            Ok(schema)
+        } else if txn_id >= now {
+            Ok(current.clone())
+        } else {
+            Err(error::not_implemented())
+        }
+    }
+}
+
+#[async_trait]
+impl Persistent for SchemaHistory {
+    async fn commit(&self, txn_id: TransactionId) {
+        if let Some(schema) = self.cache.get(&txn_id) {
+            self.chain.put(&txn_id, &[&schema]).await;
+            *self.current.write().unwrap() = (txn_id, schema);
+        }
     }
 }
 
@@ -91,7 +161,7 @@ impl From<Row> for TCValue {
 }
 
 pub struct Table {
-    schema: Arc<Schema>,
+    schema: Arc<SchemaHistory>,
     chain: Arc<Chain>,
     cache: RwLock<HashMap<TransactionId, Vec<Mutation>>>,
 }
@@ -102,8 +172,9 @@ impl File for Table {
         Err(error::not_implemented())
     }
 
-    fn into(&self, writer: &mut FileWriter) {
-        let chain_path = format!("/{}", self.schema.version);
+    fn into(&self, txn_id: &TransactionId, writer: &mut FileWriter) {
+        let schema = self.schema.current(txn_id).unwrap();
+        let chain_path = format!("/{}", schema.version);
         let chain: &Chain = &*self.chain;
         writer.write_file(Link::to(&chain_path).unwrap(), chain.into());
     }
@@ -111,14 +182,15 @@ impl File for Table {
 
 impl Table {
     async fn row_id(&self, txn: &Arc<Transaction>, value: &[TCValue]) -> TCResult<Vec<TCValue>> {
-        let key_size = self.schema.key.len();
+        let schema = self.schema.current(&txn.id())?;
+        let key_size = schema.key.len();
 
         let mut row_id: Vec<TCValue> = Vec::with_capacity(key_size);
         for value in try_join_all(
             value
                 .iter()
                 .enumerate()
-                .map(|(i, v)| txn.get(&self.schema.key[i].1, v.clone())),
+                .map(|(i, v)| txn.get(&schema.key[i].1, v.clone())),
         )
         .await?
         {
@@ -129,39 +201,27 @@ impl Table {
 
     async fn new_row(&self, txn: &Arc<Transaction>, row_id: &[TCValue]) -> TCResult<Row> {
         let row_id = self.row_id(txn, row_id).await?;
+        let schema = self.schema.current(&txn.id())?;
 
-        if row_id.len() != self.schema.key.len() {
+        if row_id.len() != schema.key.len() {
             let key: TCValue = row_id.into();
             return Err(error::bad_request(
-                &format!("Expected a key of length {}, found", self.schema.key.len()),
+                &format!("Expected a key of length {}, found", schema.key.len()),
                 key,
             ));
         }
 
         Ok(Row {
             key: row_id,
-            values: iter::repeat(None).take(self.schema.columns.len()).collect(),
+            values: iter::repeat(None).take(schema.columns.len()).collect(),
         })
     }
 }
 
 #[async_trait]
-impl Persistent for Table {
+impl Collection for Table {
     type Key = Vec<TCValue>;
     type Value = Vec<TCValue>;
-
-    async fn commit(self: &Arc<Self>, txn_id: TransactionId) {
-        let mutations = if let Some(mutations) = self.cache.read().unwrap().get(&txn_id) {
-            mutations
-                .iter()
-                .map(|(k, v)| (k.clone().into(), v.clone().into()))
-                .collect::<Vec<(TCValue, TCValue)>>()
-        } else {
-            vec![]
-        };
-
-        self.chain.put(txn_id, &mutations).await;
-    }
 
     async fn get(
         self: &Arc<Self>,
@@ -192,14 +252,15 @@ impl Persistent for Table {
         column_values: Self::Value,
     ) -> TCResult<Arc<Self>> {
         let row_id = self.row_id(&txn, &row_id).await?;
-        let schema: HashMap<String, Link> = self.schema.as_map();
+        let schema = self.schema.current(&txn.id())?;
+        let schema_map = schema.as_map();
 
         let mut names = vec![];
         let mut values = vec![];
         for column_value in column_values.iter() {
             let (column, value): (String, TCValue) = column_value.clone().try_into()?;
 
-            if let Some(ctr) = schema.get(&column) {
+            if let Some(ctr) = schema_map.get(&column) {
                 names.push(column);
                 values.push(txn.get(ctr, value));
             } else {
@@ -221,9 +282,9 @@ impl Persistent for Table {
             .collect();
 
         let mut mutated: Vec<Option<TCValue>> =
-            iter::repeat(None).take(self.schema.columns.len()).collect();
-        for i in 0..self.schema.columns.len() {
-            if let Some(value) = values.remove(&self.schema.columns[i].0) {
+            iter::repeat(None).take(schema.columns.len()).collect();
+        for i in 0..schema.columns.len() {
+            if let Some(value) = values.remove(&schema.columns[i].0) {
                 mutated[i] = Some(value);
             }
         }
@@ -241,6 +302,22 @@ impl Persistent for Table {
     }
 }
 
+#[async_trait]
+impl Persistent for Table {
+    async fn commit(&self, txn_id: TransactionId) {
+        let mutations = if let Some(mutations) = self.cache.read().unwrap().get(&txn_id) {
+            mutations
+                .iter()
+                .map(|(k, v)| (k.clone().into(), v.clone().into()))
+                .collect::<Vec<(TCValue, TCValue)>>()
+        } else {
+            vec![]
+        };
+
+        self.chain.put(&txn_id, &mutations).await;
+    }
+}
+
 #[derive(Debug)]
 pub struct TableContext {}
 
@@ -249,36 +326,27 @@ impl TableContext {
         Arc::new(TableContext {})
     }
 
-    pub async fn new_table(
-        self: &Arc<Self>,
-        txn: Arc<Transaction>,
-        method: &Link,
-    ) -> TCResult<State> {
-        if method != "/new" {
-            return Err(error::bad_request(
-                "TableContext has no such method",
-                method,
-            ));
-        }
-
+    pub async fn new_table(self: &Arc<Self>, txn: Arc<Transaction>) -> TCResult<Arc<Table>> {
         let key: Vec<(String, Link)> = txn.require("key")?.try_into()?;
         let columns: Vec<(String, Link)> = txn.require("columns")?.try_into()?;
 
-        let schema = Arc::new(Schema {
-            key,
-            columns,
-            version: Version::parse("1.0.0")?,
-        });
+        let schema = SchemaHistory::new(
+            &txn,
+            Schema {
+                key,
+                columns,
+                version: Version::parse("1.0.0")?,
+            },
+        )?;
 
-        let table_chain = Chain::new(
-            txn.context()
-                .reserve(&Link::to(&format!("/{}", schema.version))?)?,
-        );
+        let table_chain = Chain::new(txn.context().reserve(&Link::to(&format!(
+            "/{}",
+            schema.current(&txn.id())?.version
+        ))?)?);
         Ok(Arc::new(Table {
             schema,
             chain: table_chain,
             cache: RwLock::new(HashMap::new()),
-        })
-        .into())
+        }))
     }
 }

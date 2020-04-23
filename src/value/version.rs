@@ -6,6 +6,7 @@ use serde::ser::{Serialize, Serializer};
 use crate::error;
 use crate::value::TCResult;
 
+#[derive(Clone)]
 pub struct Version {
     major: u64,
     minor: u64,
@@ -33,6 +34,18 @@ impl Version {
                 patch: fields[2],
             })
         }
+    }
+
+    pub fn bump_major(&mut self) {
+        self.major += 1;
+    }
+
+    pub fn bump_minor(&mut self) {
+        self.minor += 1;
+    }
+
+    pub fn bump_patch(&mut self) {
+        self.patch += 1;
     }
 }
 

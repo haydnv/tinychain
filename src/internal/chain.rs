@@ -72,7 +72,7 @@ impl Chain {
         Ok(matched)
     }
 
-    pub async fn put<T: Serialize>(self: &Arc<Self>, txn_id: TransactionId, mutations: &[T]) {
+    pub async fn put<T: Serialize>(self: &Arc<Self>, txn_id: &TransactionId, mutations: &[T]) {
         let delta: Vec<Bytes> = mutations
             .iter()
             .map(|e| Bytes::from(serde_json::to_string_pretty(e).unwrap()))

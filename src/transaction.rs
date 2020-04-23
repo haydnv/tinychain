@@ -28,6 +28,22 @@ impl TransactionId {
     }
 }
 
+impl PartialOrd for TransactionId {
+    fn partial_cmp(&self, other: &TransactionId) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TransactionId {
+    fn cmp(&self, other: &TransactionId) -> std::cmp::Ordering {
+        if self.timestamp == other.timestamp {
+            self.nonce.cmp(&other.nonce)
+        } else {
+            self.timestamp.cmp(&other.timestamp)
+        }
+    }
+}
+
 impl Into<Link> for TransactionId {
     fn into(self) -> Link {
         Link::to(&format!("/{}-{}", self.timestamp, self.nonce)).unwrap()
@@ -40,7 +56,7 @@ impl Into<String> for TransactionId {
     }
 }
 
-impl Into<Bytes> for TransactionId {
+impl Into<Bytes> for &TransactionId {
     fn into(self) -> Bytes {
         Bytes::from(
             [

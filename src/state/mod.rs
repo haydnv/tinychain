@@ -17,10 +17,13 @@ pub type TableContext = table::TableContext;
 
 #[async_trait]
 pub trait Persistent: Send + Sync {
+    async fn commit(&self, txn_id: TransactionId);
+}
+
+#[async_trait]
+pub trait Collection: Send + Sync {
     type Key: TryFrom<TCValue>;
     type Value: TryFrom<TCValue>;
-
-    async fn commit(self: &Arc<Self>, txn_id: TransactionId);
 
     async fn get(self: &Arc<Self>, txn: Arc<Transaction>, key: &Self::Key)
         -> TCResult<Self::Value>;
