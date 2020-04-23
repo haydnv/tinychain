@@ -17,7 +17,7 @@ pub type DirContext = dir::DirContext;
 pub type Table = table::Table;
 pub type TableContext = table::TableContext;
 
-#[derive(Clone, Hash)]
+#[derive(Clone)]
 pub enum TCState {
     Dir(Arc<Dir>),
     Graph(Arc<graph::Graph>),
@@ -85,8 +85,8 @@ impl From<Arc<Dir>> for TCState {
     }
 }
 
-impl From<&Arc<Table>> for TCState {
-    fn from(table: &Arc<Table>) -> TCState {
+impl From<Arc<Table>> for TCState {
+    fn from(table: Arc<Table>) -> TCState {
         TCState::Table(table.clone())
     }
 }

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::hash;
-use std::iter::{repeat, FromIterator};
+use std::iter;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -9,81 +8,131 @@ use futures::future::try_join_all;
 
 use crate::context::*;
 use crate::error;
-use crate::internal::{Chain, FsDir};
+use crate::internal::Chain;
 use crate::state::TCState;
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCValue};
+use crate::value::{Link, TCValue, Version};
 
-#[derive(Clone)]
-struct Mutation {
-    schema: HashMap<String, usize>,
-    key: TCValue,
+type Mutation = (Vec<TCValue>, Vec<Option<TCValue>>);
+
+struct Schema {
+    version: Version,
+    key: Vec<(String, Link)>,
+    columns: Vec<(String, Link)>,
+    chain: Arc<Chain>,
+}
+
+impl Schema {
+    fn into_map(self: &Arc<Self>) -> HashMap<String, Link> {
+        let mut map: HashMap<String, Link> = HashMap::new();
+        for (name, ctr) in &self.key {
+            map.insert(name.clone(), ctr.clone());
+        }
+        for (name, ctr) in &self.columns {
+            map.insert(name.clone(), ctr.clone());
+        }
+
+        map
+    }
+}
+
+struct Row {
+    key: Vec<TCValue>,
     values: Vec<Option<TCValue>>,
 }
 
-impl hash::Hash for Mutation {
-    fn hash<H: hash::Hasher>(&self, h: &mut H) {
-        self.key.hash(h);
-        self.values.hash(h);
+impl Row {
+    fn update(&mut self, mutation: &Mutation) -> TCResult<()> {
+        let (key, values) = mutation;
+        if key != &self.key {
+            let key: TCValue = key.clone().into();
+            return Err(error::bad_request(
+                "Cannot update the value of a row's primary key",
+                key,
+            ));
+        }
+
+        for (i, value) in values.iter().enumerate() {
+            if !value.is_none() {
+                self.values[i] = value.clone();
+            }
+        }
+
+        Ok(())
     }
 }
 
-impl Mutation {
-    fn apply(&mut self, values: &[Option<TCValue>]) {
-        for (i, value) in values.iter().enumerate() {
-            if let Some(value) = value {
-                self.values[i] = Some(value.clone());
-            }
-        }
+impl From<Row> for Mutation {
+    fn from(row: Row) -> Mutation {
+        (row.key, row.values)
     }
+}
 
-    fn set(&mut self, column: String, value: TCValue) -> TCResult<()> {
-        if let Some(index) = self.schema.get(&column) {
-            self.values[*index] = Some(value);
-            Ok(())
-        } else {
-            Err(error::internal(
-                "Table attempted to mutate nonexistent column",
-            ))
+impl From<Row> for TCValue {
+    fn from(row: Row) -> TCValue {
+        let values: Vec<TCValue> = row
+            .values
+            .iter()
+            .filter(|v| v.is_some())
+            .map(|v| v.clone().unwrap())
+            .collect();
+
+        let mut value = Vec::with_capacity(row.key.len() + values.len());
+        for k in row.key {
+            value.push(k);
         }
-    }
+        for v in values {
+            value.push(v)
+        }
 
-    fn values(&self) -> TCValue {
-        self.values.clone().into_iter().collect()
+        TCValue::Vector(value)
     }
 }
 
 pub struct Table {
-    key: (String, Link),
-    columns: Vec<(String, Link)>,
+    schema: Arc<Schema>,
     chain: Arc<Chain>,
     cache: RwLock<HashMap<TransactionId, Vec<Mutation>>>,
 }
 
 impl Table {
-    fn mutation(&self, key: TCValue) -> Mutation {
-        let mut schema: Vec<(String, usize)> = vec![];
-        for i in 0..self.columns.len() {
-            schema.push((self.columns[i].0.to_owned(), i));
-        }
-        let schema: HashMap<String, usize> = schema.into_iter().collect();
+    async fn row_id(&self, txn: &Arc<Transaction>, value: TCValue) -> TCResult<Vec<TCValue>> {
+        let key_size = self.schema.key.len();
+        let value: Vec<TCValue> = if key_size == 1 {
+            vec![value]
+        } else {
+            value.try_into()?
+        };
 
-        Mutation {
-            schema,
-            key,
-            values: repeat(None).take(self.columns.len()).collect(),
+        let mut row_id: Vec<TCValue> = Vec::with_capacity(key_size);
+        for value in try_join_all(
+            value
+                .iter()
+                .enumerate()
+                .map(|(i, v)| txn.post(&self.schema.key[i].1, vec![("from".into(), v.clone())])),
+        )
+        .await?
+        {
+            row_id.push(value.try_into()?)
         }
+        Ok(row_id)
     }
 
-    fn schema_map(&self) -> HashMap<String, Link> {
-        HashMap::from_iter(self.columns.iter().cloned())
-    }
-}
+    async fn new_row(&self, txn: &Arc<Transaction>, row_id: TCValue) -> TCResult<Row> {
+        let row_id = self.row_id(txn, row_id).await?;
 
-impl hash::Hash for Table {
-    fn hash<H: hash::Hasher>(&self, h: &mut H) {
-        self.key.hash(h);
-        self.columns.hash(h);
+        if row_id.len() != self.schema.key.len() {
+            let key: TCValue = row_id.into();
+            return Err(error::bad_request(
+                &format!("Expected a key of length {}, found", self.schema.key.len()),
+                key,
+            ));
+        }
+
+        Ok(Row {
+            key: row_id,
+            values: iter::repeat(None).take(self.schema.columns.len()).collect(),
+        })
     }
 }
 
@@ -93,32 +142,34 @@ impl TCContext for Table {
         let mutations = if let Some(mutations) = self.cache.read().unwrap().get(&txn_id) {
             mutations
                 .iter()
-                .map(|m| (m.key.clone(), m.values()))
-                .collect()
+                .map(|(k, v)| (k.clone().into(), v.clone().into()))
+                .collect::<Vec<(TCValue, TCValue)>>()
         } else {
             vec![]
         };
 
-        self.chain.put(txn_id, mutations).await;
+        self.chain.put(txn_id, &mutations).await;
     }
 
     async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: &TCValue) -> TCResult<TCState> {
         // TODO: use the TransactionId to get the state of the chain at a specific point in time
 
-        let mut row = self.mutation(row_id.clone());
-        let mutations: Vec<TCValue> = self.chain.get(txn.id(), row_id).await?.try_into()?;
+        let mut row = self.new_row(&txn, row_id.clone()).await?;
+        let mutations = self
+            .chain
+            .get::<Mutation>(txn.id(), &row.key.clone().into())
+            .await?;
         for mutation in mutations {
-            let mutation: Vec<Option<TCValue>> = mutation.try_into()?;
-            row.apply(&mutation);
+            row.update(&mutation)?;
         }
 
         if let Some(mutations) = self.cache.read().unwrap().get(&txn.id()) {
             for mutation in mutations {
-                row.apply(&mutation.values);
+                row.update(mutation)?;
             }
         }
 
-        Ok(row.values().into())
+        Ok(TCState::Value(row.into()))
     }
 
     async fn put(
@@ -127,17 +178,18 @@ impl TCContext for Table {
         row_id: TCValue,
         column_values: TCState,
     ) -> TCResult<TCState> {
+        let row_id = self.row_id(&txn, row_id).await?;
         let column_values: Vec<TCValue> = column_values.try_into()?;
-        let schema = self.schema_map();
+        let schema: HashMap<String, Link> = self.schema.into_map();
 
-        let mut row = vec![];
-        row.push(txn.post(&self.key.1, vec![("from".into(), row_id)]));
+        let mut names = vec![];
+        let mut values = vec![];
         for column_value in column_values.iter() {
-            let column_value: (String, TCValue) = column_value.clone().try_into()?;
-            let (column, value) = column_value;
+            let (column, value): (String, TCValue) = column_value.clone().try_into()?;
 
             if let Some(ctr) = schema.get(&column) {
-                row.push(txn.post(ctr, vec![("from".into(), value)]));
+                names.push(column);
+                values.push(txn.post(ctr, vec![("from".into(), value)]));
             } else {
                 return Err(error::bad_request(
                     "This table contains no such column",
@@ -145,11 +197,26 @@ impl TCContext for Table {
                 ));
             }
         }
-        let mut row = try_join_all(row).await?;
-        let mut mutation = self.mutation(row.remove(0).try_into()?);
-        for (i, value) in row.iter().enumerate() {
-            mutation.set(self.columns[i].0.clone(), value.clone().try_into()?)?;
+
+        let mut values: HashMap<String, TCValue> = try_join_all(values)
+            .await?
+            .iter()
+            .map(|v| v.clone().try_into())
+            .collect::<TCResult<Vec<TCValue>>>()?
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (names[i].clone(), v.clone()))
+            .collect();
+
+        let mut mutated: Vec<Option<TCValue>> =
+            iter::repeat(None).take(self.schema.columns.len()).collect();
+        for i in 0..self.schema.columns.len() {
+            if let Some(value) = values.remove(&self.schema.columns[i].0) {
+                mutated[i] = Some(value);
+            }
         }
+
+        let mutation = (row_id, mutated);
 
         let mut cache = self.cache.write().unwrap();
         if let Some(mutations) = cache.get_mut(&txn.id()) {
@@ -158,7 +225,7 @@ impl TCContext for Table {
             cache.insert(txn.id(), vec![mutation]);
         }
 
-        Ok(self.into())
+        Ok(self.clone().into())
     }
 }
 
@@ -168,43 +235,6 @@ pub struct TableContext {}
 impl TableContext {
     pub fn new() -> Arc<TableContext> {
         Arc::new(TableContext {})
-    }
-
-    async fn new_table<'a>(
-        self: &Arc<Self>,
-        fs_dir: Arc<FsDir>,
-        schema: Vec<(String, Link)>,
-        key_column: String,
-    ) -> TCResult<Arc<Table>> {
-        let mut columns: Vec<(String, Link)> = vec![];
-        let mut key = None;
-
-        for (name, datatype) in schema {
-            if name == key_column {
-                key = Some((name, datatype));
-            } else {
-                columns.push((name.clone(), datatype.clone()));
-            }
-        }
-
-        let key = match key {
-            Some(key) => key,
-            None => {
-                return Err(error::bad_request(
-                    "No column was defined for the primary key",
-                    key_column,
-                ));
-            }
-        };
-
-        let chain = Chain::new(fs_dir.reserve(&Link::to("/chain")?)?);
-
-        Ok(Arc::new(Table {
-            key,
-            columns,
-            chain,
-            cache: RwLock::new(HashMap::new()),
-        }))
     }
 }
 
@@ -218,10 +248,18 @@ impl TCExecutable for TableContext {
             ));
         }
 
-        let schema: Vec<(String, Link)> = txn.clone().require("schema")?.try_into()?;
-        let key: String = txn.clone().require("key")?.try_into()?;
-        Ok(TCState::Table(
-            self.new_table(txn.context(), schema, key).await?,
-        ))
+        let key: Vec<(String, Link)> = txn.require("key")?.try_into()?;
+        let columns: Vec<(String, Link)> = txn.require("columns")?.try_into()?;
+        Ok(Arc::new(Table {
+            schema: Arc::new(Schema {
+                key,
+                columns,
+                chain: Chain::new(txn.context().reserve(&Link::to("/schema")?)?),
+                version: Version::parse("1.0.0").map_err(error::internal)?,
+            }),
+            chain: Chain::new(txn.context().reserve(&Link::to("/chain")?)?),
+            cache: RwLock::new(HashMap::new()),
+        })
+        .into())
     }
 }

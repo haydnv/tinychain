@@ -4,11 +4,11 @@ use std::iter::FromIterator;
 use std::sync::RwLock;
 
 #[derive(Debug)]
-pub struct Map<K: Eq + Hash, V: Hash> {
+pub struct Map<K: Eq + Hash, V> {
     map: RwLock<HashMap<K, V>>,
 }
 
-impl<K: Eq + Hash, V: Clone + Hash> Map<K, V> {
+impl<K: Eq + Hash, V: Clone> Map<K, V> {
     pub fn new() -> Map<K, V> {
         Map {
             map: RwLock::new(HashMap::new()),
@@ -31,7 +31,7 @@ impl<K: Eq + Hash, V: Clone + Hash> Map<K, V> {
     }
 }
 
-impl<K: Eq + Hash, V: Hash> FromIterator<(K, V)> for Map<K, V> {
+impl<K: Eq + Hash, V> FromIterator<(K, V)> for Map<K, V> {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(i: T) -> Map<K, V> {
         let mut map: HashMap<K, V> = HashMap::new();
         for (k, v) in i {

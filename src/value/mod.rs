@@ -20,6 +20,7 @@ pub type TCRef = reference::TCRef;
 pub type Subject = op::Subject;
 pub type ValueId = String;
 pub type ValueContext = context::ValueContext;
+pub type Version = semver::Version;
 
 pub trait TCValueTryInto: TryInto<TCValue, Error = error::TCError> {}
 pub trait TCValueTryFrom: TryFrom<TCValue, Error = error::TCError> {}
@@ -93,6 +94,15 @@ impl From<Option<TCValue>> for TCValue {
     }
 }
 
+impl From<&Option<TCValue>> for TCValue {
+    fn from(opt: &Option<TCValue>) -> TCValue {
+        match opt {
+            Some(val) => val.clone(),
+            None => TCValue::None,
+        }
+    }
+}
+
 impl From<TCRef> for TCValue {
     fn from(r: TCRef) -> TCValue {
         TCValue::Ref(r)
@@ -111,6 +121,12 @@ impl From<Vec<TCValue>> for TCValue {
     }
 }
 
+impl From<Vec<Option<TCValue>>> for TCValue {
+    fn from(v: Vec<Option<TCValue>>) -> TCValue {
+        TCValue::Vector(v.iter().map(|v| v.into()).collect())
+    }
+}
+
 impl From<Vec<(ValueId, TCValue)>> for TCValue {
     fn from(values: Vec<(ValueId, TCValue)>) -> TCValue {
         let mut result: Vec<TCValue> = vec![];
@@ -121,6 +137,12 @@ impl From<Vec<(ValueId, TCValue)>> for TCValue {
             result.push(r_item.into());
         }
         result.into()
+    }
+}
+
+impl From<(TCValue, TCValue)> for TCValue {
+    fn from(tuple: (TCValue, TCValue)) -> TCValue {
+        TCValue::Vector(vec![tuple.0, tuple.1])
     }
 }
 

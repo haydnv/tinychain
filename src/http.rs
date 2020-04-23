@@ -32,7 +32,7 @@ pub async fn listen(
     Ok(())
 }
 
-async fn get(host: Arc<Host>, path: Link, params: HashMap<String, String>) -> TCResult<TCState> {
+async fn get(host: Arc<Host>, path: Link, params: &HashMap<String, String>) -> TCResult<TCState> {
     host.get(
         path,
         params
@@ -54,7 +54,7 @@ async fn route(
     let path = Link::to(&path)?;
 
     match method {
-        Method::GET => match get(host, path, params).await? {
+        Method::GET => match get(host, path, &params).await? {
             TCState::Value(val) => Ok(serde_json::to_string_pretty(&val)?.as_bytes().to_vec()),
             state => Err(error::bad_request(
                 "Attempt to GET unserializable state {}",
