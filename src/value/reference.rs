@@ -4,8 +4,7 @@ use serde::de;
 use serde::ser::Serializer;
 use serde::Serialize;
 
-use crate::context::TCResult;
-use crate::value::{validate_id, ValueId};
+use crate::value::{validate_id, TCResult, ValueId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TCRef(ValueId);

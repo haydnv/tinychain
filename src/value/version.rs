@@ -3,8 +3,8 @@ use std::fmt;
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
-use crate::context::TCResult;
 use crate::error;
+use crate::value::TCResult;
 
 pub struct Version {
     major: u64,

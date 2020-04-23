@@ -6,11 +6,10 @@ use std::sync::{Arc, RwLock};
 use futures::Future;
 use tokio::fs;
 
-use crate::context::TCResult;
 use crate::error;
 use crate::internal::cache::Map;
 use crate::internal::DELIMITER;
-use crate::value::Link;
+use crate::value::{Link, TCResult};
 
 #[derive(Debug)]
 pub struct Dir {

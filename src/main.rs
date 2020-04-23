@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use structopt::StructOpt;
 
-mod context;
 mod error;
 mod host;
 mod http;
@@ -43,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .host
         .iter()
         .map(|d| value::Link::to(d))
-        .collect::<context::TCResult<Vec<value::Link>>>()?;
+        .collect::<value::TCResult<Vec<value::Link>>>()?;
 
     let host = host::Host::new(data_dir, workspace)?;
 

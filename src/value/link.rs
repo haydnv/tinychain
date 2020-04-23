@@ -4,9 +4,8 @@ use std::fmt;
 use serde::de;
 use serde::ser::Serializer;
 
-use crate::context::TCResult;
 use crate::error;
-use crate::value::{validate_id, TCValueTryFrom};
+use crate::value::{validate_id, TCResult, TCValueTryFrom};
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Link {

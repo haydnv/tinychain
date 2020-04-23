@@ -2,12 +2,11 @@ use std::convert::TryInto;
 use std::sync::Arc;
 use std::time;
 
-use crate::context::*;
 use crate::error;
 use crate::internal::FsDir;
 use crate::state::{State, TableContext};
 use crate::transaction::Transaction;
-use crate::value::{Link, Op, TCValue};
+use crate::value::{Link, Op, TCResult, TCValue};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 

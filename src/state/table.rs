@@ -7,12 +7,11 @@ use async_trait::async_trait;
 use futures::future::try_join_all;
 use serde::{Deserialize, Serialize};
 
-use crate::context::*;
 use crate::error;
 use crate::internal::Chain;
-use crate::state::State;
+use crate::state::{Persistent, State};
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCValue, Version};
+use crate::value::{Link, TCResult, TCValue, Version};
 
 type Mutation = (Vec<TCValue>, Vec<Option<TCValue>>);
 

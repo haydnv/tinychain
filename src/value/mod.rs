@@ -5,7 +5,6 @@ use regex::Regex;
 use serde::de;
 use serde::ser::{Serialize, SerializeSeq, Serializer};
 
-use crate::context::TCResult;
 use crate::error;
 use crate::state::State;
 
@@ -17,6 +16,7 @@ mod version;
 pub type Link = link::Link;
 pub type Op = op::Op;
 pub type TCRef = reference::TCRef;
+pub type TCResult<T> = Result<T, error::TCError>;
 pub type Subject = op::Subject;
 pub type ValueId = String;
 pub type Version = version::Version;

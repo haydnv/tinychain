@@ -2,16 +2,33 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
-use crate::context::{Persistent, TCResult};
+use async_trait::async_trait;
+
 use crate::error;
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCValue};
+use crate::value::{Link, TCResult, TCValue};
 
 mod graph;
 mod table;
 
 pub type Table = table::Table;
 pub type TableContext = table::TableContext;
+
+#[async_trait]
+pub trait Persistent: Send + Sync {
+    type Key: TryFrom<TCValue>;
+
+    async fn commit(self: &Arc<Self>, txn_id: TransactionId);
+
+    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, key: &Self::Key) -> TCResult<State>;
+
+    async fn put(
+        self: &Arc<Self>,
+        txn: Arc<Transaction>,
+        key: Self::Key,
+        state: State,
+    ) -> TCResult<State>;
+}
 
 #[derive(Clone)]
 pub enum State {
