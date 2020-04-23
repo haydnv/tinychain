@@ -5,7 +5,7 @@ use std::time;
 use crate::context::*;
 use crate::error;
 use crate::internal::FsDir;
-use crate::state::{TCState, TableContext};
+use crate::state::{State, TableContext};
 use crate::transaction::Transaction;
 use crate::value::{Link, Op, TCValue};
 
@@ -55,7 +55,7 @@ impl Host {
         Transaction::of(self.clone(), op, self.workspace.clone())
     }
 
-    pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<TCState> {
+    pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<State> {
         println!("GET {}", path);
         if path.len() < 3 {
             return Err(error::not_found(path));
@@ -66,7 +66,7 @@ impl Host {
                 "value" => match path.as_str(2) {
                     "string" => {
                         let s: String = key.try_into()?;
-                        Ok(TCState::Value(s.into()))
+                        Ok(State::Value(s.into()))
                     }
                     _ => Err(error::not_found(path)),
                 },
@@ -81,13 +81,13 @@ impl Host {
         _txn: Arc<Transaction>,
         path: Link,
         _key: TCValue,
-        _state: TCState,
-    ) -> TCResult<TCState> {
+        _state: State,
+    ) -> TCResult<State> {
         println!("PUT {}", path);
         Err(error::not_found(path))
     }
 
-    pub async fn post(self: &Arc<Self>, txn: Arc<Transaction>, path: &Link) -> TCResult<TCState> {
+    pub async fn post(self: &Arc<Self>, txn: Arc<Transaction>, path: &Link) -> TCResult<State> {
         println!("POST {}", path);
         if path.is_empty() {
             return Ok(TCValue::None.into());

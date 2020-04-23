@@ -12,7 +12,7 @@ use crate::error;
 use crate::host::Host;
 use crate::internal::cache::{Map, Queue};
 use crate::internal::FsDir;
-use crate::state::TCState;
+use crate::state::State;
 use crate::value::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
@@ -59,7 +59,7 @@ impl fmt::Display for TransactionId {
 fn calc_deps(
     value_id: ValueId,
     op: Op,
-    state: &mut HashMap<ValueId, TCState>,
+    state: &mut HashMap<ValueId, State>,
     queue: &Queue<(ValueId, Op)>,
 ) -> TCResult<()> {
     if let Op::Post { requires, .. } = &op {
@@ -78,7 +78,7 @@ fn calc_deps(
                         return Err(error::bad_request("Duplicate values provided for", id));
                     }
 
-                    state.insert(id.clone(), TCState::Value(value.clone()));
+                    state.insert(id.clone(), State::Value(value.clone()));
                     required_value_ids.push((id.clone(), id.clone()));
                 }
             }
@@ -94,9 +94,9 @@ pub struct Transaction {
     host: Arc<Host>,
     id: TransactionId,
     context: Arc<FsDir>,
-    state: Map<ValueId, TCState>,
+    state: Map<ValueId, State>,
     queue: Queue<(ValueId, Op)>,
-    mutated: Queue<TCState>,
+    mutated: Queue<State>,
 }
 
 impl Transaction {
@@ -117,7 +117,7 @@ impl Transaction {
         let id = TransactionId::new(host.time());
         let context = root.reserve(&id.clone().into())?;
 
-        let mut state: HashMap<ValueId, TCState> = HashMap::new();
+        let mut state: HashMap<ValueId, State> = HashMap::new();
         let queue: Queue<(ValueId, Op)> = Queue::new();
         calc_deps(String::from("_"), op, &mut state, &queue)?;
         queue.reverse();
@@ -173,7 +173,7 @@ impl Transaction {
     pub async fn execute<'a>(
         self: &Arc<Self>,
         capture: HashSet<ValueId>,
-    ) -> TCResult<HashMap<ValueId, TCState>> {
+    ) -> TCResult<HashMap<ValueId, State>> {
         while let Some((value_id, op)) = self.queue.pop() {
             println!("resolving {}", value_id);
             let state = match op {
@@ -223,7 +223,7 @@ impl Transaction {
             self.state.insert(value_id, state?);
         }
 
-        let mut results: HashMap<ValueId, TCState> = HashMap::new();
+        let mut results: HashMap<ValueId, State> = HashMap::new();
         for value_id in capture {
             match self.state.get(&value_id) {
                 Some(state) => {
@@ -241,14 +241,14 @@ impl Transaction {
         Ok(results)
     }
 
-    fn resolve(self: &Arc<Self>, id: &ValueId) -> TCResult<TCState> {
+    fn resolve(self: &Arc<Self>, id: &ValueId) -> TCResult<State> {
         match self.state.get(id) {
             Some(s) => Ok(s),
             None => Err(error::bad_request("Required value not provided", id)),
         }
     }
 
-    fn resolve_val(self: &Arc<Self>, value: TCValue) -> TCResult<TCState> {
+    fn resolve_val(self: &Arc<Self>, value: TCValue) -> TCResult<State> {
         match value {
             TCValue::Ref(r) => self.resolve(&r.value_id()),
             _ => Ok(value.into()),
@@ -258,7 +258,7 @@ impl Transaction {
     pub fn require(self: &Arc<Self>, value_id: &str) -> TCResult<TCValue> {
         match self.state.get(&value_id.to_string()) {
             Some(response) => match response {
-                TCState::Value(value) => Ok(value),
+                State::Value(value) => Ok(value),
                 other => Err(error::bad_request(
                     &format!("Required value {} is not serializable", value_id),
                     other,
@@ -268,7 +268,7 @@ impl Transaction {
         }
     }
 
-    pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<TCState> {
+    pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<State> {
         println!("txn::get {}", path);
         self.host.get(path, key).await
     }
@@ -277,7 +277,7 @@ impl Transaction {
         self: &Arc<Self>,
         path: &Link,
         args: Vec<(ValueId, TCValue)>,
-    ) -> TCResult<TCState> {
+    ) -> TCResult<State> {
         println!("txn::post {} {:?}", path, args);
         let txn = self.extend(self.context.clone(), args.into_iter().collect());
         self.host.post(txn, path).await

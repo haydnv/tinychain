@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use crate::context::*;
 use crate::error;
-use crate::state::TCState;
+use crate::state::State;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::TCValue;
 
@@ -21,7 +21,7 @@ impl TCContext for Graph {
         self: &Arc<Self>,
         _txn: Arc<Transaction>,
         _node_id: &TCValue,
-    ) -> TCResult<TCState> {
+    ) -> TCResult<State> {
         Err(error::not_implemented())
     }
 
@@ -29,8 +29,8 @@ impl TCContext for Graph {
         self: &Arc<Self>,
         _txn: Arc<Transaction>,
         _node_id: TCValue,
-        _node: TCState,
-    ) -> TCResult<TCState> {
+        _node: State,
+    ) -> TCResult<State> {
         Err(error::not_implemented())
     }
 }

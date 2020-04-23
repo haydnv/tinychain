@@ -7,7 +7,7 @@ use serde::ser::{Serialize, SerializeSeq, Serializer};
 
 use crate::context::TCResult;
 use crate::error;
-use crate::state::TCState;
+use crate::state::State;
 
 mod link;
 mod op;
@@ -250,12 +250,12 @@ impl<T: TCValueTryFrom> TryFrom<TCValue> for (T, TCValue) {
     }
 }
 
-impl TryFrom<TCState> for TCValue {
+impl TryFrom<State> for TCValue {
     type Error = error::TCError;
 
-    fn try_from(state: TCState) -> TCResult<TCValue> {
+    fn try_from(state: State) -> TCResult<TCValue> {
         match state {
-            TCState::Value(value) => Ok(value),
+            State::Value(value) => Ok(value),
             other => Err(error::bad_request("Expected a Value but found", other)),
         }
     }

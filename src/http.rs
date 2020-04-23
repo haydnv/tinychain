@@ -8,7 +8,7 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use crate::context::TCResult;
 use crate::error;
 use crate::host::Host;
-use crate::state::TCState;
+use crate::state::State;
 use crate::value::{Link, Op, TCValue, ValueId};
 
 pub async fn listen(
@@ -32,7 +32,7 @@ pub async fn listen(
     Ok(())
 }
 
-async fn get(host: Arc<Host>, path: &Link, params: &HashMap<String, String>) -> TCResult<TCState> {
+async fn get(host: Arc<Host>, path: &Link, params: &HashMap<String, String>) -> TCResult<State> {
     host.get(
         path,
         params
@@ -55,7 +55,7 @@ async fn route(
 
     match method {
         Method::GET => match get(host, &path, &params).await? {
-            TCState::Value(val) => Ok(serde_json::to_string_pretty(&val)?.as_bytes().to_vec()),
+            State::Value(val) => Ok(serde_json::to_string_pretty(&val)?.as_bytes().to_vec()),
             state => Err(error::bad_request(
                 "Attempt to GET unserializable state {}",
                 state,
@@ -80,7 +80,7 @@ async fn route(
                 Ok(responses) => {
                     for (id, r) in responses {
                         match r {
-                            TCState::Value(val) => {
+                            State::Value(val) => {
                                 results.insert(id.clone(), val.clone());
                             }
                             other => {

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::context::*;
 use crate::error;
 use crate::internal::Chain;
-use crate::state::TCState;
+use crate::state::State;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue, Version};
 
@@ -152,7 +152,7 @@ impl TCContext for Table {
         self.chain.put(txn_id, &mutations).await;
     }
 
-    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: &TCValue) -> TCResult<TCState> {
+    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, row_id: &TCValue) -> TCResult<State> {
         // TODO: use the TransactionId to get the state of the chain at a specific point in time
 
         let mut row = self.new_row(&txn, row_id.clone()).await?;
@@ -167,15 +167,15 @@ impl TCContext for Table {
             }
         }
 
-        Ok(TCState::Value(row.into()))
+        Ok(State::Value(row.into()))
     }
 
     async fn put(
         self: &Arc<Self>,
         txn: Arc<Transaction>,
         row_id: TCValue,
-        column_values: TCState,
-    ) -> TCResult<TCState> {
+        column_values: State,
+    ) -> TCResult<State> {
         let row_id = self.row_id(&txn, row_id).await?;
         let column_values: Vec<TCValue> = column_values.try_into()?;
         let schema: HashMap<String, Link> = self.schema.as_map();
@@ -239,7 +239,7 @@ impl TableContext {
         self: &Arc<Self>,
         txn: Arc<Transaction>,
         method: &Link,
-    ) -> TCResult<TCState> {
+    ) -> TCResult<State> {
         if method != "/new" {
             return Err(error::bad_request(
                 "TableContext has no such method",
