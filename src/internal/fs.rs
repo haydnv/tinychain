@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
+use bytes::Bytes;
 use futures::Future;
 use tokio::fs;
 
@@ -142,7 +143,7 @@ impl Dir {
         }
     }
 
-    pub async fn flush(self: &Arc<Self>, _path: Link, _header: Vec<u8>, _data: Vec<Vec<u8>>) {
+    pub async fn flush(self: &Arc<Self>, _path: Link, _header: Vec<u8>, _data: Vec<Bytes>) {
         if self.tmp {
             return;
         }

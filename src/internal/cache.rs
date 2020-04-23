@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::iter::FromIterator;
 use std::sync::RwLock;
@@ -69,5 +69,28 @@ impl<V: Clone> Queue<V> {
 
     pub fn to_vec(&self) -> Vec<V> {
         self.queue.read().unwrap().iter().cloned().collect()
+    }
+}
+
+#[derive(Debug)]
+pub struct Deque<V> {
+    deque: RwLock<VecDeque<V>>,
+}
+
+impl<V> Deque<V> {
+    pub fn new() -> Deque<V> {
+        Deque { deque: RwLock::new(VecDeque::new()) }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.deque.read().unwrap().is_empty()
+    }
+
+    pub fn pop_front(&self) -> Option<V> {
+        self.deque.write().unwrap().pop_front()
+    }
+
+    pub fn push_back(&self, item: V) {
+        self.deque.write().unwrap().push_back(item)
     }
 }

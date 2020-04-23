@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::stream::{FuturesOrdered, Stream};
 use futures::Future;
 use futures_util::{FutureExt, TryFutureExt};
@@ -55,10 +56,10 @@ impl Chain {
     }
 
     pub async fn put<T: Serialize>(self: &Arc<Self>, txn_id: TransactionId, mutations: &[T]) {
-        let delta: Vec<Vec<u8>> = mutations
+        let delta: Vec<Bytes> = mutations
             .iter()
-            .map(|e| serde_json::to_string_pretty(e).unwrap().as_bytes().to_vec())
-            .collect::<Vec<Vec<u8>>>();
+            .map(|e| Bytes::from(serde_json::to_string_pretty(e).unwrap()))
+            .collect();
         self.fs_dir
             .flush(self.latest_block.into(), txn_id.into(), delta)
             .await;

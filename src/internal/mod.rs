@@ -1,4 +1,5 @@
 mod chain;
+mod file;
 mod fs;
 
 pub const DELIMITER: char = 30 as char;
