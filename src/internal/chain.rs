@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::stream::{FuturesOrdered, Stream};
 use futures::Future;
-use futures_util::{FutureExt, TryFutureExt};
+use futures_util::FutureExt;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -19,11 +19,11 @@ pub struct Chain {
 }
 
 impl Chain {
-    pub fn new(fs_dir: Arc<FsDir>) -> Chain {
-        Chain {
+    pub fn new(fs_dir: Arc<FsDir>) -> Arc<Chain> {
+        Arc::new(Chain {
             fs_dir,
             latest_block: 0,
-        }
+        })
     }
 
     pub async fn get<T: DeserializeOwned>(
@@ -36,7 +36,7 @@ impl Chain {
         let mut i = self.latest_block;
         let mut matched: Vec<T> = vec![];
         loop {
-            let contents = self.fs_dir.clone().get(i.into()).await?;
+            let contents = self.fs_dir.clone().get(i.into()).await;
             for entry in contents {
                 let (k, value): (TCValue, T) =
                     serde_json::from_slice(&entry).map_err(error::internal)?;
@@ -66,24 +66,13 @@ impl Chain {
     }
 }
 
-impl<T: 'static + DeserializeOwned> From<Chain> for Box<dyn Stream<Item = TCResult<Vec<T>>>> {
-    fn from(chain: Chain) -> Box<dyn Stream<Item = TCResult<Vec<T>>>> {
-        let mut stream: FuturesOrdered<Box<dyn Future<Output = TCResult<Vec<T>>> + Unpin>> =
+impl From<Chain> for Box<dyn Stream<Item = Vec<Bytes>>> {
+    fn from(chain: Chain) -> Box<dyn Stream<Item = Vec<Bytes>>> {
+        let mut stream: FuturesOrdered<Box<dyn Future<Output = Vec<Bytes>> + Unpin>> =
             FuturesOrdered::new();
 
         for i in 0..chain.latest_block {
-            let fut = chain
-                .fs_dir
-                .clone()
-                .get(i.into())
-                .and_then(|contents| async {
-                    let mut results: Vec<T> = Vec::with_capacity(contents.len());
-                    for entry in contents {
-                        let result = serde_json::from_slice(&entry).map_err(error::internal)?;
-                        results.push(result);
-                    }
-                    Ok(results)
-                });
+            let fut = chain.fs_dir.clone().get(i.into());
             stream.push(Box::new(fut.boxed()));
         }
 

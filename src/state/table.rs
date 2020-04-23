@@ -262,7 +262,7 @@ impl TableContext {
         );
         Ok(Arc::new(Table {
             schema,
-            chain: Arc::new(table_chain),
+            chain: table_chain,
             cache: RwLock::new(HashMap::new()),
         })
         .into())

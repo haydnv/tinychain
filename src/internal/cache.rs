@@ -79,7 +79,9 @@ pub struct Deque<V> {
 
 impl<V> Deque<V> {
     pub fn new() -> Deque<V> {
-        Deque { deque: RwLock::new(VecDeque::new()) }
+        Deque {
+            deque: RwLock::new(VecDeque::new()),
+        }
     }
 
     pub fn is_empty(&self) -> bool {

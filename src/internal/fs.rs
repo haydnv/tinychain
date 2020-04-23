@@ -92,19 +92,19 @@ impl Dir {
         }
     }
 
-    pub fn get(self: Arc<Self>, path: Link) -> impl Future<Output = TCResult<Vec<Vec<u8>>>> {
+    pub fn get(self: Arc<Self>, path: Link) -> impl Future<Output = Vec<Bytes>> {
         println!("get file {}", path);
         async move {
             if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
-                let mut records: Vec<Vec<u8>> = buffer
+                let mut records: Vec<Bytes> = buffer
                     .split(|b| *b == DELIMITER as u8)
-                    .map(|c| c.to_vec())
+                    .map(|c| Bytes::from(c.to_vec()))
                     .collect();
                 records.pop();
-                Ok(records)
+                records
             } else {
                 // TODO
-                Ok(vec![])
+                vec![]
             }
         }
     }

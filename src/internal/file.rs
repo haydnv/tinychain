@@ -1,13 +1,15 @@
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
 
 use crate::internal::cache::Deque;
-use crate::value::Link;
+use crate::internal::FsDir;
+use crate::value::{Link, TCResult};
 
-type FileData = (Link, Link, Box<dyn Stream<Item = Bytes>>);
+type FileData = (Link, Box<dyn Stream<Item = Bytes>>);
 
 pub struct FileWriter {
     open: bool,
@@ -16,20 +18,23 @@ pub struct FileWriter {
 
 impl FileWriter {
     pub fn new() -> FileWriter {
-        FileWriter { open: true, contents: Deque::new() }
+        FileWriter {
+            open: true,
+            contents: Deque::new(),
+        }
     }
 
     pub fn end(&mut self) {
         self.open = false
     }
 
-    pub fn write_file(&mut self, path: Link, constructor: Link, blocks: Box<dyn Stream<Item = Bytes>>) {
-        self.contents.push_back((path, constructor, blocks))
+    pub fn write_file(&mut self, path: Link, blocks: Box<dyn Stream<Item = Bytes>>) {
+        self.contents.push_back((path, blocks))
     }
 }
 
 pub struct FileReader {
-    source: FileWriter
+    source: FileWriter,
 }
 
 impl Stream for FileReader {
@@ -47,9 +52,9 @@ impl Stream for FileReader {
 }
 
 pub trait File {
-    fn create() -> Self;
+    fn create(fs_dir: Arc<FsDir>) -> Arc<Self>;
 
-    fn from(reader: FileReader) -> Self;
+    fn copy(reader: FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Self>>;
 
     fn into(&self, writer: FileWriter);
 }
