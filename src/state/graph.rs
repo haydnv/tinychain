@@ -12,16 +12,12 @@ use crate::value::TCValue;
 pub struct Graph {}
 
 #[async_trait]
-impl TCContext for Graph {
+impl Persistent for Graph {
     async fn commit(self: &Arc<Self>, _txn_id: TransactionId) {
         // TODO
     }
 
-    async fn get(
-        self: &Arc<Self>,
-        _txn: Arc<Transaction>,
-        _node_id: &TCValue,
-    ) -> TCResult<State> {
+    async fn get(self: &Arc<Self>, _txn: Arc<Transaction>, _node_id: &TCValue) -> TCResult<State> {
         Err(error::not_implemented())
     }
 

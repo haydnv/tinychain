@@ -138,7 +138,7 @@ impl Table {
 }
 
 #[async_trait]
-impl TCContext for Table {
+impl Persistent for Table {
     async fn commit(self: &Arc<Self>, txn_id: TransactionId) {
         let mutations = if let Some(mutations) = self.cache.read().unwrap().get(&txn_id) {
             mutations

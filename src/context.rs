@@ -10,7 +10,7 @@ use crate::value::TCValue;
 pub type TCResult<T> = Result<T, error::TCError>;
 
 #[async_trait]
-pub trait TCContext: Send + Sync {
+pub trait Persistent: Send + Sync {
     async fn commit(self: &Arc<Self>, txn_id: TransactionId);
 
     async fn get(self: &Arc<Self>, txn: Arc<Transaction>, key: &TCValue) -> TCResult<State>;

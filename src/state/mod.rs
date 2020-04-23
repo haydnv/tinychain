@@ -2,7 +2,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
-use crate::context::{TCContext, TCResult};
+use crate::context::{Persistent, TCResult};
 use crate::error;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCValue};
@@ -39,12 +39,7 @@ impl State {
         }
     }
 
-    pub async fn put(
-        &self,
-        txn: Arc<Transaction>,
-        key: TCValue,
-        value: State,
-    ) -> TCResult<State> {
+    pub async fn put(&self, txn: Arc<Transaction>, key: TCValue, value: State) -> TCResult<State> {
         match self {
             State::Graph(g) => g.clone().put(txn, key, value).await,
             State::Table(t) => t.clone().put(txn, key, value).await,
