@@ -41,7 +41,7 @@ impl File for Graph {
         Err(error::not_implemented())
     }
 
-    async fn copy_to(&self, _txn_id: &TransactionId, _writer: &mut FileWriter) -> TCResult<()> {
+    async fn copy_to(&self, _txn_id: TransactionId, _writer: &mut FileWriter) -> TCResult<()> {
         Err(error::not_implemented())
     }
 }

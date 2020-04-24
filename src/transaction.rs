@@ -28,6 +28,15 @@ impl TransactionId {
     }
 }
 
+impl From<Bytes> for TransactionId {
+    fn from(b: Bytes) -> TransactionId {
+        TransactionId {
+            timestamp: u128::from_be_bytes(b[..16].try_into().expect("Bad transaction timestamp")),
+            nonce: u16::from_be_bytes(b[16..].try_into().expect("Bad transaction nonce")),
+        }
+    }
+}
+
 impl PartialOrd for TransactionId {
     fn partial_cmp(&self, other: &TransactionId) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
@@ -53,6 +62,18 @@ impl Into<Link> for TransactionId {
 impl Into<String> for TransactionId {
     fn into(self) -> String {
         format!("{}-{}", self.timestamp, self.nonce)
+    }
+}
+
+impl Into<Bytes> for TransactionId {
+    fn into(self) -> Bytes {
+        Bytes::from(
+            [
+                &self.timestamp.to_be_bytes()[..],
+                &self.nonce.to_be_bytes()[..],
+            ]
+            .concat(),
+        )
     }
 }
 

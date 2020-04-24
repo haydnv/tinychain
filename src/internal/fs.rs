@@ -92,19 +92,14 @@ impl Dir {
         }
     }
 
-    pub fn get(self: Arc<Self>, path: Link) -> impl Future<Output = Vec<Bytes>> {
+    pub fn get(self: Arc<Self>, path: Link) -> impl Future<Output = Bytes> {
         println!("get file {}", path);
         async move {
             if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
-                let mut records: Vec<Bytes> = buffer
-                    .split(|b| *b == DELIMITER as u8)
-                    .map(|c| Bytes::from(c.to_vec()))
-                    .collect();
-                records.pop();
-                records
+                Bytes::copy_from_slice(buffer)
             } else {
                 // TODO
-                vec![]
+                Bytes::new()
             }
         }
     }

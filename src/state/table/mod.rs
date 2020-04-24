@@ -69,7 +69,7 @@ pub struct Table {
 
 impl Table {
     async fn row_id(&self, txn: &Arc<Transaction>, value: &[TCValue]) -> TCResult<Vec<TCValue>> {
-        let schema = self.schema.current(&txn.id()).await?;
+        let schema = self.schema.current(txn.id()).await?;
         let key_size = schema.key.len();
 
         let mut row_id: Vec<TCValue> = Vec::with_capacity(key_size);
@@ -88,7 +88,7 @@ impl Table {
 
     async fn new_row(&self, txn: &Arc<Transaction>, row_id: &[TCValue]) -> TCResult<Row> {
         let (row_id, schema) =
-            try_join(self.row_id(txn, row_id), self.schema.current(&txn.id())).await?;
+            try_join(self.row_id(txn, row_id), self.schema.current(txn.id())).await?;
 
         if row_id.len() != schema.key.len() {
             let key: TCValue = row_id.into();
@@ -147,7 +147,7 @@ impl Collection for Table {
         column_values: Self::Value,
     ) -> TCResult<Arc<Self>> {
         let (row_id, schema) =
-            try_join(self.row_id(&txn, &row_id), self.schema.current(&txn.id())).await?;
+            try_join(self.row_id(&txn, &row_id), self.schema.current(txn.id())).await?;
         let schema_map = schema.as_map();
 
         let mut names = vec![];
@@ -212,14 +212,14 @@ impl File for Table {
         }))
     }
 
-    async fn copy_to(&self, txn_id: &TransactionId, writer: &mut FileWriter) -> TCResult<()> {
-        self.schema.copy_to(txn_id, writer).await?;
+    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) -> TCResult<()> {
+        self.schema.copy_to(txn_id.clone(), writer).await?;
 
-        let schema = self.schema.current(txn_id).await?;
+        let schema = self.schema.current(txn_id.clone()).await?;
         let chain_path = format!("/{}", schema.version);
         writer.write_file(
             Link::to(&chain_path).unwrap(),
-            Box::new(self.chain.into_stream().boxed()),
+            Box::new(self.chain.into_stream(txn_id).boxed()),
         );
 
         Ok(())

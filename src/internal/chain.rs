@@ -8,6 +8,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::internal::FsDir;
+use crate::internal::{DELIMITER, GROUP_DELIMITER};
 use crate::transaction::TransactionId;
 
 #[derive(Debug, Hash)]
@@ -25,12 +26,15 @@ impl Chain {
     }
 
     pub fn from(
-        stream: impl Stream<Item = Vec<Bytes>> + Unpin,
+        stream: impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> + Unpin,
         dest: Arc<FsDir>,
     ) -> impl Future<Output = Arc<Chain>> {
         stream
-            .fold((0u64, dest), |(i, dest), block| async move {
-                dest.clone().flush(i.into(), &block[0], &block[1..]).await;
+            .fold((0u64, dest), |acc, block| async move {
+                let (i, dest) = acc;
+                for (txn_id, data) in block {
+                    dest.clone().flush(i.into(), &txn_id.into(), &data).await;
+                }
                 (i, dest)
             })
             .then(|(i, dest)| async move {
@@ -45,12 +49,18 @@ impl Chain {
         self: &Arc<Self>,
         txn_id: TransactionId,
     ) -> impl Stream<Item = Vec<T>> {
-        self.into_stream()
-            .map(move |block: Vec<Bytes>| {
-                println!("{}", block.len());
+        self.into_stream(txn_id.clone())
+            .map(move |block: Vec<(TransactionId, Vec<Bytes>)>| {
                 block
                     .iter()
-                    .map(|entry| serde_json::from_slice::<(TransactionId, Vec<T>)>(&entry).unwrap())
+                    .map(|(time, data)| {
+                        (
+                            time.clone(),
+                            data.iter()
+                                .map(|e| serde_json::from_slice::<T>(e).unwrap())
+                                .collect(),
+                        )
+                    })
                     .filter(|(time, _)| time <= &txn_id)
                     .collect()
             })
@@ -78,15 +88,37 @@ impl Chain {
             .flush(self.latest_block.into(), &txn_id.into(), &delta)
     }
 
-    pub fn into_stream(self: &Arc<Self>) -> impl Stream<Item = Vec<Bytes>> {
-        let mut stream: FuturesOrdered<Box<dyn Future<Output = Vec<Bytes>> + Unpin + Send>> =
-            FuturesOrdered::new();
+    pub fn into_stream(
+        self: &Arc<Self>,
+        txn_id: TransactionId,
+    ) -> impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> {
+        let mut stream: FuturesOrdered<
+            Box<dyn Future<Output = Vec<(TransactionId, Vec<Bytes>)>> + Unpin + Send>,
+        > = FuturesOrdered::new();
 
         for i in 0..self.latest_block {
-            let fut = self.fs_dir.clone().get(i.into());
+            let txn_id = txn_id.clone();
+            let fut = self.fs_dir.clone().get(i.into()).then(|block| async move {
+                let mut block: Vec<&[u8]> = block.split(|b| *b == GROUP_DELIMITER as u8).collect();
+                block.pop();
+
+                let mut data: Vec<(TransactionId, Vec<Bytes>)> = vec![];
+                for txn in block {
+                    let mut txn: Vec<&[u8]> = txn.split(|b| *b == DELIMITER as u8).collect();
+                    txn.pop();
+
+                    let time = TransactionId::from(Bytes::copy_from_slice(txn[0]));
+                    if time <= txn_id {
+                        let txn: Vec<Bytes> =
+                            txn[1..].iter().map(|e| Bytes::copy_from_slice(e)).collect();
+                        data.push((time, txn));
+                    }
+                }
+                data
+            });
             stream.push(Box::new(fut.boxed()));
         }
 
-        stream
+        stream.take_while(|b| future::ready(!b.is_empty()))
     }
 }

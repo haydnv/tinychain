@@ -51,8 +51,8 @@ impl SchemaHistory {
         }))
     }
 
-    pub async fn current(&self, txn_id: &TransactionId) -> TCResult<Schema> {
-        if let Some(schema) = self.txn_cache.get(txn_id) {
+    pub async fn current(&self, txn_id: TransactionId) -> TCResult<Schema> {
+        if let Some(schema) = self.txn_cache.get(&txn_id) {
             Ok(schema)
         } else if let Some(schema) = self
             .chain
@@ -88,7 +88,7 @@ impl File for SchemaHistory {
         }))
     }
 
-    async fn copy_to(&self, _txn_id: &TransactionId, _writer: &mut FileWriter) -> TCResult<()> {
+    async fn copy_to(&self, _txn_id: TransactionId, _writer: &mut FileWriter) -> TCResult<()> {
         Err(error::not_implemented())
     }
 }
