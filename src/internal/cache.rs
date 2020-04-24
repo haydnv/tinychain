@@ -96,3 +96,31 @@ impl<V> Deque<V> {
         self.deque.write().unwrap().push_back(item)
     }
 }
+
+pub struct Value<T: Clone> {
+    value: RwLock<T>,
+}
+
+impl<T: Clone> Value<T> {
+    pub fn of(value: T) -> Value<T> {
+        Value {
+            value: RwLock::new(value),
+        }
+    }
+
+    pub fn read(&self) -> T {
+        self.value.read().unwrap().clone()
+    }
+
+    pub fn write(&self, value: T) {
+        *self.value.write().unwrap() = value
+    }
+}
+
+impl<T: Clone + PartialEq> PartialEq for Value<T> {
+    fn eq(&self, other: &Self) -> bool {
+        *self.value.read().unwrap() == *other.value.read().unwrap()
+    }
+}
+
+impl<T: Clone + Eq> Eq for Value<T> {}

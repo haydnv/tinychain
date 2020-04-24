@@ -25,7 +25,7 @@ impl Chain {
     }
 
     pub async fn from(
-        mut stream: Box<dyn Stream<Item = Vec<Bytes>> + Unpin>,
+        mut stream: impl Stream<Item = Vec<Bytes>> + Unpin,
         dest: Arc<FsDir>,
     ) -> Arc<Chain> {
         let mut latest_block: u64 = 0;
