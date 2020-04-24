@@ -24,21 +24,21 @@ impl Chain {
         })
     }
 
-    pub async fn from(
-        mut stream: impl Stream<Item = Vec<Bytes>> + Unpin,
+    pub fn from(
+        stream: impl Stream<Item = Vec<Bytes>> + Unpin,
         dest: Arc<FsDir>,
-    ) -> Arc<Chain> {
-        let mut latest_block: u64 = 0;
-        while let Some(block) = stream.next().await {
-            dest.flush(latest_block.into(), &block[0], &block[1..])
-                .await;
-            latest_block += 1;
-        }
-
-        Arc::new(Chain {
-            fs_dir: dest,
-            latest_block,
-        })
+    ) -> impl Future<Output = Arc<Chain>> {
+        stream
+            .fold((0u64, dest), |(i, dest), block| async move {
+                dest.clone().flush(i.into(), &block[0], &block[1..]).await;
+                (i, dest)
+            })
+            .then(|(i, dest)| async move {
+                Arc::new(Chain {
+                    fs_dir: dest,
+                    latest_block: i,
+                })
+            })
     }
 
     pub fn until<T: 'static + Clone + DeserializeOwned>(
@@ -64,14 +64,18 @@ impl Chain {
             .take_while(|block| future::ready(!block.is_empty()))
     }
 
-    pub async fn put<T: Serialize>(&self, txn_id: &TransactionId, mutations: &[T]) {
+    pub fn put<T: Serialize>(
+        self: Arc<Self>,
+        txn_id: &TransactionId,
+        mutations: &[T],
+    ) -> impl Future<Output = ()> {
         let delta: Vec<Bytes> = mutations
             .iter()
             .map(|e| Bytes::from(serde_json::to_string_pretty(e).unwrap()))
             .collect();
         self.fs_dir
+            .clone()
             .flush(self.latest_block.into(), &txn_id.into(), &delta)
-            .await;
     }
 
     pub fn into_stream(self: &Arc<Self>) -> impl Stream<Item = Vec<Bytes>> {

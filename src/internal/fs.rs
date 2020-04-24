@@ -143,12 +143,19 @@ impl Dir {
         }
     }
 
-    pub async fn flush(self: &Arc<Self>, _path: Link, _header: &Bytes, _data: &[Bytes]) {
-        if self.tmp {
-            return;
-        }
+    pub fn flush(
+        self: Arc<Self>,
+        _path: Link,
+        _header: &Bytes,
+        _data: &[Bytes],
+    ) -> impl Future<Output = ()> {
+        async move {
+            if self.tmp {
+                return;
+            }
 
-        // TODO
+            // TODO
+        }
     }
 
     fn fs_path(&self, name: &Link) -> PathBuf {

@@ -238,7 +238,7 @@ impl Persistent for Table {
             vec![]
         };
 
-        self.chain.put(&txn_id, &mutations).await;
+        self.chain.clone().put(&txn_id, &mutations).await;
     }
 }
 

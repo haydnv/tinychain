@@ -97,7 +97,7 @@ impl File for SchemaHistory {
 impl Persistent for SchemaHistory {
     async fn commit(&self, txn_id: TransactionId) {
         if let Some(schema) = self.txn_cache.get(&txn_id) {
-            self.chain.put(&txn_id, &[schema]).await;
+            self.chain.clone().put(&txn_id, &[schema]).await;
         }
     }
 }
