@@ -1,16 +1,14 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::future;
 use futures::stream::{FuturesOrdered, Stream};
-use futures::Future;
-use futures_util::{FutureExt, StreamExt};
+use futures::{Future, FutureExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::error;
 use crate::internal::FsDir;
 use crate::transaction::TransactionId;
-use crate::value::{TCResult, TCValue};
 
 #[derive(Debug, Hash)]
 pub struct Chain {
@@ -43,36 +41,30 @@ impl Chain {
         })
     }
 
-    pub async fn get<T: DeserializeOwned>(
+    pub fn until<T: 'static + Clone + DeserializeOwned>(
         self: &Arc<Self>,
-        _txn_id: TransactionId,
-        key: &TCValue,
-    ) -> TCResult<Vec<T>> {
-        // TODO: use txn_id to return the state of the chain at a specific point in time
-
-        let mut i = self.latest_block;
-        let mut matched: Vec<T> = vec![];
-        loop {
-            let contents = self.fs_dir.clone().get(i.into()).await;
-            for entry in contents {
-                let (k, value): (TCValue, T) =
-                    serde_json::from_slice(&entry).map_err(error::internal)?;
-                if key == &k {
-                    matched.push(value);
+        txn_id: TransactionId,
+    ) -> impl Stream<Item = Vec<T>> {
+        self.into_stream()
+            .map(move |block: Vec<Bytes>| {
+                println!("{}", block.len());
+                block
+                    .iter()
+                    .map(|entry| serde_json::from_slice::<(TransactionId, Vec<T>)>(&entry).unwrap())
+                    .filter(|(time, _)| time <= &txn_id)
+                    .collect()
+            })
+            .map(|block: Vec<(TransactionId, Vec<T>)>| {
+                let mut result = vec![];
+                for (_time, mutations) in block {
+                    result.extend(mutations.to_vec())
                 }
-            }
-
-            if i == 0 {
-                break;
-            } else {
-                i -= 1;
-            }
-        }
-
-        Ok(matched)
+                result.to_vec()
+            })
+            .take_while(|block| future::ready(!block.is_empty()))
     }
 
-    pub async fn put<T: Serialize>(self: &Arc<Self>, txn_id: &TransactionId, mutations: &[T]) {
+    pub async fn put<T: Serialize>(&self, txn_id: &TransactionId, mutations: &[T]) {
         let delta: Vec<Bytes> = mutations
             .iter()
             .map(|e| Bytes::from(serde_json::to_string_pretty(e).unwrap()))
@@ -81,18 +73,16 @@ impl Chain {
             .flush(self.latest_block.into(), &txn_id.into(), &delta)
             .await;
     }
-}
 
-impl From<&Chain> for Box<dyn Stream<Item = Vec<Bytes>> + Send> {
-    fn from(chain: &Chain) -> Box<dyn Stream<Item = Vec<Bytes>> + Send> {
+    pub fn into_stream(self: &Arc<Self>) -> impl Stream<Item = Vec<Bytes>> {
         let mut stream: FuturesOrdered<Box<dyn Future<Output = Vec<Bytes>> + Unpin + Send>> =
             FuturesOrdered::new();
 
-        for i in 0..chain.latest_block {
-            let fut = chain.fs_dir.clone().get(i.into());
+        for i in 0..self.latest_block {
+            let fut = self.fs_dir.clone().get(i.into());
             stream.push(Box::new(fut.boxed()));
         }
 
-        Box::new(stream)
+        stream
     }
 }

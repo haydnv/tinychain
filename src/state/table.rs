@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use futures::future::try_join_all;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
@@ -113,23 +114,12 @@ struct Row {
 }
 
 impl Row {
-    fn update(&mut self, mutation: &Mutation) -> TCResult<()> {
-        let (key, values) = mutation;
-        if key != &self.key {
-            let key: TCValue = key.clone().into();
-            return Err(error::bad_request(
-                "Cannot update the value of a row's primary key",
-                key,
-            ));
-        }
-
-        for (i, value) in values.iter().enumerate() {
+    fn update(&mut self, mutation: &Mutation) {
+        for (i, value) in mutation.1.iter().enumerate() {
             if !value.is_none() {
                 self.values[i] = value.clone();
             }
         }
-
-        Ok(())
     }
 }
 
@@ -175,8 +165,10 @@ impl File for Table {
     fn into(&self, txn_id: &TransactionId, writer: &mut FileWriter) {
         let schema = self.schema.current(txn_id).unwrap();
         let chain_path = format!("/{}", schema.version);
-        let chain: &Chain = &*self.chain;
-        writer.write_file(Link::to(&chain_path).unwrap(), chain.into());
+        writer.write_file(
+            Link::to(&chain_path).unwrap(),
+            Box::new(self.chain.into_stream().boxed()),
+        );
     }
 }
 
@@ -228,21 +220,29 @@ impl Collection for Table {
         txn: Arc<Transaction>,
         row_id: &Self::Key,
     ) -> TCResult<Self::Value> {
-        // TODO: use the TransactionId to get the state of the chain at a specific point in time
-
-        let mut row = self.new_row(&txn, row_id).await?;
-        let mutations: Vec<Mutation> = self.chain.get(txn.id(), &row.key.clone().into()).await?;
-        for mutation in mutations {
-            row.update(&mutation)?;
-        }
+        let mut row = self
+            .chain
+            .until(txn.id())
+            .fold(
+                self.new_row(&txn, row_id).await?,
+                |mut row, block: Vec<Mutation>| async {
+                    for mutation in block {
+                        if mutation.0 == row.key {
+                            row.update(&mutation)
+                        }
+                    }
+                    row
+                },
+            )
+            .await;
 
         if let Some(mutations) = self.cache.read().unwrap().get(&txn.id()) {
             for mutation in mutations {
-                row.update(mutation)?;
+                row.update(mutation);
             }
         }
 
-        Ok(row.values.iter().map(|o| o.into()).collect())
+        Ok(row.values.iter().map(|v| v.into()).collect())
     }
 
     async fn put(
