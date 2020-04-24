@@ -63,7 +63,7 @@ impl Stream for FileReader {
 
 #[async_trait]
 pub trait File {
-    async fn copy(mut reader: FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Self>>;
+    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Self>>;
 
-    async fn into(&self, txn_id: &TransactionId, writer: &mut FileWriter) -> TCResult<()>;
+    async fn copy_to(&self, txn_id: &TransactionId, writer: &mut FileWriter) -> TCResult<()>;
 }

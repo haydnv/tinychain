@@ -56,13 +56,6 @@ impl SchemaHistory {
         }))
     }
 
-    async fn from(chain: Arc<Chain>) -> Arc<SchemaHistory> {
-        Arc::new(SchemaHistory {
-            chain,
-            txn_cache: cache::Map::new(),
-        })
-    }
-
     async fn current(&self, txn_id: &TransactionId) -> TCResult<Schema> {
         if let Some(schema) = self.txn_cache.get(txn_id) {
             Ok(schema)
@@ -85,6 +78,23 @@ impl SchemaHistory {
                 txn_id,
             ))
         }
+    }
+}
+
+#[async_trait]
+impl File for SchemaHistory {
+    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> TCResult<Arc<SchemaHistory>> {
+        let (path, blocks) = reader.next().await.unwrap();
+        let chain = Chain::from(blocks, dest.reserve(&path)?).await;
+
+        Ok(Arc::new(SchemaHistory {
+            chain,
+            txn_cache: cache::Map::new(),
+        }))
+    }
+
+    async fn copy_to(&self, _txn_id: &TransactionId, _writer: &mut FileWriter) -> TCResult<()> {
+        Err(error::not_implemented())
     }
 }
 
@@ -143,35 +153,6 @@ pub struct Table {
     schema: Arc<SchemaHistory>,
     chain: Arc<Chain>,
     cache: RwLock<HashMap<TransactionId, Vec<Mutation>>>,
-}
-
-#[async_trait]
-impl File for Table {
-    async fn copy(mut reader: FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Table>> {
-        let (path, blocks) = reader.next().await.unwrap();
-        let schema_chain = Chain::from(blocks, dest.reserve(&path)?).await;
-        let schema_history = SchemaHistory::from(schema_chain).await;
-
-        let (path, blocks) = reader.next().await.unwrap();
-        let chain = Chain::from(blocks, dest.reserve(&path)?).await;
-
-        Ok(Arc::new(Table {
-            schema: schema_history,
-            chain,
-            cache: RwLock::new(HashMap::new()),
-        }))
-    }
-
-    async fn into(&self, txn_id: &TransactionId, writer: &mut FileWriter) -> TCResult<()> {
-        let schema = self.schema.current(txn_id).await?;
-        let chain_path = format!("/{}", schema.version);
-        writer.write_file(
-            Link::to(&chain_path).unwrap(),
-            Box::new(self.chain.into_stream().boxed()),
-        );
-
-        Ok(())
-    }
 }
 
 impl Table {
@@ -301,6 +282,35 @@ impl Collection for Table {
         }
 
         Ok(self.clone())
+    }
+}
+
+#[async_trait]
+impl File for Table {
+    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Table>> {
+        let schema_history = SchemaHistory::copy_from(reader, dest.clone()).await?;
+
+        let (path, blocks) = reader.next().await.unwrap();
+        let chain = Chain::from(blocks, dest.reserve(&path)?).await;
+
+        Ok(Arc::new(Table {
+            schema: schema_history,
+            chain,
+            cache: RwLock::new(HashMap::new()),
+        }))
+    }
+
+    async fn copy_to(&self, txn_id: &TransactionId, writer: &mut FileWriter) -> TCResult<()> {
+        self.schema.copy_to(txn_id, writer).await?;
+
+        let schema = self.schema.current(txn_id).await?;
+        let chain_path = format!("/{}", schema.version);
+        writer.write_file(
+            Link::to(&chain_path).unwrap(),
+            Box::new(self.chain.into_stream().boxed()),
+        );
+
+        Ok(())
     }
 }
 
