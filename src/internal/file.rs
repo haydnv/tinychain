@@ -11,7 +11,7 @@ use crate::internal::FsDir;
 use crate::transaction::TransactionId;
 use crate::value::{Link, TCResult};
 
-type FileData = (Link, Box<dyn Stream<Item = Vec<Bytes>> + Send>);
+type FileData = (Link, Box<dyn Stream<Item = Vec<Bytes>> + Send + Unpin>);
 
 pub struct FileWriter {
     open: bool,
@@ -30,7 +30,11 @@ impl FileWriter {
         self.open = false
     }
 
-    pub fn write_file(&mut self, path: Link, blocks: Box<dyn Stream<Item = Vec<Bytes>> + Send>) {
+    pub fn write_file(
+        &mut self,
+        path: Link,
+        blocks: Box<dyn Stream<Item = Vec<Bytes>> + Send + Unpin>,
+    ) {
         if path.len() != 1 {
             panic!("Tried to write file in subdirectory: {}", path);
         }
@@ -59,7 +63,7 @@ impl Stream for FileReader {
 
 #[async_trait]
 pub trait File {
-    async fn copy(reader: FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Self>>;
+    async fn copy(mut reader: FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Self>>;
 
     async fn into(&self, txn_id: &TransactionId, writer: &mut FileWriter) -> TCResult<()>;
 }

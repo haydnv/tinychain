@@ -41,58 +41,31 @@ impl Schema {
 }
 
 struct SchemaHistory {
-    current: cache::Value<(TransactionId, Schema)>,
     chain: Arc<Chain>,
-    cache: cache::Map<TransactionId, Schema>,
+    txn_cache: cache::Map<TransactionId, Schema>,
 }
 
 impl SchemaHistory {
     fn new(txn: &Arc<Transaction>, schema: Schema) -> TCResult<Arc<SchemaHistory>> {
+        let txn_cache = cache::Map::new();
+        txn_cache.insert(txn.id(), schema);
+
         Ok(Arc::new(SchemaHistory {
-            current: cache::Value::of((txn.id(), schema)),
             chain: Chain::new(txn.context().reserve(&Link::to("/schema")?)?),
-            cache: cache::Map::new(),
+            txn_cache,
         }))
     }
 
-    fn alter(
-        &self,
-        txn_id: &TransactionId,
-        key: Vec<(String, Link)>,
-        columns: Vec<(String, Link)>,
-    ) -> TCResult<()> {
-        let (now, current) = self.current.read();
-
-        if txn_id < &now {
-            return Err(error::bad_request("Attempt to alter the past", now));
-        }
-
-        if key == current.key && columns == current.columns {
-            return Ok(());
-        }
-
-        let mut version = current.version.clone();
-        if key != current.key {
-            version.bump_major()
-        } else {
-            version.bump_minor()
-        }
-
-        let schema = Schema {
-            version,
-            key,
-            columns,
-        };
-        self.cache.insert(txn_id.clone(), schema);
-        Ok(())
+    async fn from(chain: Arc<Chain>) -> Arc<SchemaHistory> {
+        Arc::new(SchemaHistory {
+            chain,
+            txn_cache: cache::Map::new(),
+        })
     }
 
     async fn current(&self, txn_id: &TransactionId) -> TCResult<Schema> {
-        let (now, current) = self.current.read();
-        if let Some(schema) = self.cache.get(txn_id) {
+        if let Some(schema) = self.txn_cache.get(txn_id) {
             Ok(schema)
-        } else if txn_id >= &now {
-            Ok(current.clone())
         } else if let Some(schema) = self
             .chain
             .until(txn_id.clone())
@@ -118,9 +91,8 @@ impl SchemaHistory {
 #[async_trait]
 impl Persistent for SchemaHistory {
     async fn commit(&self, txn_id: TransactionId) {
-        if let Some(schema) = self.cache.get(&txn_id) {
+        if let Some(schema) = self.txn_cache.get(&txn_id) {
             self.chain.put(&txn_id, &[&schema]).await;
-            self.current.write((txn_id, schema));
         }
     }
 }
@@ -175,8 +147,19 @@ pub struct Table {
 
 #[async_trait]
 impl File for Table {
-    async fn copy(_reader: FileReader, _dest: Arc<FsDir>) -> TCResult<Arc<Table>> {
-        Err(error::not_implemented())
+    async fn copy(mut reader: FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Table>> {
+        let (path, blocks) = reader.next().await.unwrap();
+        let schema_chain = Chain::from(blocks, dest.reserve(&path)?).await;
+        let schema_history = SchemaHistory::from(schema_chain).await;
+
+        let (path, blocks) = reader.next().await.unwrap();
+        let chain = Chain::from(blocks, dest.reserve(&path)?).await;
+
+        Ok(Arc::new(Table {
+            schema: schema_history,
+            chain,
+            cache: RwLock::new(HashMap::new()),
+        }))
     }
 
     async fn into(&self, txn_id: &TransactionId, writer: &mut FileWriter) -> TCResult<()> {
