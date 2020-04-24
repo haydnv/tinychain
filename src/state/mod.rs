@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::error;
+use crate::internal::file::File;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue};
 
@@ -16,7 +17,7 @@ pub type Table = table::Table;
 pub type TableContext = table::TableContext;
 
 #[async_trait]
-pub trait Persistent: Send + Sync {
+pub trait Persistent: File + Send + Sync {
     async fn commit(&self, txn_id: TransactionId);
 }
 

@@ -3,6 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::error;
+use crate::internal::file::*;
+use crate::internal::FsDir;
 use crate::state::{Collection, Persistent};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{TCResult, TCValue};
@@ -29,6 +31,17 @@ impl Collection for Graph {
         _node_id: TCValue,
         _node: TCValue,
     ) -> TCResult<Arc<Self>> {
+        Err(error::not_implemented())
+    }
+}
+
+#[async_trait]
+impl File for Graph {
+    async fn copy_from(_reader: &mut FileReader, _dest: Arc<FsDir>) -> TCResult<Arc<Self>> {
+        Err(error::not_implemented())
+    }
+
+    async fn copy_to(&self, _txn_id: &TransactionId, _writer: &mut FileWriter) -> TCResult<()> {
         Err(error::not_implemented())
     }
 }
