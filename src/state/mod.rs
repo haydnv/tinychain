@@ -12,6 +12,7 @@ use crate::value::{Link, TCResult, TCValue};
 mod graph;
 mod index;
 mod table;
+mod schema;
 
 type Graph = graph::Graph;
 pub type Table = table::Table;
