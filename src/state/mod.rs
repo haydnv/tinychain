@@ -11,8 +11,8 @@ use crate::value::{Link, TCResult, TCValue};
 
 mod graph;
 mod index;
-mod table;
 mod schema;
+mod table;
 
 type Graph = graph::Graph;
 pub type Table = table::Table;
@@ -38,7 +38,9 @@ pub trait Collection: Send + Sync {
 pub trait Derived: Collection {
     type Config: TryFrom<TCValue>;
 
-    fn from(source: impl Collection, config: Self::Config) -> TCResult<Arc<Self>>;
+    fn commit(self: &Arc<Self>);
+
+    async fn from(txn: Arc<Transaction>, config: Self::Config) -> TCResult<Arc<Self>>;
 }
 
 #[async_trait]

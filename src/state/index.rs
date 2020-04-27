@@ -1,16 +1,39 @@
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::error;
+use crate::internal::cache::Map;
 use crate::internal::FsDir;
 use crate::state::{Collection, Derived};
-use crate::transaction::Transaction;
+use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue};
 
+#[derive(Deserialize, Serialize)]
+struct IndexConfig {
+    key: Vec<(String, Link)>,
+    value: Vec<(String, Link)>,
+}
+
+impl TryFrom<TCValue> for IndexConfig {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<IndexConfig> {
+        let (key, value): (TCValue, TCValue) = value.try_into()?;
+        Ok(IndexConfig {
+            key: key.try_into()?,
+            value: value.try_into()?,
+        })
+    }
+}
+
 struct Index {
-    fs_dir: FsDir,
+    config: IndexConfig,
+    fs_dir: Arc<FsDir>,
+    txn_cache: Map<TransactionId, HashMap<Vec<TCValue>, Vec<TCValue>>>,
 }
 
 #[async_trait]
@@ -36,28 +59,17 @@ impl Collection for Index {
     }
 }
 
-struct IndexConfig {
-    key: Vec<(String, Link)>,
-    value: Vec<(String, Link)>,
-}
-
-impl TryFrom<TCValue> for IndexConfig {
-    type Error = error::TCError;
-
-    fn try_from(value: TCValue) -> TCResult<IndexConfig> {
-        let (key, value): (TCValue, TCValue) = value.try_into()?;
-        Ok(IndexConfig {
-            key: key.try_into()?,
-            value: value.try_into()?,
-        })
-    }
-}
-
 #[async_trait]
 impl Derived for Index {
     type Config = IndexConfig;
 
-    fn from(_source: impl Collection, _config: IndexConfig) -> TCResult<Arc<Index>> {
-        Err(error::not_implemented())
+    fn commit(self: &Arc<Self>) {}
+
+    async fn from(txn: Arc<Transaction>, config: IndexConfig) -> TCResult<Arc<Index>> {
+        Ok(Arc::new(Index {
+            config,
+            fs_dir: txn.context(),
+            txn_cache: Map::new(),
+        }))
     }
 }

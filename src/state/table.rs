@@ -10,8 +10,8 @@ use futures::StreamExt;
 use crate::error;
 use crate::internal::file::*;
 use crate::internal::{Chain, FsDir};
-use crate::state::{Collection, Persistent};
 use crate::state::schema::{Schema, SchemaHistory};
+use crate::state::{Collection, Persistent};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue, Version};
 
