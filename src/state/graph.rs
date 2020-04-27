@@ -23,6 +23,15 @@ impl Collection for Graph {
     ) -> TCResult<Self::Value> {
         Err(error::not_implemented())
     }
+
+    async fn put(
+        self: Arc<Self>,
+        _txn: Arc<Transaction>,
+        _node_id: TCValue,
+        _node: TCValue,
+    ) -> TCResult<Arc<Self>> {
+        Err(error::not_implemented())
+    }
 }
 
 #[async_trait]
@@ -40,14 +49,5 @@ impl File for Graph {
 impl Persistent for Graph {
     async fn commit(&self, _txn_id: TransactionId) {
         // TODO
-    }
-
-    async fn put(
-        self: &Arc<Self>,
-        _txn: Arc<Transaction>,
-        _node_id: TCValue,
-        _node: TCValue,
-    ) -> TCResult<Arc<Self>> {
-        Err(error::not_implemented())
     }
 }

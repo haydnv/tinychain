@@ -206,6 +206,22 @@ impl<T: Into<TCValue>> std::iter::FromIterator<T> for TCValue {
     }
 }
 
+impl TryFrom<TCValue> for (TCValue, TCValue) {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<(TCValue, TCValue)> {
+        let value: Vec<TCValue> = value.try_into()?;
+        if value.len() == 2 {
+            Ok((value[0].clone(), value[1].clone()))
+        } else {
+            Err(error::bad_request(
+                "Expected 2-tuple but found",
+                format!("{:?}", value),
+            ))
+        }
+    }
+}
+
 impl<T1: TCValueTryFrom, T2: TCValueTryFrom> TryFrom<TCValue> for Vec<(T1, T2)> {
     type Error = error::TCError;
 
@@ -224,12 +240,8 @@ impl<T1: TCValueTryFrom, T2: TCValueTryFrom> TryFrom<TCValue> for (T1, T2) {
     type Error = error::TCError;
 
     fn try_from(value: TCValue) -> TCResult<(T1, T2)> {
-        let v: Vec<TCValue> = value.clone().try_into()?;
-        if v.len() == 2 {
-            Ok((v[0].clone().try_into()?, v[1].clone().try_into()?))
-        } else {
-            Err(error::bad_request("Expected 2-tuple but found", value))
-        }
+        let v: (TCValue, TCValue) = value.try_into()?;
+        Ok((v.0.try_into()?, v.1.try_into()?))
     }
 }
 

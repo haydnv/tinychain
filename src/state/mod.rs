@@ -10,6 +10,7 @@ use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue};
 
 mod graph;
+mod index;
 mod table;
 
 type Graph = graph::Graph;
@@ -23,21 +24,25 @@ pub trait Collection: Send + Sync {
 
     async fn get(self: &Arc<Self>, txn: Arc<Transaction>, key: &Self::Key)
         -> TCResult<Self::Value>;
-}
-
-#[async_trait]
-pub trait Derived: Collection {}
-
-#[async_trait]
-pub trait Persistent: Collection + File {
-    async fn commit(&self, txn_id: TransactionId);
 
     async fn put(
-        self: &Arc<Self>,
+        self: Arc<Self>,
         txn: Arc<Transaction>,
         key: Self::Key,
         state: Self::Value,
     ) -> TCResult<Arc<Self>>;
+}
+
+#[async_trait]
+pub trait Derived: Collection {
+    type Config: TryFrom<TCValue>;
+
+    fn from(source: impl Collection, config: Self::Config) -> TCResult<Arc<Self>>;
+}
+
+#[async_trait]
+pub trait Persistent: Collection + File {
+    async fn commit(&self, txn_id: TransactionId);
 }
 
 #[derive(Clone)]
