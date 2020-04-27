@@ -8,4 +8,5 @@ pub type Chain = chain::Chain;
 pub type FsDir = fs::Dir;
 
 pub mod cache;
+mod directory;
 pub mod file;
