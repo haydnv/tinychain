@@ -10,7 +10,6 @@ use crate::error;
 use crate::internal::cache;
 use crate::internal::file::*;
 use crate::internal::{Chain, FsDir};
-use crate::state::Persistent;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, Version};
 
@@ -49,6 +48,12 @@ impl SchemaHistory {
             chain: Chain::new(txn.context().reserve(&Link::to("/schema")?)?),
             txn_cache,
         }))
+    }
+
+    async fn commit(&self, txn_id: TransactionId) {
+        if let Some(schema) = self.txn_cache.get(&txn_id) {
+            self.chain.clone().put(&txn_id, &[schema]).await;
+        }
     }
 
     pub async fn current(&self, txn_id: TransactionId) -> TCResult<Schema> {
@@ -90,14 +95,5 @@ impl File for SchemaHistory {
 
     async fn copy_to(&self, _txn_id: TransactionId, _writer: &mut FileWriter) -> TCResult<()> {
         Err(error::not_implemented())
-    }
-}
-
-#[async_trait]
-impl Persistent for SchemaHistory {
-    async fn commit(&self, txn_id: TransactionId) {
-        if let Some(schema) = self.txn_cache.get(&txn_id) {
-            self.chain.clone().put(&txn_id, &[schema]).await;
-        }
     }
 }
