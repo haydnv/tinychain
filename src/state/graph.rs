@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -8,6 +9,16 @@ use crate::internal::FsDir;
 use crate::state::{Collection, Persistent};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{TCResult, TCValue};
+
+pub struct GraphConfig;
+
+impl TryFrom<TCValue> for GraphConfig {
+    type Error = error::TCError;
+
+    fn try_from(_value: TCValue) -> TCResult<GraphConfig> {
+        Err(error::not_implemented())
+    }
+}
 
 #[derive(Debug)]
 pub struct Graph {}
@@ -47,6 +58,12 @@ impl File for Graph {
 
 #[async_trait]
 impl Persistent for Graph {
+    type Config = GraphConfig;
+
+    async fn create(_txn: Arc<Transaction>, _config: GraphConfig) -> TCResult<Arc<Graph>> {
+        Err(error::not_implemented())
+    }
+
     async fn commit(&self, _txn_id: TransactionId) {
         // TODO
     }

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -11,13 +12,13 @@ use crate::internal::cache;
 use crate::internal::file::*;
 use crate::internal::{Chain, FsDir};
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCResult, Version};
+use crate::value::{Link, TCResult, TCValue, Version};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Schema {
-    pub version: Version,
     pub key: Vec<(String, Link)>,
     pub columns: Vec<(String, Link)>,
+    pub version: Version,
 }
 
 impl Schema {
@@ -31,6 +32,27 @@ impl Schema {
         }
 
         map
+    }
+}
+
+impl TryFrom<TCValue> for Schema {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<Schema> {
+        let value: Vec<TCValue> = value.try_into()?;
+        if value.len() == 3 {
+            let key: Vec<(String, Link)> = value[0].clone().try_into()?;
+            let columns: Vec<(String, Link)> = value[1].clone().try_into()?;
+            let version: Version = value[2].clone().try_into()?;
+            Ok(Schema {
+                key,
+                columns,
+                version,
+            })
+        } else {
+            let value: TCValue = value.into();
+            Err(error::bad_request("Expected Schema of the form ([(name, constructor)...], [(name, constructor), ...], Version), found", value))
+        }
     }
 }
 

@@ -4,7 +4,7 @@ use std::time;
 
 use crate::error;
 use crate::internal::FsDir;
-use crate::state::{State, TableContext};
+use crate::state::{Persistent, State, Table};
 use crate::transaction::Transaction;
 use crate::value::{Link, Op, TCResult, TCValue};
 
@@ -12,18 +12,12 @@ const RESERVED: [&str; 1] = ["/sbin"];
 
 #[derive(Debug)]
 pub struct Host {
-    table_context: Arc<TableContext>,
     workspace: Arc<FsDir>,
 }
 
 impl Host {
     pub fn new(_data_dir: Arc<FsDir>, workspace: Arc<FsDir>) -> TCResult<Arc<Host>> {
-        let table_context = TableContext::new();
-
-        Ok(Arc::new(Host {
-            table_context,
-            workspace,
-        }))
+        Ok(Arc::new(Host { workspace }))
     }
 
     pub async fn claim(self: &Arc<Self>, path: Link) -> TCResult<()> {
@@ -96,7 +90,11 @@ impl Host {
 
         match path.as_str(0) {
             "sbin" => match path.as_str(1) {
-                "table" => Ok(self.table_context.new_table(txn).await?.into()),
+                "table" => Ok(
+                    Table::create(txn.clone(), txn.require("schema")?.try_into()?)
+                        .await?
+                        .into(),
+                ),
                 _ => Err(error::not_found(path)),
             },
             _ => Err(error::not_found(path)),

@@ -1,10 +1,11 @@
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
 use crate::error;
-use crate::value::TCResult;
+use crate::value::{TCResult, TCValue};
 
 #[derive(Clone)]
 pub struct Version {
@@ -46,6 +47,15 @@ impl Version {
 
     pub fn bump_patch(&mut self) {
         self.patch += 1;
+    }
+}
+
+impl TryFrom<TCValue> for Version {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<Version> {
+        let version: String = value.try_into()?;
+        Ok(Version::parse(&version)?)
     }
 }
 

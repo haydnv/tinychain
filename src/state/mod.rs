@@ -16,7 +16,6 @@ mod table;
 
 type Graph = graph::Graph;
 pub type Table = table::Table;
-pub type TableContext = table::TableContext;
 
 #[async_trait]
 pub trait Collection: Send + Sync {
@@ -45,7 +44,11 @@ pub trait Derived: Collection {
 
 #[async_trait]
 pub trait Persistent: Collection + File {
+    type Config: TryFrom<TCValue>;
+
     async fn commit(&self, txn_id: TransactionId);
+
+    async fn create(txn: Arc<Transaction>, config: Self::Config) -> TCResult<Arc<Self>>;
 }
 
 #[derive(Clone)]

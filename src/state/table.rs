@@ -13,7 +13,7 @@ use crate::internal::{Chain, FsDir};
 use crate::state::schema::{Schema, SchemaHistory};
 use crate::state::{Collection, Persistent};
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCResult, TCValue, Version};
+use crate::value::{Link, TCResult, TCValue};
 
 type Mutation = (Vec<TCValue>, Vec<Option<TCValue>>);
 
@@ -226,6 +226,8 @@ impl File for Table {
 
 #[async_trait]
 impl Persistent for Table {
+    type Config = Schema;
+
     async fn commit(&self, txn_id: TransactionId) {
         let mutations = if let Some(mutations) = self.cache.read().unwrap().get(&txn_id) {
             mutations
@@ -238,26 +240,8 @@ impl Persistent for Table {
 
         self.chain.clone().put(&txn_id, &mutations).await;
     }
-}
 
-#[derive(Debug)]
-pub struct TableContext {}
-
-impl TableContext {
-    pub fn new() -> Arc<TableContext> {
-        Arc::new(TableContext {})
-    }
-
-    pub async fn new_table(self: &Arc<Self>, txn: Arc<Transaction>) -> TCResult<Arc<Table>> {
-        let key: Vec<(String, Link)> = txn.require("key")?.try_into()?;
-        let columns: Vec<(String, Link)> = txn.require("columns")?.try_into()?;
-
-        let schema = Schema {
-            key,
-            columns,
-            version: Version::parse("1.0.0")?,
-        };
-
+    async fn create(txn: Arc<Transaction>, schema: Schema) -> TCResult<Arc<Table>> {
         let table_chain = Chain::new(
             txn.context()
                 .reserve(&Link::to(&format!("/{}", schema.version))?)?,
