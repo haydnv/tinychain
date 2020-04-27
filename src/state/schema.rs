@@ -93,7 +93,11 @@ impl File for SchemaHistory {
         }))
     }
 
-    async fn copy_to(&self, _txn_id: TransactionId, _writer: &mut FileWriter) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) -> TCResult<()> {
+        writer.write_file(
+            Link::to("/schema")?,
+            Box::new(self.chain.into_stream(txn_id).boxed()),
+        );
+        Ok(())
     }
 }
