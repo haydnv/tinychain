@@ -9,7 +9,7 @@ use futures::Stream;
 use crate::internal::cache::Deque;
 use crate::internal::FsDir;
 use crate::transaction::TransactionId;
-use crate::value::{Link, TCResult};
+use crate::value::Link;
 
 type Blocks = Box<dyn Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> + Send + Unpin>;
 type FileData = (Link, Blocks);
@@ -60,7 +60,22 @@ impl Stream for FileReader {
 
 #[async_trait]
 pub trait File {
-    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Self>>;
+    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> Arc<Self>;
 
-    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) -> TCResult<()>;
+    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter);
+}
+
+#[async_trait]
+impl<T: File + Sync + Send> File for Arc<T> {
+    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> Arc<Self> {
+        Self::copy_from(reader, dest).await
+    }
+
+    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) {
+        self.copy_to(txn_id, writer).await
+    }
+}
+
+pub async fn copy(_txn_id: TransactionId, _state: impl File, _context: Arc<FsDir>) {
+    // TODO
 }

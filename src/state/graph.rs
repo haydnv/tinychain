@@ -47,12 +47,12 @@ impl Collection for Graph {
 
 #[async_trait]
 impl File for Graph {
-    async fn copy_from(_reader: &mut FileReader, _dest: Arc<FsDir>) -> TCResult<Arc<Self>> {
-        Err(error::not_implemented())
+    async fn copy_from(_reader: &mut FileReader, _dest: Arc<FsDir>) -> Arc<Self> {
+        Arc::new(Graph {})
     }
 
-    async fn copy_to(&self, _txn_id: TransactionId, _writer: &mut FileWriter) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn copy_to(&self, _txn_id: TransactionId, _writer: &mut FileWriter) {
+        // TODO
     }
 }
 
@@ -64,7 +64,7 @@ impl Persistent for Graph {
         Err(error::not_implemented())
     }
 
-    async fn commit(&self, _txn_id: TransactionId) {
+    async fn commit(&self, _txn_id: &TransactionId) {
         // TODO
     }
 }

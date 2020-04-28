@@ -73,14 +73,14 @@ impl SchemaHistory {
     }
 
     async fn commit(&self, txn_id: TransactionId) {
-        if let Some(schema) = self.txn_cache.get(&txn_id) {
+        if let Some(schema) = self.txn_cache.remove(&txn_id) {
             self.chain.clone().put(&txn_id, &[schema]).await;
         }
     }
 
-    pub async fn current(&self, txn_id: TransactionId) -> TCResult<Schema> {
+    pub async fn current(&self, txn_id: TransactionId) -> Schema {
         if let Some(schema) = self.txn_cache.get(&txn_id) {
-            Ok(schema)
+            schema
         } else if let Some(schema) = self
             .chain
             .until(txn_id.clone())
@@ -93,33 +93,33 @@ impl SchemaHistory {
             })
             .await
         {
-            Ok(schema)
+            schema
         } else {
-            Err(error::bad_request(
-                "This table did not exist at transaction",
-                txn_id,
-            ))
+            Schema {
+                key: vec![],
+                columns: vec![],
+                version: Version::parse("0.0.0").unwrap(),
+            }
         }
     }
 }
 
 #[async_trait]
 impl File for SchemaHistory {
-    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> TCResult<Arc<SchemaHistory>> {
+    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> Arc<SchemaHistory> {
         let (path, blocks) = reader.next().await.unwrap();
-        let chain: Arc<Chain> = Chain::from(blocks, dest.reserve(&path)?).await;
+        let chain: Arc<Chain> = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
 
-        Ok(Arc::new(SchemaHistory {
+        Arc::new(SchemaHistory {
             chain,
             txn_cache: cache::Map::new(),
-        }))
+        })
     }
 
-    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) -> TCResult<()> {
+    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) {
         writer.write_file(
-            Link::to("/schema")?,
+            Link::to("/schema").unwrap(),
             Box::new(self.chain.into_stream(txn_id).boxed()),
         );
-        Ok(())
     }
 }

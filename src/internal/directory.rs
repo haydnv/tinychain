@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
+use futures::future::{join, join_all};
+use futures::{FutureExt, StreamExt};
 
 use crate::error;
-use crate::internal::cache;
 use crate::internal::file;
 use crate::internal::{Chain, FsDir};
 use crate::state::*;
@@ -38,6 +39,11 @@ impl Collection for Directory {
     ) -> TCResult<Arc<Self>> {
         if path.len() != 1 {
             return Err(error::not_found(path));
+        } else if state.is_value() {
+            return Err(error::bad_request(
+                "Expected a persistent state, found",
+                state,
+            ));
         }
 
         let entry = (self.context.reserve(&path)?, state);
@@ -55,19 +61,19 @@ impl Collection for Directory {
 
 #[async_trait]
 impl file::File for Directory {
-    async fn copy_from(
-        _reader: &mut file::FileReader,
-        _dest: Arc<FsDir>,
-    ) -> TCResult<Arc<Directory>> {
-        Err(error::not_implemented())
+    async fn copy_from(reader: &mut file::FileReader, dest: Arc<FsDir>) -> Arc<Directory> {
+        let (path, blocks) = reader.next().await.unwrap();
+        let chain = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
+
+        Arc::new(Directory {
+            context: dest,
+            chain,
+            txn_cache: RwLock::new(HashMap::new()),
+        })
     }
 
-    async fn copy_to(
-        &self,
-        _txn_id: TransactionId,
-        _writer: &mut file::FileWriter,
-    ) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn copy_to(&self, _txn_id: TransactionId, _writer: &mut file::FileWriter) {
+        // TODO
     }
 }
 
@@ -75,8 +81,26 @@ impl file::File for Directory {
 impl Persistent for Directory {
     type Config = TCValue; // TODO: permissions
 
-    async fn commit(&self, _txn_id: TransactionId) {
-        // TODO
+    async fn commit(&self, txn_id: &TransactionId) {
+        let mutations = self.txn_cache.write().unwrap().remove(&txn_id);
+        if let Some(mutations) = mutations {
+            let paths: Vec<Link> = mutations.keys().cloned().collect();
+            let tasks = mutations.values().map(|(context, state)| async move {
+                match state {
+                    State::Graph(graph) => {
+                        file::copy(txn_id.clone(), graph.clone(), context.clone()).boxed()
+                    }
+                    State::Table(table) => {
+                        file::copy(txn_id.clone(), table.clone(), context.clone()).boxed()
+                    }
+                    State::Value(_) => {
+                        panic!("Tried to file::copy a Value! This should never happen")
+                    }
+                }
+            });
+
+            join(join_all(tasks), self.chain.clone().put(txn_id, &paths)).await;
+        }
     }
 
     async fn create(txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {

@@ -32,7 +32,7 @@ impl TryFrom<TCValue> for IndexConfig {
 
 struct Index {
     config: IndexConfig,
-    fs_dir: Arc<FsDir>,
+    context: Arc<FsDir>,
     txn_cache: Map<TransactionId, HashMap<Vec<TCValue>, Vec<TCValue>>>,
 }
 
@@ -68,7 +68,7 @@ impl Derived for Index {
     async fn from(txn: Arc<Transaction>, config: IndexConfig) -> TCResult<Arc<Index>> {
         Ok(Arc::new(Index {
             config,
-            fs_dir: txn.context(),
+            context: txn.context(),
             txn_cache: Map::new(),
         }))
     }

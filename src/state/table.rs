@@ -4,7 +4,7 @@ use std::iter;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use futures::future::{try_join, try_join_all};
+use futures::future::try_join_all;
 use futures::StreamExt;
 
 use crate::error;
@@ -67,7 +67,7 @@ pub struct Table {
 
 impl Table {
     async fn row_id(&self, txn: &Arc<Transaction>, value: &[TCValue]) -> TCResult<Vec<TCValue>> {
-        let schema = self.schema.current(txn.id()).await?;
+        let schema = self.schema.current(txn.id()).await;
         let key_size = schema.key.len();
 
         let mut row_id: Vec<TCValue> = Vec::with_capacity(key_size);
@@ -85,8 +85,8 @@ impl Table {
     }
 
     async fn new_row(&self, txn: &Arc<Transaction>, row_id: &[TCValue]) -> TCResult<Row> {
-        let (row_id, schema) =
-            try_join(self.row_id(txn, row_id), self.schema.current(txn.id())).await?;
+        let row_id = self.row_id(txn, row_id).await?;
+        let schema = self.schema.current(txn.id()).await;
 
         if row_id.len() != schema.key.len() {
             let key: TCValue = row_id.into();
@@ -144,8 +144,8 @@ impl Collection for Table {
         row_id: Vec<TCValue>,
         column_values: Vec<TCValue>,
     ) -> TCResult<Arc<Self>> {
-        let (row_id, schema) =
-            try_join(self.row_id(&txn, &row_id), self.schema.current(txn.id())).await?;
+        let row_id = self.row_id(&txn, &row_id).await?;
+        let schema = self.schema.current(txn.id()).await;
         let schema_map = schema.as_map();
 
         let mut names = vec![];
@@ -197,30 +197,28 @@ impl Collection for Table {
 
 #[async_trait]
 impl File for Table {
-    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> TCResult<Arc<Table>> {
-        let schema_history = SchemaHistory::copy_from(reader, dest.clone()).await?;
+    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> Arc<Table> {
+        let schema_history = SchemaHistory::copy_from(reader, dest.clone()).await;
 
         let (path, blocks) = reader.next().await.unwrap();
-        let chain = Chain::from(blocks, dest.reserve(&path)?).await;
+        let chain = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
 
-        Ok(Arc::new(Table {
+        Arc::new(Table {
             schema: schema_history,
             chain,
             cache: RwLock::new(HashMap::new()),
-        }))
+        })
     }
 
-    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) -> TCResult<()> {
-        self.schema.copy_to(txn_id.clone(), writer).await?;
+    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) {
+        self.schema.copy_to(txn_id.clone(), writer).await;
 
-        let schema = self.schema.current(txn_id.clone()).await?;
+        let schema = self.schema.current(txn_id.clone()).await;
         let chain_path = format!("/{}", schema.version);
         writer.write_file(
             Link::to(&chain_path).unwrap(),
             Box::new(self.chain.into_stream(txn_id).boxed()),
         );
-
-        Ok(())
     }
 }
 
@@ -228,8 +226,8 @@ impl File for Table {
 impl Persistent for Table {
     type Config = Schema;
 
-    async fn commit(&self, txn_id: TransactionId) {
-        let mutations = if let Some(mutations) = self.cache.read().unwrap().get(&txn_id) {
+    async fn commit(&self, txn_id: &TransactionId) {
+        let mutations = if let Some(mutations) = self.cache.write().unwrap().remove(&txn_id) {
             mutations
                 .iter()
                 .map(|(k, v)| (k.clone().into(), v.clone().into()))

@@ -46,7 +46,7 @@ pub trait Derived: Collection {
 pub trait Persistent: Collection + File {
     type Config: TryFrom<TCValue>;
 
-    async fn commit(&self, txn_id: TransactionId);
+    async fn commit(&self, txn_id: &TransactionId);
 
     async fn create(txn: Arc<Transaction>, config: Self::Config) -> TCResult<Arc<Self>>;
 }
@@ -59,7 +59,7 @@ pub enum State {
 }
 
 impl State {
-    pub async fn commit(&self, txn_id: TransactionId) {
+    pub async fn commit(&self, txn_id: &TransactionId) {
         match self {
             State::Graph(g) => g.commit(txn_id).await,
             State::Table(t) => t.commit(txn_id).await,
@@ -74,6 +74,13 @@ impl State {
             State::Graph(g) => Ok(g.clone().get(txn, &key).await?.into()),
             State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?).await?.into()),
             _ => Err(error::bad_request("Cannot GET from", self)),
+        }
+    }
+
+    pub fn is_value(&self) -> bool {
+        match self {
+            State::Value(_) => true,
+            _ => false,
         }
     }
 

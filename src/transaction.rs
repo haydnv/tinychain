@@ -200,13 +200,7 @@ impl Transaction {
     }
 
     pub async fn commit(self: &Arc<Self>) {
-        join_all(
-            self.mutated
-                .to_vec()
-                .iter()
-                .map(|s| s.commit(self.id.clone())),
-        )
-        .await;
+        join_all(self.mutated.to_vec().iter().map(|s| s.commit(&self.id))).await;
     }
 
     pub async fn execute<'a>(
