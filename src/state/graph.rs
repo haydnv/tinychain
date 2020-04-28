@@ -47,12 +47,12 @@ impl Collection for Graph {
 
 #[async_trait]
 impl File for Graph {
-    async fn copy_from(_reader: &mut FileReader, _dest: Arc<FsDir>) -> Arc<Self> {
-        Arc::new(Graph {})
+    async fn copy_file(&self, txn_id: TransactionId, copier: &mut FileCopier) {
+        // TODO
     }
 
-    async fn copy_to(&self, _txn_id: TransactionId, _writer: &mut FileWriter) {
-        // TODO
+    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<Self> {
+        Arc::new(Graph {})
     }
 }
 

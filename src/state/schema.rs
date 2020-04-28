@@ -106,20 +106,20 @@ impl SchemaHistory {
 
 #[async_trait]
 impl File for SchemaHistory {
-    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> Arc<SchemaHistory> {
-        let (path, blocks) = reader.next().await.unwrap();
+    async fn copy_file(&self, txn_id: TransactionId, copier: &mut FileCopier) {
+        copier.write_file(
+            Link::to("/schema").unwrap(),
+            Box::new(self.chain.into_stream(txn_id).boxed()),
+        );
+    }
+
+    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<SchemaHistory> {
+        let (path, blocks) = copier.next().await.unwrap();
         let chain: Arc<Chain> = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
 
         Arc::new(SchemaHistory {
             chain,
             txn_cache: cache::Map::new(),
         })
-    }
-
-    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) {
-        writer.write_file(
-            Link::to("/schema").unwrap(),
-            Box::new(self.chain.into_stream(txn_id).boxed()),
-        );
     }
 }

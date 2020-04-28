@@ -61,8 +61,8 @@ impl Collection for Directory {
 
 #[async_trait]
 impl file::File for Directory {
-    async fn copy_from(reader: &mut file::FileReader, dest: Arc<FsDir>) -> Arc<Directory> {
-        let (path, blocks) = reader.next().await.unwrap();
+    async fn from_file(copier: &mut file::FileCopier, dest: Arc<FsDir>) -> Arc<Directory> {
+        let (path, blocks) = copier.next().await.unwrap();
         let chain = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
 
         Arc::new(Directory {
@@ -72,7 +72,7 @@ impl file::File for Directory {
         })
     }
 
-    async fn copy_to(&self, _txn_id: TransactionId, _writer: &mut file::FileWriter) {
+    async fn copy_file(&self, _txn_id: TransactionId, _writer: &mut file::FileCopier) {
         // TODO
     }
 }
@@ -88,10 +88,14 @@ impl Persistent for Directory {
             let tasks = mutations.values().map(|(context, state)| async move {
                 match state {
                     State::Graph(graph) => {
-                        file::copy(txn_id.clone(), graph.clone(), context.clone()).boxed()
+                        file::FileCopier::new()
+                            .copy(txn_id.clone(), graph.clone(), context.clone())
+                            .await;
                     }
                     State::Table(table) => {
-                        file::copy(txn_id.clone(), table.clone(), context.clone()).boxed()
+                        file::FileCopier::new()
+                            .copy(txn_id.clone(), table.clone(), context.clone())
+                            .await;
                     }
                     State::Value(_) => {
                         panic!("Tried to file::copy a Value! This should never happen")

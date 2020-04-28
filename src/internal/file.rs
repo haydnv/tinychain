@@ -14,17 +14,27 @@ use crate::value::Link;
 type Blocks = Box<dyn Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> + Send + Unpin>;
 type FileData = (Link, Blocks);
 
-pub struct FileWriter {
+pub struct FileCopier {
     open: bool,
     contents: Deque<FileData>,
 }
 
-impl FileWriter {
-    pub fn new() -> FileWriter {
-        FileWriter {
+impl FileCopier {
+    pub fn new() -> FileCopier {
+        FileCopier {
             open: true,
             contents: Deque::new(),
         }
+    }
+
+    pub async fn copy<T: File>(
+        &mut self,
+        txn_id: TransactionId,
+        state: T,
+        dest: Arc<FsDir>,
+    ) -> Arc<T> {
+        state.copy_file(txn_id, self).await;
+        T::from_file(self, dest).await
     }
 
     pub fn end(&mut self) {
@@ -40,42 +50,34 @@ impl FileWriter {
     }
 }
 
-pub struct FileReader {
-    source: FileWriter,
-}
-
-impl Stream for FileReader {
+impl Stream for FileCopier {
     type Item = FileData;
 
     fn poll_next(self: Pin<&mut Self>, _cxt: &mut Context) -> Poll<Option<Self::Item>> {
-        if !self.source.open {
+        if !self.open {
             Poll::Ready(None)
-        } else if self.source.open && self.source.contents.is_empty() {
+        } else if self.open && self.contents.is_empty() {
             Poll::Pending
         } else {
-            Poll::Ready(self.source.contents.pop_front())
+            Poll::Ready(self.contents.pop_front())
         }
     }
 }
 
 #[async_trait]
 pub trait File {
-    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> Arc<Self>;
+    async fn copy_file(&self, txn_id: TransactionId, copier: &mut FileCopier);
 
-    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter);
+    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<Self>;
 }
 
 #[async_trait]
 impl<T: File + Sync + Send> File for Arc<T> {
-    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> Arc<Self> {
-        Self::copy_from(reader, dest).await
+    async fn copy_file(&self, txn_id: TransactionId, copier: &mut FileCopier) {
+        self.copy_file(txn_id, copier).await
     }
 
-    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) {
-        self.copy_to(txn_id, writer).await
+    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<Self> {
+        Self::from_file(copier, dest).await
     }
-}
-
-pub async fn copy(_txn_id: TransactionId, _state: impl File, _context: Arc<FsDir>) {
-    // TODO
 }

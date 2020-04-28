@@ -197,10 +197,21 @@ impl Collection for Table {
 
 #[async_trait]
 impl File for Table {
-    async fn copy_from(reader: &mut FileReader, dest: Arc<FsDir>) -> Arc<Table> {
-        let schema_history = SchemaHistory::copy_from(reader, dest.clone()).await;
+    async fn copy_file(&self, txn_id: TransactionId, copier: &mut FileCopier) {
+        self.schema.copy_file(txn_id.clone(), copier).await;
 
-        let (path, blocks) = reader.next().await.unwrap();
+        let schema = self.schema.current(txn_id.clone()).await;
+        let chain_path = format!("/{}", schema.version);
+        copier.write_file(
+            Link::to(&chain_path).unwrap(),
+            Box::new(self.chain.into_stream(txn_id).boxed()),
+        );
+    }
+
+    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<Table> {
+        let schema_history = SchemaHistory::from_file(copier, dest.clone()).await;
+
+        let (path, blocks) = copier.next().await.unwrap();
         let chain = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
 
         Arc::new(Table {
@@ -208,17 +219,6 @@ impl File for Table {
             chain,
             cache: RwLock::new(HashMap::new()),
         })
-    }
-
-    async fn copy_to(&self, txn_id: TransactionId, writer: &mut FileWriter) {
-        self.schema.copy_to(txn_id.clone(), writer).await;
-
-        let schema = self.schema.current(txn_id.clone()).await;
-        let chain_path = format!("/{}", schema.version);
-        writer.write_file(
-            Link::to(&chain_path).unwrap(),
-            Box::new(self.chain.into_stream(txn_id).boxed()),
-        );
     }
 }
 
