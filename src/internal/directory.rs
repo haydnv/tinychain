@@ -12,6 +12,7 @@ use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue};
 
 struct Directory {
+    context: Arc<FsDir>,
     chain: Arc<Chain>,
     txn_cache: cache::Map<TransactionId, HashMap<Link, State>>,
 }
@@ -32,8 +33,8 @@ impl Collection for Directory {
     async fn put(
         self: Arc<Self>,
         _txn: Arc<Transaction>,
-        _key: Self::Key,
-        _value: Self::Value,
+        _path: Self::Key,
+        _state: Self::Value,
     ) -> TCResult<Arc<Self>> {
         Err(error::not_implemented())
     }
@@ -52,13 +53,17 @@ impl File for Directory {
 
 #[async_trait]
 impl Persistent for Directory {
-    type Config = TCValue;
+    type Config = TCValue; // TODO: permissions
 
     async fn commit(&self, _txn_id: TransactionId) {
         // TODO
     }
 
-    async fn create(_txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {
-        Err(error::not_implemented())
+    async fn create(txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {
+        Ok(Arc::new(Directory {
+            context: txn.context(),
+            chain: Chain::new(txn.context().reserve(&Link::to("/.contents")?)?),
+            txn_cache: cache::Map::new(),
+        }))
     }
 }
