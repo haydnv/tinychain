@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
 use crate::error;
 use crate::internal::cache;
-use crate::internal::file::*;
+use crate::internal::file;
 use crate::internal::{Chain, FsDir};
 use crate::state::*;
 use crate::transaction::{Transaction, TransactionId};
@@ -14,7 +14,7 @@ use crate::value::{Link, TCResult, TCValue};
 struct Directory {
     context: Arc<FsDir>,
     chain: Arc<Chain>,
-    txn_cache: cache::Map<TransactionId, HashMap<Link, State>>,
+    txn_cache: RwLock<HashMap<TransactionId, HashMap<Link, (Arc<FsDir>, State)>>>,
 }
 
 #[async_trait]
@@ -32,21 +32,41 @@ impl Collection for Directory {
 
     async fn put(
         self: Arc<Self>,
-        _txn: Arc<Transaction>,
-        _path: Self::Key,
-        _state: Self::Value,
+        txn: Arc<Transaction>,
+        path: Self::Key,
+        state: Self::Value,
     ) -> TCResult<Arc<Self>> {
-        Err(error::not_implemented())
+        if path.len() != 1 {
+            return Err(error::not_found(path));
+        }
+
+        let entry = (self.context.reserve(&path)?, state);
+        if let Some(mutations) = self.txn_cache.write().unwrap().get_mut(&txn.id()) {
+            mutations.insert(path, entry);
+        } else {
+            let mut mutations: HashMap<Link, (Arc<FsDir>, State)> = HashMap::new();
+            mutations.insert(path, entry);
+            self.txn_cache.write().unwrap().insert(txn.id(), mutations);
+        }
+
+        Ok(self)
     }
 }
 
 #[async_trait]
-impl File for Directory {
-    async fn copy_from(_reader: &mut FileReader, _dest: Arc<FsDir>) -> TCResult<Arc<Directory>> {
+impl file::File for Directory {
+    async fn copy_from(
+        _reader: &mut file::FileReader,
+        _dest: Arc<FsDir>,
+    ) -> TCResult<Arc<Directory>> {
         Err(error::not_implemented())
     }
 
-    async fn copy_to(&self, _txn_id: TransactionId, _writer: &mut FileWriter) -> TCResult<()> {
+    async fn copy_to(
+        &self,
+        _txn_id: TransactionId,
+        _writer: &mut file::FileWriter,
+    ) -> TCResult<()> {
         Err(error::not_implemented())
     }
 }
@@ -63,7 +83,7 @@ impl Persistent for Directory {
         Ok(Arc::new(Directory {
             context: txn.context(),
             chain: Chain::new(txn.context().reserve(&Link::to("/.contents")?)?),
-            txn_cache: cache::Map::new(),
+            txn_cache: RwLock::new(HashMap::new()),
         }))
     }
 }
