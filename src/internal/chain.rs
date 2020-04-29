@@ -7,9 +7,11 @@ use futures::{Future, FutureExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+use crate::error;
 use crate::internal::block::Store;
 use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::transaction::TransactionId;
+use crate::value::TCResult;
 
 pub struct Chain {
     store: Arc<Store>,
@@ -24,7 +26,7 @@ impl Chain {
         })
     }
 
-    pub fn from(
+    pub fn copy_from(
         stream: impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> + Unpin,
         dest: Arc<Store>,
     ) -> impl Future<Output = Arc<Chain>> {
@@ -42,6 +44,25 @@ impl Chain {
                     latest_block: i,
                 })
             })
+    }
+
+    pub async fn from_store(store: Arc<Store>) -> TCResult<Arc<Chain>> {
+        let mut latest_block = 0;
+        if !store.exists(&latest_block.into()).await? {
+            return Err(error::bad_request(
+                "This store does not contain a Chain",
+                format!("{:?}", store),
+            ));
+        }
+
+        while store.exists(&(latest_block + 1).into()).await? {
+            latest_block += 1;
+        }
+
+        Ok(Arc::new(Chain {
+            store,
+            latest_block,
+        }))
     }
 
     pub fn until<T: 'static + Clone + DeserializeOwned>(

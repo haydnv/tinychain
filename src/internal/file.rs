@@ -25,7 +25,7 @@ pub struct FileCopier {
 }
 
 impl FileCopier {
-    pub fn new() -> FileCopier {
+    pub fn open() -> FileCopier {
         FileCopier {
             contents: Deque::new(),
             shared_state: Arc::new(Mutex::new(SharedState {
@@ -35,18 +35,14 @@ impl FileCopier {
         }
     }
 
-    pub async fn copy<T: File>(
-        &mut self,
-        txn_id: TransactionId,
-        state: T,
-        dest: Arc<Store>,
-    ) -> Arc<T> {
-        state.copy_file(txn_id, self).await;
-        self.end();
-        T::from_file(self, dest).await
+    pub async fn copy<T: File>(txn_id: TransactionId, state: T, dest: Arc<Store>) -> Arc<T> {
+        let mut copier = Self::open();
+        state.copy_into(txn_id, &mut copier).await;
+        copier.close();
+        T::copy_from(&mut copier, dest).await
     }
 
-    pub fn end(&mut self) {
+    pub fn close(&mut self) {
         self.shared_state.lock().unwrap().open = false;
     }
 
@@ -85,18 +81,24 @@ impl Stream for FileCopier {
 
 #[async_trait]
 pub trait File {
-    async fn copy_file(&self, txn_id: TransactionId, copier: &mut FileCopier);
+    async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Self>;
 
-    async fn from_file(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<Self>;
+    async fn copy_into(&self, txn_id: TransactionId, writer: &mut FileCopier);
+
+    async fn from_store(store: Arc<Store>) -> Arc<Self>;
 }
 
 #[async_trait]
 impl<T: File + Sync + Send> File for Arc<T> {
-    async fn copy_file(&self, txn_id: TransactionId, copier: &mut FileCopier) {
-        self.copy_file(txn_id, copier).await
+    async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Self> {
+        Self::copy_from(reader, dest).await
     }
 
-    async fn from_file(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<Self> {
-        Self::from_file(copier, dest).await
+    async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
+        self.copy_into(txn_id, copier).await
+    }
+
+    async fn from_store(store: Arc<Store>) -> Arc<Self> {
+        Self::from_store(store).await
     }
 }

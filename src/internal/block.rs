@@ -11,6 +11,7 @@ use crate::internal::cache::Map;
 use crate::internal::RECORD_DELIMITER;
 use crate::value::{Link, TCResult};
 
+#[derive(Debug)]
 pub struct Store {
     mount_point: PathBuf,
     context: Link,

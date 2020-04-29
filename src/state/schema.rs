@@ -79,18 +79,14 @@ impl SchemaHistory {
         }
     }
 
-    pub async fn current(&self, txn_id: TransactionId) -> Schema {
-        if let Some(schema) = self.txn_cache.get(&txn_id) {
+    pub async fn at(&self, txn_id: &TransactionId) -> Schema {
+        if let Some(schema) = self.txn_cache.get(txn_id) {
             schema
         } else if let Some(schema) = self
             .chain
             .until(txn_id.clone())
             .fold(None, |_: Option<Schema>, s: Vec<Schema>| {
-                future::ready(if let Some(s) = s.last() {
-                    Some(s.clone())
-                } else {
-                    None
-                })
+                future::ready(s.last().cloned())
             })
             .await
         {
@@ -103,23 +99,35 @@ impl SchemaHistory {
             }
         }
     }
+
+    pub async fn latest(&self) -> Schema {
+        // TODO: FIX THIS!
+        self.at(&TransactionId::max()).await
+    }
 }
 
 #[async_trait]
 impl File for SchemaHistory {
-    async fn copy_file(&self, txn_id: TransactionId, copier: &mut FileCopier) {
+    async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
         copier.write_file(
             Link::to("/schema").unwrap(),
             Box::new(self.chain.into_stream(txn_id).boxed()),
         );
     }
 
-    async fn from_file(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<SchemaHistory> {
+    async fn copy_from(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<SchemaHistory> {
         let (path, blocks) = copier.next().await.unwrap();
-        let chain: Arc<Chain> = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
+        let chain: Arc<Chain> = Chain::copy_from(blocks, dest.reserve(&path).unwrap()).await;
 
         Arc::new(SchemaHistory {
             chain,
+            txn_cache: Map::new(),
+        })
+    }
+
+    async fn from_store(store: Arc<Store>) -> Arc<SchemaHistory> {
+        Arc::new(SchemaHistory {
+            chain: Chain::from_store(store).await.unwrap(),
             txn_cache: Map::new(),
         })
     }

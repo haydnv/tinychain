@@ -68,7 +68,7 @@ pub struct Table {
 
 impl Table {
     async fn row_id(&self, txn: &Arc<Transaction>, value: &[TCValue]) -> TCResult<Vec<TCValue>> {
-        let schema = self.schema.current(txn.id()).await;
+        let schema = self.schema.at(&txn.id()).await;
         let key_size = schema.key.len();
 
         let mut row_id: Vec<TCValue> = Vec::with_capacity(key_size);
@@ -87,7 +87,7 @@ impl Table {
 
     async fn new_row(&self, txn: &Arc<Transaction>, row_id: &[TCValue]) -> TCResult<Row> {
         let row_id = self.row_id(txn, row_id).await?;
-        let schema = self.schema.current(txn.id()).await;
+        let schema = self.schema.at(&txn.id()).await;
 
         if row_id.len() != schema.key.len() {
             let key: TCValue = row_id.into();
@@ -146,7 +146,7 @@ impl Collection for Table {
         column_values: Vec<TCValue>,
     ) -> TCResult<Arc<Self>> {
         let row_id = self.row_id(&txn, &row_id).await?;
-        let schema = self.schema.current(txn.id()).await;
+        let schema = self.schema.at(&txn.id()).await;
         let schema_map = schema.as_map();
 
         let mut names = vec![];
@@ -198,25 +198,40 @@ impl Collection for Table {
 
 #[async_trait]
 impl File for Table {
-    async fn copy_file(&self, txn_id: TransactionId, copier: &mut FileCopier) {
-        self.schema.copy_file(txn_id.clone(), copier).await;
+    async fn copy_into(&self, txn_id: TransactionId, writer: &mut FileCopier) {
+        self.schema.copy_into(txn_id.clone(), writer).await;
 
-        let schema = self.schema.current(txn_id.clone()).await;
+        let schema = self.schema.at(&txn_id).await;
         let chain_path = format!("/{}", schema.version);
-        copier.write_file(
+        writer.write_file(
             Link::to(&chain_path).unwrap(),
             Box::new(self.chain.into_stream(txn_id).boxed()),
         );
     }
 
-    async fn from_file(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<Table> {
-        let schema_history = SchemaHistory::from_file(copier, dest.clone()).await;
+    async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Table> {
+        let schema_history = SchemaHistory::copy_from(reader, dest.clone()).await;
 
-        let (path, blocks) = copier.next().await.unwrap();
-        let chain = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
+        let (path, blocks) = reader.next().await.unwrap();
+        let chain = Chain::copy_from(blocks, dest.reserve(&path).unwrap()).await;
 
         Arc::new(Table {
             schema: schema_history,
+            chain,
+            cache: RwLock::new(HashMap::new()),
+        })
+    }
+
+    async fn from_store(store: Arc<Store>) -> Arc<Table> {
+        let schema =
+            SchemaHistory::from_store(store.reserve(&Link::to("/schema").unwrap()).unwrap()).await;
+
+        let chain_path = format!("/{}", schema.latest().await.version);
+        let chain = Chain::from_store(store.reserve(&Link::to(&chain_path).unwrap()).unwrap())
+            .await
+            .unwrap();
+        Arc::new(Table {
+            schema,
             chain,
             cache: RwLock::new(HashMap::new()),
         })

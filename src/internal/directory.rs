@@ -101,18 +101,15 @@ impl Collection for Directory {
 
         match entry {
             Some(Entry::Directory(name)) => {
-                let dir =
-                    Directory::from_file(&mut FileCopier::new(), self.context.reserve(&name)?)
-                        .await;
+                let dir = Directory::from_store(self.context.reserve(&name)?).await;
                 dir.get(txn, &path.slice_from(1)).await
             }
-            Some(Entry::Graph(_)) => Err(error::not_implemented()),
-            Some(Entry::Table(name)) => Ok(Table::from_file(
-                &mut FileCopier::new(),
-                self.context.reserve(&name)?,
-            )
-            .await
-            .into()),
+            Some(Entry::Graph(name)) => {
+                Ok(Graph::from_store(self.context.reserve(&name)?).await.into())
+            }
+            Some(Entry::Table(name)) => {
+                Ok(Table::from_store(self.context.reserve(&name)?).await.into())
+            }
             None => Err(error::not_found(path)),
         }
     }
@@ -150,9 +147,9 @@ impl Collection for Directory {
 
 #[async_trait]
 impl File for Directory {
-    async fn from_file(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<Directory> {
-        let (path, blocks) = copier.next().await.unwrap();
-        let chain = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
+    async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Directory> {
+        let (path, blocks) = reader.next().await.unwrap();
+        let chain = Chain::copy_from(blocks, dest.reserve(&path).unwrap()).await;
 
         Arc::new(Directory {
             context: dest,
@@ -161,8 +158,12 @@ impl File for Directory {
         })
     }
 
-    async fn copy_file(&self, _txn_id: TransactionId, _writer: &mut FileCopier) {
+    async fn copy_into(&self, _txn_id: TransactionId, _writer: &mut FileCopier) {
         // TODO
+    }
+
+    async fn from_store(_store: Arc<Store>) -> Arc<Directory> {
+        panic!("Directory::from_store is not implemented")
     }
 }
 
@@ -177,19 +178,13 @@ impl Persistent for Directory {
             let tasks = mutations.values().map(|state| async move {
                 match state {
                     EntryState::Directory(context, dir) => {
-                        FileCopier::new()
-                            .copy(txn_id.clone(), dir.clone(), context.clone())
-                            .await;
+                        FileCopier::copy(txn_id.clone(), dir.clone(), context.clone()).await;
                     }
                     EntryState::Graph(context, graph) => {
-                        FileCopier::new()
-                            .copy(txn_id.clone(), graph.clone(), context.clone())
-                            .await;
+                        FileCopier::copy(txn_id.clone(), graph.clone(), context.clone()).await;
                     }
                     EntryState::Table(context, table) => {
-                        FileCopier::new()
-                            .copy(txn_id.clone(), table.clone(), context.clone())
-                            .await;
+                        FileCopier::copy(txn_id.clone(), table.clone(), context.clone()).await;
                     }
                 }
             });
