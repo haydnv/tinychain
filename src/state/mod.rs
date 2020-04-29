@@ -10,7 +10,6 @@ use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue};
 
 mod graph;
-mod index;
 mod schema;
 mod table;
 

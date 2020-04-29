@@ -4,7 +4,7 @@ use std::iter;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use futures::future::try_join_all;
+use futures::future::{join, try_join_all};
 use futures::StreamExt;
 
 use crate::error;
@@ -236,7 +236,11 @@ impl Persistent for Table {
             vec![]
         };
 
-        self.chain.clone().put(&txn_id, &mutations).await;
+        join(
+            self.schema.commit(txn_id),
+            self.chain.clone().put(&txn_id, &mutations),
+        )
+        .await;
     }
 
     async fn create(txn: Arc<Transaction>, schema: Schema) -> TCResult<Arc<Table>> {

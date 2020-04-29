@@ -72,9 +72,9 @@ impl SchemaHistory {
         }))
     }
 
-    async fn commit(&self, txn_id: TransactionId) {
-        if let Some(schema) = self.txn_cache.remove(&txn_id) {
-            self.chain.clone().put(&txn_id, &[schema]).await;
+    pub async fn commit(&self, txn_id: &TransactionId) {
+        if let Some(schema) = self.txn_cache.remove(txn_id) {
+            self.chain.clone().put(txn_id, &[schema]).await;
         }
     }
 

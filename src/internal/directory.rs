@@ -13,7 +13,7 @@ use crate::state::*;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 enum Entry {
     Directory(Link),
     Table(Link),
@@ -68,10 +68,52 @@ impl Collection for Directory {
 
     async fn get(
         self: &Arc<Self>,
-        _txn: Arc<Transaction>,
-        _key: &Self::Key,
+        txn: Arc<Transaction>,
+        path: &Self::Key,
     ) -> TCResult<Self::Value> {
-        Err(error::not_implemented())
+        if path.is_empty() {
+            return Err(error::bad_request(
+                "You must specify a path to look up in a directory",
+                path,
+            ));
+        }
+
+        let entry = self
+            .chain
+            .until(txn.id())
+            .filter_map(|entries: Vec<Entry>| async move {
+                let entries: Vec<Entry> = entries
+                    .iter()
+                    .filter(|e| e.path() == path)
+                    .cloned()
+                    .collect();
+                if entries.is_empty() {
+                    None
+                } else {
+                    Some(entries)
+                }
+            })
+            .fold(None, |_, entries: Vec<Entry>| async move {
+                entries.last().cloned()
+            })
+            .await;
+
+        match entry {
+            Some(Entry::Directory(name)) => {
+                let dir =
+                    Directory::from_file(&mut FileCopier::new(), self.context.reserve(&name)?)
+                        .await;
+                dir.get(txn, &path.slice_from(1)).await
+            }
+            Some(Entry::Graph(_)) => Err(error::not_implemented()),
+            Some(Entry::Table(name)) => Ok(Table::from_file(
+                &mut FileCopier::new(),
+                self.context.reserve(&name)?,
+            )
+            .await
+            .into()),
+            None => Err(error::not_found(path)),
+        }
     }
 
     async fn put(
