@@ -34,6 +34,7 @@ impl FileCopier {
         dest: Arc<FsDir>,
     ) -> Arc<T> {
         state.copy_file(txn_id, self).await;
+        self.end();
         T::from_file(self, dest).await
     }
 

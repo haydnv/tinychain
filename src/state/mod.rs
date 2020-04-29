@@ -14,7 +14,7 @@ mod index;
 mod schema;
 mod table;
 
-type Graph = graph::Graph;
+pub type Graph = graph::Graph;
 pub type Table = table::Table;
 
 #[async_trait]

@@ -3,19 +3,62 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use futures::future::{join, join_all};
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 
 use crate::error;
-use crate::internal::file;
+use crate::internal::file::*;
 use crate::internal::{Chain, FsDir};
 use crate::state::*;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue};
 
+#[derive(Deserialize, Serialize)]
+enum Entry {
+    Directory(Link),
+    Table(Link),
+    Graph(Link),
+}
+
+impl Entry {
+    fn path(&'_ self) -> &'_ Link {
+        match self {
+            Entry::Directory(p) => p,
+            Entry::Table(p) => p,
+            Entry::Graph(p) => p,
+        }
+    }
+}
+
+impl PartialEq for Entry {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Entry::Directory(p1), Entry::Directory(p2)) => p1 == p2,
+            (Entry::Table(p1), Entry::Table(p2)) => p1 == p2,
+            (Entry::Graph(p1), Entry::Graph(p2)) => p1 == p2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Entry {}
+
+impl std::hash::Hash for Entry {
+    fn hash<T: std::hash::Hasher>(&self, h: &mut T) {
+        self.path().hash(h)
+    }
+}
+
+enum EntryState {
+    Directory(Arc<FsDir>, Arc<Directory>),
+    Table(Arc<FsDir>, Arc<Table>),
+    Graph(Arc<FsDir>, Arc<Graph>),
+}
+
 struct Directory {
     context: Arc<FsDir>,
     chain: Arc<Chain>,
-    txn_cache: RwLock<HashMap<TransactionId, HashMap<Link, (Arc<FsDir>, State)>>>,
+    txn_cache: RwLock<HashMap<TransactionId, HashMap<Entry, EntryState>>>,
 }
 
 #[async_trait]
@@ -39,19 +82,22 @@ impl Collection for Directory {
     ) -> TCResult<Arc<Self>> {
         if path.len() != 1 {
             return Err(error::not_found(path));
-        } else if state.is_value() {
-            return Err(error::bad_request(
-                "Expected a persistent state, found",
-                state,
-            ));
         }
 
-        let entry = (self.context.reserve(&path)?, state);
+        let context = self.context.reserve(&path)?;
+        let entry = match state {
+            State::Graph(g) => (Entry::Graph(path), EntryState::Graph(context, g)),
+            State::Table(t) => (Entry::Table(path), EntryState::Table(context, t)),
+            State::Value(v) => {
+                return Err(error::bad_request("Expected a persistent state, found", v))
+            }
+        };
+
         if let Some(mutations) = self.txn_cache.write().unwrap().get_mut(&txn.id()) {
-            mutations.insert(path, entry);
+            mutations.insert(entry.0, entry.1);
         } else {
-            let mut mutations: HashMap<Link, (Arc<FsDir>, State)> = HashMap::new();
-            mutations.insert(path, entry);
+            let mut mutations: HashMap<Entry, EntryState> = HashMap::new();
+            mutations.insert(entry.0, entry.1);
             self.txn_cache.write().unwrap().insert(txn.id(), mutations);
         }
 
@@ -60,8 +106,8 @@ impl Collection for Directory {
 }
 
 #[async_trait]
-impl file::File for Directory {
-    async fn from_file(copier: &mut file::FileCopier, dest: Arc<FsDir>) -> Arc<Directory> {
+impl File for Directory {
+    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<Directory> {
         let (path, blocks) = copier.next().await.unwrap();
         let chain = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
 
@@ -72,7 +118,7 @@ impl file::File for Directory {
         })
     }
 
-    async fn copy_file(&self, _txn_id: TransactionId, _writer: &mut file::FileCopier) {
+    async fn copy_file(&self, _txn_id: TransactionId, _writer: &mut FileCopier) {
         // TODO
     }
 }
@@ -84,26 +130,28 @@ impl Persistent for Directory {
     async fn commit(&self, txn_id: &TransactionId) {
         let mutations = self.txn_cache.write().unwrap().remove(&txn_id);
         if let Some(mutations) = mutations {
-            let paths: Vec<Link> = mutations.keys().cloned().collect();
-            let tasks = mutations.values().map(|(context, state)| async move {
+            let entries: Vec<&Entry> = mutations.keys().collect();
+            let tasks = mutations.values().map(|state| async move {
                 match state {
-                    State::Graph(graph) => {
-                        file::FileCopier::new()
+                    EntryState::Directory(context, dir) => {
+                        FileCopier::new()
+                            .copy(txn_id.clone(), dir.clone(), context.clone())
+                            .await;
+                    }
+                    EntryState::Graph(context, graph) => {
+                        FileCopier::new()
                             .copy(txn_id.clone(), graph.clone(), context.clone())
                             .await;
                     }
-                    State::Table(table) => {
-                        file::FileCopier::new()
+                    EntryState::Table(context, table) => {
+                        FileCopier::new()
                             .copy(txn_id.clone(), table.clone(), context.clone())
                             .await;
-                    }
-                    State::Value(_) => {
-                        panic!("Tried to file::copy a Value! This should never happen")
                     }
                 }
             });
 
-            join(join_all(tasks), self.chain.clone().put(txn_id, &paths)).await;
+            join(join_all(tasks), self.chain.clone().put(txn_id, &entries)).await;
         }
     }
 
