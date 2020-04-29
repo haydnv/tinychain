@@ -205,7 +205,7 @@ impl File for Table {
         let chain_path = format!("/{}", schema.version);
         writer.write_file(
             Link::to(&chain_path).unwrap(),
-            Box::new(self.chain.into_stream(txn_id).boxed()),
+            Box::new(self.chain.stream_until(txn_id).boxed()),
         );
     }
 

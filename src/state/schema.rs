@@ -111,7 +111,7 @@ impl File for SchemaHistory {
     async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
         copier.write_file(
             Link::to("/schema").unwrap(),
-            Box::new(self.chain.into_stream(txn_id).boxed()),
+            Box::new(self.chain.stream_until(txn_id).boxed()),
         );
     }
 
