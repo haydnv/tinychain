@@ -7,8 +7,9 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
+use crate::internal::block::Store;
 use crate::internal::file::*;
-use crate::internal::{Chain, FsDir};
+use crate::internal::Chain;
 use crate::state::*;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue};
@@ -50,13 +51,13 @@ impl std::hash::Hash for Entry {
 }
 
 enum EntryState {
-    Directory(Arc<FsDir>, Arc<Directory>),
-    Table(Arc<FsDir>, Arc<Table>),
-    Graph(Arc<FsDir>, Arc<Graph>),
+    Directory(Arc<Store>, Arc<Directory>),
+    Table(Arc<Store>, Arc<Table>),
+    Graph(Arc<Store>, Arc<Graph>),
 }
 
 struct Directory {
-    context: Arc<FsDir>,
+    context: Arc<Store>,
     chain: Arc<Chain>,
     txn_cache: RwLock<HashMap<TransactionId, HashMap<Entry, EntryState>>>,
 }
@@ -149,7 +150,7 @@ impl Collection for Directory {
 
 #[async_trait]
 impl File for Directory {
-    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<Directory> {
+    async fn from_file(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<Directory> {
         let (path, blocks) = copier.next().await.unwrap();
         let chain = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
 

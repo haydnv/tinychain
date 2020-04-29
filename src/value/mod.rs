@@ -29,12 +29,15 @@ const RESERVED_CHARS: [&str; 17] = [
 ];
 
 fn validate_id(id: &str) -> TCResult<()> {
-    let mut delimiter = [0];
-    let delimiter = crate::internal::DELIMITER.encode_utf8(&mut delimiter);
+    let filtered: &str = &id.chars().filter(|c| *c as u8 > 32).collect::<String>();
+    if filtered != id {
+        return Err(error::bad_request(
+            "This value ID contains an ASCII control character",
+            filtered,
+        ));
+    }
 
-    let reserved = [&RESERVED_CHARS[..], &[delimiter]].concat();
-
-    for pattern in reserved.iter() {
+    for pattern in &RESERVED_CHARS {
         if id.contains(pattern) {
             return Err(error::bad_request(
                 "A value ID may not contain this pattern",

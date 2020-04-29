@@ -7,27 +7,26 @@ use futures::{Future, FutureExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::internal::FsDir;
-use crate::internal::{DELIMITER, GROUP_DELIMITER};
+use crate::internal::block::Store;
+use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::transaction::TransactionId;
 
-#[derive(Debug, Hash)]
 pub struct Chain {
-    fs_dir: Arc<FsDir>,
+    store: Arc<Store>,
     latest_block: u64,
 }
 
 impl Chain {
-    pub fn new(fs_dir: Arc<FsDir>) -> Arc<Chain> {
+    pub fn new(store: Arc<Store>) -> Arc<Chain> {
         Arc::new(Chain {
-            fs_dir,
+            store,
             latest_block: 0,
         })
     }
 
     pub fn from(
         stream: impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> + Unpin,
-        dest: Arc<FsDir>,
+        dest: Arc<Store>,
     ) -> impl Future<Output = Arc<Chain>> {
         stream
             .fold((0u64, dest), |acc, block| async move {
@@ -39,7 +38,7 @@ impl Chain {
             })
             .then(|(i, dest)| async move {
                 Arc::new(Chain {
-                    fs_dir: dest,
+                    store: dest,
                     latest_block: i,
                 })
             })
@@ -83,7 +82,7 @@ impl Chain {
             .iter()
             .map(|e| Bytes::from(serde_json::to_string_pretty(e).unwrap()))
             .collect();
-        self.fs_dir
+        self.store
             .clone()
             .flush(self.latest_block.into(), &txn_id.into(), &delta)
     }
@@ -98,13 +97,13 @@ impl Chain {
 
         for i in 0..self.latest_block {
             let txn_id = txn_id.clone();
-            let fut = self.fs_dir.clone().get(i.into()).then(|block| async move {
+            let fut = self.store.clone().get(i.into()).then(|block| async move {
                 let mut block: Vec<&[u8]> = block.split(|b| *b == GROUP_DELIMITER as u8).collect();
                 block.pop();
 
                 let mut data: Vec<(TransactionId, Vec<Bytes>)> = vec![];
                 for txn in block {
-                    let mut txn: Vec<&[u8]> = txn.split(|b| *b == DELIMITER as u8).collect();
+                    let mut txn: Vec<&[u8]> = txn.split(|b| *b == RECORD_DELIMITER as u8).collect();
                     txn.pop();
 
                     let time = TransactionId::from(Bytes::copy_from_slice(txn[0]));

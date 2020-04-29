@@ -8,8 +8,9 @@ use futures::future::{join, try_join_all};
 use futures::StreamExt;
 
 use crate::error;
+use crate::internal::block::Store;
 use crate::internal::file::*;
-use crate::internal::{Chain, FsDir};
+use crate::internal::Chain;
 use crate::state::schema::{Schema, SchemaHistory};
 use crate::state::{Collection, Persistent};
 use crate::transaction::{Transaction, TransactionId};
@@ -208,7 +209,7 @@ impl File for Table {
         );
     }
 
-    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<Table> {
+    async fn from_file(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<Table> {
         let schema_history = SchemaHistory::from_file(copier, dest.clone()).await;
 
         let (path, blocks) = copier.next().await.unwrap();

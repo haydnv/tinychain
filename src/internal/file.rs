@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 
+use crate::internal::block::Store;
 use crate::internal::cache::Deque;
-use crate::internal::FsDir;
 use crate::transaction::TransactionId;
 use crate::value::Link;
 
@@ -39,7 +39,7 @@ impl FileCopier {
         &mut self,
         txn_id: TransactionId,
         state: T,
-        dest: Arc<FsDir>,
+        dest: Arc<Store>,
     ) -> Arc<T> {
         state.copy_file(txn_id, self).await;
         self.end();
@@ -87,7 +87,7 @@ impl Stream for FileCopier {
 pub trait File {
     async fn copy_file(&self, txn_id: TransactionId, copier: &mut FileCopier);
 
-    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<Self>;
+    async fn from_file(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<Self>;
 }
 
 #[async_trait]
@@ -96,7 +96,7 @@ impl<T: File + Sync + Send> File for Arc<T> {
         self.copy_file(txn_id, copier).await
     }
 
-    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<Self> {
+    async fn from_file(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<Self> {
         Self::from_file(copier, dest).await
     }
 }

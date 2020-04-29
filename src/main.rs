@@ -35,8 +35,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
     println!();
 
-    let data_dir = internal::FsDir::new(value::Link::to("/")?, config.data_dir);
-    let workspace = internal::FsDir::new_tmp(value::Link::to("/")?, config.workspace);
+    let data_dir = internal::block::Store::new(value::Link::to("/")?, config.data_dir);
+    let workspace = internal::block::Store::new_tmp(value::Link::to("/")?, config.workspace);
 
     let hosted = config
         .host

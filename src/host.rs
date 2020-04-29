@@ -3,20 +3,19 @@ use std::sync::Arc;
 use std::time;
 
 use crate::error;
-use crate::internal::FsDir;
+use crate::internal::block::Store;
 use crate::state::{Persistent, State, Table};
 use crate::transaction::Transaction;
 use crate::value::{Link, Op, TCResult, TCValue};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 
-#[derive(Debug)]
 pub struct Host {
-    workspace: Arc<FsDir>,
+    workspace: Arc<Store>,
 }
 
 impl Host {
-    pub fn new(_data_dir: Arc<FsDir>, workspace: Arc<FsDir>) -> TCResult<Arc<Host>> {
+    pub fn new(_data_dir: Arc<Store>, workspace: Arc<Store>) -> TCResult<Arc<Host>> {
         Ok(Arc::new(Host { workspace }))
     }
 

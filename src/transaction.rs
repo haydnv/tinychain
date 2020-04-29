@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::host::Host;
+use crate::internal::block::Store;
 use crate::internal::cache::{Map, Queue};
-use crate::internal::FsDir;
 use crate::state::State;
 use crate::value::*;
 
@@ -132,14 +132,14 @@ fn calc_deps(
 pub struct Transaction {
     host: Arc<Host>,
     id: TransactionId,
-    context: Arc<FsDir>,
+    context: Arc<Store>,
     state: Map<ValueId, State>,
     queue: Queue<(ValueId, Op)>,
     mutated: Queue<State>,
 }
 
 impl Transaction {
-    pub fn new(host: Arc<Host>, root: Arc<FsDir>) -> TCResult<Arc<Transaction>> {
+    pub fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context = root.reserve(&id.clone().into())?;
         Ok(Arc::new(Transaction {
@@ -152,7 +152,7 @@ impl Transaction {
         }))
     }
 
-    pub fn of(host: Arc<Host>, op: Op, root: Arc<FsDir>) -> TCResult<Arc<Transaction>> {
+    pub fn of(host: Arc<Host>, op: Op, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context = root.reserve(&id.clone().into())?;
 
@@ -175,7 +175,7 @@ impl Transaction {
 
     fn extend(
         self: &Arc<Self>,
-        context: Arc<FsDir>,
+        context: Arc<Store>,
         required: HashMap<ValueId, TCValue>,
     ) -> Arc<Transaction> {
         Arc::new(Transaction {
@@ -191,7 +191,7 @@ impl Transaction {
         })
     }
 
-    pub fn context(self: &Arc<Self>) -> Arc<FsDir> {
+    pub fn context(self: &Arc<Self>) -> Arc<Store> {
         self.context.clone()
     }
 

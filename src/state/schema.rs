@@ -8,9 +8,10 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
-use crate::internal::cache;
+use crate::internal::block::Store;
+use crate::internal::cache::Map;
 use crate::internal::file::*;
-use crate::internal::{Chain, FsDir};
+use crate::internal::Chain;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue, Version};
 
@@ -58,12 +59,12 @@ impl TryFrom<TCValue> for Schema {
 
 pub struct SchemaHistory {
     chain: Arc<Chain>,
-    txn_cache: cache::Map<TransactionId, Schema>,
+    txn_cache: Map<TransactionId, Schema>,
 }
 
 impl SchemaHistory {
     pub fn new(txn: &Arc<Transaction>, schema: Schema) -> TCResult<Arc<SchemaHistory>> {
-        let txn_cache = cache::Map::new();
+        let txn_cache = Map::new();
         txn_cache.insert(txn.id(), schema);
 
         Ok(Arc::new(SchemaHistory {
@@ -113,13 +114,13 @@ impl File for SchemaHistory {
         );
     }
 
-    async fn from_file(copier: &mut FileCopier, dest: Arc<FsDir>) -> Arc<SchemaHistory> {
+    async fn from_file(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<SchemaHistory> {
         let (path, blocks) = copier.next().await.unwrap();
         let chain: Arc<Chain> = Chain::from(blocks, dest.reserve(&path).unwrap()).await;
 
         Arc::new(SchemaHistory {
             chain,
-            txn_cache: cache::Map::new(),
+            txn_cache: Map::new(),
         })
     }
 }
