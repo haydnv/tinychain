@@ -43,7 +43,9 @@ impl FileCopier {
     }
 
     pub fn write_file(&mut self, path: Link, blocks: Blocks) {
-        if path.len() != 1 {
+        if !self.open {
+            panic!("Tried to write file to closed FileCopier");
+        } else if path.len() != 1 {
             panic!("Tried to write file in subdirectory: {}", path);
         }
 
@@ -55,10 +57,12 @@ impl Stream for FileCopier {
     type Item = FileData;
 
     fn poll_next(self: Pin<&mut Self>, _cxt: &mut Context) -> Poll<Option<Self::Item>> {
-        if !self.open {
-            Poll::Ready(None)
-        } else if self.open && self.contents.is_empty() {
-            Poll::Pending
+        if self.contents.is_empty() {
+            if self.open {
+                Poll::Pending
+            } else {
+                Poll::Ready(None)
+            }
         } else {
             Poll::Ready(self.contents.pop_front())
         }
