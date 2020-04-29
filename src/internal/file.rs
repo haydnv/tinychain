@@ -1,6 +1,6 @@
 use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -14,16 +14,24 @@ use crate::value::Link;
 type Blocks = Box<dyn Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> + Send + Unpin>;
 type FileData = (Link, Blocks);
 
-pub struct FileCopier {
+struct SharedState {
     open: bool,
+    waker: Option<Waker>,
+}
+
+pub struct FileCopier {
     contents: Deque<FileData>,
+    shared_state: Arc<Mutex<SharedState>>,
 }
 
 impl FileCopier {
     pub fn new() -> FileCopier {
         FileCopier {
-            open: true,
             contents: Deque::new(),
+            shared_state: Arc::new(Mutex::new(SharedState {
+                open: true,
+                waker: None,
+            })),
         }
     }
 
@@ -39,26 +47,32 @@ impl FileCopier {
     }
 
     pub fn end(&mut self) {
-        self.open = false
+        self.shared_state.lock().unwrap().open = false;
     }
 
     pub fn write_file(&mut self, path: Link, blocks: Blocks) {
-        if !self.open {
+        let shared_state = self.shared_state.lock().unwrap();
+        if !shared_state.open {
             panic!("Tried to write file to closed FileCopier");
         } else if path.len() != 1 {
             panic!("Tried to write file in subdirectory: {}", path);
         }
 
-        self.contents.push_back((path, blocks))
+        self.contents.push_back((path, blocks));
+        if let Some(waker) = &shared_state.waker {
+            waker.clone().wake();
+        }
     }
 }
 
 impl Stream for FileCopier {
     type Item = FileData;
 
-    fn poll_next(self: Pin<&mut Self>, _cxt: &mut Context) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
+        let mut shared_state = self.shared_state.lock().unwrap();
         if self.contents.is_empty() {
-            if self.open {
+            if shared_state.open {
+                shared_state.waker = Some(cxt.waker().clone());
                 Poll::Pending
             } else {
                 Poll::Ready(None)
