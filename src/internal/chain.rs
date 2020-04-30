@@ -34,7 +34,7 @@ impl Chain {
             .fold((0u64, dest), |acc, block| async move {
                 let (i, dest) = acc;
                 for (txn_id, data) in block {
-                    dest.clone().flush(i.into(), &txn_id.into(), &data).await;
+                    dest.clone().flush(i.into(), txn_id.into(), data).await;
                 }
                 (i, dest)
             })
@@ -76,7 +76,7 @@ impl Chain {
             .collect();
         self.store
             .clone()
-            .flush(self.latest_block.into(), &txn_id.into(), &delta)
+            .flush(self.latest_block.into(), txn_id.into(), delta)
     }
 
     pub fn stream(self: &Arc<Self>) -> impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> {
@@ -84,7 +84,7 @@ impl Chain {
             Box<dyn Future<Output = Vec<(TransactionId, Vec<Bytes>)>> + Unpin + Send>,
         > = FuturesOrdered::new();
 
-        for i in 0..self.latest_block {
+        for i in 0..self.latest_block + 1 {
             let fut = self
                 .store
                 .clone()

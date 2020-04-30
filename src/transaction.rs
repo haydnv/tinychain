@@ -124,7 +124,6 @@ fn calc_deps(
         }
     }
 
-    println!("enqueued {}", value_id);
     queue.push((value_id, op));
     Ok(())
 }

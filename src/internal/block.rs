@@ -8,7 +8,7 @@ use tokio::fs;
 
 use crate::error;
 use crate::internal::cache::Map;
-use crate::internal::RECORD_DELIMITER;
+use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::value::{Link, TCResult};
 
 #[derive(Debug)]
@@ -96,33 +96,16 @@ impl Store {
     }
 
     pub fn into_bytes(self: Arc<Self>, path: Link) -> impl Future<Output = Bytes> {
+        println!("read data from {}", path);
         async move {
             if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
+                println!("{} bytes", buffer.len());
                 Bytes::copy_from_slice(buffer)
             } else {
                 // TODO
                 Bytes::new()
             }
         }
-    }
-
-    pub async fn append(self: &Arc<Self>, path: Link, data: Vec<u8>) -> TCResult<()> {
-        if data.contains(&(RECORD_DELIMITER as u8)) {
-            let msg = "Attempted to write a block containing the ASCII record delimiter (0x30)";
-            return Err(error::internal(msg));
-        }
-
-        let data = [&data[..], &[RECORD_DELIMITER as u8]].concat();
-
-        let mut buffer = self.buffer.write().unwrap();
-        match buffer.get_mut(&path) {
-            Some(file_buffer) => file_buffer.extend(data),
-            None => {
-                buffer.insert(path, data);
-            }
-        }
-
-        Ok(())
     }
 
     pub async fn exists(self: &Arc<Self>, path: &Link) -> TCResult<bool> {
@@ -139,16 +122,43 @@ impl Store {
 
     pub fn flush(
         self: Arc<Self>,
-        _path: Link,
-        _header: &Bytes,
-        _data: &[Bytes],
+        path: Link,
+        header: Bytes,
+        data: Vec<Bytes>,
     ) -> impl Future<Output = ()> {
+        if data.is_empty() {
+            panic!("flush to {} called with no data", path);
+        }
+
         async move {
             if self.tmp {
+                println!("flush to {} ignored", path);
                 return;
+            } else {
+                println!("flush to {}", path);
             }
 
-            // TODO
+            let group_delimiter = Bytes::from(&[GROUP_DELIMITER as u8][..]);
+            let record_delimiter = Bytes::from(&[RECORD_DELIMITER as u8][..]);
+
+            let mut records = Vec::with_capacity(data.len() + 1);
+            records.push(header);
+            records.push(record_delimiter.clone());
+            for record in data {
+                records.push(record);
+                records.push(record_delimiter.clone());
+            }
+            records.push(group_delimiter);
+
+            let mut records: Vec<u8> = records.concat();
+            let mut buffer = self.buffer.write().unwrap();
+            if let Some(block) = buffer.get_mut(&path) {
+                block.append(&mut records)
+            } else {
+                buffer.insert(path, records);
+            }
+
+            // TODO: persist data to disk
         }
     }
 
