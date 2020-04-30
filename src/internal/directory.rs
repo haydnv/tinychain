@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -16,41 +15,13 @@ use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
-enum Entry {
-    Directory(Link),
-    Table(Link),
-    Graph(Link),
+enum EntryType {
+    Directory,
+    Table,
+    Graph,
 }
 
-impl Entry {
-    fn path(&'_ self) -> &'_ Link {
-        match self {
-            Entry::Directory(p) => p,
-            Entry::Table(p) => p,
-            Entry::Graph(p) => p,
-        }
-    }
-}
-
-impl PartialEq for Entry {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Entry::Directory(p1), Entry::Directory(p2)) => p1 == p2,
-            (Entry::Table(p1), Entry::Table(p2)) => p1 == p2,
-            (Entry::Graph(p1), Entry::Graph(p2)) => p1 == p2,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Entry {}
-
-impl std::hash::Hash for Entry {
-    fn hash<T: std::hash::Hasher>(&self, h: &mut T) {
-        self.path().hash(h)
-    }
-}
-
+#[derive(Clone)]
 enum EntryState {
     Directory(Arc<Store>, Arc<Directory>),
     Table(Arc<Store>, Arc<Table>),
@@ -60,7 +31,7 @@ enum EntryState {
 pub struct Directory {
     context: Arc<Store>,
     chain: Arc<Chain>,
-    txn_cache: TransactionCache<Entry, EntryState>,
+    txn_cache: TransactionCache<Link, (EntryType, EntryState)>,
 }
 
 #[async_trait]
@@ -78,40 +49,49 @@ impl Collection for Directory {
                 "You must specify a path to look up in a directory",
                 path,
             ));
+        } else if let Some((_, state)) = self.txn_cache.get(&txn.id(), &path.nth(0)) {
+            return match state {
+                EntryState::Directory(_, dir) => dir.get(txn, &path.slice_from(1)).await,
+                EntryState::Graph(_, graph) => Ok(graph.into()),
+                EntryState::Table(_, table) => Ok(table.into()),
+            };
         }
 
         let entry = self
             .chain
             .stream_into_until(txn.id())
-            .filter_map(|entries: Vec<Entry>| async move {
-                let entries: Vec<Entry> = entries
-                    .iter()
-                    .filter(|e| e.path() == path)
-                    .cloned()
-                    .collect();
+            .filter_map(|entries: Vec<(Link, EntryType)>| async move {
+                let entries: Vec<(Link, EntryType)> =
+                    entries.iter().filter(|(p, _)| p == path).cloned().collect();
                 if entries.is_empty() {
                     None
                 } else {
                     Some(entries)
                 }
             })
-            .fold(None, |_, entries: Vec<Entry>| async move {
+            .fold(None, |_, entries: Vec<(Link, EntryType)>| async move {
                 entries.last().cloned()
             })
             .await;
 
-        match entry {
-            Some(Entry::Directory(name)) => {
-                let dir = Directory::from_store(self.context.reserve(&name)?).await;
-                dir.get(txn, &path.slice_from(1)).await
+        if let Some((_, entry_type)) = entry {
+            if let Some(store) = self.context.get(&path.nth(0)) {
+                match entry_type {
+                    EntryType::Directory => {
+                        let dir = Directory::from_store(store).await;
+                        dir.get(txn, &path.slice_from(1)).await
+                    }
+                    EntryType::Graph => Ok(Graph::from_store(store).await.into()),
+                    EntryType::Table => Ok(Table::from_store(store).await.into()),
+                }
+            } else {
+                Err(error::internal(format!(
+                    "Directory entry {} has no associated data",
+                    path
+                )))
             }
-            Some(Entry::Graph(name)) => {
-                Ok(Graph::from_store(self.context.reserve(&name)?).await.into())
-            }
-            Some(Entry::Table(name)) => {
-                Ok(Table::from_store(self.context.reserve(&name)?).await.into())
-            }
-            None => Err(error::not_found(path)),
+        } else {
+            Err(error::not_found(path))
         }
     }
 
@@ -125,16 +105,16 @@ impl Collection for Directory {
             return Err(error::not_found(path));
         }
 
-        let context = self.context.reserve(&path)?;
+        let context = self.context.create(&path)?;
         let entry = match state {
-            State::Graph(g) => (Entry::Graph(path), EntryState::Graph(context, g)),
-            State::Table(t) => (Entry::Table(path), EntryState::Table(context, t)),
+            State::Graph(g) => (EntryType::Graph, EntryState::Graph(context, g)),
+            State::Table(t) => (EntryType::Table, EntryState::Table(context, t)),
             State::Value(v) => {
                 return Err(error::bad_request("Expected a persistent state, found", v))
             }
         };
 
-        self.txn_cache.insert(txn.id(), entry.0, entry.1);
+        self.txn_cache.insert(txn.id(), path, entry);
         Ok(self)
     }
 }
@@ -143,7 +123,7 @@ impl Collection for Directory {
 impl File for Directory {
     async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Directory> {
         let (path, blocks) = reader.next().await.unwrap();
-        let chain = Chain::copy_from(blocks, dest.reserve(&path).unwrap()).await;
+        let chain = Chain::copy_from(blocks, dest.create(&path).unwrap()).await;
 
         Arc::new(Directory {
             context: dest,
@@ -166,21 +146,26 @@ impl Persistent for Directory {
     type Config = TCValue; // TODO: permissions
 
     async fn commit(&self, txn_id: &TransactionId) {
-        let mutations = self.txn_cache.close(&txn_id);
-        let entries: Vec<&Entry> = mutations.keys().collect();
-        let tasks = mutations.values().map(|state| async move {
-            match state {
-                EntryState::Directory(context, dir) => {
-                    FileCopier::copy(txn_id.clone(), dir.clone(), context.clone()).await;
+        let mutations = self.txn_cache.close(txn_id);
+        let entries: Vec<(&Link, &EntryType)> = mutations
+            .iter()
+            .map(|(path, (entry_type, _state))| (path, entry_type))
+            .collect();
+        let tasks = mutations
+            .iter()
+            .map(|(_path, (_entry_type, state))| async move {
+                match state {
+                    EntryState::Directory(context, dir) => {
+                        FileCopier::copy(txn_id.clone(), dir.clone(), context.clone()).await;
+                    }
+                    EntryState::Graph(context, graph) => {
+                        FileCopier::copy(txn_id.clone(), graph.clone(), context.clone()).await;
+                    }
+                    EntryState::Table(context, table) => {
+                        FileCopier::copy(txn_id.clone(), table.clone(), context.clone()).await;
+                    }
                 }
-                EntryState::Graph(context, graph) => {
-                    FileCopier::copy(txn_id.clone(), graph.clone(), context.clone()).await;
-                }
-                EntryState::Table(context, table) => {
-                    FileCopier::copy(txn_id.clone(), table.clone(), context.clone()).await;
-                }
-            }
-        });
+            });
 
         join(join_all(tasks), self.chain.clone().put(txn_id, &entries)).await;
     }
@@ -188,7 +173,7 @@ impl Persistent for Directory {
     async fn create(txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {
         Ok(Arc::new(Directory {
             context: txn.context(),
-            chain: Chain::new(txn.context().reserve(&Link::to("/.contents")?)?),
+            chain: Chain::new(txn.context().create(&Link::to("/.contents")?)?),
             txn_cache: TransactionCache::new(),
         }))
     }

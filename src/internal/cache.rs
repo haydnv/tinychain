@@ -103,11 +103,11 @@ impl<V> Deque<V> {
     }
 }
 
-pub struct TransactionCache<K: Eq + Hash, V> {
+pub struct TransactionCache<K: Eq + Hash, V: Clone> {
     cache: RwLock<HashMap<TransactionId, HashMap<K, V>>>,
 }
 
-impl<K: Eq + Hash, V> TransactionCache<K, V> {
+impl<K: Eq + Hash, V: Clone> TransactionCache<K, V> {
     pub fn new() -> TransactionCache<K, V> {
         TransactionCache {
             cache: RwLock::new(HashMap::new()),
@@ -120,6 +120,14 @@ impl<K: Eq + Hash, V> TransactionCache<K, V> {
             .unwrap()
             .remove(txn_id)
             .unwrap_or_else(HashMap::new)
+    }
+
+    pub fn get(&self, txn_id: &TransactionId, key: &K) -> Option<V> {
+        if let Some(entries) = self.cache.read().unwrap().get(txn_id) {
+            entries.get(key).map(|v| v.clone())
+        } else {
+            None
+        }
     }
 
     pub fn insert(&self, txn_id: TransactionId, key: K, value: V) {

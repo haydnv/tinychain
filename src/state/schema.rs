@@ -78,7 +78,7 @@ impl SchemaHistory {
         txn_cache.insert(txn.id(), schema);
 
         Ok(Arc::new(SchemaHistory {
-            chain: Chain::new(txn.context().reserve(&Link::to("/schema")?)?),
+            chain: Chain::new(txn.context().create(&Link::to("/schema")?)?),
             txn_cache,
         }))
     }
@@ -125,7 +125,7 @@ impl File for SchemaHistory {
 
     async fn copy_from(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<SchemaHistory> {
         let (path, blocks) = copier.next().await.unwrap();
-        let chain: Arc<Chain> = Chain::copy_from(blocks, dest.reserve(&path).unwrap()).await;
+        let chain: Arc<Chain> = Chain::copy_from(blocks, dest.create(&path).unwrap()).await;
 
         Arc::new(SchemaHistory {
             chain,

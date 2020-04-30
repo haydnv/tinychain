@@ -141,7 +141,7 @@ pub struct Transaction {
 impl Transaction {
     pub fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
-        let context = root.reserve(&id.clone().into())?;
+        let context = root.create(&id.clone().into())?;
         Ok(Arc::new(Transaction {
             host,
             id,
@@ -154,7 +154,7 @@ impl Transaction {
 
     pub fn of(host: Arc<Host>, root: Arc<Store>, op: Op) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
-        let context = root.reserve(&id.clone().into())?;
+        let context = root.create(&id.clone().into())?;
 
         let mut state: HashMap<ValueId, State> = HashMap::new();
         let queue: Queue<(ValueId, Op)> = Queue::new();
@@ -208,7 +208,6 @@ impl Transaction {
         capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, State>> {
         while let Some((value_id, op)) = self.queue.pop() {
-            println!("resolving {}", value_id);
             let state = match op {
                 Op::Get { subject, key } => match subject {
                     Subject::Link(l) => self.get(&l, *key).await,
@@ -245,7 +244,7 @@ impl Transaction {
                     }
 
                     let subcontext = Link::to(&format!("/{}", value_id))?;
-                    let txn = self.extend(self.context.reserve(&subcontext)?, deps);
+                    let txn = self.extend(self.context.create(&subcontext)?, deps);
                     match subject {
                         Some(r) => {
                             let subject = self.resolve(&r.value_id())?;
@@ -305,12 +304,12 @@ impl Transaction {
     }
 
     pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<State> {
-        println!("txn::get {}", path);
+        println!("txn::get {} {}", path, key);
         self.host.get(self.clone(), path, key).await
     }
 
     pub async fn put(self: &Arc<Self>, path: Link, key: TCValue, state: State) -> TCResult<State> {
-        println!("txn::put {}", path);
+        println!("txn::put {} {}", path, key);
         self.host.put(self.clone(), path, key, state).await
     }
 

@@ -85,22 +85,28 @@ impl Chain {
         > = FuturesOrdered::new();
 
         for i in 0..self.latest_block {
-            let fut = self.store.clone().get(i.into()).then(|block| async move {
-                let mut block: Vec<&[u8]> = block.split(|b| *b == GROUP_DELIMITER as u8).collect();
-                block.pop();
+            let fut = self
+                .store
+                .clone()
+                .into_bytes(i.into())
+                .then(|block| async move {
+                    let mut block: Vec<&[u8]> =
+                        block.split(|b| *b == GROUP_DELIMITER as u8).collect();
+                    block.pop();
 
-                let mut data: Vec<(TransactionId, Vec<Bytes>)> = vec![];
-                for txn in block {
-                    let mut txn: Vec<&[u8]> = txn.split(|b| *b == RECORD_DELIMITER as u8).collect();
-                    txn.pop();
+                    let mut data: Vec<(TransactionId, Vec<Bytes>)> = vec![];
+                    for txn in block {
+                        let mut txn: Vec<&[u8]> =
+                            txn.split(|b| *b == RECORD_DELIMITER as u8).collect();
+                        txn.pop();
 
-                    let txn_id = TransactionId::from(Bytes::copy_from_slice(txn[0]));
-                    let txn: Vec<Bytes> =
-                        txn[1..].iter().map(|e| Bytes::copy_from_slice(e)).collect();
-                    data.push((txn_id, txn));
-                }
-                data
-            });
+                        let txn_id = TransactionId::from(Bytes::copy_from_slice(txn[0]));
+                        let txn: Vec<Bytes> =
+                            txn[1..].iter().map(|e| Bytes::copy_from_slice(e)).collect();
+                        data.push((txn_id, txn));
+                    }
+                    data
+                });
             stream.push(Box::new(fut.boxed()));
         }
 

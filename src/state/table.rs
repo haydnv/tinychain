@@ -213,7 +213,7 @@ impl File for Table {
         let schema_history = SchemaHistory::copy_from(reader, dest.clone()).await;
 
         let (path, blocks) = reader.next().await.unwrap();
-        let chain = Chain::copy_from(blocks, dest.reserve(&path).unwrap()).await;
+        let chain = Chain::copy_from(blocks, dest.create(&path).unwrap()).await;
 
         Arc::new(Table {
             schema: schema_history,
@@ -224,10 +224,10 @@ impl File for Table {
 
     async fn from_store(store: Arc<Store>) -> Arc<Table> {
         let schema =
-            SchemaHistory::from_store(store.reserve(&Link::to("/schema").unwrap()).unwrap()).await;
+            SchemaHistory::from_store(store.get(&Link::to("/schema").unwrap()).unwrap()).await;
 
         let chain_path = format!("/{}", schema.latest().await.version);
-        let chain = Chain::from_store(store.reserve(&Link::to(&chain_path).unwrap()).unwrap())
+        let chain = Chain::from_store(store.get(&Link::to(&chain_path).unwrap()).unwrap())
             .await
             .unwrap();
         Arc::new(Table {
@@ -262,7 +262,7 @@ impl Persistent for Table {
     async fn create(txn: Arc<Transaction>, schema: Schema) -> TCResult<Arc<Table>> {
         let table_chain = Chain::new(
             txn.context()
-                .reserve(&Link::to(&format!("/{}", schema.version))?)?,
+                .create(&Link::to(&format!("/{}", schema.version))?)?,
         );
         let schema_history = SchemaHistory::new(&txn, schema)?;
 

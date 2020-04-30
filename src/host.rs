@@ -43,7 +43,7 @@ impl Host {
             }
 
             let dir = if host.data_dir.exists(&path).await? {
-                Directory::from_store(host.data_dir.reserve(&path)?).await
+                Directory::from_store(host.data_dir.create(&path)?).await
             } else {
                 Directory::create(txn.clone(), TCValue::None).await?
             };
@@ -74,7 +74,6 @@ impl Host {
         path: &Link,
         key: TCValue,
     ) -> TCResult<State> {
-        // TODO: add Transaction param
         println!("GET {}", path);
         if path.is_empty() {
             return Err(error::method_not_allowed(path));
@@ -93,8 +92,8 @@ impl Host {
                 _ => Err(error::not_found(path)),
             }
         } else if let Some(dir) = self.root.get(&path.nth(0)) {
-            let txn = Transaction::new(self.clone(), self.workspace.clone())?;
-            dir.get(txn, &path.slice_from(1)).await
+            let state = dir.get(txn.clone(), &path.slice_from(1)).await?;
+            state.get(txn, key).await
         } else {
             Err(error::not_found(path))
         }

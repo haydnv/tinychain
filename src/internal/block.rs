@@ -51,15 +51,16 @@ impl Store {
         })
     }
 
-    pub fn reserve(self: &Arc<Self>, path: &Link) -> TCResult<Arc<Store>> {
-        if path == "/" {
-            return Err(error::internal("Tried to reserve empty dir name"));
+    pub fn create(self: &Arc<Self>, path: &Link) -> TCResult<Arc<Store>> {
+        if path.is_empty() {
+            panic!();
+            return Err(error::internal("Tried to create block store with no name"));
         }
 
         if path.len() == 1 {
             if self.children.contains_key(&path) {
                 return Err(error::internal(&format!(
-                    "Tried to reserve a directory that's already reserved! {}",
+                    "Tried to create a block store that already exists! {}",
                     path
                 )));
             }
@@ -77,11 +78,25 @@ impl Store {
                 store
             };
 
-            store.reserve(&path.slice_from(1))
+            store.create(&path.slice_from(1))
         }
     }
 
-    pub fn get(self: Arc<Self>, path: Link) -> impl Future<Output = Bytes> {
+    pub fn get(self: &Arc<Self>, path: &Link) -> Option<Arc<Store>> {
+        if path.is_empty() {
+            return None;
+        }
+
+        if path.len() == 1 {
+            self.children.get(path)
+        } else if let Some(store) = self.children.get(&path.nth(1)) {
+            store.get(&path.slice_from(1))
+        } else {
+            None
+        }
+    }
+
+    pub fn into_bytes(self: Arc<Self>, path: Link) -> impl Future<Output = Bytes> {
         async move {
             if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
                 Bytes::copy_from_slice(buffer)
