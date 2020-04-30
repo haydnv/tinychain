@@ -56,7 +56,7 @@ enum EntryState {
     Graph(Arc<Store>, Arc<Graph>),
 }
 
-struct Directory {
+pub struct Directory {
     context: Arc<Store>,
     chain: Arc<Chain>,
     txn_cache: RwLock<HashMap<TransactionId, HashMap<Entry, EntryState>>>,

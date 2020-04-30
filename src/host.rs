@@ -4,6 +4,9 @@ use std::time;
 
 use crate::error;
 use crate::internal::block::Store;
+use crate::internal::cache::Map;
+use crate::internal::file::File;
+use crate::internal::Directory;
 use crate::state::{Persistent, State, Table};
 use crate::transaction::Transaction;
 use crate::value::{Link, Op, TCResult, TCValue};
@@ -11,29 +14,43 @@ use crate::value::{Link, Op, TCResult, TCValue};
 const RESERVED: [&str; 1] = ["/sbin"];
 
 pub struct Host {
+    data_dir: Arc<Store>,
     workspace: Arc<Store>,
+    root: Map<Link, Arc<Directory>>,
 }
 
 impl Host {
-    pub fn new(_data_dir: Arc<Store>, workspace: Arc<Store>) -> TCResult<Arc<Host>> {
-        Ok(Arc::new(Host { workspace }))
-    }
+    pub async fn new(
+        data_dir: Arc<Store>,
+        workspace: Arc<Store>,
+        hosted: Vec<Link>,
+    ) -> TCResult<Arc<Host>> {
+        let host = Arc::new(Host {
+            data_dir,
+            workspace,
+            root: Map::new(),
+        });
 
-    pub async fn claim(self: &Arc<Self>, path: Link) -> TCResult<()> {
-        let txn = Transaction::new(self.clone(), self.workspace.clone())?;
-        for reserved in RESERVED.iter() {
-            if path.starts_with(reserved) {
-                return Err(error::bad_request(
-                    "Attempted to host a reserved path",
-                    reserved,
-                ));
+        let txn = Transaction::new(host.clone(), host.workspace.clone())?;
+        for path in hosted {
+            for reserved in RESERVED.iter() {
+                if path.starts_with(reserved) {
+                    return Err(error::bad_request(
+                        "Attempted to host a reserved path",
+                        reserved,
+                    ));
+                }
             }
+
+            let dir = if host.data_dir.exists(&path).await? {
+                Directory::from_store(host.data_dir.reserve(&path)?).await
+            } else {
+                Directory::create(txn.clone(), TCValue::None).await?
+            };
+            host.root.insert(path.clone(), dir);
         }
 
-        // TODO
-
-        txn.commit().await;
-        Ok(())
+        Ok(host)
     }
 
     pub fn time(&self) -> u128 {

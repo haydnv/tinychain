@@ -44,11 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .map(|d| value::Link::to(d))
         .collect::<value::TCResult<Vec<value::Link>>>()?;
 
-    let host = host::Host::new(data_dir, workspace)?;
-
-    for path in hosted {
-        host.claim(path).await?;
-    }
+    let host = host::Host::new(data_dir, workspace, hosted).await?;
 
     http::listen(host, config.http_port).await?;
     Ok(())
