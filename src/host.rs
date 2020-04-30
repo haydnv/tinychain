@@ -31,7 +31,6 @@ impl Host {
             root: Map::new(),
         });
 
-        let txn = Transaction::new(host.clone(), host.workspace.clone())?;
         for path in hosted {
             for reserved in RESERVED.iter() {
                 if path.starts_with(reserved) {
@@ -42,11 +41,12 @@ impl Host {
                 }
             }
 
-            let dir = if host.data_dir.exists(&path).await? {
-                Directory::from_store(host.data_dir.create(&path)?).await
+            let dir = if let Some(store) = host.data_dir.get(&path) {
+                Directory::from_store(store).await
             } else {
-                Directory::create(txn.clone(), TCValue::None).await?
+                Directory::new(host.data_dir.create(&path)?)?
             };
+
             host.root.insert(path.clone(), dir);
         }
 

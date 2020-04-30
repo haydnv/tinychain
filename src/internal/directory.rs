@@ -34,6 +34,16 @@ pub struct Directory {
     txn_cache: TransactionCache<Link, (EntryType, EntryState)>,
 }
 
+impl Directory {
+    pub fn new(context: Arc<Store>) -> TCResult<Arc<Directory>> {
+        Ok(Arc::new(Directory {
+            context: context.clone(),
+            chain: Chain::new(context.create(&Link::to("/.contents")?)?),
+            txn_cache: TransactionCache::new(),
+        }))
+    }
+}
+
 #[async_trait]
 impl Collection for Directory {
     type Key = Link;
@@ -147,11 +157,7 @@ impl Persistent for Directory {
     type Config = TCValue; // TODO: permissions
 
     async fn create(txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {
-        Ok(Arc::new(Directory {
-            context: txn.context(),
-            chain: Chain::new(txn.context().create(&Link::to("/.contents")?)?),
-            txn_cache: TransactionCache::new(),
-        }))
+        Directory::new(txn.context())
     }
 }
 
