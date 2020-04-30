@@ -40,16 +40,14 @@ pub async fn listen(
 }
 
 async fn get(host: Arc<Host>, path: &Link, params: &HashMap<String, String>) -> TCResult<State> {
-    host.get(
-        host.new_transaction()?,
-        path,
-        params
-            .get("key")
-            .cloned()
-            .map(|s| s.into())
-            .unwrap_or_else(|| TCValue::None),
-    )
-    .await
+    let key = if let Some(key) = params.get("key") {
+        serde_json::from_str::<TCValue>(key)
+            .map_err(|e| error::bad_request("Unable to parse 'key' param", e))?
+    } else {
+        TCValue::None
+    };
+
+    host.get(host.new_transaction()?, path, key).await
 }
 
 async fn route(
