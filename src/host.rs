@@ -7,7 +7,7 @@ use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::File;
 use crate::internal::Directory;
-use crate::state::{Persistent, State, Table};
+use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Transaction;
 use crate::value::{Link, Op, TCResult, TCValue};
 
@@ -65,13 +65,14 @@ impl Host {
     }
 
     pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<State> {
+        // TODO: add Transaction param
         println!("GET {}", path);
         if path.is_empty() {
             return Err(error::method_not_allowed(path));
         }
 
-        match path.as_str(0) {
-            "sbin" => match path.as_str(1) {
+        if path.as_str(0) == "sbin" {
+            match path.as_str(1) {
                 "value" => match path.as_str(2) {
                     "string" => {
                         let s: String = key.try_into()?;
@@ -80,8 +81,12 @@ impl Host {
                     _ => Err(error::not_found(path)),
                 },
                 _ => Err(error::not_found(path)),
-            },
-            _ => Err(error::not_found(path)),
+            }
+        } else if let Some(dir) = self.root.get(&path.nth(0)) {
+            let txn = Transaction::new(self.clone(), self.workspace.clone())?;
+            dir.get(txn, &path.slice_from(1)).await
+        } else {
+            Err(error::not_found(path))
         }
     }
 
