@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{join, join_all};
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::internal::block::Store;
+use crate::internal::cache::TransactionCache;
 use crate::internal::file::*;
 use crate::internal::Chain;
 use crate::state::*;
@@ -59,7 +60,7 @@ enum EntryState {
 pub struct Directory {
     context: Arc<Store>,
     chain: Arc<Chain>,
-    txn_cache: RwLock<HashMap<TransactionId, HashMap<Entry, EntryState>>>,
+    txn_cache: TransactionCache<Entry, EntryState>,
 }
 
 #[async_trait]
@@ -133,14 +134,7 @@ impl Collection for Directory {
             }
         };
 
-        if let Some(mutations) = self.txn_cache.write().unwrap().get_mut(&txn.id()) {
-            mutations.insert(entry.0, entry.1);
-        } else {
-            let mut mutations: HashMap<Entry, EntryState> = HashMap::new();
-            mutations.insert(entry.0, entry.1);
-            self.txn_cache.write().unwrap().insert(txn.id(), mutations);
-        }
-
+        self.txn_cache.insert(txn.id(), entry.0, entry.1);
         Ok(self)
     }
 }
@@ -154,7 +148,7 @@ impl File for Directory {
         Arc::new(Directory {
             context: dest,
             chain,
-            txn_cache: RwLock::new(HashMap::new()),
+            txn_cache: TransactionCache::new(),
         })
     }
 
@@ -172,32 +166,30 @@ impl Persistent for Directory {
     type Config = TCValue; // TODO: permissions
 
     async fn commit(&self, txn_id: &TransactionId) {
-        let mutations = self.txn_cache.write().unwrap().remove(&txn_id);
-        if let Some(mutations) = mutations {
-            let entries: Vec<&Entry> = mutations.keys().collect();
-            let tasks = mutations.values().map(|state| async move {
-                match state {
-                    EntryState::Directory(context, dir) => {
-                        FileCopier::copy(txn_id.clone(), dir.clone(), context.clone()).await;
-                    }
-                    EntryState::Graph(context, graph) => {
-                        FileCopier::copy(txn_id.clone(), graph.clone(), context.clone()).await;
-                    }
-                    EntryState::Table(context, table) => {
-                        FileCopier::copy(txn_id.clone(), table.clone(), context.clone()).await;
-                    }
+        let mutations = self.txn_cache.close(&txn_id);
+        let entries: Vec<&Entry> = mutations.keys().collect();
+        let tasks = mutations.values().map(|state| async move {
+            match state {
+                EntryState::Directory(context, dir) => {
+                    FileCopier::copy(txn_id.clone(), dir.clone(), context.clone()).await;
                 }
-            });
+                EntryState::Graph(context, graph) => {
+                    FileCopier::copy(txn_id.clone(), graph.clone(), context.clone()).await;
+                }
+                EntryState::Table(context, table) => {
+                    FileCopier::copy(txn_id.clone(), table.clone(), context.clone()).await;
+                }
+            }
+        });
 
-            join(join_all(tasks), self.chain.clone().put(txn_id, &entries)).await;
-        }
+        join(join_all(tasks), self.chain.clone().put(txn_id, &entries)).await;
     }
 
     async fn create(txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {
         Ok(Arc::new(Directory {
             context: txn.context(),
             chain: Chain::new(txn.context().reserve(&Link::to("/.contents")?)?),
-            txn_cache: RwLock::new(HashMap::new()),
+            txn_cache: TransactionCache::new(),
         }))
     }
 }

@@ -152,7 +152,7 @@ impl Transaction {
         }))
     }
 
-    pub fn of(host: Arc<Host>, op: Op, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
+    pub fn of(host: Arc<Host>, root: Arc<Store>, op: Op) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context = root.reserve(&id.clone().into())?;
 
@@ -224,12 +224,15 @@ impl Transaction {
                     subject,
                     key,
                     value,
-                } => {
-                    let subject = self.resolve(&subject.value_id())?;
-                    let value = self.resolve_val(*value)?;
-                    self.mutated.push(subject.clone());
-                    subject.put(self.clone(), *key, value.try_into()?).await
-                }
+                } => match subject {
+                    Subject::Link(l) => self.put(l, *key, self.resolve_val(*value)?).await,
+                    Subject::Ref(r) => {
+                        let subject = self.resolve(&r.value_id())?;
+                        let value = self.resolve_val(*value)?;
+                        self.mutated.push(subject.clone());
+                        subject.put(self.clone(), *key, value.try_into()?).await
+                    }
+                },
                 Op::Post {
                     subject,
                     action,
@@ -303,7 +306,12 @@ impl Transaction {
 
     pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<State> {
         println!("txn::get {}", path);
-        self.host.get(path, key).await
+        self.host.get(self.clone(), path, key).await
+    }
+
+    pub async fn put(self: &Arc<Self>, path: Link, key: TCValue, state: State) -> TCResult<State> {
+        println!("txn::put {}", path);
+        self.host.put(self.clone(), path, key, state).await
     }
 
     pub async fn post(

@@ -49,7 +49,7 @@ pub enum Op {
         key: Box<TCValue>,
     },
     Put {
-        subject: TCRef,
+        subject: Subject,
         key: Box<TCValue>,
         value: Box<TCValue>,
     },
@@ -68,7 +68,7 @@ impl Op {
         }
     }
 
-    pub fn put(subject: TCRef, key: TCValue, value: TCValue) -> Op {
+    pub fn put(subject: Subject, key: TCValue, value: TCValue) -> Op {
         Op::Put {
             subject,
             key: Box::new(key),

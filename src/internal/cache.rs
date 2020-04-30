@@ -3,6 +3,8 @@ use std::hash::Hash;
 use std::iter::FromIterator;
 use std::sync::RwLock;
 
+use crate::transaction::TransactionId;
+
 #[derive(Debug)]
 pub struct Map<K: Eq + Hash, V> {
     map: RwLock<HashMap<K, V>>,
@@ -98,5 +100,36 @@ impl<V> Deque<V> {
 
     pub fn push_back(&self, item: V) {
         self.deque.write().unwrap().push_back(item)
+    }
+}
+
+pub struct TransactionCache<K: Eq + Hash, V> {
+    cache: RwLock<HashMap<TransactionId, HashMap<K, V>>>,
+}
+
+impl<K: Eq + Hash, V> TransactionCache<K, V> {
+    pub fn new() -> TransactionCache<K, V> {
+        TransactionCache {
+            cache: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub fn close(&self, txn_id: &TransactionId) -> HashMap<K, V> {
+        self.cache
+            .write()
+            .unwrap()
+            .remove(txn_id)
+            .unwrap_or_else(HashMap::new)
+    }
+
+    pub fn insert(&self, txn_id: TransactionId, key: K, value: V) {
+        let mut cache = self.cache.write().unwrap();
+        if let Some(map) = cache.get_mut(&txn_id) {
+            map.insert(key, value);
+        } else {
+            let mut map: HashMap<K, V> = HashMap::new();
+            map.insert(key, value);
+            cache.insert(txn_id, map);
+        }
     }
 }

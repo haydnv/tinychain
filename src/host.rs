@@ -60,11 +60,20 @@ impl Host {
             .as_nanos()
     }
 
-    pub fn new_transaction(self: &Arc<Self>, op: Op) -> TCResult<Arc<Transaction>> {
-        Transaction::of(self.clone(), op, self.workspace.clone())
+    pub fn new_transaction(self: &Arc<Self>) -> TCResult<Arc<Transaction>> {
+        Transaction::new(self.clone(), self.workspace.clone())
     }
 
-    pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<State> {
+    pub fn transact(self: &Arc<Self>, op: Op) -> TCResult<Arc<Transaction>> {
+        Transaction::of(self.clone(), self.workspace.clone(), op)
+    }
+
+    pub async fn get(
+        self: &Arc<Self>,
+        txn: Arc<Transaction>,
+        path: &Link,
+        key: TCValue,
+    ) -> TCResult<State> {
         // TODO: add Transaction param
         println!("GET {}", path);
         if path.is_empty() {
@@ -73,6 +82,7 @@ impl Host {
 
         if path.as_str(0) == "sbin" {
             match path.as_str(1) {
+                "table" => Ok(Table::create(txn.clone(), key.try_into()?).await?.into()),
                 "value" => match path.as_str(2) {
                     "string" => {
                         let s: String = key.try_into()?;
@@ -92,33 +102,30 @@ impl Host {
 
     pub async fn put(
         self: &Arc<Self>,
-        _txn: Arc<Transaction>,
+        txn: Arc<Transaction>,
         path: Link,
-        _key: TCValue,
-        _state: State,
+        key: TCValue,
+        state: State,
     ) -> TCResult<State> {
         println!("PUT {}", path);
-        Err(error::not_found(path))
+        if path.is_empty() {
+            Err(error::method_not_allowed(path))
+        } else if let Some(dir) = self.root.get(&path.nth(0)) {
+            dir.put(txn, path.slice_from(1).append(&key.try_into()?), state)
+                .await?;
+            Ok(().into())
+        } else {
+            Err(error::not_found(path))
+        }
     }
 
-    pub async fn post(self: &Arc<Self>, txn: Arc<Transaction>, path: &Link) -> TCResult<State> {
+    // TODO: remove this method
+    pub async fn post(self: &Arc<Self>, _txn: Arc<Transaction>, path: &Link) -> TCResult<State> {
         println!("POST {}", path);
         if path.is_empty() {
-            return Ok(TCValue::None.into());
-        } else if path.len() < 3 {
-            return Err(error::not_found(path));
-        }
-
-        match path.as_str(0) {
-            "sbin" => match path.as_str(1) {
-                "table" => Ok(
-                    Table::create(txn.clone(), txn.require("schema")?.try_into()?)
-                        .await?
-                        .into(),
-                ),
-                _ => Err(error::not_found(path)),
-            },
-            _ => Err(error::not_found(path)),
+            Ok(TCValue::None.into())
+        } else {
+            Err(error::not_found(path))
         }
     }
 }

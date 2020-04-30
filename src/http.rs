@@ -10,6 +10,14 @@ use crate::host::Host;
 use crate::state::State;
 use crate::value::{Link, Op, TCResult, TCValue, ValueId};
 
+fn line_numbers(s: &str) -> String {
+    s.lines()
+        .enumerate()
+        .map(|(i, l)| format!("{} {}", i, l))
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
 pub async fn listen(
     host: Arc<Host>,
     port: u16,
@@ -33,6 +41,7 @@ pub async fn listen(
 
 async fn get(host: Arc<Host>, path: &Link, params: &HashMap<String, String>) -> TCResult<State> {
     host.get(
+        host.new_transaction()?,
         path,
         params
             .get("key")
@@ -69,11 +78,15 @@ async fn route(
             let values = match serde_json::from_slice::<Vec<(ValueId, TCValue)>>(&body) {
                 Ok(graph) => graph,
                 Err(cause) => {
-                    return Err(error::bad_request("Unable to parse request", cause));
+                    let body = line_numbers(std::str::from_utf8(&body).unwrap());
+                    return Err(error::bad_request(
+                        &format!("{}\n\nUnable to parse request", body),
+                        cause,
+                    ));
                 }
             };
 
-            let txn = host.clone().new_transaction(Op::post(None, path, values))?;
+            let txn = host.clone().transact(Op::post(None, path, values))?;
             let mut results: HashMap<String, TCValue> = HashMap::new();
             match txn.execute(capture).await {
                 Ok(responses) => {

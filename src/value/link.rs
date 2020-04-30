@@ -41,7 +41,9 @@ impl Link {
     }
 
     pub fn append(&self, suffix: &Link) -> Link {
-        Link::to(&format!("{}{}", self, suffix)).unwrap()
+        Link {
+            segments: [&self.segments[..], &suffix.segments[..]].concat(),
+        }
     }
 
     pub fn as_str(&self, index: usize) -> &str {

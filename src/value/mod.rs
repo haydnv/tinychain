@@ -305,14 +305,21 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
     {
         if let Some(key) = access.next_key::<String>()? {
             if key.starts_with('/') {
-                let value = access.next_value::<Vec<(String, TCValue)>>()?;
+                let value = access.next_value::<Vec<TCValue>>()?;
 
                 let link = Link::to(&key).map_err(de::Error::custom)?;
 
                 if value.is_empty() {
                     Ok(link.into())
+                } else if value.len() == 1 {
+                    Ok(Op::get(link.into(), value[0].clone()).into())
+                } else if value.len() == 2 {
+                    Ok(Op::put(link.into(), value[0].clone(), value[1].clone()).into())
                 } else {
-                    Ok(Op::post(None, link, value).into())
+                    Err(de::Error::custom(format!(
+                        "Expected a list of 0, 1, or 2 values for {}",
+                        key
+                    )))
                 }
             } else if key.starts_with('$') {
                 if key.contains('/') {
