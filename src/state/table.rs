@@ -4,7 +4,7 @@ use std::iter;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use futures::future::{join, try_join_all};
+use futures::future::{self, join, try_join_all};
 use futures::StreamExt;
 
 use crate::error;
@@ -116,16 +116,16 @@ impl Collection for Table {
     ) -> TCResult<Self::Value> {
         let mut row = self
             .chain
-            .until(txn.id())
+            .stream_into_until(txn.id())
             .fold(
                 self.new_row(&txn, row_id).await?,
-                |mut row, block: Vec<Mutation>| async {
+                |mut row, block: Vec<Mutation>| {
                     for mutation in block {
                         if mutation.0 == row.key {
                             row.update(&mutation)
                         }
                     }
-                    row
+                    future::ready(row)
                 },
             )
             .await;

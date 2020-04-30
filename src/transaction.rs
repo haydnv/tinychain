@@ -22,14 +22,6 @@ pub struct TransactionId {
 }
 
 impl TransactionId {
-    // TODO: REMOVE!
-    pub fn max() -> TransactionId {
-        TransactionId {
-            timestamp: 2u128.pow(128) - 1,
-            nonce: 2u16.pow(16) - 1,
-        }
-    }
-
     fn new(timestamp: u128) -> TransactionId {
         let nonce: u16 = rand::thread_rng().gen();
         TransactionId { timestamp, nonce }

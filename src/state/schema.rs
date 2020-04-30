@@ -36,6 +36,16 @@ impl Schema {
     }
 }
 
+impl Schema {
+    fn new() -> Schema {
+        Schema {
+            key: vec![],
+            columns: vec![],
+            version: Version::parse("0.0.0").unwrap(),
+        }
+    }
+}
+
 impl TryFrom<TCValue> for Schema {
     type Error = error::TCError;
 
@@ -81,28 +91,26 @@ impl SchemaHistory {
 
     pub async fn at(&self, txn_id: &TransactionId) -> Schema {
         if let Some(schema) = self.txn_cache.get(txn_id) {
-            schema
-        } else if let Some(schema) = self
-            .chain
-            .until(txn_id.clone())
+            return schema;
+        }
+
+        self.chain
+            .stream_into_until(txn_id.clone())
             .fold(None, |_: Option<Schema>, s: Vec<Schema>| {
                 future::ready(s.last().cloned())
             })
             .await
-        {
-            schema
-        } else {
-            Schema {
-                key: vec![],
-                columns: vec![],
-                version: Version::parse("0.0.0").unwrap(),
-            }
-        }
+            .unwrap_or_else(Schema::new)
     }
 
     pub async fn latest(&self) -> Schema {
-        // TODO: FIX THIS!
-        self.at(&TransactionId::max()).await
+        self.chain
+            .stream_into()
+            .fold(None, |_: Option<Schema>, s: Vec<Schema>| {
+                future::ready(s.last().cloned())
+            })
+            .await
+            .unwrap_or_else(Schema::new)
     }
 }
 

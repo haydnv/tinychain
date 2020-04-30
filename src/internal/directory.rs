@@ -81,7 +81,7 @@ impl Collection for Directory {
 
         let entry = self
             .chain
-            .until(txn.id())
+            .stream_into_until(txn.id())
             .filter_map(|entries: Vec<Entry>| async move {
                 let entries: Vec<Entry> = entries
                     .iter()

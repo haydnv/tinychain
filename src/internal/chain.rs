@@ -107,15 +107,32 @@ impl Chain {
         stream
     }
 
+    pub fn stream_into<T: 'static + Clone + DeserializeOwned>(
+        self: &Arc<Self>,
+    ) -> impl Stream<Item = Vec<T>> {
+        self.stream()
+            .map(move |block: Vec<(TransactionId, Vec<Bytes>)>| {
+                block
+                    .iter()
+                    .map(|(_, data)| {
+                        data.iter()
+                            .map(|e| serde_json::from_slice::<T>(e).unwrap())
+                            .collect::<Vec<T>>()
+                    })
+                    .collect()
+            })
+            .map(|block: Vec<Vec<T>>| block.iter().flatten().cloned().collect())
+    }
+
     pub fn stream_until(
         self: &Arc<Self>,
         txn_id: TransactionId,
     ) -> impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> {
-        let txn_id1 = txn_id.clone();
+        let txn_id_clone = txn_id.clone();
         self.stream()
             .take_while(move |b| {
                 if let Some((time, _)) = b.last() {
-                    future::ready(time <= &txn_id1)
+                    future::ready(time <= &txn_id_clone)
                 } else {
                     future::ready(false)
                 }
@@ -129,7 +146,7 @@ impl Chain {
             })
     }
 
-    pub fn until<T: 'static + Clone + DeserializeOwned>(
+    pub fn stream_into_until<T: 'static + Clone + DeserializeOwned>(
         self: &Arc<Self>,
         txn_id: TransactionId,
     ) -> impl Stream<Item = Vec<T>> {
