@@ -66,8 +66,8 @@ impl Host {
 
     pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<State> {
         println!("GET {}", path);
-        if path.len() < 3 {
-            return Err(error::not_found(path));
+        if path.is_empty() {
+            return Err(error::method_not_allowed(path));
         }
 
         match path.as_str(0) {
