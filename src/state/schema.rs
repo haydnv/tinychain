@@ -78,10 +78,12 @@ impl SchemaHistory {
         let txn_cache = Map::new();
         txn_cache.insert(txn.id(), schema);
 
-        Ok(Arc::new(SchemaHistory {
+        let schema_history = Arc::new(SchemaHistory {
             chain: Chain::new(txn.context().create(&Link::to("/schema")?)?),
             txn_cache,
-        }))
+        });
+        txn.mutate(schema_history.clone());
+        Ok(schema_history)
     }
 
     pub async fn at(&self, txn_id: &TransactionId) -> Schema {

@@ -35,7 +35,7 @@ impl FileCopier {
         }
     }
 
-    pub async fn copy<T: File>(txn_id: TransactionId, state: T, dest: Arc<Store>) -> Arc<T> {
+    pub async fn copy<T: File>(txn_id: TransactionId, state: &T, dest: Arc<Store>) -> Arc<T> {
         let mut copier = Self::open();
         state.copy_into(txn_id, &mut copier).await;
         copier.close();
@@ -86,19 +86,4 @@ pub trait File {
     async fn copy_into(&self, txn_id: TransactionId, writer: &mut FileCopier);
 
     async fn from_store(store: Arc<Store>) -> Arc<Self>;
-}
-
-#[async_trait]
-impl<T: File + Sync + Send> File for Arc<T> {
-    async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Self> {
-        Self::copy_from(reader, dest).await
-    }
-
-    async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
-        self.copy_into(txn_id, copier).await
-    }
-
-    async fn from_store(store: Arc<Store>) -> Arc<Self> {
-        Self::from_store(store).await
-    }
 }

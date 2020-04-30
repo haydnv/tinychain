@@ -4,7 +4,7 @@ use std::iter;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use futures::future::{self, join, try_join_all};
+use futures::future::{self, try_join_all};
 use futures::StreamExt;
 
 use crate::error;
@@ -192,6 +192,7 @@ impl Collection for Table {
             cache.insert(txn.id(), vec![mutation]);
         }
 
+        txn.mutate(self.clone());
         Ok(self.clone())
     }
 }
@@ -269,10 +270,6 @@ impl Transactable for Table {
             vec![]
         };
 
-        join(
-            self.schema.commit(txn_id),
-            self.chain.clone().put(&txn_id, &mutations),
-        )
-        .await;
+        self.chain.put(&txn_id, &mutations).await
     }
 }

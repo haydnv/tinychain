@@ -115,6 +115,7 @@ impl Collection for Directory {
         };
 
         self.txn_cache.insert(txn.id(), path, entry);
+        txn.mutate(self.clone());
         Ok(self)
     }
 }
@@ -167,13 +168,13 @@ impl Transactable for Directory {
             .map(|(_path, (_entry_type, state))| async move {
                 match state {
                     EntryState::Directory(context, dir) => {
-                        FileCopier::copy(txn_id.clone(), dir.clone(), context.clone()).await;
+                        FileCopier::copy(txn_id.clone(), &*dir.clone(), context.clone()).await;
                     }
                     EntryState::Graph(context, graph) => {
-                        FileCopier::copy(txn_id.clone(), graph.clone(), context.clone()).await;
+                        FileCopier::copy(txn_id.clone(), &*graph.clone(), context.clone()).await;
                     }
                     EntryState::Table(context, table) => {
-                        FileCopier::copy(txn_id.clone(), table.clone(), context.clone()).await;
+                        FileCopier::copy(txn_id.clone(), &*table.clone(), context.clone()).await;
                     }
                 }
             });

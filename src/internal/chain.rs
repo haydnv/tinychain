@@ -66,7 +66,7 @@ impl Chain {
     }
 
     pub fn put<T: Serialize>(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         txn_id: &TransactionId,
         mutations: &[T],
     ) -> impl Future<Output = ()> {

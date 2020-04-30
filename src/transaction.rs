@@ -12,7 +12,7 @@ use crate::error;
 use crate::host::Host;
 use crate::internal::block::Store;
 use crate::internal::cache::{Map, Queue};
-use crate::state::State;
+use crate::state::{State, Transactable};
 use crate::value::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
@@ -135,13 +135,17 @@ pub struct Transaction {
     context: Arc<Store>,
     state: Map<ValueId, State>,
     queue: Queue<(ValueId, Op)>,
-    mutated: Queue<State>,
+    mutated: Queue<Arc<dyn Transactable>>,
 }
 
 impl Transaction {
     pub fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context = root.create(&id.clone().into())?;
+
+        println!();
+        println!("Transaction::new");
+
         Ok(Arc::new(Transaction {
             host,
             id,
@@ -162,6 +166,7 @@ impl Transaction {
         queue.reverse();
 
         println!();
+        println!("Transaction::of");
 
         Ok(Arc::new(Transaction {
             host,
@@ -200,7 +205,12 @@ impl Transaction {
     }
 
     pub async fn commit(self: &Arc<Self>) {
-        join_all(self.mutated.to_vec().iter().map(|s| s.commit(&self.id))).await;
+        println!("commit!");
+        let mut tasks = Vec::with_capacity(self.mutated.len());
+        while let Some(state) = self.mutated.pop() {
+            tasks.push(async move { state.commit(&self.id).await });
+        }
+        join_all(tasks).await;
     }
 
     pub async fn execute<'a>(
@@ -228,7 +238,6 @@ impl Transaction {
                     Subject::Ref(r) => {
                         let subject = self.resolve(&r.value_id())?;
                         let value = self.resolve_val(*value)?;
-                        self.mutated.push(subject.clone());
                         subject.put(self.clone(), *key, value.try_into()?).await
                     }
                 },
@@ -288,6 +297,10 @@ impl Transaction {
             TCValue::Ref(r) => self.resolve(&r.value_id()),
             _ => Ok(value.into()),
         }
+    }
+
+    pub fn mutate(self: &Arc<Self>, state: Arc<dyn Transactable>) {
+        self.mutated.push(state)
     }
 
     pub fn require(self: &Arc<Self>, value_id: &str) -> TCResult<TCValue> {
