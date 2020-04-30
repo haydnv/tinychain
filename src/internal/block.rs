@@ -96,10 +96,8 @@ impl Store {
     }
 
     pub fn into_bytes(self: Arc<Self>, path: Link) -> impl Future<Output = Bytes> {
-        println!("read data from {}", path);
         async move {
             if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
-                println!("{} bytes", buffer.len());
                 Bytes::copy_from_slice(buffer)
             } else {
                 // TODO
@@ -110,7 +108,7 @@ impl Store {
 
     pub async fn exists(self: &Arc<Self>, path: &Link) -> TCResult<bool> {
         let fs_path = self.fs_path(path);
-        if self.children.contains_key(path) {
+        if self.children.contains_key(path) || self.buffer.read().unwrap().contains_key(path) {
             return Ok(true);
         }
 
@@ -131,13 +129,6 @@ impl Store {
         }
 
         async move {
-            if self.tmp {
-                println!("flush to {} ignored", path);
-                return;
-            } else {
-                println!("flush to {}", path);
-            }
-
             let group_delimiter = Bytes::from(&[GROUP_DELIMITER as u8][..]);
             let record_delimiter = Bytes::from(&[RECORD_DELIMITER as u8][..]);
 

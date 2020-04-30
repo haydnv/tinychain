@@ -50,35 +50,6 @@ impl<K: Eq + Hash, V> FromIterator<(K, V)> for Map<K, V> {
 }
 
 #[derive(Debug)]
-pub struct Queue<V> {
-    queue: RwLock<Vec<V>>,
-}
-
-impl<V> Queue<V> {
-    pub fn new() -> Queue<V> {
-        Queue {
-            queue: RwLock::new(vec![]),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.queue.read().unwrap().len()
-    }
-
-    pub fn push(&self, item: V) {
-        self.queue.write().unwrap().push(item)
-    }
-
-    pub fn pop(&self) -> Option<V> {
-        self.queue.write().unwrap().pop()
-    }
-
-    pub fn reverse(&self) {
-        self.queue.write().unwrap().reverse()
-    }
-}
-
-#[derive(Debug)]
 pub struct Deque<V> {
     deque: RwLock<VecDeque<V>>,
 }
@@ -92,6 +63,10 @@ impl<V> Deque<V> {
 
     pub fn is_empty(&self) -> bool {
         self.deque.read().unwrap().is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.deque.read().unwrap().len()
     }
 
     pub fn pop_front(&self) -> Option<V> {
@@ -124,7 +99,7 @@ impl<K: Eq + Hash, V: Clone> TransactionCache<K, V> {
 
     pub fn get(&self, txn_id: &TransactionId, key: &K) -> Option<V> {
         if let Some(entries) = self.cache.read().unwrap().get(txn_id) {
-            entries.get(key).map(|v| v.clone())
+            entries.get(key).cloned()
         } else {
             None
         }

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::host::Host;
 use crate::internal::block::Store;
-use crate::internal::cache::{Map, Queue};
+use crate::internal::cache::{Deque, Map};
 use crate::state::{State, Transactable};
 use crate::value::*;
 
@@ -99,7 +99,7 @@ fn calc_deps(
     value_id: ValueId,
     op: Op,
     state: &mut HashMap<ValueId, State>,
-    queue: &Queue<(ValueId, Op)>,
+    queue: &Deque<(ValueId, Op)>,
 ) -> TCResult<()> {
     if let Op::Post { requires, .. } = &op {
         let mut required_value_ids: Vec<(String, ValueId)> = vec![];
@@ -124,7 +124,7 @@ fn calc_deps(
         }
     }
 
-    queue.push((value_id, op));
+    queue.push_back((value_id, op));
     Ok(())
 }
 
@@ -133,8 +133,8 @@ pub struct Transaction {
     id: TransactionId,
     context: Arc<Store>,
     state: Map<ValueId, State>,
-    queue: Queue<(ValueId, Op)>,
-    mutated: Queue<Arc<dyn Transactable>>,
+    queue: Deque<(ValueId, Op)>,
+    mutated: Deque<Arc<dyn Transactable>>,
 }
 
 impl Transaction {
@@ -150,8 +150,8 @@ impl Transaction {
             id,
             context,
             state: Map::new(),
-            queue: Queue::new(),
-            mutated: Queue::new(),
+            queue: Deque::new(),
+            mutated: Deque::new(),
         }))
     }
 
@@ -160,9 +160,8 @@ impl Transaction {
         let context = root.create(&id.clone().into())?;
 
         let mut state: HashMap<ValueId, State> = HashMap::new();
-        let queue: Queue<(ValueId, Op)> = Queue::new();
+        let queue: Deque<(ValueId, Op)> = Deque::new();
         calc_deps(String::from("_"), op, &mut state, &queue)?;
-        queue.reverse();
 
         println!();
         println!("Transaction::of");
@@ -173,7 +172,7 @@ impl Transaction {
             context,
             state: state.into_iter().collect(),
             queue,
-            mutated: Queue::new(),
+            mutated: Deque::new(),
         }))
     }
 
@@ -190,8 +189,8 @@ impl Transaction {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.into()))
                 .collect(),
-            queue: Queue::new(),
-            mutated: Queue::new(),
+            queue: Deque::new(),
+            mutated: Deque::new(),
         })
     }
 
@@ -206,7 +205,7 @@ impl Transaction {
     pub async fn commit(self: &Arc<Self>) {
         println!("commit!");
         let mut tasks = Vec::with_capacity(self.mutated.len());
-        while let Some(state) = self.mutated.pop() {
+        while let Some(state) = self.mutated.pop_front() {
             tasks.push(async move { state.commit(&self.id).await });
         }
         join_all(tasks).await;
@@ -216,7 +215,7 @@ impl Transaction {
         self: &Arc<Self>,
         capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, State>> {
-        while let Some((value_id, op)) = self.queue.pop() {
+        while let Some((value_id, op)) = self.queue.pop_front() {
             let state = match op {
                 Op::Get { subject, key } => match subject {
                     Subject::Link(l) => self.get(&l, *key).await,
@@ -299,7 +298,7 @@ impl Transaction {
     }
 
     pub fn mutate(self: &Arc<Self>, state: Arc<dyn Transactable>) {
-        self.mutated.push(state)
+        self.mutated.push_back(state)
     }
 
     pub fn require(self: &Arc<Self>, value_id: &str) -> TCResult<TCValue> {
