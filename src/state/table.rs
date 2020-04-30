@@ -12,7 +12,7 @@ use crate::internal::block::Store;
 use crate::internal::file::*;
 use crate::internal::Chain;
 use crate::state::schema::{Schema, SchemaHistory};
-use crate::state::{Collection, Persistent};
+use crate::state::{Collection, Persistent, Transactable};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue};
 
@@ -242,6 +242,23 @@ impl File for Table {
 impl Persistent for Table {
     type Config = Schema;
 
+    async fn create(txn: Arc<Transaction>, schema: Schema) -> TCResult<Arc<Table>> {
+        let table_chain = Chain::new(
+            txn.context()
+                .create(&Link::to(&format!("/{}", schema.version))?)?,
+        );
+        let schema_history = SchemaHistory::new(&txn, schema)?;
+
+        Ok(Arc::new(Table {
+            schema: schema_history,
+            chain: table_chain,
+            cache: RwLock::new(HashMap::new()),
+        }))
+    }
+}
+
+#[async_trait]
+impl Transactable for Table {
     async fn commit(&self, txn_id: &TransactionId) {
         let mutations = if let Some(mutations) = self.cache.write().unwrap().remove(&txn_id) {
             mutations
@@ -257,19 +274,5 @@ impl Persistent for Table {
             self.chain.clone().put(&txn_id, &mutations),
         )
         .await;
-    }
-
-    async fn create(txn: Arc<Transaction>, schema: Schema) -> TCResult<Arc<Table>> {
-        let table_chain = Chain::new(
-            txn.context()
-                .create(&Link::to(&format!("/{}", schema.version))?)?,
-        );
-        let schema_history = SchemaHistory::new(&txn, schema)?;
-
-        Ok(Arc::new(Table {
-            schema: schema_history,
-            chain: table_chain,
-            cache: RwLock::new(HashMap::new()),
-        }))
     }
 }

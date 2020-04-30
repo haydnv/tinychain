@@ -17,7 +17,7 @@ pub type Graph = graph::Graph;
 pub type Table = table::Table;
 
 #[async_trait]
-pub trait Collection: Send + Sync {
+pub trait Collection: Transactable + Send + Sync {
     type Key: TryFrom<TCValue>;
     type Value: TryFrom<TCValue>;
 
@@ -33,21 +33,15 @@ pub trait Collection: Send + Sync {
 }
 
 #[async_trait]
-pub trait Derived: Collection {
-    type Config: TryFrom<TCValue>;
-
-    fn commit(self: &Arc<Self>);
-
-    async fn from(txn: Arc<Transaction>, config: Self::Config) -> TCResult<Arc<Self>>;
-}
-
-#[async_trait]
 pub trait Persistent: Collection + File {
     type Config: TryFrom<TCValue>;
 
-    async fn commit(&self, txn_id: &TransactionId);
-
     async fn create(txn: Arc<Transaction>, config: Self::Config) -> TCResult<Arc<Self>>;
+}
+
+#[async_trait]
+pub trait Transactable {
+    async fn commit(&self, txn_id: &TransactionId);
 }
 
 #[derive(Clone)]

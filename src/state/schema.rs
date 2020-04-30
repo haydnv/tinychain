@@ -12,6 +12,7 @@ use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::*;
 use crate::internal::Chain;
+use crate::state::Transactable;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, TCResult, TCValue, Version};
 
@@ -83,12 +84,6 @@ impl SchemaHistory {
         }))
     }
 
-    pub async fn commit(&self, txn_id: &TransactionId) {
-        if let Some(schema) = self.txn_cache.remove(txn_id) {
-            self.chain.clone().put(txn_id, &[schema]).await;
-        }
-    }
-
     pub async fn at(&self, txn_id: &TransactionId) -> Schema {
         if let Some(schema) = self.txn_cache.get(txn_id) {
             return schema;
@@ -138,5 +133,14 @@ impl File for SchemaHistory {
             chain: Chain::from_store(store).await.unwrap(),
             txn_cache: Map::new(),
         })
+    }
+}
+
+#[async_trait]
+impl Transactable for SchemaHistory {
+    async fn commit(&self, txn_id: &TransactionId) {
+        if let Some(schema) = self.txn_cache.remove(txn_id) {
+            self.chain.clone().put(txn_id, &[schema]).await;
+        }
     }
 }

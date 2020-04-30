@@ -145,6 +145,17 @@ impl File for Directory {
 impl Persistent for Directory {
     type Config = TCValue; // TODO: permissions
 
+    async fn create(txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {
+        Ok(Arc::new(Directory {
+            context: txn.context(),
+            chain: Chain::new(txn.context().create(&Link::to("/.contents")?)?),
+            txn_cache: TransactionCache::new(),
+        }))
+    }
+}
+
+#[async_trait]
+impl Transactable for Directory {
     async fn commit(&self, txn_id: &TransactionId) {
         let mutations = self.txn_cache.close(txn_id);
         let entries: Vec<(&Link, &EntryType)> = mutations
@@ -168,13 +179,5 @@ impl Persistent for Directory {
             });
 
         join(join_all(tasks), self.chain.clone().put(txn_id, &entries)).await;
-    }
-
-    async fn create(txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {
-        Ok(Arc::new(Directory {
-            context: txn.context(),
-            chain: Chain::new(txn.context().create(&Link::to("/.contents")?)?),
-            txn_cache: TransactionCache::new(),
-        }))
     }
 }

@@ -53,7 +53,6 @@ impl Store {
 
     pub fn create(self: &Arc<Self>, path: &Link) -> TCResult<Arc<Store>> {
         if path.is_empty() {
-            panic!();
             return Err(error::internal("Tried to create block store with no name"));
         }
 

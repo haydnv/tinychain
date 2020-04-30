@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::file::*;
-use crate::state::{Collection, Persistent};
+use crate::state::{Collection, Persistent, Transactable};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{TCResult, TCValue};
 
@@ -69,7 +69,10 @@ impl Persistent for Graph {
     async fn create(_txn: Arc<Transaction>, _config: GraphConfig) -> TCResult<Arc<Graph>> {
         Err(error::not_implemented())
     }
+}
 
+#[async_trait]
+impl Transactable for Graph {
     async fn commit(&self, _txn_id: &TransactionId) {
         // TODO
     }
