@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
@@ -53,9 +53,10 @@ impl Ord for TransactionId {
     }
 }
 
-impl Into<Link> for TransactionId {
-    fn into(self) -> Link {
-        Link::to(&format!("/{}-{}", self.timestamp, self.nonce)).unwrap()
+impl Into<PathSegment> for TransactionId {
+    fn into(self) -> PathSegment {
+        let s: String = self.into();
+        s.try_into().unwrap()
     }
 }
 
@@ -102,7 +103,7 @@ fn calc_deps(
     queue: &Deque<(ValueId, Op)>,
 ) -> TCResult<()> {
     if let Op::Post { requires, .. } = &op {
-        let mut required_value_ids: Vec<(String, ValueId)> = vec![];
+        let mut required_value_ids: Vec<(ValueId, ValueId)> = vec![];
         for (id, provider) in requires {
             match provider {
                 TCValue::Op(dep) => {
@@ -110,7 +111,7 @@ fn calc_deps(
                     required_value_ids.push((id.clone(), id.clone()));
                 }
                 TCValue::Ref(r) => {
-                    required_value_ids.push((id.clone(), r.value_id()));
+                    required_value_ids.push((id.clone(), r.value_id().clone()));
                 }
                 value => {
                     if state.contains_key(id) {
@@ -140,7 +141,8 @@ pub struct Transaction {
 impl Transaction {
     pub fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
-        let context = root.create(&id.clone().into())?;
+        let context: PathSegment = id.clone().try_into()?;
+        let context = root.create(context)?;
 
         println!();
         println!("Transaction::new");
@@ -157,11 +159,12 @@ impl Transaction {
 
     pub fn of(host: Arc<Host>, root: Arc<Store>, op: Op) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
-        let context = root.create(&id.clone().into())?;
+        let context: PathSegment = id.clone().try_into()?;
+        let context = root.create(context)?;
 
         let mut state: HashMap<ValueId, State> = HashMap::new();
         let queue: Deque<(ValueId, Op)> = Deque::new();
-        calc_deps(String::from("_"), op, &mut state, &queue)?;
+        calc_deps(ValueId::try_from("_")?, op, &mut state, &queue)?;
 
         println!();
         println!("Transaction::of");
@@ -187,7 +190,7 @@ impl Transaction {
             context,
             state: required
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.into()))
+                .map(|(k, v)| (k.clone(), v.into()))
                 .collect(),
             queue: Deque::new(),
             mutated: Deque::new(),
@@ -218,7 +221,7 @@ impl Transaction {
         while let Some((value_id, op)) = self.queue.pop_front() {
             let state = match op {
                 Op::Get { subject, key } => match subject {
-                    Subject::Link(l) => self.get(&l, *key).await,
+                    Subject::Path(p) => self.get(&p, *key).await,
                     Subject::Ref(r) => match self.state.get(&r.value_id()) {
                         Some(s) => s.get(self.clone(), *key).await,
                         None => Err(error::bad_request(
@@ -232,7 +235,7 @@ impl Transaction {
                     key,
                     value,
                 } => match subject {
-                    Subject::Link(l) => self.put(l, *key, self.resolve_val(*value)?).await,
+                    Subject::Path(p) => self.put(p, *key, self.resolve_val(*value)?).await,
                     Subject::Ref(r) => {
                         let subject = self.resolve(&r.value_id())?;
                         let value = self.resolve_val(*value)?;
@@ -250,12 +253,12 @@ impl Transaction {
                         deps.insert(dest_id, dep.try_into()?);
                     }
 
-                    let subcontext = Link::to(&format!("/{}", value_id))?;
-                    let txn = self.extend(self.context.create(&subcontext)?, deps);
+                    let subcontext: PathSegment = value_id.clone().try_into()?;
+                    let txn = self.extend(self.context.create(subcontext)?, deps);
                     match subject {
                         Some(r) => {
                             let subject = self.resolve(&r.value_id())?;
-                            subject.post(txn, &action).await
+                            subject.post(txn, &action.try_into()?).await
                         }
                         None => self.host.post(txn, &action).await,
                     }
@@ -301,8 +304,12 @@ impl Transaction {
         self.mutated.push_back(state)
     }
 
-    pub fn require(self: &Arc<Self>, value_id: &str) -> TCResult<TCValue> {
-        match self.state.get(&value_id.to_string()) {
+    pub fn require<T: TryInto<ValueId, Error = error::TCError>>(
+        self: &Arc<Self>,
+        value_id: T,
+    ) -> TCResult<TCValue> {
+        let value_id: ValueId = value_id.try_into()?;
+        match self.state.get(&value_id) {
             Some(response) => match response {
                 State::Value(value) => Ok(value),
                 other => Err(error::bad_request(
@@ -314,19 +321,24 @@ impl Transaction {
         }
     }
 
-    pub async fn get(self: &Arc<Self>, path: &Link, key: TCValue) -> TCResult<State> {
+    pub async fn get(self: &Arc<Self>, path: &TCPath, key: TCValue) -> TCResult<State> {
         println!("txn::get {} {}", path, key);
         self.host.get(self.clone(), path, key).await
     }
 
-    pub async fn put(self: &Arc<Self>, path: Link, key: TCValue, state: State) -> TCResult<State> {
+    pub async fn put(
+        self: &Arc<Self>,
+        path: TCPath,
+        key: TCValue,
+        state: State,
+    ) -> TCResult<State> {
         println!("txn::put {} {}", path, key);
         self.host.put(self.clone(), path, key, state).await
     }
 
     pub async fn post(
         self: &Arc<Self>,
-        path: &Link,
+        path: &TCPath,
         args: Vec<(ValueId, TCValue)>,
     ) -> TCResult<State> {
         println!("txn::post {} {:?}", path, args);

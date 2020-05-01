@@ -14,18 +14,18 @@ use crate::internal::file::*;
 use crate::internal::Chain;
 use crate::state::Transactable;
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCResult, TCValue, Version};
+use crate::value::{TCPath, TCResult, TCValue, ValueId, Version};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Schema {
-    pub key: Vec<(String, Link)>,
-    pub columns: Vec<(String, Link)>,
+    pub key: Vec<(ValueId, TCPath)>,
+    pub columns: Vec<(ValueId, TCPath)>,
     pub version: Version,
 }
 
 impl Schema {
-    pub fn as_map(&self) -> HashMap<String, Link> {
-        let mut map: HashMap<String, Link> = HashMap::new();
+    pub fn as_map(&self) -> HashMap<ValueId, TCPath> {
+        let mut map: HashMap<ValueId, TCPath> = HashMap::new();
         for (name, ctr) in &self.key {
             map.insert(name.clone(), ctr.clone());
         }
@@ -53,8 +53,8 @@ impl TryFrom<TCValue> for Schema {
     fn try_from(value: TCValue) -> TCResult<Schema> {
         let value: Vec<TCValue> = value.try_into()?;
         if value.len() == 3 {
-            let key: Vec<(String, Link)> = value[0].clone().try_into()?;
-            let columns: Vec<(String, Link)> = value[1].clone().try_into()?;
+            let key: Vec<(ValueId, TCPath)> = value[0].clone().try_into()?;
+            let columns: Vec<(ValueId, TCPath)> = value[1].clone().try_into()?;
             let version: Version = value[2].clone().try_into()?;
             Ok(Schema {
                 key,
@@ -79,7 +79,7 @@ impl SchemaHistory {
         txn_cache.insert(txn.id(), schema);
 
         let schema_history = Arc::new(SchemaHistory {
-            chain: Chain::new(txn.context().create(&Link::to("/schema")?)?),
+            chain: Chain::new(txn.context().create("schema")?),
             txn_cache,
         });
         txn.mutate(schema_history.clone());
@@ -115,14 +115,14 @@ impl SchemaHistory {
 impl File for SchemaHistory {
     async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
         copier.write_file(
-            Link::to("/schema").unwrap(),
+            "schema".try_into().unwrap(),
             Box::new(self.chain.stream_until(txn_id).boxed()),
         );
     }
 
     async fn copy_from(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<SchemaHistory> {
         let (path, blocks) = copier.next().await.unwrap();
-        let chain: Arc<Chain> = Chain::copy_from(blocks, dest.create(&path).unwrap()).await;
+        let chain: Arc<Chain> = Chain::copy_from(blocks, dest.create(path).unwrap()).await;
 
         Arc::new(SchemaHistory {
             chain,

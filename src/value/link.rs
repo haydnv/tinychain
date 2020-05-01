@@ -1,55 +1,21 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::path::PathBuf;
 
 use serde::de;
 use serde::ser::Serializer;
 
 use crate::error;
-use crate::value::{validate_id, TCResult, TCValueTryFrom};
+use crate::value::{TCResult, ValueId};
+
+pub type PathSegment = ValueId;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
-pub struct Link {
-    segments: Vec<String>,
+pub struct TCPath {
+    segments: Vec<PathSegment>,
 }
 
-impl Link {
-    fn _validate(to: &str) -> TCResult<()> {
-        validate_id(to)?;
-
-        if !to.starts_with('/') {
-            Err(error::bad_request(
-                "Expected an absolute path starting with '/' but found",
-                to,
-            ))
-        } else if to != "/" && to.ends_with('/') {
-            Err(error::bad_request("Trailing slash is not allowed", to))
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn to(destination: &str) -> TCResult<Link> {
-        Link::_validate(destination)?;
-
-        let segments: Vec<String> = if destination == "/" {
-            vec![]
-        } else {
-            destination[1..].split('/').map(|s| s.to_string()).collect()
-        };
-
-        Ok(Link { segments })
-    }
-
-    pub fn append(&self, suffix: &Link) -> Link {
-        Link {
-            segments: [&self.segments[..], &suffix.segments[..]].concat(),
-        }
-    }
-
-    pub fn as_str(&self, index: usize) -> &str {
-        self.segments[index].as_str()
-    }
-
+impl TCPath {
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
     }
@@ -58,102 +24,150 @@ impl Link {
         self.segments.len()
     }
 
-    pub fn nth(&self, i: usize) -> Link {
-        Link {
-            segments: vec![self.segments[i].clone()],
-        }
-    }
-
-    pub fn slice_from(&self, start: usize) -> Link {
-        Link {
+    pub fn slice_from(&self, start: usize) -> TCPath {
+        TCPath {
             segments: self.segments[start..].to_vec(),
         }
     }
 
-    pub fn slice_to(&self, end: usize) -> Link {
-        Link {
+    pub fn slice_to(&self, end: usize) -> TCPath {
+        TCPath {
             segments: self.segments[..end].to_vec(),
         }
     }
 
-    pub fn starts_with(&self, path: &str) -> bool {
-        let link: String = self.into();
-        if link.len() < path.len() {
+    pub fn starts_with(&self, other: TCPath) -> bool {
+        if self.len() < other.len() {
             false
         } else {
-            &link[0..path.len()] == path
+            self.segments[0..other.len()] == other.segments[..]
         }
     }
-}
 
-impl TCValueTryFrom for Link {}
-
-impl From<u64> for Link {
-    fn from(i: u64) -> Link {
-        Link::to(&format!("/{}", i)).unwrap()
+    pub fn push(&mut self, segment: PathSegment) {
+        self.segments.push(segment)
     }
 }
 
-impl From<&Link> for String {
-    fn from(l: &Link) -> String {
-        format!("{}", l)
+impl Extend<PathSegment> for TCPath {
+    fn extend<T: IntoIterator<Item = PathSegment>>(&mut self, iter: T) {
+        self.segments.extend(iter)
     }
 }
 
-impl IntoIterator for Link {
-    type Item = Link;
+impl IntoIterator for TCPath {
+    type Item = PathSegment;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut segments = Vec::with_capacity(self.len());
-        for i in 0..self.len() {
-            segments.push(self.nth(i));
+        self.segments.into_iter()
+    }
+}
+
+impl<Idx> std::ops::Index<Idx> for TCPath
+where
+    Idx: std::slice::SliceIndex<[PathSegment]>,
+{
+    type Output = Idx::Output;
+
+    fn index(&self, index: Idx) -> &Self::Output {
+        &self.segments[index]
+    }
+}
+
+impl fmt::Display for TCPath {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "/{}",
+            self.segments
+                .iter()
+                .map(|s| String::from(s))
+                .collect::<Vec<String>>()
+                .join("/")
+        )
+    }
+}
+
+impl PartialEq<ValueId> for TCPath {
+    fn eq(&self, other: &ValueId) -> bool {
+        if self.len() == 1 {
+            &self.segments[0] == other
+        } else {
+            false
         }
-        segments.into_iter()
     }
 }
 
-impl PartialEq<str> for Link {
-    fn eq(&self, other: &str) -> bool {
-        self.to_string().as_str() == other
+impl From<Vec<PathSegment>> for TCPath {
+    fn from(segments: Vec<PathSegment>) -> TCPath {
+        TCPath { segments }
     }
 }
 
-impl PartialEq<&str> for Link {
-    fn eq(&self, other: &&str) -> bool {
-        &self.to_string().as_str() == other
+impl From<PathSegment> for TCPath {
+    fn from(segment: PathSegment) -> TCPath {
+        TCPath {
+            segments: vec![segment],
+        }
     }
 }
 
-impl TryFrom<&str> for Link {
+impl From<TCPath> for PathBuf {
+    fn from(path: TCPath) -> PathBuf {
+        PathBuf::from(format!("{}", path))
+    }
+}
+
+impl TryFrom<&str> for TCPath {
     type Error = error::TCError;
 
-    fn try_from(s: &str) -> TCResult<Link> {
-        Link::to(s)
+    fn try_from(to: &str) -> TCResult<TCPath> {
+        if to == "/" {
+            Ok(TCPath { segments: vec![] })
+        } else if to.ends_with('/') {
+            Err(error::bad_request("Path cannot end with a slash", to))
+        } else if to.starts_with('/') {
+            let segments: Vec<&str> = to.split('/').collect();
+            let segments = &segments[1..];
+            Ok(TCPath {
+                segments: segments
+                    .iter()
+                    .cloned()
+                    .map(PathSegment::try_from)
+                    .collect::<TCResult<Vec<PathSegment>>>()?,
+            })
+        } else {
+            Ok(TCPath {
+                segments: vec![to.try_into()?],
+            })
+        }
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Link {
-    fn deserialize<D>(deserializer: D) -> Result<Link, D::Error>
+impl TryFrom<String> for TCPath {
+    type Error = error::TCError;
+
+    fn try_from(s: String) -> TCResult<TCPath> {
+        TCPath::try_from(s.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TCPath {
+    fn deserialize<D>(deserializer: D) -> Result<TCPath, D::Error>
     where
         D: de::Deserializer<'de>,
     {
         let s: &str = de::Deserialize::deserialize(deserializer)?;
-        Link::to(s).map_err(de::Error::custom)
+        s.try_into().map_err(de::Error::custom)
     }
 }
 
-impl serde::Serialize for Link {
+impl serde::Serialize for TCPath {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         s.serialize_str(&format!("{}", self))
-    }
-}
-
-impl fmt::Display for Link {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", format!("/{}", self.segments.join("/")))
     }
 }

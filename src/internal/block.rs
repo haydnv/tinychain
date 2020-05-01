@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -9,19 +10,19 @@ use tokio::fs;
 use crate::error;
 use crate::internal::cache::Map;
 use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
-use crate::value::{Link, TCResult};
+use crate::value::{PathSegment, TCPath, TCResult};
 
 #[derive(Debug)]
 pub struct Store {
     mount_point: PathBuf,
-    context: Link,
-    children: Map<Link, Arc<Store>>,
-    buffer: RwLock<HashMap<Link, Vec<u8>>>,
+    context: Option<PathSegment>,
+    children: Map<PathSegment, Arc<Store>>,
+    buffer: RwLock<HashMap<PathSegment, Vec<u8>>>,
     tmp: bool,
 }
 
 impl Store {
-    pub fn new(context: Link, mount_point: PathBuf) -> Arc<Store> {
+    pub fn new(mount_point: PathBuf, context: Option<PathSegment>) -> Arc<Store> {
         Arc::new(Store {
             mount_point,
             context,
@@ -31,7 +32,7 @@ impl Store {
         })
     }
 
-    pub fn new_tmp(context: Link, mount_point: PathBuf) -> Arc<Store> {
+    pub fn new_tmp(mount_point: PathBuf, context: Option<PathSegment>) -> Arc<Store> {
         Arc::new(Store {
             mount_point,
             context,
@@ -41,63 +42,68 @@ impl Store {
         })
     }
 
-    fn child(self: &Arc<Self>, context: Link, mount_point: PathBuf) -> Arc<Store> {
+    fn child(self: &Arc<Self>, context: PathSegment, mount_point: PathBuf) -> Arc<Store> {
         Arc::new(Store {
             mount_point,
-            context,
+            context: Some(context),
             children: Map::new(),
             buffer: RwLock::new(HashMap::new()),
             tmp: self.tmp,
         })
     }
 
-    pub fn create(self: &Arc<Self>, path: &Link) -> TCResult<Arc<Store>> {
+    pub fn create<E: Into<error::TCError>, T: TryInto<TCPath, Error = E>>(
+        self: &Arc<Self>,
+        path: T,
+    ) -> TCResult<Arc<Store>> {
+        let path: TCPath = path.try_into().map_err(|e| e.into())?;
         if path.is_empty() {
             return Err(error::internal("Tried to create block store with no name"));
         }
 
         if path.len() == 1 {
-            if self.children.contains_key(&path) {
+            let path = &path[0];
+            if self.children.contains_key(path) {
                 return Err(error::internal(&format!(
                     "Tried to create a block store that already exists! {}",
                     path
                 )));
             }
 
-            let store = self.child(path.clone(), self.fs_path(path));
-            self.children.insert(path.nth(0), store.clone());
+            let store = self.child(path.clone(), self.fs_path(&path));
+            self.children.insert(path.clone(), store.clone());
             Ok(store)
         } else {
-            let store = if let Some(store) = self.children.get(&path.nth(0)) {
+            let store = if let Some(store) = self.children.get(&path[0]) {
                 store
             } else {
-                let child_path = path.nth(0);
-                let store = Store::new(child_path.clone(), self.fs_path(&child_path));
-                self.children.insert(child_path, store.clone());
+                let child_path = &path[0];
+                let store = Store::new(self.fs_path(child_path), child_path.clone().into());
+                self.children.insert(child_path.clone(), store.clone());
                 store
             };
 
-            store.create(&path.slice_from(1))
+            store.create(path.slice_from(1))
         }
     }
 
-    pub fn get(self: &Arc<Self>, path: &Link) -> Option<Arc<Store>> {
+    pub fn get(self: &Arc<Self>, path: &TCPath) -> Option<Arc<Store>> {
         if path.is_empty() {
             return None;
         }
 
         if path.len() == 1 {
-            self.children.get(path)
-        } else if let Some(store) = self.children.get(&path.nth(1)) {
+            self.children.get(&path[0])
+        } else if let Some(store) = self.children.get(&path[0]) {
             store.get(&path.slice_from(1))
         } else {
             None
         }
     }
 
-    pub fn into_bytes(self: Arc<Self>, path: Link) -> impl Future<Output = Bytes> {
+    pub fn into_bytes(self: Arc<Self>, block_id: PathSegment) -> impl Future<Output = Bytes> {
         async move {
-            if let Some(buffer) = self.buffer.read().unwrap().get(&path) {
+            if let Some(buffer) = self.buffer.read().unwrap().get(&block_id) {
                 Bytes::copy_from_slice(buffer)
             } else {
                 // TODO
@@ -106,7 +112,7 @@ impl Store {
         }
     }
 
-    pub async fn exists(self: &Arc<Self>, path: &Link) -> TCResult<bool> {
+    pub async fn exists(self: &Arc<Self>, path: &PathSegment) -> TCResult<bool> {
         let fs_path = self.fs_path(path);
         if self.children.contains_key(path) || self.buffer.read().unwrap().contains_key(path) {
             return Ok(true);
@@ -120,12 +126,12 @@ impl Store {
 
     pub fn flush(
         self: Arc<Self>,
-        path: Link,
+        block_id: PathSegment,
         header: Bytes,
         data: Vec<Bytes>,
     ) -> impl Future<Output = ()> {
         if data.is_empty() {
-            panic!("flush to {} called with no data", path);
+            panic!("flush to {} called with no data", block_id);
         }
 
         async move {
@@ -143,31 +149,22 @@ impl Store {
 
             let mut records: Vec<u8> = records.concat();
             let mut buffer = self.buffer.write().unwrap();
-            if let Some(block) = buffer.get_mut(&path) {
+            if let Some(block) = buffer.get_mut(&block_id) {
                 block.append(&mut records)
             } else {
-                buffer.insert(path, records);
+                buffer.insert(block_id, records);
             }
 
             // TODO: persist data to disk
         }
     }
 
-    fn fs_path(&self, name: &Link) -> PathBuf {
-        if !name.len() == 1 {
-            panic!("Tried to look up the filesystem path of {}", name);
-        }
-
+    fn fs_path(&self, name: &PathSegment) -> PathBuf {
         let mut path = self.mount_point.clone();
-
-        for segment in self.context.clone().into_iter() {
-            path.push(&segment.to_string()[1..]);
+        if let Some(context) = &self.context {
+            path.push(context.to_string());
         }
-
-        for i in 0..name.len() {
-            path.push(name.as_str(i));
-        }
-
+        path.push(name.to_string());
         path
     }
 }

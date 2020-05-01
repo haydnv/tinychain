@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::path::PathBuf;
 
 use structopt::StructOpt;
@@ -31,18 +32,26 @@ pub struct HostConfig {
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = HostConfig::from_args();
 
+    for path in &config.host {
+        if !path.starts_with('/') {
+            eprintln!("Hosted path must start with a '/': {}", path);
+            panic!();
+        }
+    }
+
     println!("Tinychain version {}", VERSION);
+    println!("Data directory: {}", &config.data_dir.to_str().unwrap());
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
     println!();
 
-    let data_dir = internal::block::Store::new(value::Link::to("/")?, config.data_dir);
-    let workspace = internal::block::Store::new_tmp(value::Link::to("/")?, config.workspace);
+    let data_dir = internal::block::Store::new(config.data_dir, None);
+    let workspace = internal::block::Store::new_tmp(config.workspace, None);
 
     let hosted = config
         .host
         .iter()
-        .map(|d| value::Link::to(d))
-        .collect::<value::TCResult<Vec<value::Link>>>()?;
+        .map(|d| d.as_str().try_into())
+        .collect::<value::TCResult<Vec<value::TCPath>>>()?;
 
     let host = host::Host::new(data_dir, workspace, hosted).await?;
 

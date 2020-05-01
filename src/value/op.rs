@@ -1,29 +1,30 @@
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use serde::de::{Deserializer, Error, MapAccess, Visitor};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde::Deserialize;
 
-use crate::value::{Link, TCRef, TCValue};
+use crate::value::{PathSegment, TCPath, TCRef, TCResult, TCValue, ValueId};
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Hash, Eq, PartialEq, Deserialize)]
 pub enum Subject {
-    Link(Link),
+    Path(TCPath),
     Ref(TCRef),
 }
 
 impl fmt::Display for Subject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Subject::Link(l) => write!(f, "{}", l),
+            Subject::Path(p) => write!(f, "{}", p),
             Subject::Ref(r) => write!(f, "{}", r),
         }
     }
 }
 
-impl From<Link> for Subject {
-    fn from(l: Link) -> Subject {
-        Subject::Link(l)
+impl From<TCPath> for Subject {
+    fn from(p: TCPath) -> Subject {
+        Subject::Path(p)
     }
 }
 
@@ -55,8 +56,8 @@ pub enum Op {
     },
     Post {
         subject: Option<TCRef>,
-        action: Link,
-        requires: Vec<(String, TCValue)>,
+        action: TCPath,
+        requires: Vec<(ValueId, TCValue)>,
     },
 }
 
@@ -76,7 +77,7 @@ impl Op {
         }
     }
 
-    pub fn post(subject: Option<TCRef>, action: Link, requires: Vec<(String, TCValue)>) -> Op {
+    pub fn post(subject: Option<TCRef>, action: TCPath, requires: Vec<(ValueId, TCValue)>) -> Op {
         Op::Post {
             subject,
             action,
@@ -100,13 +101,17 @@ impl fmt::Display for Op {
                 requires,
             } => write!(
                 f,
-                "subject: {}, action: {}, requires: {:?}",
+                "subject: {}, action: {}, requires: {}",
                 subject
                     .clone()
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| String::from("None")),
                 action,
                 requires
+                    .iter()
+                    .map(|(id, val)| format!("{}: {}", id, val))
+                    .collect::<Vec<String>>()
+                    .join(","),
             ),
         }
     }
@@ -128,14 +133,18 @@ impl<'de> Visitor<'de> for OpVisitor {
         if let Some(key) = access.next_key::<String>()? {
             if key.contains('/') {
                 let key: Vec<&str> = key.split('/').collect();
-                let subject = TCRef::to(&key[0][1..]).map_err(Error::custom)?;
-                let method =
-                    Link::to(&format!("/{}", key[1..].join("/"))).map_err(Error::custom)?;
-                let requires = access.next_value::<Vec<(String, TCValue)>>()?;
+                let subject: TCRef = key[0][1..].try_into().map_err(Error::custom)?;
+                let method: TCPath = key[1..]
+                    .iter()
+                    .map(|s| PathSegment::try_from(*s))
+                    .collect::<TCResult<Vec<PathSegment>>>()
+                    .map_err(Error::custom)?
+                    .into();
+                let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;
 
                 Ok(Op::post(subject.into(), method, requires))
             } else {
-                let subject = TCRef::to(&key[1..].to_string()).map_err(Error::custom)?;
+                let subject: TCRef = key[1..].try_into().map_err(Error::custom)?;
                 let value = access.next_value::<Vec<TCValue>>()?;
 
                 if value.len() == 1 {

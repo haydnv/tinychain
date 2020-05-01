@@ -13,22 +13,23 @@ mod op;
 mod reference;
 mod version;
 
-pub type Link = link::Link;
+pub type PathSegment = link::PathSegment;
 pub type Op = op::Op;
+pub type TCPath = link::TCPath;
 pub type TCRef = reference::TCRef;
 pub type TCResult<T> = Result<T, error::TCError>;
 pub type Subject = op::Subject;
-pub type ValueId = String;
 pub type Version = version::Version;
 
-pub trait TCValueTryInto: TryInto<TCValue, Error = error::TCError> {}
-pub trait TCValueTryFrom: TryFrom<TCValue, Error = error::TCError> {}
-
-const RESERVED_CHARS: [&str; 17] = [
-    "..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "=", "^", ">", "<", "'", "`", "\"",
+const RESERVED_CHARS: [&str; 18] = [
+    "/", "..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "=", "^", ">", "<", "'", "`", "\"",
 ];
 
 fn validate_id(id: &str) -> TCResult<()> {
+    if id.is_empty() {
+        return Err(error::bad_request("ValueId cannot be empty", id));
+    }
+
     let filtered: &str = &id.chars().filter(|c| *c as u8 > 32).collect::<String>();
     if filtered != id {
         return Err(error::bad_request(
@@ -56,18 +57,102 @@ fn validate_id(id: &str) -> TCResult<()> {
     Ok(())
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ValueId {
+    id: String,
+}
+
+impl ValueId {
+    pub fn as_str(&self) -> &str {
+        self.id.as_str()
+    }
+}
+
+impl fmt::Display for ValueId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.id)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ValueId {
+    fn deserialize<D>(deserializer: D) -> Result<ValueId, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let s: &str = de::Deserialize::deserialize(deserializer)?;
+        s.try_into().map_err(de::Error::custom)
+    }
+}
+
+impl Serialize for ValueId {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        s.serialize_str(&self.id)
+    }
+}
+
+impl PartialEq<&str> for ValueId {
+    fn eq(&self, other: &&str) -> bool {
+        &self.id == other
+    }
+}
+
+impl TryFrom<&str> for ValueId {
+    type Error = error::TCError;
+
+    fn try_from(id: &str) -> TCResult<ValueId> {
+        validate_id(id)?;
+        Ok(ValueId { id: id.to_string() })
+    }
+}
+
+impl TryFrom<String> for ValueId {
+    type Error = error::TCError;
+
+    fn try_from(id: String) -> TCResult<ValueId> {
+        validate_id(&id)?;
+        Ok(ValueId { id })
+    }
+}
+
+impl TryFrom<TCPath> for ValueId {
+    type Error = error::TCError;
+
+    fn try_from(path: TCPath) -> TCResult<ValueId> {
+        if path.len() == 1 {
+            Ok(path[0].clone())
+        } else {
+            Err(error::bad_request("Expected a ValueId, found", path))
+        }
+    }
+}
+
+impl From<u64> for ValueId {
+    fn from(u: u64) -> ValueId {
+        ValueId {
+            id: format!("{}", u),
+        }
+    }
+}
+
+impl From<&ValueId> for String {
+    fn from(value_id: &ValueId) -> String {
+        value_id.id.to_string()
+    }
+}
+
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub enum TCValue {
     None,
     Int32(i32),
-    Link(Link),
     Op(Op),
+    Path(TCPath),
+    Ref(TCRef),
     r#String(String),
     Vector(Vec<TCValue>),
-    Ref(TCRef),
 }
-
-impl TCValueTryFrom for String {}
 
 impl From<()> for TCValue {
     fn from(_: ()) -> TCValue {
@@ -75,9 +160,9 @@ impl From<()> for TCValue {
     }
 }
 
-impl From<Link> for TCValue {
-    fn from(link: Link) -> TCValue {
-        TCValue::Link(link)
+impl From<TCPath> for TCValue {
+    fn from(path: TCPath) -> TCValue {
+        TCValue::Path(path)
     }
 }
 
@@ -129,32 +214,19 @@ impl From<Vec<Option<TCValue>>> for TCValue {
     }
 }
 
-impl From<Vec<(ValueId, TCValue)>> for TCValue {
-    fn from(values: Vec<(ValueId, TCValue)>) -> TCValue {
-        let mut result: Vec<TCValue> = vec![];
-        for (id, val) in values {
-            let mut r_item: Vec<TCValue> = vec![];
-            r_item.push(id.into());
-            r_item.push(val);
-            result.push(r_item.into());
-        }
-        result.into()
-    }
-}
-
 impl From<(TCValue, TCValue)> for TCValue {
     fn from(tuple: (TCValue, TCValue)) -> TCValue {
         TCValue::Vector(vec![tuple.0, tuple.1])
     }
 }
 
-impl TryFrom<TCValue> for Link {
+impl TryFrom<TCValue> for TCPath {
     type Error = error::TCError;
 
-    fn try_from(v: TCValue) -> TCResult<Link> {
+    fn try_from(v: TCValue) -> TCResult<TCPath> {
         match v {
-            TCValue::Link(l) => Ok(l),
-            other => Err(error::bad_request("Expected Link but found", other)),
+            TCValue::Path(p) => Ok(p),
+            other => Err(error::bad_request("Expected Path but found", other)),
         }
     }
 }
@@ -167,6 +239,50 @@ impl TryFrom<TCValue> for String {
             TCValue::r#String(s) => Ok(s),
             other => Err(error::bad_request("Expected a String but found", other)),
         }
+    }
+}
+
+impl<
+        E1: fmt::Display,
+        E2: fmt::Display,
+        T1: TryFrom<TCValue, Error = E1>,
+        T2: TryFrom<TCValue, Error = E2>,
+    > TryFrom<TCValue> for (T1, T2)
+{
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<(T1, T2)> {
+        let v: Vec<TCValue> = v.try_into()?;
+        if v.len() == 2 {
+            Ok((
+                v[0].clone()
+                    .try_into()
+                    .map_err(|e| error::bad_request("Unable to convert from Value", e))?,
+                v[1].clone()
+                    .try_into()
+                    .map_err(|e| error::bad_request("Unable to convert from Value", e))?,
+            ))
+        } else {
+            Err(error::bad_request(
+                "Expected a 2-tuple, found",
+                TCValue::Vector(v),
+            ))
+        }
+    }
+}
+
+impl<
+        E1: fmt::Display,
+        E2: fmt::Display,
+        T1: TryFrom<TCValue, Error = E1>,
+        T2: TryFrom<TCValue, Error = E2>,
+    > TryFrom<TCValue> for Vec<(T1, T2)>
+{
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<Vec<(T1, T2)>> {
+        let v: Vec<TCValue> = value.try_into()?;
+        v.iter().cloned().map(|i| i.try_into()).collect()
     }
 }
 
@@ -198,6 +314,15 @@ impl TryFrom<TCValue> for Vec<Option<TCValue>> {
     }
 }
 
+impl TryFrom<TCValue> for ValueId {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<ValueId> {
+        let s: String = v.try_into()?;
+        s.try_into()
+    }
+}
+
 impl<T: Into<TCValue>> std::iter::FromIterator<T> for TCValue {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut v: Vec<TCValue> = vec![];
@@ -206,62 +331,6 @@ impl<T: Into<TCValue>> std::iter::FromIterator<T> for TCValue {
         }
 
         v.into()
-    }
-}
-
-impl TryFrom<TCValue> for (TCValue, TCValue) {
-    type Error = error::TCError;
-
-    fn try_from(value: TCValue) -> TCResult<(TCValue, TCValue)> {
-        let value: Vec<TCValue> = value.try_into()?;
-        if value.len() == 2 {
-            Ok((value[0].clone(), value[1].clone()))
-        } else {
-            Err(error::bad_request(
-                "Expected 2-tuple but found",
-                format!("{:?}", value),
-            ))
-        }
-    }
-}
-
-impl<T1: TCValueTryFrom, T2: TCValueTryFrom> TryFrom<TCValue> for Vec<(T1, T2)> {
-    type Error = error::TCError;
-
-    fn try_from(value: TCValue) -> TCResult<Vec<(T1, T2)>> {
-        let value: Vec<TCValue> = value.try_into()?;
-        let mut v: Vec<(T1, T2)> = Vec::with_capacity(value.len());
-        for item in value {
-            let item: (T1, T2) = item.try_into()?;
-            v.push(item);
-        }
-        Ok(v)
-    }
-}
-
-impl<T1: TCValueTryFrom, T2: TCValueTryFrom> TryFrom<TCValue> for (T1, T2) {
-    type Error = error::TCError;
-
-    fn try_from(value: TCValue) -> TCResult<(T1, T2)> {
-        let v: (TCValue, TCValue) = value.try_into()?;
-        Ok((v.0.try_into()?, v.1.try_into()?))
-    }
-}
-
-impl<T: TCValueTryFrom> TryFrom<TCValue> for (T, TCValue) {
-    type Error = error::TCError;
-
-    fn try_from(value: TCValue) -> TCResult<(T, TCValue)> {
-        let value: Vec<TCValue> = value.try_into()?;
-        if value.len() != 2 {
-            return Err(error::bad_request(
-                "Expected 2-tuple but found",
-                format!("{:?}", value),
-            ));
-        }
-
-        let item: T = value[0].clone().try_into()?;
-        Ok((item, value[1].clone()))
     }
 }
 
@@ -303,18 +372,18 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
     where
         M: de::MapAccess<'de>,
     {
-        if let Some(key) = access.next_key::<String>()? {
+        if let Some(key) = access.next_key::<&str>()? {
             if key.starts_with('/') {
                 let value = access.next_value::<Vec<TCValue>>()?;
 
-                let link = Link::to(&key).map_err(de::Error::custom)?;
+                let path = TCPath::try_from(key).map_err(de::Error::custom)?;
 
                 if value.is_empty() {
-                    Ok(link.into())
+                    Ok(path.into())
                 } else if value.len() == 1 {
-                    Ok(Op::get(link.into(), value[0].clone()).into())
+                    Ok(Op::get(path.into(), value[0].clone()).into())
                 } else if value.len() == 2 {
-                    Ok(Op::put(link.into(), value[0].clone(), value[1].clone()).into())
+                    Ok(Op::put(path.into(), value[0].clone(), value[1].clone()).into())
                 } else {
                     Err(de::Error::custom(format!(
                         "Expected a list of 0, 1, or 2 values for {}",
@@ -324,14 +393,18 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
             } else if key.starts_with('$') {
                 if key.contains('/') {
                     let key: Vec<&str> = key.split('/').collect();
-                    let subject = TCRef::to(&key[0][1..]).map_err(de::Error::custom)?;
-                    let method =
-                        Link::to(&format!("/{}", key[1..].join("/"))).map_err(de::Error::custom)?;
-                    let requires = access.next_value::<Vec<(String, TCValue)>>()?;
+                    let subject: TCRef = key[0][1..].try_into().map_err(de::Error::custom)?;
+                    let method: TCPath = key[1..]
+                        .iter()
+                        .map(|s| PathSegment::try_from(*s))
+                        .collect::<TCResult<Vec<PathSegment>>>()
+                        .map_err(de::Error::custom)?
+                        .into();
+                    let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;
 
                     Ok(Op::post(subject.into(), method, requires).into())
                 } else {
-                    let subject = TCRef::to(&key[1..].to_string()).map_err(de::Error::custom)?;
+                    let subject: TCRef = key[1..].try_into().map_err(de::Error::custom)?;
                     let value = access.next_value::<Vec<TCValue>>()?;
 
                     if value.is_empty() {
@@ -389,8 +462,8 @@ impl Serialize for TCValue {
         match self {
             TCValue::None => s.serialize_none(),
             TCValue::Int32(i) => s.serialize_i32(*i),
-            TCValue::Link(l) => l.serialize(s),
             TCValue::Op(o) => o.serialize(s),
+            TCValue::Path(p) => p.serialize(s),
             TCValue::Ref(r) => r.serialize(s),
             TCValue::r#String(v) => s.serialize_str(v),
             TCValue::Vector(v) => {
@@ -415,8 +488,8 @@ impl fmt::Display for TCValue {
         match self {
             TCValue::None => write!(f, "None"),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
-            TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::Op(o) => write!(f, "Op: {}", o),
+            TCValue::Path(p) => write!(f, "Path: {}", p),
             TCValue::Ref(r) => write!(f, "Ref: {}", r),
             TCValue::r#String(s) => write!(f, "string: {}", s),
             TCValue::Vector(v) => write!(f, "vector: {:?}", v),

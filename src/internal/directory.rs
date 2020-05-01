@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -12,7 +13,7 @@ use crate::internal::file::*;
 use crate::internal::Chain;
 use crate::state::*;
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCResult, TCValue};
+use crate::value::{PathSegment, TCPath, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
 enum EntryType {
@@ -31,14 +32,14 @@ enum EntryState {
 pub struct Directory {
     context: Arc<Store>,
     chain: Arc<Chain>,
-    txn_cache: TransactionCache<Link, (EntryType, EntryState)>,
+    txn_cache: TransactionCache<PathSegment, (EntryType, EntryState)>,
 }
 
 impl Directory {
     pub fn new(context: Arc<Store>) -> TCResult<Arc<Directory>> {
         Ok(Arc::new(Directory {
             context: context.clone(),
-            chain: Chain::new(context.create(&Link::to("/.contents")?)?),
+            chain: Chain::new(context.create("/contents")?),
             txn_cache: TransactionCache::new(),
         }))
     }
@@ -46,7 +47,7 @@ impl Directory {
 
 #[async_trait]
 impl Collection for Directory {
-    type Key = Link;
+    type Key = TCPath;
     type Value = State;
 
     async fn get(
@@ -54,12 +55,13 @@ impl Collection for Directory {
         txn: Arc<Transaction>,
         path: &Self::Key,
     ) -> TCResult<Self::Value> {
+        println!("Directory::get {}", path);
         if path.is_empty() {
             return Err(error::bad_request(
                 "You must specify a path to look up in a directory",
                 path,
             ));
-        } else if let Some((_, state)) = self.txn_cache.get(&txn.id(), &path.nth(0)) {
+        } else if let Some((_, state)) = self.txn_cache.get(&txn.id(), &path[0]) {
             return match state {
                 EntryState::Directory(_, dir) => dir.get(txn, &path.slice_from(1)).await,
                 EntryState::Graph(_, graph) => Ok(graph.into()),
@@ -70,22 +72,23 @@ impl Collection for Directory {
         let entry = self
             .chain
             .stream_into_until(txn.id())
-            .filter_map(|entries: Vec<(Link, EntryType)>| async move {
-                let entries: Vec<(Link, EntryType)> =
-                    entries.iter().filter(|(p, _)| p == path).cloned().collect();
+            .filter_map(|entries: Vec<(PathSegment, EntryType)>| async move {
+                let entries: Vec<(PathSegment, EntryType)> =
+                    entries.iter().filter(|(p, _)| path == p).cloned().collect();
                 if entries.is_empty() {
                     None
                 } else {
                     Some(entries)
                 }
             })
-            .fold(None, |_, entries: Vec<(Link, EntryType)>| async move {
-                entries.last().cloned()
-            })
+            .fold(
+                None,
+                |_, entries: Vec<(PathSegment, EntryType)>| async move { entries.last().cloned() },
+            )
             .await;
 
         if let Some((_, entry_type)) = entry {
-            if let Some(store) = self.context.get(&path.nth(0)) {
+            if let Some(store) = self.context.get(&path[0].clone().into()) {
                 match entry_type {
                     EntryType::Directory => {
                         let dir = Directory::from_store(store).await;
@@ -111,11 +114,10 @@ impl Collection for Directory {
         path: Self::Key,
         state: Self::Value,
     ) -> TCResult<Arc<Self>> {
-        if path.len() != 1 {
-            return Err(error::not_found(path));
-        }
+        println!("Directory::put {}", path);
+        let path: PathSegment = path.try_into()?;
 
-        let context = self.context.create(&path)?;
+        let context = self.context.create(path.clone())?;
         let entry = match state {
             State::Graph(g) => (EntryType::Graph, EntryState::Graph(context, g)),
             State::Table(t) => (EntryType::Table, EntryState::Table(context, t)),
@@ -134,7 +136,7 @@ impl Collection for Directory {
 impl File for Directory {
     async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Directory> {
         let (path, blocks) = reader.next().await.unwrap();
-        let chain = Chain::copy_from(blocks, dest.create(&path).unwrap()).await;
+        let chain = Chain::copy_from(blocks, dest.create(path).unwrap()).await;
 
         Arc::new(Directory {
             context: dest,
@@ -165,7 +167,7 @@ impl Persistent for Directory {
 impl Transactable for Directory {
     async fn commit(&self, txn_id: &TransactionId) {
         let mutations = self.txn_cache.close(txn_id);
-        let entries: Vec<(&Link, &EntryType)> = mutations
+        let entries: Vec<(&PathSegment, &EntryType)> = mutations
             .iter()
             .map(|(path, (entry_type, _state))| (path, entry_type))
             .collect();

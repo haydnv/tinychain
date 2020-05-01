@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::Infallible;
+use std::convert::{Infallible, TryInto};
 use std::sync::Arc;
 
 use hyper::service::{make_service_fn, service_fn};
@@ -8,7 +8,7 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use crate::error;
 use crate::host::Host;
 use crate::state::State;
-use crate::value::{Link, Op, TCResult, TCValue, ValueId};
+use crate::value::{Op, TCPath, TCResult, TCValue, ValueId};
 
 fn line_numbers(s: &str) -> String {
     s.lines()
@@ -39,7 +39,7 @@ pub async fn listen(
     Ok(())
 }
 
-async fn get(host: Arc<Host>, path: &Link, params: &HashMap<String, String>) -> TCResult<State> {
+async fn get(host: Arc<Host>, path: &TCPath, params: &HashMap<String, String>) -> TCResult<State> {
     let key = if let Some(key) = params.get("key") {
         serde_json::from_str::<TCValue>(key)
             .map_err(|e| error::bad_request("Unable to parse 'key' param", e))?
@@ -57,7 +57,7 @@ async fn route(
     params: HashMap<String, String>,
     body: Vec<u8>,
 ) -> TCResult<Vec<u8>> {
-    let path = Link::to(&path)?;
+    let path: TCPath = path.try_into()?;
 
     match method {
         Method::GET => match get(host, &path, &params).await? {
@@ -69,10 +69,12 @@ async fn route(
         },
         Method::POST => {
             let capture: HashSet<ValueId> = if let Some(c) = params.get("capture") {
-                c.split('/').map(|s| s.to_string()).collect()
+                c.split('/')
+                    .map(|s| s.try_into())
+                    .collect::<TCResult<HashSet<ValueId>>>()
             } else {
-                HashSet::new()
-            };
+                Ok(HashSet::new())
+            }?;
             let values = match serde_json::from_slice::<Vec<(ValueId, TCValue)>>(&body) {
                 Ok(graph) => graph,
                 Err(cause) => {
@@ -85,13 +87,13 @@ async fn route(
             };
 
             let txn = host.clone().transact(Op::post(None, path, values))?;
-            let mut results: HashMap<String, TCValue> = HashMap::new();
+            let mut results: HashMap<ValueId, TCValue> = HashMap::new();
             match txn.execute(capture).await {
                 Ok(responses) => {
                     for (id, r) in responses {
                         match r {
                             State::Value(val) => {
-                                results.insert(id.clone(), val.clone());
+                                results.insert(id, val.clone());
                             }
                             other => {
                                 return Err(error::bad_request(

@@ -1,28 +1,41 @@
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use serde::de;
 use serde::ser::Serializer;
 use serde::Serialize;
 
-use crate::value::{validate_id, TCResult, ValueId};
+use crate::error;
+use crate::value::{TCResult, ValueId};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct TCRef(ValueId);
+#[derive(Clone, Eq, PartialEq, Hash)]
+pub struct TCRef {
+    to: ValueId,
+}
 
 impl TCRef {
-    pub fn to(id: &str) -> TCResult<TCRef> {
-        validate_id(id)?;
-        Ok(TCRef(id.to_string()))
-    }
-
-    pub fn value_id(&self) -> ValueId {
-        self.0.to_string()
+    pub fn value_id(&'_ self) -> &'_ ValueId {
+        &self.to
     }
 }
 
 impl fmt::Display for TCRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "${}", self.0)
+        write!(f, "${}", self.to)
+    }
+}
+
+impl From<ValueId> for TCRef {
+    fn from(to: ValueId) -> TCRef {
+        TCRef { to }
+    }
+}
+
+impl TryFrom<&str> for TCRef {
+    type Error = error::TCError;
+
+    fn try_from(to: &str) -> TCResult<TCRef> {
+        Ok(TCRef { to: to.try_into()? })
     }
 }
 
@@ -45,7 +58,7 @@ impl<'de> de::Visitor<'de> for RefVisitor {
                 value
             )))
         } else {
-            TCRef::to(&value[1..]).map_err(de::Error::custom)
+            value[1..].try_into().map_err(de::Error::custom)
         }
     }
 }

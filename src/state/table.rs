@@ -14,7 +14,7 @@ use crate::internal::Chain;
 use crate::state::schema::{Schema, SchemaHistory};
 use crate::state::{Collection, Persistent, Transactable};
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCResult, TCValue};
+use crate::value::{PathSegment, TCResult, TCValue, ValueId};
 
 type Mutation = (Vec<TCValue>, Vec<Option<TCValue>>);
 
@@ -152,7 +152,7 @@ impl Collection for Table {
         let mut names = vec![];
         let mut values = vec![];
         for column_value in column_values.iter() {
-            let (column, value): (String, TCValue) = column_value.clone().try_into()?;
+            let (column, value): (ValueId, TCValue) = column_value.clone().try_into()?;
 
             if let Some(ctr) = schema_map.get(&column) {
                 names.push(column);
@@ -165,7 +165,7 @@ impl Collection for Table {
             }
         }
 
-        let mut values: HashMap<String, TCValue> = try_join_all(values)
+        let mut values: HashMap<ValueId, TCValue> = try_join_all(values)
             .await?
             .iter()
             .map(|v| v.clone().try_into())
@@ -203,9 +203,9 @@ impl File for Table {
         self.schema.copy_into(txn_id.clone(), writer).await;
 
         let schema = self.schema.at(&txn_id).await;
-        let chain_path = format!("/{}", schema.version);
+        let version: PathSegment = schema.version.to_string().try_into().unwrap();
         writer.write_file(
-            Link::to(&chain_path).unwrap(),
+            version.try_into().unwrap(),
             Box::new(self.chain.stream_until(txn_id).boxed()),
         );
     }
@@ -214,7 +214,7 @@ impl File for Table {
         let schema_history = SchemaHistory::copy_from(reader, dest.clone()).await;
 
         let (path, blocks) = reader.next().await.unwrap();
-        let chain = Chain::copy_from(blocks, dest.create(&path).unwrap()).await;
+        let chain = Chain::copy_from(blocks, dest.create(path).unwrap()).await;
 
         Arc::new(Table {
             schema: schema_history,
@@ -225,10 +225,16 @@ impl File for Table {
 
     async fn from_store(store: Arc<Store>) -> Arc<Table> {
         let schema =
-            SchemaHistory::from_store(store.get(&Link::to("/schema").unwrap()).unwrap()).await;
+            SchemaHistory::from_store(store.get(&"schema".try_into().unwrap()).unwrap()).await;
 
-        let chain_path = format!("/{}", schema.latest().await.version);
-        let chain = Chain::from_store(store.get(&Link::to(&chain_path).unwrap()).unwrap())
+        let chain_path: PathSegment = schema
+            .latest()
+            .await
+            .version
+            .to_string()
+            .try_into()
+            .unwrap();
+        let chain = Chain::from_store(store.get(&chain_path.try_into().unwrap()).unwrap())
             .await
             .unwrap();
         Arc::new(Table {
@@ -244,10 +250,7 @@ impl Persistent for Table {
     type Config = Schema;
 
     async fn create(txn: Arc<Transaction>, schema: Schema) -> TCResult<Arc<Table>> {
-        let table_chain = Chain::new(
-            txn.context()
-                .create(&Link::to(&format!("/{}", schema.version))?)?,
-        );
+        let table_chain = Chain::new(txn.context().create(schema.version.to_string())?);
         let schema_history = SchemaHistory::new(&txn, schema)?;
 
         Ok(Arc::new(Table {

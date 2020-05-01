@@ -9,10 +9,10 @@ use futures::Stream;
 use crate::internal::block::Store;
 use crate::internal::cache::Deque;
 use crate::transaction::TransactionId;
-use crate::value::Link;
+use crate::value::TCPath;
 
 type Blocks = Box<dyn Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> + Send + Unpin>;
-type FileData = (Link, Blocks);
+type FileData = (TCPath, Blocks);
 
 struct SharedState {
     open: bool,
@@ -46,7 +46,7 @@ impl FileCopier {
         self.shared_state.lock().unwrap().open = false;
     }
 
-    pub fn write_file(&mut self, path: Link, blocks: Blocks) {
+    pub fn write_file(&mut self, path: TCPath, blocks: Blocks) {
         let shared_state = self.shared_state.lock().unwrap();
         if !shared_state.open {
             panic!("Tried to write file to closed FileCopier");

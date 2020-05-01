@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::file::File;
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{Link, TCResult, TCValue};
+use crate::value::{PathSegment, TCResult, TCValue};
 
 mod graph;
 mod schema;
@@ -94,7 +94,7 @@ impl State {
         }
     }
 
-    pub async fn post(&self, _txn: Arc<Transaction>, _method: &Link) -> TCResult<State> {
+    pub async fn post(&self, _txn: Arc<Transaction>, _method: &PathSegment) -> TCResult<State> {
         Err(error::not_implemented())
     }
 }

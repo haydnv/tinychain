@@ -1,4 +1,4 @@
-use std::convert;
+use std::convert::Infallible;
 use std::fmt;
 
 #[derive(Clone)]
@@ -53,7 +53,13 @@ impl TCError {
     }
 }
 
-impl convert::From<serde_json::error::Error> for TCError {
+impl From<Infallible> for TCError {
+    fn from(e: Infallible) -> TCError {
+        internal(format!("Internal system error: {}", e))
+    }
+}
+
+impl From<serde_json::error::Error> for TCError {
     fn from(e: serde_json::error::Error) -> TCError {
         bad_request("Serialization error", e)
     }
