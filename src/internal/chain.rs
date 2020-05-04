@@ -13,7 +13,7 @@ use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::transaction::TransactionId;
 use crate::value::TCResult;
 
-pub type ChainStream<T> =
+type ChainStream<T> =
     FuturesOrdered<Box<dyn Future<Output = Vec<(TransactionId, Vec<T>)>> + Unpin + Send>>;
 
 pub struct Chain {

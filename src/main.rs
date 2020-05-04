@@ -14,13 +14,17 @@ mod value;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn block_size(flag: &str) -> value::TCResult<usize> {
-	let msg = "Unable to parse value of block_size";
+    let msg = "Unable to parse value of block_size";
+
     let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
         .map_err(|_| error::bad_request(msg, flag))?;
+
     if flag.ends_with('K') {
         Ok(size * 1000)
     } else if flag.ends_with('M') {
         Ok(size * 1_000_000)
+    } else if flag.ends_with('G') {
+        Ok(size * 1_000_000_000)
     } else {
         Err(error::bad_request(msg, flag))
     }
@@ -60,8 +64,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
     println!();
 
-    let data_dir = internal::block::Store::new(config.data_dir, None);
-    let workspace = internal::block::Store::new_tmp(config.workspace, None);
+    let data_dir = internal::block::Store::new(config.data_dir, config.block_size, None);
+    let workspace = internal::block::Store::new_tmp(config.workspace, config.block_size, None);
 
     let hosted = config
         .host

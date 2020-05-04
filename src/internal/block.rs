@@ -14,6 +14,7 @@ use crate::value::{PathSegment, TCPath, TCResult};
 
 #[derive(Debug)]
 pub struct Store {
+    block_size: usize,
     mount_point: PathBuf,
     context: Option<PathSegment>,
     children: Map<PathSegment, Arc<Store>>,
@@ -22,8 +23,13 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn new(mount_point: PathBuf, context: Option<PathSegment>) -> Arc<Store> {
+    pub fn new(
+        mount_point: PathBuf,
+        block_size: usize,
+        context: Option<PathSegment>,
+    ) -> Arc<Store> {
         Arc::new(Store {
+            block_size,
             mount_point,
             context,
             children: Map::new(),
@@ -32,8 +38,13 @@ impl Store {
         })
     }
 
-    pub fn new_tmp(mount_point: PathBuf, context: Option<PathSegment>) -> Arc<Store> {
+    pub fn new_tmp(
+        mount_point: PathBuf,
+        block_size: usize,
+        context: Option<PathSegment>,
+    ) -> Arc<Store> {
         Arc::new(Store {
+            block_size,
             mount_point,
             context,
             children: Map::new(),
@@ -42,14 +53,22 @@ impl Store {
         })
     }
 
-    fn child(self: &Arc<Self>, context: PathSegment, mount_point: PathBuf) -> Arc<Store> {
-        Arc::new(Store {
-            mount_point,
-            context: Some(context),
+    fn child(self: &Arc<Self>, context: PathSegment) -> Arc<Store> {
+        let child = Arc::new(Store {
+            block_size: self.block_size,
+            mount_point: self.fs_path(&context),
+            context: Some(context.clone()),
             children: Map::new(),
             buffer: RwLock::new(HashMap::new()),
             tmp: self.tmp,
-        })
+        });
+
+        self.children.insert(context, child.clone());
+        child
+    }
+
+    pub fn block_size_default(&self) -> usize {
+        self.block_size
     }
 
     pub fn create<E: Into<error::TCError>, T: TryInto<TCPath, Error = E>>(
@@ -70,45 +89,15 @@ impl Store {
                 )));
             }
 
-            let store = self.child(path.clone(), self.fs_path(&path));
-            self.children.insert(path.clone(), store.clone());
-            Ok(store)
+            Ok(self.child(path.clone()))
         } else {
             let store = if let Some(store) = self.children.get(&path[0]) {
                 store
             } else {
-                let child_path = &path[0];
-                let store = Store::new(self.fs_path(child_path), child_path.clone().into());
-                self.children.insert(child_path.clone(), store.clone());
-                store
+                self.child(path[0].clone())
             };
 
             store.create(path.slice_from(1))
-        }
-    }
-
-    pub fn get(self: &Arc<Self>, path: &TCPath) -> Option<Arc<Store>> {
-        if path.is_empty() {
-            return None;
-        }
-
-        if path.len() == 1 {
-            self.children.get(&path[0])
-        } else if let Some(store) = self.children.get(&path[0]) {
-            store.get(&path.slice_from(1))
-        } else {
-            None
-        }
-    }
-
-    pub fn into_bytes(self: Arc<Self>, block_id: PathSegment) -> impl Future<Output = Bytes> {
-        async move {
-            if let Some(buffer) = self.buffer.read().unwrap().get(&block_id) {
-                Bytes::copy_from_slice(buffer)
-            } else {
-                // TODO
-                Bytes::new()
-            }
         }
     }
 
@@ -156,6 +145,31 @@ impl Store {
             }
 
             // TODO: persist data to disk
+        }
+    }
+
+    pub fn get(self: &Arc<Self>, path: &TCPath) -> Option<Arc<Store>> {
+        if path.is_empty() {
+            return None;
+        }
+
+        if path.len() == 1 {
+            self.children.get(&path[0])
+        } else if let Some(store) = self.children.get(&path[0]) {
+            store.get(&path.slice_from(1))
+        } else {
+            None
+        }
+    }
+
+    pub fn into_bytes(self: Arc<Self>, block_id: PathSegment) -> impl Future<Output = Bytes> {
+        async move {
+            if let Some(buffer) = self.buffer.read().unwrap().get(&block_id) {
+                Bytes::copy_from_slice(buffer)
+            } else {
+                // TODO
+                Bytes::new()
+            }
         }
     }
 
