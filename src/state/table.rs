@@ -214,7 +214,7 @@ impl File for Table {
         let schema_history = SchemaHistory::copy_from(reader, dest.clone()).await;
 
         let (path, blocks) = reader.next().await.unwrap();
-        let chain = Chain::copy_from(blocks, dest.create(path).unwrap()).await;
+        let chain = Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
 
         Arc::new(Table {
             schema: schema_history,
@@ -225,7 +225,8 @@ impl File for Table {
 
     async fn from_store(store: Arc<Store>) -> Arc<Table> {
         let schema =
-            SchemaHistory::from_store(store.get(&"schema".try_into().unwrap()).unwrap()).await;
+            SchemaHistory::from_store(store.get_store(&"schema".try_into().unwrap()).unwrap())
+                .await;
 
         let chain_path: PathSegment = schema
             .latest()
@@ -234,7 +235,7 @@ impl File for Table {
             .to_string()
             .try_into()
             .unwrap();
-        let chain = Chain::from_store(store.get(&chain_path.try_into().unwrap()).unwrap())
+        let chain = Chain::from_store(store.get_store(&chain_path.try_into().unwrap()).unwrap())
             .await
             .unwrap();
 
@@ -251,7 +252,7 @@ impl Persistent for Table {
     type Config = Schema;
 
     async fn create(txn: Arc<Transaction>, schema: Schema) -> TCResult<Arc<Table>> {
-        let table_chain = Chain::new(txn.context().create(schema.version.to_string())?);
+        let table_chain = Chain::new(txn.context().reserve(schema.version.to_string())?);
         let schema_history = SchemaHistory::new(&txn, schema)?;
 
         Ok(Arc::new(Table {

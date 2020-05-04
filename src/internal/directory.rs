@@ -39,7 +39,7 @@ impl Directory {
     pub fn new(context: Arc<Store>) -> TCResult<Arc<Directory>> {
         Ok(Arc::new(Directory {
             context: context.clone(),
-            chain: Chain::new(context.create("/contents")?),
+            chain: Chain::new(context.reserve("/contents")?),
             txn_cache: TransactionCache::new(),
         }))
     }
@@ -88,7 +88,7 @@ impl Collection for Directory {
             .await;
 
         if let Some((_, entry_type)) = entry {
-            if let Some(store) = self.context.get(&path[0].clone().into()) {
+            if let Some(store) = self.context.get_store(&path[0].clone().into()) {
                 match entry_type {
                     EntryType::Directory => {
                         let dir = Directory::from_store(store).await;
@@ -117,7 +117,7 @@ impl Collection for Directory {
         println!("Directory::put {}", path);
         let path: PathSegment = path.try_into()?;
 
-        let context = self.context.create(path.clone())?;
+        let context = self.context.reserve(path.clone())?;
         let entry = match state {
             State::Graph(g) => (EntryType::Graph, EntryState::Graph(context, g)),
             State::Table(t) => (EntryType::Table, EntryState::Table(context, t)),
@@ -136,7 +136,7 @@ impl Collection for Directory {
 impl File for Directory {
     async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Directory> {
         let (path, blocks) = reader.next().await.unwrap();
-        let chain = Chain::copy_from(blocks, dest.create(path).unwrap()).await;
+        let chain = Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
 
         Arc::new(Directory {
             context: dest,

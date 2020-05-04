@@ -41,10 +41,10 @@ impl Host {
                 }
             }
 
-            let dir = if let Some(store) = host.data_dir.get(&path) {
+            let dir = if let Some(store) = host.data_dir.get_store(&path) {
                 Directory::from_store(store).await
             } else {
-                Directory::new(host.data_dir.create(path.clone())?)?
+                Directory::new(host.data_dir.reserve(path.clone())?)?
             };
 
             host.root.insert(path, dir);

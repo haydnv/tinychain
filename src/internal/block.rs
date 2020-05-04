@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use bytes::{Bytes, BytesMut};
-use futures::Future;
 use tokio::fs;
 
 use crate::error;
@@ -71,7 +70,7 @@ impl Store {
         self.block_size
     }
 
-    pub fn create<E: Into<error::TCError>, T: TryInto<TCPath, Error = E>>(
+    pub fn reserve<E: Into<error::TCError>, T: TryInto<TCPath, Error = E>>(
         self: &Arc<Self>,
         path: T,
     ) -> TCResult<Arc<Store>> {
@@ -97,7 +96,7 @@ impl Store {
                 self.child(path[0].clone())
             };
 
-            store.create(path.slice_from(1))
+            store.reserve(path.slice_from(1))
         }
     }
 
@@ -113,42 +112,37 @@ impl Store {
         }
     }
 
-    pub fn flush(
-        self: Arc<Self>,
-        block_id: PathSegment,
-        header: Bytes,
-        data: Vec<Bytes>,
-    ) -> impl Future<Output = ()> {
-        if data.is_empty() {
-            panic!("flush to {} called with no data", block_id);
+    pub fn append(&self, block_id: &PathSegment, header: Bytes, data: Vec<Bytes>) {
+        // TODO: check filesystem
+        if !self.buffer.read().unwrap().contains_key(block_id) {
+            panic!("tried to append to a nonexistent block! {}", block_id);
         }
 
-        async move {
-            let group_delimiter = Bytes::from(&[GROUP_DELIMITER as u8][..]);
-            let record_delimiter = Bytes::from(&[RECORD_DELIMITER as u8][..]);
+        let group_delimiter = Bytes::from(&[GROUP_DELIMITER as u8][..]);
+        let record_delimiter = Bytes::from(&[RECORD_DELIMITER as u8][..]);
 
-            let mut records = Vec::with_capacity(data.len() + 1);
-            records.push(header);
+        let mut records = Vec::with_capacity(data.len() + 1);
+        records.push(header);
+        records.push(record_delimiter.clone());
+        for record in data {
+            records.push(record);
             records.push(record_delimiter.clone());
-            for record in data {
-                records.push(record);
-                records.push(record_delimiter.clone());
-            }
-            records.push(group_delimiter);
-
-            let records = BytesMut::from(&records.concat()[..]);
-            let mut buffer = self.buffer.write().unwrap();
-            if let Some(block) = buffer.get_mut(&block_id) {
-                block.extend(records)
-            } else {
-                buffer.insert(block_id, records);
-            }
-
-            // TODO: persist data to disk
         }
+        records.push(group_delimiter);
+
+        self.buffer
+            .write()
+            .unwrap()
+            .get_mut(&block_id)
+            .unwrap()
+            .extend(BytesMut::from(&records.concat()[..]));
     }
 
-    pub fn get(&self, path: &TCPath) -> Option<Arc<Store>> {
+    pub async fn flush(self: Arc<Self>, _block_id: PathSegment) {
+        // TODO: write block buffer to disk
+    }
+
+    pub fn get_store(&self, path: &TCPath) -> Option<Arc<Store>> {
         if path.is_empty() {
             return None;
         }
@@ -156,13 +150,13 @@ impl Store {
         if path.len() == 1 {
             self.children.get(&path[0])
         } else if let Some(store) = self.children.get(&path[0]) {
-            store.get(&path.slice_from(1))
+            store.get_store(&path.slice_from(1))
         } else {
             None
         }
     }
 
-    pub async fn into_bytes(self: Arc<Self>, block_id: PathSegment) -> Bytes {
+    pub async fn get_block(self: Arc<Self>, block_id: PathSegment) -> Bytes {
         // TODO: read from filesystem
 
         if let Some(buffer) = self.buffer.read().unwrap().get(&block_id) {
@@ -171,6 +165,15 @@ impl Store {
             // TODO
             Bytes::new()
         }
+    }
+
+    pub fn new_block(&self, block_id: PathSegment, block_header: Bytes) {
+        let mut buffer = self.buffer.write().unwrap();
+        if buffer.contains_key(&block_id) {
+            panic!("Tried to overwrite block {}", block_id);
+        }
+
+        buffer.insert(block_id, block_header[..].into());
     }
 
     pub async fn size(&self, block_id: &PathSegment) -> usize {

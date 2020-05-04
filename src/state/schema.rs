@@ -79,7 +79,7 @@ impl SchemaHistory {
         txn_cache.insert(txn.id(), schema);
 
         let schema_history = Arc::new(SchemaHistory {
-            chain: Chain::new(txn.context().create("schema")?),
+            chain: Chain::new(txn.context().reserve("schema")?),
             txn_cache,
         });
         txn.mutate(schema_history.clone());
@@ -122,7 +122,7 @@ impl File for SchemaHistory {
 
     async fn copy_from(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<SchemaHistory> {
         let (path, blocks) = copier.next().await.unwrap();
-        let chain: Arc<Chain> = Chain::copy_from(blocks, dest.create(path).unwrap()).await;
+        let chain: Arc<Chain> = Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
 
         Arc::new(SchemaHistory {
             chain,

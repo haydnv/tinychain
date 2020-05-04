@@ -142,7 +142,7 @@ impl Transaction {
     pub fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
-        let context = root.create(context)?;
+        let context = root.reserve(context)?;
 
         println!();
         println!("Transaction::new");
@@ -160,7 +160,7 @@ impl Transaction {
     pub fn of(host: Arc<Host>, root: Arc<Store>, op: Op) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
-        let context = root.create(context)?;
+        let context = root.reserve(context)?;
 
         let mut state: HashMap<ValueId, State> = HashMap::new();
         let queue: Deque<(ValueId, Op)> = Deque::new();
@@ -256,7 +256,7 @@ impl Transaction {
                     }
 
                     let subcontext: PathSegment = value_id.clone().try_into()?;
-                    let txn = self.extend(self.context.create(subcontext)?, deps);
+                    let txn = self.extend(self.context.reserve(subcontext)?, deps);
                     match subject {
                         Some(r) => {
                             let subject = self.resolve(&r.value_id())?;

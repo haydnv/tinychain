@@ -12,7 +12,7 @@ use crate::error;
 use crate::internal::block::Store;
 use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::transaction::TransactionId;
-use crate::value::TCResult;
+use crate::value::{PathSegment, TCResult};
 
 type ChainStream<T> =
     FuturesOrdered<Box<dyn Future<Output = Vec<(TransactionId, Vec<T>)>> + Unpin + Send>>;
@@ -24,6 +24,8 @@ pub struct Chain {
 
 impl Chain {
     pub fn new(store: Arc<Store>) -> Arc<Chain> {
+        store.new_block(0.into(), Bytes::from(&[][..]));
+
         Arc::new(Chain {
             store,
             latest_block: RwLock::new(0),
@@ -37,10 +39,14 @@ impl Chain {
         stream
             .fold((0u64, dest), |acc, block| async move {
                 let (i, dest) = acc;
+                let block_id: PathSegment = i.into();
+                dest.new_block(block_id.clone(), Bytes::from(&[][..]));
+
                 for (txn_id, data) in block {
-                    dest.clone().flush(i.into(), txn_id.into(), data).await;
+                    dest.append(&block_id, txn_id.into(), data);
                 }
 
+                dest.clone().flush(block_id).await;
                 (i, dest)
             })
             .then(|(i, dest)| async move {
@@ -87,10 +93,8 @@ impl Chain {
             *self.latest_block.write().unwrap() = latest_block;
         }
 
-        self.store
-            .clone()
-            .flush(latest_block.into(), txn_id, delta)
-            .await
+        self.store.append(&latest_block.into(), txn_id, delta);
+        self.store.clone().flush(latest_block.into()).await;
     }
 
     fn stream(self: &Arc<Self>) -> impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> {
@@ -100,7 +104,7 @@ impl Chain {
             let fut = self
                 .store
                 .clone()
-                .into_bytes(i.into())
+                .get_block(i.into())
                 .then(|block| async move {
                     let mut block: VecDeque<&[u8]> =
                         block.split(|b| *b == GROUP_DELIMITER as u8).collect();
