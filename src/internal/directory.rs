@@ -167,13 +167,11 @@ impl Persistent for Directory {
 impl Transactable for Directory {
     async fn commit(&self, txn_id: &TransactionId) {
         let mutations = self.txn_cache.close(txn_id);
-        let entries: Vec<(&PathSegment, &EntryType)> = mutations
-            .iter()
-            .map(|(path, (entry_type, _state))| (path, entry_type))
-            .collect();
-        let tasks = mutations
-            .iter()
-            .map(|(_path, (_entry_type, state))| async move {
+        let mut entries = Vec::with_capacity(mutations.len());
+        let mut tasks = Vec::with_capacity(mutations.len());
+        for (path, (entry_type, state)) in mutations.iter() {
+            entries.push((path, entry_type));
+            tasks.push(async move {
                 match state {
                     EntryState::Directory(context, dir) => {
                         FileCopier::copy(txn_id.clone(), &*dir.clone(), context.clone()).await;
@@ -186,6 +184,7 @@ impl Transactable for Directory {
                     }
                 }
             });
+        }
 
         join(join_all(tasks), self.chain.clone().put(txn_id, &entries)).await;
     }

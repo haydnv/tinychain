@@ -218,6 +218,8 @@ impl Transaction {
         self: &Arc<Self>,
         capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, State>> {
+        // TODO: use FuturesUnordered to parallelize tasks
+
         while let Some((value_id, op)) = self.queue.pop_front() {
             let state = match op {
                 Op::Get { subject, key } => match subject {

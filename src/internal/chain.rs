@@ -13,6 +13,9 @@ use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::transaction::TransactionId;
 use crate::value::TCResult;
 
+pub type ChainStream<T> =
+    FuturesOrdered<Box<dyn Future<Output = Vec<(TransactionId, Vec<T>)>> + Unpin + Send>>;
+
 pub struct Chain {
     store: Arc<Store>,
     latest_block: u64,
@@ -80,9 +83,7 @@ impl Chain {
     }
 
     pub fn stream(self: &Arc<Self>) -> impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> {
-        let mut stream: FuturesOrdered<
-            Box<dyn Future<Output = Vec<(TransactionId, Vec<Bytes>)>> + Unpin + Send>,
-        > = FuturesOrdered::new();
+        let mut stream: ChainStream<Bytes> = FuturesOrdered::new();
 
         for i in 0..self.latest_block + 1 {
             let fut = self

@@ -36,18 +36,6 @@ impl Version {
             })
         }
     }
-
-    pub fn bump_major(&mut self) {
-        self.major += 1;
-    }
-
-    pub fn bump_minor(&mut self) {
-        self.minor += 1;
-    }
-
-    pub fn bump_patch(&mut self) {
-        self.patch += 1;
-    }
 }
 
 impl TryFrom<TCValue> for Version {

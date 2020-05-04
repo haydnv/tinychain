@@ -177,8 +177,8 @@ impl Collection for Table {
 
         let mut mutated: Vec<Option<TCValue>> =
             iter::repeat(None).take(schema.columns.len()).collect();
-        for i in 0..schema.columns.len() {
-            if let Some(value) = values.remove(&schema.columns[i].0) {
+        for (i, col) in schema.columns.iter().enumerate() {
+            if let Some(value) = values.remove(&col.0) {
                 mutated[i] = Some(value);
             }
         }
@@ -237,6 +237,7 @@ impl File for Table {
         let chain = Chain::from_store(store.get(&chain_path.try_into().unwrap()).unwrap())
             .await
             .unwrap();
+
         Arc::new(Table {
             schema,
             chain,
@@ -273,6 +274,8 @@ impl Transactable for Table {
             vec![]
         };
 
-        self.chain.put(&txn_id, &mutations).await
+        if !mutations.is_empty() {
+            self.chain.put(&txn_id, &mutations).await
+        }
     }
 }

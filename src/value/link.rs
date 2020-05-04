@@ -82,7 +82,7 @@ impl fmt::Display for TCPath {
             "/{}",
             self.segments
                 .iter()
-                .map(|s| String::from(s))
+                .map(String::from)
                 .collect::<Vec<String>>()
                 .join("/")
         )
