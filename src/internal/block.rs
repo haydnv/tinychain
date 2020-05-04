@@ -173,6 +173,8 @@ impl Store {
             panic!("Tried to overwrite block {}", block_id);
         }
 
+        let block_header = [&block_header[..], &[GROUP_DELIMITER as u8][..]].concat();
+
         buffer.insert(block_id, block_header[..].into());
     }
 

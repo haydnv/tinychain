@@ -24,7 +24,7 @@ pub struct Chain {
 
 impl Chain {
     pub fn new(store: Arc<Store>) -> Arc<Chain> {
-        store.new_block(0.into(), Bytes::from(&[][..]));
+        store.new_block(0.into(), Bytes::from(&[0; 32][..]));
 
         Arc::new(Chain {
             store,
@@ -40,7 +40,7 @@ impl Chain {
             .fold((0u64, dest), |acc, block| async move {
                 let (i, dest) = acc;
                 let block_id: PathSegment = i.into();
-                dest.new_block(block_id.clone(), Bytes::from(&[][..]));
+                dest.new_block(block_id.clone(), Bytes::from(&[0; 32][..]));
 
                 for (txn_id, data) in block {
                     dest.append(&block_id, txn_id.into(), data);
@@ -109,6 +109,8 @@ impl Chain {
                     let mut block: VecDeque<&[u8]> =
                         block.split(|b| *b == GROUP_DELIMITER as u8).collect();
                     block.pop_back();
+
+                    let _header = block.pop_front();
 
                     let mut records: Vec<(TransactionId, Vec<Bytes>)> =
                         Vec::with_capacity(block.len());
