@@ -7,6 +7,7 @@ use futures::stream::{FuturesOrdered, Stream};
 use futures::{Future, FutureExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::error;
 use crate::internal::block::Store;
@@ -15,7 +16,7 @@ use crate::transaction::TransactionId;
 use crate::value::{PathSegment, TCResult};
 
 type ChainStream<T> =
-    FuturesOrdered<Box<dyn Future<Output = Vec<(TransactionId, Vec<T>)>> + Unpin + Send>>;
+    FuturesOrdered<Box<dyn Future<Output = (Bytes, Vec<(TransactionId, Vec<T>)>)> + Unpin + Send>>;
 
 pub struct Chain {
     store: Arc<Store>,
@@ -33,23 +34,36 @@ impl Chain {
     }
 
     pub fn copy_from(
-        stream: impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> + Unpin,
+        stream: impl Stream<Item = (Bytes, Vec<(TransactionId, Vec<Bytes>)>)> + Unpin,
         dest: Arc<Store>,
     ) -> impl Future<Output = Arc<Chain>> {
         stream
-            .fold((0u64, dest), |acc, block| async move {
-                let (i, dest) = acc;
-                let block_id: PathSegment = i.into();
-                dest.new_block(block_id.clone(), Bytes::from(&[0; 32][..]));
+            .fold(
+                (0u64, dest, Bytes::from(&[0; 32][..])),
+                |acc, block| async move {
+                    let (i, dest, checksum): (u64, Arc<Store>, Bytes) = acc;
+                    if checksum != block.0 {
+                        panic!("Checksum failed for block {}", acc.0);
+                    }
 
-                for (txn_id, data) in block {
-                    dest.append(&block_id, txn_id.into(), data);
-                }
+                    let block_id: PathSegment = i.into();
+                    dest.new_block(block_id.clone(), block.0);
 
-                dest.clone().flush(block_id).await;
-                (i, dest)
-            })
-            .then(|(i, dest)| async move {
+                    for (txn_id, data) in block.1 {
+                        dest.append(&block_id, txn_id.into(), data);
+                    }
+
+                    dest.clone().flush(block_id.clone()).await;
+
+                    // TODO: move this code to a common "hash" method
+                    let mut hasher = Sha256::new();
+                    hasher.input(dest.clone().get_block(block_id).await);
+                    let checksum = hasher.result();
+
+                    (i, dest, Bytes::copy_from_slice(&checksum[..]))
+                },
+            )
+            .then(|(i, dest, _)| async move {
                 Arc::new(Chain {
                     store: dest,
                     latest_block: RwLock::new(i),
@@ -89,15 +103,22 @@ impl Chain {
             .will_fit(&latest_block.into(), &txn_id, &delta)
             .await
         {
+            let mut hasher = Sha256::new();
+            hasher.input(self.store.clone().get_block(latest_block.into()).await);
+            let checksum = hasher.result();
+
             latest_block += 1;
             *self.latest_block.write().unwrap() = latest_block;
+
+            self.store
+                .new_block(latest_block.into(), Bytes::copy_from_slice(&checksum[..]))
         }
 
         self.store.append(&latest_block.into(), txn_id, delta);
         self.store.clone().flush(latest_block.into()).await;
     }
 
-    fn stream(self: &Arc<Self>) -> impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> {
+    fn stream(self: &Arc<Self>) -> impl Stream<Item = (Bytes, Vec<(TransactionId, Vec<Bytes>)>)> {
         let mut stream: ChainStream<Bytes> = FuturesOrdered::new();
 
         for i in 0..*self.latest_block.read().unwrap() + 1 {
@@ -110,7 +131,7 @@ impl Chain {
                         block.split(|b| *b == GROUP_DELIMITER as u8).collect();
                     block.pop_back();
 
-                    let _header = block.pop_front();
+                    let header = Bytes::copy_from_slice(block.pop_front().unwrap());
 
                     let mut records: Vec<(TransactionId, Vec<Bytes>)> =
                         Vec::with_capacity(block.len());
@@ -125,7 +146,7 @@ impl Chain {
                         records.push((txn_id, txn));
                     }
 
-                    records
+                    (header, records)
                 });
 
             stream.push(Box::new(fut.boxed()));
@@ -138,8 +159,9 @@ impl Chain {
         self: &Arc<Self>,
     ) -> impl Stream<Item = Vec<T>> {
         self.stream()
-            .map(move |block: Vec<(TransactionId, Vec<Bytes>)>| {
+            .map(move |block: (Bytes, Vec<(TransactionId, Vec<Bytes>)>)| {
                 block
+                    .1
                     .iter()
                     .map(|(_, data)| {
                         data.iter()
@@ -154,22 +176,26 @@ impl Chain {
     pub fn stream_until(
         self: &Arc<Self>,
         txn_id: TransactionId,
-    ) -> impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> {
+    ) -> impl Stream<Item = (Bytes, Vec<(TransactionId, Vec<Bytes>)>)> {
         let txn_id_clone = txn_id.clone();
         self.stream()
             .take_while(move |b| {
-                if let Some((time, _)) = b.last() {
+                if let Some((time, _)) = b.1.last() {
                     future::ready(time <= &txn_id_clone)
                 } else {
                     future::ready(false)
                 }
             })
             .map(move |block| {
-                block
-                    .iter()
-                    .filter(|(time, _)| time <= &txn_id)
-                    .cloned()
-                    .collect()
+                (
+                    block.0,
+                    block
+                        .1
+                        .iter()
+                        .filter(|(time, _)| time <= &txn_id)
+                        .cloned()
+                        .collect(),
+                )
             })
     }
 
@@ -178,8 +204,9 @@ impl Chain {
         txn_id: TransactionId,
     ) -> impl Stream<Item = Vec<T>> {
         self.stream_until(txn_id.clone())
-            .map(move |block: Vec<(TransactionId, Vec<Bytes>)>| {
+            .map(move |block: (Bytes, Vec<(TransactionId, Vec<Bytes>)>)| {
                 block
+                    .1
                     .iter()
                     .map(|(time, data)| {
                         (

@@ -11,7 +11,7 @@ use crate::internal::cache::Deque;
 use crate::transaction::TransactionId;
 use crate::value::TCPath;
 
-type Blocks = Box<dyn Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> + Send + Unpin>;
+type Blocks = Box<dyn Stream<Item = (Bytes, Vec<(TransactionId, Vec<Bytes>)>)> + Send + Unpin>;
 type FileData = (TCPath, Blocks);
 
 struct SharedState {
