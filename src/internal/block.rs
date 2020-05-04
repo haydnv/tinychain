@@ -53,7 +53,7 @@ impl Store {
         })
     }
 
-    fn child(self: &Arc<Self>, context: PathSegment) -> Arc<Store> {
+    fn child(&self, context: PathSegment) -> Arc<Store> {
         let child = Arc::new(Store {
             block_size: self.block_size,
             mount_point: self.fs_path(&context),
@@ -101,7 +101,7 @@ impl Store {
         }
     }
 
-    pub async fn exists(self: &Arc<Self>, path: &PathSegment) -> TCResult<bool> {
+    pub async fn exists(&self, path: &PathSegment) -> TCResult<bool> {
         let fs_path = self.fs_path(path);
         if self.children.contains_key(path) || self.buffer.read().unwrap().contains_key(path) {
             return Ok(true);
@@ -148,7 +148,7 @@ impl Store {
         }
     }
 
-    pub fn get(self: &Arc<Self>, path: &TCPath) -> Option<Arc<Store>> {
+    pub fn get(&self, path: &TCPath) -> Option<Arc<Store>> {
         if path.is_empty() {
             return None;
         }
@@ -162,15 +162,30 @@ impl Store {
         }
     }
 
-    pub fn into_bytes(self: Arc<Self>, block_id: PathSegment) -> impl Future<Output = Bytes> {
-        async move {
-            if let Some(buffer) = self.buffer.read().unwrap().get(&block_id) {
-                Bytes::copy_from_slice(buffer)
-            } else {
-                // TODO
-                Bytes::new()
-            }
+    pub async fn into_bytes(self: Arc<Self>, block_id: PathSegment) -> Bytes {
+        // TODO: read from filesystem
+
+        if let Some(buffer) = self.buffer.read().unwrap().get(&block_id) {
+            Bytes::copy_from_slice(buffer)
+        } else {
+            // TODO
+            Bytes::new()
         }
+    }
+
+    pub async fn size(&self, block_id: &PathSegment) -> usize {
+        // TODO: read from filesystem
+
+        if let Some(buffer) = self.buffer.read().unwrap().get(block_id) {
+            buffer.len()
+        } else {
+            0
+        }
+    }
+
+    pub async fn will_fit(&self, block_id: &PathSegment, header: &Bytes, data: &[Bytes]) -> bool {
+        self.size(block_id).await + header.len() + data.iter().map(|b| b.len()).sum::<usize>()
+            <= self.block_size_default()
     }
 
     fn fs_path(&self, name: &PathSegment) -> PathBuf {

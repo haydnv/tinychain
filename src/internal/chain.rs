@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
 use futures::future;
@@ -18,14 +18,14 @@ type ChainStream<T> =
 
 pub struct Chain {
     store: Arc<Store>,
-    latest_block: u64,
+    latest_block: RwLock<u64>,
 }
 
 impl Chain {
     pub fn new(store: Arc<Store>) -> Arc<Chain> {
         Arc::new(Chain {
             store,
-            latest_block: 0,
+            latest_block: RwLock::new(0),
         })
     }
 
@@ -39,12 +39,13 @@ impl Chain {
                 for (txn_id, data) in block {
                     dest.clone().flush(i.into(), txn_id.into(), data).await;
                 }
+
                 (i, dest)
             })
             .then(|(i, dest)| async move {
                 Arc::new(Chain {
                     store: dest,
-                    latest_block: i,
+                    latest_block: RwLock::new(i),
                 })
             })
     }
@@ -64,28 +65,37 @@ impl Chain {
 
         Ok(Arc::new(Chain {
             store,
-            latest_block,
+            latest_block: RwLock::new(latest_block),
         }))
     }
 
-    pub fn put<T: Serialize>(
-        self: &Arc<Self>,
-        txn_id: &TransactionId,
-        mutations: &[T],
-    ) -> impl Future<Output = ()> {
+    pub async fn put<T: Serialize>(self: &Arc<Self>, txn_id: &TransactionId, mutations: &[T]) {
+        let mut latest_block: u64 = *self.latest_block.read().unwrap();
         let delta: Vec<Bytes> = mutations
             .iter()
             .map(|e| Bytes::from(serde_json::to_string_pretty(e).unwrap()))
             .collect();
+
+        let txn_id: Bytes = txn_id.into();
+        if !self
+            .store
+            .will_fit(&latest_block.into(), &txn_id, &delta)
+            .await
+        {
+            latest_block += 1;
+            *self.latest_block.write().unwrap() = latest_block;
+        }
+
         self.store
             .clone()
-            .flush(self.latest_block.into(), txn_id.into(), delta)
+            .flush(latest_block.into(), txn_id, delta)
+            .await
     }
 
     pub fn stream(self: &Arc<Self>) -> impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> {
         let mut stream: ChainStream<Bytes> = FuturesOrdered::new();
 
-        for i in 0..self.latest_block + 1 {
+        for i in 0..*self.latest_block.read().unwrap() + 1 {
             let fut = self
                 .store
                 .clone()
