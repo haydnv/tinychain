@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::Future;
 use tokio::fs;
 
@@ -18,7 +18,7 @@ pub struct Store {
     mount_point: PathBuf,
     context: Option<PathSegment>,
     children: Map<PathSegment, Arc<Store>>,
-    buffer: RwLock<HashMap<PathSegment, Vec<u8>>>,
+    buffer: RwLock<HashMap<PathSegment, BytesMut>>,
     tmp: bool,
 }
 
@@ -136,10 +136,10 @@ impl Store {
             }
             records.push(group_delimiter);
 
-            let mut records: Vec<u8> = records.concat();
+            let records = BytesMut::from(&records.concat()[..]);
             let mut buffer = self.buffer.write().unwrap();
             if let Some(block) = buffer.get_mut(&block_id) {
-                block.append(&mut records)
+                block.extend(records)
             } else {
                 buffer.insert(block_id, records);
             }
