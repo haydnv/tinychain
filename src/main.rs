@@ -13,8 +13,24 @@ mod value;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn block_size(flag: &str) -> value::TCResult<usize> {
+	let msg = "Unable to parse value of block_size";
+    let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
+        .map_err(|_| error::bad_request(msg, flag))?;
+    if flag.ends_with('K') {
+        Ok(size * 1000)
+    } else if flag.ends_with('M') {
+        Ok(size * 1_000_000)
+    } else {
+        Err(error::bad_request(msg, flag))
+    }
+}
+
 #[derive(Clone, StructOpt)]
 pub struct HostConfig {
+    #[structopt(long = "block_size", default_value = "1K", parse(try_from_str = block_size))]
+    pub block_size: usize,
+
     #[structopt(long = "data_dir", default_value = "/tmp/tc/data")]
     pub data_dir: PathBuf,
 
