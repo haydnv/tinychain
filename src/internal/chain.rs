@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
@@ -92,7 +93,7 @@ impl Chain {
             .await
     }
 
-    pub fn stream(self: &Arc<Self>) -> impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> {
+    fn stream(self: &Arc<Self>) -> impl Stream<Item = Vec<(TransactionId, Vec<Bytes>)>> {
         let mut stream: ChainStream<Bytes> = FuturesOrdered::new();
 
         for i in 0..*self.latest_block.read().unwrap() + 1 {
@@ -101,12 +102,13 @@ impl Chain {
                 .clone()
                 .into_bytes(i.into())
                 .then(|block| async move {
-                    let mut block: Vec<&[u8]> =
+                    let mut block: VecDeque<&[u8]> =
                         block.split(|b| *b == GROUP_DELIMITER as u8).collect();
-                    block.pop();
+                    block.pop_back();
 
-                    let mut data: Vec<(TransactionId, Vec<Bytes>)> = vec![];
-                    for txn in block {
+                    let mut records: Vec<(TransactionId, Vec<Bytes>)> =
+                        Vec::with_capacity(block.len());
+                    while let Some(txn) = block.pop_front() {
                         let mut txn: Vec<&[u8]> =
                             txn.split(|b| *b == RECORD_DELIMITER as u8).collect();
                         txn.pop();
@@ -114,10 +116,12 @@ impl Chain {
                         let txn_id = TransactionId::from(Bytes::copy_from_slice(txn[0]));
                         let txn: Vec<Bytes> =
                             txn[1..].iter().map(|e| Bytes::copy_from_slice(e)).collect();
-                        data.push((txn_id, txn));
+                        records.push((txn_id, txn));
                     }
-                    data
+
+                    records
                 });
+
             stream.push(Box::new(fut.boxed()));
         }
 
