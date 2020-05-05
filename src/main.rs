@@ -44,7 +44,10 @@ pub struct HostConfig {
     pub http_port: u16,
 
     #[structopt(long = "host")]
-    pub host: Vec<value::TCPath>,
+    pub hosted: Vec<value::TCPath>,
+
+    #[structopt(long = "peer")]
+    pub peers: Vec<value::Link>,
 }
 
 #[tokio::main]
@@ -59,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let data_dir = internal::block::Store::new(config.data_dir, config.block_size, None);
     let workspace = internal::block::Store::new_tmp(config.workspace, config.block_size, None);
 
-    let host = host::Host::new(data_dir, workspace, config.host).await?;
+    let host = host::Host::new(data_dir, workspace, config.hosted).await?;
 
     http::listen(host, config.http_port).await?;
     Ok(())

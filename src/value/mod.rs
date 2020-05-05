@@ -14,6 +14,7 @@ mod op;
 mod reference;
 mod version;
 
+pub type Link = link::Link;
 pub type PathSegment = link::PathSegment;
 pub type Op = op::Op;
 pub type TCPath = link::TCPath;

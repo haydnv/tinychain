@@ -1,4 +1,6 @@
+use std::convert::TryInto;
 use std::fmt;
+use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -9,6 +11,97 @@ use crate::error;
 use crate::value::{TCResult, ValueId};
 
 pub type PathSegment = ValueId;
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+pub enum LinkAddress {
+    IPv4(Ipv4Addr),
+}
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+pub enum LinkProtocol {
+    HTTP,
+}
+
+impl fmt::Display for LinkProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                LinkProtocol::HTTP => "http",
+            }
+        )
+    }
+}
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+pub struct Link {
+    protocol: LinkProtocol,
+    address: LinkAddress,
+    port: Option<u16>,
+    path: TCPath,
+}
+
+impl FromStr for Link {
+    type Err = error::TCError;
+
+    fn from_str(s: &str) -> TCResult<Link> {
+        if s.ends_with('/') {
+            return Err(error::bad_request(
+                "Link is not allowed to end with a '/'",
+                s,
+            ));
+        }
+
+        if !s.starts_with("http://") {
+            return Err(error::bad_request("Unable to parse Link protocol", s));
+        }
+
+        let protocol = LinkProtocol::HTTP;
+        let s = &s[7..];
+        let segments: Vec<&str> = s.split('/').collect();
+        if segments.is_empty() {
+            return Err(error::bad_request("Unable to parse Link", s));
+        }
+
+        let address: Vec<&str> = segments[0].split(':').collect();
+        if address.is_empty() || address.len() > 2 {
+            return Err(error::bad_request("Unable to parse Link address", s));
+        }
+
+        let port = if address.len() == 2 {
+            Some(
+                address[1]
+                    .parse()
+                    .map_err(|e| error::bad_request("Unable to parse port number", e))?,
+            )
+        } else {
+            None
+        };
+
+        let address: Ipv4Addr = address[0]
+            .parse()
+            .map_err(|e| error::bad_request("Unable to parse IPv4 address", e))?;
+        let address = LinkAddress::IPv4(address);
+
+        let path: TCPath = if segments.len() > 1 {
+            segments[1..]
+                .iter()
+                .map(|s| s.parse())
+                .collect::<TCResult<Vec<PathSegment>>>()?
+                .try_into()?
+        } else {
+            TCPath::new()
+        };
+
+        Ok(Link {
+            protocol,
+            address,
+            port,
+            path,
+        })
+    }
+}
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct TCPath {
@@ -46,6 +139,12 @@ impl TCPath {
 
     pub fn push(&mut self, segment: PathSegment) {
         self.segments.push(segment)
+    }
+}
+
+impl TCPath {
+    fn new() -> TCPath {
+        TCPath { segments: vec![] }
     }
 }
 
