@@ -69,7 +69,7 @@ async fn route(
         },
         Method::POST => {
             let capture: HashSet<ValueId> = if let Some(c) = params.get("capture") {
-                c.split('/')
+                c.split(',')
                     .map(|s| s.try_into())
                     .collect::<TCResult<HashSet<ValueId>>>()
             } else {
