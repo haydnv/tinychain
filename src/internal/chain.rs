@@ -28,6 +28,26 @@ pub struct ChainBlock<T: Mutation> {
 }
 
 impl<T: Mutation> ChainBlock<T> {
+    fn encode_transaction(txn_id: &TransactionId, mutations: &[T]) -> Bytes {
+        let mut buf = BytesMut::new();
+        let txn_id: Bytes = txn_id.into();
+        buf.extend(txn_id);
+        buf.put_u8(RECORD_DELIMITER as u8);
+        for mutation in mutations {
+            buf.extend(
+                serde_json::to_string_pretty(&mutation)
+                    .unwrap()
+                    .into_bytes(),
+            );
+            buf.put_u8(RECORD_DELIMITER as u8);
+        }
+        buf.put_u8(GROUP_DELIMITER as u8);
+
+        buf.into()
+    }
+}
+
+impl<T: Mutation> ChainBlock<T> {
     pub fn iter(&self) -> std::slice::Iter<(TransactionId, Vec<T>)> {
         self.records.iter()
     }
@@ -40,18 +60,7 @@ impl<T: Mutation> From<ChainBlock<T>> for Bytes {
         buf.put_u8(GROUP_DELIMITER as u8);
 
         for (txn_id, mutations) in block.records {
-            let txn_id: Bytes = txn_id.into();
-            buf.extend(txn_id);
-            buf.put_u8(RECORD_DELIMITER as u8);
-            for mutation in mutations {
-                buf.extend(
-                    serde_json::to_string_pretty(&mutation)
-                        .unwrap()
-                        .into_bytes(),
-                );
-                buf.put_u8(RECORD_DELIMITER as u8);
-            }
-            buf.put_u8(GROUP_DELIMITER as u8);
+            buf.extend(ChainBlock::encode_transaction(&txn_id, &mutations));
         }
 
         Bytes::from(buf)
@@ -86,7 +95,8 @@ impl<T: Mutation> Block for ChainBlock<T> {}
 
 impl Chain {
     pub fn new(store: Arc<Store>) -> Arc<Chain> {
-        store.new_block(0.into(), Bytes::from(&[0; 32][..]));
+        let checksum = Bytes::from(&[0; 32][..]);
+        store.new_block(0.into(), delimit_groups(&[checksum]));
 
         Arc::new(Chain {
             store,
@@ -142,21 +152,17 @@ impl Chain {
 
     pub async fn put<T: Mutation>(self: &Arc<Self>, txn_id: &TransactionId, mutations: &[T]) {
         let mut latest_block: u64 = *self.latest_block.read().unwrap();
-        let delta: Vec<Bytes> = mutations
-            .iter()
-            .map(|e| Bytes::from(serde_json::to_string_pretty(e).unwrap()))
-            .collect();
+        let encoded = ChainBlock::encode_transaction(txn_id, mutations);
 
         println!(
             "Chain::put {} mutations in block {}",
-            delta.len(),
+            mutations.len(),
             latest_block
         );
 
-        let txn_id: Bytes = txn_id.into();
         if !self
             .store
-            .will_fit(&latest_block.into(), &txn_id, &delta)
+            .will_fit(&latest_block.into(), encoded.len())
             .await
         {
             let checksum = self.store.hash_block(&latest_block.into()).await;
@@ -164,10 +170,11 @@ impl Chain {
             latest_block += 1;
             *self.latest_block.write().unwrap() = latest_block;
 
-            self.store.new_block(latest_block.into(), checksum)
+            self.store
+                .new_block(latest_block.into(), delimit_groups(&[checksum]))
         }
 
-        self.store.append(&latest_block.into(), txn_id, delta);
+        self.store.append(&latest_block.into(), encoded);
         self.store.clone().flush(latest_block.into()).await;
     }
 
@@ -188,8 +195,13 @@ impl Chain {
                         let mut block: VecDeque<&[u8]> =
                             block.split(|b| *b == GROUP_DELIMITER as u8).collect();
                         block.pop_back();
+                        println!("block has {} groups", block.len());
 
                         let checksum = Bytes::copy_from_slice(block.pop_front().unwrap());
+                        if checksum.len() != 32 {
+                            panic!("Invalid checksum, size {}", checksum.len());
+                        }
+
                         let mut records = Vec::with_capacity(block.len());
                         while let Some(record) = block.pop_front() {
                             let mut record: VecDeque<Bytes> = record
@@ -231,7 +243,7 @@ impl Chain {
             .take_while(move |(_, records)| {
                 if let Some(txn_id) = &txn_id {
                     if let Some((time, _)) = records.last() {
-                        future::ready(time <= &txn_id)
+                        future::ready(time <= txn_id)
                     } else {
                         future::ready(false)
                     }
@@ -299,4 +311,13 @@ impl Chain {
             })
             .flatten()
     }
+}
+
+fn delimit_groups(groups: &[Bytes]) -> Bytes {
+    let mut buf = BytesMut::new();
+    for group in groups {
+        buf.extend(group);
+        buf.put_u8(GROUP_DELIMITER as u8);
+    }
+    buf.into()
 }

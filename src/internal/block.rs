@@ -9,7 +9,6 @@ use tokio::fs;
 
 use crate::error;
 use crate::internal::cache::Map;
-use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::value::{PathSegment, TCPath, TCResult};
 
 pub trait Block: Into<Bytes> + TryFrom<Bytes, Error = error::TCError> {}
@@ -115,32 +114,18 @@ impl Store {
         }
     }
 
-    pub fn append(&self, block_id: &PathSegment, header: Bytes, data: Vec<Bytes>) {
+    pub fn append(&self, block_id: &PathSegment, data: Bytes) {
         // TODO: check filesystem
         if !self.buffer.read().unwrap().contains_key(block_id) {
             panic!("tried to append to a nonexistent block! {}", block_id);
         }
-
-        let group_delimiter = Bytes::from(&[GROUP_DELIMITER as u8][..]);
-        let record_delimiter = Bytes::from(&[RECORD_DELIMITER as u8][..]);
-
-        let mut records = Vec::with_capacity(data.len() + 1);
-        records.push(header);
-        records.push(record_delimiter.clone());
-        for record in data {
-            records.push(record);
-            records.push(record_delimiter.clone());
-        }
-        records.push(group_delimiter);
-
-        println!("Store::append {} records to {}", records.len(), block_id);
 
         self.buffer
             .write()
             .unwrap()
             .get_mut(&block_id)
             .unwrap()
-            .extend(BytesMut::from(&records.concat()[..]));
+            .extend(BytesMut::from(&data[..]));
     }
 
     pub async fn flush(self: Arc<Self>, _block_id: PathSegment) {
@@ -183,20 +168,13 @@ impl Store {
         }
     }
 
-    pub fn new_block(&self, block_id: PathSegment, block_header: Bytes) {
-        let block_header = [&block_header[..], &[GROUP_DELIMITER as u8][..]].concat();
-
+    pub fn new_block(&self, block_id: PathSegment, initial_value: Bytes) {
         let mut buffer = self.buffer.write().unwrap();
         if buffer.contains_key(&block_id) {
             panic!("Tried to overwrite block {}", block_id);
         }
 
-        buffer.insert(block_id.clone(), block_header[..].into());
-        println!(
-            "new block {}: initial size {}",
-            block_id,
-            block_header.len()
-        );
+        buffer.insert(block_id, initial_value[..].into());
     }
 
     pub fn put_block(&self, block_id: PathSegment, block: Bytes) {
@@ -218,9 +196,8 @@ impl Store {
         }
     }
 
-    pub async fn will_fit(&self, block_id: &PathSegment, header: &Bytes, data: &[Bytes]) -> bool {
-        self.size(block_id).await + header.len() + data.iter().map(|b| b.len()).sum::<usize>()
-            <= self.block_size_default()
+    pub async fn will_fit(&self, block_id: &PathSegment, size: usize) -> bool {
+        self.size(block_id).await + size <= self.block_size_default()
     }
 
     fn fs_path(&self, name: &PathSegment) -> PathBuf {
