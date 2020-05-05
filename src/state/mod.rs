@@ -17,7 +17,7 @@ pub type Graph = graph::Graph;
 pub type Table = table::Table;
 
 #[async_trait]
-pub trait Collection: Transactable {
+pub trait Collection: Transact {
     type Key: TryFrom<TCValue>;
     type Value: TryFrom<TCValue>;
 
@@ -40,7 +40,7 @@ pub trait Persistent: Collection + File {
 }
 
 #[async_trait]
-pub trait Transactable: Send + Sync {
+pub trait Transact: Send + Sync {
     async fn commit(&self, txn_id: &TransactionId);
 }
 

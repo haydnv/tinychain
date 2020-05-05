@@ -6,13 +6,24 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 
-use crate::internal::block::Store;
+use crate::internal::block::{Block, Store};
 use crate::internal::cache::Deque;
 use crate::transaction::TransactionId;
 use crate::value::TCPath;
 
-type Blocks = Box<dyn Stream<Item = (Bytes, Vec<(TransactionId, Vec<Bytes>)>)> + Send + Unpin>;
+type Blocks = Box<dyn Stream<Item = Bytes> + Send + Unpin>;
 type FileData = (TCPath, Blocks);
+
+#[async_trait]
+pub trait File {
+    type Block: Block;
+
+    async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Self>;
+
+    async fn copy_into(&self, txn_id: TransactionId, writer: &mut FileCopier);
+
+    async fn from_store(store: Arc<Store>) -> Arc<Self>;
+}
 
 struct SharedState {
     open: bool,
@@ -35,11 +46,11 @@ impl FileCopier {
         }
     }
 
-    pub async fn copy<T: File>(txn_id: TransactionId, state: &T, dest: Arc<Store>) -> Arc<T> {
+    pub async fn copy<F: File>(txn_id: TransactionId, state: &F, dest: Arc<Store>) -> Arc<F> {
         let mut copier = Self::open();
         state.copy_into(txn_id, &mut copier).await;
         copier.close();
-        T::copy_from(&mut copier, dest).await
+        F::copy_from(&mut copier, dest).await
     }
 
     pub fn close(&mut self) {
@@ -77,13 +88,4 @@ impl Stream for FileCopier {
             Poll::Ready(self.contents.pop_front())
         }
     }
-}
-
-#[async_trait]
-pub trait File {
-    async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Self>;
-
-    async fn copy_into(&self, txn_id: TransactionId, writer: &mut FileCopier);
-
-    async fn from_store(store: Arc<Store>) -> Arc<Self>;
 }

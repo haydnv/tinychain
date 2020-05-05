@@ -1,15 +1,18 @@
 use std::collections::HashMap;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use bytes::{Bytes, BytesMut};
+use sha2::{Digest, Sha256};
 use tokio::fs;
 
 use crate::error;
 use crate::internal::cache::Map;
 use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::value::{PathSegment, TCPath, TCResult};
+
+pub trait Block: Into<Bytes> + TryFrom<Bytes, Error = error::TCError> {}
 
 #[derive(Debug)]
 pub struct Store {
@@ -130,6 +133,8 @@ impl Store {
         }
         records.push(group_delimiter);
 
+        println!("Store::append {} records to {}", records.len(), block_id);
+
         self.buffer
             .write()
             .unwrap()
@@ -156,26 +161,51 @@ impl Store {
         }
     }
 
-    pub async fn get_block(self: Arc<Self>, block_id: PathSegment) -> Bytes {
+    pub async fn get_bytes(self: Arc<Self>, block_id: PathSegment) -> Bytes {
         // TODO: read from filesystem
 
         if let Some(buffer) = self.buffer.read().unwrap().get(&block_id) {
             Bytes::copy_from_slice(buffer)
         } else {
-            // TODO
-            Bytes::new()
+            Bytes::from(&[][..])
+        }
+    }
+
+    pub async fn hash_block(&self, block_id: &PathSegment) -> Bytes {
+        // TODO: read from filesystem
+
+        if let Some(buffer) = self.buffer.read().unwrap().get(block_id) {
+            let mut hasher = Sha256::new();
+            hasher.input(buffer);
+            Bytes::copy_from_slice(&hasher.result()[..])
+        } else {
+            Bytes::from(&[0; 32][..])
         }
     }
 
     pub fn new_block(&self, block_id: PathSegment, block_header: Bytes) {
+        let block_header = [&block_header[..], &[GROUP_DELIMITER as u8][..]].concat();
+
         let mut buffer = self.buffer.write().unwrap();
         if buffer.contains_key(&block_id) {
             panic!("Tried to overwrite block {}", block_id);
         }
 
-        let block_header = [&block_header[..], &[GROUP_DELIMITER as u8][..]].concat();
+        buffer.insert(block_id.clone(), block_header[..].into());
+        println!(
+            "new block {}: initial size {}",
+            block_id,
+            block_header.len()
+        );
+    }
 
-        buffer.insert(block_id, block_header[..].into());
+    pub fn put_block(&self, block_id: PathSegment, block: Bytes) {
+        let mut buffer = self.buffer.write().unwrap();
+        if buffer.contains_key(&block_id) {
+            panic!("Tried to overwrite block {}", block_id);
+        }
+
+        buffer.insert(block_id, BytesMut::from(&block[..]));
     }
 
     pub async fn size(&self, block_id: &PathSegment) -> usize {

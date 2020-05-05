@@ -2,15 +2,15 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{join, join_all};
+use futures::future::{self, join, join_all};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::cache::TransactionCache;
+use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
-use crate::internal::Chain;
 use crate::state::*;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{PathSegment, TCPath, TCResult, TCValue};
@@ -21,6 +21,14 @@ enum EntryType {
     Table,
     Graph,
 }
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct DirEntry {
+    name: PathSegment,
+    entry_type: EntryType,
+}
+
+impl Mutation for DirEntry {}
 
 #[derive(Clone)]
 enum EntryState {
@@ -71,25 +79,14 @@ impl Collection for Directory {
 
         let entry = self
             .chain
-            .stream_into_until(txn.id())
-            .filter_map(|entries: Vec<(PathSegment, EntryType)>| async move {
-                let entries: Vec<(PathSegment, EntryType)> =
-                    entries.iter().filter(|(p, _)| path == p).cloned().collect();
-                if entries.is_empty() {
-                    None
-                } else {
-                    Some(entries)
-                }
-            })
-            .fold(
-                None,
-                |_, entries: Vec<(PathSegment, EntryType)>| async move { entries.last().cloned() },
-            )
+            .stream_into::<DirEntry>(Some(txn.id()))
+            .filter(|entry: &DirEntry| future::ready(&entry.name == path))
+            .fold(None, |_, m| future::ready(Some(m)))
             .await;
 
-        if let Some((_, entry_type)) = entry {
+        if let Some(entry) = entry {
             if let Some(store) = self.context.get_store(&path[0].clone().into()) {
-                match entry_type {
+                match entry.entry_type {
                     EntryType::Directory => {
                         let dir = Directory::from_store(store).await;
                         dir.get(txn, &path.slice_from(1)).await
@@ -128,12 +125,15 @@ impl Collection for Directory {
 
         self.txn_cache.insert(txn.id(), path, entry);
         txn.mutate(self.clone());
+        println!("Directory::put complete");
         Ok(self)
     }
 }
 
 #[async_trait]
 impl File for Directory {
+    type Block = ChainBlock<DirEntry>;
+
     async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Directory> {
         let (path, blocks) = reader.next().await.unwrap();
         let chain = Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
@@ -164,13 +164,18 @@ impl Persistent for Directory {
 }
 
 #[async_trait]
-impl Transactable for Directory {
+impl Transact for Directory {
     async fn commit(&self, txn_id: &TransactionId) {
+        println!("Directory::commit");
         let mutations = self.txn_cache.close(txn_id);
-        let mut entries = Vec::with_capacity(mutations.len());
+        println!("Directory closed transaction cache for {}", txn_id);
+        let mut entries: Vec<DirEntry> = Vec::with_capacity(mutations.len());
         let mut tasks = Vec::with_capacity(mutations.len());
-        for (path, (entry_type, state)) in mutations.iter() {
-            entries.push((path, entry_type));
+        for (name, (entry_type, state)) in mutations.iter() {
+            entries.push(DirEntry {
+                name: name.clone(),
+                entry_type: entry_type.clone(),
+            });
             tasks.push(async move {
                 match state {
                     EntryState::Directory(context, dir) => {
@@ -186,6 +191,8 @@ impl Transactable for Directory {
             });
         }
 
+        println!("Directory::commit scheduled");
         join(join_all(tasks), self.chain.clone().put(txn_id, &entries)).await;
+        println!("Directory::commit complete");
     }
 }

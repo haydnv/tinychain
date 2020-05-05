@@ -99,6 +99,16 @@ impl PartialEq<ValueId> for TCPath {
     }
 }
 
+impl PartialEq<TCPath> for ValueId {
+    fn eq(&self, other: &TCPath) -> bool {
+        if other.len() == 1 {
+            &other.segments[0] == self
+        } else {
+            false
+        }
+    }
+}
+
 impl From<Vec<PathSegment>> for TCPath {
     fn from(segments: Vec<PathSegment>) -> TCPath {
         TCPath { segments }

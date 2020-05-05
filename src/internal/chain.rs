@@ -1,27 +1,88 @@
 use std::collections::VecDeque;
+use std::convert::TryFrom;
 use std::sync::{Arc, RwLock};
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use futures::future;
-use futures::stream::{FuturesOrdered, Stream};
+use futures::stream::{self, FuturesOrdered, Stream};
 use futures::{Future, FutureExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use crate::error;
-use crate::internal::block::Store;
+use crate::internal::block::{Block, Store};
 use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::transaction::TransactionId;
 use crate::value::{PathSegment, TCResult};
 
-type ChainStream<T> =
-    FuturesOrdered<Box<dyn Future<Output = (Bytes, Vec<(TransactionId, Vec<T>)>)> + Unpin + Send>>;
+pub trait Mutation: Clone + DeserializeOwned + Serialize {}
 
 pub struct Chain {
     store: Arc<Store>,
     latest_block: RwLock<u64>,
 }
+
+pub struct ChainBlock<T: Mutation> {
+    checksum: Bytes,
+    records: Vec<(TransactionId, Vec<T>)>,
+}
+
+impl<T: Mutation> ChainBlock<T> {
+    pub fn iter(&self) -> std::slice::Iter<(TransactionId, Vec<T>)> {
+        self.records.iter()
+    }
+}
+
+impl<T: Mutation> From<ChainBlock<T>> for Bytes {
+    fn from(block: ChainBlock<T>) -> Bytes {
+        let mut buf = BytesMut::new();
+        buf.extend(block.checksum);
+        buf.put_u8(GROUP_DELIMITER as u8);
+
+        for (txn_id, mutations) in block.records {
+            let txn_id: Bytes = txn_id.into();
+            buf.extend(txn_id);
+            buf.put_u8(RECORD_DELIMITER as u8);
+            for mutation in mutations {
+                buf.extend(
+                    serde_json::to_string_pretty(&mutation)
+                        .unwrap()
+                        .into_bytes(),
+                );
+                buf.put_u8(RECORD_DELIMITER as u8);
+            }
+            buf.put_u8(GROUP_DELIMITER as u8);
+        }
+
+        Bytes::from(buf)
+    }
+}
+
+impl<T: Mutation> TryFrom<Bytes> for ChainBlock<T> {
+    type Error = error::TCError;
+
+    fn try_from(buf: Bytes) -> TCResult<ChainBlock<T>> {
+        let mut buf: VecDeque<&[u8]> = buf.split(|b| *b == GROUP_DELIMITER as u8).collect();
+        buf.pop_back();
+
+        let checksum = Bytes::copy_from_slice(buf.pop_front().unwrap());
+        let mut records: Vec<(TransactionId, Vec<T>)> = Vec::with_capacity(buf.len());
+        while let Some(record) = buf.pop_front() {
+            let record: Vec<&[u8]> = record.split(|b| *b == RECORD_DELIMITER as u8).collect();
+
+            let txn_id: TransactionId = Bytes::copy_from_slice(record[0]).into();
+            let mutations = record[1..record.len() - 1]
+                .iter()
+                .map(|m| serde_json::from_slice::<T>(&m).unwrap())
+                .collect();
+            records.push((txn_id, mutations));
+        }
+
+        Ok(ChainBlock { checksum, records })
+    }
+}
+
+impl<T: Mutation> Block for ChainBlock<T> {}
 
 impl Chain {
     pub fn new(store: Arc<Store>) -> Arc<Chain> {
@@ -33,42 +94,31 @@ impl Chain {
         })
     }
 
-    pub fn copy_from(
-        stream: impl Stream<Item = (Bytes, Vec<(TransactionId, Vec<Bytes>)>)> + Unpin,
+    pub async fn copy_from(
+        mut source: impl Stream<Item = Bytes> + Unpin,
         dest: Arc<Store>,
-    ) -> impl Future<Output = Arc<Chain>> {
-        stream
-            .fold(
-                (0u64, dest, Bytes::from(&[0; 32][..])),
-                |acc, block| async move {
-                    let (i, dest, checksum): (u64, Arc<Store>, Bytes) = acc;
-                    if checksum != block.0 {
-                        panic!("Checksum failed for block {}", acc.0);
-                    }
+    ) -> Arc<Chain> {
+        let mut latest_block: u64 = 0;
+        let mut checksum = Bytes::from(&[0; 32][..]);
+        while let Some(block) = source.next().await {
+            let block_id: PathSegment = latest_block.into();
+            if checksum[..] != block[0..32] {
+                panic!("Checksum failed for block {}", latest_block);
+            }
 
-                    let block_id: PathSegment = i.into();
-                    dest.new_block(block_id.clone(), block.0);
+            dest.put_block(block_id.clone(), block);
+            checksum = dest.hash_block(&block_id).await;
+            latest_block += 1;
+        }
 
-                    for (txn_id, data) in block.1 {
-                        dest.append(&block_id, txn_id.into(), data);
-                    }
+        if latest_block > 0 {
+            latest_block -= 1;
+        }
 
-                    dest.clone().flush(block_id.clone()).await;
-
-                    // TODO: move this code to a common "hash" method
-                    let mut hasher = Sha256::new();
-                    hasher.input(dest.clone().get_block(block_id).await);
-                    let checksum = hasher.result();
-
-                    (i, dest, Bytes::copy_from_slice(&checksum[..]))
-                },
-            )
-            .then(|(i, dest, _)| async move {
-                Arc::new(Chain {
-                    store: dest,
-                    latest_block: RwLock::new(i),
-                })
-            })
+        Arc::new(Chain {
+            store: dest,
+            latest_block: RwLock::new(latest_block),
+        })
     }
 
     pub async fn from_store(store: Arc<Store>) -> TCResult<Arc<Chain>> {
@@ -90,12 +140,18 @@ impl Chain {
         }))
     }
 
-    pub async fn put<T: Serialize>(self: &Arc<Self>, txn_id: &TransactionId, mutations: &[T]) {
+    pub async fn put<T: Mutation>(self: &Arc<Self>, txn_id: &TransactionId, mutations: &[T]) {
         let mut latest_block: u64 = *self.latest_block.read().unwrap();
         let delta: Vec<Bytes> = mutations
             .iter()
             .map(|e| Bytes::from(serde_json::to_string_pretty(e).unwrap()))
             .collect();
+
+        println!(
+            "Chain::put {} mutations in block {}",
+            delta.len(),
+            latest_block
+        );
 
         let txn_id: Bytes = txn_id.into();
         if !self
@@ -103,129 +159,144 @@ impl Chain {
             .will_fit(&latest_block.into(), &txn_id, &delta)
             .await
         {
-            let mut hasher = Sha256::new();
-            hasher.input(self.store.clone().get_block(latest_block.into()).await);
-            let checksum = hasher.result();
+            let checksum = self.store.hash_block(&latest_block.into()).await;
 
             latest_block += 1;
             *self.latest_block.write().unwrap() = latest_block;
 
-            self.store
-                .new_block(latest_block.into(), Bytes::copy_from_slice(&checksum[..]))
+            self.store.new_block(latest_block.into(), checksum)
         }
 
         self.store.append(&latest_block.into(), txn_id, delta);
         self.store.clone().flush(latest_block.into()).await;
     }
 
-    fn stream(self: &Arc<Self>) -> impl Stream<Item = (Bytes, Vec<(TransactionId, Vec<Bytes>)>)> {
-        let mut stream: ChainStream<Bytes> = FuturesOrdered::new();
+    fn into_stream(
+        self: &Arc<Self>,
+    ) -> impl Stream<Item = (Bytes, Vec<(TransactionId, Vec<Bytes>)>)> {
+        let mut stream: FuturesOrdered<
+            Box<dyn Future<Output = (Bytes, Vec<(TransactionId, Vec<Bytes>)>)> + Unpin + Send>,
+        > = FuturesOrdered::new();
 
-        for i in 0..*self.latest_block.read().unwrap() + 1 {
-            let fut = self
-                .store
-                .clone()
-                .get_block(i.into())
-                .then(|block| async move {
-                    let mut block: VecDeque<&[u8]> =
-                        block.split(|b| *b == GROUP_DELIMITER as u8).collect();
-                    block.pop_back();
+        let mut i = 0;
+        loop {
+            stream.push(Box::new(
+                self.store
+                    .clone()
+                    .get_bytes(i.into())
+                    .map(|block| {
+                        let mut block: VecDeque<&[u8]> =
+                            block.split(|b| *b == GROUP_DELIMITER as u8).collect();
+                        block.pop_back();
 
-                    let header = Bytes::copy_from_slice(block.pop_front().unwrap());
+                        let checksum = Bytes::copy_from_slice(block.pop_front().unwrap());
+                        let mut records = Vec::with_capacity(block.len());
+                        while let Some(record) = block.pop_front() {
+                            let mut record: VecDeque<Bytes> = record
+                                .split(|b| *b == RECORD_DELIMITER as u8)
+                                .map(|m| Bytes::copy_from_slice(m))
+                                .collect();
+                            record.pop_back();
+                            println!("record size {}: {}", record.len(), record[0].len());
 
-                    let mut records: Vec<(TransactionId, Vec<Bytes>)> =
-                        Vec::with_capacity(block.len());
-                    while let Some(txn) = block.pop_front() {
-                        let mut txn: Vec<&[u8]> =
-                            txn.split(|b| *b == RECORD_DELIMITER as u8).collect();
-                        txn.pop();
+                            let txn_id: TransactionId = record.pop_front().unwrap().into();
+                            let mutations: Vec<Bytes> = record.into_iter().collect();
+                            records.push((txn_id, mutations))
+                        }
 
-                        let txn_id = TransactionId::from(Bytes::copy_from_slice(txn[0]));
-                        let txn: Vec<Bytes> =
-                            txn[1..].iter().map(|e| Bytes::copy_from_slice(e)).collect();
-                        records.push((txn_id, txn));
-                    }
+                        (checksum, records)
+                    })
+                    .boxed(),
+            ));
+            println!("into_stream got block {}", i);
 
-                    (header, records)
-                });
-
-            stream.push(Box::new(fut.boxed()));
+            if i == *self.latest_block.read().unwrap() {
+                println!("into_stream completed queue at {}", i);
+                break;
+            } else {
+                i += 1;
+                println!("{}", i);
+            }
         }
 
         stream
     }
 
-    pub fn stream_into<T: 'static + Clone + DeserializeOwned>(
+    pub fn stream_blocks<T: Mutation>(
         self: &Arc<Self>,
-    ) -> impl Stream<Item = Vec<T>> {
-        self.stream()
-            .map(move |block: (Bytes, Vec<(TransactionId, Vec<Bytes>)>)| {
-                block
-                    .1
-                    .iter()
-                    .map(|(_, data)| {
-                        data.iter()
-                            .map(|e| serde_json::from_slice::<T>(e).unwrap())
-                            .collect::<Vec<T>>()
-                    })
-                    .collect()
-            })
-            .map(|block: Vec<Vec<T>>| block.iter().flatten().cloned().collect())
-    }
-
-    pub fn stream_until(
-        self: &Arc<Self>,
-        txn_id: TransactionId,
-    ) -> impl Stream<Item = (Bytes, Vec<(TransactionId, Vec<Bytes>)>)> {
+        txn_id: Option<TransactionId>,
+    ) -> impl Stream<Item = ChainBlock<T>> {
         let txn_id_clone = txn_id.clone();
-        self.stream()
-            .take_while(move |b| {
-                if let Some((time, _)) = b.1.last() {
-                    future::ready(time <= &txn_id_clone)
+        self.into_stream()
+            .take_while(move |(_, records)| {
+                if let Some(txn_id) = &txn_id {
+                    if let Some((time, _)) = records.last() {
+                        future::ready(time <= &txn_id)
+                    } else {
+                        future::ready(false)
+                    }
                 } else {
-                    future::ready(false)
+                    future::ready(true)
                 }
             })
-            .map(move |block| {
-                (
-                    block.0,
-                    block
-                        .1
+            .map(move |(checksum, records)| {
+                let records = if let Some(txn_id) = &txn_id_clone {
+                    records
                         .iter()
-                        .filter(|(time, _)| time <= &txn_id)
+                        .filter(|(time, _)| time <= txn_id)
                         .cloned()
+                        .collect()
+                } else {
+                    records
+                };
+
+                ChainBlock {
+                    checksum,
+                    records: records
+                        .iter()
+                        .map(|(txn_id, mutations)| {
+                            (
+                                txn_id.clone(),
+                                mutations
+                                    .iter()
+                                    .map(|m| serde_json::from_slice::<T>(m).unwrap())
+                                    .collect(),
+                            )
+                        })
                         .collect(),
-                )
+                }
             })
     }
 
-    pub fn stream_into_until<T: 'static + Clone + DeserializeOwned>(
+    pub fn stream_bytes<T: Mutation>(
         self: &Arc<Self>,
-        txn_id: TransactionId,
-    ) -> impl Stream<Item = Vec<T>> {
-        self.stream_until(txn_id.clone())
-            .map(move |block: (Bytes, Vec<(TransactionId, Vec<Bytes>)>)| {
-                block
-                    .1
+        txn_id: Option<TransactionId>,
+    ) -> impl Stream<Item = Bytes> {
+        self.stream_blocks(txn_id)
+            .map(|block: ChainBlock<T>| block.into())
+    }
+
+    pub fn stream_into<T: Mutation>(
+        self: &Arc<Self>,
+        txn_id: Option<TransactionId>,
+    ) -> impl Stream<Item = T> {
+        self.stream_blocks(txn_id)
+            .filter_map(|block| {
+                println!("stream_into read block");
+                let mutations: Vec<T> = block
+                    .records
                     .iter()
-                    .map(|(time, data)| {
-                        (
-                            time.clone(),
-                            data.iter()
-                                .map(|e| serde_json::from_slice::<T>(e).unwrap())
-                                .collect(),
-                        )
-                    })
-                    .filter(|(time, _)| time <= &txn_id)
-                    .collect()
-            })
-            .map(|block: Vec<(TransactionId, Vec<T>)>| {
-                let mut result = vec![];
-                for (_time, mutations) in block {
-                    result.extend(mutations.to_vec())
+                    .cloned()
+                    .map(|(_, mutations)| mutations)
+                    .flatten()
+                    .collect();
+
+                if mutations.is_empty() {
+                    future::ready(None)
+                } else {
+                    future::ready(Some(stream::iter(mutations)))
                 }
-                result.to_vec()
             })
-            .take_while(|block| future::ready(!block.is_empty()))
+            .flatten()
     }
 }

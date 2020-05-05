@@ -90,6 +90,7 @@ impl<K: Eq + Hash, V: Clone> TransactionCache<K, V> {
     }
 
     pub fn close(&self, txn_id: &TransactionId) -> HashMap<K, V> {
+        println!("TransactionCache closing {}", txn_id);
         self.cache
             .write()
             .unwrap()

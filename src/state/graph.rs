@@ -2,11 +2,13 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::internal::block::Store;
+use crate::internal::chain::{ChainBlock, Mutation};
 use crate::internal::file::*;
-use crate::state::{Collection, Persistent, Transactable};
+use crate::state::{Collection, Persistent, Transact};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{TCResult, TCValue};
 
@@ -45,8 +47,15 @@ impl Collection for Graph {
     }
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+pub struct GraphMutation;
+
+impl Mutation for GraphMutation {}
+
 #[async_trait]
 impl File for Graph {
+    type Block = ChainBlock<GraphMutation>;
+
     async fn copy_from(_reader: &mut FileCopier, _dest: Arc<Store>) -> Arc<Self> {
         // TODO
         Arc::new(Graph {})
@@ -72,7 +81,7 @@ impl Persistent for Graph {
 }
 
 #[async_trait]
-impl Transactable for Graph {
+impl Transact for Graph {
     async fn commit(&self, _txn_id: &TransactionId) {
         // TODO
     }

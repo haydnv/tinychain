@@ -3,16 +3,15 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::cache::Map;
+use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
-use crate::internal::Chain;
-use crate::state::Transactable;
+use crate::state::Transact;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{TCPath, TCResult, TCValue, ValueId, Version};
 
@@ -35,9 +34,7 @@ impl Schema {
 
         map
     }
-}
 
-impl Schema {
     fn new() -> Schema {
         Schema {
             key: vec![],
@@ -46,6 +43,8 @@ impl Schema {
         }
     }
 }
+
+impl Mutation for Schema {}
 
 impl TryFrom<TCValue> for Schema {
     type Error = error::TCError;
@@ -87,36 +86,41 @@ impl SchemaHistory {
     }
 
     pub async fn at(&self, txn_id: &TransactionId) -> Schema {
+        println!("getting schema at {}", txn_id);
         if let Some(schema) = self.txn_cache.get(txn_id) {
             return schema;
         }
 
-        self.chain
-            .stream_into_until(txn_id.clone())
-            .fold(None, |_: Option<Schema>, s: Vec<Schema>| {
-                future::ready(s.last().cloned())
-            })
-            .await
-            .unwrap_or_else(Schema::new)
+        let mut schema = Schema::new();
+        println!("streaming past mutations from Chain");
+        let mut stream = self.chain.stream_into::<Schema>(Some(txn_id.clone()));
+        while let Some(s) = stream.next().await {
+            println!("got past mutation");
+            schema = s;
+        }
+
+        schema
     }
 
     pub async fn latest(&self) -> Schema {
-        self.chain
-            .stream_into()
-            .fold(None, |_: Option<Schema>, s: Vec<Schema>| {
-                future::ready(s.last().cloned())
-            })
-            .await
-            .unwrap_or_else(Schema::new)
+        let mut schema = Schema::new();
+        let mut stream = self.chain.stream_into::<Schema>(None);
+        while let Some(s) = stream.next().await {
+            schema = s;
+        }
+
+        schema
     }
 }
 
 #[async_trait]
 impl File for SchemaHistory {
+    type Block = ChainBlock<Schema>;
+
     async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
         copier.write_file(
             "schema".try_into().unwrap(),
-            Box::new(self.chain.stream_until(txn_id).boxed()),
+            Box::new(self.chain.stream_bytes::<Schema>(Some(txn_id)).boxed()),
         );
     }
 
@@ -139,10 +143,12 @@ impl File for SchemaHistory {
 }
 
 #[async_trait]
-impl Transactable for SchemaHistory {
+impl Transact for SchemaHistory {
     async fn commit(&self, txn_id: &TransactionId) {
+        println!("Schema::commit");
         if let Some(schema) = self.txn_cache.remove(txn_id) {
             self.chain.clone().put(txn_id, &[schema]).await;
         }
+        println!("Schema::commit complete");
     }
 }

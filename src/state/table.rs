@@ -4,19 +4,23 @@ use std::iter;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use futures::future::{self, try_join_all};
+use futures::future::{self, try_join_all, Future};
 use futures::StreamExt;
 
 use crate::error;
 use crate::internal::block::Store;
+use crate::internal::cache::TransactionCache;
+use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
-use crate::internal::Chain;
 use crate::state::schema::{Schema, SchemaHistory};
-use crate::state::{Collection, Persistent, Transactable};
+use crate::state::{Collection, Persistent, Transact};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{PathSegment, TCResult, TCValue, ValueId};
 
-type Mutation = (Vec<TCValue>, Vec<Option<TCValue>>);
+type TableMutation = (Vec<TCValue>, Vec<Option<TCValue>>);
+
+// TODO: rethink Mutation and Row data structures
+impl Mutation for TableMutation {}
 
 struct Row {
     key: Vec<TCValue>,
@@ -24,7 +28,7 @@ struct Row {
 }
 
 impl Row {
-    fn update(&mut self, mutation: &Mutation) {
+    fn update(&mut self, mutation: &TableMutation) {
         for (i, value) in mutation.1.iter().enumerate() {
             if !value.is_none() {
                 self.values[i] = value.clone();
@@ -33,8 +37,8 @@ impl Row {
     }
 }
 
-impl From<Row> for Mutation {
-    fn from(row: Row) -> Mutation {
+impl From<Row> for TableMutation {
+    fn from(row: Row) -> TableMutation {
         (row.key, row.values)
     }
 }
@@ -63,7 +67,7 @@ impl From<Row> for TCValue {
 pub struct Table {
     schema: Arc<SchemaHistory>,
     chain: Arc<Chain>,
-    cache: RwLock<HashMap<TransactionId, Vec<Mutation>>>,
+    cache: TransactionCache<Vec<TCValue>, Vec<Option<TCValue>>>,
 }
 
 impl Table {
@@ -116,24 +120,16 @@ impl Collection for Table {
     ) -> TCResult<Self::Value> {
         let mut row = self
             .chain
-            .stream_into_until(txn.id())
-            .fold(
-                self.new_row(&txn, row_id).await?,
-                |mut row, block: Vec<Mutation>| {
-                    for mutation in block {
-                        if mutation.0 == row.key {
-                            row.update(&mutation)
-                        }
-                    }
-                    future::ready(row)
-                },
-            )
+            .stream_into::<TableMutation>(Some(txn.id()))
+            .filter(|m: &TableMutation| future::ready(&m.0 == row_id))
+            .fold(self.new_row(&txn, row_id).await?, |mut row, mutation| {
+                row.update(&mutation);
+                future::ready(row)
+            })
             .await;
 
-        if let Some(mutations) = self.cache.read().unwrap().get(&txn.id()) {
-            for mutation in mutations {
-                row.update(mutation);
-            }
+        if let Some(values) = self.cache.get(&txn.id(), row_id) {
+            row.update(&(row_id.to_vec(), values));
         }
 
         Ok(row.values.iter().map(|v| v.into()).collect())
@@ -183,15 +179,21 @@ impl Collection for Table {
             }
         }
 
-        let mutation = (row_id, mutated);
-
-        let mut cache = self.cache.write().unwrap();
-        if let Some(mutations) = cache.get_mut(&txn.id()) {
-            mutations.push(mutation);
+        let row = if let Some(values) = self.cache.get(&txn.id(), &row_id) {
+            let mut row = Row {
+                key: row_id.to_vec(),
+                values,
+            };
+            row.update(&(row_id.to_vec(), mutated));
+            row
         } else {
-            cache.insert(txn.id(), vec![mutation]);
-        }
+            Row {
+                key: row_id.to_vec(),
+                values: mutated,
+            }
+        };
 
+        self.cache.insert(txn.id(), row_id, row.values);
         txn.mutate(self.clone());
         Ok(self.clone())
     }
@@ -199,27 +201,42 @@ impl Collection for Table {
 
 #[async_trait]
 impl File for Table {
+    type Block = ChainBlock<TableMutation>;
+
     async fn copy_into(&self, txn_id: TransactionId, writer: &mut FileCopier) {
+        println!("copying table into FileCopier");
         self.schema.copy_into(txn_id.clone(), writer).await;
+        println!("copied schema");
 
         let schema = self.schema.at(&txn_id).await;
+        println!("got current schema");
         let version: PathSegment = schema.version.to_string().try_into().unwrap();
         writer.write_file(
             version.try_into().unwrap(),
-            Box::new(self.chain.stream_until(txn_id).boxed()),
+            Box::new(
+                self.chain
+                    .stream_bytes::<TableMutation>(Some(txn_id))
+                    .boxed(),
+            ),
         );
+        println!("wrote table chain to file");
     }
 
     async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Table> {
+        println!("copying table from FileCopier");
         let schema_history = SchemaHistory::copy_from(reader, dest.clone()).await;
+        println!("copied schema");
 
+        println!("reading blocks from FileCopier");
         let (path, blocks) = reader.next().await.unwrap();
+        println!("got blocks");
         let chain = Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
+        println!("copied Chain");
 
         Arc::new(Table {
             schema: schema_history,
             chain,
-            cache: RwLock::new(HashMap::new()),
+            cache: TransactionCache::new(),
         })
     }
 
@@ -242,7 +259,7 @@ impl File for Table {
         Arc::new(Table {
             schema,
             chain,
-            cache: RwLock::new(HashMap::new()),
+            cache: TransactionCache::new(),
         })
     }
 }
@@ -258,25 +275,20 @@ impl Persistent for Table {
         Ok(Arc::new(Table {
             schema: schema_history,
             chain: table_chain,
-            cache: RwLock::new(HashMap::new()),
+            cache: TransactionCache::new(),
         }))
     }
 }
 
 #[async_trait]
-impl Transactable for Table {
+impl Transact for Table {
     async fn commit(&self, txn_id: &TransactionId) {
-        let mutations = if let Some(mutations) = self.cache.write().unwrap().remove(&txn_id) {
-            mutations
-                .iter()
-                .map(|(k, v)| (k.clone().into(), v.clone().into()))
-                .collect::<Vec<(TCValue, TCValue)>>()
-        } else {
-            vec![]
-        };
+        println!("Table::commit");
+        let mutations: Vec<TableMutation> = self.cache.close(&txn_id).into_iter().collect();
 
         if !mutations.is_empty() {
             self.chain.put(&txn_id, &mutations).await
         }
+        println!("Table::commit complete");
     }
 }

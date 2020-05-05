@@ -12,7 +12,7 @@ use crate::error;
 use crate::host::Host;
 use crate::internal::block::Store;
 use crate::internal::cache::{Deque, Map};
-use crate::state::{State, Transactable};
+use crate::state::{State, Transact};
 use crate::value::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
@@ -30,9 +30,13 @@ impl TransactionId {
 
 impl From<Bytes> for TransactionId {
     fn from(b: Bytes) -> TransactionId {
+        if b.len() != 18 {
+            panic!("TransactionId should be exactly 18 bytes");
+        }
+
         TransactionId {
             timestamp: u128::from_be_bytes(b[..16].try_into().expect("Bad transaction timestamp")),
-            nonce: u16::from_be_bytes(b[16..].try_into().expect("Bad transaction nonce")),
+            nonce: u16::from_be_bytes(b[16..18].try_into().expect("Bad transaction nonce")),
         }
     }
 }
@@ -135,7 +139,7 @@ pub struct Transaction {
     context: Arc<Store>,
     state: Map<ValueId, State>,
     queue: Deque<(ValueId, Op)>,
-    mutated: Deque<Arc<dyn Transactable>>,
+    mutated: Deque<Arc<dyn Transact>>,
 }
 
 impl Transaction {
@@ -302,7 +306,7 @@ impl Transaction {
         }
     }
 
-    pub fn mutate(self: &Arc<Self>, state: Arc<dyn Transactable>) {
+    pub fn mutate(self: &Arc<Self>, state: Arc<dyn Transact>) {
         self.mutated.push_back(state)
     }
 
