@@ -21,8 +21,9 @@ pub type TCResult<T> = Result<T, error::TCError>;
 pub type Subject = op::Subject;
 pub type Version = version::Version;
 
-const RESERVED_CHARS: [&str; 18] = [
-    "/", "..", "~", "$", "&", "?", "|", "{", "}", "//", ":", "=", "^", ">", "<", "'", "`", "\"",
+const RESERVED_CHARS: [&str; 21] = [
+    "/", "..", "~", "$", "`", "^", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":",
+    "//", "@", "#",
 ];
 
 fn validate_id(id: &str) -> TCResult<()> {

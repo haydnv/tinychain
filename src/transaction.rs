@@ -307,6 +307,7 @@ impl Transaction {
     }
 
     pub fn mutate(self: &Arc<Self>, state: Arc<dyn Transact>) {
+        // TODO: don't queue state if it's already in the queue
         self.mutated.push_back(state)
     }
 
