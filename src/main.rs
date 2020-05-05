@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::path::PathBuf;
 
 use structopt::StructOpt;
@@ -45,19 +44,12 @@ pub struct HostConfig {
     pub http_port: u16,
 
     #[structopt(long = "host")]
-    pub host: Vec<String>,
+    pub host: Vec<value::TCPath>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = HostConfig::from_args();
-
-    for path in &config.host {
-        if !path.starts_with('/') {
-            eprintln!("Hosted path must start with a '/': {}", path);
-            panic!();
-        }
-    }
 
     println!("Tinychain version {}", VERSION);
     println!("Data directory: {}", &config.data_dir.to_str().unwrap());
@@ -67,13 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let data_dir = internal::block::Store::new(config.data_dir, config.block_size, None);
     let workspace = internal::block::Store::new_tmp(config.workspace, config.block_size, None);
 
-    let hosted = config
-        .host
-        .iter()
-        .map(|d| d.as_str().try_into())
-        .collect::<value::TCResult<Vec<value::TCPath>>>()?;
-
-    let host = host::Host::new(data_dir, workspace, hosted).await?;
+    let host = host::Host::new(data_dir, workspace, config.host).await?;
 
     http::listen(host, config.http_port).await?;
     Ok(())

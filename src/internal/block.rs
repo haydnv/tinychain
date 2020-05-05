@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -72,11 +72,7 @@ impl Store {
         self.block_size
     }
 
-    pub fn reserve<E: Into<error::TCError>, T: TryInto<TCPath, Error = E>>(
-        self: &Arc<Self>,
-        path: T,
-    ) -> TCResult<Arc<Store>> {
-        let path: TCPath = path.try_into().map_err(|e| e.into())?;
+    pub fn reserve(self: &Arc<Self>, path: TCPath) -> TCResult<Arc<Store>> {
         if path.is_empty() {
             return Err(error::internal("Tried to create block store with no name"));
         }

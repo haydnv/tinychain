@@ -78,7 +78,7 @@ impl SchemaHistory {
         txn_cache.insert(txn.id(), schema);
 
         let schema_history = Arc::new(SchemaHistory {
-            chain: Chain::new(txn.context().reserve("schema")?),
+            chain: Chain::new(txn.context().reserve("schema".parse()?)?),
             txn_cache,
         });
         txn.mutate(schema_history.clone());
@@ -119,7 +119,7 @@ impl File for SchemaHistory {
 
     async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
         copier.write_file(
-            "schema".try_into().unwrap(),
+            "schema".parse().unwrap(),
             Box::new(self.chain.stream_bytes::<Schema>(Some(txn_id)).boxed()),
         );
     }

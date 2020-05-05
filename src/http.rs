@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::{Infallible, TryInto};
+use std::convert::Infallible;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use hyper::service::{make_service_fn, service_fn};
@@ -57,7 +58,7 @@ async fn route(
     params: HashMap<String, String>,
     body: Vec<u8>,
 ) -> TCResult<Vec<u8>> {
-    let path: TCPath = path.try_into()?;
+    let path: TCPath = path.parse()?;
 
     match method {
         Method::GET => match get(host, &path, &params).await? {
@@ -70,7 +71,7 @@ async fn route(
         Method::POST => {
             let capture: HashSet<ValueId> = if let Some(c) = params.get("capture") {
                 c.split(',')
-                    .map(|s| s.try_into())
+                    .map(ValueId::from_str)
                     .collect::<TCResult<HashSet<ValueId>>>()
             } else {
                 Ok(HashSet::new())

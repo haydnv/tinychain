@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
@@ -59,8 +59,7 @@ impl Ord for TransactionId {
 
 impl Into<PathSegment> for TransactionId {
     fn into(self) -> PathSegment {
-        let s: String = self.into();
-        s.try_into().unwrap()
+        self.to_string().parse().unwrap()
     }
 }
 
@@ -146,7 +145,7 @@ impl Transaction {
     pub fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
-        let context = root.reserve(context)?;
+        let context = root.reserve(context.into())?;
 
         println!();
         println!("Transaction::new");
@@ -164,11 +163,11 @@ impl Transaction {
     pub fn of(host: Arc<Host>, root: Arc<Store>, op: Op) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
-        let context = root.reserve(context)?;
+        let context = root.reserve(context.into())?;
 
         let mut state: HashMap<ValueId, State> = HashMap::new();
         let queue: Deque<(ValueId, Op)> = Deque::new();
-        calc_deps(ValueId::try_from("_")?, op, &mut state, &queue)?;
+        calc_deps("_".parse()?, op, &mut state, &queue)?;
 
         println!();
         println!("Transaction::of");
@@ -260,7 +259,7 @@ impl Transaction {
                     }
 
                     let subcontext: PathSegment = value_id.clone().try_into()?;
-                    let txn = self.extend(self.context.reserve(subcontext)?, deps);
+                    let txn = self.extend(self.context.reserve(subcontext.into())?, deps);
                     match subject {
                         Some(r) => {
                             let subject = self.resolve(&r.value_id())?;

@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::str::FromStr;
 
 use regex::Regex;
 use serde::de;
@@ -81,7 +82,7 @@ impl<'de> serde::Deserialize<'de> for ValueId {
         D: de::Deserializer<'de>,
     {
         let s: &str = de::Deserialize::deserialize(deserializer)?;
-        s.try_into().map_err(de::Error::custom)
+        s.parse().map_err(de::Error::custom)
     }
 }
 
@@ -100,21 +101,12 @@ impl PartialEq<&str> for ValueId {
     }
 }
 
-impl TryFrom<&str> for ValueId {
-    type Error = error::TCError;
+impl FromStr for ValueId {
+    type Err = error::TCError;
 
-    fn try_from(id: &str) -> TCResult<ValueId> {
+    fn from_str(id: &str) -> TCResult<ValueId> {
         validate_id(id)?;
         Ok(ValueId { id: id.to_string() })
-    }
-}
-
-impl TryFrom<String> for ValueId {
-    type Error = error::TCError;
-
-    fn try_from(id: String) -> TCResult<ValueId> {
-        validate_id(&id)?;
-        Ok(ValueId { id })
     }
 }
 
@@ -320,7 +312,7 @@ impl TryFrom<TCValue> for ValueId {
 
     fn try_from(v: TCValue) -> TCResult<ValueId> {
         let s: String = v.try_into()?;
-        s.try_into()
+        s.parse()
     }
 }
 
@@ -377,7 +369,7 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
             if key.starts_with('/') {
                 let value = access.next_value::<Vec<TCValue>>()?;
 
-                let path = TCPath::try_from(key).map_err(de::Error::custom)?;
+                let path: TCPath = key.parse().map_err(de::Error::custom)?;
 
                 if value.is_empty() {
                     Ok(path.into())
@@ -394,10 +386,10 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
             } else if key.starts_with('$') {
                 if key.contains('/') {
                     let key: Vec<&str> = key.split('/').collect();
-                    let subject: TCRef = key[0][1..].try_into().map_err(de::Error::custom)?;
+                    let subject: TCRef = key[0][1..].parse().map_err(de::Error::custom)?;
                     let method: TCPath = key[1..]
                         .iter()
-                        .map(|s| PathSegment::try_from(*s))
+                        .map(|s| s.parse())
                         .collect::<TCResult<Vec<PathSegment>>>()
                         .map_err(de::Error::custom)?
                         .into();
@@ -405,7 +397,7 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
 
                     Ok(Op::post(subject.into(), method, requires).into())
                 } else {
-                    let subject: TCRef = key[1..].try_into().map_err(de::Error::custom)?;
+                    let subject: TCRef = key[1..].parse().map_err(de::Error::custom)?;
                     let value = access.next_value::<Vec<TCValue>>()?;
 
                     if value.is_empty() {

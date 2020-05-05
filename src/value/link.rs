@@ -1,6 +1,6 @@
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use serde::de;
 use serde::ser::Serializer;
@@ -129,10 +129,10 @@ impl From<TCPath> for PathBuf {
     }
 }
 
-impl TryFrom<&str> for TCPath {
-    type Error = error::TCError;
+impl FromStr for TCPath {
+    type Err = error::TCError;
 
-    fn try_from(to: &str) -> TCResult<TCPath> {
+    fn from_str(to: &str) -> TCResult<TCPath> {
         if to == "/" {
             Ok(TCPath { segments: vec![] })
         } else if to.ends_with('/') {
@@ -144,22 +144,14 @@ impl TryFrom<&str> for TCPath {
                 segments: segments
                     .iter()
                     .cloned()
-                    .map(PathSegment::try_from)
+                    .map(PathSegment::from_str)
                     .collect::<TCResult<Vec<PathSegment>>>()?,
             })
         } else {
             Ok(TCPath {
-                segments: vec![to.try_into()?],
+                segments: vec![to.parse()?],
             })
         }
-    }
-}
-
-impl TryFrom<String> for TCPath {
-    type Error = error::TCError;
-
-    fn try_from(s: String) -> TCResult<TCPath> {
-        TCPath::try_from(s.as_str())
     }
 }
 
@@ -169,7 +161,7 @@ impl<'de> serde::Deserialize<'de> for TCPath {
         D: de::Deserializer<'de>,
     {
         let s: &str = de::Deserialize::deserialize(deserializer)?;
-        s.try_into().map_err(de::Error::custom)
+        s.parse().map_err(de::Error::custom)
     }
 }
 
@@ -178,6 +170,6 @@ impl serde::Serialize for TCPath {
     where
         S: Serializer,
     {
-        s.serialize_str(&format!("{}", self))
+        s.serialize_str(&self.to_string())
     }
 }

@@ -1,5 +1,5 @@
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::str::FromStr;
 
 use serde::de;
 use serde::ser::Serializer;
@@ -31,11 +31,11 @@ impl From<ValueId> for TCRef {
     }
 }
 
-impl TryFrom<&str> for TCRef {
-    type Error = error::TCError;
+impl FromStr for TCRef {
+    type Err = error::TCError;
 
-    fn try_from(to: &str) -> TCResult<TCRef> {
-        Ok(TCRef { to: to.try_into()? })
+    fn from_str(to: &str) -> TCResult<TCRef> {
+        Ok(TCRef { to: to.parse()? })
     }
 }
 
@@ -58,7 +58,7 @@ impl<'de> de::Visitor<'de> for RefVisitor {
                 value
             )))
         } else {
-            value[1..].try_into().map_err(de::Error::custom)
+            value[1..].parse().map_err(de::Error::custom)
         }
     }
 }

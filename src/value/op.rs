@@ -1,4 +1,3 @@
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use serde::de::{Deserializer, Error, MapAccess, Visitor};
@@ -133,10 +132,10 @@ impl<'de> Visitor<'de> for OpVisitor {
         if let Some(key) = access.next_key::<String>()? {
             if key.contains('/') {
                 let key: Vec<&str> = key.split('/').collect();
-                let subject: TCRef = key[0][1..].try_into().map_err(Error::custom)?;
+                let subject: TCRef = key[0][1..].parse().map_err(Error::custom)?;
                 let method: TCPath = key[1..]
                     .iter()
-                    .map(|s| PathSegment::try_from(*s))
+                    .map(|s| s.parse())
                     .collect::<TCResult<Vec<PathSegment>>>()
                     .map_err(Error::custom)?
                     .into();
@@ -144,7 +143,7 @@ impl<'de> Visitor<'de> for OpVisitor {
 
                 Ok(Op::post(subject.into(), method, requires))
             } else {
-                let subject: TCRef = key[1..].try_into().map_err(Error::custom)?;
+                let subject: TCRef = key[1..].parse().map_err(Error::custom)?;
                 let value = access.next_value::<Vec<TCValue>>()?;
 
                 if value.len() == 1 {

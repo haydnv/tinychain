@@ -47,7 +47,7 @@ impl Directory {
     pub fn new(context: Arc<Store>) -> TCResult<Arc<Directory>> {
         Ok(Arc::new(Directory {
             context: context.clone(),
-            chain: Chain::new(context.reserve("/contents")?),
+            chain: Chain::new(context.reserve("contents".parse()?)?),
             txn_cache: TransactionCache::new(),
         }))
     }
@@ -114,7 +114,7 @@ impl Collection for Directory {
         println!("Directory::put {}", path);
         let path: PathSegment = path.try_into()?;
 
-        let context = self.context.reserve(path.clone())?;
+        let context = self.context.reserve(path.clone().into())?;
         let entry = match state {
             State::Graph(g) => (EntryType::Graph, EntryState::Graph(context, g)),
             State::Table(t) => (EntryType::Table, EntryState::Table(context, t)),

@@ -171,7 +171,7 @@ impl File for Table {
 
         let schema = self.schema.at(&txn_id).await;
         println!("got current schema");
-        let version: PathSegment = schema.version.to_string().try_into().unwrap();
+        let version: PathSegment = schema.version.to_string().parse().unwrap();
         writer.write_file(
             version.try_into().unwrap(),
             Box::new(self.chain.stream_bytes::<Row>(Some(txn_id)).boxed()),
@@ -199,16 +199,9 @@ impl File for Table {
 
     async fn from_store(store: Arc<Store>) -> Arc<Table> {
         let schema =
-            SchemaHistory::from_store(store.get_store(&"schema".try_into().unwrap()).unwrap())
-                .await;
+            SchemaHistory::from_store(store.get_store(&"schema".parse().unwrap()).unwrap()).await;
 
-        let chain_path: PathSegment = schema
-            .latest()
-            .await
-            .version
-            .to_string()
-            .try_into()
-            .unwrap();
+        let chain_path: PathSegment = schema.latest().await.version.to_string().parse().unwrap();
         let chain = Chain::from_store(store.get_store(&chain_path.try_into().unwrap()).unwrap())
             .await
             .unwrap();
@@ -226,7 +219,7 @@ impl Persistent for Table {
     type Config = Schema;
 
     async fn create(txn: Arc<Transaction>, schema: Schema) -> TCResult<Arc<Table>> {
-        let table_chain = Chain::new(txn.context().reserve(schema.version.to_string())?);
+        let table_chain = Chain::new(txn.context().reserve(schema.version.to_string().parse()?)?);
         let schema_history = SchemaHistory::new(&txn, schema)?;
 
         Ok(Arc::new(Table {
