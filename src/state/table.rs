@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{self, try_join_all, Future};
+use futures::future::{self, try_join_all};
 use futures::StreamExt;
 
 use crate::error;
