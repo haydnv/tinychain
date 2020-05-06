@@ -1,6 +1,5 @@
-use std::collections::{HashMap, HashSet};
-use std::convert::Infallible;
-use std::str::FromStr;
+use std::collections::HashMap;
+use std::convert::{Infallible, TryInto};
 use std::sync::Arc;
 
 use hyper::service::{make_service_fn, service_fn};
@@ -69,15 +68,8 @@ async fn route(
             )),
         },
         Method::POST => {
-            let capture: HashSet<ValueId> = if let Some(c) = params.get("capture") {
-                c.split(',')
-                    .map(ValueId::from_str)
-                    .collect::<TCResult<HashSet<ValueId>>>()
-            } else {
-                Ok(HashSet::new())
-            }?;
-            let values = match serde_json::from_slice::<Vec<(ValueId, TCValue)>>(&body) {
-                Ok(graph) => graph,
+            let mut params: HashMap<ValueId, TCValue> = match serde_json::from_slice(&body) {
+                Ok(params) => params,
                 Err(cause) => {
                     let body = line_numbers(std::str::from_utf8(&body).unwrap());
                     return Err(error::bad_request(
@@ -87,9 +79,20 @@ async fn route(
                 }
             };
 
-            let txn = host.clone().transact(Op::post(None, path, values))?;
+            let capture: Vec<ValueId> = params
+                .remove(&"capture".parse()?)
+                .unwrap_or_else(|| TCValue::Vector(vec![]))
+                .try_into()?;
+            let values: Vec<(ValueId, TCValue)> = params
+                .remove(&"values".parse()?)
+                .unwrap_or_else(|| TCValue::Vector(vec![]))
+                .try_into()?;
+            let txn = host
+                .clone()
+                .transact(Op::post(None, TCPath::default(), values))?;
+
             let mut results: HashMap<ValueId, TCValue> = HashMap::new();
-            match txn.execute(capture).await {
+            match txn.execute(capture.into_iter().collect()).await {
                 Ok(responses) => {
                     for (id, r) in responses {
                         match r {

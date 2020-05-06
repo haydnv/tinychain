@@ -91,7 +91,7 @@ impl FromStr for Link {
                 .collect::<TCResult<Vec<PathSegment>>>()?
                 .try_into()?
         } else {
-            TCPath::new()
+            TCPath::default()
         };
 
         Ok(Link {
@@ -103,7 +103,7 @@ impl FromStr for Link {
     }
 }
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct TCPath {
     segments: Vec<PathSegment>,
 }
@@ -139,12 +139,6 @@ impl TCPath {
 
     pub fn push(&mut self, segment: PathSegment) {
         self.segments.push(segment)
-    }
-}
-
-impl TCPath {
-    fn new() -> TCPath {
-        TCPath { segments: vec![] }
     }
 }
 

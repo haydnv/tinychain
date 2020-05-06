@@ -265,21 +265,6 @@ impl<
     }
 }
 
-impl<
-        E1: fmt::Display,
-        E2: fmt::Display,
-        T1: TryFrom<TCValue, Error = E1>,
-        T2: TryFrom<TCValue, Error = E2>,
-    > TryFrom<TCValue> for Vec<(T1, T2)>
-{
-    type Error = error::TCError;
-
-    fn try_from(value: TCValue) -> TCResult<Vec<(T1, T2)>> {
-        let v: Vec<TCValue> = value.try_into()?;
-        v.iter().cloned().map(|i| i.try_into()).collect()
-    }
-}
-
 impl TryFrom<TCValue> for Vec<TCValue> {
     type Error = error::TCError;
 
@@ -314,6 +299,15 @@ impl TryFrom<TCValue> for ValueId {
     fn try_from(v: TCValue) -> TCResult<ValueId> {
         let s: String = v.try_into()?;
         s.parse()
+    }
+}
+
+impl<T: TryFrom<TCValue, Error = error::TCError>> TryFrom<TCValue> for Vec<T> {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<Vec<T>> {
+        let items: Vec<TCValue> = v.try_into()?;
+        items.iter().cloned().map(|i| i.try_into()).collect()
     }
 }
 
