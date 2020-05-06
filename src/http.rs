@@ -39,15 +39,16 @@ pub async fn listen(
     Ok(())
 }
 
-async fn get(host: Arc<Host>, path: &TCPath, params: &HashMap<String, String>) -> TCResult<State> {
-    let key = if let Some(key) = params.get("key") {
-        serde_json::from_str::<TCValue>(key)
-            .map_err(|e| error::bad_request("Unable to parse 'key' param", e))?
-    } else {
-        TCValue::None
-    };
-
+async fn get(host: Arc<Host>, path: &TCPath, key: TCValue) -> TCResult<State> {
     host.get(host.new_transaction()?, path, key).await
+}
+
+async fn post(
+    _host: Arc<Host>,
+    _path: &TCPath,
+    mut _params: HashMap<ValueId, TCValue>,
+) -> TCResult<State> {
+    Err(error::not_implemented())
 }
 
 async fn route(
@@ -60,13 +61,22 @@ async fn route(
     let path: TCPath = path.parse()?;
 
     match method {
-        Method::GET => match get(host, &path, &params).await? {
-            State::Value(val) => Ok(serde_json::to_string_pretty(&val)?.as_bytes().to_vec()),
-            state => Err(error::bad_request(
-                "Attempt to GET unserializable state {}",
-                state,
-            )),
-        },
+        Method::GET => {
+            let key = if let Some(key) = params.get("key") {
+                serde_json::from_str::<TCValue>(key)
+                    .map_err(|e| error::bad_request("Unable to parse 'key' param", e))?
+            } else {
+                TCValue::None
+            };
+
+            match get(host, &path, key).await? {
+                State::Value(val) => Ok(serde_json::to_string_pretty(&val)?.as_bytes().to_vec()),
+                state => Err(error::bad_request(
+                    "Attempt to GET unserializable state {}",
+                    state,
+                )),
+            }
+        }
         Method::POST => {
             let mut params: HashMap<ValueId, TCValue> = match serde_json::from_slice(&body) {
                 Ok(params) => params,
