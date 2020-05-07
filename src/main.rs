@@ -7,6 +7,7 @@ mod error;
 mod host;
 mod http;
 mod internal;
+mod object;
 mod state;
 mod transaction;
 mod value;
