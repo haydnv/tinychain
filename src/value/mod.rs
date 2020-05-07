@@ -301,7 +301,7 @@ impl<T: TryFrom<TCValue, Error = error::TCError>> TryFrom<TCValue> for Vec<T> {
 
     fn try_from(v: TCValue) -> TCResult<Vec<T>> {
         let items: Vec<TCValue> = v.try_into()?;
-        items.iter().cloned().map(|i| i.try_into()).collect()
+        items.into_iter().map(|i| i.try_into()).collect()
     }
 }
 

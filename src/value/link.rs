@@ -295,15 +295,13 @@ impl FromStr for TCPath {
         } else if to.ends_with('/') {
             Err(error::bad_request("Path cannot end with a slash", to))
         } else if to.starts_with('/') {
-            let segments: Vec<&str> = to.split('/').collect();
-            let segments = &segments[1..];
-            Ok(TCPath {
-                segments: segments
-                    .iter()
-                    .cloned()
-                    .map(PathSegment::from_str)
-                    .collect::<TCResult<Vec<PathSegment>>>()?,
-            })
+            let mut segments: Vec<&str> = to.split('/').collect();
+            segments.remove(0);
+            let segments = segments
+                .into_iter()
+                .map(PathSegment::from_str)
+                .collect::<TCResult<Vec<PathSegment>>>()?;
+            Ok(TCPath { segments })
         } else {
             Ok(TCPath {
                 segments: vec![to.parse()?],

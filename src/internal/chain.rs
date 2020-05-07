@@ -254,9 +254,8 @@ impl Chain {
             .map(move |(checksum, records)| {
                 let records = if let Some(txn_id) = &txn_id_clone {
                     records
-                        .iter()
+                        .into_iter()
                         .filter(|(time, _)| time <= txn_id)
-                        .cloned()
                         .collect()
                 } else {
                     records
@@ -297,8 +296,7 @@ impl Chain {
                 println!("stream_into read block");
                 let mutations: Vec<T> = block
                     .records
-                    .iter()
-                    .cloned()
+                    .into_iter()
                     .map(|(_, mutations)| mutations)
                     .flatten()
                     .collect();
