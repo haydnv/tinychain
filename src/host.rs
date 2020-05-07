@@ -80,10 +80,13 @@ impl Host {
             return Err(error::method_not_allowed(path));
         }
 
-        if path[0] == "sbin" {
+        if path[0] == "sbin" && path.len() > 2 {
             match path[1].as_str() {
-                "table" => Ok(Table::create(txn.clone(), key.try_into()?).await?.into()),
-                "value" if path.len() > 2 => match path[2].as_str() {
+                "state" => match path[2].as_str() {
+                    "table" => Ok(Table::create(txn.clone(), key.try_into()?).await?.into()),
+                    _ => Err(error::not_found(path)),
+                },
+                "value" => match path[2].as_str() {
                     "string" => {
                         let s: String = key.try_into()?;
                         Ok(State::Value(s.into()))
