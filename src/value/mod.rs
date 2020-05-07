@@ -2,9 +2,10 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::str::FromStr;
 
+use bytes::Bytes;
 use regex::Regex;
 use serde::de;
-use serde::ser::{Serialize, SerializeSeq, Serializer};
+use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::error;
 use crate::state::State;
@@ -140,6 +141,7 @@ impl From<&ValueId> for String {
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub enum TCValue {
     None,
+    Bytes(Bytes),
     Int32(i32),
     Op(Op),
     Path(TCPath),
@@ -151,6 +153,18 @@ pub enum TCValue {
 impl From<()> for TCValue {
     fn from(_: ()) -> TCValue {
         TCValue::None
+    }
+}
+
+impl From<&'static [u8]> for TCValue {
+    fn from(b: &'static [u8]) -> TCValue {
+        TCValue::Bytes(Bytes::from(b))
+    }
+}
+
+impl From<Bytes> for TCValue {
+    fn from(b: Bytes) -> TCValue {
+        TCValue::Bytes(b)
     }
 }
 
@@ -187,6 +201,12 @@ impl From<String> for TCValue {
     }
 }
 
+impl From<Vec<u8>> for TCValue {
+    fn from(v: Vec<u8>) -> TCValue {
+        TCValue::Bytes(Bytes::copy_from_slice(&v[..]))
+    }
+}
+
 impl<T: Into<TCValue>> From<Vec<T>> for TCValue {
     fn from(v: Vec<T>) -> TCValue {
         TCValue::Vector(v.into_iter().map(|i| i.into()).collect())
@@ -196,6 +216,17 @@ impl<T: Into<TCValue>> From<Vec<T>> for TCValue {
 impl<T1: Into<TCValue>, T2: Into<TCValue>> From<(T1, T2)> for TCValue {
     fn from(tuple: (T1, T2)) -> TCValue {
         TCValue::Vector(vec![tuple.0.into(), tuple.1.into()])
+    }
+}
+
+impl TryFrom<TCValue> for Bytes {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<Bytes> {
+        match v {
+            TCValue::Bytes(b) => Ok(b),
+            other => Err(error::bad_request("Expected Bytes but found", other)),
+        }
     }
 }
 
@@ -393,9 +424,14 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                         )))
                     }
                 }
+            } else if key == "Bytes" {
+                let value: &str = access.next_value()?;
+                let value: Vec<u8> = base64::decode(value)
+                    .map_err(|e| de::Error::custom(format!("Invalid base64 string: {}", e)))?;
+                Ok(value.into())
             } else {
                 Err(de::Error::custom(format!(
-                    "Expected a Link starting with '/' or a Ref starting with '$', found {}",
+                    "Unable to determine data type of {}",
                     key
                 )))
             }
@@ -434,6 +470,11 @@ impl Serialize for TCValue {
     {
         match self {
             TCValue::None => s.serialize_none(),
+            TCValue::Bytes(b) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry("Bytes", &base64::encode(b))?;
+                map.end()
+            }
             TCValue::Int32(i) => s.serialize_i32(*i),
             TCValue::Op(o) => o.serialize(s),
             TCValue::Path(p) => p.serialize(s),
@@ -460,6 +501,7 @@ impl fmt::Display for TCValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             TCValue::None => write!(f, "None"),
+            TCValue::Bytes(b) => write!(f, "binary data: {} bytes", b.len()),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Op(o) => write!(f, "Op: {}", o),
             TCValue::Path(p) => write!(f, "Path: {}", p),

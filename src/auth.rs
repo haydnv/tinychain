@@ -1,18 +1,20 @@
 use std::convert::{TryFrom, TryInto};
 
+use bytes::Bytes;
+
 use crate::error;
 use crate::value::{TCResult, TCValue};
 
 pub struct Actor {
-    private_key: String,
-    public_key: String,
+    private_key: Bytes,
+    public_key: Bytes,
 }
 
 impl Actor {
     pub fn new() -> Actor {
         Actor {
-            private_key: String::new(), // TODO
-            public_key: String::new(),  // TODO
+            private_key: Bytes::new(), // TODO
+            public_key: Bytes::new(),  // TODO
         }
     }
 }
@@ -27,7 +29,7 @@ impl TryFrom<TCValue> for Actor {
     type Error = error::TCError;
 
     fn try_from(value: TCValue) -> TCResult<Actor> {
-        let mut value: Vec<String> = value.try_into()?;
+        let mut value: Vec<Bytes> = value.try_into()?;
         if value.len() == 2 {
             Ok(Actor {
                 private_key: value.remove(0),
