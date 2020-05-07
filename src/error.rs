@@ -6,6 +6,9 @@ pub enum Code {
     // "I know that what you're asking for doesn't make sense"
     BadRequest,
 
+    // "I know who you are and you're not allowed to do this!"
+    Forbidden,
+
     // "Something that really should have worked didn't work--you should file a bug report"
     #[allow(dead_code)]
     Internal,
@@ -19,16 +22,21 @@ pub enum Code {
     // "This is marked for implementation in the future"
     #[allow(dead_code)]
     NotImplemented,
+
+    // "This resource requires authorization but your credentials are absent or nonsensical"
+    Unauthorized,
 }
 
 impl fmt::Display for Code {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Code::BadRequest => write!(f, "Bad request"),
+            Code::Forbidden => write!(f, "Forbidden"),
             Code::Internal => write!(f, "Internal server error"),
             Code::MethodNotAllowed => write!(f, "Method not allowed"),
             Code::NotFound => write!(f, "Not found"),
             Code::NotImplemented => write!(f, "Not implemented"),
+            Code::Unauthorized => write!(f, "Unauthorized"),
         }
     }
 }
@@ -83,6 +91,10 @@ pub fn bad_request<T: fmt::Display>(message: &str, info: T) -> TCError {
     TCError::of(Code::BadRequest, format!("{}: {}", message, info))
 }
 
+pub fn forbidden(message: String) -> TCError {
+    TCError::of(Code::Forbidden, message)
+}
+
 pub fn internal<T: fmt::Display>(cause: T) -> TCError {
     TCError::of(Code::Internal, format!("{}", cause))
 }
@@ -105,6 +117,10 @@ pub fn not_found<T: fmt::Display>(id: T) -> TCError {
 pub fn not_implemented() -> TCError {
     TCError::of(
         Code::NotImplemented,
-        "This functionality is not yet implemented".to_string(),
+        "This functionality is not yet implemented".into(),
     )
+}
+
+pub fn unauthorized(message: &str) -> TCError {
+    TCError::of(Code::Unauthorized, message.into())
 }
