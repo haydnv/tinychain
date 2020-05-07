@@ -196,15 +196,9 @@ impl From<String> for TCValue {
     }
 }
 
-impl From<Vec<TCValue>> for TCValue {
-    fn from(v: Vec<TCValue>) -> TCValue {
-        TCValue::Vector(v)
-    }
-}
-
-impl From<Vec<Option<TCValue>>> for TCValue {
-    fn from(v: Vec<Option<TCValue>>) -> TCValue {
-        TCValue::Vector(v.iter().map(|v| v.into()).collect())
+impl<T: Into<TCValue>> From<Vec<T>> for TCValue {
+    fn from(v: Vec<T>) -> TCValue {
+        TCValue::Vector(v.into_iter().map(|i| i.into()).collect())
     }
 }
 
