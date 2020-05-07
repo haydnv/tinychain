@@ -1,9 +1,11 @@
 use std::convert::{TryFrom, TryInto};
 
 use bytes::Bytes;
+use ed25519_dalek::Keypair;
+use rand::rngs::OsRng;
 
 use crate::error;
-use crate::value::{TCResult, TCValue};
+use crate::value::{Link, TCResult, TCValue};
 
 pub struct Actor {
     private_key: Bytes,
@@ -12,9 +14,12 @@ pub struct Actor {
 
 impl Actor {
     pub fn new() -> Actor {
+        let mut rng = OsRng {};
+        let keypair: Keypair = Keypair::generate(&mut rng);
+
         Actor {
-            private_key: Bytes::new(), // TODO
-            public_key: Bytes::new(),  // TODO
+            private_key: Bytes::copy_from_slice(&keypair.secret.to_bytes()[..]),
+            public_key: Bytes::copy_from_slice(&keypair.public.to_bytes()[..]),
         }
     }
 }
@@ -38,6 +43,32 @@ impl TryFrom<TCValue> for Actor {
         } else {
             let value: TCValue = value.into();
             Err(error::bad_request("Expected Actor, found", value))
+        }
+    }
+}
+
+struct TokenHeader {
+    alg: String,
+    typ: String,
+}
+
+struct TokenClaims {
+    iss: Link,
+}
+
+pub struct Token {
+    header: TokenHeader,
+    claims: TokenClaims,
+}
+
+impl Token {
+    pub fn new(issuer: Link, _issued_at: u128, _expires: u128) -> Token {
+        Token {
+            header: TokenHeader {
+                alg: "ES256".into(),
+                typ: "JWT".into(),
+            },
+            claims: TokenClaims { iss: issuer },
         }
     }
 }
