@@ -15,6 +15,24 @@ use crate::value::{Op, TCPath, TCResult, TCValue, ValueId};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 
+pub struct NetworkTime {
+    nanos: u128,
+}
+
+impl NetworkTime {
+    pub fn as_millis(&self) -> u64 {
+        (self.nanos / 1_000_000).try_into().unwrap()
+    }
+
+    pub fn as_nanos(&self) -> u128 {
+        self.nanos
+    }
+
+    pub fn from_nanos(nanos: u128) -> NetworkTime {
+        NetworkTime { nanos }
+    }
+}
+
 pub struct Host {
     data_dir: Arc<Store>,
     workspace: Arc<Store>,
@@ -55,11 +73,13 @@ impl Host {
         Ok(host)
     }
 
-    pub fn time(&self) -> u128 {
-        time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+    pub fn time(&self) -> NetworkTime {
+        NetworkTime::from_nanos(
+            time::SystemTime::now()
+                .duration_since(time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        )
     }
 
     pub fn new_transaction(self: &Arc<Self>) -> TCResult<Arc<Transaction>> {

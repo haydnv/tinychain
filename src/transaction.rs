@@ -9,7 +9,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
-use crate::host::Host;
+use crate::host::{Host, NetworkTime};
 use crate::internal::block::Store;
 use crate::internal::cache::{Deque, Map};
 use crate::state::{State, Transact};
@@ -22,9 +22,11 @@ pub struct TransactionId {
 }
 
 impl TransactionId {
-    fn new(timestamp: u128) -> TransactionId {
-        let nonce: u16 = rand::thread_rng().gen();
-        TransactionId { timestamp, nonce }
+    fn new(time: NetworkTime) -> TransactionId {
+        TransactionId {
+            timestamp: time.as_nanos(),
+            nonce: rand::thread_rng().gen(),
+        }
     }
 }
 

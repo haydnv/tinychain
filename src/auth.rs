@@ -5,6 +5,7 @@ use ed25519_dalek::Keypair;
 use rand::rngs::OsRng;
 
 use crate::error;
+use crate::host::NetworkTime;
 use crate::value::{Link, TCResult, TCValue};
 
 pub struct Actor {
@@ -54,6 +55,8 @@ struct TokenHeader {
 
 struct TokenClaims {
     iss: Link,
+    iat: u64,
+    exp: u64,
 }
 
 pub struct Token {
@@ -62,13 +65,17 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(issuer: Link, _issued_at: u128, _expires: u128) -> Token {
+    pub fn new(issuer: Link, issued_at: NetworkTime, expires: NetworkTime) -> Token {
         Token {
             header: TokenHeader {
                 alg: "ES256".into(),
                 typ: "JWT".into(),
             },
-            claims: TokenClaims { iss: issuer },
+            claims: TokenClaims {
+                iss: issuer,
+                iat: issued_at.as_millis(),
+                exp: expires.as_millis(),
+            },
         }
     }
 }
