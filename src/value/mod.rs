@@ -208,9 +208,9 @@ impl From<Vec<Option<TCValue>>> for TCValue {
     }
 }
 
-impl From<(TCValue, TCValue)> for TCValue {
-    fn from(tuple: (TCValue, TCValue)) -> TCValue {
-        TCValue::Vector(vec![tuple.0, tuple.1])
+impl<T1: Into<TCValue>, T2: Into<TCValue>> From<(T1, T2)> for TCValue {
+    fn from(tuple: (T1, T2)) -> TCValue {
+        TCValue::Vector(vec![tuple.0.into(), tuple.1.into()])
     }
 }
 

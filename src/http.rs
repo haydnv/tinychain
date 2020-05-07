@@ -8,7 +8,10 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use crate::error;
 use crate::host::Host;
 use crate::state::State;
-use crate::value::{Op, TCPath, TCResult, TCValue, ValueId};
+use crate::value::{Op, TCPath, TCRef, TCResult, TCValue, ValueId};
+
+const UNSERIALIZABLE: &str =
+    "The request completed successfully but some of the response could not be serialized";
 
 fn line_numbers(s: &str) -> String {
     s.lines()
@@ -48,8 +51,44 @@ async fn post(
     path: &TCPath,
     mut params: HashMap<ValueId, TCValue>,
 ) -> TCResult<State> {
-    if path == "/sbin/transact/execute" {
-        Err(error::not_implemented())
+    if path == "/sbin/transact" {
+        let capture: Vec<ValueId> = params
+            .remove(&"capture".parse()?)
+            .unwrap_or_else(|| TCValue::Vector(vec![]))
+            .try_into()?;
+        let values: Vec<(ValueId, TCValue)> = params
+            .remove(&"values".parse()?)
+            .unwrap_or_else(|| TCValue::Vector(vec![]))
+            .try_into()?;
+        let txn = host
+            .clone()
+            .transact(Op::post(None, TCPath::default(), values))?;
+
+        let mut results: Vec<TCValue> = Vec::with_capacity(capture.len());
+        match txn.execute(capture.into_iter().collect()).await {
+            Ok(responses) => {
+                for (id, r) in responses {
+                    match r {
+                        State::Value(val) => {
+                            results.push((TCRef::from(id), val).into());
+                        }
+                        other => {
+                            return Err(error::bad_request(
+                                "Attempt to capture an unserializable value",
+                                other,
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(cause) => {
+                return Err(cause);
+            }
+        };
+
+        txn.commit().await;
+
+        Ok(State::Value(results.into()))
     } else {
         host.post(host.new_transaction()?, path, params).await
     }
@@ -82,7 +121,7 @@ async fn route(
             }
         }
         Method::POST => {
-            let mut params: HashMap<ValueId, TCValue> = match serde_json::from_slice(&body) {
+            let params: HashMap<ValueId, TCValue> = match serde_json::from_slice(&body) {
                 Ok(params) => params,
                 Err(cause) => {
                     let body = line_numbers(std::str::from_utf8(&body).unwrap());
@@ -93,48 +132,12 @@ async fn route(
                 }
             };
 
-            let capture: Vec<ValueId> = params
-                .remove(&"capture".parse()?)
-                .unwrap_or_else(|| TCValue::Vector(vec![]))
-                .try_into()?;
-            let values: Vec<(ValueId, TCValue)> = params
-                .remove(&"values".parse()?)
-                .unwrap_or_else(|| TCValue::Vector(vec![]))
-                .try_into()?;
-            let txn = host
-                .clone()
-                .transact(Op::post(None, TCPath::default(), values))?;
-
-            let mut results: HashMap<ValueId, TCValue> = HashMap::new();
-            match txn.execute(capture.into_iter().collect()).await {
-                Ok(responses) => {
-                    for (id, r) in responses {
-                        match r {
-                            State::Value(val) => {
-                                results.insert(id, val.clone());
-                            }
-                            other => {
-                                return Err(error::bad_request(
-                                    "Attempt to capture an unserializable value",
-                                    other,
-                                ));
-                            }
-                        }
-                    }
-                }
-                Err(cause) => {
-                    return Err(cause);
-                }
-            };
-
-            txn.commit().await;
-
-            serde_json::to_string_pretty(&results)
-                .and_then(|s| Ok(s.into_bytes()))
-                .or_else(|e| {
-                    let msg = "Your request completed successfully but there was an error serializing the response";
-                    Err(error::bad_request(msg, e))
-                })
+            match post(host, &path, params).await? {
+                State::Value(v) => serde_json::to_string_pretty(&v)
+                    .and_then(|s| Ok(s.into_bytes()))
+                    .or_else(|e| Err(error::bad_request(UNSERIALIZABLE, e))),
+                other => Err(error::bad_request(UNSERIALIZABLE, other)),
+            }
         }
         _ => Err(error::not_found(path)),
     }
