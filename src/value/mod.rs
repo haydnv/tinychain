@@ -175,15 +175,6 @@ impl From<Option<TCValue>> for TCValue {
     }
 }
 
-impl From<&Option<TCValue>> for TCValue {
-    fn from(opt: &Option<TCValue>) -> TCValue {
-        match opt {
-            Some(val) => val.clone(),
-            None => TCValue::None,
-        }
-    }
-}
-
 impl From<TCRef> for TCValue {
     fn from(r: TCRef) -> TCValue {
         TCValue::Ref(r)
@@ -240,13 +231,13 @@ impl<
     type Error = error::TCError;
 
     fn try_from(v: TCValue) -> TCResult<(T1, T2)> {
-        let v: Vec<TCValue> = v.try_into()?;
+        let mut v: Vec<TCValue> = v.try_into()?;
         if v.len() == 2 {
             Ok((
-                v[0].clone()
+                v.remove(0)
                     .try_into()
                     .map_err(|e| error::bad_request("Unable to convert from Value", e))?,
-                v[1].clone()
+                v.remove(0)
                     .try_into()
                     .map_err(|e| error::bad_request("Unable to convert from Value", e))?,
             ))
@@ -356,16 +347,16 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
     {
         if let Some(key) = access.next_key::<&str>()? {
             if key.starts_with('/') {
-                let value = access.next_value::<Vec<TCValue>>()?;
+                let mut value = access.next_value::<Vec<TCValue>>()?;
 
                 let path: TCPath = key.parse().map_err(de::Error::custom)?;
 
                 if value.is_empty() {
                     Ok(path.into())
                 } else if value.len() == 1 {
-                    Ok(Op::get(path.into(), value[0].clone()).into())
+                    Ok(Op::get(path.into(), value.remove(0)).into())
                 } else if value.len() == 2 {
-                    Ok(Op::put(path.into(), value[0].clone(), value[1].clone()).into())
+                    Ok(Op::put(path.into(), value.remove(0), value.remove(0)).into())
                 } else {
                     Err(de::Error::custom(format!(
                         "Expected a list of 0, 1, or 2 values for {}",
@@ -387,14 +378,14 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                     Ok(Op::post(subject.into(), method, requires).into())
                 } else {
                     let subject: TCRef = key[1..].parse().map_err(de::Error::custom)?;
-                    let value = access.next_value::<Vec<TCValue>>()?;
+                    let mut value = access.next_value::<Vec<TCValue>>()?;
 
                     if value.is_empty() {
                         Ok(subject.into())
                     } else if value.len() == 1 {
-                        Ok(Op::get(subject.into(), value[0].clone()).into())
+                        Ok(Op::get(subject.into(), value.remove(0)).into())
                     } else if value.len() == 2 {
-                        Ok(Op::put(subject.into(), value[0].clone(), value[1].clone()).into())
+                        Ok(Op::put(subject.into(), value.remove(0), value.remove(0)).into())
                     } else {
                         Err(de::Error::custom(format!(
                             "Expected a list of 0, 1, or 2 Values for {}",

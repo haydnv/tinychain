@@ -99,7 +99,7 @@ impl Collection for Table {
             update_row(&mut row, values);
         }
 
-        Ok(row.1.iter().map(|v| v.into()).collect())
+        Ok(row.1.into_iter().map(|v| v.into()).collect())
     }
 
     async fn put(

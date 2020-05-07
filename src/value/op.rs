@@ -102,7 +102,7 @@ impl fmt::Display for Op {
                 f,
                 "subject: {}, action: {}, requires: {}",
                 subject
-                    .clone()
+                    .as_ref()
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| String::from("None")),
                 action,
@@ -144,12 +144,12 @@ impl<'de> Visitor<'de> for OpVisitor {
                 Ok(Op::post(subject.into(), method, requires))
             } else {
                 let subject: TCRef = key[1..].parse().map_err(Error::custom)?;
-                let value = access.next_value::<Vec<TCValue>>()?;
+                let mut value = access.next_value::<Vec<TCValue>>()?;
 
                 if value.len() == 1 {
-                    Ok(Op::get(subject.into(), value[0].clone()))
+                    Ok(Op::get(subject.into(), value.remove(0)))
                 } else if value.len() == 2 {
-                    Ok(Op::put(subject.into(), value[0].clone(), value[1].clone()))
+                    Ok(Op::put(subject.into(), value.remove(0), value.remove(0)))
                 } else {
                     Err(Error::custom(format!(
                         "Expected either 1 (for a Get), or 2 (for a Put) Values for {}",
@@ -180,7 +180,8 @@ impl Serialize for Op {
         match self {
             Op::Get { subject, key } => {
                 let mut op = s.serialize_map(Some(1))?;
-                op.serialize_entry(subject, &TCValue::Vector([*key.clone()].to_vec()))?;
+                let key: TCValue = vec![(**key).clone()].into();
+                op.serialize_entry(subject, &key)?;
                 op.end()
             }
             Op::Put {
