@@ -13,7 +13,7 @@ use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
 use crate::state::*;
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{PathSegment, TCPath, TCResult, TCValue};
+use crate::value::{Link, PathSegment, TCPath, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
 enum EntryType {
@@ -26,6 +26,7 @@ enum EntryType {
 pub struct DirEntry {
     name: PathSegment,
     entry_type: EntryType,
+    owner: Option<Link>,
 }
 
 impl Mutation for DirEntry {}
@@ -37,10 +38,12 @@ enum EntryState {
     Graph(Arc<Store>, Arc<Graph>),
 }
 
+type PendingMutation = (EntryType, EntryState, Option<Link>);
+
 pub struct Directory {
     context: Arc<Store>,
     chain: Arc<Chain>,
-    txn_cache: TransactionCache<PathSegment, (EntryType, EntryState)>,
+    txn_cache: TransactionCache<PathSegment, PendingMutation>,
 }
 
 impl Directory {
@@ -69,7 +72,7 @@ impl Collection for Directory {
                 "You must specify a path to look up in a directory",
                 path,
             ));
-        } else if let Some((_, state)) = self.txn_cache.get(&txn.id(), &path[0]) {
+        } else if let Some((_, state, _owner)) = self.txn_cache.get(&txn.id(), &path[0]) {
             return match state {
                 EntryState::Directory(_, dir) => dir.get(txn, &path.slice_from(1)).await,
                 EntryState::Graph(_, graph) => Ok(graph.into()),
@@ -116,8 +119,8 @@ impl Collection for Directory {
 
         let context = self.context.reserve(path.clone().into())?;
         let entry = match state {
-            State::Graph(g) => (EntryType::Graph, EntryState::Graph(context, g)),
-            State::Table(t) => (EntryType::Table, EntryState::Table(context, t)),
+            State::Graph(g) => (EntryType::Graph, EntryState::Graph(context, g), None),
+            State::Table(t) => (EntryType::Table, EntryState::Table(context, t), None),
             State::Value(v) => {
                 return Err(error::bad_request("Expected a persistent state, found", v))
             }
@@ -171,10 +174,11 @@ impl Transact for Directory {
         println!("Directory closed transaction cache for {}", txn_id);
         let mut entries: Vec<DirEntry> = Vec::with_capacity(mutations.len());
         let mut tasks = Vec::with_capacity(mutations.len());
-        for (name, (entry_type, state)) in mutations.iter() {
+        for (name, (entry_type, state, owner)) in mutations.iter() {
             entries.push(DirEntry {
                 name: name.clone(),
                 entry_type: entry_type.clone(),
+                owner: owner.clone(),
             });
             tasks.push(async move {
                 match state {
