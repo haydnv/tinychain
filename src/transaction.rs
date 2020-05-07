@@ -182,24 +182,6 @@ impl Transaction {
         }))
     }
 
-    fn extend(
-        self: &Arc<Self>,
-        context: Arc<Store>,
-        required: HashMap<ValueId, TCValue>,
-    ) -> Arc<Transaction> {
-        Arc::new(Transaction {
-            host: self.host.clone(),
-            id: self.id.clone(),
-            context,
-            state: required
-                .iter()
-                .map(|(k, v)| (k.clone(), v.into()))
-                .collect(),
-            queue: Deque::new(),
-            mutated: Deque::new(),
-        })
-    }
-
     pub fn context(self: &Arc<Self>) -> Arc<Store> {
         self.context.clone()
     }
@@ -226,7 +208,7 @@ impl Transaction {
         while let Some((value_id, op)) = self.queue.pop_front() {
             let state = match op {
                 Op::Get { subject, key } => match subject {
-                    Subject::Path(p) => self.get(&p, *key).await,
+                    Subject::Path(p) => self.clone().get(&p, *key).await,
                     Subject::Ref(r) => match self.state.get(&r.value_id()) {
                         Some(s) => s.get(self.clone(), *key).await,
                         None => Err(error::bad_request(
@@ -240,7 +222,7 @@ impl Transaction {
                     key,
                     value,
                 } => match subject {
-                    Subject::Path(p) => self.put(p, *key, self.resolve_val(*value)?).await,
+                    Subject::Path(p) => self.clone().put(p, *key, self.resolve_val(*value)?).await,
                     Subject::Ref(r) => {
                         let subject = self.resolve(&r.value_id())?;
                         let value = self.resolve_val(*value)?;
@@ -258,14 +240,12 @@ impl Transaction {
                         deps.insert(dest_id, dep.try_into()?);
                     }
 
-                    let subcontext: PathSegment = value_id.clone().try_into()?;
-                    let txn = self.extend(self.context.reserve(subcontext.into())?, deps);
                     match subject {
                         Some(r) => {
                             let subject = self.resolve(&r.value_id())?;
-                            subject.post(txn, &action.try_into()?).await
+                            subject.post(self.clone(), &action.try_into()?, deps).await
                         }
-                        None => self.host.post(txn, &action).await,
+                        None => self.host.post(self.clone(), &action, deps).await,
                     }
                 }
             };
@@ -348,7 +328,8 @@ impl Transaction {
         args: Vec<(ValueId, TCValue)>,
     ) -> TCResult<State> {
         println!("txn::post {} {:?}", path, args);
-        let txn = self.extend(self.context.clone(), args.into_iter().collect());
-        self.host.post(txn, path).await
+        self.host
+            .post(self.clone(), path, args.into_iter().collect())
+            .await
     }
 }

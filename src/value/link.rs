@@ -182,6 +182,12 @@ impl fmt::Display for TCPath {
     }
 }
 
+impl PartialEq<str> for TCPath {
+    fn eq(&self, other: &str) -> bool {
+        self.to_string() == other
+    }
+}
+
 impl PartialEq<ValueId> for TCPath {
     fn eq(&self, other: &ValueId) -> bool {
         if self.len() == 1 {

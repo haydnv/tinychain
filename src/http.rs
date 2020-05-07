@@ -44,11 +44,15 @@ async fn get(host: Arc<Host>, path: &TCPath, key: TCValue) -> TCResult<State> {
 }
 
 async fn post(
-    _host: Arc<Host>,
-    _path: &TCPath,
-    mut _params: HashMap<ValueId, TCValue>,
+    host: Arc<Host>,
+    path: &TCPath,
+    mut params: HashMap<ValueId, TCValue>,
 ) -> TCResult<State> {
-    Err(error::not_implemented())
+    if path == "/sbin/transact/execute" {
+        Err(error::not_implemented())
+    } else {
+        host.post(host.new_transaction()?, path, params).await
+    }
 }
 
 async fn route(

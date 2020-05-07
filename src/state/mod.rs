@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
@@ -7,7 +8,7 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::file::File;
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{PathSegment, TCResult, TCValue};
+use crate::value::{PathSegment, TCResult, TCValue, ValueId};
 
 mod graph;
 mod schema;
@@ -94,7 +95,12 @@ impl State {
         }
     }
 
-    pub async fn post(&self, _txn: Arc<Transaction>, _method: &PathSegment) -> TCResult<State> {
+    pub async fn post(
+        &self,
+        _txn: Arc<Transaction>,
+        _method: &PathSegment,
+        _args: HashMap<ValueId, TCValue>,
+    ) -> TCResult<State> {
         Err(error::not_implemented())
     }
 }

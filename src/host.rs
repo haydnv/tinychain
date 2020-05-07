@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 use std::time;
@@ -9,7 +10,7 @@ use crate::internal::file::File;
 use crate::internal::Directory;
 use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Transaction;
-use crate::value::{Op, TCPath, TCResult, TCValue};
+use crate::value::{Op, TCPath, TCResult, TCValue, ValueId};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 
@@ -121,7 +122,12 @@ impl Host {
     }
 
     // TODO: remove this method
-    pub async fn post(self: &Arc<Self>, _txn: Arc<Transaction>, path: &TCPath) -> TCResult<State> {
+    pub async fn post(
+        self: &Arc<Self>,
+        _txn: Arc<Transaction>,
+        path: &TCPath,
+        _params: HashMap<ValueId, TCValue>,
+    ) -> TCResult<State> {
         println!("POST {}", path);
         if path.is_empty() {
             Ok(TCValue::None.into())
