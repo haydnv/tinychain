@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::net::Ipv4Addr;
@@ -5,16 +6,24 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use serde::de;
-use serde::ser::Serializer;
+use serde::ser::{SerializeMap, Serializer};
 
 use crate::error;
-use crate::value::{TCResult, ValueId};
+use crate::value::{TCResult, TCValue, ValueId};
 
 pub type PathSegment = ValueId;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
     IPv4(Ipv4Addr),
+}
+
+impl fmt::Display for LinkAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            LinkAddress::IPv4(addr) => write!(f, "{}", addr),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -100,6 +109,55 @@ impl FromStr for Link {
             port,
             path,
         })
+    }
+}
+
+impl fmt::Display for Link {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}://{}", self.protocol, self.address)?;
+        if let Some(port) = self.port {
+            write!(f, ":{}", port)?;
+        }
+        write!(f, "{}", self.path)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Link {
+    fn deserialize<D>(deserializer: D) -> Result<Link, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let m: HashMap<String, HashMap<ValueId, TCValue>> =
+            de::Deserialize::deserialize(deserializer)?;
+        if m.len() != 1 {
+            Err(de::Error::custom(format!(
+                "Expected Link, found Map: {}",
+                m.keys().cloned().collect::<Vec<String>>().join(", ")
+            )))
+        } else {
+            let mut m: Vec<_> = m.into_iter().collect();
+            let (link, params) = m.pop().unwrap();
+            if !params.is_empty() {
+                Err(de::Error::custom(format!(
+                    "Expected Link but found Op to {}",
+                    link
+                )))
+            } else {
+                link.parse().map_err(de::Error::custom)
+            }
+        }
+    }
+}
+
+impl serde::Serialize for Link {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = s.serialize_map(Some(1))?;
+        let data: HashMap<ValueId, TCValue> = HashMap::new();
+        map.serialize_entry(&self.to_string(), &data)?;
+        map.end()
     }
 }
 
