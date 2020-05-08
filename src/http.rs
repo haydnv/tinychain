@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use hyper::service::{make_service_fn, service_fn};
@@ -23,17 +24,16 @@ fn line_numbers(s: &str) -> String {
 
 pub async fn listen(
     host: Arc<Host>,
-    port: u16,
+    address: &SocketAddr,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let make_svc = make_service_fn(|_conn| {
         let host = host.clone();
         async { Ok::<_, Infallible>(service_fn(move |req| handle(host.clone(), req))) }
     });
 
-    let addr = ([127, 0, 0, 1], port).into();
-    let server = Server::bind(&addr).serve(make_svc);
+    let server = Server::bind(address).serve(make_svc);
 
-    println!("Listening on http://{}", addr);
+    println!("Listening on http://{}", address);
 
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);

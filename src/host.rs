@@ -1,8 +1,13 @@
 use std::convert::TryInto;
+use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time;
 
+use structopt::StructOpt;
+
 use crate::error;
+use crate::http;
 use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::File;
@@ -10,9 +15,50 @@ use crate::internal::Directory;
 use crate::object::{Actor, TCObject};
 use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Transaction;
-use crate::value::{Args, Op, TCPath, TCResult, TCValue};
+use crate::value::{Args, Link, Op, TCPath, TCResult, TCValue};
 
 const RESERVED: [&str; 1] = ["/sbin"];
+
+fn block_size(flag: &str) -> TCResult<usize> {
+    let msg = "Unable to parse value of block_size";
+
+    let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
+        .map_err(|_| error::bad_request(msg, flag))?;
+
+    if flag.ends_with('K') {
+        Ok(size * 1000)
+    } else if flag.ends_with('M') {
+        Ok(size * 1_000_000)
+    } else if flag.ends_with('G') {
+        Ok(size * 1_000_000_000)
+    } else {
+        Err(error::bad_request(msg, flag))
+    }
+}
+
+#[derive(Clone, StructOpt)]
+pub struct HostConfig {
+    #[structopt(long = "address", default_value = "127.0.0.1")]
+    pub address: IpAddr,
+
+    #[structopt(long = "block_size", default_value = "1K", parse(try_from_str = block_size))]
+    pub block_size: usize,
+
+    #[structopt(long = "data_dir", default_value = "/tmp/tc/data")]
+    pub data_dir: PathBuf,
+
+    #[structopt(long = "workspace", default_value = "/tmp/tc/tmp")]
+    pub workspace: PathBuf,
+
+    #[structopt(long = "http_port", default_value = "8702")]
+    pub http_port: u16,
+
+    #[structopt(long = "host")]
+    pub hosted: Vec<TCPath>,
+
+    #[structopt(long = "peer")]
+    pub peers: Vec<Link>,
+}
 
 #[derive(Clone)]
 pub struct NetworkTime {
@@ -44,24 +90,27 @@ impl std::ops::Add<std::time::Duration> for NetworkTime {
 }
 
 pub struct Host {
+    address: IpAddr,
+    http_port: u16,
     data_dir: Arc<Store>,
     workspace: Arc<Store>,
     root: Map<TCPath, Arc<Directory>>,
 }
 
 impl Host {
-    pub async fn new(
-        data_dir: Arc<Store>,
-        workspace: Arc<Store>,
-        hosted: Vec<TCPath>,
-    ) -> TCResult<Arc<Host>> {
+    pub async fn new(config: HostConfig) -> TCResult<Arc<Host>> {
+        let data_dir = Store::new(config.data_dir, config.block_size, None);
+        let workspace = Store::new_tmp(config.workspace, config.block_size, None);
+
         let host = Arc::new(Host {
+            address: config.address,
+            http_port: config.http_port,
             data_dir,
             workspace,
             root: Map::new(),
         });
 
-        for path in hosted {
+        for path in config.hosted {
             for reserved in RESERVED.iter() {
                 if path.to_string().starts_with(reserved) {
                     return Err(error::bad_request(
@@ -81,6 +130,12 @@ impl Host {
         }
 
         Ok(host)
+    }
+
+    pub async fn http_listen(
+        self: &Arc<Self>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        http::listen(self.clone(), &(self.address, self.http_port).into()).await
     }
 
     pub fn time(&self) -> NetworkTime {
