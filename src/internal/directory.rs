@@ -121,6 +121,7 @@ impl Collection for Directory {
         let entry = match state {
             State::Graph(g) => (EntryType::Graph, EntryState::Graph(context, g), None),
             State::Table(t) => (EntryType::Table, EntryState::Table(context, t), None),
+            State::Object(_) => return Err(error::not_implemented()),
             State::Value(v) => {
                 return Err(error::bad_request("Expected a persistent state, found", v))
             }

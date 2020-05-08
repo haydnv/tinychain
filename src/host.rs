@@ -114,7 +114,7 @@ impl Host {
         if path[0] == "sbin" && path.len() > 2 {
             match path[1].as_str() {
                 "auth" => match path[2].as_str() {
-                    "actor" => Ok(State::Value(Actor::new(txn.clone(), key).await?.into())),
+                    "actor" => Ok(State::Object(Actor::new(txn.clone(), key).await?.into())),
                     _ => Err(error::not_found(path)),
                 },
                 "state" => match path[2].as_str() {

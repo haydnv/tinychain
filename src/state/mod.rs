@@ -6,6 +6,7 @@ use async_trait::async_trait;
 
 use crate::error;
 use crate::internal::file::File;
+use crate::object::Object;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Args, PathSegment, TCResult, TCValue};
 
@@ -48,6 +49,7 @@ pub trait Transact: Send + Sync {
 pub enum State {
     Graph(Arc<Graph>),
     Table(Arc<Table>),
+    Object(Object),
     Value(TCValue),
 }
 
@@ -96,11 +98,14 @@ impl State {
 
     pub async fn post(
         &self,
-        _txn: Arc<Transaction>,
-        _method: &PathSegment,
-        _args: Args,
+        txn: Arc<Transaction>,
+        method: &PathSegment,
+        args: Args,
     ) -> TCResult<State> {
-        Err(error::not_implemented())
+        match self {
+            State::Object(o) => o.post(txn, method, args).await,
+            _ => Err(error::not_implemented()),
+        }
     }
 }
 
@@ -138,6 +143,7 @@ impl fmt::Display for State {
         match self {
             State::Graph(_) => write!(f, "(graph)"),
             State::Table(_) => write!(f, "(table)"),
+            State::Object(object) => write!(f, "(object: {})", object.class()),
             State::Value(value) => write!(f, "value: {}", value),
         }
     }

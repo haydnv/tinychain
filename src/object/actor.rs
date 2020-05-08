@@ -25,15 +25,19 @@ pub struct Actor {
 
 #[async_trait]
 impl TCObject for Actor {
-    async fn new(_txn: Arc<Transaction>, id: TCValue) -> TCResult<Actor> {
+    async fn new(_txn: Arc<Transaction>, id: TCValue) -> TCResult<Arc<Actor>> {
         let mut rng = OsRng {};
         let keypair: Keypair = Keypair::generate(&mut rng);
 
-        Ok(Actor {
+        Ok(Arc::new(Actor {
             id,
             public_key: keypair.public,
             private_key: Some(keypair.secret),
-        })
+        }))
+    }
+
+    fn class() -> &'static str {
+        "Actor"
     }
 
     fn id(&self) -> TCValue {
@@ -43,7 +47,7 @@ impl TCObject for Actor {
     async fn post(
         &self,
         txn: Arc<Transaction>,
-        method: PathSegment,
+        method: &PathSegment,
         mut args: Args,
     ) -> TCResult<State> {
         match method.as_str() {
