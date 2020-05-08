@@ -1,5 +1,7 @@
 use std::convert::{TryFrom, TryInto};
+use std::sync::Arc;
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signature};
 use rand::rngs::OsRng;
@@ -7,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::host::NetworkTime;
+use crate::object::TCObject;
+use crate::transaction::Transaction;
 use crate::value::{Link, TCPath, TCResult, TCValue};
 
 pub struct Actor {
@@ -15,18 +19,25 @@ pub struct Actor {
     private_key: Option<SecretKey>,
 }
 
-impl Actor {
-    pub fn new(id: TCValue) -> Actor {
+#[async_trait]
+impl TCObject for Actor {
+    async fn new(_txn: Arc<Transaction>, id: TCValue) -> TCResult<Actor> {
         let mut rng = OsRng {};
         let keypair: Keypair = Keypair::generate(&mut rng);
 
-        Actor {
+        Ok(Actor {
             id,
             public_key: keypair.public,
             private_key: Some(keypair.secret),
-        }
+        })
     }
 
+    fn id(&self) -> TCValue {
+        self.id.clone()
+    }
+}
+
+impl Actor {
     pub fn token(
         &self,
         issuer: Link,

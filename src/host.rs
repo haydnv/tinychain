@@ -3,12 +3,12 @@ use std::convert::TryInto;
 use std::sync::Arc;
 use std::time;
 
-use crate::auth::Actor;
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::File;
 use crate::internal::Directory;
+use crate::object::{Actor, TCObject};
 use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Transaction;
 use crate::value::{Op, TCPath, TCResult, TCValue, ValueId};
@@ -104,7 +104,7 @@ impl Host {
         if path[0] == "sbin" && path.len() > 2 {
             match path[1].as_str() {
                 "auth" => match path[2].as_str() {
-                    "actor" => Ok(State::Value(Actor::new(key).into())),
+                    "actor" => Ok(State::Value(Actor::new(txn.clone(), key).await?.into())),
                     _ => Err(error::not_found(path)),
                 },
                 "state" => match path[2].as_str() {

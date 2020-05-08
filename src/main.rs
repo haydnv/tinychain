@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use structopt::StructOpt;
 
-mod auth;
 mod error;
 mod host;
 mod http;
