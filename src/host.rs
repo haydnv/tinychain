@@ -158,10 +158,17 @@ impl Host {
     pub async fn get(
         self: &Arc<Self>,
         txn: Arc<Transaction>,
-        path: &TCPath,
+        link: &Link,
         key: TCValue,
     ) -> TCResult<State> {
-        println!("GET {}", path);
+        println!("GET {}", link);
+        if let Some((_, address, _)) = link.host() {
+            if address != &self.address {
+                return Err(error::not_implemented());
+            }
+        }
+
+        let path = link.path();
         if path.is_empty() {
             return Err(error::method_not_allowed(path));
         }
@@ -196,11 +203,19 @@ impl Host {
     pub async fn put(
         self: &Arc<Self>,
         txn: Arc<Transaction>,
-        path: TCPath,
+        dest: Link,
         key: TCValue,
         state: State,
     ) -> TCResult<State> {
-        println!("PUT {}", path);
+        println!("PUT {}", dest);
+        if let Some((_, address, _)) = dest.host() {
+            if address != &self.address {
+                return Err(error::not_implemented());
+            }
+        }
+
+        let path = dest.path();
+
         if path.is_empty() {
             Err(error::method_not_allowed(path))
         } else if let Some(dir) = self.root.get(&path[0].clone().into()) {
@@ -218,14 +233,20 @@ impl Host {
     pub async fn post(
         self: &Arc<Self>,
         _txn: Arc<Transaction>,
-        path: &TCPath,
+        dest: &Link,
         _args: Args,
     ) -> TCResult<State> {
-        println!("POST {}", path);
-        if path.is_empty() {
+        println!("POST {}", dest);
+        if let Some((_, address, _)) = dest.host() {
+            if address != &self.address {
+                return Err(error::not_implemented());
+            }
+        }
+
+        if dest.path().is_empty() {
             Ok(TCValue::None.into())
         } else {
-            Err(error::not_found(path))
+            Err(error::not_found(dest))
         }
     }
 }

@@ -146,7 +146,6 @@ pub enum TCValue {
     Int32(i32),
     Link(Link),
     Op(Op),
-    Path(TCPath),
     Ref(TCRef),
     r#String(String),
     Vector(Vec<TCValue>),
@@ -170,9 +169,15 @@ impl From<Bytes> for TCValue {
     }
 }
 
+impl From<Link> for TCValue {
+    fn from(l: Link) -> TCValue {
+        TCValue::Link(l)
+    }
+}
+
 impl From<TCPath> for TCValue {
     fn from(path: TCPath) -> TCValue {
-        TCValue::Path(path)
+        TCValue::Link(path.into())
     }
 }
 
@@ -248,8 +253,14 @@ impl TryFrom<TCValue> for TCPath {
 
     fn try_from(v: TCValue) -> TCResult<TCPath> {
         match v {
-            TCValue::Path(p) => Ok(p),
-            other => Err(error::bad_request("Expected Path but found", other)),
+            TCValue::Link(l) => {
+                if l.host().is_none() {
+                    Ok(l.path().clone())
+                } else {
+                    Err(error::bad_request("Expected Path but found Link: {}", l))
+                }
+            }
+            other => Err(error::bad_request("Expected Path but found {}", other)),
         }
     }
 }
@@ -373,17 +384,17 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
         M: de::MapAccess<'de>,
     {
         if let Some(key) = access.next_key::<&str>()? {
-            if key.starts_with('/') {
+            if key.starts_with('/') || key.starts_with("http://") {
                 let mut value = access.next_value::<Vec<TCValue>>()?;
 
-                let path: TCPath = key.parse().map_err(de::Error::custom)?;
+                let link: Link = key.parse().map_err(de::Error::custom)?;
 
                 if value.is_empty() {
-                    Ok(path.into())
+                    Ok(link.into())
                 } else if value.len() == 1 {
-                    Ok(Op::get(path.into(), value.remove(0)).into())
+                    Ok(Op::get(link.into(), value.remove(0)).into())
                 } else if value.len() == 2 {
-                    Ok(Op::put(path.into(), value.remove(0), value.remove(0)).into())
+                    Ok(Op::put(link.into(), value.remove(0), value.remove(0)).into())
                 } else {
                     Err(de::Error::custom(format!(
                         "Expected a list of 0, 1, or 2 values for {}",
@@ -474,7 +485,6 @@ impl Serialize for TCValue {
             TCValue::Int32(i) => s.serialize_i32(*i),
             TCValue::Link(l) => l.serialize(s),
             TCValue::Op(o) => o.serialize(s),
-            TCValue::Path(p) => p.serialize(s),
             TCValue::Ref(r) => r.serialize(s),
             TCValue::r#String(v) => s.serialize_str(v),
             TCValue::Vector(v) => {
@@ -502,7 +512,6 @@ impl fmt::Display for TCValue {
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::Op(o) => write!(f, "Op: {}", o),
-            TCValue::Path(p) => write!(f, "Path: {}", p),
             TCValue::Ref(r) => write!(f, "Ref: {}", r),
             TCValue::r#String(s) => write!(f, "string: {}", s),
             TCValue::Vector(v) => write!(f, "vector: {:?}", v),

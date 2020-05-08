@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -26,6 +26,27 @@ impl fmt::Display for LinkAddress {
     }
 }
 
+impl PartialEq<Ipv4Addr> for LinkAddress {
+    fn eq(&self, other: &Ipv4Addr) -> bool {
+        use LinkAddress::*;
+
+        match self {
+            IPv4(address) => address == other,
+        }
+    }
+}
+
+impl PartialEq<IpAddr> for LinkAddress {
+    fn eq(&self, other: &IpAddr) -> bool {
+        use IpAddr::*;
+
+        match other {
+            V4(address) => self == address,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub enum LinkProtocol {
     HTTP,
@@ -43,12 +64,28 @@ impl fmt::Display for LinkProtocol {
     }
 }
 
+pub type LinkHost = Option<(LinkProtocol, LinkAddress, Option<u16>)>;
+
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Link {
-    protocol: LinkProtocol,
-    address: LinkAddress,
-    port: Option<u16>,
+    host: LinkHost,
     path: TCPath,
+}
+
+impl Link {
+    pub fn host(&'_ self) -> &'_ LinkHost {
+        &self.host
+    }
+
+    pub fn path(&'_ self) -> &'_ TCPath {
+        &self.path
+    }
+}
+
+impl From<TCPath> for Link {
+    fn from(path: TCPath) -> Link {
+        Link { host: None, path }
+    }
 }
 
 impl FromStr for Link {
@@ -62,7 +99,12 @@ impl FromStr for Link {
             ));
         }
 
-        if !s.starts_with("http://") {
+        if s.starts_with('/') {
+            return Ok(Link {
+                host: None,
+                path: s.parse()?,
+            });
+        } else if !s.starts_with("http://") {
             return Err(error::bad_request("Unable to parse Link protocol", s));
         }
 
@@ -104,9 +146,7 @@ impl FromStr for Link {
         };
 
         Ok(Link {
-            protocol,
-            address,
-            port,
+            host: Some((protocol, address, port)),
             path,
         })
     }
@@ -114,10 +154,13 @@ impl FromStr for Link {
 
 impl fmt::Display for Link {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}://{}", self.protocol, self.address)?;
-        if let Some(port) = self.port {
-            write!(f, ":{}", port)?;
+        if let Some((protocol, address, port)) = &self.host {
+            write!(f, "{}://{}", protocol, address)?;
+            if let Some(port) = port {
+                write!(f, ":{}", port)?;
+            }
         }
+
         write!(f, "{}", self.path)
     }
 }

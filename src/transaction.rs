@@ -210,7 +210,7 @@ impl Transaction {
         while let Some((value_id, op)) = self.queue.pop_front() {
             let state = match op {
                 Op::Get { subject, key } => match subject {
-                    Subject::Path(p) => self.clone().get(&p, *key).await,
+                    Subject::Link(l) => self.clone().get(l, *key).await,
                     Subject::Ref(r) => match self.state.get(&r.value_id()) {
                         Some(s) => s.get(self.clone(), *key).await,
                         None => Err(error::bad_request(
@@ -224,7 +224,7 @@ impl Transaction {
                     key,
                     value,
                 } => match subject {
-                    Subject::Path(p) => self.clone().put(p, *key, self.resolve_val(*value)?).await,
+                    Subject::Link(l) => self.clone().put(l, *key, self.resolve_val(*value)?).await,
                     Subject::Ref(r) => {
                         let subject = self.resolve(&r.value_id())?;
                         let value = self.resolve_val(*value)?;
@@ -249,7 +249,11 @@ impl Transaction {
                                 .post(self.clone(), &action.try_into()?, deps.into())
                                 .await
                         }
-                        None => self.host.post(self.clone(), &action, deps.into()).await,
+                        None => {
+                            self.host
+                                .post(self.clone(), &action.clone().into(), deps.into())
+                                .await
+                        }
                     }
                 }
             };
@@ -298,23 +302,18 @@ impl Transaction {
         NetworkTime::from_nanos(self.id.timestamp)
     }
 
-    pub async fn get(self: &Arc<Self>, path: &TCPath, key: TCValue) -> TCResult<State> {
-        println!("txn::get {} {}", path, key);
-        self.host.get(self.clone(), path, key).await
+    pub async fn get(self: &Arc<Self>, link: Link, key: TCValue) -> TCResult<State> {
+        println!("txn::get {} {}", link, key);
+        self.host.get(self.clone(), &link, key).await
     }
 
-    pub async fn put(
-        self: &Arc<Self>,
-        path: TCPath,
-        key: TCValue,
-        state: State,
-    ) -> TCResult<State> {
-        println!("txn::put {} {}", path, key);
-        self.host.put(self.clone(), path, key, state).await
+    pub async fn put(self: &Arc<Self>, dest: Link, key: TCValue, state: State) -> TCResult<State> {
+        println!("txn::put {} {}", dest, key);
+        self.host.put(self.clone(), dest, key, state).await
     }
 
-    pub async fn post(self: &Arc<Self>, path: &TCPath, args: Args) -> TCResult<State> {
-        println!("txn::post {}", path);
-        self.host.post(self.clone(), path, args).await
+    pub async fn post(self: &Arc<Self>, dest: &Link, args: Args) -> TCResult<State> {
+        println!("txn::post {}", dest);
+        self.host.post(self.clone(), dest, args).await
     }
 }

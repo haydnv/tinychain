@@ -7,26 +7,32 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde::Deserialize;
 
 use crate::error;
-use crate::value::{PathSegment, TCPath, TCRef, TCResult, TCValue, ValueId};
+use crate::value::{Link, PathSegment, TCPath, TCRef, TCResult, TCValue, ValueId};
 
 #[derive(Clone, Hash, Eq, PartialEq, Deserialize)]
 pub enum Subject {
-    Path(TCPath),
+    Link(Link),
     Ref(TCRef),
 }
 
 impl fmt::Display for Subject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Subject::Path(p) => write!(f, "{}", p),
+            Subject::Link(l) => write!(f, "{}", l),
             Subject::Ref(r) => write!(f, "{}", r),
         }
     }
 }
 
+impl From<Link> for Subject {
+    fn from(l: Link) -> Subject {
+        Subject::Link(l)
+    }
+}
+
 impl From<TCPath> for Subject {
     fn from(p: TCPath) -> Subject {
-        Subject::Path(p)
+        Subject::Link(p.into())
     }
 }
 

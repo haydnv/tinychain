@@ -47,7 +47,7 @@ impl Table {
             value
                 .iter()
                 .enumerate()
-                .map(|(i, v)| txn.get(&schema.key[i].1, v.clone())),
+                .map(|(i, v)| txn.get(schema.key[i].1.clone().into(), v.clone())),
         )
         .await?
         {
@@ -119,7 +119,7 @@ impl Collection for Table {
 
             if let Some(ctr) = schema_map.get(&column) {
                 names.push(column);
-                values.push(txn.get(ctr, value));
+                values.push(txn.get(ctr.clone().into(), value));
             } else {
                 return Err(error::bad_request(
                     "This table contains no such column",

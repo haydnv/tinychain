@@ -42,8 +42,8 @@ pub async fn listen(
     Ok(())
 }
 
-async fn get(host: Arc<Host>, path: &TCPath, key: TCValue) -> TCResult<State> {
-    host.get(host.new_transaction()?, path, key).await
+async fn get(host: Arc<Host>, path: TCPath, key: TCValue) -> TCResult<State> {
+    host.get(host.new_transaction()?, &path.into(), key).await
 }
 
 async fn post(host: Arc<Host>, path: &TCPath, mut args: Args) -> TCResult<State> {
@@ -80,7 +80,8 @@ async fn post(host: Arc<Host>, path: &TCPath, mut args: Args) -> TCResult<State>
 
         Ok(State::Value(results.into()))
     } else {
-        host.post(host.new_transaction()?, path, args).await
+        host.post(host.new_transaction()?, &path.clone().into(), args)
+            .await
     }
 }
 
@@ -102,7 +103,7 @@ async fn route(
                 TCValue::None
             };
 
-            match get(host, &path, key).await? {
+            match get(host, path, key).await? {
                 State::Value(val) => Ok(serde_json::to_string_pretty(&val)?.as_bytes().to_vec()),
                 state => Err(error::bad_request(
                     "Attempt to GET unserializable state {}",
