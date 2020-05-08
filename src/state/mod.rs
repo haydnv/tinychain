@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
@@ -8,7 +7,7 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::file::File;
 use crate::transaction::{Transaction, TransactionId};
-use crate::value::{PathSegment, TCResult, TCValue, ValueId};
+use crate::value::{Args, PathSegment, TCResult, TCValue};
 
 mod graph;
 mod schema;
@@ -99,15 +98,9 @@ impl State {
         &self,
         _txn: Arc<Transaction>,
         _method: &PathSegment,
-        _args: HashMap<ValueId, TCValue>,
+        _args: Args,
     ) -> TCResult<State> {
         Err(error::not_implemented())
-    }
-}
-
-impl From<()> for State {
-    fn from(_: ()) -> State {
-        State::Value(TCValue::None)
     }
 }
 
@@ -123,20 +116,8 @@ impl From<Arc<Table>> for State {
     }
 }
 
-impl From<TCValue> for State {
-    fn from(value: TCValue) -> State {
-        State::Value(value)
-    }
-}
-
-impl From<&TCValue> for State {
-    fn from(value: &TCValue) -> State {
-        State::Value(value.clone())
-    }
-}
-
-impl From<Vec<TCValue>> for State {
-    fn from(value: Vec<TCValue>) -> State {
+impl<T: Into<TCValue>> From<T> for State {
+    fn from(value: T) -> State {
         State::Value(value.into())
     }
 }

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 use std::time;
@@ -11,10 +10,11 @@ use crate::internal::Directory;
 use crate::object::{Actor, TCObject};
 use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Transaction;
-use crate::value::{Op, TCPath, TCResult, TCValue, ValueId};
+use crate::value::{Args, Op, TCPath, TCResult, TCValue};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 
+#[derive(Clone)]
 pub struct NetworkTime {
     nanos: u128,
 }
@@ -30,6 +30,16 @@ impl NetworkTime {
 
     pub fn from_nanos(nanos: u128) -> NetworkTime {
         NetworkTime { nanos }
+    }
+}
+
+impl std::ops::Add<std::time::Duration> for NetworkTime {
+    type Output = Self;
+
+    fn add(self, other: std::time::Duration) -> Self {
+        NetworkTime {
+            nanos: self.nanos + other.as_nanos(),
+        }
     }
 }
 
@@ -154,7 +164,7 @@ impl Host {
         self: &Arc<Self>,
         _txn: Arc<Transaction>,
         path: &TCPath,
-        _params: HashMap<ValueId, TCValue>,
+        _args: Args,
     ) -> TCResult<State> {
         println!("POST {}", path);
         if path.is_empty() {

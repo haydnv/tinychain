@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::{Infallible, TryInto};
+use std::convert::Infallible;
 use std::sync::Arc;
 
 use hyper::service::{make_service_fn, service_fn};
@@ -8,7 +8,7 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use crate::error;
 use crate::host::Host;
 use crate::state::State;
-use crate::value::{Op, TCPath, TCRef, TCResult, TCValue, ValueId};
+use crate::value::{Args, Op, TCPath, TCRef, TCResult, TCValue, ValueId};
 
 const UNSERIALIZABLE: &str =
     "The request completed successfully but some of the response could not be serialized";
@@ -46,20 +46,10 @@ async fn get(host: Arc<Host>, path: &TCPath, key: TCValue) -> TCResult<State> {
     host.get(host.new_transaction()?, path, key).await
 }
 
-async fn post(
-    host: Arc<Host>,
-    path: &TCPath,
-    mut params: HashMap<ValueId, TCValue>,
-) -> TCResult<State> {
+async fn post(host: Arc<Host>, path: &TCPath, mut args: Args) -> TCResult<State> {
     if path == "/sbin/transact" {
-        let capture: Vec<ValueId> = params
-            .remove(&"capture".parse()?)
-            .unwrap_or_else(|| TCValue::Vector(vec![]))
-            .try_into()?;
-        let values: Vec<(ValueId, TCValue)> = params
-            .remove(&"values".parse()?)
-            .unwrap_or_else(|| TCValue::Vector(vec![]))
-            .try_into()?;
+        let capture: Vec<ValueId> = args.take_or("capture", vec![])?;
+        let values: Vec<(ValueId, TCValue)> = args.take_or("values", vec![])?;
         let txn = host
             .clone()
             .transact(Op::post(None, TCPath::default(), values))?;
@@ -90,7 +80,7 @@ async fn post(
 
         Ok(State::Value(results.into()))
     } else {
-        host.post(host.new_transaction()?, path, params).await
+        host.post(host.new_transaction()?, path, args).await
     }
 }
 
@@ -121,7 +111,7 @@ async fn route(
             }
         }
         Method::POST => {
-            let params: HashMap<ValueId, TCValue> = match serde_json::from_slice(&body) {
+            let args: HashMap<ValueId, TCValue> = match serde_json::from_slice(&body) {
                 Ok(params) => params,
                 Err(cause) => {
                     let body = line_numbers(std::str::from_utf8(&body).unwrap());
@@ -132,7 +122,7 @@ async fn route(
                 }
             };
 
-            match post(host, &path, params).await? {
+            match post(host, &path, args.into()).await? {
                 State::Value(v) => serde_json::to_string_pretty(&v)
                     .and_then(|s| Ok(s.into_bytes()))
                     .or_else(|e| Err(error::bad_request(UNSERIALIZABLE, e))),

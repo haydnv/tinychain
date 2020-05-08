@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -10,8 +11,11 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::host::NetworkTime;
 use crate::object::TCObject;
+use crate::state::State;
 use crate::transaction::Transaction;
-use crate::value::{Link, TCPath, TCResult, TCValue};
+use crate::value::{Args, Link, PathSegment, TCPath, TCResult, TCValue};
+
+const TOKEN_DURATION: Duration = Duration::from_secs(30 * 60);
 
 pub struct Actor {
     id: TCValue,
@@ -34,6 +38,25 @@ impl TCObject for Actor {
 
     fn id(&self) -> TCValue {
         self.id.clone()
+    }
+
+    async fn post(
+        &self,
+        txn: Arc<Transaction>,
+        method: PathSegment,
+        mut args: Args,
+    ) -> TCResult<State> {
+        match method.as_str() {
+            "token" => {
+                let issuer: Link = args.take("issuer")?;
+                let scopes: Vec<TCPath> = args.take("scopes")?;
+                let issued_at = txn.time();
+                let expires = issued_at.clone() + TOKEN_DURATION;
+                let token = self.token(issuer, scopes, issued_at, expires)?;
+                Ok(token.into())
+            }
+            _ => Err(error::bad_request("Actor has no such method", method)),
+        }
     }
 }
 

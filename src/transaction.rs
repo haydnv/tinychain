@@ -236,18 +236,20 @@ impl Transaction {
                     action,
                     requires,
                 } => {
-                    let mut deps: HashMap<ValueId, TCValue> = HashMap::new();
+                    let mut deps: Vec<(ValueId, TCValue)> = Vec::with_capacity(requires.len());
                     for (dest_id, id) in requires {
                         let dep = self.resolve_val(id)?;
-                        deps.insert(dest_id, dep.try_into()?);
+                        deps.push((dest_id, dep.try_into()?));
                     }
 
                     match subject {
                         Some(r) => {
                             let subject = self.resolve(&r.value_id())?;
-                            subject.post(self.clone(), &action.try_into()?, deps).await
+                            subject
+                                .post(self.clone(), &action.try_into()?, deps.into())
+                                .await
                         }
-                        None => self.host.post(self.clone(), &action, deps).await,
+                        None => self.host.post(self.clone(), &action, deps.into()).await,
                     }
                 }
             };
@@ -292,21 +294,8 @@ impl Transaction {
         self.mutated.push_back(state)
     }
 
-    pub fn require<T: TryInto<ValueId, Error = error::TCError>>(
-        self: &Arc<Self>,
-        value_id: T,
-    ) -> TCResult<TCValue> {
-        let value_id: ValueId = value_id.try_into()?;
-        match self.state.get(&value_id) {
-            Some(response) => match response {
-                State::Value(value) => Ok(value),
-                other => Err(error::bad_request(
-                    &format!("Required value {} is not serializable", value_id),
-                    other,
-                )),
-            },
-            None => Err(error::bad_request("No value was provided for", value_id)),
-        }
+    pub fn time(&self) -> NetworkTime {
+        NetworkTime::from_nanos(self.id.timestamp)
     }
 
     pub async fn get(self: &Arc<Self>, path: &TCPath, key: TCValue) -> TCResult<State> {
@@ -324,14 +313,8 @@ impl Transaction {
         self.host.put(self.clone(), path, key, state).await
     }
 
-    pub async fn post(
-        self: &Arc<Self>,
-        path: &TCPath,
-        args: Vec<(ValueId, TCValue)>,
-    ) -> TCResult<State> {
-        println!("txn::post {} {:?}", path, args);
-        self.host
-            .post(self.clone(), path, args.into_iter().collect())
-            .await
+    pub async fn post(self: &Arc<Self>, path: &TCPath, args: Args) -> TCResult<State> {
+        println!("txn::post {}", path);
+        self.host.post(self.clone(), path, args).await
     }
 }

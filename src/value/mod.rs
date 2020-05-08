@@ -15,6 +15,7 @@ mod op;
 mod reference;
 mod version;
 
+pub type Args = op::Args;
 pub type Link = link::Link;
 pub type PathSegment = link::PathSegment;
 pub type Op = op::Op;
@@ -143,6 +144,7 @@ pub enum TCValue {
     None,
     Bytes(Bytes),
     Int32(i32),
+    Link(Link),
     Op(Op),
     Path(TCPath),
     Ref(TCRef),
@@ -226,6 +228,17 @@ impl TryFrom<TCValue> for Bytes {
         match v {
             TCValue::Bytes(b) => Ok(b),
             other => Err(error::bad_request("Expected Bytes but found", other)),
+        }
+    }
+}
+
+impl TryFrom<TCValue> for Link {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<Link> {
+        match v {
+            TCValue::Link(l) => Ok(l),
+            other => Err(error::bad_request("Expected Link but found", other)),
         }
     }
 }
@@ -459,6 +472,7 @@ impl Serialize for TCValue {
                 map.end()
             }
             TCValue::Int32(i) => s.serialize_i32(*i),
+            TCValue::Link(l) => l.serialize(s),
             TCValue::Op(o) => o.serialize(s),
             TCValue::Path(p) => p.serialize(s),
             TCValue::Ref(r) => r.serialize(s),
@@ -486,6 +500,7 @@ impl fmt::Display for TCValue {
             TCValue::None => write!(f, "None"),
             TCValue::Bytes(b) => write!(f, "binary data: {} bytes", b.len()),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
+            TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::Op(o) => write!(f, "Op: {}", o),
             TCValue::Path(p) => write!(f, "Path: {}", p),
             TCValue::Ref(r) => write!(f, "Ref: {}", r),
