@@ -104,7 +104,10 @@ impl State {
     ) -> TCResult<State> {
         match self {
             State::Object(o) => o.post(txn, method, args).await,
-            _ => Err(error::not_implemented()),
+            other => Err(error::method_not_allowed(format!(
+                "{} does not support POST",
+                other
+            ))),
         }
     }
 }

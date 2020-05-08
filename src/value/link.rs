@@ -92,13 +92,6 @@ impl FromStr for Link {
     type Err = error::TCError;
 
     fn from_str(s: &str) -> TCResult<Link> {
-        if s.ends_with('/') {
-            return Err(error::bad_request(
-                "Link is not allowed to end with a '/'",
-                s,
-            ));
-        }
-
         if s.starts_with('/') {
             return Ok(Link {
                 host: None,
@@ -106,6 +99,11 @@ impl FromStr for Link {
             });
         } else if !s.starts_with("http://") {
             return Err(error::bad_request("Unable to parse Link protocol", s));
+        } else if s.ends_with('/') {
+            return Err(error::bad_request(
+                "Link is not allowed to end with a '/'",
+                s,
+            ));
         }
 
         let protocol = LinkProtocol::HTTP;
