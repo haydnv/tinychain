@@ -1,18 +1,18 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryInto;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::join_all;
+use futures::future::{self, join_all, try_join_all, Future, FutureExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::host::{Host, NetworkTime};
 use crate::internal::block::Store;
-use crate::internal::cache::{Deque, Map};
+use crate::internal::cache::{Map, Single};
 use crate::state::State;
 use crate::value::*;
 
@@ -107,86 +107,139 @@ impl fmt::Display for TransactionId {
     }
 }
 
-fn calc_deps(
-    value_id: ValueId,
-    op: Op,
-    state: &mut HashMap<ValueId, State>,
-    queue: &Deque<(ValueId, Op)>,
-) -> TCResult<()> {
-    if let Op::Post { requires, .. } = &op {
-        let mut required_value_ids: Vec<(ValueId, ValueId)> = vec![];
-        for (id, provider) in requires {
-            match provider {
-                TCValue::Op(dep) => {
-                    calc_deps(id.clone(), dep.clone(), state, queue)?;
-                    required_value_ids.push((id.clone(), id.clone()));
-                }
-                TCValue::Ref(r) => {
-                    required_value_ids.push((id.clone(), r.value_id().clone()));
-                }
-                value => {
-                    if state.contains_key(id) {
-                        return Err(error::bad_request("Duplicate values provided for", id));
+struct TransactionState {
+    known: HashSet<TCRef>,
+    queue: VecDeque<(ValueId, Op)>,
+    resolved: HashMap<ValueId, State>,
+}
+
+impl TransactionState {
+    fn new() -> TransactionState {
+        TransactionState {
+            known: HashSet::new(),
+            queue: VecDeque::new(),
+            resolved: HashMap::new(),
+        }
+    }
+
+    fn push(&mut self, value: (ValueId, TCValue)) -> TCResult<()> {
+        if self.resolved.contains_key(&value.0) {
+            return Err(error::bad_request("Duplicate value provided for", value.0));
+        }
+        self.known.insert(value.0.clone().into());
+
+        match value.1 {
+            TCValue::Op(op) => {
+                let required = op.deps();
+                let unknown: Vec<&TCRef> = required.difference(&self.known).collect();
+                if !unknown.is_empty() {
+                    let unknown: TCValue = unknown.into_iter().cloned().collect();
+                    Err(error::bad_request(
+                        "Some required values were not provided",
+                        unknown,
+                    ))
+                } else {
+                    if required.is_empty() {
+                        self.queue.push_front((value.0, op));
+                    } else {
+                        self.queue.push_back((value.0, op));
                     }
 
-                    state.insert(id.clone(), State::Value(value.clone()));
-                    required_value_ids.push((id.clone(), id.clone()));
+                    Ok(())
                 }
+            }
+            _ => {
+                self.resolved.insert(value.0, value.1.into());
+                Ok(())
             }
         }
     }
 
-    queue.push_back((value_id, op));
-    Ok(())
+    async fn resolve(
+        &mut self,
+        txn: Arc<Transaction>,
+        capture: HashSet<ValueId>,
+    ) -> TCResult<HashMap<ValueId, State>> {
+        let resolved: Map<ValueId, State> = self.resolved.drain().collect();
+        while !self.queue.is_empty() {
+            let known: HashSet<TCRef> = resolved.keys().drain().map(|id| id.into()).collect();
+            let mut ready = vec![];
+            let mut value_ids = vec![];
+            while let Some((value_id, op)) = self.queue.pop_front() {
+                if op.deps().is_subset(&known) {
+                    ready.push(txn.execute(&resolved, op));
+                    println!("ready: {}", value_id);
+                    value_ids.push(value_id);
+                } else {
+                    self.queue.push_front((value_id, op));
+                    break;
+                }
+            }
+
+            let values = try_join_all(ready).await?.into_iter().map(|s| {
+                println!("resolved {}", value_ids[0]);
+                (value_ids.remove(0), s)
+            });
+            resolved.extend(values);
+            println!("{} remaining to resolve", self.queue.len());
+        }
+
+        let resolved = resolved
+            .drain()
+            .drain()
+            .filter(|(id, _)| capture.contains(id))
+            .collect();
+
+        Ok(resolved)
+    }
 }
 
 pub struct Transaction {
-    host: Arc<Host>,
     id: TransactionId,
     context: Arc<Store>,
-    state: Map<ValueId, State>,
-    queue: Deque<(ValueId, Op)>,
-    mutated: Deque<Arc<dyn Transact>>,
+    host: Arc<Host>,
+    mutated: RwLock<Vec<Arc<dyn Transact>>>,
+    state: RwLock<Single<TransactionState>>,
 }
 
 impl Transaction {
-    pub fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
-        let id = TransactionId::new(host.time());
-        let context: PathSegment = id.clone().try_into()?;
-        let context = root.reserve(context.into())?;
+    pub fn from_iter<I: IntoIterator<Item = (ValueId, TCValue)>>(
+        host: Arc<Host>,
+        root: Arc<Store>,
+        iter: I,
+    ) -> TCResult<Arc<Transaction>> {
+        let mut state = TransactionState::new();
+        for item in iter {
+            state.push(item)?;
+        }
 
-        println!();
-        println!("Transaction::new");
-
-        Ok(Arc::new(Transaction {
-            host,
-            id,
-            context,
-            state: Map::new(),
-            queue: Deque::new(),
-            mutated: Deque::new(),
-        }))
+        Transaction::with_state(host, root, state)
     }
 
-    pub fn of(host: Arc<Host>, root: Arc<Store>, op: Op) -> TCResult<Arc<Transaction>> {
+    pub fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
+        Transaction::with_state(host, root, TransactionState::new())
+    }
+
+    fn with_state(
+        host: Arc<Host>,
+        root: Arc<Store>,
+        txn_state: TransactionState,
+    ) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
         let context = root.reserve(context.into())?;
 
-        let mut state: HashMap<ValueId, State> = HashMap::new();
-        let queue: Deque<(ValueId, Op)> = Deque::new();
-        calc_deps("_".parse()?, op, &mut state, &queue)?;
-
         println!();
-        println!("Transaction::of");
+        println!("Transaction::from_iter");
+
+        let state = RwLock::new(Single::new(Some(txn_state)));
 
         Ok(Arc::new(Transaction {
-            host,
             id,
             context,
-            state: state.into_iter().collect(),
-            queue,
-            mutated: Deque::new(),
+            host,
+            mutated: RwLock::new(vec![]),
+            state,
         }))
     }
 
@@ -198,110 +251,80 @@ impl Transaction {
         self.id.clone()
     }
 
-    pub async fn commit(self: &Arc<Self>) {
+    pub fn commit(&self) -> impl Future<Output = ()> + '_ {
         println!("commit!");
-        let mut tasks = Vec::with_capacity(self.mutated.len());
-        while let Some(state) = self.mutated.pop_front() {
-            tasks.push(async move { state.commit(&self.id).await });
-        }
-        join_all(tasks).await;
-    }
-
-    pub async fn execute<'a>(
-        self: &Arc<Self>,
-        capture: HashSet<ValueId>,
-    ) -> TCResult<HashMap<ValueId, State>> {
-        // TODO: use FuturesUnordered to parallelize tasks
-
-        while let Some((value_id, op)) = self.queue.pop_front() {
-            let state = match op {
-                Op::Get { subject, key } => match subject {
-                    Subject::Link(l) => self.clone().get(l, *key).await,
-                    Subject::Ref(r) => match self.state.get(&r.value_id()) {
-                        Some(s) => s.get(self.clone(), *key).await,
-                        None => Err(error::bad_request(
-                            "Required value not provided",
-                            r.value_id(),
-                        )),
-                    },
-                },
-                Op::Put {
-                    subject,
-                    key,
-                    value,
-                } => match subject {
-                    Subject::Link(l) => self.clone().put(l, *key, self.resolve_val(*value)?).await,
-                    Subject::Ref(r) => {
-                        let subject = self.resolve(&r.value_id())?;
-                        let value = self.resolve_val(*value)?;
-                        subject.put(self.clone(), *key, value.try_into()?).await
-                    }
-                },
-                Op::Post {
-                    subject,
-                    action,
-                    requires,
-                } => {
-                    let mut deps: Vec<(ValueId, TCValue)> = Vec::with_capacity(requires.len());
-                    for (dest_id, id) in requires {
-                        let dep = self.resolve_val(id)?;
-                        deps.push((dest_id, dep.try_into()?));
-                    }
-
-                    match subject {
-                        Some(r) => {
-                            let subject = self.resolve(&r.value_id())?;
-                            subject
-                                .post(self.clone(), &action.try_into()?, deps.into())
-                                .await
-                        }
-                        None => {
-                            self.host
-                                .post(self.clone(), &action.clone().into(), deps.into())
-                                .await
-                        }
-                    }
-                }
-            };
-
-            self.state.insert(value_id, state?);
-        }
-
-        let mut results: HashMap<ValueId, State> = HashMap::new();
-        for value_id in capture {
-            match self.state.get(&value_id) {
-                Some(state) => {
-                    results.insert(value_id, state);
-                }
-                None => {
-                    return Err(error::bad_request(
-                        "There is no such value to capture",
-                        value_id,
-                    ));
-                }
-            }
-        }
-
-        Ok(results)
-    }
-
-    fn resolve(self: &Arc<Self>, id: &ValueId) -> TCResult<State> {
-        match self.state.get(id) {
-            Some(s) => Ok(s),
-            None => Err(error::bad_request("Required value not provided", id)),
-        }
-    }
-
-    fn resolve_val(self: &Arc<Self>, value: TCValue) -> TCResult<State> {
-        match value {
-            TCValue::Ref(r) => self.resolve(&r.value_id()),
-            _ => Ok(value.into()),
-        }
+        join_all(self.mutated.write().unwrap().drain(..).map(|s| async move {
+            s.commit(&self.id).await;
+        }))
+        .then(|_| future::ready(()))
     }
 
     pub fn mutate(self: &Arc<Self>, state: Arc<dyn Transact>) {
-        // TODO: don't queue state if it's already in the queue
-        self.mutated.push_back(state)
+        self.mutated.write().unwrap().push(state)
+    }
+
+    pub async fn resolve(
+        self: &Arc<Self>,
+        capture: HashSet<ValueId>,
+    ) -> TCResult<HashMap<ValueId, State>> {
+        let mut state = self.state.write().unwrap().replace(None).unwrap();
+        state.resolve(self.clone(), capture).await
+    }
+
+    async fn execute(self: &Arc<Self>, resolved: &Map<ValueId, State>, op: Op) -> TCResult<State> {
+        match op {
+            Op::Get { subject, key } => match subject {
+                Subject::Link(l) => self.clone().get(l, *key).await,
+                Subject::Ref(r) => match resolved.get(&r.value_id()) {
+                    Some(s) => s.get(self.clone(), *key).await,
+                    None => Err(error::bad_request(
+                        "Required value not provided",
+                        r.value_id(),
+                    )),
+                },
+            },
+            Op::Put {
+                subject,
+                key,
+                value,
+            } => match subject {
+                Subject::Link(l) => {
+                    self.clone()
+                        .put(l, *key, resolve_val(resolved, *value)?)
+                        .await
+                }
+                Subject::Ref(r) => {
+                    let subject = resolve_id(resolved, &r.value_id())?;
+                    let value = resolve_val(resolved, *value)?;
+                    subject.put(self.clone(), *key, value.try_into()?).await
+                }
+            },
+            Op::Post {
+                subject,
+                action,
+                requires,
+            } => {
+                let mut deps: Vec<(ValueId, TCValue)> = Vec::with_capacity(requires.len());
+                for (dest_id, id) in requires {
+                    let dep = resolve_val(resolved, id)?;
+                    deps.push((dest_id, dep.try_into()?));
+                }
+
+                match subject {
+                    Some(r) => {
+                        let subject = resolve_id(resolved, &r.value_id())?;
+                        subject
+                            .post(self.clone(), &action.try_into()?, deps.into())
+                            .await
+                    }
+                    None => {
+                        self.host
+                            .post(self.clone(), &action.clone().into(), deps.into())
+                            .await
+                    }
+                }
+            }
+        }
     }
 
     pub fn time(&self) -> NetworkTime {
@@ -321,5 +344,19 @@ impl Transaction {
     pub async fn post(self: &Arc<Self>, dest: &Link, args: Args) -> TCResult<State> {
         println!("txn::post {}", dest);
         self.host.post(self.clone(), dest, args).await
+    }
+}
+
+fn resolve_id(resolved: &Map<ValueId, State>, id: &ValueId) -> TCResult<State> {
+    match resolved.get(id) {
+        Some(s) => Ok(s),
+        None => Err(error::bad_request("Required value not provided", id)),
+    }
+}
+
+fn resolve_val(resolved: &Map<ValueId, State>, value: TCValue) -> TCResult<State> {
+    match value {
+        TCValue::Ref(r) => resolve_id(resolved, &r.value_id()),
+        _ => Ok(value.into()),
     }
 }

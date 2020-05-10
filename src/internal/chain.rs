@@ -136,7 +136,7 @@ impl Chain {
         if !store.exists(&latest_block.into()).await? {
             return Err(error::bad_request(
                 "This store does not contain a Chain",
-                format!("{:?}", store),
+                "",
             ));
         }
 

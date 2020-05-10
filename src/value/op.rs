@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
@@ -111,7 +111,7 @@ pub enum Op {
 }
 
 impl Op {
-    pub fn deps(&self) -> BTreeSet<TCRef> {
+    pub fn deps(&self) -> HashSet<TCRef> {
         let mut deps = vec![];
         match self {
             Op::Get { subject, key } => {

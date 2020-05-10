@@ -9,7 +9,7 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use crate::error;
 use crate::host::Host;
 use crate::state::State;
-use crate::value::{Args, Op, TCPath, TCRef, TCResult, TCValue, ValueId};
+use crate::value::{Args, TCPath, TCRef, TCResult, TCValue, ValueId};
 
 const UNSERIALIZABLE: &str =
     "The request completed successfully but some of the response could not be serialized";
@@ -50,12 +50,10 @@ async fn post(host: Arc<Host>, path: &TCPath, mut args: Args) -> TCResult<State>
     if path == "/sbin/transact" {
         let capture: Vec<ValueId> = args.take_or("capture", vec![])?;
         let values: Vec<(ValueId, TCValue)> = args.take_or("values", vec![])?;
-        let txn = host
-            .clone()
-            .transact(Op::post(None, TCPath::default(), values))?;
+        let txn = host.clone().transact(values)?;
 
         let mut results: Vec<TCValue> = Vec::with_capacity(capture.len());
-        match txn.execute(capture.into_iter().collect()).await {
+        match txn.resolve(capture.into_iter().collect()).await {
             Ok(responses) => {
                 for (id, r) in responses {
                     match r {

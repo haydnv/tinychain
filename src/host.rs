@@ -15,7 +15,7 @@ use crate::internal::Directory;
 use crate::object::{Actor, TCObject};
 use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Transaction;
-use crate::value::{Args, Link, Op, TCPath, TCResult, TCValue};
+use crate::value::{Args, Link, TCPath, TCResult, TCValue, ValueId};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 
@@ -151,8 +151,8 @@ impl Host {
         Transaction::new(self.clone(), self.workspace.clone())
     }
 
-    pub fn transact(self: &Arc<Self>, op: Op) -> TCResult<Arc<Transaction>> {
-        Transaction::of(self.clone(), self.workspace.clone(), op)
+    pub fn transact(self: &Arc<Self>, ops: Vec<(ValueId, TCValue)>) -> TCResult<Arc<Transaction>> {
+        Transaction::from_iter(self.clone(), self.workspace.clone(), ops.into_iter())
     }
 
     pub async fn get(

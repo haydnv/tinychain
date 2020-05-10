@@ -7,7 +7,6 @@ mod internal;
 mod object;
 mod state;
 mod transaction;
-mod transaction_new;
 mod value;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");

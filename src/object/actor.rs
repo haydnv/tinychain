@@ -29,6 +29,7 @@ impl TCObject for Actor {
         let mut rng = OsRng {};
         let keypair: Keypair = Keypair::generate(&mut rng);
 
+        println!("OK: Actor::new");
         Ok(Arc::new(Actor {
             id,
             public_key: keypair.public,

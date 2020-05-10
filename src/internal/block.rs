@@ -13,7 +13,6 @@ use crate::value::{PathSegment, TCPath, TCResult};
 
 pub trait Block: Into<Bytes> + TryFrom<Bytes, Error = error::TCError> {}
 
-#[derive(Debug)]
 pub struct Store {
     block_size: usize,
     mount_point: PathBuf,
