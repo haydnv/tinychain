@@ -12,7 +12,7 @@ use crate::internal::cache::TransactionCache;
 use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
 use crate::state::*;
-use crate::transaction::{Transaction, TransactionId};
+use crate::transaction::{Transact, Transaction, TransactionId};
 use crate::value::{Link, PathSegment, TCPath, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]

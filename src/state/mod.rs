@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::file::File;
 use crate::object::Object;
-use crate::transaction::{Transaction, TransactionId};
+use crate::transaction::{Transact, Transaction, TransactionId};
 use crate::value::{Args, PathSegment, TCResult, TCValue};
 
 mod graph;
@@ -38,11 +38,6 @@ pub trait Persistent: Collection + File {
     type Config: TryFrom<TCValue>;
 
     async fn create(txn: Arc<Transaction>, config: Self::Config) -> TCResult<Arc<Self>>;
-}
-
-#[async_trait]
-pub trait Transact: Send + Sync {
-    async fn commit(&self, txn_id: &TransactionId);
 }
 
 #[derive(Clone)]

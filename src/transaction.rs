@@ -3,6 +3,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::join_all;
 use rand::Rng;
@@ -12,8 +13,13 @@ use crate::error;
 use crate::host::{Host, NetworkTime};
 use crate::internal::block::Store;
 use crate::internal::cache::{Deque, Map};
-use crate::state::{State, Transact};
+use crate::state::State;
 use crate::value::*;
+
+#[async_trait]
+pub trait Transact: Send + Sync {
+    async fn commit(&self, txn_id: &TransactionId);
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct TransactionId {
