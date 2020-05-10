@@ -1,13 +1,15 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::convert::TryInto;
 use std::sync::{Arc, RwLock};
 
 use futures::future::{join_all, try_join_all};
 
 use crate::error;
 use crate::host::Host;
+use crate::internal::block::Store;
 use crate::state::State;
 use crate::transaction::{Transact, TransactionId};
-use crate::value::{Op, TCRef, TCResult, TCValue, ValueId};
+use crate::value::{Op, PathSegment, TCRef, TCResult, TCValue, ValueId};
 
 struct TransactionState {
     known: BTreeSet<TCRef>,
@@ -80,6 +82,7 @@ impl TransactionState {
 
 struct Transaction {
     id: TransactionId,
+    context: Arc<Store>,
     mutated: RwLock<Vec<Arc<dyn Transact>>>,
     state: RwLock<TransactionState>,
 }
@@ -87,6 +90,7 @@ struct Transaction {
 impl Transaction {
     pub fn from_iter<I: IntoIterator<Item = (ValueId, Op)>>(
         host: Arc<Host>,
+        root: Arc<Store>,
         iter: I,
     ) -> TCResult<Arc<Transaction>> {
         let mut state = TransactionState::new();
@@ -94,8 +98,28 @@ impl Transaction {
             state.push(item)?;
         }
 
+        Transaction::with_state(host, root, state)
+    }
+
+    pub fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
+        Transaction::with_state(host, root, TransactionState::new())
+    }
+
+    fn with_state(
+        host: Arc<Host>,
+        root: Arc<Store>,
+        state: TransactionState,
+    ) -> TCResult<Arc<Transaction>> {
+        let id = TransactionId::new(host.time());
+        let context: PathSegment = id.clone().try_into()?;
+        let context = root.reserve(context.into())?;
+
+        println!();
+        println!("Transaction::from_iter");
+
         Ok(Arc::new(Transaction {
-            id: TransactionId::new(host.time()),
+            id,
+            context,
             mutated: RwLock::new(vec![]),
             state: RwLock::new(state),
         }))
