@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 use futures::future::{join_all, try_join_all};
 
 use crate::error;
+use crate::host::Host;
 use crate::state::State;
 use crate::transaction::{Transact, TransactionId};
 use crate::value::{Op, TCRef, TCResult, TCValue, ValueId};
@@ -14,6 +15,13 @@ struct TransactionState {
 }
 
 impl TransactionState {
+    fn new() -> TransactionState {
+        TransactionState {
+            known: BTreeSet::new(),
+            queue: VecDeque::new(),
+        }
+    }
+
     fn push(&mut self, op: (ValueId, Op)) -> TCResult<()> {
         let required = op.1.deps();
         let unknown: Vec<&TCRef> = required.difference(&self.known).collect();
@@ -77,15 +85,32 @@ struct Transaction {
 }
 
 impl Transaction {
+    pub fn from_iter<I: IntoIterator<Item = (ValueId, Op)>>(
+        host: Arc<Host>,
+        iter: I,
+    ) -> TCResult<Arc<Transaction>> {
+        let mut state = TransactionState::new();
+        for item in iter {
+            state.push(item)?;
+        }
+
+        Ok(Arc::new(Transaction {
+            id: TransactionId::new(host.time()),
+            mutated: RwLock::new(vec![]),
+            state: RwLock::new(state),
+        }))
+    }
+
     pub async fn commit(&self) {
         println!("commit!");
 
         let mut mutated = self.mutated.write().unwrap();
-        let mut tasks = Vec::with_capacity(mutated.len());
-        while let Some(state) = mutated.pop() {
-            tasks.push(async move { state.commit(&self.id).await });
-        }
-        join_all(tasks).await;
+        join_all(
+            mutated
+                .drain(..)
+                .map(|s| async move { s.commit(&self.id).await }),
+        )
+        .await;
     }
 
     pub async fn execute(self: &Arc<Self>, _op: Op) -> TCResult<State> {

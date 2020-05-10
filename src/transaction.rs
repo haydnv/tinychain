@@ -28,7 +28,7 @@ pub struct TransactionId {
 }
 
 impl TransactionId {
-    fn new(time: NetworkTime) -> TransactionId {
+    pub fn new(time: NetworkTime) -> TransactionId {
         TransactionId {
             timestamp: time.as_nanos(),
             nonce: rand::thread_rng().gen(),
