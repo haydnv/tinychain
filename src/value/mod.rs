@@ -62,7 +62,7 @@ fn validate_id(id: &str) -> TCResult<()> {
     Ok(())
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct ValueId {
     id: String,
 }

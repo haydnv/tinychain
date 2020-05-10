@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::error;
 use crate::value::{TCResult, ValueId};
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct TCRef {
     to: ValueId,
 }
