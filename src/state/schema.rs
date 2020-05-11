@@ -1,17 +1,16 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
+use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{future, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::internal::block::Store;
-use crate::internal::cache::Map;
 use crate::internal::chain::{Chain, ChainBlock, Mutation, PendingMutation};
 use crate::internal::file::*;
-use crate::state::Transact;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{TCPath, TCResult, TCValue, ValueId, Version};
 
@@ -45,7 +44,13 @@ impl Schema {
 }
 
 impl Mutation for Schema {}
-impl PendingMutation<Schema> for Schema {}
+
+#[async_trait]
+impl PendingMutation<Schema> for Schema {
+    async fn commit(self, _txn_id: &TransactionId) -> Schema {
+        self
+    }
+}
 
 impl TryFrom<TCValue> for Schema {
     type Error = error::TCError;
@@ -70,47 +75,31 @@ impl TryFrom<TCValue> for Schema {
 
 pub struct SchemaHistory {
     chain: Arc<Chain<Schema, Schema>>,
-    txn_cache: Map<TransactionId, Schema>,
 }
 
 impl SchemaHistory {
     pub fn new(txn: &Arc<Transaction>, schema: Schema) -> TCResult<Arc<SchemaHistory>> {
-        let txn_cache = Map::new();
-        txn_cache.insert(txn.id(), schema);
+        let chain = Chain::new(txn.context().reserve("schema".parse()?)?);
+        chain.put(txn.id(), iter::once(schema));
+        txn.mutate(chain.clone());
 
-        let schema_history = Arc::new(SchemaHistory {
-            chain: Chain::new(txn.context().reserve("schema".parse()?)?),
-            txn_cache,
-        });
-        txn.mutate(schema_history.clone());
-        Ok(schema_history)
+        Ok(Arc::new(SchemaHistory { chain }))
     }
 
     pub async fn at(&self, txn_id: &TransactionId) -> Schema {
-        println!("getting schema at {}", txn_id);
-        if let Some(schema) = self.txn_cache.get(txn_id) {
-            return schema;
-        }
-
-        let mut schema = Schema::new();
-        println!("streaming past mutations from Chain");
-        let mut stream = self.chain.stream_into(Some(txn_id.clone()));
-        while let Some(s) = stream.next().await {
-            println!("got past mutation");
-            schema = s;
-        }
-
-        schema
+        self.chain
+            .clone()
+            .stream_into(Some(txn_id.clone()))
+            .fold(Schema::new(), |_, s| future::ready(s))
+            .await
     }
 
     pub async fn latest(&self) -> Schema {
-        let mut schema = Schema::new();
-        let mut stream = self.chain.stream_into(None);
-        while let Some(s) = stream.next().await {
-            schema = s;
-        }
-
-        schema
+        self.chain
+            .clone()
+            .stream_into(None)
+            .fold(Schema::new(), |_, s| future::ready(s))
+            .await
     }
 }
 
@@ -121,7 +110,7 @@ impl File for SchemaHistory {
     async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
         copier.write_file(
             "schema".parse().unwrap(),
-            Box::new(self.chain.stream_bytes(Some(txn_id)).boxed()),
+            Box::new(self.chain.clone().stream_bytes(Some(txn_id)).boxed()),
         );
     }
 
@@ -130,27 +119,12 @@ impl File for SchemaHistory {
         let chain: Arc<Chain<Schema, Schema>> =
             Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
 
-        Arc::new(SchemaHistory {
-            chain,
-            txn_cache: Map::new(),
-        })
+        Arc::new(SchemaHistory { chain })
     }
 
     async fn from_store(store: Arc<Store>) -> Arc<SchemaHistory> {
         Arc::new(SchemaHistory {
             chain: Chain::from_store(store).await.unwrap(),
-            txn_cache: Map::new(),
         })
-    }
-}
-
-#[async_trait]
-impl Transact for SchemaHistory {
-    async fn commit(&self, txn_id: &TransactionId) {
-        println!("Schema::commit");
-        if let Some(schema) = self.txn_cache.remove(txn_id) {
-            self.chain.clone().put(txn_id, &[schema]).await;
-        }
-        println!("Schema::commit complete");
     }
 }

@@ -151,15 +151,25 @@ impl Store {
         }
     }
 
-    pub async fn hash_block(&self, block_id: &PathSegment) -> Bytes {
+    pub async fn get_block_hash(&self, block_id: &PathSegment) -> [u8; 32] {
         // TODO: read from filesystem
 
         if let Some(buffer) = self.buffer.read().unwrap().get(block_id) {
-            let mut hasher = Sha256::new();
-            hasher.input(buffer);
-            Bytes::copy_from_slice(&hasher.result()[..])
+            Store::hash_block(&buffer[..])
         } else {
-            Bytes::from(&[0; 32][..])
+            [0; 32]
+        }
+    }
+
+    pub fn hash_block(block: &[u8]) -> [u8; 32] {
+        if block.is_empty() {
+            [0; 32]
+        } else {
+            let mut checksum = [0; 32];
+            let mut hasher = Sha256::new();
+            hasher.input(block);
+            checksum.copy_from_slice(&hasher.result()[0..32]);
+            checksum
         }
     }
 

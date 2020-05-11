@@ -1,18 +1,17 @@
 use std::convert::TryInto;
+use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{self, join, join_all};
-use futures::StreamExt;
+use futures::{future, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::internal::block::Store;
-use crate::internal::cache::TransactionCache;
 use crate::internal::chain::{Chain, ChainBlock, Mutation, PendingMutation};
 use crate::internal::file::*;
 use crate::state::*;
-use crate::transaction::{Transact, Transaction, TransactionId};
+use crate::transaction::{Transaction, TransactionId};
 use crate::value::{Link, PathSegment, TCPath, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -29,11 +28,8 @@ pub struct DirEntry {
     owner: Option<Link>,
 }
 
-impl Mutation for DirEntry {}
-
-impl From<PendingDirEntry> for DirEntry {
-    fn from(pending: PendingDirEntry) -> DirEntry {
-        let (name, entry_type, entry_state, owner) = pending;
+impl DirEntry {
+    fn new(name: PathSegment, entry_type: EntryType, owner: Option<Link>) -> DirEntry {
         DirEntry {
             name,
             entry_type,
@@ -42,21 +38,47 @@ impl From<PendingDirEntry> for DirEntry {
     }
 }
 
+impl From<PendingDirEntry> for DirEntry {
+    fn from(pending: PendingDirEntry) -> DirEntry {
+        pending.0
+    }
+}
+
+impl Mutation for DirEntry {}
+
 #[derive(Clone)]
-enum EntryState {
+enum EntrySource {
     Directory(Arc<Store>, Arc<Directory>),
     Table(Arc<Store>, Arc<Table>),
     Graph(Arc<Store>, Arc<Graph>),
 }
 
-type PendingDirEntry = (PathSegment, EntryType, EntryState, Option<Link>);
+type PendingDirEntry = (DirEntry, EntrySource);
 
-impl PendingMutation<DirEntry> for PendingDirEntry {}
+#[async_trait]
+impl PendingMutation<DirEntry> for PendingDirEntry {
+    async fn commit(self, txn_id: &TransactionId) -> DirEntry {
+        use EntrySource::*;
+
+        match &self.1 {
+            Directory(context, dir) => {
+                FileCopier::copy(txn_id.clone(), &*dir.clone(), context.clone()).await;
+            }
+            Graph(context, graph) => {
+                FileCopier::copy(txn_id.clone(), &*graph.clone(), context.clone()).await;
+            }
+            Table(context, table) => {
+                FileCopier::copy(txn_id.clone(), &*table.clone(), context.clone()).await;
+            }
+        }
+
+        self.0
+    }
+}
 
 pub struct Directory {
     context: Arc<Store>,
     chain: Arc<Chain<DirEntry, PendingDirEntry>>,
-    txn_cache: TransactionCache<PathSegment, PendingDirEntry>,
 }
 
 impl Directory {
@@ -64,7 +86,6 @@ impl Directory {
         Ok(Arc::new(Directory {
             context: context.clone(),
             chain: Chain::new(context.reserve("contents".parse()?)?),
-            txn_cache: TransactionCache::new(),
         }))
     }
 }
@@ -85,16 +106,11 @@ impl Collection for Directory {
                 "You must specify a path to look up in a directory",
                 path,
             ));
-        } else if let Some((_, _, state, _owner)) = self.txn_cache.get(&txn.id(), &path[0]) {
-            return match state {
-                EntryState::Directory(_, dir) => dir.get(txn, &path.slice_from(1)).await,
-                EntryState::Graph(_, graph) => Ok(graph.into()),
-                EntryState::Table(_, table) => Ok(table.into()),
-            };
         }
 
         let entry = self
             .chain
+            .clone()
             .stream_into(Some(txn.id()))
             .filter(|entry: &DirEntry| future::ready(&entry.name == path))
             .fold(None, |_, m| future::ready(Some(m)))
@@ -127,32 +143,29 @@ impl Collection for Directory {
         path: Self::Key,
         state: Self::Value,
     ) -> TCResult<Arc<Self>> {
-        println!("Directory::put {}", path);
         let path: PathSegment = path.try_into()?;
 
         let context = self.context.reserve(path.clone().into())?;
         let entry = match state {
             State::Graph(g) => (
-                path.clone(),
-                EntryType::Graph,
-                EntryState::Graph(context, g),
-                None,
+                DirEntry::new(path.clone(), EntryType::Graph, None),
+                EntrySource::Graph(context, g),
             ),
             State::Table(t) => (
-                path.clone(),
-                EntryType::Table,
-                EntryState::Table(context, t),
-                None,
+                DirEntry::new(path.clone(), EntryType::Table, None),
+                EntrySource::Table(context, t),
             ),
             State::Object(_) => return Err(error::not_implemented()),
             State::Value(v) => {
-                return Err(error::bad_request("Expected a persistent state, found", v))
+                return Err(error::bad_request(
+                    "Directory::put expected a persistent state but found",
+                    v,
+                ))
             }
         };
 
-        self.txn_cache.insert(txn.id(), path, entry);
-        txn.mutate(self.clone());
-        println!("Directory::put complete");
+        self.chain.put(txn.id(), iter::once(entry));
+        txn.mutate(self.chain.clone());
         Ok(self)
     }
 }
@@ -161,15 +174,11 @@ impl Collection for Directory {
 impl File for Directory {
     type Block = ChainBlock<DirEntry>;
 
-    async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Directory> {
+    async fn copy_from(reader: &mut FileCopier, context: Arc<Store>) -> Arc<Directory> {
         let (path, blocks) = reader.next().await.unwrap();
-        let chain = Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
+        let chain = Chain::copy_from(blocks, context.reserve(path).unwrap()).await;
 
-        Arc::new(Directory {
-            context: dest,
-            chain,
-            txn_cache: TransactionCache::new(),
-        })
+        Arc::new(Directory { context, chain })
     }
 
     async fn copy_into(&self, _txn_id: TransactionId, _writer: &mut FileCopier) {
@@ -187,40 +196,5 @@ impl Persistent for Directory {
 
     async fn create(txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {
         Directory::new(txn.context())
-    }
-}
-
-#[async_trait]
-impl Transact for Directory {
-    async fn commit(&self, txn_id: &TransactionId) {
-        println!("Directory::commit");
-        let mutations = self.txn_cache.close(txn_id);
-        println!("Directory closed transaction cache for {}", txn_id);
-        let mut entries: Vec<DirEntry> = Vec::with_capacity(mutations.len());
-        let mut tasks = Vec::with_capacity(mutations.len());
-        for (name, (_, entry_type, state, owner)) in mutations.iter() {
-            entries.push(DirEntry {
-                name: name.clone(),
-                entry_type: entry_type.clone(),
-                owner: owner.clone(),
-            });
-            tasks.push(async move {
-                match state {
-                    EntryState::Directory(context, dir) => {
-                        FileCopier::copy(txn_id.clone(), &*dir.clone(), context.clone()).await;
-                    }
-                    EntryState::Graph(context, graph) => {
-                        FileCopier::copy(txn_id.clone(), &*graph.clone(), context.clone()).await;
-                    }
-                    EntryState::Table(context, table) => {
-                        FileCopier::copy(txn_id.clone(), &*table.clone(), context.clone()).await;
-                    }
-                }
-            });
-        }
-
-        println!("Directory::commit scheduled");
-        join(join_all(tasks), self.chain.clone().put(txn_id, &entries)).await;
-        println!("Directory::commit complete");
     }
 }

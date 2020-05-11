@@ -9,18 +9,23 @@ use futures::StreamExt;
 
 use crate::error;
 use crate::internal::block::Store;
-use crate::internal::cache::TransactionCache;
 use crate::internal::chain::{Chain, ChainBlock, Mutation, PendingMutation};
 use crate::internal::file::*;
 use crate::state::schema::{Schema, SchemaHistory};
-use crate::state::{Collection, Persistent, Transact};
+use crate::state::{Collection, Persistent};
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{PathSegment, TCResult, TCValue, ValueId};
 
 type Row = (Vec<TCValue>, Vec<Option<TCValue>>);
 
 impl Mutation for Row {}
-impl PendingMutation<Row> for Row {}
+
+#[async_trait]
+impl PendingMutation<Row> for Row {
+    async fn commit(self, _txn_id: &TransactionId) -> Row {
+        self
+    }
+}
 
 fn update_row(row: &mut Row, mut values: Vec<Option<TCValue>>) {
     let mut i = values.len();
@@ -35,7 +40,6 @@ fn update_row(row: &mut Row, mut values: Vec<Option<TCValue>>) {
 pub struct Table {
     schema: Arc<SchemaHistory>,
     chain: Arc<Chain<Row, Row>>,
-    cache: TransactionCache<Vec<TCValue>, Vec<Option<TCValue>>>,
 }
 
 impl Table {
@@ -86,8 +90,9 @@ impl Collection for Table {
         txn: Arc<Transaction>,
         row_id: &Self::Key,
     ) -> TCResult<Self::Value> {
-        let mut row = self
+        let row = self
             .chain
+            .clone()
             .stream_into(Some(txn.id()))
             .filter(|r: &Row| future::ready(&r.0 == row_id))
             .fold(self.new_row(&txn, row_id).await?, |mut row, mutation| {
@@ -95,10 +100,6 @@ impl Collection for Table {
                 future::ready(row)
             })
             .await;
-
-        if let Some(values) = self.cache.get(&txn.id(), row_id) {
-            update_row(&mut row, values);
-        }
 
         Ok(row.1.into_iter().map(|v| v.into()).collect())
     }
@@ -147,16 +148,9 @@ impl Collection for Table {
             }
         }
 
-        let row: Row = if let Some(values) = self.cache.get(&txn.id(), &row_id) {
-            let mut row = (row_id, values);
-            update_row(&mut row, mutated);
-            row
-        } else {
-            (row_id, mutated)
-        };
-
-        self.cache.insert(txn.id(), row.0, row.1);
-        txn.mutate(self.clone());
+        let row: Row = (row_id, mutated);
+        self.chain.put(txn.id(), iter::once(row));
+        txn.mutate(self.chain.clone());
         Ok(self.clone())
     }
 }
@@ -175,7 +169,7 @@ impl File for Table {
         let version: PathSegment = schema.version.to_string().parse().unwrap();
         writer.write_file(
             version.try_into().unwrap(),
-            Box::new(self.chain.stream_bytes(Some(txn_id)).boxed()),
+            Box::new(self.chain.clone().stream_bytes(Some(txn_id)).boxed()),
         );
         println!("wrote table chain to file");
     }
@@ -194,7 +188,6 @@ impl File for Table {
         Arc::new(Table {
             schema: schema_history,
             chain,
-            cache: TransactionCache::new(),
         })
     }
 
@@ -207,11 +200,7 @@ impl File for Table {
             .await
             .unwrap();
 
-        Arc::new(Table {
-            schema,
-            chain,
-            cache: TransactionCache::new(),
-        })
+        Arc::new(Table { schema, chain })
     }
 }
 
@@ -226,20 +215,6 @@ impl Persistent for Table {
         Ok(Arc::new(Table {
             schema: schema_history,
             chain: table_chain,
-            cache: TransactionCache::new(),
         }))
-    }
-}
-
-#[async_trait]
-impl Transact for Table {
-    async fn commit(&self, txn_id: &TransactionId) {
-        println!("Table::commit");
-        let mutations: Vec<Row> = self.cache.close(&txn_id).into_iter().collect();
-
-        if !mutations.is_empty() {
-            self.chain.put(&txn_id, &mutations).await
-        }
-        println!("Table::commit complete");
     }
 }

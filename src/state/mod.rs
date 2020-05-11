@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::file::File;
 use crate::object::Object;
-use crate::transaction::{Transact, Transaction, TransactionId};
+use crate::transaction::{Transact, Transaction};
 use crate::value::{Args, PathSegment, TCResult, TCValue};
 
 mod graph;
@@ -18,7 +18,7 @@ pub type Graph = graph::Graph;
 pub type Table = table::Table;
 
 #[async_trait]
-pub trait Collection: Transact {
+pub trait Collection {
     type Key: TryFrom<TCValue>;
     type Value: TryFrom<TCValue>;
 
@@ -49,16 +49,6 @@ pub enum State {
 }
 
 impl State {
-    pub async fn commit(&self, txn_id: &TransactionId) {
-        match self {
-            State::Graph(g) => g.commit(txn_id).await,
-            State::Table(t) => t.commit(txn_id).await,
-            _ => {
-                panic!("Tried to commit to a non-persistent state: {}", self);
-            }
-        }
-    }
-
     pub async fn get(&self, txn: Arc<Transaction>, key: TCValue) -> TCResult<State> {
         match self {
             State::Graph(g) => Ok(g.clone().get(txn, &key).await?.into()),
