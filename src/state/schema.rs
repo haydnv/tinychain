@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::cache::Map;
-use crate::internal::chain::{Chain, ChainBlock, Mutation};
+use crate::internal::chain::{Chain, ChainBlock, Mutation, PendingMutation};
 use crate::internal::file::*;
 use crate::state::Transact;
 use crate::transaction::{Transaction, TransactionId};
@@ -45,6 +45,7 @@ impl Schema {
 }
 
 impl Mutation for Schema {}
+impl PendingMutation<Schema> for Schema {}
 
 impl TryFrom<TCValue> for Schema {
     type Error = error::TCError;
@@ -68,7 +69,7 @@ impl TryFrom<TCValue> for Schema {
 }
 
 pub struct SchemaHistory {
-    chain: Arc<Chain>,
+    chain: Arc<Chain<Schema, Schema>>,
     txn_cache: Map<TransactionId, Schema>,
 }
 
@@ -93,7 +94,7 @@ impl SchemaHistory {
 
         let mut schema = Schema::new();
         println!("streaming past mutations from Chain");
-        let mut stream = self.chain.stream_into::<Schema>(Some(txn_id.clone()));
+        let mut stream = self.chain.stream_into(Some(txn_id.clone()));
         while let Some(s) = stream.next().await {
             println!("got past mutation");
             schema = s;
@@ -104,7 +105,7 @@ impl SchemaHistory {
 
     pub async fn latest(&self) -> Schema {
         let mut schema = Schema::new();
-        let mut stream = self.chain.stream_into::<Schema>(None);
+        let mut stream = self.chain.stream_into(None);
         while let Some(s) = stream.next().await {
             schema = s;
         }
@@ -120,13 +121,14 @@ impl File for SchemaHistory {
     async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
         copier.write_file(
             "schema".parse().unwrap(),
-            Box::new(self.chain.stream_bytes::<Schema>(Some(txn_id)).boxed()),
+            Box::new(self.chain.stream_bytes(Some(txn_id)).boxed()),
         );
     }
 
     async fn copy_from(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<SchemaHistory> {
         let (path, blocks) = copier.next().await.unwrap();
-        let chain: Arc<Chain> = Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
+        let chain: Arc<Chain<Schema, Schema>> =
+            Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
 
         Arc::new(SchemaHistory {
             chain,

@@ -59,11 +59,6 @@ impl<M: Mutation, T: PendingMutation<M>> TransactionCache<M, T> {
     }
 }
 
-pub struct Chain {
-    store: Arc<Store>,
-    latest_block: RwLock<u64>,
-}
-
 pub struct ChainBlock<T: Mutation> {
     checksum: Bytes,
     records: Vec<(TransactionId, Vec<T>)>,
@@ -135,12 +130,19 @@ impl<T: Mutation> TryFrom<Bytes> for ChainBlock<T> {
 
 impl<T: Mutation> Block for ChainBlock<T> {}
 
-impl Chain {
-    pub fn new(store: Arc<Store>) -> Arc<Chain> {
+pub struct Chain<M: Mutation, T: PendingMutation<M>> {
+    cache: TransactionCache<M, T>,
+    store: Arc<Store>,
+    latest_block: RwLock<u64>,
+}
+
+impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
+    pub fn new(store: Arc<Store>) -> Arc<Chain<M, T>> {
         let checksum = Bytes::from(&[0; 32][..]);
         store.new_block(0.into(), delimit_groups(&[checksum]));
 
         Arc::new(Chain {
+            cache: TransactionCache::new(),
             store,
             latest_block: RwLock::new(0),
         })
@@ -149,7 +151,7 @@ impl Chain {
     pub async fn copy_from(
         mut source: impl Stream<Item = Bytes> + Unpin,
         dest: Arc<Store>,
-    ) -> Arc<Chain> {
+    ) -> Arc<Chain<M, T>> {
         let mut latest_block: u64 = 0;
         let mut checksum = Bytes::from(&[0; 32][..]);
         while let Some(block) = source.next().await {
@@ -168,12 +170,13 @@ impl Chain {
         }
 
         Arc::new(Chain {
+            cache: TransactionCache::new(),
             store: dest,
             latest_block: RwLock::new(latest_block),
         })
     }
 
-    pub async fn from_store(store: Arc<Store>) -> TCResult<Arc<Chain>> {
+    pub async fn from_store(store: Arc<Store>) -> TCResult<Arc<Chain<M, T>>> {
         let mut latest_block = 0;
         if !store.exists(&latest_block.into()).await? {
             return Err(error::bad_request(
@@ -187,12 +190,13 @@ impl Chain {
         }
 
         Ok(Arc::new(Chain {
+            cache: TransactionCache::new(),
             store,
             latest_block: RwLock::new(latest_block),
         }))
     }
 
-    pub async fn put<T: Mutation>(self: &Arc<Self>, txn_id: &TransactionId, mutations: &[T]) {
+    pub async fn put(self: &Arc<Self>, txn_id: &TransactionId, mutations: &[M]) {
         let mut latest_block: u64 = *self.latest_block.read().unwrap();
         let encoded = ChainBlock::encode_transaction(txn_id, mutations);
 
@@ -276,10 +280,10 @@ impl Chain {
         stream
     }
 
-    pub fn stream_blocks<T: Mutation>(
+    pub fn stream_blocks(
         self: &Arc<Self>,
         txn_id: Option<TransactionId>,
-    ) -> impl Stream<Item = ChainBlock<T>> {
+    ) -> impl Stream<Item = ChainBlock<M>> {
         let txn_id_clone = txn_id.clone();
         self.into_stream()
             .take_while(move |(_, records)| {
@@ -312,7 +316,7 @@ impl Chain {
                                 txn_id.clone(),
                                 mutations
                                     .iter()
-                                    .map(|m| serde_json::from_slice::<T>(m).unwrap())
+                                    .map(|m| serde_json::from_slice::<M>(m).unwrap())
                                     .collect(),
                             )
                         })
@@ -321,22 +325,19 @@ impl Chain {
             })
     }
 
-    pub fn stream_bytes<T: Mutation>(
+    pub fn stream_bytes(
         self: &Arc<Self>,
         txn_id: Option<TransactionId>,
     ) -> impl Stream<Item = Bytes> {
         self.stream_blocks(txn_id)
-            .map(|block: ChainBlock<T>| block.into())
+            .map(|block: ChainBlock<M>| block.into())
     }
 
-    pub fn stream_into<T: Mutation>(
-        self: &Arc<Self>,
-        txn_id: Option<TransactionId>,
-    ) -> impl Stream<Item = T> {
+    pub fn stream_into(self: &Arc<Self>, txn_id: Option<TransactionId>) -> impl Stream<Item = M> {
         self.stream_blocks(txn_id)
             .filter_map(|block| {
                 println!("stream_into read block");
-                let mutations: Vec<T> = block
+                let mutations: Vec<M> = block
                     .records
                     .into_iter()
                     .map(|(_, mutations)| mutations)

@@ -10,7 +10,7 @@ use futures::StreamExt;
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::cache::TransactionCache;
-use crate::internal::chain::{Chain, ChainBlock, Mutation};
+use crate::internal::chain::{Chain, ChainBlock, Mutation, PendingMutation};
 use crate::internal::file::*;
 use crate::state::schema::{Schema, SchemaHistory};
 use crate::state::{Collection, Persistent, Transact};
@@ -20,6 +20,7 @@ use crate::value::{PathSegment, TCResult, TCValue, ValueId};
 type Row = (Vec<TCValue>, Vec<Option<TCValue>>);
 
 impl Mutation for Row {}
+impl PendingMutation<Row> for Row {}
 
 fn update_row(row: &mut Row, mut values: Vec<Option<TCValue>>) {
     let mut i = values.len();
@@ -33,7 +34,7 @@ fn update_row(row: &mut Row, mut values: Vec<Option<TCValue>>) {
 
 pub struct Table {
     schema: Arc<SchemaHistory>,
-    chain: Arc<Chain>,
+    chain: Arc<Chain<Row, Row>>,
     cache: TransactionCache<Vec<TCValue>, Vec<Option<TCValue>>>,
 }
 
@@ -87,7 +88,7 @@ impl Collection for Table {
     ) -> TCResult<Self::Value> {
         let mut row = self
             .chain
-            .stream_into::<Row>(Some(txn.id()))
+            .stream_into(Some(txn.id()))
             .filter(|r: &Row| future::ready(&r.0 == row_id))
             .fold(self.new_row(&txn, row_id).await?, |mut row, mutation| {
                 update_row(&mut row, mutation.1);
@@ -174,7 +175,7 @@ impl File for Table {
         let version: PathSegment = schema.version.to_string().parse().unwrap();
         writer.write_file(
             version.try_into().unwrap(),
-            Box::new(self.chain.stream_bytes::<Row>(Some(txn_id)).boxed()),
+            Box::new(self.chain.stream_bytes(Some(txn_id)).boxed()),
         );
         println!("wrote table chain to file");
     }

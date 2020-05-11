@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::cache::TransactionCache;
-use crate::internal::chain::{Chain, ChainBlock, Mutation};
+use crate::internal::chain::{Chain, ChainBlock, Mutation, PendingMutation};
 use crate::internal::file::*;
 use crate::state::*;
 use crate::transaction::{Transact, Transaction, TransactionId};
@@ -31,6 +31,17 @@ pub struct DirEntry {
 
 impl Mutation for DirEntry {}
 
+impl From<PendingDirEntry> for DirEntry {
+    fn from(pending: PendingDirEntry) -> DirEntry {
+        let (name, entry_type, entry_state, owner) = pending;
+        DirEntry {
+            name,
+            entry_type,
+            owner,
+        }
+    }
+}
+
 #[derive(Clone)]
 enum EntryState {
     Directory(Arc<Store>, Arc<Directory>),
@@ -38,12 +49,14 @@ enum EntryState {
     Graph(Arc<Store>, Arc<Graph>),
 }
 
-type PendingMutation = (EntryType, EntryState, Option<Link>);
+type PendingDirEntry = (PathSegment, EntryType, EntryState, Option<Link>);
+
+impl PendingMutation<DirEntry> for PendingDirEntry {}
 
 pub struct Directory {
     context: Arc<Store>,
-    chain: Arc<Chain>,
-    txn_cache: TransactionCache<PathSegment, PendingMutation>,
+    chain: Arc<Chain<DirEntry, PendingDirEntry>>,
+    txn_cache: TransactionCache<PathSegment, PendingDirEntry>,
 }
 
 impl Directory {
@@ -72,7 +85,7 @@ impl Collection for Directory {
                 "You must specify a path to look up in a directory",
                 path,
             ));
-        } else if let Some((_, state, _owner)) = self.txn_cache.get(&txn.id(), &path[0]) {
+        } else if let Some((_, _, state, _owner)) = self.txn_cache.get(&txn.id(), &path[0]) {
             return match state {
                 EntryState::Directory(_, dir) => dir.get(txn, &path.slice_from(1)).await,
                 EntryState::Graph(_, graph) => Ok(graph.into()),
@@ -82,7 +95,7 @@ impl Collection for Directory {
 
         let entry = self
             .chain
-            .stream_into::<DirEntry>(Some(txn.id()))
+            .stream_into(Some(txn.id()))
             .filter(|entry: &DirEntry| future::ready(&entry.name == path))
             .fold(None, |_, m| future::ready(Some(m)))
             .await;
@@ -119,8 +132,18 @@ impl Collection for Directory {
 
         let context = self.context.reserve(path.clone().into())?;
         let entry = match state {
-            State::Graph(g) => (EntryType::Graph, EntryState::Graph(context, g), None),
-            State::Table(t) => (EntryType::Table, EntryState::Table(context, t), None),
+            State::Graph(g) => (
+                path.clone(),
+                EntryType::Graph,
+                EntryState::Graph(context, g),
+                None,
+            ),
+            State::Table(t) => (
+                path.clone(),
+                EntryType::Table,
+                EntryState::Table(context, t),
+                None,
+            ),
             State::Object(_) => return Err(error::not_implemented()),
             State::Value(v) => {
                 return Err(error::bad_request("Expected a persistent state, found", v))
@@ -175,7 +198,7 @@ impl Transact for Directory {
         println!("Directory closed transaction cache for {}", txn_id);
         let mut entries: Vec<DirEntry> = Vec::with_capacity(mutations.len());
         let mut tasks = Vec::with_capacity(mutations.len());
-        for (name, (entry_type, state, owner)) in mutations.iter() {
+        for (name, (_, entry_type, state, owner)) in mutations.iter() {
             entries.push(DirEntry {
                 name: name.clone(),
                 entry_type: entry_type.clone(),
