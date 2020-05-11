@@ -11,6 +11,8 @@ use crate::error;
 use crate::internal::cache::Map;
 use crate::value::{PathSegment, TCPath, TCResult};
 
+pub type Checksum = [u8; 32];
+
 pub trait Block: Into<Bytes> + TryFrom<Bytes, Error = error::TCError> {}
 
 pub struct Store {
@@ -151,7 +153,7 @@ impl Store {
         }
     }
 
-    pub async fn get_block_hash(&self, block_id: &PathSegment) -> [u8; 32] {
+    pub async fn get_block_hash(&self, block_id: &PathSegment) -> Checksum {
         // TODO: read from filesystem
 
         if let Some(buffer) = self.buffer.read().unwrap().get(block_id) {
@@ -161,7 +163,7 @@ impl Store {
         }
     }
 
-    pub fn hash_block(block: &[u8]) -> [u8; 32] {
+    pub fn hash_block(block: &[u8]) -> Checksum {
         if block.is_empty() {
             [0; 32]
         } else {

@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::error;
-use crate::internal::block::{Block, Store};
+use crate::internal::block::{Block, Checksum, Store};
 use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::transaction::{Transact, TransactionId};
 use crate::value::{PathSegment, TCResult};
@@ -65,19 +65,19 @@ impl<M: Mutation, T: PendingMutation<M>> TransactionCache<M, T> {
 }
 
 pub struct ChainBlock<T: Mutation> {
-    checksum: [u8; 32],
+    checksum: Checksum,
     mutations: Vec<(TransactionId, Vec<T>)>,
 }
 
 impl<T: Mutation> ChainBlock<T> {
-    fn empty(checksum: [u8; 32]) -> ChainBlock<T> {
+    fn empty(checksum: Checksum) -> ChainBlock<T> {
         ChainBlock {
             checksum,
             mutations: vec![],
         }
     }
 
-    fn new(checksum: [u8; 32], txn_id: TransactionId, records: Vec<T>) -> ChainBlock<T> {
+    fn new(checksum: Checksum, txn_id: TransactionId, records: Vec<T>) -> ChainBlock<T> {
         ChainBlock {
             checksum,
             mutations: vec![(txn_id, records)],
@@ -134,7 +134,7 @@ impl<T: Mutation> TryFrom<Bytes> for ChainBlock<T> {
         let mut buf: VecDeque<&[u8]> = buf.split(|b| *b == GROUP_DELIMITER as u8).collect();
         buf.pop_back();
 
-        let mut checksum: [u8; 32] = [0; 32];
+        let mut checksum: Checksum = [0; 32];
         checksum.copy_from_slice(&buf.pop_front().unwrap()[0..32]);
 
         let mut mutations: Vec<(TransactionId, Vec<T>)> = Vec::with_capacity(buf.len());
@@ -161,7 +161,7 @@ impl<T: Mutation> TryFrom<Bytes> for ChainBlock<T> {
 impl<T: Mutation> Block for ChainBlock<T> {}
 
 type BlockStream = FuturesOrdered<
-    Box<dyn Future<Output = ([u8; 32], Vec<(TransactionId, Vec<Bytes>)>)> + Unpin + Send>,
+    Box<dyn Future<Output = (Checksum, Vec<(TransactionId, Vec<Bytes>)>)> + Unpin + Send>,
 >;
 
 pub struct Chain<M: Mutation, T: PendingMutation<M>> {
@@ -241,7 +241,7 @@ impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
 
     fn stream(
         self: &Arc<Self>,
-    ) -> impl Stream<Item = ([u8; 32], Vec<(TransactionId, Vec<Bytes>)>)> {
+    ) -> impl Stream<Item = (Checksum, Vec<(TransactionId, Vec<Bytes>)>)> {
         let mut stream: BlockStream = FuturesOrdered::new();
 
         let mut i = 0;
