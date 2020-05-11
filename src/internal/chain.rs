@@ -1,5 +1,6 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::convert::TryFrom;
+use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 
 use bytes::{BufMut, Bytes, BytesMut};
@@ -16,6 +17,47 @@ use crate::transaction::TransactionId;
 use crate::value::{PathSegment, TCResult};
 
 pub trait Mutation: Clone + DeserializeOwned + Serialize {}
+pub trait PendingMutation<M: Mutation>: Clone + Into<M> {}
+
+pub struct TransactionCache<M: Mutation, T: PendingMutation<M>> {
+    cache: RwLock<HashMap<TransactionId, Vec<T>>>,
+    phantom: PhantomData<M>,
+}
+
+impl<M: Mutation, T: PendingMutation<M>> TransactionCache<M, T> {
+    pub fn new() -> TransactionCache<M, T> {
+        TransactionCache {
+            cache: RwLock::new(HashMap::new()),
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn close(&self, txn_id: &TransactionId) -> Vec<T> {
+        self.cache
+            .write()
+            .unwrap()
+            .remove(txn_id)
+            .unwrap_or_else(Vec::new)
+    }
+
+    pub fn get(&self, txn_id: &TransactionId) -> Vec<T> {
+        self.cache
+            .read()
+            .unwrap()
+            .get(txn_id)
+            .map(|v| v.to_vec())
+            .unwrap_or_else(Vec::new)
+    }
+
+    pub fn extend<I: Iterator<Item = T>>(&self, txn_id: TransactionId, iter: I) {
+        let mut cache = self.cache.write().unwrap();
+        if let Some(list) = cache.get_mut(&txn_id) {
+            list.extend(iter);
+        } else {
+            cache.insert(txn_id, iter.collect());
+        }
+    }
+}
 
 pub struct Chain {
     store: Arc<Store>,
