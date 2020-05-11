@@ -9,7 +9,7 @@ use futures::StreamExt;
 
 use crate::error;
 use crate::internal::block::Store;
-use crate::internal::chain::{Chain, ChainBlock, Mutation, PendingMutation};
+use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
 use crate::state::schema::{Schema, SchemaHistory};
 use crate::state::{Collection, Persistent};
@@ -19,13 +19,6 @@ use crate::value::{PathSegment, TCResult, TCValue, ValueId};
 type Row = (Vec<TCValue>, Vec<Option<TCValue>>);
 
 impl Mutation for Row {}
-
-#[async_trait]
-impl PendingMutation<Row> for Row {
-    async fn commit(self, _txn_id: &TransactionId) -> Row {
-        self
-    }
-}
 
 fn update_row(row: &mut Row, mut values: Vec<Option<TCValue>>) {
     let mut i = values.len();
@@ -39,7 +32,7 @@ fn update_row(row: &mut Row, mut values: Vec<Option<TCValue>>) {
 
 pub struct Table {
     schema: Arc<SchemaHistory>,
-    chain: Arc<Chain<Row, Row>>,
+    chain: Arc<Chain<Row>>,
 }
 
 impl Table {

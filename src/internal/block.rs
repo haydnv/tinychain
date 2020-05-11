@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use bytes::{Bytes, BytesMut};
-use sha2::{Digest, Sha256};
 use tokio::fs;
 
 use crate::error;
@@ -13,7 +12,10 @@ use crate::value::{PathSegment, TCPath, TCResult};
 
 pub type Checksum = [u8; 32];
 
-pub trait Block: Into<Bytes> + TryFrom<Bytes, Error = error::TCError> {}
+pub trait Block:
+    Clone + Into<Bytes> + Into<Checksum> + TryFrom<Bytes, Error = error::TCError>
+{
+}
 
 pub struct Store {
     block_size: usize,
@@ -99,6 +101,14 @@ impl Store {
         }
     }
 
+    pub fn reserve_or_get(self: &Arc<Self>, path: &TCPath) -> TCResult<Arc<Store>> {
+        if let Some(store) = self.get_store(path) {
+            Ok(store)
+        } else {
+            self.reserve(path.clone())
+        }
+    }
+
     pub async fn exists(&self, path: &PathSegment) -> TCResult<bool> {
         let fs_path = self.fs_path(path);
         if self.children.contains_key(path) || self.buffer.read().unwrap().contains_key(path) {
@@ -143,39 +153,27 @@ impl Store {
         }
     }
 
-    pub async fn get_bytes(self: Arc<Self>, block_id: PathSegment) -> Bytes {
+    pub async fn get_block<B: Block>(self: Arc<Self>, block_id: PathSegment) -> TCResult<B> {
         // TODO: read from filesystem
 
+        if let Some(buffer) = self.get_bytes(block_id.clone()).await {
+            buffer.try_into()
+        } else {
+            Err(error::not_found(block_id))
+        }
+    }
+
+    pub async fn get_bytes(self: Arc<Self>, block_id: PathSegment) -> Option<Bytes> {
         if let Some(buffer) = self.buffer.read().unwrap().get(&block_id) {
-            Bytes::copy_from_slice(buffer)
+            Some(Bytes::copy_from_slice(buffer))
         } else {
-            Bytes::from(&[][..])
-        }
-    }
-
-    pub async fn get_block_hash(&self, block_id: &PathSegment) -> Checksum {
-        // TODO: read from filesystem
-
-        if let Some(buffer) = self.buffer.read().unwrap().get(block_id) {
-            Store::hash_block(&buffer[..])
-        } else {
-            [0; 32]
-        }
-    }
-
-    pub fn hash_block(block: &[u8]) -> Checksum {
-        if block.is_empty() {
-            [0; 32]
-        } else {
-            let mut checksum = [0; 32];
-            let mut hasher = Sha256::new();
-            hasher.input(block);
-            checksum.copy_from_slice(&hasher.result()[0..32]);
-            checksum
+            None
         }
     }
 
     pub fn new_block(&self, block_id: PathSegment, initial_value: Bytes) {
+        println!("new block, initial size {}", initial_value.len());
+
         let mut buffer = self.buffer.write().unwrap();
         if buffer.contains_key(&block_id) {
             panic!("Tried to overwrite block {}", block_id);

@@ -1,15 +1,15 @@
 use std::collections::{HashMap, VecDeque};
-use std::convert::TryFrom;
-use std::marker::PhantomData;
+use std::convert::{TryFrom, TryInto};
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::future::{self, join_all};
+use futures::future;
 use futures::stream::{self, FuturesOrdered, Stream};
 use futures::{Future, FutureExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::error;
 use crate::internal::block::{Block, Checksum, Store};
@@ -19,25 +19,18 @@ use crate::value::{PathSegment, TCResult};
 
 pub trait Mutation: Clone + DeserializeOwned + Serialize + Send + Sync {}
 
-#[async_trait]
-pub trait PendingMutation<M: Mutation>: Clone + Into<M> + Send + Sync {
-    async fn commit(self, txn_id: &TransactionId) -> M;
+struct TransactionCache<M: Mutation> {
+    cache: RwLock<HashMap<TransactionId, Vec<M>>>,
 }
 
-struct TransactionCache<M: Mutation, T: PendingMutation<M>> {
-    cache: RwLock<HashMap<TransactionId, Vec<T>>>,
-    phantom: PhantomData<M>,
-}
-
-impl<M: Mutation, T: PendingMutation<M>> TransactionCache<M, T> {
-    fn new() -> TransactionCache<M, T> {
+impl<M: Mutation> TransactionCache<M> {
+    fn new() -> TransactionCache<M> {
         TransactionCache {
             cache: RwLock::new(HashMap::new()),
-            phantom: PhantomData,
         }
     }
 
-    fn close(&self, txn_id: &TransactionId) -> Vec<T> {
+    fn close(&self, txn_id: &TransactionId) -> Vec<M> {
         self.cache
             .write()
             .unwrap()
@@ -45,7 +38,7 @@ impl<M: Mutation, T: PendingMutation<M>> TransactionCache<M, T> {
             .unwrap_or_else(Vec::new)
     }
 
-    fn get(&self, txn_id: &TransactionId) -> Vec<T> {
+    fn get(&self, txn_id: &TransactionId) -> Vec<M> {
         self.cache
             .read()
             .unwrap()
@@ -54,7 +47,7 @@ impl<M: Mutation, T: PendingMutation<M>> TransactionCache<M, T> {
             .unwrap_or_else(Vec::new)
     }
 
-    fn extend<I: Iterator<Item = T>>(&self, txn_id: TransactionId, iter: I) {
+    fn extend<I: Iterator<Item = M>>(&self, txn_id: TransactionId, iter: I) {
         let mut cache = self.cache.write().unwrap();
         if let Some(list) = cache.get_mut(&txn_id) {
             list.extend(iter);
@@ -64,27 +57,28 @@ impl<M: Mutation, T: PendingMutation<M>> TransactionCache<M, T> {
     }
 }
 
-pub struct ChainBlock<T: Mutation> {
+#[derive(Clone)]
+pub struct ChainBlock<M: Mutation> {
     checksum: Checksum,
-    mutations: Vec<(TransactionId, Vec<T>)>,
+    mutations: Vec<(TransactionId, Vec<M>)>,
 }
 
-impl<T: Mutation> ChainBlock<T> {
-    fn empty(checksum: Checksum) -> ChainBlock<T> {
+impl<M: Mutation> ChainBlock<M> {
+    fn empty(checksum: Checksum) -> ChainBlock<M> {
         ChainBlock {
             checksum,
             mutations: vec![],
         }
     }
 
-    fn new(checksum: Checksum, txn_id: TransactionId, records: Vec<T>) -> ChainBlock<T> {
+    fn new(checksum: Checksum, txn_id: TransactionId, records: Vec<M>) -> ChainBlock<M> {
         ChainBlock {
             checksum,
             mutations: vec![(txn_id, records)],
         }
     }
 
-    fn encode_transaction(txn_id: &TransactionId, mutations: &[T]) -> Bytes {
+    fn encode_transaction(txn_id: &TransactionId, mutations: &[M]) -> Bytes {
         let mut buf = BytesMut::new();
         let txn_id: Bytes = txn_id.into();
         buf.extend(txn_id);
@@ -105,16 +99,16 @@ impl<T: Mutation> ChainBlock<T> {
     fn is_empty(&self) -> bool {
         self.mutations.is_empty()
     }
-}
 
-impl<T: Mutation> ChainBlock<T> {
-    pub fn iter(&self) -> std::slice::Iter<(TransactionId, Vec<T>)> {
+    pub fn iter(&self) -> std::slice::Iter<(TransactionId, Vec<M>)> {
         self.mutations.iter()
     }
 }
 
-impl<T: Mutation> From<ChainBlock<T>> for Bytes {
-    fn from(block: ChainBlock<T>) -> Bytes {
+impl<M: Mutation> Block for ChainBlock<M> {}
+
+impl<M: Mutation> From<ChainBlock<M>> for Bytes {
+    fn from(block: ChainBlock<M>) -> Bytes {
         let mut buf = BytesMut::new();
         buf.put(&block.checksum[..]);
         buf.put_u8(GROUP_DELIMITER as u8);
@@ -127,17 +121,32 @@ impl<T: Mutation> From<ChainBlock<T>> for Bytes {
     }
 }
 
-impl<T: Mutation> TryFrom<Bytes> for ChainBlock<T> {
+impl<M: Mutation> From<ChainBlock<M>> for Checksum {
+    fn from(block: ChainBlock<M>) -> Checksum {
+        if block.is_empty() {
+            return [0; 32];
+        }
+
+        let mut hasher = Sha256::new();
+        let data: Bytes = block.into();
+        hasher.input(data);
+        let mut checksum = [0; 32];
+        checksum.copy_from_slice(&hasher.result()[..]);
+        checksum
+    }
+}
+
+impl<M: Mutation> TryFrom<Bytes> for ChainBlock<M> {
     type Error = error::TCError;
 
-    fn try_from(buf: Bytes) -> TCResult<ChainBlock<T>> {
+    fn try_from(buf: Bytes) -> TCResult<ChainBlock<M>> {
         let mut buf: VecDeque<&[u8]> = buf.split(|b| *b == GROUP_DELIMITER as u8).collect();
         buf.pop_back();
 
         let mut checksum: Checksum = [0; 32];
         checksum.copy_from_slice(&buf.pop_front().unwrap()[0..32]);
 
-        let mut mutations: Vec<(TransactionId, Vec<T>)> = Vec::with_capacity(buf.len());
+        let mut mutations: Vec<(TransactionId, Vec<M>)> = Vec::with_capacity(buf.len());
         while let Some(record) = buf.pop_front() {
             let record: Vec<&[u8]> = record.split(|b| *b == RECORD_DELIMITER as u8).collect();
 
@@ -146,7 +155,7 @@ impl<T: Mutation> TryFrom<Bytes> for ChainBlock<T> {
                 txn_id,
                 record[1..record.len() - 1]
                     .iter()
-                    .map(|m| serde_json::from_slice::<T>(&m).unwrap())
+                    .map(|m| serde_json::from_slice::<M>(&m).unwrap())
                     .collect(),
             ));
         }
@@ -158,20 +167,18 @@ impl<T: Mutation> TryFrom<Bytes> for ChainBlock<T> {
     }
 }
 
-impl<T: Mutation> Block for ChainBlock<T> {}
-
 type BlockStream = FuturesOrdered<
     Box<dyn Future<Output = (Checksum, Vec<(TransactionId, Vec<Bytes>)>)> + Unpin + Send>,
 >;
 
-pub struct Chain<M: Mutation, T: PendingMutation<M>> {
-    cache: TransactionCache<M, T>,
+pub struct Chain<M: Mutation> {
+    cache: TransactionCache<M>,
     store: Arc<Store>,
     latest_block: RwLock<u64>,
 }
 
-impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
-    pub fn new(store: Arc<Store>) -> Arc<Chain<M, T>> {
+impl<M: Mutation> Chain<M> {
+    pub fn new(store: Arc<Store>) -> Arc<Chain<M>> {
         let checksum = Bytes::from(&[0; 32][..]);
         store.new_block(0.into(), delimit_groups(&[checksum]));
 
@@ -185,7 +192,7 @@ impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
     pub async fn copy_from(
         mut source: impl Stream<Item = Bytes> + Unpin,
         dest: Arc<Store>,
-    ) -> Arc<Chain<M, T>> {
+    ) -> Arc<Chain<M>> {
         let mut latest_block: u64 = 0;
         let mut checksum = [0; 32];
         while let Some(block) = source.next().await {
@@ -199,8 +206,9 @@ impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
                 );
             }
 
-            dest.put_block(block_id.clone(), block);
-            checksum = dest.get_block_hash(&block_id).await;
+            let block: ChainBlock<M> = block.try_into().unwrap();
+            checksum = block.clone().into();
+            dest.put_block(block_id.clone(), block.into());
             latest_block += 1;
         }
 
@@ -215,7 +223,7 @@ impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
         })
     }
 
-    pub async fn from_store(store: Arc<Store>) -> TCResult<Arc<Chain<M, T>>> {
+    pub async fn from_store(store: Arc<Store>) -> TCResult<Arc<Chain<M>>> {
         let mut latest_block = 0;
         if !store.exists(&latest_block.into()).await? {
             return Err(error::bad_request(
@@ -235,7 +243,11 @@ impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
         }))
     }
 
-    pub fn put<I: Iterator<Item = T>>(self: &Arc<Self>, txn_id: TransactionId, mutations: I) {
+    pub fn get_pending(self: &Arc<Self>, txn_id: &TransactionId) -> Vec<M> {
+        self.cache.get(txn_id)
+    }
+
+    pub fn put<I: Iterator<Item = M>>(self: &Arc<Self>, txn_id: TransactionId, mutations: I) {
         self.cache.extend(txn_id, mutations)
     }
 
@@ -251,6 +263,7 @@ impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
                     .clone()
                     .get_bytes(i.into())
                     .map(|block| {
+                        let block = block.unwrap();
                         let mut block: VecDeque<&[u8]> =
                             block.split(|b| *b == GROUP_DELIMITER as u8).collect();
                         block.pop_back();
@@ -283,7 +296,6 @@ impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
                 break;
             } else {
                 i += 1;
-                println!("{}", i);
             }
         }
 
@@ -336,23 +348,21 @@ impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
             });
 
         let latest_block: u64 = *self.latest_block.read().unwrap();
-        blocks
-            .chain(stream::once(async move {
-                let checksum = self.store.get_block_hash(&latest_block.into()).await;
-                if let Some(txn_id) = txn_id_clone2 {
-                    let mutations: Vec<M> = self
-                        .cache
-                        .get(&txn_id)
-                        .iter()
-                        .cloned()
-                        .map(|p| p.into())
-                        .collect();
-                    ChainBlock::new(checksum, txn_id, mutations)
-                } else {
-                    ChainBlock::empty(checksum)
-                }
-            }))
-            .filter(|b| future::ready(!b.is_empty()))
+        blocks.chain(stream::once(async move {
+            let latest_block: ChainBlock<M> = self
+                .store
+                .clone()
+                .get_block(latest_block.into())
+                .await
+                .unwrap();
+            let checksum: Checksum = latest_block.into();
+            if let Some(txn_id) = txn_id_clone2 {
+                let mutations: Vec<M> = self.cache.get(&txn_id);
+                ChainBlock::new(checksum, txn_id, mutations)
+            } else {
+                ChainBlock::empty(checksum)
+            }
+        }))
     }
 
     pub fn stream_bytes(
@@ -385,10 +395,9 @@ impl<M: Mutation, T: PendingMutation<M>> Chain<M, T> {
 }
 
 #[async_trait]
-impl<M: Mutation, T: PendingMutation<M>> Transact for Chain<M, T> {
+impl<M: Mutation> Transact for Chain<M> {
     async fn commit(&self, txn_id: &TransactionId) {
-        let mutations: Vec<M> =
-            join_all(self.cache.close(txn_id).drain(..).map(|p| p.commit(txn_id))).await;
+        let mutations: Vec<M> = self.cache.close(txn_id);
         let mut latest_block: u64 = *self.latest_block.read().unwrap();
         let encoded = ChainBlock::encode_transaction(txn_id, &mutations);
 
@@ -403,7 +412,13 @@ impl<M: Mutation, T: PendingMutation<M>> Transact for Chain<M, T> {
             .will_fit(&latest_block.into(), encoded.len())
             .await
         {
-            let checksum = self.store.get_block_hash(&latest_block.into()).await;
+            let block: ChainBlock<M> = self
+                .store
+                .clone()
+                .get_block(latest_block.into())
+                .await
+                .unwrap();
+            let checksum: Checksum = block.into();
 
             latest_block += 1;
             *self.latest_block.write().unwrap() = latest_block;

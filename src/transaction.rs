@@ -167,7 +167,7 @@ impl TransactionState {
             let mut value_ids = vec![];
             while let Some((value_id, op)) = self.queue.pop_front() {
                 if op.deps().is_subset(&known) {
-                    ready.push(txn.execute(&resolved, op));
+                    ready.push(txn.resolve_value(&resolved, value_id.clone(), op));
                     println!("ready: {}", value_id);
                     value_ids.push(value_id);
                 } else {
@@ -198,7 +198,7 @@ pub struct Transaction {
     id: TransactionId,
     context: Arc<Store>,
     host: Arc<Host>,
-    mutated: RwLock<Vec<Arc<dyn Transact>>>,
+    mutated: Arc<RwLock<Vec<Arc<dyn Transact>>>>,
     state: RwLock<Single<TransactionState>>,
 }
 
@@ -208,6 +208,9 @@ impl Transaction {
         root: Arc<Store>,
         iter: I,
     ) -> TCResult<Arc<Transaction>> {
+        println!();
+        println!("Transaction::from_iter");
+
         let mut state = TransactionState::new();
         for item in iter {
             state.push(item)?;
@@ -228,23 +231,31 @@ impl Transaction {
         let id = TransactionId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
         let context = root.reserve(context.into())?;
-
-        println!();
-        println!("Transaction::from_iter");
-
         let state = RwLock::new(Single::new(Some(txn_state)));
 
         Ok(Arc::new(Transaction {
             id,
             context,
             host,
-            mutated: RwLock::new(vec![]),
+            mutated: Arc::new(RwLock::new(vec![])),
             state,
         }))
     }
 
     pub fn context(self: &Arc<Self>) -> Arc<Store> {
         self.context.clone()
+    }
+
+    fn extend(self: &Arc<Self>, context: ValueId) -> TCResult<Arc<Transaction>> {
+        let context: Arc<Store> = self.context.reserve(context.into())?;
+
+        Ok(Arc::new(Transaction {
+            id: self.id.clone(),
+            context,
+            host: self.host.clone(),
+            mutated: self.mutated.clone(),
+            state: RwLock::new(Single::new(None)),
+        }))
     }
 
     pub fn id(self: &Arc<Self>) -> TransactionId {
@@ -271,12 +282,19 @@ impl Transaction {
         state.resolve(self.clone(), capture).await
     }
 
-    async fn execute(self: &Arc<Self>, resolved: &Map<ValueId, State>, op: Op) -> TCResult<State> {
+    async fn resolve_value(
+        self: &Arc<Self>,
+        resolved: &Map<ValueId, State>,
+        value_id: ValueId,
+        op: Op,
+    ) -> TCResult<State> {
+        let extension = self.extend(value_id)?;
+
         match op {
             Op::Get { subject, key } => match subject {
-                Subject::Link(l) => self.clone().get(l, *key).await,
+                Subject::Link(l) => extension.get(l, *key).await,
                 Subject::Ref(r) => match resolved.get(&r.value_id()) {
-                    Some(s) => s.get(self.clone(), *key).await,
+                    Some(s) => s.get(extension, *key).await,
                     None => Err(error::bad_request(
                         "Required value not provided",
                         r.value_id(),
@@ -288,15 +306,11 @@ impl Transaction {
                 key,
                 value,
             } => match subject {
-                Subject::Link(l) => {
-                    self.clone()
-                        .put(l, *key, resolve_val(resolved, *value)?)
-                        .await
-                }
+                Subject::Link(l) => extension.put(l, *key, resolve_val(resolved, *value)?).await,
                 Subject::Ref(r) => {
                     let subject = resolve_id(resolved, &r.value_id())?;
                     let value = resolve_val(resolved, *value)?;
-                    subject.put(self.clone(), *key, value.try_into()?).await
+                    subject.put(extension, *key, value.try_into()?).await
                 }
             },
             Op::Post {
@@ -314,12 +328,12 @@ impl Transaction {
                     Some(r) => {
                         let subject = resolve_id(resolved, &r.value_id())?;
                         subject
-                            .post(self.clone(), &action.try_into()?, deps.into())
+                            .post(extension, &action.try_into()?, deps.into())
                             .await
                     }
                     None => {
                         self.host
-                            .post(self.clone(), &action.clone().into(), deps.into())
+                            .post(extension, &action.clone().into(), deps.into())
                             .await
                     }
                 }

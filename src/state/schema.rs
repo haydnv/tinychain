@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::internal::block::Store;
-use crate::internal::chain::{Chain, ChainBlock, Mutation, PendingMutation};
+use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
 use crate::transaction::{Transaction, TransactionId};
 use crate::value::{TCPath, TCResult, TCValue, ValueId, Version};
@@ -45,13 +45,6 @@ impl Schema {
 
 impl Mutation for Schema {}
 
-#[async_trait]
-impl PendingMutation<Schema> for Schema {
-    async fn commit(self, _txn_id: &TransactionId) -> Schema {
-        self
-    }
-}
-
 impl TryFrom<TCValue> for Schema {
     type Error = error::TCError;
 
@@ -74,13 +67,14 @@ impl TryFrom<TCValue> for Schema {
 }
 
 pub struct SchemaHistory {
-    chain: Arc<Chain<Schema, Schema>>,
+    chain: Arc<Chain<Schema>>,
 }
 
 impl SchemaHistory {
     pub fn new(txn: &Arc<Transaction>, schema: Schema) -> TCResult<Arc<SchemaHistory>> {
         let chain = Chain::new(txn.context().reserve("schema".parse()?)?);
         chain.put(txn.id(), iter::once(schema));
+        println!("put initial Schema into SchemaHistory chain");
         txn.mutate(chain.clone());
 
         Ok(Arc::new(SchemaHistory { chain }))
@@ -116,8 +110,7 @@ impl File for SchemaHistory {
 
     async fn copy_from(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<SchemaHistory> {
         let (path, blocks) = copier.next().await.unwrap();
-        let chain: Arc<Chain<Schema, Schema>> =
-            Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
+        let chain: Arc<Chain<Schema>> = Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
 
         Arc::new(SchemaHistory { chain })
     }
