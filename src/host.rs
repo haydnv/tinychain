@@ -19,30 +19,10 @@ use crate::value::{Args, Link, TCPath, TCResult, TCValue, ValueId};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 
-fn block_size(flag: &str) -> TCResult<usize> {
-    let msg = "Unable to parse value of block_size";
-
-    let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
-        .map_err(|_| error::bad_request(msg, flag))?;
-
-    if flag.ends_with('K') {
-        Ok(size * 1000)
-    } else if flag.ends_with('M') {
-        Ok(size * 1_000_000)
-    } else if flag.ends_with('G') {
-        Ok(size * 1_000_000_000)
-    } else {
-        Err(error::bad_request(msg, flag))
-    }
-}
-
 #[derive(Clone, StructOpt)]
 pub struct HostConfig {
     #[structopt(long = "address", default_value = "127.0.0.1")]
     pub address: IpAddr,
-
-    #[structopt(long = "block_size", default_value = "1K", parse(try_from_str = block_size))]
-    pub block_size: usize,
 
     #[structopt(long = "data_dir", default_value = "/tmp/tc/data")]
     pub data_dir: PathBuf,
@@ -99,8 +79,8 @@ pub struct Host {
 
 impl Host {
     pub async fn new(config: HostConfig) -> TCResult<Arc<Host>> {
-        let data_dir = Store::new(config.data_dir, config.block_size, None);
-        let workspace = Store::new_tmp(config.workspace, config.block_size, None);
+        let data_dir = Store::new(config.data_dir, None);
+        let workspace = Store::new_tmp(config.workspace, None);
 
         let host = Arc::new(Host {
             address: config.address,

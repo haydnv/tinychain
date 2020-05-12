@@ -18,7 +18,6 @@ pub trait Block:
 }
 
 pub struct Store {
-    block_size: usize,
     mount_point: PathBuf,
     context: Option<PathSegment>,
     children: Map<PathSegment, Arc<Store>>,
@@ -27,13 +26,8 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn new(
-        mount_point: PathBuf,
-        block_size: usize,
-        context: Option<PathSegment>,
-    ) -> Arc<Store> {
+    pub fn new(mount_point: PathBuf, context: Option<PathSegment>) -> Arc<Store> {
         Arc::new(Store {
-            block_size,
             mount_point,
             context,
             children: Map::new(),
@@ -42,13 +36,8 @@ impl Store {
         })
     }
 
-    pub fn new_tmp(
-        mount_point: PathBuf,
-        block_size: usize,
-        context: Option<PathSegment>,
-    ) -> Arc<Store> {
+    pub fn new_tmp(mount_point: PathBuf, context: Option<PathSegment>) -> Arc<Store> {
         Arc::new(Store {
-            block_size,
             mount_point,
             context,
             children: Map::new(),
@@ -59,7 +48,6 @@ impl Store {
 
     fn child(&self, context: PathSegment) -> Arc<Store> {
         let child = Arc::new(Store {
-            block_size: self.block_size,
             mount_point: self.fs_path(&context),
             context: Some(context.clone()),
             children: Map::new(),
@@ -69,10 +57,6 @@ impl Store {
 
         self.children.insert(context, child.clone());
         child
-    }
-
-    pub fn block_size_default(&self) -> usize {
-        self.block_size
     }
 
     pub fn reserve(self: &Arc<Self>, path: TCPath) -> TCResult<Arc<Store>> {
@@ -189,20 +173,6 @@ impl Store {
         }
 
         buffer.insert(block_id, BytesMut::from(&block[..]));
-    }
-
-    pub async fn size(&self, block_id: &PathSegment) -> usize {
-        // TODO: read from filesystem
-
-        if let Some(buffer) = self.buffer.read().unwrap().get(block_id) {
-            buffer.len()
-        } else {
-            0
-        }
-    }
-
-    pub async fn will_fit(&self, block_id: &PathSegment, size: usize) -> bool {
-        self.size(block_id).await + size <= self.block_size_default()
     }
 
     fn fs_path(&self, name: &PathSegment) -> PathBuf {

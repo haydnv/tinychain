@@ -398,7 +398,7 @@ impl<M: Mutation> Chain<M> {
 impl<M: Mutation> Transact for Chain<M> {
     async fn commit(&self, txn_id: &TransactionId) {
         let mutations: Vec<M> = self.cache.close(txn_id);
-        let mut latest_block: u64 = *self.latest_block.read().unwrap();
+        let latest_block: u64 = *self.latest_block.read().unwrap();
         let encoded = ChainBlock::encode_transaction(txn_id, &mutations);
 
         println!(
@@ -406,28 +406,6 @@ impl<M: Mutation> Transact for Chain<M> {
             mutations.len(),
             latest_block
         );
-
-        if !self
-            .store
-            .will_fit(&latest_block.into(), encoded.len())
-            .await
-        {
-            let block: ChainBlock<M> = self
-                .store
-                .clone()
-                .get_block(latest_block.into())
-                .await
-                .unwrap();
-            let checksum: Checksum = block.into();
-
-            latest_block += 1;
-            *self.latest_block.write().unwrap() = latest_block;
-
-            self.store.new_block(
-                latest_block.into(),
-                delimit_groups(&[Bytes::copy_from_slice(&checksum[..])]),
-            )
-        }
 
         self.store.append(&latest_block.into(), encoded);
         self.store.clone().flush(latest_block.into()).await;

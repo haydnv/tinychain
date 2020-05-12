@@ -2,11 +2,10 @@ use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::error;
-use crate::transaction::{Transact, TransactionId};
+use crate::transaction::TransactionId;
 use crate::value::{PathSegment, TCPath, TCResult};
 
 pub type Checksum = [u8; 32];
