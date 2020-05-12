@@ -3,7 +3,6 @@ use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::future;
 use futures::stream::{self, FuturesOrdered, Stream};
@@ -15,8 +14,10 @@ use sha2::{Digest, Sha256};
 use crate::error;
 use crate::internal::block::{Block, Checksum, Store};
 use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
-use crate::transaction::{Transact, TransactionId};
+use crate::transaction::TransactionId;
 use crate::value::{PathSegment, TCResult};
+
+const BLOCK_SIZE: usize = 1_000_000;
 
 pub trait Mutation: Clone + DeserializeOwned + Serialize + Send + Sync {}
 
@@ -33,7 +34,7 @@ fn valid_encoding(val: &[u8]) -> bool {
         }
     }
 
-    return true;
+    true
 }
 
 impl<M: Mutation> ChainBlock<M> {
@@ -228,6 +229,7 @@ impl<M: Mutation> Chain<M> {
         mutations: I,
     ) -> TCResult<()> {
         let block_id: PathSegment = self.latest_block.into();
+
         self.store
             .append(
                 &txn_id,
@@ -351,12 +353,29 @@ impl<M: Mutation> Chain<M> {
             })
             .flatten()
     }
-}
 
-#[async_trait]
-impl<M: Mutation> Transact for Chain<M> {
-    async fn commit(&self, txn_id: &TransactionId) {
+    pub async fn commit(&mut self, txn_id: &TransactionId) {
         println!("Chain::commit");
+        let block = self
+            .store
+            .clone()
+            .get_bytes(txn_id.clone(), self.latest_block.into())
+            .await
+            .unwrap();
+        if block.len() > BLOCK_SIZE {
+            self.latest_block += 1;
+            let block: ChainBlock<M> = block.try_into().unwrap();
+            let checksum: Checksum = block.into();
+            self.store
+                .new_block(
+                    txn_id,
+                    self.latest_block.into(),
+                    delimit_groups(&[Bytes::copy_from_slice(&checksum[..])]),
+                )
+                .await
+                .unwrap();
+        }
+
         self.store.commit(txn_id).await;
     }
 }

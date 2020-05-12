@@ -185,7 +185,7 @@ impl Persistent for Directory {
 #[async_trait]
 impl Transact for Directory {
     async fn commit(&self, txn_id: &TransactionId) {
-        let chain = self.chain.lock().await;
+        let mut chain = self.chain.lock().await;
         self.context.commit(txn_id).await;
         chain.commit(txn_id).await;
     }
