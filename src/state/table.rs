@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{self, try_join_all};
+use futures::lock::Mutex;
 use futures::StreamExt;
 
 use crate::error;
@@ -13,7 +14,7 @@ use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
 use crate::state::schema::{Schema, SchemaHistory};
 use crate::state::{Collection, Persistent};
-use crate::transaction::{Transaction, TransactionId};
+use crate::transaction::{Transact, Transaction, TransactionId};
 use crate::value::{PathSegment, TCResult, TCValue, ValueId};
 
 type Row = (Vec<TCValue>, Vec<Option<TCValue>>);
@@ -32,7 +33,7 @@ fn update_row(row: &mut Row, mut values: Vec<Option<TCValue>>) {
 
 pub struct Table {
     schema: Arc<SchemaHistory>,
-    chain: Arc<Chain<Row>>,
+    chain: Mutex<Chain<Row>>,
 }
 
 impl Table {
@@ -85,7 +86,8 @@ impl Collection for Table {
     ) -> TCResult<Self::Value> {
         let row = self
             .chain
-            .clone()
+            .lock()
+            .await
             .stream_into(txn.id())
             .filter(|r: &Row| future::ready(&r.0 == row_id))
             .fold(self.new_row(&txn, row_id).await?, |mut row, mutation| {
@@ -142,8 +144,8 @@ impl Collection for Table {
         }
 
         let row: Row = (row_id, mutated);
-        self.chain.put(txn.id(), iter::once(row)).await;
-        txn.mutate(self.chain.clone());
+        self.chain.lock().await.put(txn.id(), iter::once(row)).await;
+        txn.mutate(self.clone());
         Ok(self.clone())
     }
 }
@@ -162,7 +164,7 @@ impl File for Table {
         let version: PathSegment = schema.version.to_string().parse().unwrap();
         writer.write_file(
             version.try_into().unwrap(),
-            Box::new(self.chain.clone().stream_bytes(txn_id).boxed()),
+            Box::new(self.chain.lock().await.stream_bytes(txn_id).boxed()),
         );
         println!("wrote table chain to file");
     }
@@ -179,8 +181,9 @@ impl File for Table {
         println!("reading blocks from FileCopier");
         let (path, blocks) = reader.next().await.unwrap();
         println!("got blocks");
-        let chain =
-            Chain::copy_from(blocks, txn_id, dest.reserve(txn_id, path).await.unwrap()).await;
+        let chain = Mutex::new(
+            Chain::copy_from(blocks, txn_id, dest.reserve(txn_id, path).await.unwrap()).await,
+        );
         println!("copied Chain");
 
         Arc::new(Table {
@@ -206,15 +209,17 @@ impl File for Table {
             .to_string()
             .parse()
             .unwrap();
-        let chain = Chain::from_store(
-            txn_id,
-            store
-                .get_store(txn_id, &chain_path.try_into().unwrap())
-                .await
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+        let chain = Mutex::new(
+            Chain::from_store(
+                txn_id,
+                store
+                    .get_store(txn_id, &chain_path.try_into().unwrap())
+                    .await
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        );
 
         Arc::new(Table { schema, chain })
     }
@@ -225,18 +230,27 @@ impl Persistent for Table {
     type Config = Schema;
 
     async fn create(txn: Arc<Transaction>, schema: Schema) -> TCResult<Arc<Table>> {
-        let table_chain = Chain::new(
-            &txn.id(),
-            txn.context()
-                .reserve(&txn.id(), schema.version.to_string().parse()?)
-                .await?,
-        )
-        .await;
+        let table_chain = Mutex::new(
+            Chain::new(
+                &txn.id(),
+                txn.context()
+                    .reserve(&txn.id(), schema.version.to_string().parse()?)
+                    .await?,
+            )
+            .await,
+        );
         let schema_history = SchemaHistory::new(&txn, schema).await?;
 
         Ok(Arc::new(Table {
             schema: schema_history,
             chain: table_chain,
         }))
+    }
+}
+
+#[async_trait]
+impl Transact for Table {
+    async fn commit(&self, txn_id: &TransactionId) {
+        self.chain.lock().await.commit(txn_id).await
     }
 }

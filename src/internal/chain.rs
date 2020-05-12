@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -122,12 +122,12 @@ type BlockStream = FuturesOrdered<
 
 pub struct Chain<M: Mutation> {
     store: Arc<Store>,
-    latest_block: RwLock<u64>,
+    latest_block: u64,
     phantom: PhantomData<M>,
 }
 
 impl<M: Mutation> Chain<M> {
-    pub async fn new(txn_id: &TransactionId, store: Arc<Store>) -> Arc<Chain<M>> {
+    pub async fn new(txn_id: &TransactionId, store: Arc<Store>) -> Chain<M> {
         let checksum = Bytes::from(&[0; 32][..]);
         store
             .new_block(&txn_id, 0.into(), delimit_groups(&[checksum]))
@@ -135,18 +135,18 @@ impl<M: Mutation> Chain<M> {
             .unwrap();
         println!("Chain::new created block 0");
 
-        Arc::new(Chain {
+        Chain {
             store,
-            latest_block: RwLock::new(0),
+            latest_block: 0,
             phantom: PhantomData,
-        })
+        }
     }
 
     pub async fn copy_from(
         mut source: impl Stream<Item = Bytes> + Unpin,
         txn_id: &TransactionId,
         dest: Arc<Store>,
-    ) -> Arc<Chain<M>> {
+    ) -> Chain<M> {
         let mut latest_block: u64 = 0;
         let mut checksum = [0; 32];
         while let Some(block) = source.next().await {
@@ -174,14 +174,14 @@ impl<M: Mutation> Chain<M> {
             latest_block -= 1;
         }
 
-        Arc::new(Chain {
+        Chain {
             store: dest,
-            latest_block: RwLock::new(latest_block),
+            latest_block,
             phantom: PhantomData,
-        })
+        }
     }
 
-    pub async fn from_store(txn_id: &TransactionId, store: Arc<Store>) -> TCResult<Arc<Chain<M>>> {
+    pub async fn from_store(txn_id: &TransactionId, store: Arc<Store>) -> TCResult<Chain<M>> {
         let mut latest_block = 0;
         if !store.contains_block(txn_id, &latest_block.into()).await {
             return Err(error::bad_request(
@@ -197,15 +197,15 @@ impl<M: Mutation> Chain<M> {
             latest_block += 1;
         }
 
-        Ok(Arc::new(Chain {
+        Ok(Chain {
             store,
-            latest_block: RwLock::new(latest_block),
+            latest_block,
             phantom: PhantomData,
-        }))
+        })
     }
 
-    pub async fn put<I: Iterator<Item = M>>(self: &Arc<Self>, txn_id: TransactionId, mutations: I) {
-        let block_id: PathSegment = (*self.latest_block.read().unwrap()).into();
+    pub async fn put<I: Iterator<Item = M>>(&self, txn_id: TransactionId, mutations: I) {
+        let block_id: PathSegment = self.latest_block.into();
         self.store
             .append(
                 &txn_id,
@@ -217,7 +217,7 @@ impl<M: Mutation> Chain<M> {
     }
 
     fn stream(
-        self: &Arc<Self>,
+        &self,
         txn_id: TransactionId,
     ) -> impl Stream<Item = (Checksum, Vec<(TransactionId, Vec<Bytes>)>)> {
         let mut stream: BlockStream = FuturesOrdered::new();
@@ -257,7 +257,7 @@ impl<M: Mutation> Chain<M> {
             ));
             println!("into_stream got block {}", i);
 
-            if i == *self.latest_block.read().unwrap() {
+            if i == self.latest_block {
                 println!("into_stream completed queue at {}", i);
                 break;
             } else {
@@ -268,10 +268,7 @@ impl<M: Mutation> Chain<M> {
         stream
     }
 
-    pub fn stream_blocks(
-        self: Arc<Self>,
-        txn_id: TransactionId,
-    ) -> impl Stream<Item = ChainBlock<M>> {
+    pub fn stream_blocks(&self, txn_id: TransactionId) -> impl Stream<Item = ChainBlock<M>> {
         let txn_id_clone = txn_id.clone();
 
         self.stream(txn_id.clone())
@@ -305,12 +302,12 @@ impl<M: Mutation> Chain<M> {
             })
     }
 
-    pub fn stream_bytes(self: Arc<Self>, txn_id: TransactionId) -> impl Stream<Item = Bytes> {
+    pub fn stream_bytes(&self, txn_id: TransactionId) -> impl Stream<Item = Bytes> {
         self.stream_blocks(txn_id)
             .map(|block: ChainBlock<M>| block.into())
     }
 
-    pub fn stream_into(self: Arc<Self>, txn_id: TransactionId) -> impl Stream<Item = M> {
+    pub fn stream_into(&self, txn_id: TransactionId) -> impl Stream<Item = M> {
         self.stream_blocks(txn_id)
             .filter_map(|block| {
                 println!("stream_into read block");

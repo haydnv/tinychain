@@ -4,6 +4,7 @@ use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::lock::Mutex;
 use futures::{future, StreamExt};
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +12,7 @@ use crate::error;
 use crate::internal::block::Store;
 use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
-use crate::transaction::{Transaction, TransactionId};
+use crate::transaction::{Transact, Transaction, TransactionId};
 use crate::value::{TCPath, TCResult, TCValue, ValueId, Version};
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -67,7 +68,7 @@ impl TryFrom<TCValue> for Schema {
 }
 
 pub struct SchemaHistory {
-    chain: Arc<Chain<Schema>>,
+    chain: Mutex<Chain<Schema>>,
 }
 
 impl SchemaHistory {
@@ -78,15 +79,17 @@ impl SchemaHistory {
         )
         .await;
         chain.put(txn.id(), iter::once(schema)).await;
-        println!("put initial Schema into SchemaHistory chain");
-        txn.mutate(chain.clone());
-
-        Ok(Arc::new(SchemaHistory { chain }))
+        let schema_history = Arc::new(SchemaHistory {
+            chain: Mutex::new(chain),
+        });
+        txn.mutate(schema_history.clone());
+        Ok(schema_history)
     }
 
     pub async fn at(&self, txn_id: TransactionId) -> Schema {
         self.chain
-            .clone()
+            .lock()
+            .await
             .stream_into(txn_id)
             .fold(Schema::new(), |_, s| future::ready(s))
             .await
@@ -100,7 +103,7 @@ impl File for SchemaHistory {
     async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
         copier.write_file(
             "schema".parse().unwrap(),
-            Box::new(self.chain.clone().stream_bytes(txn_id).boxed()),
+            Box::new(self.chain.lock().await.stream_bytes(txn_id).boxed()),
         );
     }
 
@@ -110,15 +113,24 @@ impl File for SchemaHistory {
         dest: Arc<Store>,
     ) -> Arc<SchemaHistory> {
         let (path, blocks) = copier.next().await.unwrap();
-        let chain: Arc<Chain<Schema>> =
+        let chain: Chain<Schema> =
             Chain::copy_from(blocks, txn_id, dest.reserve(txn_id, path).await.unwrap()).await;
 
-        Arc::new(SchemaHistory { chain })
+        Arc::new(SchemaHistory {
+            chain: Mutex::new(chain),
+        })
     }
 
     async fn from_store(txn_id: &TransactionId, store: Arc<Store>) -> Arc<SchemaHistory> {
         Arc::new(SchemaHistory {
-            chain: Chain::from_store(txn_id, store).await.unwrap(),
+            chain: Mutex::new(Chain::from_store(txn_id, store).await.unwrap()),
         })
+    }
+}
+
+#[async_trait]
+impl Transact for SchemaHistory {
+    async fn commit(&self, txn_id: &TransactionId) {
+        self.chain.lock().await.commit(txn_id).await
     }
 }

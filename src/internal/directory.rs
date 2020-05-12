@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future;
+use futures::lock::Mutex;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
@@ -43,7 +44,7 @@ impl Mutation for DirEntry {}
 
 pub struct Directory {
     context: Arc<Store>,
-    chain: Arc<Chain<DirEntry>>,
+    chain: Mutex<Chain<DirEntry>>,
 }
 
 impl Directory {
@@ -51,7 +52,9 @@ impl Directory {
         println!("Directory::new");
         Ok(Arc::new(Directory {
             context: context.clone(),
-            chain: Chain::new(txn_id, context.reserve(txn_id, ".contents".parse()?).await?).await,
+            chain: Mutex::new(
+                Chain::new(txn_id, context.reserve(txn_id, ".contents".parse()?).await?).await,
+            ),
         }))
     }
 }
@@ -76,7 +79,8 @@ impl Collection for Directory {
 
         let entry = self
             .chain
-            .clone()
+            .lock()
+            .await
             .stream_into(txn.id())
             .filter(|entry: &DirEntry| future::ready(&entry.name == path))
             .fold(None, |_, m| future::ready(Some(m)))
@@ -116,6 +120,7 @@ impl Collection for Directory {
     ) -> TCResult<Arc<Self>> {
         let path: PathSegment = path.try_into()?;
         let context = self.context.reserve(&txn.id(), path.clone().into()).await?;
+        let chain = self.chain.lock().await;
 
         let entry = match state {
             State::Graph(g) => {
@@ -136,9 +141,9 @@ impl Collection for Directory {
         };
 
         println!("Directory::put new entry to {}", path);
-        self.chain.put(txn.id(), iter::once(entry)).await;
+        chain.put(txn.id(), iter::once(entry)).await;
         txn.mutate(self.clone());
-        Ok(self)
+        Ok(self.clone())
     }
 }
 
@@ -152,8 +157,9 @@ impl File for Directory {
         context: Arc<Store>,
     ) -> Arc<Directory> {
         let (path, blocks) = reader.next().await.unwrap();
-        let chain =
-            Chain::copy_from(blocks, txn_id, context.reserve(txn_id, path).await.unwrap()).await;
+        let chain = Mutex::new(
+            Chain::copy_from(blocks, txn_id, context.reserve(txn_id, path).await.unwrap()).await,
+        );
 
         Arc::new(Directory { context, chain })
     }
@@ -179,7 +185,8 @@ impl Persistent for Directory {
 #[async_trait]
 impl Transact for Directory {
     async fn commit(&self, txn_id: &TransactionId) {
+        let chain = self.chain.lock().await;
         self.context.commit(txn_id).await;
-        self.chain.commit(txn_id).await;
+        chain.commit(txn_id).await;
     }
 }
