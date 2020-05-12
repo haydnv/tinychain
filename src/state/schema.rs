@@ -71,27 +71,23 @@ pub struct SchemaHistory {
 }
 
 impl SchemaHistory {
-    pub fn new(txn: &Arc<Transaction>, schema: Schema) -> TCResult<Arc<SchemaHistory>> {
-        let chain = Chain::new(txn.context().reserve("schema".parse()?)?);
-        chain.put(txn.id(), iter::once(schema));
+    pub async fn new(txn: &Arc<Transaction>, schema: Schema) -> TCResult<Arc<SchemaHistory>> {
+        let chain = Chain::new(
+            &txn.id(),
+            txn.context().reserve(&txn.id(), "schema".parse()?).await?,
+        )
+        .await;
+        chain.put(txn.id(), iter::once(schema)).await;
         println!("put initial Schema into SchemaHistory chain");
         txn.mutate(chain.clone());
 
         Ok(Arc::new(SchemaHistory { chain }))
     }
 
-    pub async fn at(&self, txn_id: &TransactionId) -> Schema {
+    pub async fn at(&self, txn_id: TransactionId) -> Schema {
         self.chain
             .clone()
-            .stream_into(Some(txn_id.clone()))
-            .fold(Schema::new(), |_, s| future::ready(s))
-            .await
-    }
-
-    pub async fn latest(&self) -> Schema {
-        self.chain
-            .clone()
-            .stream_into(None)
+            .stream_into(txn_id)
             .fold(Schema::new(), |_, s| future::ready(s))
             .await
     }
@@ -104,20 +100,25 @@ impl File for SchemaHistory {
     async fn copy_into(&self, txn_id: TransactionId, copier: &mut FileCopier) {
         copier.write_file(
             "schema".parse().unwrap(),
-            Box::new(self.chain.clone().stream_bytes(Some(txn_id)).boxed()),
+            Box::new(self.chain.clone().stream_bytes(txn_id).boxed()),
         );
     }
 
-    async fn copy_from(copier: &mut FileCopier, dest: Arc<Store>) -> Arc<SchemaHistory> {
+    async fn copy_from(
+        copier: &mut FileCopier,
+        txn_id: &TransactionId,
+        dest: Arc<Store>,
+    ) -> Arc<SchemaHistory> {
         let (path, blocks) = copier.next().await.unwrap();
-        let chain: Arc<Chain<Schema>> = Chain::copy_from(blocks, dest.reserve(path).unwrap()).await;
+        let chain: Arc<Chain<Schema>> =
+            Chain::copy_from(blocks, txn_id, dest.reserve(txn_id, path).await.unwrap()).await;
 
         Arc::new(SchemaHistory { chain })
     }
 
-    async fn from_store(store: Arc<Store>) -> Arc<SchemaHistory> {
+    async fn from_store(txn_id: &TransactionId, store: Arc<Store>) -> Arc<SchemaHistory> {
         Arc::new(SchemaHistory {
-            chain: Chain::from_store(store).await.unwrap(),
+            chain: Chain::from_store(txn_id, store).await.unwrap(),
         })
     }
 }

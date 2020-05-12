@@ -79,8 +79,8 @@ pub struct Host {
 
 impl Host {
     pub async fn new(config: HostConfig) -> TCResult<Arc<Host>> {
-        let data_dir = Store::new(config.data_dir, None);
-        let workspace = Store::new_tmp(config.workspace, None);
+        let data_dir = Store::new(config.data_dir);
+        let workspace = Store::new_tmp(config.workspace);
 
         let host = Arc::new(Host {
             address: config.address,
@@ -89,6 +89,9 @@ impl Host {
             workspace,
             root: Map::new(),
         });
+
+        let txn = host.new_transaction().await?;
+        let txn_id = &txn.id();
 
         for path in config.hosted {
             for reserved in RESERVED.iter() {
@@ -100,14 +103,16 @@ impl Host {
                 }
             }
 
-            let dir = if let Some(store) = host.data_dir.get_store(&path) {
-                Directory::from_store(store).await
+            let dir = if let Some(store) = host.data_dir.get_store(txn_id, &path).await {
+                Directory::from_store(txn_id, store).await
             } else {
-                Directory::new(host.data_dir.reserve(path.clone())?)?
+                Directory::new(txn_id, host.data_dir.reserve(txn_id, path.clone()).await?).await?
             };
 
             host.root.insert(path, dir);
         }
+
+        host.data_dir.commit(&txn.id()).await;
 
         Ok(host)
     }
@@ -127,12 +132,15 @@ impl Host {
         )
     }
 
-    pub fn new_transaction(self: &Arc<Self>) -> TCResult<Arc<Transaction>> {
-        Transaction::new(self.clone(), self.workspace.clone())
+    pub async fn new_transaction(self: &Arc<Self>) -> TCResult<Arc<Transaction>> {
+        Transaction::new(self.clone(), self.workspace.clone()).await
     }
 
-    pub fn transact(self: &Arc<Self>, ops: Vec<(ValueId, TCValue)>) -> TCResult<Arc<Transaction>> {
-        Transaction::from_iter(self.clone(), self.workspace.clone(), ops.into_iter())
+    pub async fn transact(
+        self: &Arc<Self>,
+        ops: Vec<(ValueId, TCValue)>,
+    ) -> TCResult<Arc<Transaction>> {
+        Transaction::from_iter(self.clone(), self.workspace.clone(), ops.into_iter()).await
     }
 
     pub async fn get(

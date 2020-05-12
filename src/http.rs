@@ -43,14 +43,15 @@ pub async fn listen(
 }
 
 async fn get(host: Arc<Host>, path: TCPath, key: TCValue) -> TCResult<State> {
-    host.get(host.new_transaction()?, &path.into(), key).await
+    host.get(host.new_transaction().await?, &path.into(), key)
+        .await
 }
 
 async fn post(host: Arc<Host>, path: &TCPath, mut args: Args) -> TCResult<State> {
     if path == "/sbin/transact" {
         let capture: Vec<ValueId> = args.take_or("capture", vec![])?;
         let values: Vec<(ValueId, TCValue)> = args.take_or("values", vec![])?;
-        let txn = host.clone().transact(values)?;
+        let txn = host.clone().transact(values).await?;
 
         let mut results: Vec<TCValue> = Vec::with_capacity(capture.len());
         match txn.resolve(capture.into_iter().collect()).await {
@@ -78,7 +79,7 @@ async fn post(host: Arc<Host>, path: &TCPath, mut args: Args) -> TCResult<State>
 
         Ok(State::Value(results.into()))
     } else {
-        host.post(host.new_transaction()?, &path.clone().into(), args)
+        host.post(host.new_transaction().await?, &path.clone().into(), args)
             .await
     }
 }

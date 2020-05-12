@@ -1,5 +1,4 @@
 pub mod block;
-mod block_new;
 pub mod cache;
 pub mod chain;
 mod directory;

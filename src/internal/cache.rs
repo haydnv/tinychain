@@ -14,10 +14,6 @@ impl<K: Clone + Eq + Hash + Send + Sync, V: Clone + Send + Sync> Map<K, V> {
         }
     }
 
-    pub fn contains_key(&self, key: &K) -> bool {
-        self.map.read().unwrap().read().unwrap().contains_key(key)
-    }
-
     pub fn drain(&self) -> HashMap<K, V> {
         self.map
             .write()

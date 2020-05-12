@@ -203,7 +203,7 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub fn from_iter<I: IntoIterator<Item = (ValueId, TCValue)>>(
+    pub async fn from_iter<I: IntoIterator<Item = (ValueId, TCValue)>>(
         host: Arc<Host>,
         root: Arc<Store>,
         iter: I,
@@ -216,21 +216,21 @@ impl Transaction {
             state.push(item)?;
         }
 
-        Transaction::with_state(host, root, state)
+        Transaction::with_state(host, root, state).await
     }
 
-    pub fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
-        Transaction::with_state(host, root, TransactionState::new())
+    pub async fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
+        Transaction::with_state(host, root, TransactionState::new()).await
     }
 
-    fn with_state(
+    async fn with_state(
         host: Arc<Host>,
         root: Arc<Store>,
         txn_state: TransactionState,
     ) -> TCResult<Arc<Transaction>> {
         let id = TransactionId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
-        let context = root.reserve(context.into())?;
+        let context = root.reserve(&id, context.into()).await?;
         let state = RwLock::new(Single::new(Some(txn_state)));
 
         Ok(Arc::new(Transaction {
@@ -246,8 +246,8 @@ impl Transaction {
         self.context.clone()
     }
 
-    fn extend(self: &Arc<Self>, context: ValueId) -> TCResult<Arc<Transaction>> {
-        let context: Arc<Store> = self.context.reserve(context.into())?;
+    async fn extend(self: &Arc<Self>, context: ValueId) -> TCResult<Arc<Transaction>> {
+        let context: Arc<Store> = self.context.reserve(&self.id, context.into()).await?;
 
         Ok(Arc::new(Transaction {
             id: self.id.clone(),
@@ -288,7 +288,7 @@ impl Transaction {
         value_id: ValueId,
         op: Op,
     ) -> TCResult<State> {
-        let extension = self.extend(value_id)?;
+        let extension = self.extend(value_id).await?;
 
         match op {
             Op::Get { subject, key } => match subject {

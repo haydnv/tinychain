@@ -56,7 +56,11 @@ impl Mutation for GraphMutation {}
 impl File for Graph {
     type Block = ChainBlock<GraphMutation>;
 
-    async fn copy_from(_reader: &mut FileCopier, _dest: Arc<Store>) -> Arc<Self> {
+    async fn copy_from(
+        _reader: &mut FileCopier,
+        _txn_id: &TransactionId,
+        _dest: Arc<Store>,
+    ) -> Arc<Self> {
         // TODO
         Arc::new(Graph {})
     }
@@ -65,7 +69,7 @@ impl File for Graph {
         // TODO
     }
 
-    async fn from_store(_store: Arc<Store>) -> Arc<Graph> {
+    async fn from_store(_txn_id: &TransactionId, _store: Arc<Store>) -> Arc<Graph> {
         // TODO
         Arc::new(Graph {})
     }

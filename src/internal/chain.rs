@@ -1,5 +1,6 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
+use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -19,44 +20,6 @@ use crate::value::{PathSegment, TCResult};
 
 pub trait Mutation: Clone + DeserializeOwned + Serialize + Send + Sync {}
 
-struct TransactionCache<M: Mutation> {
-    cache: RwLock<HashMap<TransactionId, Vec<M>>>,
-}
-
-impl<M: Mutation> TransactionCache<M> {
-    fn new() -> TransactionCache<M> {
-        TransactionCache {
-            cache: RwLock::new(HashMap::new()),
-        }
-    }
-
-    fn close(&self, txn_id: &TransactionId) -> Vec<M> {
-        self.cache
-            .write()
-            .unwrap()
-            .remove(txn_id)
-            .unwrap_or_else(Vec::new)
-    }
-
-    fn get(&self, txn_id: &TransactionId) -> Vec<M> {
-        self.cache
-            .read()
-            .unwrap()
-            .get(txn_id)
-            .map(|v| v.to_vec())
-            .unwrap_or_else(Vec::new)
-    }
-
-    fn extend<I: Iterator<Item = M>>(&self, txn_id: TransactionId, iter: I) {
-        let mut cache = self.cache.write().unwrap();
-        if let Some(list) = cache.get_mut(&txn_id) {
-            list.extend(iter);
-        } else {
-            cache.insert(txn_id, iter.collect());
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct ChainBlock<M: Mutation> {
     checksum: Checksum,
@@ -64,21 +27,7 @@ pub struct ChainBlock<M: Mutation> {
 }
 
 impl<M: Mutation> ChainBlock<M> {
-    fn empty(checksum: Checksum) -> ChainBlock<M> {
-        ChainBlock {
-            checksum,
-            mutations: vec![],
-        }
-    }
-
-    fn new(checksum: Checksum, txn_id: TransactionId, records: Vec<M>) -> ChainBlock<M> {
-        ChainBlock {
-            checksum,
-            mutations: vec![(txn_id, records)],
-        }
-    }
-
-    fn encode_transaction(txn_id: &TransactionId, mutations: &[M]) -> Bytes {
+    fn encode_transaction<I: Iterator<Item = M>>(txn_id: &TransactionId, mutations: I) -> Bytes {
         let mut buf = BytesMut::new();
         let txn_id: Bytes = txn_id.into();
         buf.extend(txn_id);
@@ -108,13 +57,13 @@ impl<M: Mutation> ChainBlock<M> {
 impl<M: Mutation> Block for ChainBlock<M> {}
 
 impl<M: Mutation> From<ChainBlock<M>> for Bytes {
-    fn from(block: ChainBlock<M>) -> Bytes {
+    fn from(mut block: ChainBlock<M>) -> Bytes {
         let mut buf = BytesMut::new();
         buf.put(&block.checksum[..]);
         buf.put_u8(GROUP_DELIMITER as u8);
 
-        for (txn_id, mutations) in block.mutations {
-            buf.extend(ChainBlock::encode_transaction(&txn_id, &mutations));
+        for (txn_id, mut mutations) in block.mutations.drain(..) {
+            buf.extend(ChainBlock::encode_transaction(&txn_id, mutations.drain(..)));
         }
 
         Bytes::from(buf)
@@ -172,31 +121,38 @@ type BlockStream = FuturesOrdered<
 >;
 
 pub struct Chain<M: Mutation> {
-    cache: TransactionCache<M>,
     store: Arc<Store>,
     latest_block: RwLock<u64>,
+    phantom: PhantomData<M>,
 }
 
 impl<M: Mutation> Chain<M> {
-    pub fn new(store: Arc<Store>) -> Arc<Chain<M>> {
+    pub async fn new(txn_id: &TransactionId, store: Arc<Store>) -> Arc<Chain<M>> {
         let checksum = Bytes::from(&[0; 32][..]);
-        store.new_block(0.into(), delimit_groups(&[checksum]));
+        store
+            .new_block(&txn_id, 0.into(), delimit_groups(&[checksum]))
+            .await
+            .unwrap();
+        println!("Chain::new created block 0");
 
         Arc::new(Chain {
-            cache: TransactionCache::new(),
             store,
             latest_block: RwLock::new(0),
+            phantom: PhantomData,
         })
     }
 
     pub async fn copy_from(
         mut source: impl Stream<Item = Bytes> + Unpin,
+        txn_id: &TransactionId,
         dest: Arc<Store>,
     ) -> Arc<Chain<M>> {
         let mut latest_block: u64 = 0;
         let mut checksum = [0; 32];
         while let Some(block) = source.next().await {
             let block_id: PathSegment = latest_block.into();
+            println!("copying Chain block {}", block_id);
+
             if checksum[..] != block[0..32] {
                 panic!(
                     "Checksum failed for block {}, {} != {}",
@@ -208,7 +164,9 @@ impl<M: Mutation> Chain<M> {
 
             let block: ChainBlock<M> = block.try_into().unwrap();
             checksum = block.clone().into();
-            dest.put_block(block_id.clone(), block.into());
+            dest.new_block(&txn_id, block_id.clone(), block.into())
+                .await
+                .unwrap();
             latest_block += 1;
         }
 
@@ -217,42 +175,50 @@ impl<M: Mutation> Chain<M> {
         }
 
         Arc::new(Chain {
-            cache: TransactionCache::new(),
             store: dest,
             latest_block: RwLock::new(latest_block),
+            phantom: PhantomData,
         })
     }
 
-    pub async fn from_store(store: Arc<Store>) -> TCResult<Arc<Chain<M>>> {
+    pub async fn from_store(txn_id: &TransactionId, store: Arc<Store>) -> TCResult<Arc<Chain<M>>> {
         let mut latest_block = 0;
-        if !store.exists(&latest_block.into()).await? {
+        if !store.contains_block(txn_id, &latest_block.into()).await {
             return Err(error::bad_request(
                 "This store does not contain a Chain",
                 "",
             ));
         }
 
-        while store.exists(&(latest_block + 1).into()).await? {
+        while store
+            .contains_block(txn_id, &(latest_block + 1).into())
+            .await
+        {
             latest_block += 1;
         }
 
         Ok(Arc::new(Chain {
-            cache: TransactionCache::new(),
             store,
             latest_block: RwLock::new(latest_block),
+            phantom: PhantomData,
         }))
     }
 
-    pub fn get_pending(self: &Arc<Self>, txn_id: &TransactionId) -> Vec<M> {
-        self.cache.get(txn_id)
-    }
-
-    pub fn put<I: Iterator<Item = M>>(self: &Arc<Self>, txn_id: TransactionId, mutations: I) {
-        self.cache.extend(txn_id, mutations)
+    pub async fn put<I: Iterator<Item = M>>(self: &Arc<Self>, txn_id: TransactionId, mutations: I) {
+        let block_id: PathSegment = (*self.latest_block.read().unwrap()).into();
+        self.store
+            .append(
+                &txn_id,
+                &block_id,
+                ChainBlock::encode_transaction(&txn_id, mutations),
+            )
+            .await
+            .unwrap();
     }
 
     fn stream(
         self: &Arc<Self>,
+        txn_id: TransactionId,
     ) -> impl Stream<Item = (Checksum, Vec<(TransactionId, Vec<Bytes>)>)> {
         let mut stream: BlockStream = FuturesOrdered::new();
 
@@ -261,7 +227,7 @@ impl<M: Mutation> Chain<M> {
             stream.push(Box::new(
                 self.store
                     .clone()
-                    .get_bytes(i.into())
+                    .get_bytes(txn_id.clone(), i.into())
                     .map(|block| {
                         let block = block.unwrap();
                         let mut block: VecDeque<&[u8]> =
@@ -304,32 +270,23 @@ impl<M: Mutation> Chain<M> {
 
     pub fn stream_blocks(
         self: Arc<Self>,
-        txn_id: Option<TransactionId>,
+        txn_id: TransactionId,
     ) -> impl Stream<Item = ChainBlock<M>> {
-        let txn_id_clone1 = txn_id.clone();
-        let txn_id_clone2 = txn_id.clone();
-        let blocks = self
-            .stream()
+        let txn_id_clone = txn_id.clone();
+
+        self.stream(txn_id.clone())
             .take_while(move |(_, records)| {
-                if let Some(txn_id) = &txn_id {
-                    if let Some((time, _)) = records.last() {
-                        future::ready(time <= txn_id)
-                    } else {
-                        future::ready(false)
-                    }
+                if let Some((time, _)) = records.last() {
+                    future::ready(time <= &txn_id)
                 } else {
-                    future::ready(true)
+                    future::ready(false)
                 }
             })
             .map(move |(checksum, mutations)| {
-                let mutations = if let Some(txn_id) = &txn_id_clone1 {
-                    mutations
-                        .into_iter()
-                        .filter(|(time, _)| time <= txn_id)
-                        .collect()
-                } else {
-                    mutations
-                };
+                let mutations: Vec<(TransactionId, Vec<Bytes>)> = mutations
+                    .into_iter()
+                    .filter(|(time, _)| time <= &txn_id_clone)
+                    .collect();
 
                 ChainBlock {
                     checksum,
@@ -345,35 +302,15 @@ impl<M: Mutation> Chain<M> {
                         })
                         .collect(),
                 }
-            });
-
-        let latest_block: u64 = *self.latest_block.read().unwrap();
-        blocks.chain(stream::once(async move {
-            let latest_block: ChainBlock<M> = self
-                .store
-                .clone()
-                .get_block(latest_block.into())
-                .await
-                .unwrap();
-            let checksum: Checksum = latest_block.into();
-            if let Some(txn_id) = txn_id_clone2 {
-                let mutations: Vec<M> = self.cache.get(&txn_id);
-                ChainBlock::new(checksum, txn_id, mutations)
-            } else {
-                ChainBlock::empty(checksum)
-            }
-        }))
+            })
     }
 
-    pub fn stream_bytes(
-        self: Arc<Self>,
-        txn_id: Option<TransactionId>,
-    ) -> impl Stream<Item = Bytes> {
+    pub fn stream_bytes(self: Arc<Self>, txn_id: TransactionId) -> impl Stream<Item = Bytes> {
         self.stream_blocks(txn_id)
             .map(|block: ChainBlock<M>| block.into())
     }
 
-    pub fn stream_into(self: Arc<Self>, txn_id: Option<TransactionId>) -> impl Stream<Item = M> {
+    pub fn stream_into(self: Arc<Self>, txn_id: TransactionId) -> impl Stream<Item = M> {
         self.stream_blocks(txn_id)
             .filter_map(|block| {
                 println!("stream_into read block");
@@ -397,18 +334,8 @@ impl<M: Mutation> Chain<M> {
 #[async_trait]
 impl<M: Mutation> Transact for Chain<M> {
     async fn commit(&self, txn_id: &TransactionId) {
-        let mutations: Vec<M> = self.cache.close(txn_id);
-        let latest_block: u64 = *self.latest_block.read().unwrap();
-        let encoded = ChainBlock::encode_transaction(txn_id, &mutations);
-
-        println!(
-            "Chain::commit {} mutations in block {}",
-            mutations.len(),
-            latest_block
-        );
-
-        self.store.append(&latest_block.into(), encoded);
-        self.store.clone().flush(latest_block.into()).await;
+        println!("Chain::commit");
+        self.store.commit(txn_id).await;
     }
 }
 

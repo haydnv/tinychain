@@ -133,10 +133,10 @@ impl Actor {
 
         if header != TokenHeader::default() {
             Err(error::unauthorized("Unsupported bearer token"))
-        } else if !self
+        } else if self
             .public_key
             .verify(message.as_bytes(), &signature)
-            .is_ok()
+            .is_err()
         {
             Err(error::unauthorized("Invalid bearer token provided"))
         } else {

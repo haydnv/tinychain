@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use bytes::{Bytes, BytesMut};
-use tokio::fs;
+use bytes::{BufMut, Bytes, BytesMut};
+use futures::future::BoxFuture;
+use futures::lock::Mutex;
 
 use crate::error;
-use crate::internal::cache::Map;
+use crate::transaction::TransactionId;
 use crate::value::{PathSegment, TCPath, TCResult};
 
 pub type Checksum = [u8; 32];
@@ -17,162 +18,315 @@ pub trait Block:
 {
 }
 
+struct TransactionCache {
+    subdirs: HashMap<TransactionId, HashMap<PathSegment, Arc<Store>>>,
+    blocks: HashMap<TransactionId, HashMap<PathSegment, BytesMut>>,
+}
+
+impl TransactionCache {
+    fn new() -> TransactionCache {
+        TransactionCache {
+            subdirs: HashMap::new(),
+            blocks: HashMap::new(),
+        }
+    }
+}
+
+struct StoreState {
+    cache: TransactionCache,
+    subdirs: HashMap<PathSegment, Arc<Store>>,
+    blocks: HashMap<PathSegment, BytesMut>,
+}
+
+impl StoreState {
+    fn new() -> StoreState {
+        StoreState {
+            cache: TransactionCache::new(),
+            subdirs: HashMap::new(),
+            blocks: HashMap::new(),
+        }
+    }
+}
+
 pub struct Store {
     mount_point: PathBuf,
     context: Option<PathSegment>,
-    children: Map<PathSegment, Arc<Store>>,
-    buffer: RwLock<HashMap<PathSegment, BytesMut>>,
     tmp: bool,
+    state: Mutex<StoreState>,
 }
 
 impl Store {
-    pub fn new(mount_point: PathBuf, context: Option<PathSegment>) -> Arc<Store> {
+    pub fn new(mount_point: PathBuf) -> Arc<Store> {
         Arc::new(Store {
             mount_point,
-            context,
-            children: Map::new(),
-            buffer: RwLock::new(HashMap::new()),
+            context: None,
             tmp: false,
+            state: Mutex::new(StoreState::new()),
         })
     }
 
-    pub fn new_tmp(mount_point: PathBuf, context: Option<PathSegment>) -> Arc<Store> {
+    pub fn new_tmp(mount_point: PathBuf) -> Arc<Store> {
         Arc::new(Store {
             mount_point,
-            context,
-            children: Map::new(),
-            buffer: RwLock::new(HashMap::new()),
+            context: None,
             tmp: true,
+            state: Mutex::new(StoreState::new()),
         })
     }
 
-    fn child(&self, context: PathSegment) -> Arc<Store> {
-        let child = Arc::new(Store {
+    fn subdir(&self, context: PathSegment) -> Arc<Store> {
+        Arc::new(Store {
             mount_point: self.fs_path(&context),
             context: Some(context.clone()),
-            children: Map::new(),
-            buffer: RwLock::new(HashMap::new()),
             tmp: self.tmp,
-        });
-
-        self.children.insert(context, child.clone());
-        child
+            state: Mutex::new(StoreState::new()),
+        })
     }
 
-    pub fn reserve(self: &Arc<Self>, path: TCPath) -> TCResult<Arc<Store>> {
-        if path.is_empty() {
-            return Err(error::internal("Tried to create block store with no name"));
-        }
+    pub async fn append(
+        &self,
+        txn_id: &TransactionId,
+        block_id: &PathSegment,
+        data: Bytes,
+    ) -> TCResult<()> {
+        println!("append to block {} in {}", block_id, txn_id);
+        let mut state = self.state.lock().await;
 
-        if path.len() == 1 {
-            let path = &path[0];
-            if self.children.contains_key(path) {
-                return Err(error::internal(&format!(
-                    "Tried to create a block store that already exists! {}",
-                    path
-                )));
+        let block_exists = state.blocks.contains_key(block_id);
+        if let Some(blocks) = state.cache.blocks.get_mut(txn_id) {
+            if let Some(block) = blocks.get_mut(block_id) {
+                println!("found {} in txn {}", block_id, txn_id);
+                block.put(data);
+                Ok(())
+            } else if block_exists {
+                println!("found {}, appending in txn {}", block_id, txn_id);
+                blocks.insert(block_id.clone(), data[..].into());
+                Ok(())
+            } else {
+                Err(error::internal(format!(
+                    "Tried to append to nonexistent block {} in txn {}",
+                    block_id, txn_id
+                )))
+            }
+        } else if block_exists {
+            println!("found {}, creating new cache for txn {}", block_id, txn_id);
+            let mut blocks = HashMap::new();
+            blocks.insert(block_id.clone(), data[..].into());
+            state.cache.blocks.insert(txn_id.clone(), blocks);
+            Ok(())
+        } else {
+            Err(error::internal(format!(
+                "Tried to append to nonexistent block: {}",
+                block_id
+            )))
+        }
+    }
+
+    pub fn commit<'a>(&'a self, txn_id: &'a TransactionId) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            let mut state = self.state.lock().await;
+
+            if let Some(subdirs) = state.cache.subdirs.remove(txn_id) {
+                state.subdirs.extend(subdirs);
+                println!("{:?} subdirs after commit:", self.context);
+                for (name, store) in state.subdirs.iter() {
+                    store.commit(txn_id).await;
+                    println!("\t{}", name);
+                }
             }
 
-            Ok(self.child(path.clone()))
-        } else {
-            let store = if let Some(store) = self.children.get(&path[0]) {
-                store
-            } else {
-                self.child(path[0].clone())
-            };
-
-            store.reserve(path.slice_from(1))
-        }
+            if let Some(mut blocks) = state.cache.blocks.remove(txn_id) {
+                for (name, block) in blocks.drain() {
+                    if let Some(existing_block) = state.blocks.get_mut(&name) {
+                        existing_block.put(block);
+                        println!("appended committed data to {}", name);
+                    } else {
+                        println!("committing new block {}", name);
+                        state.blocks.insert(name, block);
+                    }
+                }
+            }
+        })
     }
 
-    pub fn reserve_or_get(self: &Arc<Self>, path: &TCPath) -> TCResult<Arc<Store>> {
-        if let Some(store) = self.get_store(path) {
-            Ok(store)
-        } else {
-            self.reserve(path.clone())
+    pub async fn contains_block(&self, txn_id: &TransactionId, block_id: &PathSegment) -> bool {
+        let state = self.state.lock().await;
+        if let Some(blocks) = state.cache.blocks.get(txn_id) {
+            if blocks.contains_key(block_id) {
+                return true;
+            }
         }
+
+        state.blocks.contains_key(block_id)
     }
 
-    pub async fn exists(&self, path: &PathSegment) -> TCResult<bool> {
-        let fs_path = self.fs_path(path);
-        if self.children.contains_key(path) || self.buffer.read().unwrap().contains_key(path) {
-            return Ok(true);
-        }
-
-        match fs::metadata(fs_path).await {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false),
-        }
-    }
-
-    pub fn append(&self, block_id: &PathSegment, data: Bytes) {
-        // TODO: check filesystem
-        if !self.buffer.read().unwrap().contains_key(block_id) {
-            panic!("tried to append to a nonexistent block! {}", block_id);
-        }
-
-        self.buffer
-            .write()
-            .unwrap()
-            .get_mut(&block_id)
-            .unwrap()
-            .extend(BytesMut::from(&data[..]));
-    }
-
-    pub async fn flush(self: Arc<Self>, _block_id: PathSegment) {
-        // TODO: write block buffer to disk
-    }
-
-    pub fn get_store(&self, path: &TCPath) -> Option<Arc<Store>> {
-        if path.is_empty() {
-            return None;
-        }
-
-        if path.len() == 1 {
-            self.children.get(&path[0])
-        } else if let Some(store) = self.children.get(&path[0]) {
-            store.get_store(&path.slice_from(1))
-        } else {
-            None
-        }
-    }
-
-    pub async fn get_block<B: Block>(self: Arc<Self>, block_id: PathSegment) -> TCResult<B> {
+    pub async fn get_block<B: Block>(
+        self: Arc<Self>,
+        txn_id: TransactionId,
+        block_id: PathSegment,
+    ) -> TCResult<B> {
         // TODO: read from filesystem
 
-        if let Some(buffer) = self.get_bytes(block_id.clone()).await {
+        if let Some(buffer) = self.get_bytes(txn_id, block_id.clone()).await {
             buffer.try_into()
         } else {
             Err(error::not_found(block_id))
         }
     }
 
-    pub async fn get_bytes(self: Arc<Self>, block_id: PathSegment) -> Option<Bytes> {
-        if let Some(buffer) = self.buffer.read().unwrap().get(&block_id) {
-            Some(Bytes::copy_from_slice(buffer))
+    pub async fn get_bytes(
+        self: Arc<Self>,
+        txn_id: TransactionId,
+        block_id: PathSegment,
+    ) -> Option<Bytes> {
+        let state = self.state.lock().await;
+
+        let block = if let Some(block) = state.blocks.get(&block_id) {
+            Bytes::copy_from_slice(&block[..])
+        } else {
+            Bytes::from(&[][..])
+        };
+
+        let append = if let Some(blocks) = state.cache.blocks.get(&txn_id) {
+            if let Some(block) = blocks.get(&block_id) {
+                Bytes::copy_from_slice(&block[..])
+            } else {
+                Bytes::from(&[][..])
+            }
+        } else {
+            Bytes::from(&[][..])
+        };
+
+        if !block.is_empty() || !append.is_empty() {
+            Some(Bytes::from([&block[..], &append[..]].concat()))
         } else {
             None
         }
     }
 
-    pub fn new_block(&self, block_id: PathSegment, initial_value: Bytes) {
-        println!("new block, initial size {}", initial_value.len());
+    pub fn get_store<'a>(
+        &'a self,
+        txn_id: &'a TransactionId,
+        path: &'a TCPath,
+    ) -> BoxFuture<'a, Option<Arc<Store>>> {
+        Box::pin(async move {
+            if path.is_empty() {
+                return None;
+            }
 
-        let mut buffer = self.buffer.write().unwrap();
-        if buffer.contains_key(&block_id) {
-            panic!("Tried to overwrite block {}", block_id);
-        }
+            let state = self.state.lock().await;
+            if path.len() == 1 {
+                if let Some(subdirs) = state.cache.subdirs.get(txn_id) {
+                    if let Some(store) = subdirs.get(&path[0]) {
+                        return Some(store.clone());
+                    }
+                }
 
-        buffer.insert(block_id, initial_value[..].into());
+                state.subdirs.get(&path[0]).cloned()
+            } else if let Some(store) = state.subdirs.get(&path[0]) {
+                store.get_store(txn_id, &path.slice_from(1)).await
+            } else {
+                None
+            }
+        })
     }
 
-    pub fn put_block(&self, block_id: PathSegment, block: Bytes) {
-        let mut buffer = self.buffer.write().unwrap();
-        if buffer.contains_key(&block_id) {
-            panic!("Tried to overwrite block {}", block_id);
-        }
+    pub async fn new_block(
+        &self,
+        txn_id: &TransactionId,
+        block_id: PathSegment,
+        initial_value: Bytes,
+    ) -> TCResult<()> {
+        println!(
+            "new block {} in txn {}, initial size {}",
+            block_id,
+            txn_id,
+            initial_value.len()
+        );
 
-        buffer.insert(block_id, BytesMut::from(&block[..]));
+        let mut state = self.state.lock().await;
+        if state.blocks.contains_key(&block_id) {
+            Err(error::internal(format!(
+                "Attempted to truncate an existing block: {}",
+                block_id
+            )))
+        } else if let Some(blocks) = state.cache.blocks.get_mut(txn_id) {
+            if blocks.contains_key(&block_id) {
+                Err(error::internal(format!(
+                    "Attempted to truncate an existing block: {}",
+                    block_id
+                )))
+            } else {
+                blocks.insert(block_id, initial_value[..].into());
+                Ok(())
+            }
+        } else {
+            println!("creating block {}", block_id);
+            let mut blocks = HashMap::new();
+            blocks.insert(block_id, initial_value[..].into());
+            state.cache.blocks.insert(txn_id.clone(), blocks);
+            Ok(())
+        }
+    }
+
+    pub fn reserve<'a>(
+        &'a self,
+        txn_id: &'a TransactionId,
+        path: TCPath,
+    ) -> BoxFuture<'a, TCResult<Arc<Store>>> {
+        Box::pin(async move {
+            if path.is_empty() {
+                return Err(error::internal("Tried to create block store with no name"));
+            }
+
+            let mut state = self.state.lock().await;
+
+            if path.len() == 1 {
+                if !state.cache.subdirs.contains_key(txn_id) {
+                    state.cache.subdirs.insert(txn_id.clone(), HashMap::new());
+                }
+
+                let path = &path[0];
+                if state.cache.subdirs.get(txn_id).unwrap().contains_key(path) {
+                    Err(error::bad_request("The path {} is already reserved", path))
+                } else {
+                    let subdir = self.subdir(path.clone());
+                    state
+                        .cache
+                        .subdirs
+                        .get_mut(txn_id)
+                        .unwrap()
+                        .insert(path.clone(), subdir);
+                    Ok(state
+                        .cache
+                        .subdirs
+                        .get(txn_id)
+                        .unwrap()
+                        .get(path)
+                        .unwrap()
+                        .clone())
+                }
+            } else {
+                state
+                    .subdirs
+                    .get_mut(&path[0])
+                    .unwrap()
+                    .reserve(txn_id, path.slice_from(1))
+                    .await
+            }
+        })
+    }
+
+    pub async fn reserve_or_get(
+        &self,
+        txn_id: &TransactionId,
+        path: &TCPath,
+    ) -> TCResult<Arc<Store>> {
+        if let Some(store) = self.get_store(txn_id, path).await {
+            Ok(store)
+        } else {
+            self.reserve(txn_id, path.clone()).await
+        }
     }
 
     fn fs_path(&self, name: &PathSegment) -> PathBuf {

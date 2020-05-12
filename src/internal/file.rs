@@ -18,11 +18,15 @@ type FileData = (TCPath, Blocks);
 pub trait File {
     type Block: Block;
 
-    async fn copy_from(reader: &mut FileCopier, dest: Arc<Store>) -> Arc<Self>;
+    async fn copy_from(
+        reader: &mut FileCopier,
+        txn_id: &TransactionId,
+        dest: Arc<Store>,
+    ) -> Arc<Self>;
 
     async fn copy_into(&self, txn_id: TransactionId, writer: &mut FileCopier);
 
-    async fn from_store(store: Arc<Store>) -> Arc<Self>;
+    async fn from_store(txn_id: &TransactionId, store: Arc<Store>) -> Arc<Self>;
 }
 
 struct SharedState {
@@ -48,9 +52,9 @@ impl FileCopier {
 
     pub async fn copy<F: File>(txn_id: TransactionId, state: &F, dest: Arc<Store>) -> Arc<F> {
         let mut copier = Self::open();
-        state.copy_into(txn_id, &mut copier).await;
+        state.copy_into(txn_id.clone(), &mut copier).await;
         copier.close();
-        F::copy_from(&mut copier, dest).await
+        F::copy_from(&mut copier, &txn_id, dest).await
     }
 
     pub fn close(&mut self) {

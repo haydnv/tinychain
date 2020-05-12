@@ -3,7 +3,7 @@ use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{self, join, join_all};
+use futures::future;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
@@ -47,10 +47,11 @@ pub struct Directory {
 }
 
 impl Directory {
-    pub fn new(context: Arc<Store>) -> TCResult<Arc<Directory>> {
+    pub async fn new(txn_id: &TransactionId, context: Arc<Store>) -> TCResult<Arc<Directory>> {
+        println!("Directory::new");
         Ok(Arc::new(Directory {
             context: context.clone(),
-            chain: Chain::new(context.reserve("contents".parse()?)?),
+            chain: Chain::new(txn_id, context.reserve(txn_id, ".contents".parse()?).await?).await,
         }))
     }
 }
@@ -76,20 +77,25 @@ impl Collection for Directory {
         let entry = self
             .chain
             .clone()
-            .stream_into(Some(txn.id()))
+            .stream_into(txn.id())
             .filter(|entry: &DirEntry| future::ready(&entry.name == path))
             .fold(None, |_, m| future::ready(Some(m)))
             .await;
 
         if let Some(entry) = entry {
-            if let Some(store) = self.context.get_store(&path[0].clone().into()) {
+            let txn_id = &txn.id();
+            if let Some(store) = self
+                .context
+                .get_store(txn_id, &path[0].clone().into())
+                .await
+            {
                 match entry.entry_type {
                     EntryType::Directory => {
-                        let dir = Directory::from_store(store).await;
+                        let dir = Directory::from_store(txn_id, store).await;
                         dir.get(txn, &path.slice_from(1)).await
                     }
-                    EntryType::Graph => Ok(Graph::from_store(store).await.into()),
-                    EntryType::Table => Ok(Table::from_store(store).await.into()),
+                    EntryType::Graph => Ok(Graph::from_store(txn_id, store).await.into()),
+                    EntryType::Table => Ok(Table::from_store(txn_id, store).await.into()),
                 }
             } else {
                 Err(error::internal(format!(
@@ -109,9 +115,7 @@ impl Collection for Directory {
         state: Self::Value,
     ) -> TCResult<Arc<Self>> {
         let path: PathSegment = path.try_into()?;
-        let context = self
-            .context
-            .reserve_or_get(&vec![txn.id().into(), path.clone()].into())?;
+        let context = self.context.reserve(&txn.id(), path.clone().into()).await?;
 
         let entry = match state {
             State::Graph(g) => {
@@ -131,9 +135,8 @@ impl Collection for Directory {
             }
         };
 
-        // TODO: roll this back if the transaction fails elsewhere
-        self.context.reserve(path.into())?;
-        self.chain.put(txn.id(), iter::once(entry));
+        println!("Directory::put new entry to {}", path);
+        self.chain.put(txn.id(), iter::once(entry)).await;
         txn.mutate(self.clone());
         Ok(self)
     }
@@ -143,9 +146,14 @@ impl Collection for Directory {
 impl File for Directory {
     type Block = ChainBlock<DirEntry>;
 
-    async fn copy_from(reader: &mut FileCopier, context: Arc<Store>) -> Arc<Directory> {
+    async fn copy_from(
+        reader: &mut FileCopier,
+        txn_id: &TransactionId,
+        context: Arc<Store>,
+    ) -> Arc<Directory> {
         let (path, blocks) = reader.next().await.unwrap();
-        let chain = Chain::copy_from(blocks, context.reserve(path).unwrap()).await;
+        let chain =
+            Chain::copy_from(blocks, txn_id, context.reserve(txn_id, path).await.unwrap()).await;
 
         Arc::new(Directory { context, chain })
     }
@@ -154,7 +162,7 @@ impl File for Directory {
         panic!("Directory::copy_into is not implemented")
     }
 
-    async fn from_store(_store: Arc<Store>) -> Arc<Directory> {
+    async fn from_store(_txn_id: &TransactionId, _store: Arc<Store>) -> Arc<Directory> {
         panic!("Directory::from_store is not implemented")
     }
 }
@@ -164,38 +172,14 @@ impl Persistent for Directory {
     type Config = TCValue; // TODO: permissions
 
     async fn create(txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {
-        Directory::new(txn.context())
+        Directory::new(&txn.id(), txn.context()).await
     }
 }
 
 #[async_trait]
 impl Transact for Directory {
     async fn commit(&self, txn_id: &TransactionId) {
-        let copies = join_all(self.chain.get_pending(txn_id).drain(..).map(|m: DirEntry| {
-            let source = self
-                .context
-                .get_store(&vec![txn_id.clone().into(), m.name.clone()].into())
-                .unwrap();
-            let dest = self.context.get_store(&m.name.clone().into()).unwrap();
-
-            async move {
-                match m.entry_type {
-                    EntryType::Directory => {
-                        let d = Directory::from_store(source).await;
-                        FileCopier::copy(txn_id.clone(), &*d, dest).await;
-                    }
-                    EntryType::Graph => {
-                        let g = Graph::from_store(source).await;
-                        FileCopier::copy(txn_id.clone(), &*g, dest).await;
-                    }
-                    EntryType::Table => {
-                        let t = Table::from_store(source).await;
-                        FileCopier::copy(txn_id.clone(), &*t, dest).await;
-                    }
-                }
-            }
-        }));
-
-        join(copies, self.chain.commit(txn_id)).await;
+        self.context.commit(txn_id).await;
+        self.chain.commit(txn_id).await;
     }
 }
