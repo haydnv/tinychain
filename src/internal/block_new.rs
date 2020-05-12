@@ -1,22 +1,31 @@
 use std::collections::HashMap;
+use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
 
-use bytes::BytesMut;
+use async_trait::async_trait;
+use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::error;
-use crate::transaction::TransactionId;
+use crate::transaction::{Transact, TransactionId};
 use crate::value::{PathSegment, TCPath, TCResult};
+
+pub type Checksum = [u8; 32];
+
+pub trait Block:
+    Clone + Into<Bytes> + Into<Checksum> + TryFrom<Bytes, Error = error::TCError>
+{
+}
 
 struct TransactionCache {
     subdirs: HashMap<TransactionId, HashMap<PathSegment, Store>>,
-    buffer: HashMap<TransactionId, HashMap<PathSegment, BytesMut>>,
+    blocks: HashMap<TransactionId, HashMap<PathSegment, BytesMut>>,
 }
 
 impl TransactionCache {
     fn new() -> TransactionCache {
         TransactionCache {
             subdirs: HashMap::new(),
-            buffer: HashMap::new(),
+            blocks: HashMap::new(),
         }
     }
 }
@@ -26,35 +35,29 @@ pub struct Store {
     context: Option<PathSegment>,
     cache: TransactionCache,
     subdirs: HashMap<PathSegment, Store>,
-    data: HashMap<PathSegment, BytesMut>,
+    blocks: HashMap<PathSegment, BytesMut>,
     tmp: bool,
 }
 
 impl Store {
-    pub fn new(
-        mount_point: PathBuf,
-        context: Option<PathSegment>,
-    ) -> Store {
+    pub fn new(mount_point: PathBuf, context: Option<PathSegment>) -> Store {
         Store {
             mount_point,
             context,
             cache: TransactionCache::new(),
             subdirs: HashMap::new(),
-            data: HashMap::new(),
+            blocks: HashMap::new(),
             tmp: false,
         }
     }
 
-    pub fn new_tmp(
-        mount_point: PathBuf,
-        context: Option<PathSegment>,
-    ) -> Store {
+    pub fn new_tmp(mount_point: PathBuf, context: Option<PathSegment>) -> Store {
         Store {
             mount_point,
             context,
             cache: TransactionCache::new(),
             subdirs: HashMap::new(),
-            data: HashMap::new(),
+            blocks: HashMap::new(),
             tmp: true,
         }
     }
@@ -65,8 +68,155 @@ impl Store {
             context: Some(context.clone()),
             cache: TransactionCache::new(),
             subdirs: HashMap::new(),
-            data: HashMap::new(),
+            blocks: HashMap::new(),
             tmp: self.tmp,
+        }
+    }
+
+    pub fn append(
+        &mut self,
+        txn_id: &TransactionId,
+        block_id: &PathSegment,
+        data: Bytes,
+    ) -> TCResult<()> {
+        if let Some(blocks) = self.cache.blocks.get_mut(txn_id) {
+            if let Some(block) = blocks.get_mut(block_id) {
+                block.put(data);
+                Ok(())
+            } else if self.blocks.contains_key(block_id) {
+                blocks.insert(block_id.clone(), data[..].into());
+                Ok(())
+            } else {
+                Err(error::internal(format!(
+                    "Tried to append to nonexistent block: {}",
+                    block_id
+                )))
+            }
+        } else if self.blocks.contains_key(block_id) {
+            let mut blocks = HashMap::new();
+            blocks.insert(block_id.clone(), data[..].into());
+            self.cache.blocks.insert(txn_id.clone(), blocks);
+            Ok(())
+        } else {
+            Err(error::internal(format!(
+                "Tried to append to nonexistent block: {}",
+                block_id
+            )))
+        }
+    }
+
+    pub async fn commit(&mut self, txn_id: &TransactionId) {
+        if let Some(subdirs) = self.cache.subdirs.remove(txn_id) {
+            self.subdirs.extend(subdirs);
+        }
+
+        if let Some(mut blocks) = self.cache.blocks.remove(txn_id) {
+            for (name, block) in blocks.drain() {
+                if let Some(existing_block) = self.blocks.get_mut(&name) {
+                    existing_block.put(block);
+                } else {
+                    self.blocks.insert(name, block);
+                }
+            }
+        }
+    }
+
+    pub async fn contains_block(&self, txn_id: &TransactionId, block_id: &PathSegment) -> bool {
+        if let Some(blocks) = self.cache.blocks.get(txn_id) {
+            if blocks.contains_key(block_id) {
+                return true;
+            }
+        }
+
+        self.blocks.contains_key(block_id)
+    }
+
+    pub async fn get_block<B: Block>(
+        &self,
+        txn_id: &TransactionId,
+        block_id: &PathSegment,
+    ) -> TCResult<B> {
+        // TODO: read from filesystem
+
+        if let Some(buffer) = self.get_bytes(txn_id, block_id).await {
+            buffer.try_into()
+        } else {
+            Err(error::not_found(block_id))
+        }
+    }
+
+    pub async fn get_bytes(&self, txn_id: &TransactionId, block_id: &PathSegment) -> Option<Bytes> {
+        let block = if let Some(block) = self.blocks.get(block_id) {
+            Bytes::copy_from_slice(&block[..])
+        } else {
+            Bytes::from(&[][..])
+        };
+
+        let append = if let Some(blocks) = self.cache.blocks.get(txn_id) {
+            if let Some(block) = blocks.get(block_id) {
+                Bytes::copy_from_slice(&block[..])
+            } else {
+                Bytes::from(&[][..])
+            }
+        } else {
+            Bytes::from(&[][..])
+        };
+
+        if !block.is_empty() || !append.is_empty() {
+            Some(Bytes::from([&block[..], &append[..]].concat()))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_store(&self, txn_id: &TransactionId, path: &TCPath) -> Option<&Store> {
+        if path.is_empty() {
+            return None;
+        }
+
+        if path.len() == 1 {
+            if let Some(subdirs) = self.cache.subdirs.get(txn_id) {
+                if let Some(store) = subdirs.get(&path[0]) {
+                    return Some(store);
+                }
+            }
+
+            self.subdirs.get(&path[0])
+        } else if let Some(store) = self.subdirs.get(&path[0]) {
+            store.get_store(txn_id, &path.slice_from(1))
+        } else {
+            None
+        }
+    }
+
+    pub fn new_block(
+        &mut self,
+        txn_id: &TransactionId,
+        block_id: PathSegment,
+        initial_value: Bytes,
+    ) -> TCResult<()> {
+        println!("new block, initial size {}", initial_value.len());
+
+        if self.blocks.contains_key(&block_id) {
+            Err(error::internal(format!(
+                "Attempted to truncate an existing block: {}",
+                block_id
+            )))
+        } else if let Some(blocks) = self.cache.blocks.get_mut(txn_id) {
+            if blocks.contains_key(&block_id) {
+                Err(error::internal(format!(
+                    "Attempted to truncate an existing block: {}",
+                    block_id
+                )))
+            } else {
+                blocks.insert(block_id, initial_value[..].into());
+                Ok(())
+            }
+        } else {
+            let mut blocks = HashMap::new();
+            blocks.insert(block_id, initial_value[..].into());
+            self.cache.blocks.insert(txn_id.clone(), blocks);
+            Ok(())
         }
     }
 
@@ -85,11 +235,18 @@ impl Store {
                 Err(error::bad_request("The path {} is already reserved", path))
             } else {
                 let subdir = self.subdir(path.clone());
-                self.cache.subdirs.get_mut(txn_id).unwrap().insert(path.clone(), subdir);
+                self.cache
+                    .subdirs
+                    .get_mut(txn_id)
+                    .unwrap()
+                    .insert(path.clone(), subdir);
                 Ok(self.cache.subdirs.get(txn_id).unwrap().get(path).unwrap())
             }
         } else {
-            self.subdirs.get_mut(&path[0]).unwrap().reserve(txn_id, path.slice_from(1))
+            self.subdirs
+                .get_mut(&path[0])
+                .unwrap()
+                .reserve(txn_id, path.slice_from(1))
         }
     }
 
