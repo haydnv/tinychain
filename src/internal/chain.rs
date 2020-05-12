@@ -26,22 +26,41 @@ pub struct ChainBlock<M: Mutation> {
     mutations: Vec<(TransactionId, Vec<M>)>,
 }
 
+fn valid_encoding(val: &[u8]) -> bool {
+    for b in val {
+        if *b == GROUP_DELIMITER as u8 || *b == RECORD_DELIMITER as u8 {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 impl<M: Mutation> ChainBlock<M> {
-    fn encode_transaction<I: Iterator<Item = M>>(txn_id: &TransactionId, mutations: I) -> Bytes {
+    fn encode_transaction<I: Iterator<Item = M>>(
+        txn_id: &TransactionId,
+        mutations: I,
+    ) -> TCResult<Bytes> {
         let mut buf = BytesMut::new();
         buf.extend(serde_json::to_string_pretty(txn_id).unwrap().as_bytes());
         buf.put_u8(RECORD_DELIMITER as u8);
         for mutation in mutations {
-            buf.extend(
-                serde_json::to_string_pretty(&mutation)
-                    .unwrap()
-                    .into_bytes(),
-            );
+            let mutation = serde_json::to_string_pretty(&mutation).unwrap();
+            let encoded = mutation.as_bytes();
+
+            if !valid_encoding(&encoded) {
+                return Err(error::bad_request(
+                    "Attempt to encode a value containing an ASCII control character",
+                    mutation,
+                ));
+            }
+
+            buf.extend(encoded);
             buf.put_u8(RECORD_DELIMITER as u8);
         }
         buf.put_u8(GROUP_DELIMITER as u8);
 
-        buf.into()
+        Ok(buf.into())
     }
 
     fn is_empty(&self) -> bool {
@@ -62,7 +81,7 @@ impl<M: Mutation> From<ChainBlock<M>> for Bytes {
         buf.put_u8(GROUP_DELIMITER as u8);
 
         for (txn_id, mut mutations) in block.mutations.drain(..) {
-            buf.extend(ChainBlock::encode_transaction(&txn_id, mutations.drain(..)));
+            buf.extend(ChainBlock::encode_transaction(&txn_id, mutations.drain(..)).unwrap());
         }
 
         Bytes::from(buf)
@@ -203,16 +222,22 @@ impl<M: Mutation> Chain<M> {
         })
     }
 
-    pub async fn put<I: Iterator<Item = M>>(&self, txn_id: TransactionId, mutations: I) {
+    pub async fn put<I: Iterator<Item = M>>(
+        &self,
+        txn_id: TransactionId,
+        mutations: I,
+    ) -> TCResult<()> {
         let block_id: PathSegment = self.latest_block.into();
         self.store
             .append(
                 &txn_id,
                 &block_id,
-                ChainBlock::encode_transaction(&txn_id, mutations),
+                ChainBlock::encode_transaction(&txn_id, mutations)?,
             )
             .await
             .unwrap();
+
+        Ok(())
     }
 
     fn stream(

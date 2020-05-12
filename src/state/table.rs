@@ -144,7 +144,11 @@ impl Collection for Table {
         }
 
         let row: Row = (row_id, mutated);
-        self.chain.lock().await.put(txn.id(), iter::once(row)).await;
+        self.chain
+            .lock()
+            .await
+            .put(txn.id(), iter::once(row))
+            .await?;
         txn.mutate(self.clone());
         Ok(self.clone())
     }

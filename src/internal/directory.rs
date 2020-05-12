@@ -141,7 +141,7 @@ impl Collection for Directory {
         };
 
         println!("Directory::put new entry to {}", path);
-        chain.put(txn.id(), iter::once(entry)).await;
+        chain.put(txn.id(), iter::once(entry)).await?;
         txn.mutate(self.clone());
         Ok(self.clone())
     }

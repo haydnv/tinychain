@@ -78,7 +78,7 @@ impl SchemaHistory {
             txn.context().reserve(&txn.id(), "schema".parse()?).await?,
         )
         .await;
-        chain.put(txn.id(), iter::once(schema)).await;
+        chain.put(txn.id(), iter::once(schema)).await?;
         let schema_history = Arc::new(SchemaHistory {
             chain: Mutex::new(chain),
         });
