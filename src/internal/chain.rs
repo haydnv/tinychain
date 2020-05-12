@@ -29,8 +29,7 @@ pub struct ChainBlock<M: Mutation> {
 impl<M: Mutation> ChainBlock<M> {
     fn encode_transaction<I: Iterator<Item = M>>(txn_id: &TransactionId, mutations: I) -> Bytes {
         let mut buf = BytesMut::new();
-        let txn_id: Bytes = txn_id.into();
-        buf.extend(txn_id);
+        buf.extend(serde_json::to_string_pretty(txn_id).unwrap().as_bytes());
         buf.put_u8(RECORD_DELIMITER as u8);
         for mutation in mutations {
             buf.extend(
@@ -99,7 +98,7 @@ impl<M: Mutation> TryFrom<Bytes> for ChainBlock<M> {
         while let Some(record) = buf.pop_front() {
             let record: Vec<&[u8]> = record.split(|b| *b == RECORD_DELIMITER as u8).collect();
 
-            let txn_id: TransactionId = Bytes::copy_from_slice(record[0]).into();
+            let txn_id: TransactionId = serde_json::from_slice(&record[0]).unwrap();
             mutations.push((
                 txn_id,
                 record[1..record.len() - 1]
@@ -247,7 +246,8 @@ impl<M: Mutation> Chain<M> {
                             record.pop_back();
                             println!("record size {}: {}", record.len(), record[0].len());
 
-                            let txn_id: TransactionId = record.pop_front().unwrap().into();
+                            let txn_id: TransactionId =
+                                serde_json::from_slice(&record.pop_front().unwrap()).unwrap();
                             mutations.push((txn_id, record.into_iter().collect()))
                         }
 

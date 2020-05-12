@@ -36,19 +36,6 @@ impl TransactionId {
     }
 }
 
-impl From<Bytes> for TransactionId {
-    fn from(b: Bytes) -> TransactionId {
-        if b.len() != 18 {
-            panic!("TransactionId should be exactly 18 bytes");
-        }
-
-        TransactionId {
-            timestamp: u128::from_be_bytes(b[..16].try_into().expect("Bad transaction timestamp")),
-            nonce: u16::from_be_bytes(b[16..18].try_into().expect("Bad transaction nonce")),
-        }
-    }
-}
-
 impl PartialOrd for TransactionId {
     fn partial_cmp(&self, other: &TransactionId) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
