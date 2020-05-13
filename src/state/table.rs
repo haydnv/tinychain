@@ -14,7 +14,7 @@ use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
 use crate::state::schema::{Schema, SchemaHistory};
 use crate::state::{Collection, Persistent};
-use crate::transaction::{Transact, Transaction, TransactionId};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{PathSegment, TCResult, TCValue, ValueId};
 
 type Row = (Vec<TCValue>, Vec<Option<TCValue>>);
@@ -37,7 +37,7 @@ pub struct Table {
 }
 
 impl Table {
-    async fn row_id(&self, txn: &Arc<Transaction>, value: &[TCValue]) -> TCResult<Vec<TCValue>> {
+    async fn row_id(&self, txn: &Arc<Txn>, value: &[TCValue]) -> TCResult<Vec<TCValue>> {
         let schema = self.schema.at(txn.id()).await;
         let key_size = schema.key.len();
 
@@ -55,7 +55,7 @@ impl Table {
         Ok(row_id)
     }
 
-    async fn new_row(&self, txn: &Arc<Transaction>, row_id: &[TCValue]) -> TCResult<Row> {
+    async fn new_row(&self, txn: &Arc<Txn>, row_id: &[TCValue]) -> TCResult<Row> {
         let row_id = self.row_id(txn, row_id).await?;
         let schema = self.schema.at(txn.id()).await;
 
@@ -79,11 +79,7 @@ impl Collection for Table {
     type Key = Vec<TCValue>;
     type Value = Vec<TCValue>;
 
-    async fn get(
-        self: &Arc<Self>,
-        txn: Arc<Transaction>,
-        row_id: &Self::Key,
-    ) -> TCResult<Self::Value> {
+    async fn get(self: &Arc<Self>, txn: Arc<Txn>, row_id: &Self::Key) -> TCResult<Self::Value> {
         let row = self
             .chain
             .lock()
@@ -101,7 +97,7 @@ impl Collection for Table {
 
     async fn put(
         self: Arc<Self>,
-        txn: Arc<Transaction>,
+        txn: Arc<Txn>,
         row_id: Vec<TCValue>,
         column_values: Vec<TCValue>,
     ) -> TCResult<Arc<Self>> {
@@ -158,7 +154,7 @@ impl Collection for Table {
 impl File for Table {
     type Block = ChainBlock<Row>;
 
-    async fn copy_into(&self, txn_id: TransactionId, writer: &mut FileCopier) {
+    async fn copy_into(&self, txn_id: TxnId, writer: &mut FileCopier) {
         println!("copying table into FileCopier");
         self.schema.copy_into(txn_id.clone(), writer).await;
         println!("copied schema");
@@ -173,11 +169,7 @@ impl File for Table {
         println!("wrote table chain to file");
     }
 
-    async fn copy_from(
-        reader: &mut FileCopier,
-        txn_id: &TransactionId,
-        dest: Arc<Store>,
-    ) -> Arc<Table> {
+    async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, dest: Arc<Store>) -> Arc<Table> {
         println!("copying table from FileCopier");
         let schema_history = SchemaHistory::copy_from(reader, txn_id, dest.clone()).await;
         println!("copied schema");
@@ -196,7 +188,7 @@ impl File for Table {
         })
     }
 
-    async fn from_store(txn_id: &TransactionId, store: Arc<Store>) -> Arc<Table> {
+    async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> Arc<Table> {
         let schema = SchemaHistory::from_store(
             txn_id,
             store
@@ -233,7 +225,7 @@ impl File for Table {
 impl Persistent for Table {
     type Config = Schema;
 
-    async fn create(txn: Arc<Transaction>, schema: Schema) -> TCResult<Arc<Table>> {
+    async fn create(txn: Arc<Txn>, schema: Schema) -> TCResult<Arc<Table>> {
         let table_chain = Mutex::new(
             Chain::new(
                 &txn.id(),
@@ -254,7 +246,7 @@ impl Persistent for Table {
 
 #[async_trait]
 impl Transact for Table {
-    async fn commit(&self, txn_id: &TransactionId) {
+    async fn commit(&self, txn_id: &TxnId) {
         self.chain.lock().await.commit(txn_id).await
     }
 }

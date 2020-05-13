@@ -9,7 +9,7 @@ use crate::internal::block::Store;
 use crate::internal::chain::{ChainBlock, Mutation};
 use crate::internal::file::*;
 use crate::state::{Collection, Persistent, Transact};
-use crate::transaction::{Transaction, TransactionId};
+use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCValue};
 
 pub struct GraphConfig;
@@ -29,17 +29,13 @@ pub struct Graph {}
 impl Collection for Graph {
     type Key = TCValue;
     type Value = TCValue;
-    async fn get(
-        self: &Arc<Self>,
-        _txn: Arc<Transaction>,
-        _node_id: &TCValue,
-    ) -> TCResult<Self::Value> {
+    async fn get(self: &Arc<Self>, _txn: Arc<Txn>, _node_id: &TCValue) -> TCResult<Self::Value> {
         Err(error::not_implemented())
     }
 
     async fn put(
         self: Arc<Self>,
-        _txn: Arc<Transaction>,
+        _txn: Arc<Txn>,
         _node_id: TCValue,
         _node: TCValue,
     ) -> TCResult<Arc<Self>> {
@@ -56,20 +52,16 @@ impl Mutation for GraphMutation {}
 impl File for Graph {
     type Block = ChainBlock<GraphMutation>;
 
-    async fn copy_from(
-        _reader: &mut FileCopier,
-        _txn_id: &TransactionId,
-        _dest: Arc<Store>,
-    ) -> Arc<Self> {
+    async fn copy_from(_reader: &mut FileCopier, _txn_id: &TxnId, _dest: Arc<Store>) -> Arc<Self> {
         // TODO
         Arc::new(Graph {})
     }
 
-    async fn copy_into(&self, _txn_id: TransactionId, _writer: &mut FileCopier) {
+    async fn copy_into(&self, _txn_id: TxnId, _writer: &mut FileCopier) {
         // TODO
     }
 
-    async fn from_store(_txn_id: &TransactionId, _store: Arc<Store>) -> Arc<Graph> {
+    async fn from_store(_txn_id: &TxnId, _store: Arc<Store>) -> Arc<Graph> {
         // TODO
         Arc::new(Graph {})
     }
@@ -79,14 +71,14 @@ impl File for Graph {
 impl Persistent for Graph {
     type Config = GraphConfig;
 
-    async fn create(_txn: Arc<Transaction>, _config: GraphConfig) -> TCResult<Arc<Graph>> {
+    async fn create(_txn: Arc<Txn>, _config: GraphConfig) -> TCResult<Arc<Graph>> {
         Err(error::not_implemented())
     }
 }
 
 #[async_trait]
 impl Transact for Graph {
-    async fn commit(&self, _txn_id: &TransactionId) {
+    async fn commit(&self, _txn_id: &TxnId) {
         // TODO
     }
 }

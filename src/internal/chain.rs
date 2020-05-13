@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::error;
 use crate::internal::block::{Block, Checksum, Store};
 use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
-use crate::transaction::TransactionId;
+use crate::transaction::TxnId;
 use crate::value::{PathSegment, TCResult};
 
 const BLOCK_SIZE: usize = 1_000_000;
@@ -24,7 +24,7 @@ pub trait Mutation: Clone + DeserializeOwned + Serialize + Send + Sync {}
 #[derive(Clone)]
 pub struct ChainBlock<M: Mutation> {
     checksum: Checksum,
-    mutations: Vec<(TransactionId, Vec<M>)>,
+    mutations: Vec<(TxnId, Vec<M>)>,
 }
 
 fn valid_encoding(val: &[u8]) -> bool {
@@ -38,10 +38,7 @@ fn valid_encoding(val: &[u8]) -> bool {
 }
 
 impl<M: Mutation> ChainBlock<M> {
-    fn encode_transaction<I: Iterator<Item = M>>(
-        txn_id: &TransactionId,
-        mutations: I,
-    ) -> TCResult<Bytes> {
+    fn encode_transaction<I: Iterator<Item = M>>(txn_id: &TxnId, mutations: I) -> TCResult<Bytes> {
         let mut buf = BytesMut::new();
         buf.extend(serde_json::to_string_pretty(txn_id).unwrap().as_bytes());
         buf.put_u8(RECORD_DELIMITER as u8);
@@ -68,7 +65,7 @@ impl<M: Mutation> ChainBlock<M> {
         self.mutations.is_empty()
     }
 
-    pub fn iter(&self) -> std::slice::Iter<(TransactionId, Vec<M>)> {
+    pub fn iter(&self) -> std::slice::Iter<(TxnId, Vec<M>)> {
         self.mutations.iter()
     }
 }
@@ -114,11 +111,11 @@ impl<M: Mutation> TryFrom<Bytes> for ChainBlock<M> {
         let mut checksum: Checksum = [0; 32];
         checksum.copy_from_slice(&buf.pop_front().unwrap()[0..32]);
 
-        let mut mutations: Vec<(TransactionId, Vec<M>)> = Vec::with_capacity(buf.len());
+        let mut mutations: Vec<(TxnId, Vec<M>)> = Vec::with_capacity(buf.len());
         while let Some(record) = buf.pop_front() {
             let record: Vec<&[u8]> = record.split(|b| *b == RECORD_DELIMITER as u8).collect();
 
-            let txn_id: TransactionId = serde_json::from_slice(&record[0]).unwrap();
+            let txn_id: TxnId = serde_json::from_slice(&record[0]).unwrap();
             mutations.push((
                 txn_id,
                 record[1..record.len() - 1]
@@ -135,9 +132,8 @@ impl<M: Mutation> TryFrom<Bytes> for ChainBlock<M> {
     }
 }
 
-type BlockStream = FuturesOrdered<
-    Box<dyn Future<Output = (Checksum, Vec<(TransactionId, Vec<Bytes>)>)> + Unpin + Send>,
->;
+type BlockStream =
+    FuturesOrdered<Box<dyn Future<Output = (Checksum, Vec<(TxnId, Vec<Bytes>)>)> + Unpin + Send>>;
 
 pub struct Chain<M: Mutation> {
     store: Arc<Store>,
@@ -146,7 +142,7 @@ pub struct Chain<M: Mutation> {
 }
 
 impl<M: Mutation> Chain<M> {
-    pub async fn new(txn_id: &TransactionId, store: Arc<Store>) -> Chain<M> {
+    pub async fn new(txn_id: &TxnId, store: Arc<Store>) -> Chain<M> {
         let checksum = Bytes::from(&[0; 32][..]);
         store
             .new_block(&txn_id, 0.into(), delimit_groups(&[checksum]))
@@ -163,7 +159,7 @@ impl<M: Mutation> Chain<M> {
 
     pub async fn copy_from(
         mut source: impl Stream<Item = Bytes> + Unpin,
-        txn_id: &TransactionId,
+        txn_id: &TxnId,
         dest: Arc<Store>,
     ) -> Chain<M> {
         let mut latest_block: u64 = 0;
@@ -200,7 +196,7 @@ impl<M: Mutation> Chain<M> {
         }
     }
 
-    pub async fn from_store(txn_id: &TransactionId, store: Arc<Store>) -> TCResult<Chain<M>> {
+    pub async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> TCResult<Chain<M>> {
         let mut latest_block = 0;
         if !store.contains_block(txn_id, &latest_block.into()).await {
             return Err(error::bad_request(
@@ -223,11 +219,7 @@ impl<M: Mutation> Chain<M> {
         })
     }
 
-    pub async fn put<I: Iterator<Item = M>>(
-        &self,
-        txn_id: TransactionId,
-        mutations: I,
-    ) -> TCResult<()> {
+    pub async fn put<I: Iterator<Item = M>>(&self, txn_id: TxnId, mutations: I) -> TCResult<()> {
         let block_id: PathSegment = self.latest_block.into();
 
         self.store
@@ -242,10 +234,7 @@ impl<M: Mutation> Chain<M> {
         Ok(())
     }
 
-    fn stream(
-        &self,
-        txn_id: TransactionId,
-    ) -> impl Stream<Item = (Checksum, Vec<(TransactionId, Vec<Bytes>)>)> {
+    fn stream(&self, txn_id: TxnId) -> impl Stream<Item = (Checksum, Vec<(TxnId, Vec<Bytes>)>)> {
         let mut stream: BlockStream = FuturesOrdered::new();
 
         let mut i = 0;
@@ -273,7 +262,7 @@ impl<M: Mutation> Chain<M> {
                             record.pop_back();
                             println!("record size {}: {}", record.len(), record[0].len());
 
-                            let txn_id: TransactionId =
+                            let txn_id: TxnId =
                                 serde_json::from_slice(&record.pop_front().unwrap()).unwrap();
                             mutations.push((txn_id, record.into_iter().collect()))
                         }
@@ -295,7 +284,7 @@ impl<M: Mutation> Chain<M> {
         stream
     }
 
-    pub fn stream_blocks(&self, txn_id: TransactionId) -> impl Stream<Item = ChainBlock<M>> {
+    pub fn stream_blocks(&self, txn_id: TxnId) -> impl Stream<Item = ChainBlock<M>> {
         let txn_id_clone = txn_id.clone();
 
         self.stream(txn_id.clone())
@@ -307,7 +296,7 @@ impl<M: Mutation> Chain<M> {
                 }
             })
             .map(move |(checksum, mutations)| {
-                let mutations: Vec<(TransactionId, Vec<Bytes>)> = mutations
+                let mutations: Vec<(TxnId, Vec<Bytes>)> = mutations
                     .into_iter()
                     .filter(|(time, _)| time <= &txn_id_clone)
                     .collect();
@@ -329,12 +318,12 @@ impl<M: Mutation> Chain<M> {
             })
     }
 
-    pub fn stream_bytes(&self, txn_id: TransactionId) -> impl Stream<Item = Bytes> {
+    pub fn stream_bytes(&self, txn_id: TxnId) -> impl Stream<Item = Bytes> {
         self.stream_blocks(txn_id)
             .map(|block: ChainBlock<M>| block.into())
     }
 
-    pub fn stream_into(&self, txn_id: TransactionId) -> impl Stream<Item = M> {
+    pub fn stream_into(&self, txn_id: TxnId) -> impl Stream<Item = M> {
         self.stream_blocks(txn_id)
             .filter_map(|block| {
                 println!("stream_into read block");
@@ -354,7 +343,7 @@ impl<M: Mutation> Chain<M> {
             .flatten()
     }
 
-    pub async fn commit(&mut self, txn_id: &TransactionId) {
+    pub async fn commit(&mut self, txn_id: &TxnId) {
         println!("Chain::commit");
         let block = self
             .store

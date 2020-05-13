@@ -13,7 +13,7 @@ use crate::internal::block::Store;
 use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
 use crate::state::*;
-use crate::transaction::{Transact, Transaction, TransactionId};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{Link, PathSegment, TCPath, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -48,7 +48,7 @@ pub struct Directory {
 }
 
 impl Directory {
-    pub async fn new(txn_id: &TransactionId, context: Arc<Store>) -> TCResult<Arc<Directory>> {
+    pub async fn new(txn_id: &TxnId, context: Arc<Store>) -> TCResult<Arc<Directory>> {
         println!("Directory::new");
         Ok(Arc::new(Directory {
             context: context.clone(),
@@ -64,11 +64,7 @@ impl Collection for Directory {
     type Key = TCPath;
     type Value = State;
 
-    async fn get(
-        self: &Arc<Self>,
-        txn: Arc<Transaction>,
-        path: &Self::Key,
-    ) -> TCResult<Self::Value> {
+    async fn get(self: &Arc<Self>, txn: Arc<Txn>, path: &Self::Key) -> TCResult<Self::Value> {
         println!("Directory::get {}", path);
         if path.is_empty() {
             return Err(error::bad_request(
@@ -114,7 +110,7 @@ impl Collection for Directory {
 
     async fn put(
         self: Arc<Self>,
-        txn: Arc<Transaction>,
+        txn: Arc<Txn>,
         path: Self::Key,
         state: Self::Value,
     ) -> TCResult<Arc<Self>> {
@@ -153,7 +149,7 @@ impl File for Directory {
 
     async fn copy_from(
         reader: &mut FileCopier,
-        txn_id: &TransactionId,
+        txn_id: &TxnId,
         context: Arc<Store>,
     ) -> Arc<Directory> {
         let (path, blocks) = reader.next().await.unwrap();
@@ -164,11 +160,11 @@ impl File for Directory {
         Arc::new(Directory { context, chain })
     }
 
-    async fn copy_into(&self, _txn_id: TransactionId, _writer: &mut FileCopier) {
+    async fn copy_into(&self, _txn_id: TxnId, _writer: &mut FileCopier) {
         panic!("Directory::copy_into is not implemented")
     }
 
-    async fn from_store(_txn_id: &TransactionId, _store: Arc<Store>) -> Arc<Directory> {
+    async fn from_store(_txn_id: &TxnId, _store: Arc<Store>) -> Arc<Directory> {
         panic!("Directory::from_store is not implemented")
     }
 }
@@ -177,14 +173,14 @@ impl File for Directory {
 impl Persistent for Directory {
     type Config = TCValue; // TODO: permissions
 
-    async fn create(txn: Arc<Transaction>, _: TCValue) -> TCResult<Arc<Directory>> {
+    async fn create(txn: Arc<Txn>, _: TCValue) -> TCResult<Arc<Directory>> {
         Directory::new(&txn.id(), txn.context()).await
     }
 }
 
 #[async_trait]
 impl Transact for Directory {
-    async fn commit(&self, txn_id: &TransactionId) {
+    async fn commit(&self, txn_id: &TxnId) {
         let mut chain = self.chain.lock().await;
         self.context.commit(txn_id).await;
         chain.commit(txn_id).await;

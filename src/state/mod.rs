@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::file::File;
 use crate::object::Object;
-use crate::transaction::{Transact, Transaction};
+use crate::transaction::{Transact, Txn};
 use crate::value::{Args, PathSegment, TCResult, TCValue};
 
 mod graph;
@@ -22,12 +22,11 @@ pub trait Collection {
     type Key: TryFrom<TCValue>;
     type Value: TryFrom<TCValue>;
 
-    async fn get(self: &Arc<Self>, txn: Arc<Transaction>, key: &Self::Key)
-        -> TCResult<Self::Value>;
+    async fn get(self: &Arc<Self>, txn: Arc<Txn>, key: &Self::Key) -> TCResult<Self::Value>;
 
     async fn put(
         self: Arc<Self>,
-        txn: Arc<Transaction>,
+        txn: Arc<Txn>,
         key: Self::Key,
         state: Self::Value,
     ) -> TCResult<Arc<Self>>;
@@ -37,7 +36,7 @@ pub trait Collection {
 pub trait Persistent: Collection + File {
     type Config: TryFrom<TCValue>;
 
-    async fn create(txn: Arc<Transaction>, config: Self::Config) -> TCResult<Arc<Self>>;
+    async fn create(txn: Arc<Txn>, config: Self::Config) -> TCResult<Arc<Self>>;
 }
 
 #[derive(Clone)]
@@ -49,7 +48,7 @@ pub enum State {
 }
 
 impl State {
-    pub async fn get(&self, txn: Arc<Transaction>, key: TCValue) -> TCResult<State> {
+    pub async fn get(&self, txn: Arc<Txn>, key: TCValue) -> TCResult<State> {
         match self {
             State::Graph(g) => Ok(g.clone().get(txn, &key).await?.into()),
             State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?).await?.into()),
@@ -64,12 +63,7 @@ impl State {
         }
     }
 
-    pub async fn put(
-        &self,
-        txn: Arc<Transaction>,
-        key: TCValue,
-        value: TCValue,
-    ) -> TCResult<State> {
+    pub async fn put(&self, txn: Arc<Txn>, key: TCValue, value: TCValue) -> TCResult<State> {
         match self {
             State::Graph(g) => Ok(g.clone().put(txn, key, value).await?.into()),
             State::Table(t) => Ok(t
@@ -81,12 +75,7 @@ impl State {
         }
     }
 
-    pub async fn post(
-        &self,
-        txn: Arc<Transaction>,
-        method: &PathSegment,
-        args: Args,
-    ) -> TCResult<State> {
+    pub async fn post(&self, txn: Arc<Txn>, method: &PathSegment, args: Args) -> TCResult<State> {
         match self {
             State::Object(o) => o.post(txn, method, args).await,
             other => Err(error::method_not_allowed(format!(

@@ -18,32 +18,32 @@ use crate::value::*;
 
 #[async_trait]
 pub trait Transact: Send + Sync {
-    async fn commit(&self, txn_id: &TransactionId);
+    async fn commit(&self, txn_id: &TxnId);
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
-pub struct TransactionId {
+pub struct TxnId {
     timestamp: u128, // nanoseconds since Unix epoch
     nonce: u16,
 }
 
-impl TransactionId {
-    pub fn new(time: NetworkTime) -> TransactionId {
-        TransactionId {
+impl TxnId {
+    pub fn new(time: NetworkTime) -> TxnId {
+        TxnId {
             timestamp: time.as_nanos(),
             nonce: rand::thread_rng().gen(),
         }
     }
 }
 
-impl PartialOrd for TransactionId {
-    fn partial_cmp(&self, other: &TransactionId) -> Option<std::cmp::Ordering> {
+impl PartialOrd for TxnId {
+    fn partial_cmp(&self, other: &TxnId) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for TransactionId {
-    fn cmp(&self, other: &TransactionId) -> std::cmp::Ordering {
+impl Ord for TxnId {
+    fn cmp(&self, other: &TxnId) -> std::cmp::Ordering {
         if self.timestamp == other.timestamp {
             self.nonce.cmp(&other.nonce)
         } else {
@@ -52,19 +52,19 @@ impl Ord for TransactionId {
     }
 }
 
-impl Into<PathSegment> for TransactionId {
+impl Into<PathSegment> for TxnId {
     fn into(self) -> PathSegment {
         self.to_string().parse().unwrap()
     }
 }
 
-impl Into<String> for TransactionId {
+impl Into<String> for TxnId {
     fn into(self) -> String {
         format!("{}-{}", self.timestamp, self.nonce)
     }
 }
 
-impl Into<Bytes> for TransactionId {
+impl Into<Bytes> for TxnId {
     fn into(self) -> Bytes {
         Bytes::from(
             [
@@ -76,7 +76,7 @@ impl Into<Bytes> for TransactionId {
     }
 }
 
-impl Into<Bytes> for &TransactionId {
+impl Into<Bytes> for &TxnId {
     fn into(self) -> Bytes {
         Bytes::from(
             [
@@ -88,21 +88,21 @@ impl Into<Bytes> for &TransactionId {
     }
 }
 
-impl fmt::Display for TransactionId {
+impl fmt::Display for TxnId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}-{}", self.timestamp, self.nonce)
     }
 }
 
-struct TransactionState {
+struct TxnState {
     known: HashSet<TCRef>,
     queue: VecDeque<(ValueId, Op)>,
     resolved: HashMap<ValueId, State>,
 }
 
-impl TransactionState {
-    fn new() -> TransactionState {
-        TransactionState {
+impl TxnState {
+    fn new() -> TxnState {
+        TxnState {
             known: HashSet::new(),
             queue: VecDeque::new(),
             resolved: HashMap::new(),
@@ -144,7 +144,7 @@ impl TransactionState {
 
     async fn resolve(
         &mut self,
-        txn: Arc<Transaction>,
+        txn: Arc<Txn>,
         capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, State>> {
         let resolved: Map<ValueId, State> = self.resolved.drain().collect();
@@ -181,46 +181,46 @@ impl TransactionState {
     }
 }
 
-pub struct Transaction {
-    id: TransactionId,
+pub struct Txn {
+    id: TxnId,
     context: Arc<Store>,
     host: Arc<Host>,
     mutated: Arc<RwLock<Vec<Arc<dyn Transact>>>>,
-    state: RwLock<Single<TransactionState>>,
+    state: RwLock<Single<TxnState>>,
 }
 
-impl Transaction {
+impl Txn {
     pub async fn from_iter<I: IntoIterator<Item = (ValueId, TCValue)>>(
         host: Arc<Host>,
         root: Arc<Store>,
         iter: I,
-    ) -> TCResult<Arc<Transaction>> {
+    ) -> TCResult<Arc<Txn>> {
         println!();
-        println!("Transaction::from_iter");
+        println!("Txn::from_iter");
 
-        let mut state = TransactionState::new();
+        let mut state = TxnState::new();
         for item in iter {
             state.push(item)?;
         }
 
-        Transaction::with_state(host, root, state).await
+        Txn::with_state(host, root, state).await
     }
 
-    pub async fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Transaction>> {
-        Transaction::with_state(host, root, TransactionState::new()).await
+    pub async fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Txn>> {
+        Txn::with_state(host, root, TxnState::new()).await
     }
 
     async fn with_state(
         host: Arc<Host>,
         root: Arc<Store>,
-        txn_state: TransactionState,
-    ) -> TCResult<Arc<Transaction>> {
-        let id = TransactionId::new(host.time());
+        txn_state: TxnState,
+    ) -> TCResult<Arc<Txn>> {
+        let id = TxnId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
         let context = root.reserve(&id, context.into()).await?;
         let state = RwLock::new(Single::new(Some(txn_state)));
 
-        Ok(Arc::new(Transaction {
+        Ok(Arc::new(Txn {
             id,
             context,
             host,
@@ -233,10 +233,10 @@ impl Transaction {
         self.context.clone()
     }
 
-    async fn extend(self: &Arc<Self>, context: ValueId) -> TCResult<Arc<Transaction>> {
+    async fn extend(self: &Arc<Self>, context: ValueId) -> TCResult<Arc<Txn>> {
         let context: Arc<Store> = self.context.reserve(&self.id, context.into()).await?;
 
-        Ok(Arc::new(Transaction {
+        Ok(Arc::new(Txn {
             id: self.id.clone(),
             context,
             host: self.host.clone(),
@@ -245,7 +245,7 @@ impl Transaction {
         }))
     }
 
-    pub fn id(self: &Arc<Self>) -> TransactionId {
+    pub fn id(self: &Arc<Self>) -> TxnId {
         self.id.clone()
     }
 

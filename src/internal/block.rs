@@ -8,7 +8,7 @@ use futures::future::BoxFuture;
 use futures::lock::Mutex;
 
 use crate::error;
-use crate::transaction::TransactionId;
+use crate::transaction::TxnId;
 use crate::value::{PathSegment, TCPath, TCResult};
 
 pub type Checksum = [u8; 32];
@@ -18,14 +18,14 @@ pub trait Block:
 {
 }
 
-struct TransactionCache {
-    subdirs: HashMap<TransactionId, HashMap<PathSegment, Arc<Store>>>,
-    blocks: HashMap<TransactionId, HashMap<PathSegment, BytesMut>>,
+struct TxnCache {
+    subdirs: HashMap<TxnId, HashMap<PathSegment, Arc<Store>>>,
+    blocks: HashMap<TxnId, HashMap<PathSegment, BytesMut>>,
 }
 
-impl TransactionCache {
-    fn new() -> TransactionCache {
-        TransactionCache {
+impl TxnCache {
+    fn new() -> TxnCache {
+        TxnCache {
             subdirs: HashMap::new(),
             blocks: HashMap::new(),
         }
@@ -33,7 +33,7 @@ impl TransactionCache {
 }
 
 struct StoreState {
-    cache: TransactionCache,
+    cache: TxnCache,
     subdirs: HashMap<PathSegment, Arc<Store>>,
     blocks: HashMap<PathSegment, BytesMut>,
 }
@@ -41,7 +41,7 @@ struct StoreState {
 impl StoreState {
     fn new() -> StoreState {
         StoreState {
-            cache: TransactionCache::new(),
+            cache: TxnCache::new(),
             subdirs: HashMap::new(),
             blocks: HashMap::new(),
         }
@@ -85,7 +85,7 @@ impl Store {
 
     pub async fn append(
         &self,
-        txn_id: &TransactionId,
+        txn_id: &TxnId,
         block_id: &PathSegment,
         data: Bytes,
     ) -> TCResult<()> {
@@ -122,7 +122,7 @@ impl Store {
         }
     }
 
-    pub fn commit<'a>(&'a self, txn_id: &'a TransactionId) -> BoxFuture<'a, ()> {
+    pub fn commit<'a>(&'a self, txn_id: &'a TxnId) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             let mut state = self.state.lock().await;
 
@@ -149,7 +149,7 @@ impl Store {
         })
     }
 
-    pub async fn contains_block(&self, txn_id: &TransactionId, block_id: &PathSegment) -> bool {
+    pub async fn contains_block(&self, txn_id: &TxnId, block_id: &PathSegment) -> bool {
         let state = self.state.lock().await;
         if let Some(blocks) = state.cache.blocks.get(txn_id) {
             if blocks.contains_key(block_id) {
@@ -162,7 +162,7 @@ impl Store {
 
     pub async fn get_block<B: Block>(
         self: Arc<Self>,
-        txn_id: TransactionId,
+        txn_id: TxnId,
         block_id: PathSegment,
     ) -> TCResult<B> {
         // TODO: read from filesystem
@@ -174,11 +174,7 @@ impl Store {
         }
     }
 
-    pub async fn get_bytes(
-        self: Arc<Self>,
-        txn_id: TransactionId,
-        block_id: PathSegment,
-    ) -> Option<Bytes> {
+    pub async fn get_bytes(self: Arc<Self>, txn_id: TxnId, block_id: PathSegment) -> Option<Bytes> {
         let state = self.state.lock().await;
 
         let block = if let Some(block) = state.blocks.get(&block_id) {
@@ -206,7 +202,7 @@ impl Store {
 
     pub fn get_store<'a>(
         &'a self,
-        txn_id: &'a TransactionId,
+        txn_id: &'a TxnId,
         path: &'a TCPath,
     ) -> BoxFuture<'a, Option<Arc<Store>>> {
         Box::pin(async move {
@@ -233,7 +229,7 @@ impl Store {
 
     pub async fn new_block(
         &self,
-        txn_id: &TransactionId,
+        txn_id: &TxnId,
         block_id: PathSegment,
         initial_value: Bytes,
     ) -> TCResult<()> {
@@ -271,7 +267,7 @@ impl Store {
 
     pub fn reserve<'a>(
         &'a self,
-        txn_id: &'a TransactionId,
+        txn_id: &'a TxnId,
         path: TCPath,
     ) -> BoxFuture<'a, TCResult<Arc<Store>>> {
         Box::pin(async move {
@@ -317,11 +313,7 @@ impl Store {
         })
     }
 
-    pub async fn reserve_or_get(
-        &self,
-        txn_id: &TransactionId,
-        path: &TCPath,
-    ) -> TCResult<Arc<Store>> {
+    pub async fn reserve_or_get(&self, txn_id: &TxnId, path: &TCPath) -> TCResult<Arc<Store>> {
         if let Some(store) = self.get_store(txn_id, path).await {
             Ok(store)
         } else {

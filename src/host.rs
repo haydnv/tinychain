@@ -14,7 +14,7 @@ use crate::internal::file::File;
 use crate::internal::Directory;
 use crate::object::{Actor, TCObject};
 use crate::state::{Collection, Persistent, State, Table};
-use crate::transaction::Transaction;
+use crate::transaction::Txn;
 use crate::value::{Args, Link, TCPath, TCResult, TCValue, ValueId};
 
 const RESERVED: [&str; 1] = ["/sbin"];
@@ -132,20 +132,17 @@ impl Host {
         )
     }
 
-    pub async fn new_transaction(self: &Arc<Self>) -> TCResult<Arc<Transaction>> {
-        Transaction::new(self.clone(), self.workspace.clone()).await
+    pub async fn new_transaction(self: &Arc<Self>) -> TCResult<Arc<Txn>> {
+        Txn::new(self.clone(), self.workspace.clone()).await
     }
 
-    pub async fn transact(
-        self: &Arc<Self>,
-        ops: Vec<(ValueId, TCValue)>,
-    ) -> TCResult<Arc<Transaction>> {
-        Transaction::from_iter(self.clone(), self.workspace.clone(), ops.into_iter()).await
+    pub async fn transact(self: &Arc<Self>, ops: Vec<(ValueId, TCValue)>) -> TCResult<Arc<Txn>> {
+        Txn::from_iter(self.clone(), self.workspace.clone(), ops.into_iter()).await
     }
 
     pub async fn get(
         self: &Arc<Self>,
-        txn: Arc<Transaction>,
+        txn: Arc<Txn>,
         link: &Link,
         key: TCValue,
     ) -> TCResult<State> {
@@ -190,7 +187,7 @@ impl Host {
 
     pub async fn put(
         self: &Arc<Self>,
-        txn: Arc<Transaction>,
+        txn: Arc<Txn>,
         dest: Link,
         key: TCValue,
         state: State,
@@ -220,7 +217,7 @@ impl Host {
     // TODO: remove this method
     pub async fn post(
         self: &Arc<Self>,
-        _txn: Arc<Transaction>,
+        _txn: Arc<Txn>,
         dest: &Link,
         _args: Args,
     ) -> TCResult<State> {

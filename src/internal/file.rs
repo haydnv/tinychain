@@ -8,7 +8,7 @@ use futures::Stream;
 
 use crate::internal::block::{Block, Store};
 use crate::internal::cache::Deque;
-use crate::transaction::TransactionId;
+use crate::transaction::TxnId;
 use crate::value::TCPath;
 
 type Blocks = Box<dyn Stream<Item = Bytes> + Send + Unpin>;
@@ -18,15 +18,11 @@ type FileData = (TCPath, Blocks);
 pub trait File {
     type Block: Block;
 
-    async fn copy_from(
-        reader: &mut FileCopier,
-        txn_id: &TransactionId,
-        dest: Arc<Store>,
-    ) -> Arc<Self>;
+    async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, dest: Arc<Store>) -> Arc<Self>;
 
-    async fn copy_into(&self, txn_id: TransactionId, writer: &mut FileCopier);
+    async fn copy_into(&self, txn_id: TxnId, writer: &mut FileCopier);
 
-    async fn from_store(txn_id: &TransactionId, store: Arc<Store>) -> Arc<Self>;
+    async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> Arc<Self>;
 }
 
 struct SharedState {
@@ -50,7 +46,7 @@ impl FileCopier {
         }
     }
 
-    pub async fn copy<F: File>(txn_id: TransactionId, state: &F, dest: Arc<Store>) -> Arc<F> {
+    pub async fn copy<F: File>(txn_id: TxnId, state: &F, dest: Arc<Store>) -> Arc<F> {
         let mut copier = Self::open();
         state.copy_into(txn_id.clone(), &mut copier).await;
         copier.close();

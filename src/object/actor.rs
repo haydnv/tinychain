@@ -12,7 +12,7 @@ use crate::error;
 use crate::host::NetworkTime;
 use crate::object::TCObject;
 use crate::state::State;
-use crate::transaction::Transaction;
+use crate::transaction::Txn;
 use crate::value::{Args, Link, PathSegment, TCPath, TCResult, TCValue};
 
 const TOKEN_DURATION: Duration = Duration::from_secs(30 * 60);
@@ -25,7 +25,7 @@ pub struct Actor {
 
 #[async_trait]
 impl TCObject for Actor {
-    async fn new(_txn: Arc<Transaction>, id: TCValue) -> TCResult<Arc<Actor>> {
+    async fn new(_txn: Arc<Txn>, id: TCValue) -> TCResult<Arc<Actor>> {
         let mut rng = OsRng {};
         let keypair: Keypair = Keypair::generate(&mut rng);
 
@@ -45,12 +45,7 @@ impl TCObject for Actor {
         self.id.clone()
     }
 
-    async fn post(
-        &self,
-        txn: Arc<Transaction>,
-        method: &PathSegment,
-        mut args: Args,
-    ) -> TCResult<State> {
+    async fn post(&self, txn: Arc<Txn>, method: &PathSegment, mut args: Args) -> TCResult<State> {
         match method.as_str() {
             "token" => {
                 let issuer: Link = args.take("issuer")?;
