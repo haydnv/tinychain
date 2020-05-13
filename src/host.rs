@@ -78,6 +78,8 @@ pub struct Host {
 
 impl Host {
     pub async fn new(config: HostConfig) -> TCResult<Arc<Host>> {
+        // TODO: figure out a way to populate `root` without locking
+
         let data_dir = Store::new(config.data_dir);
         let workspace = Store::new_tmp(config.workspace);
 

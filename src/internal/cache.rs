@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::iter::FromIterator;
 use std::sync::RwLock;
@@ -14,21 +14,6 @@ impl<K: Clone + Eq + Hash + Send + Sync, V: Clone + Send + Sync> Map<K, V> {
         }
     }
 
-    pub fn drain(&self) -> HashMap<K, V> {
-        self.map
-            .write()
-            .unwrap()
-            .replace(Some(HashMap::new()))
-            .unwrap()
-    }
-
-    pub fn extend<I: Iterator<Item = (K, V)>>(&self, i: I) {
-        let mut lock = self.map.write().unwrap();
-        let mut map = lock.replace(None).unwrap();
-        map.extend(i);
-        lock.replace(Some(map));
-    }
-
     pub fn get(&self, key: &K) -> Option<V> {
         match self.map.read().unwrap().read().unwrap().get(key) {
             Some(val) => Some(val.clone()),
@@ -42,12 +27,6 @@ impl<K: Clone + Eq + Hash + Send + Sync, V: Clone + Send + Sync> Map<K, V> {
         let result = map.insert(key, value);
         lock.replace(Some(map));
         result
-    }
-
-    pub fn keys(&self) -> HashSet<K> {
-        let lock = self.map.read().unwrap();
-        let keys = lock.read().unwrap().keys();
-        keys.cloned().collect()
     }
 }
 
