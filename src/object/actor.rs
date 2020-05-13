@@ -126,9 +126,16 @@ impl Actor {
 
 impl From<Actor> for TCValue {
     fn from(actor: Actor) -> TCValue {
+        let private_key: TCValue = if let Some(private_key) = actor.private_key {
+            private_key.to_bytes().to_vec().into()
+        } else {
+            TCValue::None
+        };
+
         TCValue::Vector(vec![
             actor.host.into(),
             actor.id,
+            private_key,
             actor.public_key.to_bytes().to_vec().into(),
         ])
     }
@@ -139,15 +146,21 @@ impl TryFrom<TCValue> for Actor {
 
     fn try_from(value: TCValue) -> TCResult<Actor> {
         let mut value: Vec<TCValue> = value.try_into()?;
-        if value.len() == 3 {
+        if value.len() == 4 {
             let public_key: Bytes = value.pop().unwrap().try_into()?;
 
             Ok(Actor {
                 public_key: PublicKey::from_bytes(&public_key[..])
                     .map_err(|_| error::unauthorized("Invalid public key specified for Actor"))?,
+                private_key: if let Some(TCValue::Bytes(b)) = value.pop() {
+                    Some(SecretKey::from_bytes(&b[..]).map_err(|_| {
+                        error::unauthorized("Invalid private key specified for Actor")
+                    })?)
+                } else {
+                    None
+                },
                 id: value.pop().unwrap(),
                 host: value.pop().unwrap().try_into()?,
-                private_key: None,
             })
         } else {
             let value: TCValue = value.into();
