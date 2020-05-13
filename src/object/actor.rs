@@ -52,10 +52,6 @@ impl Actor {
         })
     }
 
-    pub fn from_token(_token: &str) -> TCResult<Actor> {
-        Err(error::not_implemented())
-    }
-
     pub fn sign_token(&self, token: &Token) -> TCResult<String> {
         let keypair = if let Some(secret) = &self.private_key {
             Keypair::from_bytes(&[secret.to_bytes(), self.public_key.to_bytes()].concat()).map_err(
