@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::host::{Host, NetworkTime};
 use crate::internal::block::Store;
-use crate::internal::cache::Map;
 use crate::state::State;
 use crate::value::*;
 
@@ -157,9 +156,9 @@ impl TxnState {
         txn: Arc<Txn>,
         capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, State>> {
-        let resolved: Map<ValueId, State> = self.resolved.drain().collect();
+        let mut resolved: HashMap<ValueId, State> = self.resolved.drain().collect();
         while !self.queue.is_empty() {
-            let known: HashSet<TCRef> = resolved.keys().drain().map(|id| id.into()).collect();
+            let known: HashSet<TCRef> = resolved.keys().cloned().map(|id| id.into()).collect();
             let mut ready = vec![];
             let mut value_ids = vec![];
             while let Some((value_id, op)) = self.queue.pop_front() {
@@ -182,7 +181,6 @@ impl TxnState {
         }
 
         let resolved = resolved
-            .drain()
             .drain()
             .filter(|(id, _)| capture.contains(id))
             .collect();
@@ -268,7 +266,7 @@ impl Txn {
 
     async fn resolve_value(
         self: &Arc<Self>,
-        resolved: &Map<ValueId, State>,
+        resolved: &HashMap<ValueId, State>,
         value_id: ValueId,
         op: Op,
     ) -> TCResult<State> {
@@ -345,14 +343,14 @@ impl Txn {
     }
 }
 
-fn resolve_id(resolved: &Map<ValueId, State>, id: &ValueId) -> TCResult<State> {
+fn resolve_id(resolved: &HashMap<ValueId, State>, id: &ValueId) -> TCResult<State> {
     match resolved.get(id) {
-        Some(s) => Ok(s),
+        Some(s) => Ok(s.clone()),
         None => Err(error::bad_request("Required value not provided", id)),
     }
 }
 
-fn resolve_val(resolved: &Map<ValueId, State>, value: TCValue) -> TCResult<State> {
+fn resolve_val(resolved: &HashMap<ValueId, State>, value: TCValue) -> TCResult<State> {
     match value {
         TCValue::Ref(r) => resolve_id(resolved, &r.value_id()),
         _ => Ok(value.into()),
