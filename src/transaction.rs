@@ -109,6 +109,14 @@ impl TxnState {
         }
     }
 
+    fn extend<I: Iterator<Item = (ValueId, TCValue)>>(&mut self, values: I) -> TCResult<()> {
+        for item in values {
+            self.push(item)?
+        }
+
+        Ok(())
+    }
+
     fn push(&mut self, value: (ValueId, TCValue)) -> TCResult<()> {
         if self.resolved.contains_key(&value.0) {
             return Err(error::bad_request("Duplicate value provided for", value.0));
@@ -190,22 +198,6 @@ pub struct Txn {
 }
 
 impl Txn {
-    pub async fn from_iter<I: IntoIterator<Item = (ValueId, TCValue)>>(
-        host: Arc<Host>,
-        root: Arc<Store>,
-        iter: I,
-    ) -> TCResult<Arc<Txn>> {
-        println!();
-        println!("Txn::from_iter");
-
-        let mut state = TxnState::new();
-        for item in iter {
-            state.push(item)?;
-        }
-
-        Txn::with_state(host, root, state).await
-    }
-
     pub async fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Txn>> {
         Txn::with_state(host, root, TxnState::new()).await
     }
@@ -233,12 +225,12 @@ impl Txn {
         self.context.clone()
     }
 
-    async fn extend(self: &Arc<Self>, context: ValueId) -> TCResult<Arc<Txn>> {
-        let context: Arc<Store> = self.context.reserve(&self.id, context.into()).await?;
+    async fn subcontext(self: &Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn>> {
+        let subcontext: Arc<Store> = self.context.reserve(&self.id, subcontext.into()).await?;
 
         Ok(Arc::new(Txn {
             id: self.id.clone(),
-            context,
+            context: subcontext,
             host: self.host.clone(),
             mutated: self.mutated.clone(),
             state: RwLock::new(Single::new(None)),
@@ -247,6 +239,14 @@ impl Txn {
 
     pub fn id(self: &Arc<Self>) -> TxnId {
         self.id.clone()
+    }
+
+    pub fn extend<I: Iterator<Item = (ValueId, TCValue)>>(&self, iter: I) -> TCResult<()> {
+        let mut lock = self.state.write().unwrap();
+        let mut state = lock.replace(None).unwrap();
+        state.extend(iter)?;
+        lock.replace(Some(state));
+        Ok(())
     }
 
     pub fn commit(&self) -> impl Future<Output = ()> + '_ {
@@ -275,7 +275,7 @@ impl Txn {
         value_id: ValueId,
         op: Op,
     ) -> TCResult<State> {
-        let extension = self.extend(value_id).await?;
+        let extension = self.subcontext(value_id).await?;
 
         match op {
             Op::Get { subject, key } => match subject {
