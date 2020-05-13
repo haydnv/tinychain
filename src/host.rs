@@ -12,7 +12,7 @@ use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::File;
 use crate::internal::Directory;
-use crate::object::{Actor, TCObject};
+use crate::object::Actor;
 use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Txn;
 use crate::value::{Args, Link, TCPath, TCResult, TCValue, ValueId};
@@ -147,8 +147,8 @@ impl Host {
         key: TCValue,
     ) -> TCResult<State> {
         println!("GET {}", link);
-        if let Some((_, address, _)) = link.host() {
-            if address != &self.address {
+        if let Some(host) = link.host() {
+            if host.address() != &self.address {
                 return Err(error::not_implemented());
             }
         }
@@ -161,7 +161,9 @@ impl Host {
         if path[0] == "sbin" && path.len() > 2 {
             match path[1].as_str() {
                 "auth" => match path[2].as_str() {
-                    "actor" => Ok(State::Object(Actor::new(txn.clone(), key).await?.into())),
+                    "actor" => Ok(State::Object(
+                        Actor::new(txn.clone(), (self.address, self.http_port).into(), key).into(),
+                    )),
                     _ => Err(error::not_found(path)),
                 },
                 "state" => match path[2].as_str() {
@@ -193,8 +195,8 @@ impl Host {
         state: State,
     ) -> TCResult<State> {
         println!("PUT {}", dest);
-        if let Some((_, address, _)) = dest.host() {
-            if address != &self.address {
+        if let Some(host) = dest.host() {
+            if host.address() != &self.address {
                 return Err(error::not_implemented());
             }
         }
@@ -222,8 +224,8 @@ impl Host {
         _args: Args,
     ) -> TCResult<State> {
         println!("POST {}", dest);
-        if let Some((_, address, _)) = dest.host() {
-            if address != &self.address {
+        if let Some(host) = dest.host() {
+            if host.address() != &self.address {
                 return Err(error::not_implemented());
             }
         }

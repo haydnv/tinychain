@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -16,12 +16,28 @@ pub type PathSegment = ValueId;
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
     IPv4(Ipv4Addr),
+    IPv6(Ipv6Addr),
 }
 
 impl fmt::Display for LinkAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use LinkAddress::*;
+
         match self {
-            LinkAddress::IPv4(addr) => write!(f, "{}", addr),
+            IPv4(addr) => write!(f, "{}", addr),
+            IPv6(addr) => write!(f, "{}", addr),
+        }
+    }
+}
+
+impl From<IpAddr> for LinkAddress {
+    fn from(addr: IpAddr) -> LinkAddress {
+        use IpAddr::*;
+        use LinkAddress::*;
+
+        match addr {
+            V4(addr) => IPv4(addr),
+            V6(addr) => IPv6(addr),
         }
     }
 }
@@ -31,7 +47,19 @@ impl PartialEq<Ipv4Addr> for LinkAddress {
         use LinkAddress::*;
 
         match self {
-            IPv4(address) => address == other,
+            IPv4(addr) => addr == other,
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq<Ipv6Addr> for LinkAddress {
+    fn eq(&self, other: &Ipv6Addr) -> bool {
+        use LinkAddress::*;
+
+        match self {
+            IPv6(addr) => addr == other,
+            _ => false,
         }
     }
 }
@@ -41,8 +69,8 @@ impl PartialEq<IpAddr> for LinkAddress {
         use IpAddr::*;
 
         match other {
-            V4(address) => self == address,
-            _ => false,
+            V4(addr) => self == addr,
+            V6(addr) => self == addr,
         }
     }
 }
@@ -50,6 +78,12 @@ impl PartialEq<IpAddr> for LinkAddress {
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub enum LinkProtocol {
     HTTP,
+}
+
+impl Default for LinkProtocol {
+    fn default() -> LinkProtocol {
+        LinkProtocol::HTTP
+    }
 }
 
 impl fmt::Display for LinkProtocol {
@@ -64,21 +98,69 @@ impl fmt::Display for LinkProtocol {
     }
 }
 
-pub type LinkHost = Option<(LinkProtocol, LinkAddress, Option<u16>)>;
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+pub struct LinkHost {
+    protocol: LinkProtocol,
+    address: LinkAddress,
+    port: Option<u16>,
+}
+
+impl LinkHost {
+    pub fn address(&'_ self) -> &'_ LinkAddress {
+        &self.address
+    }
+
+    pub fn port(&'_ self) -> &'_ Option<u16> {
+        &self.port
+    }
+
+    pub fn protocol(&'_ self) -> &'_ LinkProtocol {
+        &self.protocol
+    }
+}
+
+impl<A: Into<LinkAddress>> From<(A, u16)> for LinkHost {
+    fn from(addr: (A, u16)) -> LinkHost {
+        LinkHost {
+            protocol: LinkProtocol::default(),
+            address: addr.0.into(),
+            port: Some(addr.1),
+        }
+    }
+}
+
+impl<A: Into<LinkAddress>> From<(LinkProtocol, A, Option<u16>)> for LinkHost {
+    fn from(addr: (LinkProtocol, A, Option<u16>)) -> LinkHost {
+        LinkHost {
+            protocol: addr.0,
+            address: addr.1.into(),
+            port: addr.2,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Link {
-    host: LinkHost,
+    host: Option<LinkHost>,
     path: TCPath,
 }
 
 impl Link {
-    pub fn host(&'_ self) -> &'_ LinkHost {
+    pub fn host(&'_ self) -> &'_ Option<LinkHost> {
         &self.host
     }
 
     pub fn path(&'_ self) -> &'_ TCPath {
         &self.path
+    }
+}
+
+impl<A: Into<LinkAddress>> From<(A, u16)> for Link {
+    fn from(addr: (A, u16)) -> Link {
+        Link {
+            host: Some(addr.into()),
+            path: TCPath::default(),
+        }
     }
 }
 
@@ -144,7 +226,7 @@ impl FromStr for Link {
         };
 
         Ok(Link {
-            host: Some((protocol, address, port)),
+            host: Some((protocol, address, port).into()),
             path,
         })
     }
@@ -152,9 +234,9 @@ impl FromStr for Link {
 
 impl fmt::Display for Link {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some((protocol, address, port)) = &self.host {
-            write!(f, "{}://{}", protocol, address)?;
-            if let Some(port) = port {
+        if let Some(host) = &self.host {
+            write!(f, "{}://{}", host.protocol(), host.address())?;
+            if let Some(port) = host.port() {
                 write!(f, ":{}", port)?;
             }
         }

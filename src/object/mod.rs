@@ -13,8 +13,6 @@ pub type Actor = actor::Actor;
 
 #[async_trait]
 pub trait TCObject: Into<TCValue> + TryFrom<TCValue> {
-    async fn new(txn: Arc<Txn>, id: TCValue) -> TCResult<Arc<Self>>;
-
     fn class() -> &'static str;
 
     fn id(&self) -> TCValue;

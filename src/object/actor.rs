@@ -18,6 +18,7 @@ use crate::value::{Args, Link, PathSegment, TCPath, TCResult, TCValue};
 const TOKEN_DURATION: Duration = Duration::from_secs(30 * 60);
 
 pub struct Actor {
+    host: Link,
     id: TCValue,
     public_key: PublicKey,
     private_key: Option<SecretKey>,
@@ -25,18 +26,6 @@ pub struct Actor {
 
 #[async_trait]
 impl TCObject for Actor {
-    async fn new(_txn: Arc<Txn>, id: TCValue) -> TCResult<Arc<Actor>> {
-        let mut rng = OsRng {};
-        let keypair: Keypair = Keypair::generate(&mut rng);
-
-        println!("OK: Actor::new");
-        Ok(Arc::new(Actor {
-            id,
-            public_key: keypair.public,
-            private_key: Some(keypair.secret),
-        }))
-    }
-
     fn class() -> &'static str {
         "Actor"
     }
@@ -48,11 +37,10 @@ impl TCObject for Actor {
     async fn post(&self, txn: Arc<Txn>, method: &PathSegment, mut args: Args) -> TCResult<State> {
         match method.as_str() {
             "token" => {
-                let issuer: Link = args.take("issuer")?;
                 let scopes: Vec<TCPath> = args.take("scopes")?;
                 let issued_at = txn.time();
                 let expires = issued_at.clone() + TOKEN_DURATION;
-                let token = self.token(issuer, scopes, issued_at, expires)?;
+                let token = self.token(scopes, issued_at, expires)?;
                 Ok(token.into())
             }
             _ => Err(error::bad_request("Actor has no such method", method)),
@@ -61,9 +49,24 @@ impl TCObject for Actor {
 }
 
 impl Actor {
+    pub fn new(_txn: Arc<Txn>, host: Link, id: TCValue) -> Arc<Actor> {
+        let mut rng = OsRng {};
+        let keypair: Keypair = Keypair::generate(&mut rng);
+
+        Arc::new(Actor {
+            host,
+            id,
+            public_key: keypair.public,
+            private_key: Some(keypair.secret),
+        })
+    }
+
+    pub fn from_token(_token: &str) -> TCResult<Actor> {
+        Err(error::not_implemented())
+    }
+
     pub fn token(
         &self,
-        issuer: Link,
         scopes: Vec<TCPath>,
         issued_at: NetworkTime,
         expires: NetworkTime,
@@ -81,7 +84,7 @@ impl Actor {
         let header = TokenHeader::default();
 
         let claims = TokenClaims {
-            iss: issuer,
+            iss: self.host.clone(),
             iat: issued_at.as_millis(),
             exp: expires.as_millis(),
             actor_id: self.id.clone(),
@@ -158,6 +161,7 @@ impl From<Actor> for TCValue {
         };
 
         TCValue::Vector(vec![
+            actor.host.into(),
             actor.id,
             private_key,
             actor.public_key.to_bytes().to_vec().into(),
@@ -170,7 +174,7 @@ impl TryFrom<TCValue> for Actor {
 
     fn try_from(value: TCValue) -> TCResult<Actor> {
         let mut value: Vec<TCValue> = value.try_into()?;
-        if value.len() == 3 {
+        if value.len() == 4 {
             let public_key: Bytes = value.pop().unwrap().try_into()?;
 
             Ok(Actor {
@@ -184,6 +188,7 @@ impl TryFrom<TCValue> for Actor {
                     None
                 },
                 id: value.pop().unwrap(),
+                host: value.pop().unwrap().try_into()?,
             })
         } else {
             let value: TCValue = value.into();
