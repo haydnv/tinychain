@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::error;
 use crate::state::State;
 use crate::transaction::Txn;
 use crate::value::{Args, PathSegment, TCResult, TCValue};
@@ -17,7 +18,14 @@ pub trait TCObject: Into<TCValue> + TryFrom<TCValue> {
 
     fn id(&self) -> TCValue;
 
-    async fn post(&self, txn: Arc<Txn>, method: &PathSegment, mut args: Args) -> TCResult<State>;
+    async fn post(
+        &self,
+        _txn: Arc<Txn>,
+        _method: &PathSegment,
+        mut _args: Args,
+    ) -> TCResult<State> {
+        Err(error::method_not_allowed(self.id()))
+    }
 }
 
 #[derive(Clone)]

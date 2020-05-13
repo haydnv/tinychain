@@ -1,6 +1,5 @@
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -9,13 +8,18 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
-use crate::host::NetworkTime;
 use crate::object::TCObject;
-use crate::state::State;
 use crate::transaction::Txn;
-use crate::value::{Args, Link, PathSegment, TCPath, TCResult, TCValue};
+use crate::value::{Link, TCPath, TCResult, TCValue};
 
-const TOKEN_DURATION: Duration = Duration::from_secs(30 * 60);
+#[derive(Deserialize, Serialize)]
+pub struct Token {
+    iss: Link,
+    iat: u64,
+    exp: u64,
+    actor_id: TCValue,
+    scopes: Vec<TCPath>,
+}
 
 pub struct Actor {
     host: Link,
@@ -32,19 +36,6 @@ impl TCObject for Actor {
 
     fn id(&self) -> TCValue {
         self.id.clone()
-    }
-
-    async fn post(&self, txn: Arc<Txn>, method: &PathSegment, mut args: Args) -> TCResult<State> {
-        match method.as_str() {
-            "token" => {
-                let scopes: Vec<TCPath> = args.take("scopes")?;
-                let issued_at = txn.time();
-                let expires = issued_at.clone() + TOKEN_DURATION;
-                let token = self.token(scopes, issued_at, expires)?;
-                Ok(token.into())
-            }
-            _ => Err(error::bad_request("Actor has no such method", method)),
-        }
     }
 }
 
@@ -65,12 +56,7 @@ impl Actor {
         Err(error::not_implemented())
     }
 
-    pub fn token(
-        &self,
-        scopes: Vec<TCPath>,
-        issued_at: NetworkTime,
-        expires: NetworkTime,
-    ) -> TCResult<String> {
+    pub fn sign_token(&self, token: &Token) -> TCResult<String> {
         let keypair = if let Some(secret) = &self.private_key {
             Keypair::from_bytes(&[secret.to_bytes(), self.public_key.to_bytes()].concat()).map_err(
                 |_| error::unauthorized("Unable to construct ECDSA keypair for the given user"),
@@ -81,18 +67,8 @@ impl Actor {
             ));
         };
 
-        let header = TokenHeader::default();
-
-        let claims = TokenClaims {
-            iss: self.host.clone(),
-            iat: issued_at.as_millis(),
-            exp: expires.as_millis(),
-            actor_id: self.id.clone(),
-            scopes,
-        };
-
-        let header = base64::encode(serde_json::to_string_pretty(&header).unwrap());
-        let claims = base64::encode(serde_json::to_string_pretty(&claims).unwrap());
+        let header = base64::encode(serde_json::to_string_pretty(&TokenHeader::default()).unwrap());
+        let claims = base64::encode(serde_json::to_string_pretty(&token).unwrap());
         let signature = base64::encode(
             &keypair
                 .sign(format!("{}.{}", header, claims).as_bytes())
@@ -101,36 +77,41 @@ impl Actor {
         Ok(format!("{}.{}.{}", header, claims, signature))
     }
 
-    pub fn verify(&self, token: &str, scope: &TCPath) -> TCResult<()> {
-        let err1 = |e| error::unauthorized(&format!("Invalid bearer token provided: {}", e));
-        let err2 = |e| error::unauthorized(&format!("Invalid bearer token provided: {}", e));
-        let mut token: Vec<&str> = token.split('.').collect();
-        if token.len() != 3 {
+    pub fn validate(&self, encoded: &str) -> TCResult<Token> {
+        let mut encoded: Vec<&str> = encoded.split('.').collect();
+        if encoded.len() != 3 {
             return Err(error::unauthorized(
                 "Expected bearer token in the format '<header>.<claims>.<data>'",
             ));
         }
 
-        let message = format!("{}.{}", token[0], token[1]);
-        let signature = Signature::from_bytes(&base64::decode(token.pop().unwrap()).map_err(err1)?)
+        let message = format!("{}.{}", encoded[0], encoded[1]);
+        let signature =
+            Signature::from_bytes(&base64::decode(encoded.pop().unwrap()).map_err(|e| {
+                error::unauthorized(&format!("Invalid bearer token signature: {}", e))
+            })?)
             .map_err(|_| error::unauthorized("Invalid bearer token signature"))?;
 
-        let claims = token.pop().unwrap();
-        let claims = base64::decode(claims).map_err(err1)?;
-        let claims: TokenClaims = serde_json::from_slice(&claims).map_err(err2)?;
+        let token = encoded.pop().unwrap();
+        let token = base64::decode(token)
+            .map_err(|e| error::unauthorized(&format!("Invalid bearer token: {}", e)))?;
+        let token: Token = serde_json::from_slice(&token)
+            .map_err(|e| error::unauthorized(&format!("Invalid bearer token: {}", e)))?;
 
-        if claims.actor_id != self.id {
+        if token.actor_id != self.id {
             return Err(error::unauthorized(
                 "Attempted to use a bearer token for a different user",
             ));
         }
 
-        let header = token.pop().unwrap();
-        let header = base64::decode(header).map_err(err1)?;
-        let header: TokenHeader = serde_json::from_slice(&header).map_err(err2)?;
+        let header = encoded.pop().unwrap();
+        let header = base64::decode(header)
+            .map_err(|e| error::unauthorized(&format!("Invalid bearer token header: {}", e)))?;
+        let header: TokenHeader = serde_json::from_slice(&header)
+            .map_err(|e| error::unauthorized(&format!("Invalid bearer token header: {}", e)))?;
 
         if header != TokenHeader::default() {
-            Err(error::unauthorized("Unsupported bearer token"))
+            Err(error::unauthorized("Unsupported bearer token type"))
         } else if self
             .public_key
             .verify(message.as_bytes(), &signature)
@@ -138,16 +119,7 @@ impl Actor {
         {
             Err(error::unauthorized("Invalid bearer token provided"))
         } else {
-            for authorized_scope in claims.scopes {
-                if scope.starts_with(authorized_scope) {
-                    return Ok(());
-                }
-            }
-
-            Err(error::forbidden(format!(
-                "Not authorized for scope {}",
-                scope
-            )))
+            Ok(token)
         }
     }
 }
@@ -197,13 +169,4 @@ impl Default for TokenHeader {
             typ: "JWT".into(),
         }
     }
-}
-
-#[derive(Deserialize, Serialize)]
-struct TokenClaims {
-    iss: Link,
-    iat: u64,
-    exp: u64,
-    actor_id: TCValue,
-    scopes: Vec<TCPath>,
 }
