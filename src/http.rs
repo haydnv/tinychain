@@ -52,7 +52,7 @@ async fn post(host: Arc<Host>, path: &TCPath, mut args: Args) -> TCResult<State>
         let capture: Vec<ValueId> = args.take_or("capture", vec![])?;
         let mut values: Vec<(ValueId, TCValue)> = args.take_or("values", vec![])?;
         let txn = host.clone().new_transaction().await?;
-        txn.extend(values.drain(..))?;
+        txn.extend(values.drain(..)).await?;
 
         let mut results: Vec<TCValue> = Vec::with_capacity(capture.len());
         match txn.resolve(capture.into_iter().collect()).await {

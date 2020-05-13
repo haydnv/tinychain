@@ -6,13 +6,14 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{self, join_all, try_join_all, Future, FutureExt};
+use futures::lock::Mutex;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::host::{Host, NetworkTime};
 use crate::internal::block::Store;
-use crate::internal::cache::{Map, Single};
+use crate::internal::cache::Map;
 use crate::state::State;
 use crate::value::*;
 
@@ -94,6 +95,7 @@ impl fmt::Display for TxnId {
     }
 }
 
+#[derive(Default)]
 struct TxnState {
     known: HashSet<TCRef>,
     queue: VecDeque<(ValueId, Op)>,
@@ -194,7 +196,7 @@ pub struct Txn {
     context: Arc<Store>,
     host: Arc<Host>,
     mutated: Arc<RwLock<Vec<Arc<dyn Transact>>>>,
-    state: RwLock<Single<TxnState>>,
+    state: Mutex<TxnState>,
 }
 
 impl Txn {
@@ -210,7 +212,7 @@ impl Txn {
         let id = TxnId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
         let context = root.reserve(&id, context.into()).await?;
-        let state = RwLock::new(Single::new(Some(txn_state)));
+        let state = Mutex::new(txn_state);
 
         Ok(Arc::new(Txn {
             id,
@@ -233,7 +235,7 @@ impl Txn {
             context: subcontext,
             host: self.host.clone(),
             mutated: self.mutated.clone(),
-            state: RwLock::new(Single::new(None)),
+            state: Mutex::new(TxnState::default()),
         }))
     }
 
@@ -241,12 +243,8 @@ impl Txn {
         self.id.clone()
     }
 
-    pub fn extend<I: Iterator<Item = (ValueId, TCValue)>>(&self, iter: I) -> TCResult<()> {
-        let mut lock = self.state.write().unwrap();
-        let mut state = lock.replace(None).unwrap();
-        state.extend(iter)?;
-        lock.replace(Some(state));
-        Ok(())
+    pub async fn extend<I: Iterator<Item = (ValueId, TCValue)>>(&self, iter: I) -> TCResult<()> {
+        self.state.lock().await.extend(iter)
     }
 
     pub fn commit(&self) -> impl Future<Output = ()> + '_ {
@@ -265,8 +263,7 @@ impl Txn {
         self: &Arc<Self>,
         capture: HashSet<ValueId>,
     ) -> TCResult<HashMap<ValueId, State>> {
-        let mut state = self.state.write().unwrap().replace(None).unwrap();
-        state.resolve(self.clone(), capture).await
+        self.state.lock().await.resolve(self.clone(), capture).await
     }
 
     async fn resolve_value(
