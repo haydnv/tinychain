@@ -77,7 +77,7 @@ impl Actor {
             )?
         } else {
             return Err(error::forbidden(
-                "You are not authorized to issue tokens on behalf of this user".into(),
+                "You are not authorized to issue tokens on behalf of this user",
             ));
         };
 

@@ -11,6 +11,7 @@ use crate::transaction::Txn;
 use crate::value::{Args, PathSegment, TCResult, TCValue};
 
 pub mod actor;
+mod shard;
 
 #[async_trait]
 pub trait TCObject: Into<TCValue> + TryFrom<TCValue> {
