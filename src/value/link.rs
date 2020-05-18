@@ -119,6 +119,43 @@ impl LinkHost {
     }
 }
 
+impl FromStr for LinkHost {
+    type Err = error::TCError;
+
+    fn from_str(s: &str) -> TCResult<LinkHost> {
+        if !s.starts_with("http://") {
+            return Err(error::bad_request("Unable to parse Link protocol", s));
+        }
+
+        let protocol = LinkProtocol::HTTP;
+        let address: Vec<&str> = s.split(':').collect();
+        if address.is_empty() || address.len() > 2 {
+            return Err(error::bad_request("Unable to parse Link address", s));
+        }
+
+        let port = if address.len() == 2 {
+            Some(
+                address[1]
+                    .parse()
+                    .map_err(|e| error::bad_request("Unable to parse port number", e))?,
+            )
+        } else {
+            None
+        };
+
+        let address: Ipv4Addr = address[0]
+            .parse()
+            .map_err(|e| error::bad_request("Unable to parse IPv4 address", e))?;
+        let address = LinkAddress::IPv4(address);
+
+        Ok(LinkHost {
+            protocol,
+            address,
+            port,
+        })
+    }
+}
+
 impl<A: Into<LinkAddress>> From<(A, u16)> for LinkHost {
     fn from(addr: (A, u16)) -> LinkHost {
         LinkHost {
@@ -216,32 +253,13 @@ impl FromStr for Link {
             ));
         }
 
-        let protocol = LinkProtocol::HTTP;
         let s = &s[7..];
         let segments: Vec<&str> = s.split('/').collect();
         if segments.is_empty() {
             return Err(error::bad_request("Unable to parse Link", s));
         }
 
-        let address: Vec<&str> = segments[0].split(':').collect();
-        if address.is_empty() || address.len() > 2 {
-            return Err(error::bad_request("Unable to parse Link address", s));
-        }
-
-        let port = if address.len() == 2 {
-            Some(
-                address[1]
-                    .parse()
-                    .map_err(|e| error::bad_request("Unable to parse port number", e))?,
-            )
-        } else {
-            None
-        };
-
-        let address: Ipv4Addr = address[0]
-            .parse()
-            .map_err(|e| error::bad_request("Unable to parse IPv4 address", e))?;
-        let address = LinkAddress::IPv4(address);
+        let host: LinkHost = segments[0].parse()?;
 
         let path: TCPath = if segments.len() > 1 {
             segments[1..]
@@ -254,7 +272,7 @@ impl FromStr for Link {
         };
 
         Ok(Link {
-            host: Some((protocol, address, port).into()),
+            host: Some(host),
             path,
         })
     }

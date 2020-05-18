@@ -38,7 +38,7 @@ pub struct HostConfig {
     pub hosted: Vec<TCPath>,
 
     #[structopt(long = "peer")]
-    pub peers: Vec<Link>,
+    pub peers: Vec<LinkHost>,
 }
 
 #[derive(Clone)]
@@ -177,7 +177,7 @@ impl Host {
                         let link: Link = key.try_into()?;
                         Ok(State::Value(link.into()))
                     }
-                    "link" if path.len() > 2 => match path[3].as_str() {
+                    "link" if path.len() > 3 => match path[3].as_str() {
                         "host" => {
                             let address: Link = key.try_into()?;
                             let address: LinkHost = address.try_into()?;
