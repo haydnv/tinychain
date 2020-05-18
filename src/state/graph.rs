@@ -8,6 +8,7 @@ use crate::error;
 use crate::internal::block::Store;
 use crate::internal::chain::{ChainBlock, Mutation};
 use crate::internal::file::*;
+use crate::object::actor::Token;
 use crate::state::{Collection, Persistent, Transact};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCValue};
@@ -29,7 +30,12 @@ pub struct Graph {}
 impl Collection for Graph {
     type Key = TCValue;
     type Value = TCValue;
-    async fn get(self: &Arc<Self>, _txn: Arc<Txn>, _node_id: &TCValue) -> TCResult<Self::Value> {
+    async fn get(
+        self: &Arc<Self>,
+        _txn: Arc<Txn>,
+        _node_id: &TCValue,
+        _auth: &Option<Token>,
+    ) -> TCResult<Self::Value> {
         Err(error::not_implemented())
     }
 
@@ -38,6 +44,7 @@ impl Collection for Graph {
         _txn: Arc<Txn>,
         _node_id: TCValue,
         _node: TCValue,
+        _auth: &Option<Token>,
     ) -> TCResult<Arc<Self>> {
         Err(error::not_implemented())
     }

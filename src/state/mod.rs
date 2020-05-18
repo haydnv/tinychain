@@ -6,6 +6,7 @@ use async_trait::async_trait;
 
 use crate::error;
 use crate::internal::file::File;
+use crate::object::actor::Token;
 use crate::object::Object;
 use crate::transaction::{Transact, Txn};
 use crate::value::{Args, PathSegment, TCResult, TCValue};
@@ -22,13 +23,19 @@ pub trait Collection {
     type Key: TryFrom<TCValue>;
     type Value: TryFrom<TCValue>;
 
-    async fn get(self: &Arc<Self>, txn: Arc<Txn>, key: &Self::Key) -> TCResult<Self::Value>;
+    async fn get(
+        self: &Arc<Self>,
+        txn: Arc<Txn>,
+        key: &Self::Key,
+        auth: &Option<Token>,
+    ) -> TCResult<Self::Value>;
 
     async fn put(
         self: Arc<Self>,
         txn: Arc<Txn>,
         key: Self::Key,
         state: Self::Value,
+        auth: &Option<Token>,
     ) -> TCResult<Arc<Self>>;
 }
 
@@ -48,10 +55,10 @@ pub enum State {
 }
 
 impl State {
-    pub async fn get(&self, txn: Arc<Txn>, key: TCValue) -> TCResult<State> {
+    pub async fn get(&self, txn: Arc<Txn>, key: TCValue, auth: &Option<Token>) -> TCResult<State> {
         match self {
-            State::Graph(g) => Ok(g.clone().get(txn, &key).await?.into()),
-            State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?).await?.into()),
+            State::Graph(g) => Ok(g.clone().get(txn, &key, auth).await?.into()),
+            State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?, auth).await?.into()),
             _ => Err(error::bad_request("Cannot GET from", self)),
         }
     }
@@ -63,21 +70,33 @@ impl State {
         }
     }
 
-    pub async fn put(&self, txn: Arc<Txn>, key: TCValue, value: TCValue) -> TCResult<State> {
+    pub async fn put(
+        &self,
+        txn: Arc<Txn>,
+        key: TCValue,
+        value: TCValue,
+        auth: &Option<Token>,
+    ) -> TCResult<State> {
         match self {
-            State::Graph(g) => Ok(g.clone().put(txn, key, value).await?.into()),
+            State::Graph(g) => Ok(g.clone().put(txn, key, value, auth).await?.into()),
             State::Table(t) => Ok(t
                 .clone()
-                .put(txn, key.try_into()?, value.try_into()?)
+                .put(txn, key.try_into()?, value.try_into()?, auth)
                 .await?
                 .into()),
             _ => Err(error::bad_request("Cannot PUT to", self)),
         }
     }
 
-    pub async fn post(&self, txn: Arc<Txn>, method: &PathSegment, args: Args) -> TCResult<State> {
+    pub async fn post(
+        &self,
+        txn: Arc<Txn>,
+        method: &PathSegment,
+        args: Args,
+        auth: &Option<Token>,
+    ) -> TCResult<State> {
         match self {
-            State::Object(o) => o.post(txn, method, args).await,
+            State::Object(o) => o.post(txn, method, args, auth).await,
             other => Err(error::method_not_allowed(format!(
                 "{} does not support POST",
                 other

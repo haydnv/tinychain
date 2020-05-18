@@ -12,6 +12,7 @@ use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::File;
 use crate::internal::Directory;
+use crate::object::actor::Token;
 use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Txn;
 use crate::value::{Args, Link, TCPath, TCResult, TCValue};
@@ -91,7 +92,7 @@ impl Host {
             root: Map::new(),
         });
 
-        let txn = host.new_transaction().await?;
+        let txn = host.new_transaction(None).await?;
         let txn_id = &txn.id();
 
         for path in config.hosted {
@@ -133,8 +134,8 @@ impl Host {
         )
     }
 
-    pub async fn new_transaction(self: &Arc<Self>) -> TCResult<Arc<Txn>> {
-        Txn::new(self.clone(), self.workspace.clone()).await
+    pub async fn new_transaction(self: &Arc<Self>, auth: Option<Token>) -> TCResult<Arc<Txn>> {
+        Txn::new(self.clone(), self.workspace.clone(), auth).await
     }
 
     pub async fn get(
@@ -142,6 +143,7 @@ impl Host {
         txn: Arc<Txn>,
         link: &Link,
         key: TCValue,
+        auth: &Option<Token>,
     ) -> TCResult<State> {
         println!("GET {}", link);
         if let Some(host) = link.host() {
@@ -171,8 +173,8 @@ impl Host {
                 _ => Err(error::not_found(path)),
             }
         } else if let Some(dir) = self.root.get(&path[0].clone().into()) {
-            let state = dir.get(txn.clone(), &path.slice_from(1)).await?;
-            state.get(txn, key).await
+            let state = dir.get(txn.clone(), &path.slice_from(1), auth).await?;
+            state.get(txn, key, auth).await
         } else {
             Err(error::not_found(path))
         }
@@ -184,6 +186,7 @@ impl Host {
         dest: Link,
         key: TCValue,
         state: State,
+        auth: &Option<Token>,
     ) -> TCResult<State> {
         println!("PUT {}", dest);
         if let Some(host) = dest.host() {
@@ -200,7 +203,7 @@ impl Host {
             let key: TCPath = key.try_into()?;
             let mut path = path.slice_from(1).clone();
             path.extend(key.into_iter());
-            dir.put(txn, path, state).await?;
+            dir.put(txn, path, state, auth).await?;
             Ok(().into())
         } else {
             Err(error::not_found(path))
@@ -213,6 +216,7 @@ impl Host {
         _txn: Arc<Txn>,
         dest: &Link,
         _args: Args,
+        _auth: &Option<Token>,
     ) -> TCResult<State> {
         println!("POST {}", dest);
         if let Some(host) = dest.host() {

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::error;
+use crate::object::actor::Token;
 use crate::state::State;
 use crate::transaction::Txn;
 use crate::value::{Args, PathSegment, TCResult, TCValue};
@@ -22,6 +23,7 @@ pub trait TCObject: Into<TCValue> + TryFrom<TCValue> {
         _txn: Arc<Txn>,
         _method: &PathSegment,
         mut _args: Args,
+        _auth: &Option<Token>,
     ) -> TCResult<State> {
         Err(error::method_not_allowed(self.id()))
     }
@@ -39,9 +41,15 @@ impl Object {
         }
     }
 
-    pub async fn post(&self, txn: Arc<Txn>, method: &PathSegment, args: Args) -> TCResult<State> {
+    pub async fn post(
+        &self,
+        txn: Arc<Txn>,
+        method: &PathSegment,
+        args: Args,
+        auth: &Option<Token>,
+    ) -> TCResult<State> {
         match self {
-            Object::Actor(actor) => actor.post(txn, method, args).await,
+            Object::Actor(actor) => actor.post(txn, method, args, auth).await,
         }
     }
 }

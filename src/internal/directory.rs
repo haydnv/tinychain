@@ -12,6 +12,7 @@ use crate::error;
 use crate::internal::block::Store;
 use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
+use crate::object::actor::Token;
 use crate::state::*;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{Link, PathSegment, TCPath, TCResult, TCValue};
@@ -64,7 +65,12 @@ impl Collection for Directory {
     type Key = TCPath;
     type Value = State;
 
-    async fn get(self: &Arc<Self>, txn: Arc<Txn>, path: &Self::Key) -> TCResult<Self::Value> {
+    async fn get(
+        self: &Arc<Self>,
+        txn: Arc<Txn>,
+        path: &Self::Key,
+        auth: &Option<Token>,
+    ) -> TCResult<Self::Value> {
         println!("Directory::get {}", path);
         if path.is_empty() {
             return Err(error::bad_request(
@@ -92,7 +98,7 @@ impl Collection for Directory {
                 match entry.entry_type {
                     EntryType::Directory => {
                         let dir = Directory::from_store(txn_id, store).await;
-                        dir.get(txn, &path.slice_from(1)).await
+                        dir.get(txn, &path.slice_from(1), auth).await
                     }
                     EntryType::Graph => Ok(Graph::from_store(txn_id, store).await.into()),
                     EntryType::Table => Ok(Table::from_store(txn_id, store).await.into()),
@@ -113,6 +119,7 @@ impl Collection for Directory {
         txn: Arc<Txn>,
         path: Self::Key,
         state: Self::Value,
+        _auth: &Option<Token>,
     ) -> TCResult<Arc<Self>> {
         let path: PathSegment = path.try_into()?;
         let context = self.context.reserve(&txn.id(), path.clone().into()).await?;

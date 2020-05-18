@@ -13,7 +13,7 @@ use crate::object::TCObject;
 use crate::transaction::Txn;
 use crate::value::{Link, Op, TCPath, TCResult, TCValue};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Token {
     iss: Link,
     iat: u64,

@@ -12,6 +12,7 @@ use crate::error;
 use crate::internal::block::Store;
 use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
+use crate::object::actor::Token;
 use crate::state::schema::{Schema, SchemaHistory};
 use crate::state::{Collection, Persistent};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -79,7 +80,12 @@ impl Collection for Table {
     type Key = Vec<TCValue>;
     type Value = Vec<TCValue>;
 
-    async fn get(self: &Arc<Self>, txn: Arc<Txn>, row_id: &Self::Key) -> TCResult<Self::Value> {
+    async fn get(
+        self: &Arc<Self>,
+        txn: Arc<Txn>,
+        row_id: &Self::Key,
+        _auth: &Option<Token>,
+    ) -> TCResult<Self::Value> {
         let row = self
             .chain
             .lock()
@@ -100,6 +106,7 @@ impl Collection for Table {
         txn: Arc<Txn>,
         row_id: Vec<TCValue>,
         column_values: Vec<TCValue>,
+        _auth: &Option<Token>,
     ) -> TCResult<Arc<Self>> {
         let row_id = self.row_id(&txn, &row_id).await?;
         let schema = self.schema.at(txn.id()).await;

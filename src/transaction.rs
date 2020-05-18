@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::host::{Host, NetworkTime};
 use crate::internal::block::Store;
+use crate::object::actor::Token;
 use crate::state::State;
 use crate::value::*;
 
@@ -190,6 +191,7 @@ impl TxnState {
 }
 
 pub struct Txn {
+    auth: Option<Token>,
     id: TxnId,
     context: Arc<Store>,
     host: Arc<Host>,
@@ -198,21 +200,14 @@ pub struct Txn {
 }
 
 impl Txn {
-    pub async fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Txn>> {
-        Txn::with_state(host, root, TxnState::new()).await
-    }
-
-    async fn with_state(
-        host: Arc<Host>,
-        root: Arc<Store>,
-        txn_state: TxnState,
-    ) -> TCResult<Arc<Txn>> {
+    pub async fn new(host: Arc<Host>, root: Arc<Store>, auth: Option<Token>) -> TCResult<Arc<Txn>> {
         let id = TxnId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
         let context = root.reserve(&id, context.into()).await?;
-        let state = Mutex::new(txn_state);
+        let state = Mutex::new(TxnState::new());
 
         Ok(Arc::new(Txn {
+            auth,
             id,
             context,
             host,
@@ -229,6 +224,7 @@ impl Txn {
         let subcontext: Arc<Store> = self.context.reserve(&self.id, subcontext.into()).await?;
 
         Ok(Arc::new(Txn {
+            auth: self.auth.clone(),
             id: self.id.clone(),
             context: subcontext,
             host: self.host.clone(),
@@ -280,7 +276,7 @@ impl Txn {
             Op::Get { subject, key } => match subject {
                 Subject::Link(l) => extension.get(l, *key).await,
                 Subject::Ref(r) => match resolved.get(&r.value_id()) {
-                    Some(s) => s.get(extension, *key).await,
+                    Some(s) => s.get(extension, *key, &self.auth).await,
                     None => Err(error::bad_request(
                         "Required value not provided",
                         r.value_id(),
@@ -296,7 +292,9 @@ impl Txn {
                 Subject::Ref(r) => {
                     let subject = resolve_id(resolved, &r.value_id())?;
                     let value = resolve_val(resolved, *value)?;
-                    subject.put(extension, *key, value.try_into()?).await
+                    subject
+                        .put(extension, *key, value.try_into()?, &self.auth)
+                        .await
                 }
             },
             Op::Post {
@@ -314,12 +312,12 @@ impl Txn {
                     Some(r) => {
                         let subject = resolve_id(resolved, &r.value_id())?;
                         subject
-                            .post(extension, &action.try_into()?, deps.into())
+                            .post(extension, &action.try_into()?, deps.into(), &self.auth)
                             .await
                     }
                     None => {
                         self.host
-                            .post(extension, &action.clone().into(), deps.into())
+                            .post(extension, &action.clone().into(), deps.into(), &self.auth)
                             .await
                     }
                 }
@@ -333,17 +331,19 @@ impl Txn {
 
     pub async fn get(self: &Arc<Self>, link: Link, key: TCValue) -> TCResult<State> {
         println!("txn::get {} {}", link, key);
-        self.host.get(self.clone(), &link, key).await
+        self.host.get(self.clone(), &link, key, &self.auth).await
     }
 
     pub async fn put(self: &Arc<Self>, dest: Link, key: TCValue, state: State) -> TCResult<State> {
         println!("txn::put {} {}", dest, key);
-        self.host.put(self.clone(), dest, key, state).await
+        self.host
+            .put(self.clone(), dest, key, state, &self.auth)
+            .await
     }
 
     pub async fn post(self: &Arc<Self>, dest: &Link, args: Args) -> TCResult<State> {
         println!("txn::post {}", dest);
-        self.host.post(self.clone(), dest, args).await
+        self.host.post(self.clone(), dest, args, &self.auth).await
     }
 }
 

@@ -150,7 +150,7 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
         })
         .unwrap_or_else(HashMap::new);
 
-    let txn = match host.new_transaction().await {
+    let txn = match host.new_transaction(None).await {
         Ok(txn) => txn,
         Err(cause) => return transform_error(Err(cause)),
     };
