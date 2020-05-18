@@ -4,7 +4,6 @@ use std::fmt;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::future::{self, join_all, try_join_all, Future, FutureExt};
 use futures::lock::Mutex;
 use rand::Rng;
@@ -62,30 +61,6 @@ impl Into<PathSegment> for TxnId {
 impl Into<String> for TxnId {
     fn into(self) -> String {
         format!("{}-{}", self.timestamp, self.nonce)
-    }
-}
-
-impl Into<Bytes> for TxnId {
-    fn into(self) -> Bytes {
-        Bytes::from(
-            [
-                &self.timestamp.to_be_bytes()[..],
-                &self.nonce.to_be_bytes()[..],
-            ]
-            .concat(),
-        )
-    }
-}
-
-impl Into<Bytes> for &TxnId {
-    fn into(self) -> Bytes {
-        Bytes::from(
-            [
-                &self.timestamp.to_be_bytes()[..],
-                &self.nonce.to_be_bytes()[..],
-            ]
-            .concat(),
-        )
     }
 }
 
