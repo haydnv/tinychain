@@ -15,7 +15,7 @@ use crate::internal::Directory;
 use crate::object::actor::Token;
 use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Txn;
-use crate::value::link::{Link, TCPath};
+use crate::value::link::{Link, LinkHost, TCPath};
 use crate::value::{Args, TCResult, TCValue};
 
 const RESERVED: [&str; 1] = ["/sbin"];
@@ -158,13 +158,27 @@ impl Host {
             return Err(error::method_not_allowed(path));
         }
 
-        if path[0] == "sbin" && path.len() > 2 {
+        if path[0] == "sbin" {
             match path[1].as_str() {
-                "state" => match path[2].as_str() {
+                "state" if path.len() > 2 => match path[2].as_str() {
                     "table" => Ok(Table::create(txn, key.try_into()?).await?.into()),
                     _ => Err(error::not_found(path)),
                 },
-                "value" => match path[2].as_str() {
+                "value" if path.len() == 2 => Ok(State::Value(key)),
+                "value" if path.len() > 2 => match path[2].as_str() {
+                    "link" if path.len() == 3 => {
+                        let link: Link = key.try_into()?;
+                        Ok(State::Value(link.into()))
+                    }
+                    "link" if path.len() > 2 => match path[3].as_str() {
+                        "host" => {
+                            let address: Link = key.try_into()?;
+                            let address: LinkHost = address.try_into()?;
+                            let address: Link = address.into();
+                            Ok(State::Value(address.into()))
+                        }
+                        _ => Err(error::not_found(path)),
+                    },
                     "string" => {
                         let s: String = key.try_into()?;
                         Ok(State::Value(s.into()))

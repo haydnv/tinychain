@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
@@ -135,6 +135,25 @@ impl<A: Into<LinkAddress>> From<(LinkProtocol, A, Option<u16>)> for LinkHost {
             protocol: addr.0,
             address: addr.1.into(),
             port: addr.2,
+        }
+    }
+}
+
+impl TryFrom<Link> for LinkHost {
+    type Error = error::TCError;
+
+    fn try_from(link: Link) -> TCResult<LinkHost> {
+        if link.path == TCPath::default() {
+            if let Some(host) = link.host() {
+                Ok(host.clone())
+            } else {
+                Err(error::bad_request("This Link has no LinkHost", link))
+            }
+        } else {
+            Err(error::bad_request(
+                "Cannot convert to LinkHost without losing path information",
+                link,
+            ))
         }
     }
 }
