@@ -7,7 +7,8 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde::Deserialize;
 
 use crate::error;
-use crate::value::{Link, PathSegment, TCPath, TCRef, TCResult, TCValue, ValueId};
+use crate::value::link::*;
+use crate::value::*;
 
 #[derive(Clone, Hash, Eq, PartialEq, Deserialize)]
 pub enum Subject {

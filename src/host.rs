@@ -15,7 +15,8 @@ use crate::internal::Directory;
 use crate::object::actor::Token;
 use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Txn;
-use crate::value::{Args, Link, TCPath, TCResult, TCValue};
+use crate::value::link::{Link, TCPath};
+use crate::value::{Args, TCResult, TCValue};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 

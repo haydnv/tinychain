@@ -9,7 +9,8 @@ use futures::lock::Mutex;
 
 use crate::error;
 use crate::transaction::TxnId;
-use crate::value::{PathSegment, TCPath, TCResult};
+use crate::value::link::{PathSegment, TCPath};
+use crate::value::TCResult;
 
 pub type Checksum = [u8; 32];
 

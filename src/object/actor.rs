@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::object::TCObject;
 use crate::transaction::Txn;
-use crate::value::{Link, Op, TCPath, TCResult, TCValue};
+use crate::value::link::{Link, TCPath};
+use crate::value::{Op, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Token {

@@ -16,7 +16,8 @@ use crate::object::actor::Token;
 use crate::state::schema::{Schema, SchemaHistory};
 use crate::state::{Collection, Persistent};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{PathSegment, TCResult, TCValue, ValueId};
+use crate::value::link::PathSegment;
+use crate::value::{TCResult, TCValue, ValueId};
 
 type Row = (Vec<TCValue>, Vec<Option<TCValue>>);
 

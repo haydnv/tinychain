@@ -15,7 +15,8 @@ use crate::internal::file::*;
 use crate::object::actor::Token;
 use crate::state::*;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{Op, PathSegment, TCPath, TCResult, TCValue};
+use crate::value::link::{PathSegment, TCPath};
+use crate::value::{Op, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
 enum EntryType {

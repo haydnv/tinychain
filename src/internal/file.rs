@@ -9,7 +9,7 @@ use futures::Stream;
 use crate::internal::block::{Block, Store};
 use crate::internal::cache::Deque;
 use crate::transaction::TxnId;
-use crate::value::TCPath;
+use crate::value::link::TCPath;
 
 type Blocks = Box<dyn Stream<Item = Bytes> + Send + Unpin>;
 type FileData = (TCPath, Blocks);

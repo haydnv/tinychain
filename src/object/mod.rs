@@ -8,7 +8,8 @@ use crate::error;
 use crate::object::actor::Token;
 use crate::state::State;
 use crate::transaction::Txn;
-use crate::value::{Args, PathSegment, TCResult, TCValue};
+use crate::value::link::PathSegment;
+use crate::value::{Args, TCResult, TCValue};
 
 pub mod actor;
 

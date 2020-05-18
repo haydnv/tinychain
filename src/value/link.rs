@@ -155,6 +155,15 @@ impl Link {
     }
 }
 
+impl From<LinkHost> for Link {
+    fn from(host: LinkHost) -> Link {
+        Link {
+            host: Some(host),
+            path: TCPath::default(),
+        }
+    }
+}
+
 impl<A: Into<LinkAddress>> From<(A, u16)> for Link {
     fn from(addr: (A, u16)) -> Link {
         Link {

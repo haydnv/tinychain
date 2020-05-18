@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::str::FromStr;
 
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
@@ -14,8 +15,10 @@ pub struct Version {
     patch: u64,
 }
 
-impl Version {
-    pub fn parse(v: &str) -> TCResult<Version> {
+impl FromStr for Version {
+    type Err = error::TCError;
+
+    fn from_str(v: &str) -> TCResult<Version> {
         let fields: Vec<u64> = v
             .split('.')
             .map(|s| {
@@ -43,7 +46,7 @@ impl TryFrom<TCValue> for Version {
 
     fn try_from(value: TCValue) -> TCResult<Version> {
         let version: String = value.try_into()?;
-        Ok(Version::parse(&version)?)
+        version.parse()
     }
 }
 
@@ -52,7 +55,7 @@ impl<'de> Deserialize<'de> for Version {
     where
         D: Deserializer<'de>,
     {
-        Version::parse(Deserialize::deserialize(deserializer)?).map_err(Error::custom)
+        Version::from_str(Deserialize::deserialize(deserializer)?).map_err(Error::custom)
     }
 }
 

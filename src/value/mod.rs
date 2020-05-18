@@ -10,16 +10,13 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 use crate::error;
 use crate::state::State;
 
-mod link;
+pub mod link;
 mod op;
 mod reference;
 mod version;
 
 pub type Args = op::Args;
-pub type Link = link::Link;
-pub type PathSegment = link::PathSegment;
 pub type Op = op::Op;
-pub type TCPath = link::TCPath;
 pub type TCRef = reference::TCRef;
 pub type TCResult<T> = Result<T, error::TCError>;
 pub type Subject = op::Subject;
@@ -113,10 +110,10 @@ impl FromStr for ValueId {
     }
 }
 
-impl TryFrom<TCPath> for ValueId {
+impl TryFrom<link::TCPath> for ValueId {
     type Error = error::TCError;
 
-    fn try_from(path: TCPath) -> TCResult<ValueId> {
+    fn try_from(path: link::TCPath) -> TCResult<ValueId> {
         if path.len() == 1 {
             Ok(path[0].clone())
         } else {
@@ -144,7 +141,7 @@ pub enum TCValue {
     None,
     Bytes(Bytes),
     Int32(i32),
-    Link(Link),
+    Link(link::Link),
     Op(Op),
     Ref(TCRef),
     r#String(String),
@@ -169,14 +166,14 @@ impl From<Bytes> for TCValue {
     }
 }
 
-impl From<Link> for TCValue {
-    fn from(l: Link) -> TCValue {
+impl From<link::Link> for TCValue {
+    fn from(l: link::Link) -> TCValue {
         TCValue::Link(l)
     }
 }
 
-impl From<TCPath> for TCValue {
-    fn from(path: TCPath) -> TCValue {
+impl From<link::TCPath> for TCValue {
+    fn from(path: link::TCPath) -> TCValue {
         TCValue::Link(path.into())
     }
 }
@@ -237,10 +234,10 @@ impl TryFrom<TCValue> for Bytes {
     }
 }
 
-impl TryFrom<TCValue> for Link {
+impl TryFrom<TCValue> for link::Link {
     type Error = error::TCError;
 
-    fn try_from(v: TCValue) -> TCResult<Link> {
+    fn try_from(v: TCValue) -> TCResult<link::Link> {
         match v {
             TCValue::Link(l) => Ok(l),
             other => Err(error::bad_request("Expected Link but found", other)),
@@ -248,10 +245,10 @@ impl TryFrom<TCValue> for Link {
     }
 }
 
-impl TryFrom<TCValue> for TCPath {
+impl TryFrom<TCValue> for link::TCPath {
     type Error = error::TCError;
 
-    fn try_from(v: TCValue) -> TCResult<TCPath> {
+    fn try_from(v: TCValue) -> TCResult<link::TCPath> {
         match v {
             TCValue::Link(l) => {
                 if l.host().is_none() {
@@ -387,7 +384,7 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
             if key.starts_with('/') || key.starts_with("http://") {
                 let mut value = access.next_value::<Vec<TCValue>>()?;
 
-                let link: Link = key.parse().map_err(de::Error::custom)?;
+                let link: link::Link = key.parse().map_err(de::Error::custom)?;
 
                 if value.is_empty() {
                     Ok(link.into())
@@ -405,10 +402,10 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                 if key.contains('/') {
                     let key: Vec<&str> = key.split('/').collect();
                     let subject: TCRef = key[0][1..].parse().map_err(de::Error::custom)?;
-                    let method: TCPath = key[1..]
+                    let method: link::TCPath = key[1..]
                         .iter()
                         .map(|s| s.parse())
-                        .collect::<TCResult<Vec<PathSegment>>>()
+                        .collect::<TCResult<Vec<link::PathSegment>>>()
                         .map_err(de::Error::custom)?
                         .into();
                     let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;

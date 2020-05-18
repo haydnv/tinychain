@@ -13,7 +13,8 @@ use crate::internal::block::Store;
 use crate::internal::chain::{Chain, ChainBlock, Mutation};
 use crate::internal::file::*;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{TCPath, TCResult, TCValue, ValueId, Version};
+use crate::value::link::TCPath;
+use crate::value::{TCResult, TCValue, ValueId, Version};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Schema {
@@ -35,11 +36,23 @@ impl Schema {
         map
     }
 
+    pub fn from(
+        key: Vec<(ValueId, TCPath)>,
+        columns: Vec<(ValueId, TCPath)>,
+        version: Version,
+    ) -> Schema {
+        Schema {
+            key,
+            columns,
+            version,
+        }
+    }
+
     fn new() -> Schema {
         Schema {
             key: vec![],
             columns: vec![],
-            version: Version::parse("0.0.0").unwrap(),
+            version: "0.0.0".parse().unwrap(),
         }
     }
 }

@@ -15,7 +15,8 @@ use crate::error;
 use crate::internal::block::{Block, Checksum, Store};
 use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
 use crate::transaction::TxnId;
-use crate::value::{PathSegment, TCResult};
+use crate::value::link::PathSegment;
+use crate::value::TCResult;
 
 const BLOCK_SIZE: usize = 1_000_000;
 

@@ -13,7 +13,8 @@ use crate::object::actor::{Actor, Token};
 use crate::object::Object;
 use crate::state::State;
 use crate::transaction::Txn;
-use crate::value::{Args, TCPath, TCRef, TCResult, TCValue, ValueId};
+use crate::value::link::*;
+use crate::value::{Args, TCRef, TCResult, TCValue, ValueId};
 
 const UNSERIALIZABLE: &str =
     "The request completed successfully but some of the response could not be serialized";

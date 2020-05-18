@@ -14,6 +14,7 @@ use crate::host::{Host, NetworkTime};
 use crate::internal::block::Store;
 use crate::object::actor::Token;
 use crate::state::State;
+use crate::value::link::*;
 use crate::value::*;
 
 #[async_trait]

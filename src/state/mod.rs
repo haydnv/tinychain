@@ -9,14 +9,17 @@ use crate::internal::file::File;
 use crate::object::actor::Token;
 use crate::object::Object;
 use crate::transaction::{Transact, Txn};
-use crate::value::{Args, PathSegment, TCResult, TCValue};
+use crate::value::link::PathSegment;
+use crate::value::{Args, TCResult, TCValue};
 
+mod cluster;
 mod graph;
 mod schema;
 mod table;
 
 pub type Graph = graph::Graph;
 pub type Table = table::Table;
+pub type Schema = schema::Schema;
 
 #[async_trait]
 pub trait Collection {
