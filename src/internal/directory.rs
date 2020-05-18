@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::internal::block::Store;
-use crate::internal::chain::{Chain, ChainBlock, Mutation};
+use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
 use crate::object::actor::Token;
 use crate::state::*;
@@ -160,8 +160,6 @@ impl Collection for Directory {
 
 #[async_trait]
 impl File for Directory {
-    type Block = ChainBlock<DirEntry>;
-
     async fn copy_from(
         reader: &mut FileCopier,
         txn_id: &TxnId,

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::internal::block::Store;
-use crate::internal::chain::{Chain, ChainBlock, Mutation};
+use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::TCPath;
@@ -111,8 +111,6 @@ impl SchemaHistory {
 
 #[async_trait]
 impl File for SchemaHistory {
-    type Block = ChainBlock<Schema>;
-
     async fn copy_into(&self, txn_id: TxnId, copier: &mut FileCopier) {
         copier.write_file(
             "schema".parse().unwrap(),

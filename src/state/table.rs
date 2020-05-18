@@ -10,7 +10,7 @@ use futures::StreamExt;
 
 use crate::error;
 use crate::internal::block::Store;
-use crate::internal::chain::{Chain, ChainBlock, Mutation};
+use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
 use crate::object::actor::Token;
 use crate::state::schema::{Schema, SchemaHistory};
@@ -173,8 +173,6 @@ impl Collection for Table {
 
 #[async_trait]
 impl File for Table {
-    type Block = ChainBlock<Row>;
-
     async fn copy_into(&self, txn_id: TxnId, writer: &mut FileCopier) {
         println!("copying table into FileCopier");
         self.schema.copy_into(txn_id.clone(), writer).await;
