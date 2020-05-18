@@ -21,6 +21,12 @@ pub struct Token {
     scopes: Vec<TCPath>,
 }
 
+impl Token {
+    pub fn get_actor_link(_token: &str) -> TCResult<Link> {
+        Err(error::not_implemented())
+    }
+}
+
 pub struct Actor {
     host: Link,
     id: TCValue,

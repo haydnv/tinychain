@@ -8,9 +8,7 @@ use crate::state::State;
 use crate::transaction::Txn;
 use crate::value::{Args, PathSegment, TCResult, TCValue};
 
-mod actor;
-
-pub type Actor = actor::Actor;
+pub mod actor;
 
 #[async_trait]
 pub trait TCObject: Into<TCValue> + TryFrom<TCValue> {
@@ -30,13 +28,13 @@ pub trait TCObject: Into<TCValue> + TryFrom<TCValue> {
 
 #[derive(Clone)]
 pub enum Object {
-    Actor(Arc<Actor>),
+    Actor(Arc<actor::Actor>),
 }
 
 impl Object {
     pub fn class(&self) -> &'static str {
         match self {
-            Object::Actor(_) => Actor::class(),
+            Object::Actor(_) => actor::Actor::class(),
         }
     }
 
@@ -47,8 +45,8 @@ impl Object {
     }
 }
 
-impl From<Arc<Actor>> for Object {
-    fn from(a: Arc<Actor>) -> Object {
+impl From<Arc<actor::Actor>> for Object {
+    fn from(a: Arc<actor::Actor>) -> Object {
         Object::Actor(a)
     }
 }

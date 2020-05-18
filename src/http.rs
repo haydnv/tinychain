@@ -3,11 +3,13 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 
 use crate::error;
 use crate::host::Host;
+use crate::object::actor::Token;
 use crate::state::State;
 use crate::value::{Args, TCPath, TCRef, TCResult, TCValue, ValueId};
 
@@ -91,6 +93,7 @@ async fn route(
     path: &str,
     params: HashMap<String, String>,
     body: Vec<u8>,
+    _token: Option<Token>,
 ) -> TCResult<Vec<u8>> {
     let path: TCPath = path.parse()?;
 
@@ -148,9 +151,35 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
         })
         .unwrap_or_else(HashMap::new);
 
+    let token = if let Some(header) = req.headers().get("Authorization") {
+        match validate_token(header).await {
+            Ok(t) => t,
+            Err(cause) => return transform_error(Err(cause)),
+        }
+    } else {
+        None
+    };
+
     let body = &hyper::body::to_bytes(req.into_body()).await?;
 
-    transform_error(route(host, method, path, params, body.to_vec()).await)
+    transform_error(route(host, method, path, params, body.to_vec(), token).await)
+}
+
+async fn validate_token(auth_header: &HeaderValue) -> TCResult<Option<Token>> {
+    match auth_header.to_str() {
+        Ok(t) => {
+            if t.starts_with("Bearer: ") {
+                let _actor_link = Token::get_actor_link(&t[8..]);
+                Err(error::not_implemented())
+            } else {
+                Err(error::unauthorized(&format!(
+                    "Invalid authorization header: {}",
+                    t
+                )))
+            }
+        }
+        Err(cause) => Err(error::unauthorized(&cause.to_string())),
+    }
 }
 
 fn transform_error(result: TCResult<Vec<u8>>) -> Result<Response<Body>, hyper::Error> {
