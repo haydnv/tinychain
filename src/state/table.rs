@@ -38,7 +38,12 @@ pub struct Table {
 }
 
 impl Table {
-    async fn row_id(&self, txn: &Arc<Txn>, value: &[TCValue]) -> TCResult<Vec<TCValue>> {
+    async fn row_id(
+        &self,
+        txn: &Arc<Txn<'_>>,
+        value: &[TCValue],
+        auth: &Option<Token>,
+    ) -> TCResult<Vec<TCValue>> {
         let schema = self.schema.at(txn.id()).await;
         let key_size = schema.key.len();
 
@@ -47,7 +52,7 @@ impl Table {
             value
                 .iter()
                 .enumerate()
-                .map(|(i, v)| txn.get(schema.key[i].1.clone().into(), v.clone())),
+                .map(|(i, v)| txn.get(schema.key[i].1.clone().into(), v.clone(), auth)),
         )
         .await?
         {
@@ -56,8 +61,13 @@ impl Table {
         Ok(row_id)
     }
 
-    async fn new_row(&self, txn: &Arc<Txn>, row_id: &[TCValue]) -> TCResult<Row> {
-        let row_id = self.row_id(txn, row_id).await?;
+    async fn new_row(
+        &self,
+        txn: &Arc<Txn<'_>>,
+        row_id: &[TCValue],
+        auth: &Option<Token>,
+    ) -> TCResult<Row> {
+        let row_id = self.row_id(txn, row_id, auth).await?;
         let schema = self.schema.at(txn.id()).await;
 
         if row_id.len() != schema.key.len() {
@@ -82,9 +92,9 @@ impl Collection for Table {
 
     async fn get(
         self: &Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         row_id: &Self::Key,
-        _auth: &Option<Token>,
+        auth: &Option<Token>,
     ) -> TCResult<Self::Value> {
         let row = self
             .chain
@@ -92,10 +102,13 @@ impl Collection for Table {
             .await
             .stream_into(txn.id())
             .filter(|r: &Row| future::ready(&r.0 == row_id))
-            .fold(self.new_row(&txn, row_id).await?, |mut row, mutation| {
-                update_row(&mut row, mutation.1);
-                future::ready(row)
-            })
+            .fold(
+                self.new_row(&txn, row_id, auth).await?,
+                |mut row, mutation| {
+                    update_row(&mut row, mutation.1);
+                    future::ready(row)
+                },
+            )
             .await;
 
         Ok(row.1.into_iter().map(|v| v.into()).collect())
@@ -103,12 +116,12 @@ impl Collection for Table {
 
     async fn put(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         row_id: Vec<TCValue>,
         column_values: Vec<TCValue>,
-        _auth: &Option<Token>,
+        auth: &Option<Token>,
     ) -> TCResult<Arc<Self>> {
-        let row_id = self.row_id(&txn, &row_id).await?;
+        let row_id = self.row_id(&txn, &row_id, auth).await?;
         let schema = self.schema.at(txn.id()).await;
         let schema_map = schema.as_map();
 
@@ -119,7 +132,7 @@ impl Collection for Table {
 
             if let Some(ctr) = schema_map.get(&column) {
                 names.push(column);
-                values.push(txn.get(ctr.clone().into(), value));
+                values.push(txn.get(ctr.clone().into(), value, auth));
             } else {
                 return Err(error::bad_request(
                     "This table contains no such column",
@@ -232,7 +245,7 @@ impl File for Table {
 impl Persistent for Table {
     type Config = Schema;
 
-    async fn create(txn: Arc<Txn>, schema: Schema) -> TCResult<Arc<Table>> {
+    async fn create(txn: Arc<Txn<'_>>, schema: Schema) -> TCResult<Arc<Table>> {
         let table_chain = Mutex::new(
             Chain::new(
                 &txn.id(),

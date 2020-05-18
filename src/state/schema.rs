@@ -72,7 +72,7 @@ pub struct SchemaHistory {
 }
 
 impl SchemaHistory {
-    pub async fn new(txn: &Arc<Txn>, schema: Schema) -> TCResult<Arc<SchemaHistory>> {
+    pub async fn new(txn: &Arc<Txn<'_>>, schema: Schema) -> TCResult<Arc<SchemaHistory>> {
         let chain = Chain::new(
             &txn.id(),
             txn.context().reserve(&txn.id(), "schema".parse()?).await?,

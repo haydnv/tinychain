@@ -71,14 +71,14 @@ impl fmt::Display for TxnId {
 }
 
 #[derive(Default)]
-struct TxnState {
+struct TxnState<'a> {
     known: HashSet<TCRef>,
-    queue: VecDeque<(ValueId, Op)>,
+    queue: VecDeque<(ValueId, Op, &'a Option<Token>)>,
     resolved: HashMap<ValueId, State>,
 }
 
-impl TxnState {
-    fn new() -> TxnState {
+impl<'a> TxnState<'a> {
+    fn new() -> TxnState<'a> {
         TxnState {
             known: HashSet::new(),
             queue: VecDeque::new(),
@@ -86,15 +86,19 @@ impl TxnState {
         }
     }
 
-    fn extend<I: Iterator<Item = (ValueId, TCValue)>>(&mut self, values: I) -> TCResult<()> {
+    fn extend<I: Iterator<Item = (ValueId, TCValue)>>(
+        &mut self,
+        values: I,
+        auth: &'a Option<Token>,
+    ) -> TCResult<()> {
         for item in values {
-            self.push(item)?
+            self.push(item, auth)?
         }
 
         Ok(())
     }
 
-    fn push(&mut self, value: (ValueId, TCValue)) -> TCResult<()> {
+    fn push(&mut self, value: (ValueId, TCValue), auth: &'a Option<Token>) -> TCResult<()> {
         if self.resolved.contains_key(&value.0) {
             return Err(error::bad_request("Duplicate value provided for", value.0));
         }
@@ -112,9 +116,9 @@ impl TxnState {
                     ))
                 } else {
                     if required.is_empty() {
-                        self.queue.push_front((value.0, op));
+                        self.queue.push_front((value.0, op, auth));
                     } else {
-                        self.queue.push_back((value.0, op));
+                        self.queue.push_back((value.0, op, auth));
                     }
 
                     Ok(())
@@ -129,7 +133,7 @@ impl TxnState {
 
     async fn resolve(
         &mut self,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'a>>,
         capture: Vec<ValueId>,
     ) -> TCResult<HashMap<ValueId, State>> {
         let mut resolved: HashMap<ValueId, State> = self.resolved.drain().collect();
@@ -137,13 +141,13 @@ impl TxnState {
             let known: HashSet<TCRef> = resolved.keys().cloned().map(|id| id.into()).collect();
             let mut ready = vec![];
             let mut value_ids = vec![];
-            while let Some((value_id, op)) = self.queue.pop_front() {
+            while let Some((value_id, op, auth)) = self.queue.pop_front() {
                 if op.deps().is_subset(&known) {
-                    ready.push(txn.resolve_value(&resolved, value_id.clone(), op));
+                    ready.push(txn.resolve_value(&resolved, value_id.clone(), op, auth));
                     println!("ready: {}", value_id);
                     value_ids.push(value_id);
                 } else {
-                    self.queue.push_front((value_id, op));
+                    self.queue.push_front((value_id, op, auth));
                     break;
                 }
             }
@@ -165,24 +169,22 @@ impl TxnState {
     }
 }
 
-pub struct Txn {
-    auth: Option<Token>,
+pub struct Txn<'a> {
     id: TxnId,
     context: Arc<Store>,
     host: Arc<Host>,
     mutated: Arc<RwLock<Vec<Arc<dyn Transact>>>>,
-    state: Mutex<TxnState>,
+    state: Mutex<TxnState<'a>>,
 }
 
-impl Txn {
-    pub async fn new(host: Arc<Host>, root: Arc<Store>, auth: Option<Token>) -> TCResult<Arc<Txn>> {
+impl<'a> Txn<'a> {
+    pub async fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Txn<'a>>> {
         let id = TxnId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
         let context = root.reserve(&id, context.into()).await?;
         let state = Mutex::new(TxnState::new());
 
         Ok(Arc::new(Txn {
-            auth,
             id,
             context,
             host,
@@ -195,11 +197,10 @@ impl Txn {
         self.context.clone()
     }
 
-    async fn subcontext(self: &Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn>> {
+    async fn subcontext(self: &Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn<'a>>> {
         let subcontext: Arc<Store> = self.context.reserve(&self.id, subcontext.into()).await?;
 
         Ok(Arc::new(Txn {
-            auth: self.auth.clone(),
             id: self.id.clone(),
             context: subcontext,
             host: self.host.clone(),
@@ -212,15 +213,19 @@ impl Txn {
         self.id.clone()
     }
 
-    pub async fn extend<I: Iterator<Item = (ValueId, TCValue)>>(&self, iter: I) -> TCResult<()> {
-        self.state.lock().await.extend(iter)
+    pub async fn extend<I: Iterator<Item = (ValueId, TCValue)>>(
+        &self,
+        iter: I,
+        auth: &'a Option<Token>,
+    ) -> TCResult<()> {
+        self.state.lock().await.extend(iter, auth)
     }
 
-    pub async fn push(&self, item: (ValueId, TCValue)) -> TCResult<()> {
-        self.state.lock().await.push(item)
+    pub async fn push(&self, item: (ValueId, TCValue), auth: &'a Option<Token>) -> TCResult<()> {
+        self.state.lock().await.push(item, auth)
     }
 
-    pub fn commit(&self) -> impl Future<Output = ()> + '_ {
+    pub fn commit(&'a self) -> impl Future<Output = ()> + 'a {
         println!("commit!");
         join_all(self.mutated.write().unwrap().drain(..).map(|s| async move {
             s.commit(&self.id).await;
@@ -244,14 +249,15 @@ impl Txn {
         resolved: &HashMap<ValueId, State>,
         value_id: ValueId,
         op: Op,
+        auth: &Option<Token>,
     ) -> TCResult<State> {
         let extension = self.subcontext(value_id).await?;
 
         match op {
             Op::Get { subject, key } => match subject {
-                Subject::Link(l) => extension.get(l, *key).await,
+                Subject::Link(l) => extension.get(l, *key, auth).await,
                 Subject::Ref(r) => match resolved.get(&r.value_id()) {
-                    Some(s) => s.get(extension, *key, &self.auth).await,
+                    Some(s) => s.get(extension, *key, auth).await,
                     None => Err(error::bad_request(
                         "Required value not provided",
                         r.value_id(),
@@ -263,13 +269,15 @@ impl Txn {
                 key,
                 value,
             } => match subject {
-                Subject::Link(l) => extension.put(l, *key, resolve_val(resolved, *value)?).await,
+                Subject::Link(l) => {
+                    extension
+                        .put(l, *key, resolve_val(resolved, *value)?, auth)
+                        .await
+                }
                 Subject::Ref(r) => {
                     let subject = resolve_id(resolved, &r.value_id())?;
                     let value = resolve_val(resolved, *value)?;
-                    subject
-                        .put(extension, *key, value.try_into()?, &self.auth)
-                        .await
+                    subject.put(extension, *key, value.try_into()?, auth).await
                 }
             },
             Op::Post {
@@ -287,12 +295,12 @@ impl Txn {
                     Some(r) => {
                         let subject = resolve_id(resolved, &r.value_id())?;
                         subject
-                            .post(extension, &action.try_into()?, deps.into(), &self.auth)
+                            .post(extension, &action.try_into()?, deps.into(), auth)
                             .await
                     }
                     None => {
                         self.host
-                            .post(extension, &action.clone().into(), deps.into(), &self.auth)
+                            .post(extension, &action.clone().into(), deps.into(), auth)
                             .await
                     }
                 }
@@ -304,21 +312,35 @@ impl Txn {
         NetworkTime::from_nanos(self.id.timestamp)
     }
 
-    pub async fn get(self: &Arc<Self>, link: Link, key: TCValue) -> TCResult<State> {
+    pub async fn get(
+        self: &Arc<Self>,
+        link: Link,
+        key: TCValue,
+        auth: &Option<Token>,
+    ) -> TCResult<State> {
         println!("txn::get {} {}", link, key);
-        self.host.get(self.clone(), &link, key, &self.auth).await
+        self.host.get(self.clone(), &link, key, auth).await
     }
 
-    pub async fn put(self: &Arc<Self>, dest: Link, key: TCValue, state: State) -> TCResult<State> {
+    pub async fn put(
+        self: &Arc<Self>,
+        dest: Link,
+        key: TCValue,
+        state: State,
+        auth: &Option<Token>,
+    ) -> TCResult<State> {
         println!("txn::put {} {}", dest, key);
-        self.host
-            .put(self.clone(), dest, key, state, &self.auth)
-            .await
+        self.host.put(self.clone(), dest, key, state, auth).await
     }
 
-    pub async fn post(self: &Arc<Self>, dest: &Link, args: Args) -> TCResult<State> {
+    pub async fn post(
+        self: &Arc<Self>,
+        dest: &Link,
+        args: Args,
+        auth: &Option<Token>,
+    ) -> TCResult<State> {
         println!("txn::post {}", dest);
-        self.host.post(self.clone(), dest, args, &self.auth).await
+        self.host.post(self.clone(), dest, args, auth).await
     }
 }
 

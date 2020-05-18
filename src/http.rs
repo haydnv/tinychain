@@ -46,15 +46,25 @@ pub async fn listen(
     Ok(())
 }
 
-async fn get(txn: Arc<Txn>, path: TCPath, key: TCValue) -> TCResult<State> {
-    txn.get(path.into(), key).await
+async fn get<'a>(
+    txn: &'a Arc<Txn<'a>>,
+    path: TCPath,
+    key: TCValue,
+    auth: &Option<Token>,
+) -> TCResult<State> {
+    txn.get(path.into(), key, auth).await
 }
 
-async fn post(txn: Arc<Txn>, path: &TCPath, mut args: Args) -> TCResult<State> {
+async fn post<'a>(
+    txn: &'a Arc<Txn<'a>>,
+    path: &TCPath,
+    mut args: Args,
+    auth: &'a Option<Token>,
+) -> TCResult<State> {
     if path == "/sbin/transact" {
         let capture: Vec<ValueId> = args.take_or("capture", vec![])?;
         let mut values: Vec<(ValueId, TCValue)> = args.take_or("values", vec![])?;
-        txn.extend(values.drain(..)).await?;
+        txn.extend(values.drain(..), auth).await?;
 
         let mut results: Vec<TCValue> = Vec::with_capacity(capture.len());
         match txn.resolve(capture.into_iter().collect()).await {
@@ -82,17 +92,17 @@ async fn post(txn: Arc<Txn>, path: &TCPath, mut args: Args) -> TCResult<State> {
 
         Ok(State::Value(results.into()))
     } else {
-        txn.post(&path.clone().into(), args).await
+        txn.post(&path.clone().into(), args, &auth).await
     }
 }
 
-async fn route(
-    txn: Arc<Txn>,
+async fn route<'a>(
+    txn: &'a Arc<Txn<'a>>,
     method: Method,
     path: &str,
     params: HashMap<String, String>,
     body: Vec<u8>,
-    _token: Option<Token>,
+    auth: &'a Option<Token>,
 ) -> TCResult<Vec<u8>> {
     let path: TCPath = path.parse()?;
 
@@ -105,7 +115,7 @@ async fn route(
                 TCValue::None
             };
 
-            match get(txn, path, key).await? {
+            match get(txn, path, key, &auth).await? {
                 State::Value(val) => Ok(serde_json::to_string_pretty(&val)?.as_bytes().to_vec()),
                 state => Err(error::bad_request(
                     "Attempt to GET unserializable state {}",
@@ -125,7 +135,7 @@ async fn route(
                 }
             };
 
-            match post(txn, &path, args.into()).await? {
+            match post(txn, &path, args.into(), auth).await? {
                 State::Value(v) => serde_json::to_string_pretty(&v)
                     .and_then(|s| Ok(s.into_bytes()))
                     .or_else(|e| Err(error::bad_request(UNSERIALIZABLE, e))),
@@ -150,7 +160,7 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
         })
         .unwrap_or_else(HashMap::new);
 
-    let txn = match host.new_transaction(None).await {
+    let txn = match host.new_transaction().await {
         Ok(txn) => txn,
         Err(cause) => return transform_error(Err(cause)),
     };
@@ -166,17 +176,18 @@ async fn handle(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body>, h
 
     let body = &hyper::body::to_bytes(req.into_body()).await?;
 
-    transform_error(route(txn, method, path, params, body.to_vec(), token).await)
+    transform_error(route(&txn, method, path, params, body.to_vec(), &token).await)
 }
 
-async fn validate_token(txn: Arc<Txn>, auth_header: &HeaderValue) -> TCResult<Token> {
+async fn validate_token(txn: Arc<Txn<'_>>, auth_header: &HeaderValue) -> TCResult<Token> {
     match auth_header.to_str() {
         Ok(t) => {
             if t.starts_with("Bearer: ") {
                 let token = &t[8..];
                 let get_actor = Token::get_actor(token)?;
                 let value_id: ValueId = "__actor_id".parse().unwrap();
-                txn.push((value_id.clone(), get_actor.into())).await?;
+                txn.push((value_id.clone(), get_actor.into()), &None)
+                    .await?;
                 txn.resolve(vec![value_id.clone()]).await.map(|actor| {
                     let actor: Object = actor.get(&value_id).unwrap().try_into()?;
                     let actor: Arc<Actor> = actor.try_into()?;

@@ -32,7 +32,7 @@ impl Collection for Graph {
     type Value = TCValue;
     async fn get(
         self: &Arc<Self>,
-        _txn: Arc<Txn>,
+        _txn: Arc<Txn<'_>>,
         _node_id: &TCValue,
         _auth: &Option<Token>,
     ) -> TCResult<Self::Value> {
@@ -41,7 +41,7 @@ impl Collection for Graph {
 
     async fn put(
         self: Arc<Self>,
-        _txn: Arc<Txn>,
+        _txn: Arc<Txn<'_>>,
         _node_id: TCValue,
         _node: TCValue,
         _auth: &Option<Token>,
@@ -78,7 +78,7 @@ impl File for Graph {
 impl Persistent for Graph {
     type Config = GraphConfig;
 
-    async fn create(_txn: Arc<Txn>, _config: GraphConfig) -> TCResult<Arc<Graph>> {
+    async fn create(_txn: Arc<Txn<'_>>, _config: GraphConfig) -> TCResult<Arc<Graph>> {
         Err(error::not_implemented())
     }
 }

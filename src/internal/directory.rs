@@ -67,7 +67,7 @@ impl Collection for Directory {
 
     async fn get(
         self: &Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         path: &Self::Key,
         auth: &Option<Token>,
     ) -> TCResult<Self::Value> {
@@ -116,7 +116,7 @@ impl Collection for Directory {
 
     async fn put(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         path: Self::Key,
         state: Self::Value,
         _auth: &Option<Token>,
@@ -180,7 +180,7 @@ impl File for Directory {
 impl Persistent for Directory {
     type Config = TCValue; // TODO: permissions
 
-    async fn create(txn: Arc<Txn>, _: TCValue) -> TCResult<Arc<Directory>> {
+    async fn create(txn: Arc<Txn<'_>>, _: TCValue) -> TCResult<Arc<Directory>> {
         Directory::new(&txn.id(), txn.context()).await
     }
 }

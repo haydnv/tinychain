@@ -92,7 +92,7 @@ impl Host {
             root: Map::new(),
         });
 
-        let txn = host.new_transaction(None).await?;
+        let txn = host.new_transaction().await?;
         let txn_id = &txn.id();
 
         for path in config.hosted {
@@ -134,13 +134,13 @@ impl Host {
         )
     }
 
-    pub async fn new_transaction(self: &Arc<Self>, auth: Option<Token>) -> TCResult<Arc<Txn>> {
-        Txn::new(self.clone(), self.workspace.clone(), auth).await
+    pub async fn new_transaction<'a>(self: &Arc<Self>) -> TCResult<Arc<Txn<'a>>> {
+        Txn::new(self.clone(), self.workspace.clone()).await
     }
 
     pub async fn get(
         self: &Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         link: &Link,
         key: TCValue,
         auth: &Option<Token>,
@@ -182,7 +182,7 @@ impl Host {
 
     pub async fn put(
         self: &Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         dest: Link,
         key: TCValue,
         state: State,
@@ -213,7 +213,7 @@ impl Host {
     // TODO: remove this method
     pub async fn post(
         self: &Arc<Self>,
-        _txn: Arc<Txn>,
+        _txn: Arc<Txn<'_>>,
         dest: &Link,
         _args: Args,
         _auth: &Option<Token>,

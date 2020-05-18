@@ -25,14 +25,14 @@ pub trait Collection {
 
     async fn get(
         self: &Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         key: &Self::Key,
         auth: &Option<Token>,
     ) -> TCResult<Self::Value>;
 
     async fn put(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         key: Self::Key,
         state: Self::Value,
         auth: &Option<Token>,
@@ -43,7 +43,7 @@ pub trait Collection {
 pub trait Persistent: Collection + File {
     type Config: TryFrom<TCValue>;
 
-    async fn create(txn: Arc<Txn>, config: Self::Config) -> TCResult<Arc<Self>>;
+    async fn create(txn: Arc<Txn<'_>>, config: Self::Config) -> TCResult<Arc<Self>>;
 }
 
 #[derive(Clone)]
@@ -55,7 +55,12 @@ pub enum State {
 }
 
 impl State {
-    pub async fn get(&self, txn: Arc<Txn>, key: TCValue, auth: &Option<Token>) -> TCResult<State> {
+    pub async fn get(
+        &self,
+        txn: Arc<Txn<'_>>,
+        key: TCValue,
+        auth: &Option<Token>,
+    ) -> TCResult<State> {
         match self {
             State::Graph(g) => Ok(g.clone().get(txn, &key, auth).await?.into()),
             State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?, auth).await?.into()),
@@ -72,7 +77,7 @@ impl State {
 
     pub async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         key: TCValue,
         value: TCValue,
         auth: &Option<Token>,
@@ -90,7 +95,7 @@ impl State {
 
     pub async fn post(
         &self,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         method: &PathSegment,
         args: Args,
         auth: &Option<Token>,

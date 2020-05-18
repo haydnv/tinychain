@@ -20,7 +20,7 @@ pub trait TCObject: Into<TCValue> + TryFrom<TCValue> {
 
     async fn post(
         &self,
-        _txn: Arc<Txn>,
+        _txn: Arc<Txn<'_>>,
         _method: &PathSegment,
         mut _args: Args,
         _auth: &Option<Token>,
@@ -43,7 +43,7 @@ impl Object {
 
     pub async fn post(
         &self,
-        txn: Arc<Txn>,
+        txn: Arc<Txn<'_>>,
         method: &PathSegment,
         args: Args,
         auth: &Option<Token>,
