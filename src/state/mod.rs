@@ -115,6 +115,17 @@ impl TryFrom<State> for Vec<TCValue> {
     }
 }
 
+impl TryFrom<&State> for Object {
+    type Error = error::TCError;
+
+    fn try_from(state: &State) -> TCResult<Object> {
+        match state {
+            State::Object(object) => Ok(object.clone()),
+            other => Err(error::bad_request("Expected an Object but found", other)),
+        }
+    }
+}
+
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

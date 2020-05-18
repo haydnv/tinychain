@@ -1,4 +1,5 @@
 use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::object::TCObject;
 use crate::transaction::Txn;
-use crate::value::{Link, TCPath, TCResult, TCValue};
+use crate::value::{Link, Op, TCPath, TCResult, TCValue};
 
 #[derive(Deserialize, Serialize)]
 pub struct Token {
@@ -22,8 +23,23 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn get_actor_link(_token: &str) -> TCResult<Link> {
-        Err(error::not_implemented())
+    pub fn get_actor(token: &str) -> TCResult<Op> {
+        let token: Vec<&str> = token.split('.').collect();
+        if token.len() != 3 {
+            return Err(error::unauthorized(
+                "Expected bearer token in the format '<header>.<claims>.<data>'",
+            ));
+        }
+
+        let token = base64::decode(token[1])
+            .map_err(|e| error::unauthorized(&format!("Invalid bearer token: {}", e)))?;
+        let token: Token = serde_json::from_slice(&token)
+            .map_err(|e| error::unauthorized(&format!("Invalid bearer token: {}", e)))?;
+
+        Ok(Op::Get {
+            subject: token.iss.into(),
+            key: Box::new(token.actor_id),
+        })
     }
 }
 
@@ -32,17 +48,6 @@ pub struct Actor {
     id: TCValue,
     public_key: PublicKey,
     private_key: Option<SecretKey>,
-}
-
-#[async_trait]
-impl TCObject for Actor {
-    fn class() -> &'static str {
-        "Actor"
-    }
-
-    fn id(&self) -> TCValue {
-        self.id.clone()
-    }
 }
 
 impl Actor {
@@ -126,6 +131,12 @@ impl Actor {
     }
 }
 
+impl fmt::Display for Actor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Actor({}, {})", self.host, self.id)
+    }
+}
+
 impl From<Actor> for TCValue {
     fn from(actor: Actor) -> TCValue {
         let private_key: TCValue = if let Some(private_key) = actor.private_key {
@@ -168,6 +179,17 @@ impl TryFrom<TCValue> for Actor {
             let value: TCValue = value.into();
             Err(error::bad_request("Expected Actor, found", value))
         }
+    }
+}
+
+#[async_trait]
+impl TCObject for Actor {
+    fn class() -> &'static str {
+        "Actor"
+    }
+
+    fn id(&self) -> TCValue {
+        self.id.clone()
     }
 }
 

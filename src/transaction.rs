@@ -154,7 +154,7 @@ impl TxnState {
     async fn resolve(
         &mut self,
         txn: Arc<Txn>,
-        capture: HashSet<ValueId>,
+        capture: Vec<ValueId>,
     ) -> TCResult<HashMap<ValueId, State>> {
         let mut resolved: HashMap<ValueId, State> = self.resolved.drain().collect();
         while !self.queue.is_empty() {
@@ -245,6 +245,10 @@ impl Txn {
         self.state.lock().await.extend(iter)
     }
 
+    pub async fn push(&self, item: (ValueId, TCValue)) -> TCResult<()> {
+        self.state.lock().await.push(item)
+    }
+
     pub fn commit(&self) -> impl Future<Output = ()> + '_ {
         println!("commit!");
         join_all(self.mutated.write().unwrap().drain(..).map(|s| async move {
@@ -259,7 +263,7 @@ impl Txn {
 
     pub async fn resolve(
         self: &Arc<Self>,
-        capture: HashSet<ValueId>,
+        capture: Vec<ValueId>,
     ) -> TCResult<HashMap<ValueId, State>> {
         self.state.lock().await.resolve(self.clone(), capture).await
     }

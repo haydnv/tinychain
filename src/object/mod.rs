@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -45,8 +46,26 @@ impl Object {
     }
 }
 
+impl fmt::Display for Object {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Object::Actor(actor) => write!(f, "{}", actor),
+        }
+    }
+}
+
 impl From<Arc<actor::Actor>> for Object {
     fn from(a: Arc<actor::Actor>) -> Object {
         Object::Actor(a)
+    }
+}
+
+impl TryFrom<Object> for Arc<actor::Actor> {
+    type Error = error::TCError;
+
+    fn try_from(object: Object) -> TCResult<Arc<actor::Actor>> {
+        match object {
+            Object::Actor(actor) => Ok(actor),
+        }
     }
 }
