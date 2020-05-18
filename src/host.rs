@@ -140,7 +140,7 @@ impl Host {
 
     pub async fn get(
         self: &Arc<Self>,
-        txn: Arc<Txn<'_>>,
+        txn: &Arc<Txn<'_>>,
         link: &Link,
         key: TCValue,
         auth: &Option<Token>,
@@ -160,7 +160,7 @@ impl Host {
         if path[0] == "sbin" && path.len() > 2 {
             match path[1].as_str() {
                 "state" => match path[2].as_str() {
-                    "table" => Ok(Table::create(txn.clone(), key.try_into()?).await?.into()),
+                    "table" => Ok(Table::create(txn, key.try_into()?).await?.into()),
                     _ => Err(error::not_found(path)),
                 },
                 "value" => match path[2].as_str() {
@@ -173,7 +173,7 @@ impl Host {
                 _ => Err(error::not_found(path)),
             }
         } else if let Some(dir) = self.root.get(&path[0].clone().into()) {
-            let state = dir.get(txn.clone(), &path.slice_from(1), auth).await?;
+            let state = dir.get(txn, &path.slice_from(1), auth).await?;
             state.get(txn, key, auth).await
         } else {
             Err(error::not_found(path))
@@ -182,7 +182,7 @@ impl Host {
 
     pub async fn put(
         self: &Arc<Self>,
-        txn: Arc<Txn<'_>>,
+        txn: &Arc<Txn<'_>>,
         dest: Link,
         key: TCValue,
         state: State,
@@ -213,7 +213,7 @@ impl Host {
     // TODO: remove this method
     pub async fn post(
         self: &Arc<Self>,
-        _txn: Arc<Txn<'_>>,
+        _txn: &Arc<Txn<'_>>,
         dest: &Link,
         _args: Args,
         _auth: &Option<Token>,

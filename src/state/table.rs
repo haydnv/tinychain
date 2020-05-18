@@ -92,7 +92,7 @@ impl Collection for Table {
 
     async fn get(
         self: &Arc<Self>,
-        txn: Arc<Txn<'_>>,
+        txn: &Arc<Txn<'_>>,
         row_id: &Self::Key,
         auth: &Option<Token>,
     ) -> TCResult<Self::Value> {
@@ -116,7 +116,7 @@ impl Collection for Table {
 
     async fn put(
         self: Arc<Self>,
-        txn: Arc<Txn<'_>>,
+        txn: &Arc<Txn<'_>>,
         row_id: Vec<TCValue>,
         column_values: Vec<TCValue>,
         auth: &Option<Token>,
@@ -245,7 +245,7 @@ impl File for Table {
 impl Persistent for Table {
     type Config = Schema;
 
-    async fn create(txn: Arc<Txn<'_>>, schema: Schema) -> TCResult<Arc<Table>> {
+    async fn create(txn: &Arc<Txn<'_>>, schema: Schema) -> TCResult<Arc<Table>> {
         let table_chain = Mutex::new(
             Chain::new(
                 &txn.id(),

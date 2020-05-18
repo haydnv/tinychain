@@ -25,14 +25,14 @@ pub trait Collection {
 
     async fn get(
         self: &Arc<Self>,
-        txn: Arc<Txn<'_>>,
+        txn: &Arc<Txn<'_>>,
         key: &Self::Key,
         auth: &Option<Token>,
     ) -> TCResult<Self::Value>;
 
     async fn put(
         self: Arc<Self>,
-        txn: Arc<Txn<'_>>,
+        txn: &Arc<Txn<'_>>,
         key: Self::Key,
         state: Self::Value,
         auth: &Option<Token>,
@@ -43,7 +43,7 @@ pub trait Collection {
 pub trait Persistent: Collection + File {
     type Config: TryFrom<TCValue>;
 
-    async fn create(txn: Arc<Txn<'_>>, config: Self::Config) -> TCResult<Arc<Self>>;
+    async fn create(txn: &Arc<Txn<'_>>, config: Self::Config) -> TCResult<Arc<Self>>;
 }
 
 #[derive(Clone)]
@@ -57,7 +57,7 @@ pub enum State {
 impl State {
     pub async fn get(
         &self,
-        txn: Arc<Txn<'_>>,
+        txn: &Arc<Txn<'_>>,
         key: TCValue,
         auth: &Option<Token>,
     ) -> TCResult<State> {
@@ -77,7 +77,7 @@ impl State {
 
     pub async fn put(
         &self,
-        txn: Arc<Txn<'_>>,
+        txn: &Arc<Txn<'_>>,
         key: TCValue,
         value: TCValue,
         auth: &Option<Token>,

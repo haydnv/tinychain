@@ -257,7 +257,7 @@ impl<'a> Txn<'a> {
             Op::Get { subject, key } => match subject {
                 Subject::Link(l) => extension.get(l, *key, auth).await,
                 Subject::Ref(r) => match resolved.get(&r.value_id()) {
-                    Some(s) => s.get(extension, *key, auth).await,
+                    Some(s) => s.get(&extension, *key, auth).await,
                     None => Err(error::bad_request(
                         "Required value not provided",
                         r.value_id(),
@@ -277,7 +277,7 @@ impl<'a> Txn<'a> {
                 Subject::Ref(r) => {
                     let subject = resolve_id(resolved, &r.value_id())?;
                     let value = resolve_val(resolved, *value)?;
-                    subject.put(extension, *key, value.try_into()?, auth).await
+                    subject.put(&extension, *key, value.try_into()?, auth).await
                 }
             },
             Op::Post {
@@ -300,7 +300,7 @@ impl<'a> Txn<'a> {
                     }
                     None => {
                         self.host
-                            .post(extension, &action.clone().into(), deps.into(), auth)
+                            .post(&extension, &action.clone().into(), deps.into(), auth)
                             .await
                     }
                 }
@@ -319,7 +319,7 @@ impl<'a> Txn<'a> {
         auth: &Option<Token>,
     ) -> TCResult<State> {
         println!("txn::get {} {}", link, key);
-        self.host.get(self.clone(), &link, key, auth).await
+        self.host.get(self, &link, key, auth).await
     }
 
     pub async fn put(
@@ -330,7 +330,7 @@ impl<'a> Txn<'a> {
         auth: &Option<Token>,
     ) -> TCResult<State> {
         println!("txn::put {} {}", dest, key);
-        self.host.put(self.clone(), dest, key, state, auth).await
+        self.host.put(self, dest, key, state, auth).await
     }
 
     pub async fn post(
@@ -340,7 +340,7 @@ impl<'a> Txn<'a> {
         auth: &Option<Token>,
     ) -> TCResult<State> {
         println!("txn::post {}", dest);
-        self.host.post(self.clone(), dest, args, auth).await
+        self.host.post(self, dest, args, auth).await
     }
 }
 
