@@ -12,7 +12,7 @@ use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::File;
 use crate::internal::Directory;
-use crate::object::actor::Token;
+use crate::object::actor::{Actor, Token};
 use crate::state::{Collection, Persistent, State, Table};
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, TCPath};
@@ -160,6 +160,13 @@ impl Host {
 
         if path[0] == "sbin" {
             match path[1].as_str() {
+                "object" if path.len() > 2 => match path[2].as_str() {
+                    "actor" => {
+                        let actor: Actor = key.try_into()?;
+                        Ok(actor.into())
+                    }
+                    _ => Err(error::not_found(path)),
+                },
                 "state" if path.len() > 2 => match path[2].as_str() {
                     "table" => Ok(Table::create(txn, key.try_into()?).await?.into()),
                     _ => Err(error::not_found(path)),
