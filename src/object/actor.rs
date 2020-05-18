@@ -23,6 +23,13 @@ pub struct Token {
 }
 
 impl Token {
+    pub fn actor_id(&self) -> Op {
+        Op::Get {
+            subject: self.iss.clone().into(),
+            key: Box::new(self.actor_id.clone()),
+        }
+    }
+
     pub fn get_actor(token: &str) -> TCResult<Op> {
         let token: Vec<&str> = token.split('.').collect();
         if token.len() != 3 {

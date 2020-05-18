@@ -15,7 +15,7 @@ use crate::internal::file::*;
 use crate::object::actor::Token;
 use crate::state::*;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{Link, PathSegment, TCPath, TCResult, TCValue};
+use crate::value::{Op, PathSegment, TCPath, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
 enum EntryType {
@@ -28,11 +28,11 @@ enum EntryType {
 pub struct DirEntry {
     name: PathSegment,
     entry_type: EntryType,
-    owner: Option<Link>,
+    owner: Option<Op>,
 }
 
 impl DirEntry {
-    fn new(name: PathSegment, entry_type: EntryType, owner: Option<Link>) -> DirEntry {
+    fn new(name: PathSegment, entry_type: EntryType, owner: Option<Op>) -> DirEntry {
         DirEntry {
             name,
             entry_type,
@@ -89,6 +89,12 @@ impl Collection for Directory {
             .await;
 
         if let Some(entry) = entry {
+            if let Some(owner) = entry.owner {
+                if auth.as_ref().map(|token| token.actor_id()) != Some(owner) {
+                    return Err(error::forbidden("You are not the owner of this resource"));
+                }
+            }
+
             let txn_id = &txn.id();
             if let Some(store) = self
                 .context
@@ -119,20 +125,21 @@ impl Collection for Directory {
         txn: Arc<Txn<'_>>,
         path: Self::Key,
         state: Self::Value,
-        _auth: &Option<Token>,
+        auth: &Option<Token>,
     ) -> TCResult<Arc<Self>> {
         let path: PathSegment = path.try_into()?;
         let context = self.context.reserve(&txn.id(), path.clone().into()).await?;
         let chain = self.chain.lock().await;
 
+        let owner = auth.as_ref().map(|token| token.actor_id());
         let entry = match state {
             State::Graph(g) => {
                 FileCopier::copy(txn.id(), &*g, context).await;
-                DirEntry::new(path.clone(), EntryType::Graph, None)
+                DirEntry::new(path.clone(), EntryType::Graph, owner)
             }
             State::Table(t) => {
                 FileCopier::copy(txn.id(), &*t, context).await;
-                DirEntry::new(path.clone(), EntryType::Table, None)
+                DirEntry::new(path.clone(), EntryType::Table, owner)
             }
             State::Object(_) => return Err(error::not_implemented()),
             State::Value(v) => {
