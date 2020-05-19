@@ -11,9 +11,8 @@ use crate::http;
 use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::File;
-use crate::internal::Directory;
 use crate::object::actor::{Actor, Token};
-use crate::state::{Cluster, Collection, Persistent, State, Table};
+use crate::state::{Cluster, Collection, Directory, Persistent, State, Table};
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, TCPath};
 use crate::value::{Args, TCResult, TCValue};
@@ -240,8 +239,7 @@ impl Host {
             let key: TCPath = key.try_into()?;
             let mut path = path.slice_from(1).clone();
             path.extend(key.into_iter());
-            dir.put(txn, path, state, auth).await?;
-            Ok(().into())
+            Ok(dir.put(txn, path, state, auth).await?.into())
         } else {
             Err(error::not_found(path))
         }
@@ -262,10 +260,6 @@ impl Host {
             }
         }
 
-        if dest.path().is_empty() {
-            Ok(TCValue::None.into())
-        } else {
-            Err(error::not_found(dest))
-        }
+        Err(error::not_found(dest))
     }
 }

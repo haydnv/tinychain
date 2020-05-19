@@ -13,11 +13,13 @@ use crate::value::link::PathSegment;
 use crate::value::{Args, TCResult, TCValue};
 
 mod cluster;
+mod directory;
 mod graph;
 mod schema;
 mod table;
 
 pub type Cluster = cluster::Cluster;
+pub type Directory = directory::Directory;
 pub type Graph = graph::Graph;
 pub type Table = table::Table;
 pub type Schema = schema::Schema;
@@ -53,6 +55,7 @@ pub trait Persistent: Collection + File {
 #[derive(Clone)]
 pub enum State {
     Cluster(Arc<Cluster>),
+    Directory(Arc<Directory>),
     Graph(Arc<Graph>),
     Table(Arc<Table>),
     Object(Object),
@@ -67,9 +70,14 @@ impl State {
         auth: &Option<Token>,
     ) -> TCResult<State> {
         match self {
+            State::Cluster(c) => c.clone().get(txn, &key.try_into()?, auth).await,
+            State::Directory(d) => d.clone().get(txn, &key.try_into()?, auth).await,
             State::Graph(g) => Ok(g.clone().get(txn, &key, auth).await?.into()),
             State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?, auth).await?.into()),
-            _ => Err(error::bad_request("Cannot GET from", self)),
+            _ => Err(error::bad_request(
+                &format!("Cannot GET {} from", key),
+                self,
+            )),
         }
     }
 
@@ -88,6 +96,11 @@ impl State {
         auth: &Option<Token>,
     ) -> TCResult<State> {
         match self {
+            State::Directory(d) => Ok(d
+                .clone()
+                .put(txn, key.try_into()?, value.try_into()?, auth)
+                .await?
+                .into()),
             State::Graph(g) => Ok(g.clone().put(txn, key, value, auth).await?.into()),
             State::Table(t) => Ok(t
                 .clone()
@@ -118,6 +131,12 @@ impl State {
 impl From<Arc<Cluster>> for State {
     fn from(cluster: Arc<Cluster>) -> State {
         State::Cluster(cluster)
+    }
+}
+
+impl From<Arc<Directory>> for State {
+    fn from(dir: Arc<Directory>) -> State {
+        State::Directory(dir)
     }
 }
 
@@ -165,6 +184,7 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             State::Cluster(_) => write!(f, "(cluster)"),
+            State::Directory(_) => write!(f, "(directory)"),
             State::Graph(_) => write!(f, "(graph)"),
             State::Table(_) => write!(f, "(table)"),
             State::Object(object) => write!(f, "(object: {})", object.class()),

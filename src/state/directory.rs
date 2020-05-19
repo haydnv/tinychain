@@ -27,7 +27,7 @@ enum EntryType {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-pub struct DirEntry {
+struct DirEntry {
     name: PathSegment,
     entry_type: EntryType,
     owner: Option<Op>,
@@ -150,6 +150,10 @@ impl Collection for Directory {
 
         let owner = auth.as_ref().map(|token| token.actor_id());
         let entry = match state {
+            State::Directory(d) => {
+                FileCopier::copy(txn.id(), &*d, context).await;
+                DirEntry::new(path.clone(), EntryType::Directory, owner)
+            }
             State::Cluster(c) => {
                 FileCopier::copy(txn.id(), &*c, context).await;
                 DirEntry::new(path.clone(), EntryType::Cluster, owner)
