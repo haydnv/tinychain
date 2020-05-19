@@ -17,6 +17,7 @@ mod graph;
 mod schema;
 mod table;
 
+pub type Cluster = cluster::Cluster;
 pub type Graph = graph::Graph;
 pub type Table = table::Table;
 pub type Schema = schema::Schema;
@@ -51,6 +52,7 @@ pub trait Persistent: Collection + File {
 
 #[derive(Clone)]
 pub enum State {
+    Cluster(Arc<Cluster>),
     Graph(Arc<Graph>),
     Table(Arc<Table>),
     Object(Object),
@@ -113,6 +115,12 @@ impl State {
     }
 }
 
+impl From<Arc<Cluster>> for State {
+    fn from(cluster: Arc<Cluster>) -> State {
+        State::Cluster(cluster)
+    }
+}
+
 impl From<Arc<Graph>> for State {
     fn from(graph: Arc<Graph>) -> State {
         State::Graph(graph)
@@ -156,6 +164,7 @@ impl TryFrom<&State> for Object {
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            State::Cluster(_) => write!(f, "(cluster)"),
             State::Graph(_) => write!(f, "(graph)"),
             State::Table(_) => write!(f, "(table)"),
             State::Object(object) => write!(f, "(object: {})", object.class()),

@@ -344,6 +344,10 @@ impl TCPath {
         self.segments.len()
     }
 
+    pub fn pop(&mut self) -> Option<PathSegment> {
+        self.segments.pop()
+    }
+
     pub fn slice_from(&self, start: usize) -> TCPath {
         TCPath {
             segments: self.segments[start..].to_vec(),

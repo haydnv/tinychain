@@ -285,7 +285,7 @@ impl Store {
 
                 let path = &path[0];
                 if state.cache.subdirs.get(txn_id).unwrap().contains_key(path) {
-                    Err(error::bad_request("The path {} is already reserved", path))
+                    Err(error::bad_request("This path is already reserved", path))
                 } else {
                     let subdir = self.subdir(path.clone());
                     state

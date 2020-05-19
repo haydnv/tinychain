@@ -20,6 +20,7 @@ use crate::value::{Op, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
 enum EntryType {
+    Cluster,
     Directory,
     Table,
     Graph,
@@ -103,6 +104,7 @@ impl Collection for Directory {
                 .await
             {
                 match entry.entry_type {
+                    EntryType::Cluster => Ok(Cluster::from_store(txn_id, store).await.into()),
                     EntryType::Directory => {
                         let dir = Directory::from_store(txn_id, store).await;
                         dir.get(txn, &path.slice_from(1), auth).await
@@ -134,6 +136,10 @@ impl Collection for Directory {
 
         let owner = auth.as_ref().map(|token| token.actor_id());
         let entry = match state {
+            State::Cluster(c) => {
+                FileCopier::copy(txn.id(), &*c, context).await;
+                DirEntry::new(path.clone(), EntryType::Cluster, owner)
+            }
             State::Graph(g) => {
                 FileCopier::copy(txn.id(), &*g, context).await;
                 DirEntry::new(path.clone(), EntryType::Graph, owner)

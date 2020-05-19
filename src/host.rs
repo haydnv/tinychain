@@ -13,7 +13,7 @@ use crate::internal::cache::Map;
 use crate::internal::file::File;
 use crate::internal::Directory;
 use crate::object::actor::{Actor, Token};
-use crate::state::{Collection, Persistent, State, Table};
+use crate::state::{Cluster, Collection, Persistent, State, Table};
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, TCPath};
 use crate::value::{Args, TCResult, TCValue};
@@ -168,6 +168,21 @@ impl Host {
                     _ => Err(error::not_found(path)),
                 },
                 "state" if path.len() > 2 => match path[2].as_str() {
+                    "cluster" => {
+                        let cluster = Cluster::create(txn, key.clone().try_into()?).await?;
+
+                        let mut dest: TCPath = key.try_into()?;
+                        let name: TCPath = if let Some(name) = dest.pop() {
+                            name.into()
+                        } else {
+                            return Err(error::bad_request("Cluster context cannot be '/'", dest));
+                        };
+
+                        let dir = self
+                            .put(txn, dest.into(), name.clone().into(), cluster.into(), auth)
+                            .await?;
+                        dir.get(txn, name.into(), auth).await
+                    }
                     "table" => Ok(Table::create(txn, key.try_into()?).await?.into()),
                     _ => Err(error::not_found(path)),
                 },
