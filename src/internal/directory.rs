@@ -179,12 +179,29 @@ impl File for Directory {
         Arc::new(Directory { context, chain })
     }
 
-    async fn copy_into(&self, _txn_id: TxnId, _writer: &mut FileCopier) {
-        panic!("Directory::copy_into is not implemented")
+    async fn copy_into(&self, txn_id: TxnId, writer: &mut FileCopier) {
+        writer.write_file(
+            ".contents".parse().unwrap(),
+            Box::new(self.chain.lock().await.stream_bytes(txn_id).boxed()),
+        )
     }
 
-    async fn from_store(_txn_id: &TxnId, _store: Arc<Store>) -> Arc<Directory> {
-        panic!("Directory::from_store is not implemented")
+    async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> Arc<Directory> {
+        let chain = Mutex::new(
+            Chain::from_store(
+                txn_id,
+                store
+                    .get_store(txn_id, &".contents".parse().unwrap())
+                    .await
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        );
+        Arc::new(Directory {
+            context: store,
+            chain,
+        })
     }
 }
 
