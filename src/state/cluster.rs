@@ -10,10 +10,9 @@ use crate::object::actor::Token;
 use crate::state::{Collection, File, Persistent, Schema, State, Table};
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
-use crate::value::TCResult;
+use crate::value::{TCResult, TCValue};
 
 pub struct Cluster {
-    context: TCPath,
     actors: Arc<Table>,
     hosts: Arc<Table>,
     hosted: Arc<Directory>,
@@ -46,9 +45,9 @@ impl Collection for Cluster {
 
 #[async_trait]
 impl Persistent for Cluster {
-    type Config = TCPath;
+    type Config = TCValue;
 
-    async fn create(txn: &Arc<Txn<'_>>, context: TCPath) -> TCResult<Arc<Cluster>> {
+    async fn create(txn: &Arc<Txn<'_>>, _: TCValue) -> TCResult<Arc<Cluster>> {
         let actors = Table::create(
             &txn.subcontext("actors".parse()?).await?,
             Schema::from(
@@ -70,7 +69,6 @@ impl Persistent for Cluster {
         .await?;
 
         Ok(Arc::new(Cluster {
-            context,
             actors,
             hosts,
             hosted: Directory::new(

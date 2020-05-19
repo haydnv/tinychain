@@ -169,7 +169,7 @@ impl Host {
                 },
                 "state" if path.len() > 2 => match path[2].as_str() {
                     "cluster" => {
-                        let cluster = Cluster::create(txn, key.clone().try_into()?).await?;
+                        let cluster = Cluster::create(txn, TCValue::None).await?;
 
                         let mut dest: TCPath = key.try_into()?;
                         let name: TCPath = if let Some(name) = dest.pop() {
