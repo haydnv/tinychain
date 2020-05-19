@@ -84,18 +84,79 @@ impl Persistent for Cluster {
 
 #[async_trait]
 impl File for Cluster {
-    async fn copy_from(_reader: &mut FileCopier, _txn_id: &TxnId, _dest: Arc<Store>) -> Arc<Self> {
-        // TODO
-        panic!("NOT IMPLEMENTED")
+    async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, dest: Arc<Store>) -> Arc<Self> {
+        let actors = Table::copy_from(
+            reader,
+            txn_id,
+            dest.reserve(txn_id, "actors".parse().unwrap())
+                .await
+                .unwrap(),
+        )
+        .await;
+
+        let hosts = Table::copy_from(
+            reader,
+            txn_id,
+            dest.reserve(txn_id, "hosts".parse().unwrap())
+                .await
+                .unwrap(),
+        )
+        .await;
+
+        let hosted = Directory::copy_from(
+            reader,
+            txn_id,
+            dest.reserve(txn_id, "hosted".parse().unwrap())
+                .await
+                .unwrap(),
+        )
+        .await;
+
+        Arc::new(Cluster {
+            actors,
+            hosts,
+            hosted,
+        })
     }
 
-    async fn copy_into(&self, _txn_id: TxnId, _writer: &mut FileCopier) {
-        // TODO
-        panic!("NOT IMPLEMENTED")
+    async fn copy_into(&self, txn_id: TxnId, writer: &mut FileCopier) {
+        self.actors.copy_into(txn_id.clone(), writer).await;
+        self.hosts.copy_into(txn_id.clone(), writer).await;
+        self.hosted.copy_into(txn_id.clone(), writer).await;
     }
 
-    async fn from_store(_txn_id: &TxnId, _store: Arc<Store>) -> Arc<Self> {
-        // TODO
-        panic!("NOT IMPLEMENTED")
+    async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> Arc<Self> {
+        let actors = Table::from_store(
+            txn_id,
+            store
+                .get_store(txn_id, &"actors".parse().unwrap())
+                .await
+                .unwrap(),
+        )
+        .await;
+
+        let hosts = Table::from_store(
+            txn_id,
+            store
+                .get_store(txn_id, &"hosts".parse().unwrap())
+                .await
+                .unwrap(),
+        )
+        .await;
+
+        let hosted = Directory::from_store(
+            txn_id,
+            store
+                .get_store(txn_id, &"hosted".parse().unwrap())
+                .await
+                .unwrap(),
+        )
+        .await;
+
+        Arc::new(Cluster {
+            actors,
+            hosts,
+            hosted,
+        })
     }
 }
