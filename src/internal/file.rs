@@ -63,6 +63,8 @@ impl FileCopier {
             panic!("Tried to write file in subdirectory: {}", path);
         }
 
+        println!("FileCopier::write_file {}", path);
+
         self.contents.push_back((path, blocks));
         if let Some(waker) = &shared_state.waker {
             waker.clone().wake();
@@ -83,7 +85,12 @@ impl Stream for FileCopier {
                 Poll::Ready(None)
             }
         } else {
-            Poll::Ready(self.contents.pop_front())
+            let item = self.contents.pop_front();
+            if let Some((path, _)) = &item {
+                println!("FileCopier::next ({}, <blocks>)", path);
+            }
+
+            Poll::Ready(item)
         }
     }
 }

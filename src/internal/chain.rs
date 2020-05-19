@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
+use std::iter;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -26,6 +27,12 @@ pub trait Mutation: Clone + DeserializeOwned + Serialize + Send + Sync {}
 pub struct ChainBlock<M: Mutation> {
     checksum: Checksum,
     mutations: Vec<(TxnId, Vec<M>)>,
+}
+
+impl<M: Mutation> ChainBlock<M> {
+    fn len(&self) -> usize {
+        self.mutations.len() + 1
+    }
 }
 
 fn valid_encoding(val: &[u8]) -> bool {
@@ -151,11 +158,15 @@ impl<M: Mutation> Chain<M> {
             .unwrap();
         println!("Chain::new created block 0");
 
-        Chain {
+        let chain = Chain {
             store,
             latest_block: 0,
             phantom: PhantomData,
-        }
+        };
+
+        chain.put(txn_id.clone(), iter::empty()).await.unwrap();
+
+        chain
     }
 
     pub async fn copy_from(
@@ -188,6 +199,8 @@ impl<M: Mutation> Chain<M> {
 
         if latest_block > 0 {
             latest_block -= 1;
+        } else {
+            panic!("Chain::copy_from called on a stream with no blocks!")
         }
 
         Chain {
@@ -204,6 +217,8 @@ impl<M: Mutation> Chain<M> {
                 "This store does not contain a Chain",
                 "",
             ));
+        } else {
+            println!("Chain::from_store");
         }
 
         while store
@@ -240,12 +255,16 @@ impl<M: Mutation> Chain<M> {
 
         let mut i = 0;
         loop {
+            let block_id = i;
             stream.push(Box::new(
                 self.store
                     .clone()
-                    .get_bytes(txn_id.clone(), i.into())
-                    .map(|block| {
-                        let block = block.unwrap();
+                    .get_bytes(txn_id.clone(), block_id.into())
+                    .map(move |block| {
+                        let block = block.expect(&format!(
+                            "This chain has a nonexistent block at {}!",
+                            block_id
+                        ));
                         let mut block: VecDeque<&[u8]> =
                             block.split(|b| *b == GROUP_DELIMITER as u8).collect();
                         block.pop_back();
@@ -254,28 +273,28 @@ impl<M: Mutation> Chain<M> {
                         let mut checksum = [0u8; 32];
                         checksum.copy_from_slice(&block.pop_front().unwrap()[0..32]);
 
-                        let mut mutations = Vec::with_capacity(block.len());
-                        while let Some(record) = block.pop_front() {
-                            let mut record: VecDeque<Bytes> = record
+                        let mut transactions = Vec::with_capacity(block.len());
+                        while let Some(mutations) = block.pop_front() {
+                            let mut mutations: VecDeque<Bytes> = mutations
                                 .split(|b| *b == RECORD_DELIMITER as u8)
                                 .map(|m| Bytes::copy_from_slice(m))
                                 .collect();
-                            record.pop_back();
-                            println!("record size {}: {}", record.len(), record[0].len());
+                            mutations.pop_back();
+                            println!("record size {}: {}", mutations.len(), mutations[0].len());
 
                             let txn_id: TxnId =
-                                serde_json::from_slice(&record.pop_front().unwrap()).unwrap();
-                            mutations.push((txn_id, record.into_iter().collect()))
+                                serde_json::from_slice(&mutations.pop_front().unwrap()).unwrap();
+                            transactions.push((txn_id, mutations.into_iter().collect()))
                         }
+                        println!("block records {} transactions", transactions.len());
 
-                        (checksum, mutations)
+                        (checksum, transactions)
                     })
                     .boxed(),
             ));
-            println!("into_stream got block {}", i);
 
             if i == self.latest_block {
-                println!("into_stream completed queue at {}", i);
+                println!("Chain::stream completed queue at {}", i);
                 break;
             } else {
                 i += 1;
@@ -291,8 +310,15 @@ impl<M: Mutation> Chain<M> {
         self.stream(txn_id.clone())
             .take_while(move |(_, records)| {
                 if let Some((time, _)) = records.last() {
-                    future::ready(time <= &txn_id)
+                    if time <= &txn_id {
+                        println!("Passing block through");
+                        future::ready(true)
+                    } else {
+                        println!("Dropping block since its transactions are in the future");
+                        future::ready(false)
+                    }
                 } else {
+                    println!("Dropping block since it is empty");
                     future::ready(false)
                 }
             })
@@ -302,7 +328,7 @@ impl<M: Mutation> Chain<M> {
                     .filter(|(time, _)| time <= &txn_id_clone)
                     .collect();
 
-                ChainBlock {
+                let block = ChainBlock {
                     checksum,
                     mutations: mutations
                         .iter()
@@ -315,7 +341,9 @@ impl<M: Mutation> Chain<M> {
                             )
                         })
                         .collect(),
-                }
+                };
+                println!("ChainBlock size {}", block.len());
+                block
             })
     }
 

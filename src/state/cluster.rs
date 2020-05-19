@@ -68,16 +68,18 @@ impl Persistent for Cluster {
         )
         .await?;
 
+        let hosted = Directory::new(
+            &txn.id(),
+            txn.context()
+                .reserve(&txn.id(), "hosted".parse().unwrap())
+                .await?,
+        )
+        .await?;
+
         Ok(Arc::new(Cluster {
             actors,
             hosts,
-            hosted: Directory::new(
-                &txn.id(),
-                txn.context()
-                    .reserve(&txn.id(), "hosted".parse().unwrap())
-                    .await?,
-            )
-            .await?,
+            hosted,
         }))
     }
 }
@@ -85,6 +87,7 @@ impl Persistent for Cluster {
 #[async_trait]
 impl File for Cluster {
     async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, dest: Arc<Store>) -> Arc<Self> {
+        println!("Cluster::copy_from actors");
         let actors = Table::copy_from(
             reader,
             txn_id,
@@ -94,6 +97,7 @@ impl File for Cluster {
         )
         .await;
 
+        println!("Cluster::copy_from hosts");
         let hosts = Table::copy_from(
             reader,
             txn_id,
@@ -103,6 +107,7 @@ impl File for Cluster {
         )
         .await;
 
+        println!("Cluster::copy_from hosted");
         let hosted = Directory::copy_from(
             reader,
             txn_id,
@@ -120,8 +125,13 @@ impl File for Cluster {
     }
 
     async fn copy_into(&self, txn_id: TxnId, writer: &mut FileCopier) {
+        println!("Cluster::copy_into actors");
         self.actors.copy_into(txn_id.clone(), writer).await;
+
+        println!("Cluster::copy_into hosts");
         self.hosts.copy_into(txn_id.clone(), writer).await;
+
+        println!("Cluster::copy_into hosted");
         self.hosted.copy_into(txn_id.clone(), writer).await;
     }
 

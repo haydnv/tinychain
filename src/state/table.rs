@@ -245,20 +245,19 @@ impl Persistent for Table {
     type Config = Schema;
 
     async fn create(txn: &Arc<Txn<'_>>, schema: Schema) -> TCResult<Arc<Table>> {
-        let table_chain = Mutex::new(
-            Chain::new(
-                &txn.id(),
-                txn.context()
-                    .reserve(&txn.id(), schema.version.to_string().parse()?)
-                    .await?,
-            )
-            .await,
-        );
+        let chain = Chain::new(
+            &txn.id(),
+            txn.context()
+                .reserve(&txn.id(), schema.version.to_string().parse()?)
+                .await?,
+        )
+        .await;
+
         let schema_history = SchemaHistory::new(&txn, schema).await?;
 
         Ok(Arc::new(Table {
             schema: schema_history,
-            chain: table_chain,
+            chain: Mutex::new(chain),
         }))
     }
 }
