@@ -50,25 +50,19 @@ impl Persistent for Cluster {
 
     async fn create(txn: &Arc<Txn<'_>>, context: TCPath) -> TCResult<Arc<Cluster>> {
         let actors = Table::create(
-            txn,
+            &txn.subcontext("actors".parse()?).await?,
             Schema::from(
-                vec![(
-                    "actor".parse().unwrap(),
-                    "/sbin/object/actor".parse().unwrap(),
-                )],
+                vec![("actor".parse()?, "/sbin/object/actor".parse()?)],
                 vec![],
-                "1.0.0".parse().unwrap(),
+                "1.0.0".parse()?,
             ),
         )
         .await?;
 
         let hosts = Table::create(
-            txn,
+            &txn.subcontext("hosts".parse()?).await?,
             Schema::from(
-                vec![(
-                    "address".parse().unwrap(),
-                    "/sbin/value/link/address".parse().unwrap(),
-                )],
+                vec![("address".parse()?, "/sbin/value/link/address".parse()?)],
                 vec![],
                 "1.0.0".parse().unwrap(),
             ),

@@ -198,7 +198,7 @@ impl<'a> Txn<'a> {
         self.context.clone()
     }
 
-    async fn subcontext(self: &Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn<'a>>> {
+    pub async fn subcontext(self: &Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn<'a>>> {
         let subcontext: Arc<Store> = self.context.reserve(&self.id, subcontext.into()).await?;
 
         Ok(Arc::new(Txn {
