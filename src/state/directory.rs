@@ -99,7 +99,7 @@ impl Collection for Directory {
             .lock()
             .await
             .stream_into(txn.id())
-            .filter(|entry: &DirEntry| future::ready(&entry.name == path))
+            .filter(|entry: &DirEntry| future::ready(entry.name == path[0]))
             .fold(None, |_, m| future::ready(Some(m)))
             .await;
 
@@ -118,13 +118,29 @@ impl Collection for Directory {
                 .await
             {
                 match entry.entry_type {
-                    EntryType::Cluster => Ok(Cluster::from_store(txn_id, store).await.into()),
+                    EntryType::Cluster => {
+                        let cluster = Cluster::from_store(txn_id, store).await;
+                        if path.len() == 1 {
+                            Ok(cluster.into())
+                        } else {
+                            cluster.get(txn, &path.slice_from(1), auth).await
+                        }
+                    }
                     EntryType::Directory => {
                         let dir = Directory::from_store(txn_id, store).await;
-                        dir.get(txn, &path.slice_from(1), auth).await
+                        if path.len() == 1 {
+                            Ok(dir.into())
+                        } else {
+                            dir.get(txn, &path.slice_from(1), auth).await
+                        }
                     }
-                    EntryType::Graph => Ok(Graph::from_store(txn_id, store).await.into()),
-                    EntryType::Table => Ok(Table::from_store(txn_id, store).await.into()),
+                    EntryType::Graph if path.len() == 1 => {
+                        Ok(Graph::from_store(txn_id, store).await.into())
+                    }
+                    EntryType::Table if path.len() == 1 => {
+                        Ok(Table::from_store(txn_id, store).await.into())
+                    }
+                    _ => Err(error::not_found(path)),
                 }
             } else {
                 Err(error::internal(format!(
