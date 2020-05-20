@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time;
 
 use bytes::Bytes;
+use sha2::{Digest, Sha256};
 use structopt::StructOpt;
 
 use crate::error;
@@ -162,6 +163,7 @@ impl Host {
 
         if path[0] == "sbin" {
             match path[1].as_str() {
+                "auth" => Ok(Sbin::auth(&path.slice_from(2), key)?.into()),
                 "object" => Ok(State::Object(Sbin::object(self, &path.slice_from(2), key)?)),
                 "state" => Sbin::state(self, txn, &path.slice_from(2), key, auth).await,
                 "value" => Ok(Sbin::value(&path.slice_from(2), key)?.into()),
@@ -208,6 +210,20 @@ impl Host {
 struct Sbin;
 
 impl Sbin {
+    fn auth(path: &TCPath, key: TCValue) -> TCResult<TCValue> {
+        match path.to_string().as_str() {
+            "/hash/sha256" => {
+                let data: String = key.try_into()?;
+                let data: Bytes = data.into();
+
+                let mut hasher = Sha256::new();
+                hasher.input(data);
+                Ok(Bytes::copy_from_slice(&hasher.result()[..]).into())
+            }
+            _ => Err(error::not_found(path)),
+        }
+    }
+
     fn object(host: &Arc<Host>, path: &TCPath, key: TCValue) -> TCResult<Object> {
         match path.to_string().as_str() {
             "/actor" => {

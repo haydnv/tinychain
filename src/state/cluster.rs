@@ -60,7 +60,7 @@ impl Persistent for Cluster {
             &txn.subcontext("actors".parse()?).await?,
             Schema::from(
                 vec![("actor".parse()?, "/sbin/object/actor".parse()?)],
-                vec![],
+                vec![("password".parse()?, "/sbin/auth/hash/sha256".parse()?)],
                 "1.0.0".parse()?,
             ),
         )

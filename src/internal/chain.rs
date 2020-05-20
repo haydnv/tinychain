@@ -261,10 +261,9 @@ impl<M: Mutation> Chain<M> {
                     .clone()
                     .get_bytes(txn_id.clone(), block_id.into())
                     .map(move |block| {
-                        let block = block.expect(&format!(
-                            "This chain has a nonexistent block at {}!",
-                            block_id
-                        ));
+                        let block = block.unwrap_or_else(|| {
+                            panic!("This chain has a nonexistent block at {}!", block_id)
+                        });
                         let mut block: VecDeque<&[u8]> =
                             block.split(|b| *b == GROUP_DELIMITER as u8).collect();
                         block.pop_back();
