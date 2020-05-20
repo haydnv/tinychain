@@ -152,6 +152,12 @@ impl From<Arc<Table>> for State {
     }
 }
 
+impl From<Object> for State {
+    fn from(object: Object) -> State {
+        State::Object(object)
+    }
+}
+
 impl<T: Into<TCValue>> From<T> for State {
     fn from(value: T) -> State {
         State::Value(value.into())

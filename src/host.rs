@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time;
 
+use bytes::Bytes;
 use structopt::StructOpt;
 
 use crate::error;
@@ -12,6 +13,7 @@ use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::File;
 use crate::object::actor::{Actor, Token};
+use crate::object::Object;
 use crate::state::{Cluster, Collection, Directory, Persistent, State, Table};
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, TCPath};
@@ -160,53 +162,9 @@ impl Host {
 
         if path[0] == "sbin" {
             match path[1].as_str() {
-                "object" if path.len() > 2 => match path[2].as_str() {
-                    "actor" => {
-                        let actor: Actor = key.try_into()?;
-                        Ok(actor.into())
-                    }
-                    _ => Err(error::not_found(path)),
-                },
-                "state" if path.len() > 2 => match path[2].as_str() {
-                    "cluster" => {
-                        let cluster = Cluster::create(txn, TCValue::None).await?;
-
-                        let mut dest: TCPath = key.try_into()?;
-                        let name: TCPath = if let Some(name) = dest.pop() {
-                            name.into()
-                        } else {
-                            return Err(error::bad_request("Cluster context cannot be '/'", dest));
-                        };
-
-                        let dir = self
-                            .put(txn, dest.into(), name.clone().into(), cluster.into(), auth)
-                            .await?;
-                        dir.get(txn, name.into(), auth).await
-                    }
-                    "table" => Ok(Table::create(txn, key.try_into()?).await?.into()),
-                    _ => Err(error::not_found(path)),
-                },
-                "value" if path.len() == 2 => Ok(State::Value(key)),
-                "value" if path.len() > 2 => match path[2].as_str() {
-                    "link" if path.len() == 3 => {
-                        let link: Link = key.try_into()?;
-                        Ok(State::Value(link.into()))
-                    }
-                    "link" if path.len() > 3 => match path[3].as_str() {
-                        "host" => {
-                            let address: Link = key.try_into()?;
-                            let address: LinkHost = address.try_into()?;
-                            let address: Link = address.into();
-                            Ok(State::Value(address.into()))
-                        }
-                        _ => Err(error::not_found(path)),
-                    },
-                    "string" => {
-                        let s: String = key.try_into()?;
-                        Ok(State::Value(s.into()))
-                    }
-                    _ => Err(error::not_found(path)),
-                },
+                "object" => Ok(Sbin::object(&path.slice_from(2), key)?.into()),
+                "state" => Sbin::state(self, txn, &path.slice_from(2), key, auth).await,
+                "value" => Ok(Sbin::value(&path.slice_from(2), key)?.into()),
                 _ => Err(error::not_found(path)),
             }
         } else if let Some(dir) = self.root.get(&path[0].clone().into()) {
@@ -243,6 +201,75 @@ impl Host {
             Ok(dir.put(txn, path, state, auth).await?.into())
         } else {
             Err(error::not_found(path))
+        }
+    }
+}
+
+struct Sbin;
+
+impl Sbin {
+    fn object(path: &TCPath, key: TCValue) -> TCResult<Object> {
+        match path.to_string().as_str() {
+            "/actor" => {
+                let actor: Actor = key.try_into()?;
+                Ok(Arc::new(actor).into())
+            }
+            _ => Err(error::not_found(path)),
+        }
+    }
+
+    async fn state(
+        host: &Arc<Host>,
+        txn: &Arc<Txn<'_>>,
+        path: &TCPath,
+        key: TCValue,
+        auth: &Option<Token>,
+    ) -> TCResult<State> {
+        match path.to_string().as_str() {
+            "/cluster" => {
+                let cluster = Cluster::create(txn, TCValue::None).await?;
+
+                let mut dest: TCPath = key.try_into()?;
+                let name: TCPath = if let Some(name) = dest.pop() {
+                    name.into()
+                } else {
+                    return Err(error::bad_request("Cluster context cannot be '/'", dest));
+                };
+
+                let dir = host
+                    .put(txn, dest.into(), name.clone().into(), cluster.into(), auth)
+                    .await?;
+                dir.get(txn, name.into(), auth).await
+            }
+            "/table" => Ok(Table::create(txn, key.try_into()?).await?.into()),
+            _ => Err(error::not_found(path)),
+        }
+    }
+
+    fn value(path: &TCPath, key: TCValue) -> TCResult<TCValue> {
+        match path.to_string().as_str() {
+            "/" => Ok(key),
+            "/bytes" => {
+                let encoded: String = key.try_into()?;
+                let decoded = base64::decode(encoded)
+                    .map_err(|e| error::bad_request("Unable to decode base64 string", e))?;
+                Ok(TCValue::Bytes(Bytes::from(decoded)))
+            }
+            "/link" => {
+                let link: Link = key.try_into()?;
+                Ok(link.into())
+            }
+            "/link/host" => {
+                let address: Link = key.try_into()?;
+                let address: LinkHost = address.try_into()?;
+                let address: Link = address.into();
+                Ok(address.into())
+            }
+            "/string" => {
+                let s: String = key.try_into()?;
+                Ok(s.into())
+            }
+            _ => Err(error::not_found(path)),
         }
     }
 }

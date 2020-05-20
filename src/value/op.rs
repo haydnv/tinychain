@@ -232,7 +232,7 @@ impl<'de> Visitor<'de> for OpVisitor {
                     .into();
                 let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;
 
-                Ok(Op::post(subject.into(), method, requires))
+                Ok(Op::post(subject, method, requires))
             } else {
                 let subject: TCRef = key[1..].parse().map_err(Error::custom)?;
                 let mut value = access.next_value::<Vec<TCValue>>()?;

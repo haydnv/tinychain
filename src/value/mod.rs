@@ -418,7 +418,7 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                         .into();
                     let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;
 
-                    Ok(Op::post(subject.into(), method, requires).into())
+                    Ok(Op::post(subject, method, requires).into())
                 } else {
                     let subject: TCRef = key[1..].parse().map_err(de::Error::custom)?;
                     let mut value = access.next_value::<Vec<TCValue>>()?;
@@ -436,11 +436,6 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                         )))
                     }
                 }
-            } else if key == "Bytes" {
-                let value: &str = access.next_value()?;
-                let value: Vec<u8> = base64::decode(value)
-                    .map_err(|e| de::Error::custom(format!("Invalid base64 string: {}", e)))?;
-                Ok(value.into())
             } else {
                 Err(de::Error::custom(format!(
                     "Unable to determine data type of {}",
@@ -484,7 +479,7 @@ impl Serialize for TCValue {
             TCValue::None => s.serialize_none(),
             TCValue::Bytes(b) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("Bytes", &base64::encode(b))?;
+                map.serialize_entry("/sbin/value/bytes", &base64::encode(b))?;
                 map.end()
             }
             TCValue::Int32(i) => s.serialize_i32(*i),
