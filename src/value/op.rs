@@ -105,7 +105,7 @@ pub enum Op {
         value: Box<TCValue>,
     },
     Post {
-        subject: Option<TCRef>,
+        subject: TCRef,
         action: TCPath,
         requires: Vec<(ValueId, TCValue)>,
     },
@@ -143,9 +143,7 @@ impl Op {
                 action: _,
                 requires,
             } => {
-                if let Some(r) = subject {
-                    deps.push(r);
-                }
+                deps.push(subject);
                 for (_, v) in requires {
                     if let TCValue::Ref(r) = v {
                         deps.push(&r);
@@ -172,7 +170,7 @@ impl Op {
         }
     }
 
-    pub fn post(subject: Option<TCRef>, action: TCPath, requires: Vec<(ValueId, TCValue)>) -> Op {
+    pub fn post(subject: TCRef, action: TCPath, requires: Vec<(ValueId, TCValue)>) -> Op {
         Op::Post {
             subject,
             action,
@@ -197,10 +195,7 @@ impl fmt::Display for Op {
             } => write!(
                 f,
                 "subject: {}, action: {}, requires: {}",
-                subject
-                    .as_ref()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| String::from("None")),
+                subject.to_string(),
                 action,
                 requires
                     .iter()
@@ -297,14 +292,8 @@ impl Serialize for Op {
                 action,
                 requires,
             } => {
-                let subject = if let Some(subject) = subject {
-                    format!("{}{}", subject, action)
-                } else {
-                    format!("{}", action)
-                };
-
                 let mut op = s.serialize_map(Some(1))?;
-                op.serialize_entry(&subject, requires)?;
+                op.serialize_entry(&format!("{}{}", subject, action), requires)?;
                 op.end()
             }
         }

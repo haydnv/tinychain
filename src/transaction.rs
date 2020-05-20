@@ -292,19 +292,10 @@ impl<'a> Txn<'a> {
                     deps.push((dest_id, dep.try_into()?));
                 }
 
-                match subject {
-                    Some(r) => {
-                        let subject = resolve_id(resolved, &r.value_id())?;
-                        subject
-                            .post(extension, &action.try_into()?, deps.into(), auth)
-                            .await
-                    }
-                    None => {
-                        self.host
-                            .post(&extension, &action.clone().into(), deps.into(), auth)
-                            .await
-                    }
-                }
+                let subject = resolve_id(resolved, &subject.value_id())?;
+                subject
+                    .post(extension, &action.try_into()?, deps.into(), auth)
+                    .await
             }
         }
     }
@@ -332,16 +323,6 @@ impl<'a> Txn<'a> {
     ) -> TCResult<State> {
         println!("txn::put {} {}", dest, key);
         self.host.put(self, dest, key, state, auth).await
-    }
-
-    pub async fn post(
-        self: &Arc<Self>,
-        dest: &Link,
-        args: Args,
-        auth: &Option<Token>,
-    ) -> TCResult<State> {
-        println!("txn::post {}", dest);
-        self.host.post(self, dest, args, auth).await
     }
 }
 

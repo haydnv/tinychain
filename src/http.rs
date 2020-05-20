@@ -93,7 +93,7 @@ async fn post<'a>(
 
         Ok(State::Value(results.into()))
     } else {
-        txn.post(&path.clone().into(), args, &auth).await
+        Err(error::method_not_allowed(path))
     }
 }
 

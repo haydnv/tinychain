@@ -15,7 +15,7 @@ use crate::object::actor::{Actor, Token};
 use crate::state::{Cluster, Collection, Directory, Persistent, State, Table};
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, TCPath};
-use crate::value::{Args, TCResult, TCValue};
+use crate::value::{TCResult, TCValue};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 
@@ -243,23 +243,5 @@ impl Host {
         } else {
             Err(error::not_found(path))
         }
-    }
-
-    // TODO: remove this method
-    pub async fn post(
-        self: &Arc<Self>,
-        _txn: &Arc<Txn<'_>>,
-        dest: &Link,
-        _args: Args,
-        _auth: &Option<Token>,
-    ) -> TCResult<State> {
-        println!("POST {}", dest);
-        if let Some(host) = dest.host() {
-            if host.address() != &self.address {
-                return Err(error::not_implemented());
-            }
-        }
-
-        Err(error::not_found(dest))
     }
 }
