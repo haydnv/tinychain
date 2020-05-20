@@ -47,7 +47,8 @@ pub struct NetworkTime {
 
 impl NetworkTime {
     pub fn as_millis(&self) -> u64 {
-        (self.nanos / 1_000_000).try_into().unwrap()
+        const MILLIS_PER_NANO: u128 = 1_000_000;
+        (self.nanos / MILLIS_PER_NANO).try_into().unwrap()
     }
 
     pub fn as_nanos(&self) -> u128 {
