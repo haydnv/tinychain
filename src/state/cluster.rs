@@ -25,10 +25,19 @@ impl Collection for Cluster {
     async fn get(
         self: &Arc<Self>,
         _txn: &Arc<Txn<'_>>,
-        _path: &TCPath,
+        path: &TCPath,
         _auth: &Option<Token>,
     ) -> TCResult<Self::Value> {
-        Err(error::not_implemented())
+        if path.len() != 1 {
+            return Err(error::not_found(path));
+        }
+
+        match path[0].as_str() {
+            "actors" => Ok(self.actors.clone().into()),
+            "hosts" => Ok(self.hosts.clone().into()),
+            "hosted" => Ok(self.hosted.clone().into()),
+            _ => Err(error::not_found(path)),
+        }
     }
 
     async fn put(

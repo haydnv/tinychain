@@ -114,6 +114,14 @@ impl TryFrom<link::TCPath> for ValueId {
     type Error = error::TCError;
 
     fn try_from(path: link::TCPath) -> TCResult<ValueId> {
+        ValueId::try_from(&path)
+    }
+}
+
+impl TryFrom<&link::TCPath> for ValueId {
+    type Error = error::TCError;
+
+    fn try_from(path: &link::TCPath) -> TCResult<ValueId> {
         if path.len() == 1 {
             Ok(path[0].clone())
         } else {
