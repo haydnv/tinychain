@@ -162,7 +162,7 @@ impl Host {
 
         if path[0] == "sbin" {
             match path[1].as_str() {
-                "object" => Ok(Sbin::object(&path.slice_from(2), key)?.into()),
+                "object" => Ok(State::Object(Sbin::object(self, &path.slice_from(2), key)?)),
                 "state" => Sbin::state(self, txn, &path.slice_from(2), key, auth).await,
                 "value" => Ok(Sbin::value(&path.slice_from(2), key)?.into()),
                 _ => Err(error::not_found(path)),
@@ -208,12 +208,13 @@ impl Host {
 struct Sbin;
 
 impl Sbin {
-    fn object(path: &TCPath, key: TCValue) -> TCResult<Object> {
+    fn object(host: &Arc<Host>, path: &TCPath, key: TCValue) -> TCResult<Object> {
         match path.to_string().as_str() {
             "/actor" => {
                 let actor: Actor = key.try_into()?;
                 Ok(Arc::new(actor).into())
             }
+            "/actor/new" => Ok(Actor::new((host.address, host.http_port).into(), key).into()),
             _ => Err(error::not_found(path)),
         }
     }

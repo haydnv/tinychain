@@ -277,8 +277,12 @@ impl<'a> Txn<'a> {
                 }
                 Subject::Ref(r) => {
                     let subject = resolve_id(resolved, &r.value_id())?;
+                    let key = resolve_val(resolved, *key)?;
                     let value = resolve_val(resolved, *value)?;
-                    subject.put(&extension, *key, value.try_into()?, auth).await
+                    println!("{}.put({}, {})", subject, key, value);
+                    subject
+                        .put(&extension, key.try_into()?, value.try_into()?, auth)
+                        .await
                 }
             },
             Op::Post {
@@ -336,6 +340,23 @@ fn resolve_id(resolved: &HashMap<ValueId, State>, id: &ValueId) -> TCResult<Stat
 fn resolve_val(resolved: &HashMap<ValueId, State>, value: TCValue) -> TCResult<State> {
     match value {
         TCValue::Ref(r) => resolve_id(resolved, &r.value_id()),
+        TCValue::Vector(mut v) => {
+            let mut val: Vec<TCValue> = vec![];
+            for item in v.drain(..) {
+                match resolve_val(resolved, item)? {
+                    State::Value(i) => val.push(i),
+                    State::Object(o) => val.push(o.into_value()),
+                    other => {
+                        return Err(error::bad_request(
+                            "State {} cannot be serialized into a Value",
+                            other,
+                        ))
+                    }
+                }
+            }
+
+            Ok(TCValue::Vector(val).into())
+        }
         _ => Ok(value.into()),
     }
 }

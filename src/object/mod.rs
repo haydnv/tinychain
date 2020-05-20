@@ -42,6 +42,12 @@ impl Object {
         }
     }
 
+    pub fn into_value(self) -> TCValue {
+        match self {
+            Object::Actor(a) => TCValue::from(&*a),
+        }
+    }
+
     pub async fn post(
         &self,
         txn: Arc<Txn<'_>>,

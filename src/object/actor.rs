@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::object::TCObject;
-use crate::transaction::Txn;
 use crate::value::link::{Link, TCPath};
 use crate::value::{Op, TCResult, TCValue};
 
@@ -59,7 +58,7 @@ pub struct Actor {
 }
 
 impl Actor {
-    pub fn new(_txn: Arc<Txn>, host: Link, id: TCValue) -> Arc<Actor> {
+    pub fn new(host: Link, id: TCValue) -> Arc<Actor> {
         let mut rng = OsRng {};
         let keypair: Keypair = Keypair::generate(&mut rng);
 
@@ -145,20 +144,26 @@ impl fmt::Display for Actor {
     }
 }
 
-impl From<Actor> for TCValue {
-    fn from(actor: Actor) -> TCValue {
-        let private_key: TCValue = if let Some(private_key) = actor.private_key {
+impl From<&Actor> for TCValue {
+    fn from(actor: &Actor) -> TCValue {
+        let private_key: TCValue = if let Some(private_key) = &actor.private_key {
             private_key.to_bytes().to_vec().into()
         } else {
             TCValue::None
         };
 
         TCValue::Vector(vec![
-            actor.host.into(),
-            actor.id,
+            actor.host.clone().into(),
+            actor.id.clone(),
             private_key,
             actor.public_key.to_bytes().to_vec().into(),
         ])
+    }
+}
+
+impl From<Actor> for TCValue {
+    fn from(actor: Actor) -> TCValue {
+        TCValue::from(&actor)
     }
 }
 
