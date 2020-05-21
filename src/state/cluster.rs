@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::file::*;
-use crate::object::actor::Token;
+use crate::object::actor::{Actor, Token};
+use crate::object::TCObject;
 use crate::state::*;
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
@@ -56,19 +57,13 @@ impl Persistent for Cluster {
     type Config = TCValue;
 
     async fn create(txn: &Arc<Txn<'_>>, _: TCValue) -> TCResult<Arc<Cluster>> {
-        let actors = table::Table::create(
-            &txn.subcontext("actors".parse()?).await?,
-            Schema::from(
-                vec![("actor".parse()?, "/sbin/object/actor".parse()?)],
-                vec![],
-                "1.0.0".parse()?,
-            ),
-        )
-        .await?;
+        let actors =
+            table::Table::create(&txn.subcontext("actors".parse()?).await?, Actor::schema())
+                .await?;
 
         let hosts = table::Table::create(
             &txn.subcontext("hosts".parse()?).await?,
-            Schema::from(
+            table::Schema::from(
                 vec![("address".parse()?, "/sbin/value/link/address".parse()?)],
                 vec![],
                 "1.0.0".parse().unwrap(),

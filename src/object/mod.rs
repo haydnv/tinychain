@@ -17,6 +17,8 @@ pub mod actor;
 pub trait TCObject: Into<table::Row> + TryFrom<table::Row> {
     fn class() -> &'static str;
 
+    fn schema() -> table::Schema;
+
     async fn post(
         &self,
         _txn: Arc<Txn<'_>>,

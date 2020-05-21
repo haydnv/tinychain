@@ -1,79 +1,16 @@
-use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
 use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::lock::Mutex;
 use futures::{future, StreamExt};
-use serde::{Deserialize, Serialize};
 
-use crate::error;
 use crate::internal::block::Store;
-use crate::internal::chain::{Chain, Mutation};
+use crate::internal::chain::Chain;
 use crate::internal::file::*;
+use crate::state::table::Schema;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::link::TCPath;
-use crate::value::{TCResult, TCValue, ValueId, Version};
-
-#[derive(Clone, Deserialize, Serialize)]
-pub struct Schema {
-    pub key: Vec<(ValueId, TCPath)>,
-    pub columns: Vec<(ValueId, TCPath)>,
-    pub version: Version,
-}
-
-impl Schema {
-    pub fn as_map(&self) -> HashMap<ValueId, TCPath> {
-        [&self.key[..], &self.columns[..]]
-            .concat()
-            .into_iter()
-            .collect()
-    }
-
-    pub fn from(
-        key: Vec<(ValueId, TCPath)>,
-        columns: Vec<(ValueId, TCPath)>,
-        version: Version,
-    ) -> Schema {
-        Schema {
-            key,
-            columns,
-            version,
-        }
-    }
-
-    fn new() -> Schema {
-        Schema {
-            key: vec![],
-            columns: vec![],
-            version: "0.0.0".parse().unwrap(),
-        }
-    }
-}
-
-impl Mutation for Schema {}
-
-impl TryFrom<TCValue> for Schema {
-    type Error = error::TCError;
-
-    fn try_from(value: TCValue) -> TCResult<Schema> {
-        let value: Vec<TCValue> = value.try_into()?;
-        if value.len() == 3 {
-            let key: Vec<(ValueId, TCPath)> = value[0].clone().try_into()?;
-            let columns: Vec<(ValueId, TCPath)> = value[1].clone().try_into()?;
-            let version: Version = value[2].clone().try_into()?;
-            Ok(Schema {
-                key,
-                columns,
-                version,
-            })
-        } else {
-            let value: TCValue = value.into();
-            Err(error::bad_request("Expected Schema of the form ([(name, constructor)...], [(name, constructor), ...], Version), found", value))
-        }
-    }
-}
+use crate::value::TCResult;
 
 pub struct SchemaHistory {
     chain: Mutex<Chain<Schema>>,

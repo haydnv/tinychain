@@ -14,11 +14,70 @@ use crate::internal::block::Store;
 use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
 use crate::object::actor::Token;
-use crate::state::schema::{Schema, SchemaHistory};
+use crate::state::SchemaHistory;
 use crate::state::{Collection, Persistent};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::link::PathSegment;
-use crate::value::{TCResult, TCValue, ValueId};
+use crate::value::link::{PathSegment, TCPath};
+use crate::value::{TCResult, TCValue, ValueId, Version};
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct Schema {
+    pub key: Vec<(ValueId, TCPath)>,
+    pub columns: Vec<(ValueId, TCPath)>,
+    pub version: Version,
+}
+
+impl Schema {
+    pub fn as_map(&self) -> HashMap<ValueId, TCPath> {
+        [&self.key[..], &self.columns[..]]
+            .concat()
+            .into_iter()
+            .collect()
+    }
+
+    pub fn from(
+        key: Vec<(ValueId, TCPath)>,
+        columns: Vec<(ValueId, TCPath)>,
+        version: Version,
+    ) -> Schema {
+        Schema {
+            key,
+            columns,
+            version,
+        }
+    }
+
+    pub fn new() -> Schema {
+        Schema {
+            key: vec![],
+            columns: vec![],
+            version: "0.0.0".parse().unwrap(),
+        }
+    }
+}
+
+impl Mutation for Schema {}
+
+impl TryFrom<TCValue> for Schema {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<Schema> {
+        let value: Vec<TCValue> = value.try_into()?;
+        if value.len() == 3 {
+            let key: Vec<(ValueId, TCPath)> = value[0].clone().try_into()?;
+            let columns: Vec<(ValueId, TCPath)> = value[1].clone().try_into()?;
+            let version: Version = value[2].clone().try_into()?;
+            Ok(Schema {
+                key,
+                columns,
+                version,
+            })
+        } else {
+            let value: TCValue = value.into();
+            Err(error::bad_request("Expected Schema of the form ([(name, constructor)...], [(name, constructor), ...], Version), found", value))
+        }
+    }
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Row(Vec<TCValue>, Vec<Option<TCValue>>);

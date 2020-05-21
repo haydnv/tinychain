@@ -21,7 +21,7 @@ pub mod table;
 pub type Cluster = cluster::Cluster;
 pub type Directory = directory::Directory;
 pub type Graph = graph::Graph;
-pub type Schema = schema::Schema;
+pub type SchemaHistory = schema::SchemaHistory;
 
 #[async_trait]
 pub trait Collection {

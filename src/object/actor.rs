@@ -209,6 +209,27 @@ impl TCObject for Actor {
     fn class() -> &'static str {
         "Actor"
     }
+
+    fn schema() -> table::Schema {
+        // TODO: figure out a more concise way of constructing from a 'static str
+        let key = vec![
+            ("host".parse().unwrap(), "/sbin/link/host".parse().unwrap()),
+            ("id".parse().unwrap(), "/sbin/value".parse().unwrap()),
+        ];
+        let columns = vec![
+            ("lock".parse().unwrap(), "/sbin/value/op".parse().unwrap()),
+            (
+                "public_key".parse().unwrap(),
+                "/sbin/value/bytes".parse().unwrap(),
+            ),
+            (
+                "private_key".parse().unwrap(),
+                "/sbin/value/bytes".parse().unwrap(),
+            ),
+        ];
+        let version = "0.0.1".parse().unwrap();
+        table::Schema::from(key, columns, version)
+    }
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq)]
