@@ -270,6 +270,17 @@ impl TryFrom<TCValue> for link::TCPath {
     }
 }
 
+impl TryFrom<TCValue> for op::Op {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<op::Op> {
+        match v {
+            TCValue::Op(op) => Ok(op),
+            other => Err(error::bad_request("Expected Op but found", other)),
+        }
+    }
+}
+
 impl TryFrom<TCValue> for String {
     type Error = error::TCError;
 

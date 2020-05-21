@@ -54,18 +54,20 @@ impl Token {
 pub struct Actor {
     host: Link,
     id: TCValue,
+    lock: Op,
     public_key: PublicKey,
     private_key: SecretKey,
 }
 
 impl Actor {
-    pub fn new(host: Link, id: TCValue) -> Arc<Actor> {
+    pub fn new(host: Link, id: TCValue, lock: Op) -> Arc<Actor> {
         let mut rng = OsRng {};
         let keypair: Keypair = Keypair::generate(&mut rng);
 
         Arc::new(Actor {
             host,
             id,
+            lock,
             public_key: keypair.public,
             private_key: keypair.secret,
         })
@@ -152,8 +154,13 @@ impl TryFrom<table::Row> for Actor {
             let host = key.pop().unwrap().try_into()?;
             let private_key: Bytes = values.pop().unwrap().ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "private_key"))?.try_into()?;
             let public_key: Bytes = values.pop().unwrap().ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "public_key"))?.try_into()?;
+            let lock = values.pop().unwrap().ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "lock"))?.try_into()?;
 
-            Ok(Actor { host, id, public_key: PublicKey::from_bytes(&public_key[..]).map_err(|e| error::bad_request("Unable to parse public key", e))?, private_key: SecretKey::from_bytes(&private_key[..]).map_err(|e| error::bad_request("Unable to parse private key", e))? })
+            if values.is_empty() {
+                Ok(Actor { host, id, lock, public_key: PublicKey::from_bytes(&public_key[..]).map_err(|e| error::bad_request("Unable to parse public key", e))?, private_key: SecretKey::from_bytes(&private_key[..]).map_err(|e| error::bad_request("Unable to parse private key", e))? })
+            } else {
+                Err(error::bad_request("Got extra unknown values for Actor", format!("{:?}", values)))
+            }
         }
     }
 }
