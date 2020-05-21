@@ -6,7 +6,7 @@ use async_trait::async_trait;
 
 use crate::error;
 use crate::object::actor::Token;
-use crate::state::{State, table};
+use crate::state::{table, State};
 use crate::transaction::Txn;
 use crate::value::link::PathSegment;
 use crate::value::{Args, TCResult};

@@ -74,9 +74,10 @@ impl Actor {
     }
 
     pub fn sign_token(&self, token: &Token) -> TCResult<String> {
-        let keypair = Keypair::from_bytes(&[self.private_key.to_bytes(), self.public_key.to_bytes()].concat()).map_err(
-            |_| error::unauthorized("Unable to construct ECDSA keypair for the given user"),
-        )?;
+        let keypair = Keypair::from_bytes(
+            &[self.private_key.to_bytes(), self.public_key.to_bytes()].concat(),
+        )
+        .map_err(|_| error::unauthorized("Unable to construct ECDSA keypair for the given user"))?;
 
         let header = base64::encode(serde_json::to_string_pretty(&TokenHeader::default()).unwrap());
         let claims = base64::encode(serde_json::to_string_pretty(&token).unwrap());
@@ -137,7 +138,13 @@ impl Actor {
 
 impl Into<table::Row> for Actor {
     fn into(self) -> table::Row {
-        table::Row::from(vec![self.host.into(), self.id], vec![Some(self.public_key.to_bytes().to_vec().into()), Some(self.private_key.to_bytes().to_vec().into())])
+        table::Row::from(
+            vec![self.host.into(), self.id],
+            vec![
+                Some(self.public_key.to_bytes().to_vec().into()),
+                Some(self.private_key.to_bytes().to_vec().into()),
+            ],
+        )
     }
 }
 
@@ -148,18 +155,44 @@ impl TryFrom<table::Row> for Actor {
         let (mut key, mut values) = row.into();
 
         if key.len() != 2 || values.len() != 2 {
-            Err(error::bad_request("Expected Actor, found", format!("{:?}: {:?}", key, values)))
+            Err(error::bad_request(
+                "Expected Actor, found",
+                format!("{:?}: {:?}", key, values),
+            ))
         } else {
             let id = key.pop().unwrap().try_into()?;
             let host = key.pop().unwrap().try_into()?;
-            let private_key: Bytes = values.pop().unwrap().ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "private_key"))?.try_into()?;
-            let public_key: Bytes = values.pop().unwrap().ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "public_key"))?.try_into()?;
-            let lock = values.pop().unwrap().ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "lock"))?.try_into()?;
+            let private_key: Bytes = values
+                .pop()
+                .unwrap()
+                .ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "private_key"))?
+                .try_into()?;
+            let public_key: Bytes = values
+                .pop()
+                .unwrap()
+                .ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "public_key"))?
+                .try_into()?;
+            let lock = values
+                .pop()
+                .unwrap()
+                .ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "lock"))?
+                .try_into()?;
 
             if values.is_empty() {
-                Ok(Actor { host, id, lock, public_key: PublicKey::from_bytes(&public_key[..]).map_err(|e| error::bad_request("Unable to parse public key", e))?, private_key: SecretKey::from_bytes(&private_key[..]).map_err(|e| error::bad_request("Unable to parse private key", e))? })
+                Ok(Actor {
+                    host,
+                    id,
+                    lock,
+                    public_key: PublicKey::from_bytes(&public_key[..])
+                        .map_err(|e| error::bad_request("Unable to parse public key", e))?,
+                    private_key: SecretKey::from_bytes(&private_key[..])
+                        .map_err(|e| error::bad_request("Unable to parse private key", e))?,
+                })
             } else {
-                Err(error::bad_request("Got extra unknown values for Actor", format!("{:?}", values)))
+                Err(error::bad_request(
+                    "Got extra unknown values for Actor",
+                    format!("{:?}", values),
+                ))
             }
         }
     }

@@ -35,6 +35,22 @@ impl From<Row> for (Vec<TCValue>, Vec<Option<TCValue>>) {
     }
 }
 
+impl From<Row> for TCValue {
+    fn from(mut row: Row) -> TCValue {
+        TCValue::Vector(
+            [
+                row.0,
+                row.1
+                    .drain(..)
+                    .map(|i| i.unwrap_or(TCValue::None))
+                    .collect::<Vec<TCValue>>(),
+            ]
+            .concat::<TCValue>()
+            .to_vec(),
+        )
+    }
+}
+
 impl Mutation for Row {}
 
 pub struct Table {
@@ -63,6 +79,7 @@ impl Table {
         {
             row_id.push(value.try_into()?)
         }
+
         Ok(row_id)
     }
 
@@ -101,7 +118,7 @@ impl Collection for Table {
         row_id: &Self::Key,
         auth: &Option<Token>,
     ) -> TCResult<Self::Value> {
-        let row = self
+        let mut row = self
             .chain
             .lock()
             .await
@@ -121,7 +138,11 @@ impl Collection for Table {
             )
             .await;
 
-        Ok(row.1.into_iter().map(|v| v.into()).collect())
+        Ok(row
+            .1
+            .drain(..)
+            .map(|v| v.unwrap_or(TCValue::None))
+            .collect())
     }
 
     async fn put(
