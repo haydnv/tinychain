@@ -4,29 +4,25 @@ use std::iter::FromIterator;
 use std::sync::RwLock;
 
 pub struct Map<K: Clone + Eq + Hash + Send + Sync, V: Send + Sync> {
-    map: RwLock<Single<HashMap<K, V>>>,
+    map: RwLock<HashMap<K, V>>,
 }
 
 impl<K: Clone + Eq + Hash + Send + Sync, V: Clone + Send + Sync> Map<K, V> {
     pub fn new() -> Map<K, V> {
         Map {
-            map: RwLock::new(Single::new(Some(HashMap::new()))),
+            map: RwLock::new(HashMap::new()),
         }
     }
 
     pub fn get(&self, key: &K) -> Option<V> {
-        match self.map.read().unwrap().read().unwrap().get(key) {
+        match self.map.read().unwrap().get(key) {
             Some(val) => Some(val.clone()),
             None => None,
         }
     }
 
     pub fn insert(&self, key: K, value: V) -> Option<V> {
-        let mut lock = self.map.write().unwrap();
-        let mut map = lock.replace(None).unwrap();
-        let result = map.insert(key, value);
-        lock.replace(Some(map));
-        result
+        self.map.write().unwrap().insert(key, value)
     }
 }
 
@@ -36,8 +32,9 @@ impl<K: Clone + Eq + Hash + Send + Sync, V: Send + Sync> FromIterator<(K, V)> fo
         for (k, v) in i {
             map.insert(k, v);
         }
+
         Map {
-            map: RwLock::new(Single::new(Some(map))),
+            map: RwLock::new(map),
         }
     }
 }
@@ -64,34 +61,5 @@ impl<V> Deque<V> {
 
     pub fn push_back(&self, item: V) {
         self.deque.write().unwrap().push_back(item)
-    }
-}
-
-pub struct Single<T: Send + Sync> {
-    item: Vec<T>,
-}
-
-impl<T: Send + Sync> Single<T> {
-    pub fn new(item: Option<T>) -> Single<T> {
-        let mut v = Vec::with_capacity(1);
-
-        if let Some(item) = item {
-            v.push(item);
-        }
-
-        Single { item: v }
-    }
-
-    pub fn read(&self) -> Option<&T> {
-        self.item.last()
-    }
-
-    pub fn replace(&mut self, new_item: Option<T>) -> Option<T> {
-        let item = self.item.pop();
-        if let Some(new_item) = new_item {
-            self.item.push(new_item);
-        }
-
-        item
     }
 }
