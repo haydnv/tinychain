@@ -43,12 +43,26 @@ impl Collection for Cluster {
 
     async fn put(
         self: Arc<Self>,
-        _txn: &Arc<Txn<'_>>,
-        _path: TCPath,
-        _state: State,
-        _auth: &Option<Token>,
+        txn: &Arc<Txn<'_>>,
+        path: TCPath,
+        state: State,
+        auth: &Option<Token>,
     ) -> TCResult<Arc<Self>> {
-        Err(error::not_implemented())
+        if path[0] == "hosted" {
+            if path.len() > 1 {
+                self.hosted
+                    .clone()
+                    .put(txn, path.slice_from(1), state, auth)
+                    .await?;
+                Ok(self)
+            } else {
+                Err(error::forbidden(
+                    "You are not allowed to perform this action",
+                ))
+            }
+        } else {
+            Err(error::method_not_allowed(path))
+        }
     }
 }
 
