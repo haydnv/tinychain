@@ -13,9 +13,9 @@ use crate::http;
 use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::File;
-use crate::object::actor::{Actor, Token};
-use crate::object::Object;
-use crate::state::{Cluster, Collection, Directory, Persistent, State, Table};
+use crate::object::actor::Token;
+use crate::state::{Cluster, Collection, Directory, Persistent, State};
+use crate::state::table::Table;
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, TCPath};
 use crate::value::{TCResult, TCValue};
@@ -164,7 +164,6 @@ impl Host {
         if path[0] == "sbin" {
             match path[1].as_str() {
                 "auth" => Ok(Sbin::auth(&path.slice_from(2), key)?.into()),
-                "object" => Ok(State::Object(Sbin::object(self, &path.slice_from(2), key)?)),
                 "state" => Sbin::state(self, txn, &path.slice_from(2), key, auth).await,
                 "value" => Ok(Sbin::value(&path.slice_from(2), key)?.into()),
                 _ => Err(error::not_found(path)),
@@ -220,17 +219,6 @@ impl Sbin {
                 hasher.input(data);
                 Ok(Bytes::copy_from_slice(&hasher.result()[..]).into())
             }
-            _ => Err(error::not_found(path)),
-        }
-    }
-
-    fn object(host: &Arc<Host>, path: &TCPath, key: TCValue) -> TCResult<Object> {
-        match path.to_string().as_str() {
-            "/actor" => {
-                let actor: Actor = key.try_into()?;
-                Ok(Arc::new(actor).into())
-            }
-            "/actor/new" => Ok(Actor::new((host.address, host.http_port).into(), key).into()),
             _ => Err(error::not_found(path)),
         }
     }

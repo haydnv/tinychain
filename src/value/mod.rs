@@ -214,8 +214,8 @@ impl From<String> for TCValue {
 }
 
 impl From<Vec<u8>> for TCValue {
-    fn from(v: Vec<u8>) -> TCValue {
-        TCValue::Bytes(Bytes::copy_from_slice(&v[..]))
+    fn from(b: Vec<u8>) -> TCValue {
+        TCValue::Bytes(Bytes::copy_from_slice(&b[..]))
     }
 }
 
@@ -355,7 +355,6 @@ impl TryFrom<State> for TCValue {
 
     fn try_from(state: State) -> TCResult<TCValue> {
         match state {
-            State::Object(object) => Ok(object.into_value()),
             State::Value(value) => Ok(value),
             other => Err(error::bad_request("Expected a Value but found", other)),
         }

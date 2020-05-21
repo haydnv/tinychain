@@ -345,7 +345,6 @@ fn resolve_val(resolved: &HashMap<ValueId, State>, value: TCValue) -> TCResult<S
             for item in v.drain(..) {
                 match resolve_val(resolved, item)? {
                     State::Value(i) => val.push(i),
-                    State::Object(o) => val.push(o.into_value()),
                     other => {
                         return Err(error::bad_request(
                             "State {} cannot be serialized into a Value",

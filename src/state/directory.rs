@@ -138,7 +138,7 @@ impl Collection for Directory {
                         Ok(Graph::from_store(txn_id, store).await.into())
                     }
                     EntryType::Table if path.len() == 1 => {
-                        Ok(Table::from_store(txn_id, store).await.into())
+                        Ok(table::Table::from_store(txn_id, store).await.into())
                     }
                     _ => Err(error::not_found(path)),
                 }
@@ -232,7 +232,7 @@ impl File for Directory {
                     Graph::copy_from(reader, txn_id, dest).await;
                 }
                 EntryType::Table => {
-                    Table::copy_from(reader, txn_id, dest).await;
+                    table::Table::copy_from(reader, txn_id, dest).await;
                 }
             }
         }
@@ -277,7 +277,7 @@ impl File for Directory {
                         .await
                 }
                 EntryType::Table => {
-                    Table::from_store(&txn_id, store)
+                    table::Table::from_store(&txn_id, store)
                         .await
                         .copy_into(txn_id, writer)
                         .await

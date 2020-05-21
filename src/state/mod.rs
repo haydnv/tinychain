@@ -16,12 +16,11 @@ mod cluster;
 mod directory;
 mod graph;
 mod schema;
-mod table;
+pub mod table;
 
 pub type Cluster = cluster::Cluster;
 pub type Directory = directory::Directory;
 pub type Graph = graph::Graph;
-pub type Table = table::Table;
 pub type Schema = schema::Schema;
 
 #[async_trait]
@@ -57,7 +56,7 @@ pub enum State {
     Cluster(Arc<Cluster>),
     Directory(Arc<Directory>),
     Graph(Arc<Graph>),
-    Table(Arc<Table>),
+    Table(Arc<table::Table>),
     Object(Object),
     Value(TCValue),
 }
@@ -146,8 +145,8 @@ impl From<Arc<Graph>> for State {
     }
 }
 
-impl From<Arc<Table>> for State {
-    fn from(table: Arc<Table>) -> State {
+impl From<Arc<table::Table>> for State {
+    fn from(table: Arc<table::Table>) -> State {
         State::Table(table)
     }
 }

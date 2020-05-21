@@ -6,18 +6,16 @@ use async_trait::async_trait;
 
 use crate::error;
 use crate::object::actor::Token;
-use crate::state::State;
+use crate::state::{State, table};
 use crate::transaction::Txn;
 use crate::value::link::PathSegment;
-use crate::value::{Args, TCResult, TCValue};
+use crate::value::{Args, TCResult};
 
 pub mod actor;
 
 #[async_trait]
-pub trait TCObject: Into<TCValue> + TryFrom<TCValue> {
+pub trait TCObject: Into<table::Row> + TryFrom<table::Row> {
     fn class() -> &'static str;
-
-    fn id(&self) -> TCValue;
 
     async fn post(
         &self,
@@ -26,7 +24,7 @@ pub trait TCObject: Into<TCValue> + TryFrom<TCValue> {
         mut _args: Args,
         _auth: &Option<Token>,
     ) -> TCResult<State> {
-        Err(error::method_not_allowed(self.id()))
+        Err(error::method_not_allowed(Self::class()))
     }
 }
 
@@ -39,12 +37,6 @@ impl Object {
     pub fn class(&self) -> &'static str {
         match self {
             Object::Actor(_) => actor::Actor::class(),
-        }
-    }
-
-    pub fn into_value(self) -> TCValue {
-        match self {
-            Object::Actor(a) => TCValue::from(&*a),
         }
     }
 

@@ -6,14 +6,14 @@ use crate::error;
 use crate::internal::block::Store;
 use crate::internal::file::*;
 use crate::object::actor::Token;
-use crate::state::{Collection, Directory, File, Persistent, Schema, State, Table};
+use crate::state::*;
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
 use crate::value::{TCResult, TCValue};
 
 pub struct Cluster {
-    actors: Arc<Table>,
-    hosts: Arc<Table>,
+    actors: Arc<table::Table>,
+    hosts: Arc<table::Table>,
     hosted: Arc<Directory>,
 }
 
@@ -56,7 +56,7 @@ impl Persistent for Cluster {
     type Config = TCValue;
 
     async fn create(txn: &Arc<Txn<'_>>, _: TCValue) -> TCResult<Arc<Cluster>> {
-        let actors = Table::create(
+        let actors = table::Table::create(
             &txn.subcontext("actors".parse()?).await?,
             Schema::from(
                 vec![("actor".parse()?, "/sbin/object/actor".parse()?)],
@@ -66,7 +66,7 @@ impl Persistent for Cluster {
         )
         .await?;
 
-        let hosts = Table::create(
+        let hosts = table::Table::create(
             &txn.subcontext("hosts".parse()?).await?,
             Schema::from(
                 vec![("address".parse()?, "/sbin/value/link/address".parse()?)],
@@ -96,7 +96,7 @@ impl Persistent for Cluster {
 impl File for Cluster {
     async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, dest: Arc<Store>) -> Arc<Self> {
         println!("Cluster::copy_from actors");
-        let actors = Table::copy_from(
+        let actors = table::Table::copy_from(
             reader,
             txn_id,
             dest.reserve(txn_id, "actors".parse().unwrap())
@@ -106,7 +106,7 @@ impl File for Cluster {
         .await;
 
         println!("Cluster::copy_from hosts");
-        let hosts = Table::copy_from(
+        let hosts = table::Table::copy_from(
             reader,
             txn_id,
             dest.reserve(txn_id, "hosts".parse().unwrap())
@@ -144,7 +144,7 @@ impl File for Cluster {
     }
 
     async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> Arc<Self> {
-        let actors = Table::from_store(
+        let actors = table::Table::from_store(
             txn_id,
             store
                 .get_store(txn_id, &"actors".parse().unwrap())
@@ -153,7 +153,7 @@ impl File for Cluster {
         )
         .await;
 
-        let hosts = Table::from_store(
+        let hosts = table::Table::from_store(
             txn_id,
             store
                 .get_store(txn_id, &"hosts".parse().unwrap())

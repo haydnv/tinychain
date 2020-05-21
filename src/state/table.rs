@@ -21,7 +21,19 @@ use crate::value::link::PathSegment;
 use crate::value::{TCResult, TCValue, ValueId};
 
 #[derive(Clone, Deserialize, Serialize)]
-struct Row(Vec<TCValue>, Vec<Option<TCValue>>);
+pub struct Row(Vec<TCValue>, Vec<Option<TCValue>>);
+
+impl Row {
+    pub fn from(key: Vec<TCValue>, values: Vec<Option<TCValue>>) -> Row {
+        Row(key, values)
+    }
+}
+
+impl From<Row> for (Vec<TCValue>, Vec<Option<TCValue>>) {
+    fn from(row: Row) -> (Vec<TCValue>, Vec<Option<TCValue>>) {
+        (row.0, row.1)
+    }
+}
 
 impl Mutation for Row {}
 

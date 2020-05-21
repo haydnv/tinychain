@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::object::TCObject;
+use crate::state::table;
 use crate::value::link::{Link, TCPath};
 use crate::value::{Op, TCResult, TCValue};
 
@@ -54,7 +55,7 @@ pub struct Actor {
     host: Link,
     id: TCValue,
     public_key: PublicKey,
-    private_key: Option<SecretKey>,
+    private_key: SecretKey,
 }
 
 impl Actor {
@@ -66,20 +67,14 @@ impl Actor {
             host,
             id,
             public_key: keypair.public,
-            private_key: Some(keypair.secret),
+            private_key: keypair.secret,
         })
     }
 
     pub fn sign_token(&self, token: &Token) -> TCResult<String> {
-        let keypair = if let Some(secret) = &self.private_key {
-            Keypair::from_bytes(&[secret.to_bytes(), self.public_key.to_bytes()].concat()).map_err(
-                |_| error::unauthorized("Unable to construct ECDSA keypair for the given user"),
-            )?
-        } else {
-            return Err(error::forbidden(
-                "You are not authorized to issue tokens on behalf of this user",
-            ));
-        };
+        let keypair = Keypair::from_bytes(&[self.private_key.to_bytes(), self.public_key.to_bytes()].concat()).map_err(
+            |_| error::unauthorized("Unable to construct ECDSA keypair for the given user"),
+        )?;
 
         let header = base64::encode(serde_json::to_string_pretty(&TokenHeader::default()).unwrap());
         let claims = base64::encode(serde_json::to_string_pretty(&token).unwrap());
@@ -138,60 +133,34 @@ impl Actor {
     }
 }
 
+impl Into<table::Row> for Actor {
+    fn into(self) -> table::Row {
+        table::Row::from(vec![self.host.into(), self.id], vec![Some(self.public_key.to_bytes().to_vec().into()), Some(self.private_key.to_bytes().to_vec().into())])
+    }
+}
+
+impl TryFrom<table::Row> for Actor {
+    type Error = error::TCError;
+
+    fn try_from(row: table::Row) -> TCResult<Actor> {
+        let (mut key, mut values) = row.into();
+
+        if key.len() != 2 || values.len() != 2 {
+            Err(error::bad_request("Expected Actor, found", format!("{:?}: {:?}", key, values)))
+        } else {
+            let id = key.pop().unwrap().try_into()?;
+            let host = key.pop().unwrap().try_into()?;
+            let private_key: Bytes = values.pop().unwrap().ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "private_key"))?.try_into()?;
+            let public_key: Bytes = values.pop().unwrap().ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "public_key"))?.try_into()?;
+
+            Ok(Actor { host, id, public_key: PublicKey::from_bytes(&public_key[..]).map_err(|e| error::bad_request("Unable to parse public key", e))?, private_key: SecretKey::from_bytes(&private_key[..]).map_err(|e| error::bad_request("Unable to parse private key", e))? })
+        }
+    }
+}
+
 impl fmt::Display for Actor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Actor({}, {})", self.host, self.id)
-    }
-}
-
-impl From<&Actor> for TCValue {
-    fn from(actor: &Actor) -> TCValue {
-        let private_key: TCValue = if let Some(private_key) = &actor.private_key {
-            private_key.to_bytes().to_vec().into()
-        } else {
-            TCValue::None
-        };
-
-        TCValue::Vector(vec![
-            actor.host.clone().into(),
-            actor.id.clone(),
-            private_key,
-            actor.public_key.to_bytes().to_vec().into(),
-        ])
-    }
-}
-
-impl From<Actor> for TCValue {
-    fn from(actor: Actor) -> TCValue {
-        TCValue::from(&actor)
-    }
-}
-
-impl TryFrom<TCValue> for Actor {
-    type Error = error::TCError;
-
-    fn try_from(value: TCValue) -> TCResult<Actor> {
-        let mut value: Vec<TCValue> = value.try_into()?;
-        if value.len() == 4 {
-            let public_key: Bytes = value.pop().unwrap().try_into()?;
-
-            Ok(Actor {
-                public_key: PublicKey::from_bytes(&public_key[..])
-                    .map_err(|_| error::unauthorized("Invalid public key specified for Actor"))?,
-                private_key: if let Some(TCValue::Bytes(b)) = value.pop() {
-                    Some(SecretKey::from_bytes(&b[..]).map_err(|_| {
-                        error::unauthorized("Invalid private key specified for Actor")
-                    })?)
-                } else {
-                    None
-                },
-                id: value.pop().unwrap(),
-                host: value.pop().unwrap().try_into()?,
-            })
-        } else {
-            let value: TCValue = value.into();
-            Err(error::bad_request("Expected Actor, found", value))
-        }
     }
 }
 
@@ -199,10 +168,6 @@ impl TryFrom<TCValue> for Actor {
 impl TCObject for Actor {
     fn class() -> &'static str {
         "Actor"
-    }
-
-    fn id(&self) -> TCValue {
-        self.id.clone()
     }
 }
 
