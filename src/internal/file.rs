@@ -1,5 +1,6 @@
+use std::collections::VecDeque;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::task::{Context, Poll, Waker};
 
 use async_trait::async_trait;
@@ -7,7 +8,7 @@ use bytes::Bytes;
 use futures::Stream;
 
 use crate::internal::block::Store;
-use crate::internal::cache::Deque;
+//use crate::internal::cache::Deque;
 use crate::transaction::TxnId;
 use crate::value::link::TCPath;
 
@@ -29,14 +30,14 @@ struct SharedState {
 }
 
 pub struct FileCopier {
-    contents: Deque<FileData>,
+    contents: RwLock<VecDeque<FileData>>,
     shared_state: Arc<Mutex<SharedState>>,
 }
 
 impl FileCopier {
     pub fn open() -> FileCopier {
         FileCopier {
-            contents: Deque::new(),
+            contents: RwLock::new(VecDeque::new()),
             shared_state: Arc::new(Mutex::new(SharedState {
                 open: true,
                 waker: None,
@@ -65,7 +66,7 @@ impl FileCopier {
 
         println!("FileCopier::write_file {}", path);
 
-        self.contents.push_back((path, blocks));
+        self.contents.write().unwrap().push_back((path, blocks));
         if let Some(waker) = &shared_state.waker {
             waker.clone().wake();
         }
@@ -77,7 +78,7 @@ impl Stream for FileCopier {
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let mut shared_state = self.shared_state.lock().unwrap();
-        if self.contents.is_empty() {
+        if self.contents.read().unwrap().is_empty() {
             if shared_state.open {
                 shared_state.waker = Some(cxt.waker().clone());
                 Poll::Pending
@@ -85,7 +86,7 @@ impl Stream for FileCopier {
                 Poll::Ready(None)
             }
         } else {
-            let item = self.contents.pop_front();
+            let item = self.contents.write().unwrap().pop_front();
             if let Some((path, _)) = &item {
                 println!("FileCopier::next ({}, <blocks>)", path);
             }

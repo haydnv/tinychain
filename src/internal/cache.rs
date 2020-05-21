@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::iter::FromIterator;
 use std::sync::RwLock;
@@ -36,30 +36,5 @@ impl<K: Clone + Eq + Hash + Send + Sync, V: Send + Sync> FromIterator<(K, V)> fo
         Map {
             map: RwLock::new(map),
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct Deque<V> {
-    deque: RwLock<VecDeque<V>>,
-}
-
-impl<V> Deque<V> {
-    pub fn new() -> Deque<V> {
-        Deque {
-            deque: RwLock::new(VecDeque::new()),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.deque.read().unwrap().is_empty()
-    }
-
-    pub fn pop_front(&self) -> Option<V> {
-        self.deque.write().unwrap().pop_front()
-    }
-
-    pub fn push_back(&self, item: V) {
-        self.deque.write().unwrap().push_back(item)
     }
 }
