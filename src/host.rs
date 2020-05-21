@@ -167,7 +167,7 @@ impl Host {
             match dir.as_str() {
                 "auth" => Ok(Sbin::auth(path, key)?.into()),
                 "object" => Ok(Sbin::object(path, key)?.into()),
-                "state" => Sbin::state(self, txn, path, key, auth).await,
+                "state" => Sbin::state(txn, path, key).await,
                 "value" => Ok(Sbin::value(path, key)?.into()),
                 _ => Err(error::not_found(path)),
             }
@@ -227,9 +227,9 @@ impl Sbin {
     }
 
     fn object(path: &TCPath, key: TCValue) -> TCResult<TCValue> {
-        let row: Row = key.try_into()?;
         match path.to_string().as_str() {
             "/object/actor" => {
+                let row: Row = key.try_into()?;
                 let actor: Actor = row.try_into()?;
                 let row: Row = actor.into();
                 Ok(TCValue::from(row))
@@ -238,29 +238,9 @@ impl Sbin {
         }
     }
 
-    async fn state(
-        host: &Arc<Host>,
-        txn: &Arc<Txn<'_>>,
-        path: &TCPath,
-        key: TCValue,
-        auth: &Option<Token>,
-    ) -> TCResult<State> {
+    async fn state(txn: &Arc<Txn<'_>>, path: &TCPath, key: TCValue) -> TCResult<State> {
         match path.to_string().as_str() {
-            "/cluster" => {
-                let cluster = Cluster::create(txn, TCValue::None).await?;
-
-                let mut dest: TCPath = key.try_into()?;
-                let name: TCPath = if let Some(name) = dest.pop() {
-                    name.into()
-                } else {
-                    return Err(error::bad_request("Cluster context cannot be '/'", dest));
-                };
-
-                let dir = host
-                    .put(txn, dest.into(), name.clone().into(), cluster.into(), auth)
-                    .await?;
-                dir.get(txn, name.into(), auth).await
-            }
+            "/cluster" => Ok(Cluster::create(txn, key.try_into()?).await?.into()),
             "/table" => Ok(Table::create(txn, key.try_into()?).await?.into()),
             _ => Err(error::not_found(path)),
         }
