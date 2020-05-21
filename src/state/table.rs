@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::iter;
 use std::sync::Arc;
 
@@ -37,17 +37,30 @@ impl From<Row> for (Vec<TCValue>, Vec<Option<TCValue>>) {
 
 impl From<Row> for TCValue {
     fn from(mut row: Row) -> TCValue {
-        TCValue::Vector(
-            [
-                row.0,
-                row.1
-                    .drain(..)
-                    .map(|i| i.unwrap_or(TCValue::None))
-                    .collect::<Vec<TCValue>>(),
-            ]
-            .concat::<TCValue>()
-            .to_vec(),
-        )
+        TCValue::Vector(vec![
+            row.0.into(),
+            row.1
+                .drain(..)
+                .map(|i| i.unwrap_or(TCValue::None))
+                .collect(),
+        ])
+    }
+}
+
+impl TryFrom<TCValue> for Row {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<Row> {
+        let mut value: Vec<TCValue> = value.try_into()?;
+        if value.len() == 2 {
+            let mut row_values: Vec<TCValue> = value.pop().unwrap().try_into()?;
+            let row_values: Vec<Option<TCValue>> = row_values.drain(..).map(|v| v.into()).collect();
+            let row_key: Vec<TCValue> = value.pop().unwrap().try_into()?;
+            Ok(Row(row_key, row_values))
+        } else {
+            let value: TCValue = value.into();
+            Err(error::bad_request("Expected Row but found", value))
+        }
     }
 }
 

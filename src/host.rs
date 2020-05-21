@@ -13,8 +13,8 @@ use crate::http;
 use crate::internal::block::Store;
 use crate::internal::cache::Map;
 use crate::internal::file::File;
-use crate::object::actor::Token;
-use crate::state::table::Table;
+use crate::object::actor::{Actor, Token};
+use crate::state::table::{Row, Table};
 use crate::state::{Cluster, Collection, Directory, Persistent, State};
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, TCPath};
@@ -162,10 +162,13 @@ impl Host {
         }
 
         if path[0] == "sbin" {
-            match path[1].as_str() {
-                "auth" => Ok(Sbin::auth(&path.slice_from(2), key)?.into()),
-                "state" => Sbin::state(self, txn, &path.slice_from(2), key, auth).await,
-                "value" => Ok(Sbin::value(&path.slice_from(2), key)?.into()),
+            let dir = &path[1];
+            let path = &path.slice_from(2);
+            match dir.as_str() {
+                "auth" => Ok(Sbin::auth(path, key)?.into()),
+                "object" => Ok(Sbin::object(path, key)?.into()),
+                "state" => Sbin::state(self, txn, path, key, auth).await,
+                "value" => Ok(Sbin::value(path, key)?.into()),
                 _ => Err(error::not_found(path)),
             }
         } else if let Some(dir) = self.root.get(&path[0].clone().into()) {
@@ -218,6 +221,18 @@ impl Sbin {
                 let mut hasher = Sha256::new();
                 hasher.input(data);
                 Ok(Bytes::copy_from_slice(&hasher.result()[..]).into())
+            }
+            _ => Err(error::not_found(path)),
+        }
+    }
+
+    fn object(path: &TCPath, key: TCValue) -> TCResult<TCValue> {
+        let row: Row = key.try_into()?;
+        match path.to_string().as_str() {
+            "/object/actor" => {
+                let actor: Actor = row.try_into()?;
+                let row: Row = actor.into();
+                Ok(TCValue::from(row))
             }
             _ => Err(error::not_found(path)),
         }
