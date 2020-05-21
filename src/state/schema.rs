@@ -25,15 +25,10 @@ pub struct Schema {
 
 impl Schema {
     pub fn as_map(&self) -> HashMap<ValueId, TCPath> {
-        let mut map: HashMap<ValueId, TCPath> = HashMap::new();
-        for (name, ctr) in &self.key {
-            map.insert(name.clone(), ctr.clone());
-        }
-        for (name, ctr) in &self.columns {
-            map.insert(name.clone(), ctr.clone());
-        }
-
-        map
+        [&self.key[..], &self.columns[..]]
+            .concat()
+            .into_iter()
+            .collect()
     }
 
     pub fn from(

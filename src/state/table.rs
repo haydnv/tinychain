@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use futures::future::{self, try_join_all};
 use futures::lock::Mutex;
 use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::internal::block::Store;
@@ -19,19 +20,10 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::{TCResult, TCValue, ValueId};
 
-type Row = (Vec<TCValue>, Vec<Option<TCValue>>);
+#[derive(Clone, Deserialize, Serialize)]
+struct Row(Vec<TCValue>, Vec<Option<TCValue>>);
 
 impl Mutation for Row {}
-
-fn update_row(row: &mut Row, mut values: Vec<Option<TCValue>>) {
-    let mut i = values.len();
-    while !values.is_empty() {
-        if let Some(value) = values.pop() {
-            row.1[i - 1] = value;
-        }
-        i -= 1;
-    }
-}
 
 pub struct Table {
     schema: Arc<SchemaHistory>,
@@ -79,7 +71,7 @@ impl Table {
             ));
         }
 
-        Ok((
+        Ok(Row(
             row_id,
             iter::repeat(None).take(schema.columns.len()).collect(),
         ))
@@ -105,8 +97,13 @@ impl Collection for Table {
             .filter(|r: &Row| future::ready(&r.0 == row_id))
             .fold(
                 self.new_row(&txn, row_id, auth).await?,
-                |mut row, mutation| {
-                    update_row(&mut row, mutation.1);
+                |mut row, mut mutation| {
+                    for (i, value) in mutation.1.drain(..).enumerate() {
+                        if let Some(value) = value {
+                            row.1[i] = Some(value);
+                        }
+                    }
+
                     future::ready(row)
                 },
             )
@@ -160,7 +157,8 @@ impl Collection for Table {
             }
         }
 
-        let row: Row = (row_id, mutated);
+        let row = Row(row_id, mutated);
+
         self.chain
             .lock()
             .await
