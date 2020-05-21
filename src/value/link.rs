@@ -336,6 +336,19 @@ pub struct TCPath {
 }
 
 impl TCPath {
+    pub fn from_path(&self, other: &TCPath) -> TCResult<TCPath> {
+        if self.segments[..other.len()] == other.segments[..] {
+            Ok(TCPath {
+                segments: self.segments[other.len()..].to_vec(),
+            })
+        } else {
+            Err(error::bad_request(
+                "Tried to calculate the path of {} from an incorrect root",
+                other,
+            ))
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
     }

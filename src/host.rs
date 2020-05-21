@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -11,13 +12,12 @@ use structopt::StructOpt;
 use crate::error;
 use crate::http;
 use crate::internal::block::Store;
-use crate::internal::cache::Map;
 use crate::internal::file::File;
 use crate::object::actor::{Actor, Token};
 use crate::state::table::{Row, Table};
 use crate::state::{Cluster, Collection, Directory, Persistent, State};
 use crate::transaction::Txn;
-use crate::value::link::{Link, LinkHost, TCPath};
+use crate::value::link::{Link, LinkHost, PathSegment, TCPath};
 use crate::value::{TCResult, TCValue};
 
 const RESERVED: [&str; 1] = ["/sbin"];
@@ -73,12 +73,13 @@ impl std::ops::Add<std::time::Duration> for NetworkTime {
     }
 }
 
+#[derive(Clone)]
 pub struct Host {
     address: IpAddr,
     http_port: u16,
     data_dir: Arc<Store>,
     workspace: Arc<Store>,
-    root: Map<TCPath, Arc<Directory>>,
+    root: Hosted,
 }
 
 impl Host {
@@ -88,18 +89,21 @@ impl Host {
         let data_dir = Store::new(config.data_dir);
         let workspace = Store::new_tmp(config.workspace);
 
-        let host = Arc::new(Host {
+        let mut hosted = config.hosted;
+        hosted.sort_by(|a, b| a.len().partial_cmp(&b.len()).unwrap());
+
+        let mut host = Host {
             address: config.address,
             http_port: config.http_port,
             data_dir,
             workspace,
-            root: Map::new(),
-        });
+            root: Hosted::new(),
+        };
 
-        let txn = host.new_transaction().await?;
+        let txn = Arc::new(host.clone()).new_transaction().await?;
         let txn_id = &txn.id();
 
-        for path in config.hosted {
+        while let Some(path) = hosted.pop() {
             for reserved in RESERVED.iter() {
                 if path.to_string().starts_with(reserved) {
                     return Err(error::bad_request(
@@ -109,18 +113,25 @@ impl Host {
                 }
             }
 
+            if host.root.get(&path).is_some() {
+                return Err(error::bad_request(
+                    "Cannot host a subdirectory of a hosted directory",
+                    path,
+                ));
+            }
+
             let dir = if let Some(store) = host.data_dir.get_store(txn_id, &path).await {
                 Directory::from_store(txn_id, store).await
             } else {
                 Directory::new(txn_id, host.data_dir.reserve(txn_id, path.clone()).await?).await?
             };
 
-            host.root.insert(path, dir);
+            host.root.push(path, dir);
         }
 
         host.data_dir.commit(&txn.id()).await;
 
-        Ok(host)
+        Ok(Arc::new(host))
     }
 
     pub async fn http_listen(
@@ -171,8 +182,8 @@ impl Host {
                 "value" => Ok(Sbin::value(path, key)?.into()),
                 _ => Err(error::not_found(path)),
             }
-        } else if let Some(dir) = self.root.get(&path[0].clone().into()) {
-            let state = dir.get(txn, &path.slice_from(1), auth).await?;
+        } else if let Some((path, dir)) = self.root.get(path) {
+            let state = dir.get(txn, &path, auth).await?;
             state.get(txn, key, auth).await
         } else {
             Err(error::not_found(path))
@@ -198,11 +209,10 @@ impl Host {
 
         if path.is_empty() {
             Err(error::method_not_allowed(path))
-        } else if let Some(dir) = self.root.get(&path[0].clone().into()) {
+        } else if let Some((mut path, dir)) = self.root.get(path) {
             let key: TCPath = key.try_into()?;
-            let mut path = path.slice_from(1).clone();
             path.extend(key.into_iter());
-            Ok(dir.put(txn, path, state, auth).await?.into())
+            Ok(dir.clone().put(txn, path, state, auth).await?.into())
         } else {
             Err(error::not_found(path))
         }
@@ -271,5 +281,66 @@ impl Sbin {
             }
             _ => Err(error::not_found(path)),
         }
+    }
+}
+
+#[derive(Clone)]
+struct HostedNode {
+    children: HashMap<PathSegment, HostedNode>,
+}
+
+#[derive(Clone)]
+struct Hosted {
+    root: HostedNode,
+    hosted: HashMap<TCPath, Arc<Directory>>,
+}
+
+impl Hosted {
+    fn new() -> Hosted {
+        Hosted {
+            root: HostedNode {
+                children: HashMap::new(),
+            },
+            hosted: HashMap::new(),
+        }
+    }
+
+    fn get(&self, path: &TCPath) -> Option<(TCPath, Arc<Directory>)> {
+        println!("checking for hosted directory {}", path);
+        let mut node = &self.root;
+        let mut found_path = TCPath::default();
+        for segment in path.clone() {
+            if let Some(child) = node.children.get(&segment) {
+                found_path.push(segment);
+                node = child;
+                println!("found {}", found_path);
+            } else if found_path != TCPath::default() {
+                return Some((
+                    path.from_path(&found_path).unwrap(),
+                    self.hosted.get(&found_path).unwrap().clone(),
+                ));
+            } else {
+                println!("couldn't find {}", segment);
+                return None;
+            }
+        }
+
+        if let Some(dir) = self.hosted.get(&found_path) {
+            Some((path.from_path(&found_path).unwrap(), dir.clone()))
+        } else {
+            None
+        }
+    }
+
+    fn push(&mut self, path: TCPath, dir: Arc<Directory>) -> Option<Arc<Directory>> {
+        let mut node = &mut self.root;
+        for segment in path.clone() {
+            node = node.children.entry(segment).or_insert(HostedNode {
+                children: HashMap::new(),
+            });
+        }
+
+        println!("Hosted directory: {}", path);
+        self.hosted.insert(path, dir)
     }
 }

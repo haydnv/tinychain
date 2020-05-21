@@ -276,9 +276,9 @@ impl Store {
                 return Err(error::internal("Tried to create block store with no name"));
             }
 
-            let mut state = self.state.lock().await;
-
             if path.len() == 1 {
+                let mut state = self.state.lock().await;
+
                 if !state.cache.subdirs.contains_key(txn_id) {
                     state.cache.subdirs.insert(txn_id.clone(), HashMap::new());
                 }
@@ -304,12 +304,8 @@ impl Store {
                         .clone())
                 }
             } else {
-                state
-                    .subdirs
-                    .get_mut(&path[0])
-                    .unwrap()
-                    .reserve(txn_id, path.slice_from(1))
-                    .await
+                let store = self.reserve_or_get(txn_id, &path[0].clone().into()).await?;
+                store.reserve(txn_id, path.slice_from(1)).await
             }
         })
     }
