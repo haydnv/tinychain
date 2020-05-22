@@ -142,6 +142,13 @@ impl Table {
         let schema = self.schema.at(txn.id()).await;
         let key_size = schema.key.len();
 
+        if value.len() != key_size {
+            return Err(error::bad_request(
+                &format!("Expected a key of length {}, found", key_size),
+                value.len(),
+            ));
+        }
+
         let mut row_id: Vec<TCValue> = Vec::with_capacity(key_size);
         for value in try_join_all(
             value

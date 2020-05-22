@@ -212,7 +212,10 @@ impl TCObject for Actor {
     fn schema() -> table::Schema {
         // TODO: figure out a more concise way of constructing from a 'static str
         let key = vec![
-            ("host".parse().unwrap(), "/sbin/link/host".parse().unwrap()),
+            (
+                "host".parse().unwrap(),
+                "/sbin/value/link/host".parse().unwrap(),
+            ),
             ("id".parse().unwrap(), "/sbin/value".parse().unwrap()),
         ];
         let columns = vec![

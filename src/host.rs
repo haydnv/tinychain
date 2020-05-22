@@ -215,7 +215,7 @@ impl Host {
             let path = &path.slice_from(2);
             match dir.as_str() {
                 "auth" => Err(error::method_not_allowed(path)),
-                "object" => Ok(Sbin::put_object(self, path, key, state)?.into()),
+                "object" => Ok(Sbin::put_object(path, key, state)?.into()),
                 "state" => Err(error::method_not_allowed(path)),
                 "value" => Err(error::method_not_allowed(path)),
                 _ => Err(error::not_found(path)),
@@ -223,7 +223,7 @@ impl Host {
         } else if let Some((mut path, dir)) = self.root.get(path) {
             let key: TCPath = key.try_into()?;
             path.extend(key.into_iter());
-            Ok(dir.clone().put(txn, path, state, auth).await?.into())
+            Ok(dir.clone().put(txn, path, state, auth).await?)
         } else {
             Err(error::not_found(path))
         }
@@ -259,12 +259,12 @@ impl Sbin {
         }
     }
 
-    fn put_object(host: &Arc<Host>, path: &TCPath, id: TCValue, state: State) -> TCResult<TCValue> {
+    fn put_object(path: &TCPath, id: TCValue, state: State) -> TCResult<TCValue> {
         match path.to_string().as_str() {
             "/actor" => {
-                let state: TCValue = state.try_into()?;
-                let actor =
-                    Actor::new((host.address, host.http_port).into(), id, state.try_into()?);
+                let (host, id): (Link, TCValue) = id.try_into()?;
+                let lock: TCValue = state.try_into()?;
+                let actor = Actor::new(host, id, lock.try_into()?);
                 Ok(TCValue::from(actor.as_row()))
             }
             _ => Err(error::not_found(path)),

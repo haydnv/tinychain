@@ -22,7 +22,7 @@ const UNSERIALIZABLE: &str =
 fn line_numbers(s: &str) -> String {
     s.lines()
         .enumerate()
-        .map(|(i, l)| format!("{} {}", i, l))
+        .map(|(i, l)| format!("{} {}", i + 1, l))
         .collect::<Vec<String>>()
         .join("\n")
 }

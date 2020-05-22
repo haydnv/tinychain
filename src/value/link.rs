@@ -5,6 +5,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use addr::DomainName;
 use serde::de;
 use serde::ser::{SerializeMap, Serializer};
 
@@ -13,10 +14,21 @@ use crate::value::{TCResult, TCValue, ValueId};
 
 pub type PathSegment = ValueId;
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
+    DomainName(DomainName),
     IPv4(Ipv4Addr),
     IPv6(Ipv6Addr),
+}
+
+impl Clone for LinkAddress {
+    fn clone(&self) -> Self {
+        use LinkAddress::*;
+        match self {
+            DomainName(n) => DomainName(n.to_string().parse().unwrap()),
+            other => other.clone(),
+        }
+    }
 }
 
 impl fmt::Display for LinkAddress {
@@ -24,9 +36,22 @@ impl fmt::Display for LinkAddress {
         use LinkAddress::*;
 
         match self {
+            DomainName(addr) => write!(f, "{}", addr),
             IPv4(addr) => write!(f, "{}", addr),
             IPv6(addr) => write!(f, "{}", addr),
         }
+    }
+}
+
+impl From<Ipv4Addr> for LinkAddress {
+    fn from(addr: Ipv4Addr) -> LinkAddress {
+        LinkAddress::IPv4(addr)
+    }
+}
+
+impl From<Ipv6Addr> for LinkAddress {
+    fn from(addr: Ipv6Addr) -> LinkAddress {
+        LinkAddress::IPv6(addr)
     }
 }
 
@@ -39,6 +64,12 @@ impl From<IpAddr> for LinkAddress {
             V4(addr) => IPv4(addr),
             V6(addr) => IPv6(addr),
         }
+    }
+}
+
+impl From<DomainName> for LinkAddress {
+    fn from(addr: DomainName) -> LinkAddress {
+        LinkAddress::DomainName(addr)
     }
 }
 
@@ -119,6 +150,11 @@ impl LinkHost {
     }
 }
 
+fn is_ipv4(s: &str) -> bool {
+    let segments: Vec<&str> = s.split('.').collect();
+    segments.len() == 4 && !segments.iter().any(|s| s.parse::<u16>().is_err())
+}
+
 impl FromStr for LinkHost {
     type Err = error::TCError;
 
@@ -128,25 +164,60 @@ impl FromStr for LinkHost {
         }
 
         let protocol = LinkProtocol::HTTP;
-        let address: Vec<&str> = s.split(':').collect();
-        if address.is_empty() || address.len() > 2 {
-            return Err(error::bad_request("Unable to parse Link address", s));
-        }
 
-        let port = if address.len() == 2 {
-            Some(
-                address[1]
-                    .parse()
-                    .map_err(|e| error::bad_request("Unable to parse port number", e))?,
-            )
+        let s = &s[7..];
+        let (address, port): (LinkAddress, Option<u16>) = if s.contains("::") {
+            let mut segments: Vec<&str> = s.split("::").collect();
+            let port: Option<u16> = if segments.last().unwrap().contains(':') {
+                let last_segment: Vec<&str> = segments.pop().unwrap().split(':').collect();
+                if last_segment.len() == 2 {
+                    segments.push(last_segment[0]);
+                    Some(
+                        last_segment[1]
+                            .parse()
+                            .map_err(|e| error::bad_request("Unable to parse port number", e))?,
+                    )
+                } else {
+                    return Err(error::bad_request("Unable to parse IPv6 address", s));
+                }
+            } else {
+                None
+            };
+
+            let address: Ipv6Addr = segments
+                .join("::")
+                .parse()
+                .map_err(|e| error::bad_request("Unable to parse IPv6 address", e))?;
+            (address.into(), port)
         } else {
-            None
-        };
+            let (address, port) = if s.contains(':') {
+                let segments: Vec<&str> = s.split(':').collect();
+                if segments.len() == 2 {
+                    let port: u16 = segments[1]
+                        .parse()
+                        .map_err(|e| error::bad_request("Unable to parse port number", e))?;
+                    (segments[0], Some(port))
+                } else {
+                    return Err(error::bad_request("Unable to parse network address", s));
+                }
+            } else {
+                (s, None)
+            };
 
-        let address: Ipv4Addr = address[0]
-            .parse()
-            .map_err(|e| error::bad_request("Unable to parse IPv4 address", e))?;
-        let address = LinkAddress::IPv4(address);
+            let address: LinkAddress = if is_ipv4(address) {
+                let address: Ipv4Addr = address
+                    .parse()
+                    .map_err(|e| error::bad_request("Unable to parse IPv4 address", e))?;
+                address.into()
+            } else {
+                let address: DomainName = address
+                    .parse()
+                    .map_err(|e| error::bad_request("Unable to parse domain name", e))?;
+                address.into()
+            };
+
+            (address, port)
+        };
 
         Ok(LinkHost {
             protocol,
@@ -239,6 +310,8 @@ impl FromStr for Link {
     type Err = error::TCError;
 
     fn from_str(s: &str) -> TCResult<Link> {
+        println!("Link::from_str({})", s);
+
         if s.starts_with('/') {
             return Ok(Link {
                 host: None,
@@ -253,13 +326,13 @@ impl FromStr for Link {
             ));
         }
 
-        let s = &s[7..];
         let segments: Vec<&str> = s.split('/').collect();
         if segments.is_empty() {
             return Err(error::bad_request("Unable to parse Link", s));
         }
 
-        let host: LinkHost = segments[0].parse()?;
+        let host: LinkHost = segments[..3].join("/").parse()?;
+        let segments = &segments[3..];
 
         let path: TCPath = if segments.len() > 1 {
             segments[1..]
