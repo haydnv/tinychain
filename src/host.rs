@@ -19,7 +19,7 @@ use crate::state::table::{Row, Table};
 use crate::state::{Cluster, Collection, Directory, Persistent, State};
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, PathSegment, TCPath};
-use crate::value::{TCResult, TCValue};
+use crate::value::{TCResult, TCValue, ValueId};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 
@@ -287,6 +287,10 @@ impl Sbin {
                 let decoded = base64::decode(encoded)
                     .map_err(|e| error::bad_request("Unable to decode base64 string", e))?;
                 Ok(TCValue::Bytes(Bytes::from(decoded)))
+            }
+            "/id" => {
+                let id: ValueId = key.try_into()?;
+                Ok(id.into())
             }
             "/link" => {
                 let link: Link = key.try_into()?;

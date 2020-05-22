@@ -152,6 +152,7 @@ impl From<&ValueId> for String {
 pub enum TCValue {
     None,
     Bytes(Bytes),
+    Id(ValueId),
     Int32(i32),
     Link(link::Link),
     Op(Op),
@@ -193,6 +194,12 @@ impl From<link::TCPath> for TCValue {
 impl From<Op> for TCValue {
     fn from(op: Op) -> TCValue {
         TCValue::Op(op)
+    }
+}
+
+impl From<ValueId> for TCValue {
+    fn from(id: ValueId) -> TCValue {
+        TCValue::Id(id)
     }
 }
 
@@ -494,7 +501,12 @@ impl Serialize for TCValue {
             TCValue::None => s.serialize_none(),
             TCValue::Bytes(b) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("/sbin/value/bytes", &base64::encode(b))?;
+                map.serialize_entry("/sbin/value/bytes", &[base64::encode(b)])?;
+                map.end()
+            }
+            TCValue::Id(i) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry("/sbin/value/id", &[i.as_str()])?;
                 map.end()
             }
             TCValue::Int32(i) => s.serialize_i32(*i),
@@ -523,13 +535,14 @@ impl fmt::Display for TCValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             TCValue::None => write!(f, "None"),
-            TCValue::Bytes(b) => write!(f, "binary data: {} bytes", b.len()),
+            TCValue::Bytes(b) => write!(f, "Bytes({})", b.len()),
+            TCValue::Id(id) => write!(f, "ValueId: {}", id),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::Op(o) => write!(f, "Op: {}", o),
             TCValue::Ref(r) => write!(f, "Ref: {}", r),
-            TCValue::r#String(s) => write!(f, "string: {}", s),
-            TCValue::Vector(v) => write!(f, "vector: {:?}", v),
+            TCValue::r#String(s) => write!(f, "String: {}", s),
+            TCValue::Vector(v) => write!(f, "Vector: {:?}", v),
         }
     }
 }
