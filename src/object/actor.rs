@@ -136,18 +136,6 @@ impl Actor {
     }
 }
 
-impl Into<table::Row> for Actor {
-    fn into(self) -> table::Row {
-        table::Row::from(
-            vec![self.host.into(), self.id],
-            vec![
-                Some(self.public_key.to_bytes().to_vec().into()),
-                Some(self.private_key.to_bytes().to_vec().into()),
-            ],
-        )
-    }
-}
-
 impl TryFrom<table::Row> for Actor {
     type Error = error::TCError;
 
@@ -208,6 +196,17 @@ impl fmt::Display for Actor {
 impl TCObject for Actor {
     fn class() -> &'static str {
         "Actor"
+    }
+
+    fn as_row(&self) -> table::Row {
+        (
+            vec![self.host.clone().into(), self.id.clone()],
+            vec![
+                Some(self.public_key.to_bytes().to_vec().into()),
+                Some(self.private_key.to_bytes().to_vec().into()),
+            ],
+        )
+            .into()
     }
 
     fn schema() -> table::Schema {

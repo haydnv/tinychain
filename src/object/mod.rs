@@ -14,10 +14,12 @@ use crate::value::{Args, TCResult};
 pub mod actor;
 
 #[async_trait]
-pub trait TCObject: Into<table::Row> + TryFrom<table::Row> {
+pub trait TCObject: TryFrom<table::Row> {
     fn class() -> &'static str;
 
     fn schema() -> table::Schema;
+
+    fn as_row(&self) -> table::Row;
 
     async fn post(
         &self,
@@ -27,6 +29,18 @@ pub trait TCObject: Into<table::Row> + TryFrom<table::Row> {
         _auth: &Option<Token>,
     ) -> TCResult<State> {
         Err(error::method_not_allowed(Self::class()))
+    }
+}
+
+impl<T: TCObject> From<T> for table::Row {
+    fn from(object: T) -> table::Row {
+        object.as_row()
+    }
+}
+
+impl<T: TCObject> From<Arc<T>> for table::Row {
+    fn from(object: Arc<T>) -> table::Row {
+        object.as_row()
     }
 }
 

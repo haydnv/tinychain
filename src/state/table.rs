@@ -82,9 +82,9 @@ impl TryFrom<TCValue> for Schema {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Row(Vec<TCValue>, Vec<Option<TCValue>>);
 
-impl Row {
-    pub fn from(key: Vec<TCValue>, values: Vec<Option<TCValue>>) -> Row {
-        Row(key, values)
+impl From<(Vec<TCValue>, Vec<Option<TCValue>>)> for Row {
+    fn from(data: (Vec<TCValue>, Vec<Option<TCValue>>)) -> Row {
+        Row(data.0, data.1)
     }
 }
 

@@ -163,17 +163,6 @@ impl<T: Into<TCValue>> From<T> for State {
     }
 }
 
-impl TryFrom<State> for Vec<TCValue> {
-    type Error = error::TCError;
-
-    fn try_from(state: State) -> TCResult<Vec<TCValue>> {
-        match state {
-            State::Value(value) => Ok(value.try_into()?),
-            other => Err(error::bad_request("Expected a Value but found", other)),
-        }
-    }
-}
-
 impl TryFrom<&State> for Object {
     type Error = error::TCError;
 

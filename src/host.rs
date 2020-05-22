@@ -14,6 +14,7 @@ use crate::http;
 use crate::internal::block::Store;
 use crate::internal::file::File;
 use crate::object::actor::{Actor, Token};
+use crate::object::TCObject;
 use crate::state::table::{Row, Table};
 use crate::state::{Cluster, Collection, Directory, Persistent, State};
 use crate::transaction::Txn;
@@ -177,7 +178,7 @@ impl Host {
             let path = &path.slice_from(2);
             match dir.as_str() {
                 "auth" => Ok(Sbin::auth(path, key)?.into()),
-                "object" => Ok(Sbin::object(path, key)?.into()),
+                "object" => Ok(Sbin::get_object(path, key)?.into()),
                 "state" => Sbin::state(txn, path, key).await,
                 "value" => Ok(Sbin::value(path, key)?.into()),
                 _ => Err(error::not_found(path)),
@@ -209,6 +210,16 @@ impl Host {
 
         if path.is_empty() {
             Err(error::method_not_allowed(path))
+        } else if path[0] == "sbin" {
+            let dir = &path[1];
+            let path = &path.slice_from(2);
+            match dir.as_str() {
+                "auth" => Err(error::method_not_allowed(path)),
+                "object" => Ok(Sbin::put_object(self, path, key, state)?.into()),
+                "state" => Err(error::method_not_allowed(path)),
+                "value" => Err(error::method_not_allowed(path)),
+                _ => Err(error::not_found(path)),
+            }
         } else if let Some((mut path, dir)) = self.root.get(path) {
             let key: TCPath = key.try_into()?;
             path.extend(key.into_iter());
@@ -236,13 +247,25 @@ impl Sbin {
         }
     }
 
-    fn object(path: &TCPath, key: TCValue) -> TCResult<TCValue> {
+    fn get_object(path: &TCPath, key: TCValue) -> TCResult<TCValue> {
         match path.to_string().as_str() {
-            "/object/actor" => {
+            "/actor" => {
                 let row: Row = key.try_into()?;
                 let actor: Actor = row.try_into()?;
                 let row: Row = actor.into();
                 Ok(TCValue::from(row))
+            }
+            _ => Err(error::not_found(path)),
+        }
+    }
+
+    fn put_object(host: &Arc<Host>, path: &TCPath, id: TCValue, state: State) -> TCResult<TCValue> {
+        match path.to_string().as_str() {
+            "/actor" => {
+                let state: TCValue = state.try_into()?;
+                let actor =
+                    Actor::new((host.address, host.http_port).into(), id, state.try_into()?);
+                Ok(TCValue::from(actor.as_row()))
             }
             _ => Err(error::not_found(path)),
         }
