@@ -7,7 +7,7 @@ use crate::error;
 use crate::internal::block::Store;
 use crate::internal::file::*;
 use crate::object::actor::Token;
-use crate::state::{Collection, Persistent, Transact};
+use crate::state::{Collection, Persistent, State, Transact};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCValue};
 
@@ -43,8 +43,8 @@ impl Collection for Graph {
         _node_id: TCValue,
         _node: TCValue,
         _auth: &Option<Token>,
-    ) -> TCResult<Arc<Self>> {
-        Err(error::not_implemented())
+    ) -> TCResult<State> {
+        Ok(self.into())
     }
 }
 

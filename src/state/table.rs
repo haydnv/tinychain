@@ -15,7 +15,7 @@ use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
 use crate::object::actor::Token;
 use crate::state::SchemaHistory;
-use crate::state::{Collection, Persistent};
+use crate::state::{Collection, Persistent, State};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{PathSegment, TCPath};
 use crate::value::{TCResult, TCValue, ValueId, Version};
@@ -46,8 +46,10 @@ impl Schema {
             version,
         }
     }
+}
 
-    pub fn new() -> Schema {
+impl Default for Schema {
+    fn default() -> Schema {
         Schema {
             key: vec![],
             columns: vec![],
@@ -223,7 +225,7 @@ impl Collection for Table {
         row_id: Vec<TCValue>,
         column_values: Vec<TCValue>,
         auth: &Option<Token>,
-    ) -> TCResult<Arc<Self>> {
+    ) -> TCResult<State> {
         let row_id = self.row_id(&txn, &row_id, auth).await?;
         let schema = self.schema.at(txn.id()).await;
         let schema_map = schema.as_map();
@@ -270,7 +272,7 @@ impl Collection for Table {
             .put(txn.id(), iter::once(row))
             .await?;
         txn.mutate(self.clone());
-        Ok(self.clone())
+        Ok(self.into())
     }
 }
 

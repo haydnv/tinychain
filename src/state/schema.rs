@@ -36,7 +36,7 @@ impl SchemaHistory {
             .lock()
             .await
             .stream_into(txn_id)
-            .fold(Schema::new(), |_, s| future::ready(s))
+            .fold(Schema::default(), |_, s| future::ready(s))
             .await
     }
 }

@@ -47,14 +47,14 @@ impl Collection for Cluster {
         path: TCPath,
         state: State,
         auth: &Option<Token>,
-    ) -> TCResult<Arc<Self>> {
+    ) -> TCResult<State> {
         if path[0] == "hosted" {
             if path.len() > 1 {
                 self.hosted
                     .clone()
                     .put(txn, path.slice_from(1), state, auth)
                     .await?;
-                Ok(self)
+                Ok(self.into())
             } else {
                 Err(error::forbidden(
                     "You are not allowed to perform this action",

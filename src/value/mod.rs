@@ -266,10 +266,10 @@ impl TryFrom<TCValue> for link::TCPath {
                 if l.host().is_none() {
                     Ok(l.path().clone())
                 } else {
-                    Err(error::bad_request("Expected Path but found Link: {}", l))
+                    Err(error::bad_request("Expected Path but found Link", l))
                 }
             }
-            other => Err(error::bad_request("Expected Path but found {}", other)),
+            other => Err(error::bad_request("Expected Path but found", other)),
         }
     }
 }

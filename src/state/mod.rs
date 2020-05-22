@@ -41,7 +41,7 @@ pub trait Collection {
         key: Self::Key,
         state: Self::Value,
         auth: &Option<Token>,
-    ) -> TCResult<Arc<Self>>;
+    ) -> TCResult<State>;
 }
 
 #[async_trait]

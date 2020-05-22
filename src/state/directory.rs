@@ -159,7 +159,7 @@ impl Collection for Directory {
         path: Self::Key,
         state: Self::Value,
         auth: &Option<Token>,
-    ) -> TCResult<Arc<Self>> {
+    ) -> TCResult<State> {
         let path: PathSegment = path.try_into()?;
         if path.starts_with(".") {
             return Err(error::bad_request(
@@ -169,8 +169,6 @@ impl Collection for Directory {
         }
 
         let context = self.context.reserve(&txn.id(), path.clone().into()).await?;
-        let chain = self.chain.lock().await;
-
         let owner = auth.as_ref().map(|token| token.actor_id());
         let entry = match state {
             State::Directory(d) => {
@@ -199,9 +197,14 @@ impl Collection for Directory {
         };
 
         println!("Directory::put new entry to {}", path);
-        chain.put(txn.id(), iter::once(entry)).await?;
+        self.chain
+            .lock()
+            .await
+            .put(txn.id(), iter::once(entry))
+            .await?;
         txn.mutate(self.clone());
-        Ok(self.clone())
+
+        self.get(txn, &path.into(), auth).await
     }
 }
 
