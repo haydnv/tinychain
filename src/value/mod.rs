@@ -68,6 +68,10 @@ impl ValueId {
     pub fn as_str(&self) -> &str {
         self.id.as_str()
     }
+
+    pub fn starts_with(&self, prefix: &str) -> bool {
+        self.id.starts_with(prefix)
+    }
 }
 
 impl fmt::Display for ValueId {

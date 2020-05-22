@@ -161,6 +161,13 @@ impl Collection for Directory {
         auth: &Option<Token>,
     ) -> TCResult<Arc<Self>> {
         let path: PathSegment = path.try_into()?;
+        if path.starts_with(".") {
+            return Err(error::bad_request(
+                "Directory entry name may not start with a '.'",
+                path,
+            ));
+        }
+
         let context = self.context.reserve(&txn.id(), path.clone().into()).await?;
         let chain = self.chain.lock().await;
 
