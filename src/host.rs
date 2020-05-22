@@ -90,7 +90,7 @@ impl Host {
         let workspace = Store::new_tmp(config.workspace);
 
         let mut hosted = config.hosted;
-        hosted.sort_by(|a, b| a.len().partial_cmp(&b.len()).unwrap());
+        hosted.sort_by(|a, b| b.len().partial_cmp(&a.len()).unwrap());
 
         let mut host = Host {
             address: config.address,

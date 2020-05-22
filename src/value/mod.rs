@@ -378,7 +378,7 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
     type Value = TCValue;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("A Tinychain Value, e.g. \"foo\" or 123 or {\"$object_ref: [\"slice_id\", \"$state\"]\"}")
+        f.write_str("a Tinychain Value, e.g. \"foo\" or 123 or {\"$object_ref: [\"slice_id\", \"$state\"]\"}")
     }
 
     fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E>
