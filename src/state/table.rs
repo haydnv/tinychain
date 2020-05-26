@@ -14,7 +14,7 @@ use crate::internal::block::Store;
 use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
 use crate::object::actor::Token;
-use crate::state::SchemaHistory;
+use crate::state::History;
 use crate::state::{Collection, Persistent, State};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{PathSegment, TCPath};
@@ -128,18 +128,25 @@ impl TryFrom<TCValue> for Row {
 impl Mutation for Row {}
 
 pub struct Table {
-    schema: Arc<SchemaHistory>,
+    schema_history: Arc<History<Schema>>,
     chain: Mutex<Chain<Row>>,
 }
 
 impl Table {
+    async fn schema(&self, txn_id: TxnId) -> TCResult<Schema> {
+        self.schema_history
+            .at(txn_id)
+            .await
+            .ok_or_else(|| error::internal("This Table has no Schema!"))
+    }
+
     async fn row_id(
         &self,
         txn: &Arc<Txn<'_>>,
         value: &[TCValue],
         auth: &Option<Token>,
     ) -> TCResult<Vec<TCValue>> {
-        let schema = self.schema.at(txn.id()).await;
+        let schema = self.schema(txn.id()).await?;
         let key_size = schema.key.len();
 
         if value.len() != key_size {
@@ -171,7 +178,7 @@ impl Table {
         auth: &Option<Token>,
     ) -> TCResult<Row> {
         let row_id = self.row_id(txn, row_id, auth).await?;
-        let schema = self.schema.at(txn.id()).await;
+        let schema = self.schema(txn.id()).await?;
 
         if row_id.len() != schema.key.len() {
             let key: TCValue = row_id.into();
@@ -234,7 +241,7 @@ impl Collection for Table {
         auth: &Option<Token>,
     ) -> TCResult<State> {
         let row_id = self.row_id(&txn, &row_id, auth).await?;
-        let schema = self.schema.at(txn.id()).await;
+        let schema = self.schema(txn.id()).await?;
         let schema_map = schema.as_map();
 
         let mut names = vec![];
@@ -287,10 +294,10 @@ impl Collection for Table {
 impl File for Table {
     async fn copy_into(&self, txn_id: TxnId, writer: &mut FileCopier) {
         println!("copying table into FileCopier");
-        self.schema.copy_into(txn_id.clone(), writer).await;
+        self.schema_history.copy_into(txn_id.clone(), writer).await;
         println!("copied schema");
 
-        let schema = self.schema.at(txn_id.clone()).await;
+        let schema = self.schema(txn_id.clone()).await.unwrap();
         println!("got current schema");
         let version: PathSegment = schema.version.to_string().parse().unwrap();
         writer.write_file(
@@ -302,7 +309,7 @@ impl File for Table {
 
     async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, dest: Arc<Store>) -> Arc<Table> {
         println!("copying table from FileCopier");
-        let schema_history = SchemaHistory::copy_from(reader, txn_id, dest.clone()).await;
+        let schema_history = History::copy_from(reader, txn_id, dest.clone()).await;
         println!("copied schema");
 
         println!("reading blocks from FileCopier");
@@ -314,28 +321,16 @@ impl File for Table {
         println!("copied Chain");
 
         Arc::new(Table {
-            schema: schema_history,
+            schema_history,
             chain,
         })
     }
 
     async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> Arc<Table> {
-        let schema = SchemaHistory::from_store(
-            txn_id,
-            store
-                .get_store(txn_id, &"schema".parse().unwrap())
-                .await
-                .unwrap(),
-        )
-        .await;
+        let schema_history: Arc<History<Schema>> = History::from_store(txn_id, store.clone()).await;
 
-        let chain_path: PathSegment = schema
-            .at(txn_id.clone())
-            .await
-            .version
-            .to_string()
-            .parse()
-            .unwrap();
+        let latest_schema = schema_history.at(txn_id.clone()).await.unwrap();
+        let chain_path: PathSegment = latest_schema.version.to_string().parse().unwrap();
         let chain = Mutex::new(
             Chain::from_store(
                 txn_id,
@@ -348,7 +343,10 @@ impl File for Table {
             .unwrap(),
         );
 
-        Arc::new(Table { schema, chain })
+        Arc::new(Table {
+            schema_history,
+            chain,
+        })
     }
 }
 
@@ -365,10 +363,12 @@ impl Persistent for Table {
         )
         .await;
 
-        let schema_history = SchemaHistory::new(&txn, schema).await?;
+        let schema_history = History::new(txn.id(), txn.context()).await?;
+        schema_history.put(txn.id(), schema).await?;
+        txn.mutate(schema_history.clone());
 
         Ok(Arc::new(Table {
-            schema: schema_history,
+            schema_history,
             chain: Mutex::new(chain),
         }))
     }

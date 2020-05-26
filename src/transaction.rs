@@ -137,6 +137,8 @@ impl<'a> TxnState<'a> {
         txn: Arc<Txn<'a>>,
         capture: Vec<ValueId>,
     ) -> TCResult<HashMap<ValueId, State>> {
+        // TODO: Don't resolve any GET op unless it's required by a captured value
+
         let mut resolved: HashMap<ValueId, State> = self.resolved.drain().collect();
         while !self.queue.is_empty() {
             let known: HashSet<TCRef> = resolved.keys().cloned().map(|id| id.into()).collect();

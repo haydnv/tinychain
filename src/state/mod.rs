@@ -15,13 +15,13 @@ use crate::value::{Args, TCResult, TCValue};
 mod cluster;
 mod directory;
 mod graph;
-mod schema;
+mod history;
 pub mod table;
 
 pub type Cluster = cluster::Cluster;
 pub type Directory = directory::Directory;
 pub type Graph = graph::Graph;
-pub type SchemaHistory = schema::SchemaHistory;
+pub type History<O> = history::History<O>;
 
 #[async_trait]
 pub trait Collection {
@@ -95,17 +95,17 @@ impl State {
         auth: &Option<Token>,
     ) -> TCResult<State> {
         match self {
-            State::Directory(d) => Ok(d
-                .clone()
-                .put(txn, key.try_into()?, value.try_into()?, auth)
-                .await?
-                .into()),
-            State::Graph(g) => Ok(g.clone().put(txn, key, value, auth).await?.into()),
-            State::Table(t) => Ok(t
-                .clone()
-                .put(txn, key.try_into()?, value.try_into()?, auth)
-                .await?
-                .into()),
+            State::Directory(d) => {
+                d.clone()
+                    .put(txn, key.try_into()?, value.try_into()?, auth)
+                    .await
+            }
+            State::Graph(g) => g.clone().put(txn, key, value, auth).await,
+            State::Table(t) => {
+                t.clone()
+                    .put(txn, key.try_into()?, value.try_into()?, auth)
+                    .await
+            }
             _ => Err(error::bad_request("Cannot PUT to", self)),
         }
     }
