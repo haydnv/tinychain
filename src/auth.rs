@@ -2,14 +2,12 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signature};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
-use crate::object::TCObject;
 use crate::state::table;
 use crate::value::link::{Link, TCPath};
 use crate::value::{Op, TCResult, TCValue};
@@ -134,6 +132,41 @@ impl Actor {
             Ok(token)
         }
     }
+
+    fn as_row(&self) -> table::Row {
+        (
+            vec![self.host.clone().into(), self.id.clone()],
+            vec![
+                Some(self.public_key.to_bytes().to_vec().into()),
+                Some(self.private_key.to_bytes().to_vec().into()),
+            ],
+        )
+            .into()
+    }
+
+    fn schema() -> table::Schema {
+        // TODO: figure out a more concise way of constructing from a 'static str
+        let key = vec![
+            (
+                "host".parse().unwrap(),
+                "/sbin/value/link/host".parse().unwrap(),
+            ),
+            ("id".parse().unwrap(), "/sbin/value".parse().unwrap()),
+        ];
+        let columns = vec![
+            ("lock".parse().unwrap(), "/sbin/value/op".parse().unwrap()),
+            (
+                "public_key".parse().unwrap(),
+                "/sbin/value/bytes".parse().unwrap(),
+            ),
+            (
+                "private_key".parse().unwrap(),
+                "/sbin/value/bytes".parse().unwrap(),
+            ),
+        ];
+        let version = "0.0.1".parse().unwrap();
+        table::Schema::from(key, columns, version)
+    }
 }
 
 impl TryFrom<table::Row> for Actor {
@@ -189,48 +222,6 @@ impl TryFrom<table::Row> for Actor {
 impl fmt::Display for Actor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Actor({}, {})", self.host, self.id)
-    }
-}
-
-#[async_trait]
-impl TCObject for Actor {
-    fn class() -> &'static str {
-        "Actor"
-    }
-
-    fn as_row(&self) -> table::Row {
-        (
-            vec![self.host.clone().into(), self.id.clone()],
-            vec![
-                Some(self.public_key.to_bytes().to_vec().into()),
-                Some(self.private_key.to_bytes().to_vec().into()),
-            ],
-        )
-            .into()
-    }
-
-    fn schema() -> table::Schema {
-        // TODO: figure out a more concise way of constructing from a 'static str
-        let key = vec![
-            (
-                "host".parse().unwrap(),
-                "/sbin/value/link/host".parse().unwrap(),
-            ),
-            ("id".parse().unwrap(), "/sbin/value".parse().unwrap()),
-        ];
-        let columns = vec![
-            ("lock".parse().unwrap(), "/sbin/value/op".parse().unwrap()),
-            (
-                "public_key".parse().unwrap(),
-                "/sbin/value/bytes".parse().unwrap(),
-            ),
-            (
-                "private_key".parse().unwrap(),
-                "/sbin/value/bytes".parse().unwrap(),
-            ),
-        ];
-        let version = "0.0.1".parse().unwrap();
-        table::Schema::from(key, columns, version)
     }
 }
 

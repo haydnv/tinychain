@@ -9,13 +9,12 @@ use bytes::Bytes;
 use sha2::{Digest, Sha256};
 use structopt::StructOpt;
 
+use crate::auth::Token;
 use crate::error;
 use crate::http;
 use crate::internal::block::Store;
 use crate::internal::file::File;
-use crate::object::actor::{Actor, Token};
-use crate::object::TCObject;
-use crate::state::table::{Row, Table};
+use crate::state::table::Table;
 use crate::state::{Collection, Directory, Persistent, State};
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, PathSegment, TCPath};
@@ -178,7 +177,6 @@ impl Host {
             let path = &path.slice_from(2);
             match dir.as_str() {
                 "auth" => Ok(Sbin::auth(path, key)?.into()),
-                "object" => Ok(Sbin::get_object(path, key)?.into()),
                 "state" => Sbin::state(txn, path, key).await,
                 "value" => Ok(Sbin::value(path, key)?.into()),
                 _ => Err(error::not_found(path)),
@@ -215,7 +213,6 @@ impl Host {
             let path = &path.slice_from(2);
             match dir.as_str() {
                 "auth" => Err(error::method_not_allowed(path)),
-                "object" => Ok(Sbin::put_object(path, key, state)?.into()),
                 "state" => Err(error::method_not_allowed(path)),
                 "value" => Err(error::method_not_allowed(path)),
                 _ => Err(error::not_found(path)),
@@ -242,30 +239,6 @@ impl Sbin {
                 let mut hasher = Sha256::new();
                 hasher.input(data);
                 Ok(Bytes::copy_from_slice(&hasher.result()[..]).into())
-            }
-            _ => Err(error::not_found(path)),
-        }
-    }
-
-    fn get_object(path: &TCPath, key: TCValue) -> TCResult<TCValue> {
-        match path.to_string().as_str() {
-            "/actor" => {
-                let row: Row = key.try_into()?;
-                let actor: Actor = row.try_into()?;
-                let row: Row = actor.into();
-                Ok(TCValue::from(row))
-            }
-            _ => Err(error::not_found(path)),
-        }
-    }
-
-    fn put_object(path: &TCPath, id: TCValue, state: State) -> TCResult<TCValue> {
-        match path.to_string().as_str() {
-            "/actor" => {
-                let (host, id): (Link, TCValue) = id.try_into()?;
-                let lock: TCValue = state.try_into()?;
-                let actor = Actor::new(host, id, lock.try_into()?);
-                Ok(TCValue::from(actor.as_row()))
             }
             _ => Err(error::not_found(path)),
         }

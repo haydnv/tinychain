@@ -9,10 +9,10 @@ use futures::lock::Mutex;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+use crate::auth::Token;
 use crate::error;
 use crate::host::{Host, NetworkTime};
 use crate::internal::block::Store;
-use crate::object::actor::Token;
 use crate::state::State;
 use crate::value::link::*;
 use crate::value::*;

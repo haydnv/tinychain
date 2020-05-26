@@ -1,10 +1,12 @@
 use structopt::StructOpt;
 
+#[allow(dead_code)]
+mod auth;
+
 mod error;
 mod host;
 mod http;
 mod internal;
-mod object;
 mod state;
 mod transaction;
 mod value;

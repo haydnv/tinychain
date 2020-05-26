@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::auth::Token;
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::file::*;
-use crate::object::actor::Token;
 use crate::state::{Collection, Persistent, State, Transact};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCValue};

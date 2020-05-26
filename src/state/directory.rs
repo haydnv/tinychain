@@ -8,11 +8,11 @@ use futures::lock::Mutex;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
+use crate::auth::Token;
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
-use crate::object::actor::Token;
 use crate::state::*;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{PathSegment, TCPath};
@@ -180,7 +180,6 @@ impl Collection for Directory {
                 FileCopier::copy(txn.id(), &*t, context).await;
                 DirEntry::new(path_clone, EntryType::Tensor, owner)
             }
-            State::Object(_) => return Err(error::not_implemented()),
             State::Value(v) => {
                 return Err(error::bad_request(
                     "Directory::put expected a persistent state but found",

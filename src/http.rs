@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::{Infallible, TryInto};
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -7,10 +7,9 @@ use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 
+use crate::auth::Token;
 use crate::error;
 use crate::host::Host;
-use crate::object::actor::{Actor, Token};
-use crate::object::Object;
 use crate::state::State;
 use crate::transaction::Txn;
 use crate::value::link::*;
@@ -190,11 +189,9 @@ async fn validate_token(txn: Arc<Txn<'_>>, auth_header: &HeaderValue) -> TCResul
                 let value_id: ValueId = "__actor_id".parse().unwrap();
                 txn.push((value_id.clone(), get_actor.into()), &None)
                     .await?;
-                txn.resolve(vec![value_id.clone()]).await.map(|actor| {
-                    let actor: Object = actor.get(&value_id).unwrap().try_into()?;
-                    let actor: Arc<Actor> = actor.try_into()?;
-                    actor.validate(token)
-                })?
+                txn.resolve(vec![value_id.clone()])
+                    .await
+                    .map(|_actor| Err(error::not_implemented()))?
             } else {
                 Err(error::unauthorized(&format!(
                     "Invalid authorization header: {}",

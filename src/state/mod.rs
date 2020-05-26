@@ -4,10 +4,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::auth::Token;
 use crate::error;
 use crate::internal::file::File;
-use crate::object::actor::Token;
-use crate::object::Object;
 use crate::transaction::{Transact, Txn};
 use crate::value::link::PathSegment;
 use crate::value::{Args, TCResult, TCValue};
@@ -56,7 +55,6 @@ pub enum State {
     Graph(Arc<Graph>),
     Table(Arc<table::Table>),
     Tensor(Arc<tensor::Tensor>),
-    Object(Object),
     Value(TCValue),
 }
 
@@ -110,18 +108,15 @@ impl State {
 
     pub async fn post(
         &self,
-        txn: Arc<Txn<'_>>,
-        method: &PathSegment,
-        args: Args,
-        auth: &Option<Token>,
+        _txn: Arc<Txn<'_>>,
+        _method: &PathSegment,
+        _args: Args,
+        _auth: &Option<Token>,
     ) -> TCResult<State> {
-        match self {
-            State::Object(o) => o.post(txn, method, args, auth).await,
-            other => Err(error::method_not_allowed(format!(
-                "{} does not support POST",
-                other
-            ))),
-        }
+        Err(error::method_not_allowed(format!(
+            "{} does not support POST",
+            self
+        )))
     }
 }
 
@@ -143,26 +138,9 @@ impl From<Arc<table::Table>> for State {
     }
 }
 
-impl From<Object> for State {
-    fn from(object: Object) -> State {
-        State::Object(object)
-    }
-}
-
 impl<T: Into<TCValue>> From<T> for State {
     fn from(value: T) -> State {
         State::Value(value.into())
-    }
-}
-
-impl TryFrom<&State> for Object {
-    type Error = error::TCError;
-
-    fn try_from(state: &State) -> TCResult<Object> {
-        match state {
-            State::Object(object) => Ok(object.clone()),
-            other => Err(error::bad_request("Expected an Object but found", other)),
-        }
     }
 }
 
@@ -173,7 +151,6 @@ impl fmt::Display for State {
             State::Graph(_) => write!(f, "(graph)"),
             State::Table(_) => write!(f, "(table)"),
             State::Tensor(_) => write!(f, "(tensor)"),
-            State::Object(object) => write!(f, "(object: {})", object.class()),
             State::Value(value) => write!(f, "value: {}", value),
         }
     }
