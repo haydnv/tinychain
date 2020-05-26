@@ -16,7 +16,7 @@ use crate::internal::file::File;
 use crate::object::actor::{Actor, Token};
 use crate::object::TCObject;
 use crate::state::table::{Row, Table};
-use crate::state::{Cluster, Collection, Directory, Persistent, State};
+use crate::state::{Collection, Directory, Persistent, State};
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, PathSegment, TCPath};
 use crate::value::{TCResult, TCValue, ValueId};
@@ -273,7 +273,6 @@ impl Sbin {
 
     async fn state(txn: &Arc<Txn<'_>>, path: &TCPath, key: TCValue) -> TCResult<State> {
         match path.to_string().as_str() {
-            "/cluster" => Ok(Cluster::create(txn, key.try_into()?).await?.into()),
             "/table" => Ok(Table::create(txn, key.try_into()?).await?.into()),
             _ => Err(error::not_found(path)),
         }

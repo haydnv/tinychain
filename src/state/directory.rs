@@ -20,9 +20,9 @@ use crate::value::{Op, TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
 enum EntryType {
-    Cluster,
     Directory,
     Table,
+    Tensor,
     Graph,
 }
 
@@ -118,14 +118,6 @@ impl Collection for Directory {
                 .await
             {
                 match entry.entry_type {
-                    EntryType::Cluster => {
-                        let cluster = Cluster::from_store(txn_id, store).await;
-                        if path.len() == 1 {
-                            Ok(cluster.into())
-                        } else {
-                            cluster.get(txn, &path.slice_from(1), auth).await
-                        }
-                    }
                     EntryType::Directory => {
                         let dir = Directory::from_store(txn_id, store).await;
                         if path.len() == 1 {
@@ -170,22 +162,23 @@ impl Collection for Directory {
 
         let context = self.context.reserve(&txn.id(), path.clone().into()).await?;
         let owner = auth.as_ref().map(|token| token.actor_id());
+        let path_clone = path.clone();
         let entry = match state {
             State::Directory(d) => {
                 FileCopier::copy(txn.id(), &*d, context).await;
-                DirEntry::new(path.clone(), EntryType::Directory, owner)
-            }
-            State::Cluster(c) => {
-                FileCopier::copy(txn.id(), &*c, context).await;
-                DirEntry::new(path.clone(), EntryType::Cluster, owner)
+                DirEntry::new(path_clone, EntryType::Directory, owner)
             }
             State::Graph(g) => {
                 FileCopier::copy(txn.id(), &*g, context).await;
-                DirEntry::new(path.clone(), EntryType::Graph, owner)
+                DirEntry::new(path_clone, EntryType::Graph, owner)
             }
             State::Table(t) => {
                 FileCopier::copy(txn.id(), &*t, context).await;
-                DirEntry::new(path.clone(), EntryType::Table, owner)
+                DirEntry::new(path_clone, EntryType::Table, owner)
+            }
+            State::Tensor(t) => {
+                FileCopier::copy(txn.id(), &*t, context).await;
+                DirEntry::new(path_clone, EntryType::Tensor, owner)
             }
             State::Object(_) => return Err(error::not_implemented()),
             State::Value(v) => {
@@ -232,9 +225,6 @@ impl File for Directory {
                 .unwrap();
 
             match entry.entry_type {
-                EntryType::Cluster => {
-                    Cluster::copy_from(reader, txn_id, dest).await;
-                }
                 EntryType::Directory => {
                     Directory::copy_from(reader, txn_id, dest).await;
                 }
@@ -243,6 +233,9 @@ impl File for Directory {
                 }
                 EntryType::Table => {
                     table::Table::copy_from(reader, txn_id, dest).await;
+                }
+                EntryType::Tensor => {
+                    tensor::Tensor::copy_from(reader, txn_id, dest).await;
                 }
             }
         }
@@ -268,12 +261,6 @@ impl File for Directory {
                 .unwrap();
 
             match entry.entry_type {
-                EntryType::Cluster => {
-                    Cluster::from_store(&txn_id, store)
-                        .await
-                        .copy_into(txn_id, writer)
-                        .await
-                }
                 EntryType::Directory => {
                     Directory::from_store(&txn_id, store)
                         .await
@@ -288,6 +275,12 @@ impl File for Directory {
                 }
                 EntryType::Table => {
                     table::Table::from_store(&txn_id, store)
+                        .await
+                        .copy_into(txn_id, writer)
+                        .await
+                }
+                EntryType::Tensor => {
+                    tensor::Tensor::from_store(&txn_id, store)
                         .await
                         .copy_into(txn_id, writer)
                         .await

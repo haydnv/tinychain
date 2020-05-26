@@ -12,13 +12,12 @@ use crate::transaction::{Transact, Txn};
 use crate::value::link::PathSegment;
 use crate::value::{Args, TCResult, TCValue};
 
-mod cluster;
 mod directory;
 mod graph;
 mod history;
 pub mod table;
+mod tensor;
 
-pub type Cluster = cluster::Cluster;
 pub type Directory = directory::Directory;
 pub type Graph = graph::Graph;
 pub type History<O> = history::History<O>;
@@ -53,10 +52,10 @@ pub trait Persistent: Collection + File {
 
 #[derive(Clone)]
 pub enum State {
-    Cluster(Arc<Cluster>),
     Directory(Arc<Directory>),
     Graph(Arc<Graph>),
     Table(Arc<table::Table>),
+    Tensor(Arc<tensor::Tensor>),
     Object(Object),
     Value(TCValue),
 }
@@ -69,7 +68,6 @@ impl State {
         auth: &Option<Token>,
     ) -> TCResult<State> {
         match self {
-            State::Cluster(c) => c.clone().get(txn, &key.try_into()?, auth).await,
             State::Directory(d) => d.clone().get(txn, &key.try_into()?, auth).await,
             State::Graph(g) => Ok(g.clone().get(txn, &key, auth).await?.into()),
             State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?, auth).await?.into()),
@@ -127,12 +125,6 @@ impl State {
     }
 }
 
-impl From<Arc<Cluster>> for State {
-    fn from(cluster: Arc<Cluster>) -> State {
-        State::Cluster(cluster)
-    }
-}
-
 impl From<Arc<Directory>> for State {
     fn from(dir: Arc<Directory>) -> State {
         State::Directory(dir)
@@ -177,10 +169,10 @@ impl TryFrom<&State> for Object {
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            State::Cluster(_) => write!(f, "(cluster)"),
             State::Directory(_) => write!(f, "(directory)"),
             State::Graph(_) => write!(f, "(graph)"),
             State::Table(_) => write!(f, "(table)"),
+            State::Tensor(_) => write!(f, "(tensor)"),
             State::Object(object) => write!(f, "(object: {})", object.class()),
             State::Value(value) => write!(f, "value: {}", value),
         }
