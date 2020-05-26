@@ -79,4 +79,8 @@ impl Transact for Graph {
     async fn commit(&self, _txn_id: &TxnId) {
         // TODO
     }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        // TODO
+    }
 }

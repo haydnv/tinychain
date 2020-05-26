@@ -395,6 +395,11 @@ impl<M: Mutation> Chain<M> {
 
         self.store.commit(txn_id).await;
     }
+
+    pub async fn rollback(&self, txn_id: &TxnId) {
+        println!("Chain::rollback");
+        self.store.rollback(txn_id).await
+    }
 }
 
 fn delimit_groups(groups: &[Bytes]) -> Bytes {

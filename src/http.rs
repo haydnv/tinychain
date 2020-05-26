@@ -76,6 +76,7 @@ async fn post<'a>(
                             results.push((TCRef::from(id), val).into());
                         }
                         other => {
+                            txn.rollback().await;
                             return Err(error::bad_request(
                                 "Attempt to capture an unserializable value",
                                 other,

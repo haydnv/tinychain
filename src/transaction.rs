@@ -20,6 +20,8 @@ use crate::value::*;
 #[async_trait]
 pub trait Transact: Send + Sync {
     async fn commit(&self, txn_id: &TxnId);
+
+    async fn rollback(&self, txn_id: &TxnId);
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
@@ -232,6 +234,14 @@ impl<'a> Txn<'a> {
         println!("commit!");
         join_all(self.mutated.write().unwrap().drain(..).map(|s| async move {
             s.commit(&self.id).await;
+        }))
+        .then(|_| future::ready(()))
+    }
+
+    pub fn rollback(&'a self) -> impl Future<Output = ()> + 'a {
+        println!("rollback!");
+        join_all(self.mutated.write().unwrap().drain(..).map(|s| async move {
+            s.rollback(&self.id).await;
         }))
         .then(|_| future::ready(()))
     }

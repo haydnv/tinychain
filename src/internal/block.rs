@@ -150,6 +150,12 @@ impl Store {
         })
     }
 
+    pub async fn rollback(&self, txn_id: &TxnId) {
+        let mut state = self.state.lock().await;
+        state.cache.subdirs.remove(txn_id);
+        state.cache.blocks.remove(txn_id);
+    }
+
     pub async fn contains_block(&self, txn_id: &TxnId, block_id: &PathSegment) -> bool {
         let state = self.state.lock().await;
         if let Some(blocks) = state.cache.blocks.get(txn_id) {

@@ -332,4 +332,9 @@ impl Transact for Directory {
         self.context.commit(txn_id).await;
         chain.commit(txn_id).await;
     }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.context.rollback(txn_id).await;
+        self.chain.lock().await.rollback(txn_id).await;
+    }
 }

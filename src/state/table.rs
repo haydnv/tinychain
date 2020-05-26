@@ -379,4 +379,8 @@ impl Transact for Table {
     async fn commit(&self, txn_id: &TxnId) {
         self.chain.lock().await.commit(txn_id).await
     }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.chain.lock().await.commit(txn_id).await
+    }
 }

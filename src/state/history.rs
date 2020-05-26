@@ -97,4 +97,8 @@ impl<O: Clone + DeserializeOwned + Serialize + Send + Sync> Transact for History
     async fn commit(&self, txn_id: &TxnId) {
         self.chain.lock().await.commit(txn_id).await
     }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.chain.lock().await.rollback(txn_id).await
+    }
 }
