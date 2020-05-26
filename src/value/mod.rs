@@ -332,6 +332,17 @@ impl<
     }
 }
 
+impl TryFrom<TCValue> for i32 {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<i32> {
+        match v {
+            TCValue::Int32(i) => Ok(i),
+            other => Err(error::bad_request("Expected Int32 but found", other)),
+        }
+    }
+}
+
 impl TryFrom<TCValue> for Vec<TCValue> {
     type Error = error::TCError;
 

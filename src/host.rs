@@ -302,6 +302,7 @@ impl Sbin {
                 let address: Link = address.into();
                 Ok(address.into())
             }
+            "/number/int32" => Ok(TCValue::Int32(key.try_into()?)),
             "/string" => {
                 let s: String = key.try_into()?;
                 Ok(s.into())
