@@ -500,6 +500,7 @@ impl fmt::Display for TCPath {
 }
 
 impl PartialEq<str> for TCPath {
+    #[allow(clippy::cmp_owned)]
     fn eq(&self, other: &str) -> bool {
         self.to_string() == other
     }

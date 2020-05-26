@@ -234,6 +234,7 @@ impl Store {
         })
     }
 
+    #[allow(clippy::map_entry)]
     pub async fn new_block(
         &self,
         txn_id: &TxnId,
