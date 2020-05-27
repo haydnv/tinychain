@@ -19,26 +19,43 @@ mod tensor;
 
 pub type Directory = directory::Directory;
 pub type Graph = graph::Graph;
-pub type Tensor = tensor::Tensor;
 
 #[async_trait]
-pub trait Collection {
-    type Key: TryFrom<TCValue>;
-    type Value: TryFrom<TCValue>;
-
+pub trait Authorized: Collection {
     async fn get(
         self: &Arc<Self>,
         txn: &Arc<Txn<'_>>,
         key: &Self::Key,
-        auth: &Option<Token>,
-    ) -> TCResult<Self::Value>;
+        _auth: &Option<Token>,
+    ) -> TCResult<Self::Value> {
+        // TODO: authorize
+        Collection::get(self, txn, key).await
+    }
 
     async fn put(
         self: Arc<Self>,
         txn: &Arc<Txn<'_>>,
         key: Self::Key,
         state: Self::Value,
-        auth: &Option<Token>,
+        _auth: &Option<Token>,
+    ) -> TCResult<State> {
+        // TODO: authorize
+        Collection::put(self, txn, key, state).await
+    }
+}
+
+#[async_trait]
+pub trait Collection: Send + Sync {
+    type Key: TryFrom<TCValue> + Send + Sync;
+    type Value: TryFrom<TCValue> + Send + Sync;
+
+    async fn get(self: &Arc<Self>, txn: &Arc<Txn<'_>>, key: &Self::Key) -> TCResult<Self::Value>;
+
+    async fn put(
+        self: Arc<Self>,
+        txn: &Arc<Txn<'_>>,
+        key: Self::Key,
+        state: Self::Value,
     ) -> TCResult<State>;
 }
 
@@ -70,12 +87,13 @@ impl State {
         &self,
         txn: &Arc<Txn<'_>>,
         key: TCValue,
-        auth: &Option<Token>,
+        _auth: &Option<Token>,
     ) -> TCResult<State> {
+        // TODO: authorize
         match self {
-            State::Directory(d) => d.clone().get(txn, &key.try_into()?, auth).await,
-            State::Graph(g) => Ok(g.clone().get(txn, &key, auth).await?.into()),
-            State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?, auth).await?.into()),
+            State::Directory(d) => d.clone().get(txn, &key.try_into()?).await,
+            State::Graph(g) => Ok(g.clone().get(txn, &key).await?.into()),
+            State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?).await?.into()),
             _ => Err(error::bad_request(
                 &format!("Cannot GET {} from", key),
                 self,
@@ -95,20 +113,13 @@ impl State {
         txn: &Arc<Txn<'_>>,
         key: TCValue,
         value: TCValue,
-        auth: &Option<Token>,
+        _auth: &Option<Token>,
     ) -> TCResult<State> {
+        // TODO: authorize
         match self {
-            State::Directory(d) => {
-                d.clone()
-                    .put(txn, key.try_into()?, value.try_into()?, auth)
-                    .await
-            }
-            State::Graph(g) => g.clone().put(txn, key, value, auth).await,
-            State::Table(t) => {
-                t.clone()
-                    .put(txn, key.try_into()?, value.try_into()?, auth)
-                    .await
-            }
+            State::Directory(d) => d.clone().put(txn, key.try_into()?, value.try_into()?).await,
+            State::Graph(g) => g.clone().put(txn, key, value).await,
+            State::Table(t) => t.clone().put(txn, key.try_into()?, value.try_into()?).await,
             _ => Err(error::bad_request("Cannot PUT to", self)),
         }
     }

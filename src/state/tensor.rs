@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::try_join_all;
 
-use crate::auth::Token;
 use crate::error;
 use crate::internal::block::Store;
 use crate::state::{Collection, Derived, State};
@@ -90,12 +89,7 @@ impl Collection for Tensor {
     type Key = Slice;
     type Value = Tensor;
 
-    async fn get(
-        self: &Arc<Self>,
-        _txn: &Arc<Txn<'_>>,
-        _key: &Slice,
-        _auth: &Option<Token>,
-    ) -> TCResult<Tensor> {
+    async fn get(self: &Arc<Self>, _txn: &Arc<Txn<'_>>, _key: &Slice) -> TCResult<Tensor> {
         Err(error::not_implemented())
     }
 
@@ -104,7 +98,6 @@ impl Collection for Tensor {
         _txn: &Arc<Txn<'_>>,
         _key: Slice,
         _value: Tensor,
-        _auth: &Option<Token>,
     ) -> TCResult<State> {
         Err(error::not_implemented())
     }

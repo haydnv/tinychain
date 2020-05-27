@@ -204,8 +204,9 @@ impl Collection for Table {
         self: &Arc<Self>,
         txn: &Arc<Txn<'_>>,
         row_id: &Self::Key,
-        auth: &Option<Token>,
     ) -> TCResult<Self::Value> {
+        // TODO: authorize
+        let auth = &None;
         let mut row = self
             .chain
             .lock()
@@ -238,8 +239,9 @@ impl Collection for Table {
         txn: &Arc<Txn<'_>>,
         row_id: Vec<TCValue>,
         column_values: Vec<TCValue>,
-        auth: &Option<Token>,
     ) -> TCResult<State> {
+        // TODO: authorize
+        let auth = &None;
         let row_id = self.row_id(&txn, &row_id, auth).await?;
         let schema = self.schema(txn.id()).await?;
         let schema_map = schema.as_map();

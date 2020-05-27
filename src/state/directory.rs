@@ -8,7 +8,6 @@ use futures::lock::Mutex;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::Token;
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::chain::{Chain, Mutation};
@@ -79,12 +78,7 @@ impl Collection for Directory {
     type Key = TCPath;
     type Value = State;
 
-    async fn get(
-        self: &Arc<Self>,
-        txn: &Arc<Txn<'_>>,
-        path: &Self::Key,
-        auth: &Option<Token>,
-    ) -> TCResult<Self::Value> {
+    async fn get(self: &Arc<Self>, txn: &Arc<Txn<'_>>, path: &Self::Key) -> TCResult<Self::Value> {
         println!("Directory::get {}", path);
         if path.is_empty() {
             return Err(error::bad_request(
@@ -103,12 +97,6 @@ impl Collection for Directory {
             .await;
 
         if let Some(entry) = entry {
-            if let Some(owner) = entry.owner {
-                if auth.as_ref().map(|token| token.actor_id()) != Some(owner) {
-                    return Err(error::forbidden("You are not the owner of this resource"));
-                }
-            }
-
             let txn_id = &txn.id();
 
             if let Some(store) = self
@@ -122,7 +110,7 @@ impl Collection for Directory {
                         if path.len() == 1 {
                             Ok(dir.into())
                         } else {
-                            dir.get(txn, &path.slice_from(1), auth).await
+                            dir.get(txn, &path.slice_from(1)).await
                         }
                     }
                     EntryType::Graph if path.len() == 1 => {
@@ -149,7 +137,6 @@ impl Collection for Directory {
         txn: &Arc<Txn<'_>>,
         path: Self::Key,
         state: Self::Value,
-        auth: &Option<Token>,
     ) -> TCResult<State> {
         let path: PathSegment = path.try_into()?;
         if path.starts_with(".") {
@@ -160,7 +147,7 @@ impl Collection for Directory {
         }
 
         let context = self.context.reserve(&txn.id(), path.clone().into()).await?;
-        let owner = auth.as_ref().map(|token| token.actor_id());
+        let owner = None; // TODO: authorize
         let path_clone = path.clone();
         let entry = match state {
             State::Directory(d) => {
@@ -191,7 +178,7 @@ impl Collection for Directory {
             .await?;
         txn.mutate(self.clone());
 
-        self.get(txn, &path.into(), auth).await
+        self.get(txn, &path.into()).await
     }
 }
 

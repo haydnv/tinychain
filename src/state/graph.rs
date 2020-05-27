@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::auth::Token;
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::file::*;
@@ -32,7 +31,6 @@ impl Collection for Graph {
         self: &Arc<Self>,
         _txn: &Arc<Txn<'_>>,
         _node_id: &TCValue,
-        _auth: &Option<Token>,
     ) -> TCResult<Self::Value> {
         Err(error::not_implemented())
     }
@@ -42,7 +40,6 @@ impl Collection for Graph {
         _txn: &Arc<Txn<'_>>,
         _node_id: TCValue,
         _node: TCValue,
-        _auth: &Option<Token>,
     ) -> TCResult<State> {
         Ok(self.into())
     }

@@ -1,13 +1,12 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::auth::Token;
 use crate::error;
 use crate::internal::block::Store;
-use crate::state::{Collection, Derived, State, Tensor};
+use crate::state::{Collection, Derived, State};
 use crate::transaction::Txn;
 use crate::value::link::TCPath;
 use crate::value::{TCResult, TCValue, ValueId};
@@ -22,18 +21,29 @@ impl TryFrom<TCValue> for Slice {
     }
 }
 
-struct List {
-    blocks: Arc<Store>,
+struct BTree {
+    blocks: Arc<Store>
 }
 
-enum Column {
-    List(List),
-    Tensor(Tensor),
+pub struct IndexConfig {
+    key: HashMap<ValueId, TCPath>,
+    values: HashMap<ValueId, TCPath>,
+}
+
+impl TryFrom<TCValue> for IndexConfig {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<IndexConfig> {
+        let (key, values): (TCValue, TCValue) = value.try_into()?;
+        let key: Vec<(ValueId, TCPath)> = key.try_into()?;
+        let values: Vec<(ValueId, TCPath)> = values.try_into()?;
+        Ok(IndexConfig { key: key.into_iter().collect(), values: values.into_iter().collect() })
+    }
 }
 
 pub struct Index {
-    key: HashMap<ValueId, Column>,
-    values: HashMap<ValueId, Column>,
+    config: IndexConfig,
+    data: BTree,
 }
 
 impl TryFrom<TCValue> for Index {
@@ -49,12 +59,7 @@ impl Collection for Index {
     type Key = Slice;
     type Value = Index;
 
-    async fn get(
-        self: &Arc<Self>,
-        _txn: &Arc<Txn<'_>>,
-        _key: &Slice,
-        _auth: &Option<Token>,
-    ) -> TCResult<Index> {
+    async fn get(self: &Arc<Self>, _txn: &Arc<Txn<'_>>, _key: &Slice) -> TCResult<Index> {
         Err(error::not_implemented())
     }
 
@@ -63,7 +68,6 @@ impl Collection for Index {
         _txn: &Arc<Txn<'_>>,
         _key: Slice,
         _value: Index,
-        _auth: &Option<Token>,
     ) -> TCResult<State> {
         Err(error::not_implemented())
     }
@@ -71,9 +75,10 @@ impl Collection for Index {
 
 #[async_trait]
 impl Derived for Index {
-    type Config = (Vec<(ValueId, TCPath)>, Vec<(ValueId, TCPath)>);
+    type Config = IndexConfig;
 
-    async fn create(_txn: &Arc<Txn<'_>>, _config: Self::Config) -> TCResult<Arc<Self>> {
-        Err(error::not_implemented())
+    async fn create(txn: &Arc<Txn<'_>>, config: Self::Config) -> TCResult<Arc<Self>> {
+        let data = BTree { blocks: txn.context() };
+        Ok(Arc::new(Index { config, data }))
     }
 }

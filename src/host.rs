@@ -182,7 +182,7 @@ impl Host {
                 _ => Err(error::not_found(path)),
             }
         } else if let Some((path, dir)) = self.root.get(path) {
-            let state = dir.get(txn, &path, auth).await?;
+            let state = dir.get(txn, &path).await?;
             state.get(txn, key, auth).await
         } else {
             Err(error::not_found(path))
@@ -195,8 +195,9 @@ impl Host {
         dest: Link,
         key: TCValue,
         state: State,
-        auth: &Option<Token>,
+        _auth: &Option<Token>,
     ) -> TCResult<State> {
+        // TODO: authorize
         println!("PUT {}", dest);
         if let Some(host) = dest.host() {
             if host.address() != &self.address {
@@ -220,7 +221,7 @@ impl Host {
         } else if let Some((mut path, dir)) = self.root.get(path) {
             let key: TCPath = key.try_into()?;
             path.extend(key.into_iter());
-            Ok(dir.clone().put(txn, path, state, auth).await?)
+            Ok(dir.clone().put(txn, path, state).await?)
         } else {
             Err(error::not_found(path))
         }
