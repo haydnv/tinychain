@@ -15,7 +15,7 @@ use crate::internal::file::*;
 use crate::state::*;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{PathSegment, TCPath};
-use crate::value::{Op, TCResult, TCValue};
+use crate::value::{TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
 enum EntryType {
@@ -28,16 +28,11 @@ enum EntryType {
 struct DirEntry {
     name: PathSegment,
     entry_type: EntryType,
-    owner: Option<Op>,
 }
 
 impl DirEntry {
-    fn new(name: PathSegment, entry_type: EntryType, owner: Option<Op>) -> DirEntry {
-        DirEntry {
-            name,
-            entry_type,
-            owner,
-        }
+    fn new(name: PathSegment, entry_type: EntryType) -> DirEntry {
+        DirEntry { name, entry_type }
     }
 }
 
@@ -147,20 +142,19 @@ impl Collection for Directory {
         }
 
         let context = self.context.reserve(&txn.id(), path.clone().into()).await?;
-        let owner = None; // TODO: authorize
         let path_clone = path.clone();
         let entry = match state {
             State::Directory(d) => {
                 FileCopier::copy(txn.id(), &*d, context).await;
-                DirEntry::new(path_clone, EntryType::Directory, owner)
+                DirEntry::new(path_clone, EntryType::Directory)
             }
             State::Graph(g) => {
                 FileCopier::copy(txn.id(), &*g, context).await;
-                DirEntry::new(path_clone, EntryType::Graph, owner)
+                DirEntry::new(path_clone, EntryType::Graph)
             }
             State::Table(t) => {
                 FileCopier::copy(txn.id(), &*t, context).await;
-                DirEntry::new(path_clone, EntryType::Table, owner)
+                DirEntry::new(path_clone, EntryType::Table)
             }
             other => {
                 return Err(error::bad_request(

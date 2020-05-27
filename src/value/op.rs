@@ -94,55 +94,115 @@ impl From<Vec<(ValueId, TCValue)>> for Args {
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
+pub struct GetOp {
+    pub subject: Subject,
+    pub key: TCValue,
+}
+
+impl<S: Into<Subject>> From<(S, TCValue)> for GetOp {
+    fn from(tup: (S, TCValue)) -> GetOp {
+        GetOp {
+            subject: tup.0.into(),
+            key: tup.1,
+        }
+    }
+}
+
+impl fmt::Display for GetOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "GET {}/{}", self.subject, self.key)
+    }
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct PutOp {
+    pub subject: Subject,
+    pub key: TCValue,
+    pub value: TCValue,
+}
+
+impl<S: Into<Subject>> From<(S, TCValue, TCValue)> for PutOp {
+    fn from(tup: (S, TCValue, TCValue)) -> PutOp {
+        PutOp {
+            subject: tup.0.into(),
+            key: tup.1,
+            value: tup.2,
+        }
+    }
+}
+
+impl fmt::Display for PutOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "PUT {}/{}:{}", self.subject, self.key, self.value)
+    }
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct PostOp {
+    pub subject: TCRef,
+    pub action: TCPath,
+    pub requires: Vec<(ValueId, TCValue)>,
+}
+
+impl From<(TCRef, TCPath, Vec<(ValueId, TCValue)>)> for PostOp {
+    fn from(tup: (TCRef, TCPath, Vec<(ValueId, TCValue)>)) -> PostOp {
+        PostOp {
+            subject: tup.0,
+            action: tup.1,
+            requires: tup.2,
+        }
+    }
+}
+
+impl fmt::Display for PostOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "POST {}{}: {:?}",
+            self.subject, self.action, self.requires
+        )
+    }
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
 pub enum Op {
-    Get {
-        subject: Subject,
-        key: Box<TCValue>,
-    },
-    Put {
-        subject: Subject,
-        key: Box<TCValue>,
-        value: Box<TCValue>,
-    },
-    Post {
-        subject: TCRef,
-        action: TCPath,
-        requires: Vec<(ValueId, TCValue)>,
-    },
+    Get(GetOp),
+    Put(PutOp),
+    Post(PostOp),
 }
 
 impl Op {
     pub fn deps(&self) -> HashSet<TCRef> {
         let mut deps = vec![];
         match self {
-            Op::Get { subject, key } => {
+            Op::Get(GetOp { subject, key }) => {
                 if let Subject::Ref(r) = subject {
                     deps.push(r);
                 }
-                if let TCValue::Ref(r) = &**key {
+                if let TCValue::Ref(r) = key {
                     deps.push(&r);
                 }
             }
-            Op::Put {
+            Op::Put(PutOp {
                 subject,
                 key,
                 value,
-            } => {
+            }) => {
                 if let Subject::Ref(r) = subject {
                     deps.push(r);
                 }
-                if let TCValue::Ref(r) = &**key {
+                if let TCValue::Ref(r) = key {
                     deps.push(&r);
                 }
-                if let TCValue::Ref(r) = &**value {
+                if let TCValue::Ref(r) = value {
                     deps.push(&r);
                 }
             }
-            Op::Post {
+            Op::Post(PostOp {
                 subject,
                 action: _,
                 requires,
-            } => {
+            }) => {
                 deps.push(subject);
                 for (_, v) in requires {
                     if let TCValue::Ref(r) = v {
@@ -154,60 +214,38 @@ impl Op {
 
         deps.into_iter().cloned().collect()
     }
+}
 
-    pub fn get(subject: Subject, key: TCValue) -> Op {
-        Op::Get {
-            subject,
-            key: Box::new(key),
-        }
+impl From<GetOp> for Op {
+    fn from(op: GetOp) -> Op {
+        Op::Get(op)
     }
+}
 
-    pub fn put(subject: Subject, key: TCValue, value: TCValue) -> Op {
-        Op::Put {
-            subject,
-            key: Box::new(key),
-            value: Box::new(value),
-        }
+impl From<PutOp> for Op {
+    fn from(op: PutOp) -> Op {
+        Op::Put(op)
     }
+}
 
-    pub fn post(subject: TCRef, action: TCPath, requires: Vec<(ValueId, TCValue)>) -> Op {
-        Op::Post {
-            subject,
-            action,
-            requires,
-        }
+impl From<PostOp> for Op {
+    fn from(op: PostOp) -> Op {
+        Op::Post(op)
     }
 }
 
 impl fmt::Display for Op {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Op::Get { subject, key } => write!(f, "subject: {}, key: {}", subject, key),
-            Op::Put {
-                subject,
-                key,
-                value,
-            } => write!(f, "subject: {}, key: {}, value: {}", subject, key, value),
-            Op::Post {
-                subject,
-                action,
-                requires,
-            } => write!(
-                f,
-                "subject: {}, action: {}, requires: {}",
-                subject.to_string(),
-                action,
-                requires
-                    .iter()
-                    .map(|(id, val)| format!("{}: {}", id, val))
-                    .collect::<Vec<String>>()
-                    .join(","),
-            ),
+            Op::Get(get_op) => write!(f, "{}", get_op),
+            Op::Put(put_op) => write!(f, "{}", put_op),
+            Op::Post(post_op) => write!(f, "{}", post_op),
         }
     }
 }
 
-pub struct OpVisitor;
+// TODO: split this into op-specific Visitors
+struct OpVisitor;
 
 impl<'de> Visitor<'de> for OpVisitor {
     type Value = Op;
@@ -224,7 +262,7 @@ impl<'de> Visitor<'de> for OpVisitor {
             if key.contains('/') {
                 let key: Vec<&str> = key.split('/').collect();
                 let subject: TCRef = key[0][1..].parse().map_err(Error::custom)?;
-                let method: TCPath = key[1..]
+                let action: TCPath = key[1..]
                     .iter()
                     .map(|s| s.parse())
                     .collect::<TCResult<Vec<PathSegment>>>()
@@ -232,15 +270,29 @@ impl<'de> Visitor<'de> for OpVisitor {
                     .into();
                 let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;
 
-                Ok(Op::post(subject, method, requires))
+                Ok(PostOp {
+                    subject,
+                    action,
+                    requires,
+                }
+                .into())
             } else {
                 let subject: TCRef = key[1..].parse().map_err(Error::custom)?;
                 let mut value = access.next_value::<Vec<TCValue>>()?;
 
                 if value.len() == 1 {
-                    Ok(Op::get(subject.into(), value.remove(0)))
+                    Ok(GetOp {
+                        subject: subject.into(),
+                        key: value.remove(0),
+                    }
+                    .into())
                 } else if value.len() == 2 {
-                    Ok(Op::put(subject.into(), value.remove(0), value.remove(0)))
+                    Ok(PutOp {
+                        subject: subject.into(),
+                        key: value.remove(0),
+                        value: value.remove(0),
+                    }
+                    .into())
                 } else {
                     Err(Error::custom(format!(
                         "Expected either 1 (for a Get), or 2 (for a Put) Values for {}",
@@ -263,35 +315,36 @@ impl<'de> Deserialize<'de> for Op {
     }
 }
 
+// TODO: split this into op-specific definitions
 impl Serialize for Op {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            Op::Get { subject, key } => {
+            Op::Get(GetOp { subject, key }) => {
                 let mut op = s.serialize_map(Some(1))?;
-                let key: TCValue = vec![(**key).clone()].into();
+                let key: TCValue = vec![key.clone()].into();
                 op.serialize_entry(subject, &key)?;
                 op.end()
             }
-            Op::Put {
+            Op::Put(PutOp {
                 subject,
                 key,
                 value,
-            } => {
+            }) => {
                 let mut op = s.serialize_map(Some(1))?;
                 op.serialize_entry(
                     subject,
-                    &TCValue::Vector([*key.clone(), *value.clone()].to_vec()),
+                    &TCValue::Vector([key.clone(), value.clone()].to_vec()),
                 )?;
                 op.end()
             }
-            Op::Post {
+            Op::Post(PostOp {
                 subject,
                 action,
                 requires,
-            } => {
+            }) => {
                 let mut op = s.serialize_map(Some(1))?;
                 op.serialize_entry(&format!("{}{}", subject, action), requires)?;
                 op.end()

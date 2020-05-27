@@ -22,7 +22,7 @@ impl TryFrom<TCValue> for Slice {
 }
 
 struct BTree {
-    blocks: Arc<Store>
+    blocks: Arc<Store>,
 }
 
 pub struct IndexConfig {
@@ -37,7 +37,10 @@ impl TryFrom<TCValue> for IndexConfig {
         let (key, values): (TCValue, TCValue) = value.try_into()?;
         let key: Vec<(ValueId, TCPath)> = key.try_into()?;
         let values: Vec<(ValueId, TCPath)> = values.try_into()?;
-        Ok(IndexConfig { key: key.into_iter().collect(), values: values.into_iter().collect() })
+        Ok(IndexConfig {
+            key: key.into_iter().collect(),
+            values: values.into_iter().collect(),
+        })
     }
 }
 
@@ -78,7 +81,9 @@ impl Derived for Index {
     type Config = IndexConfig;
 
     async fn create(txn: &Arc<Txn<'_>>, config: Self::Config) -> TCResult<Arc<Self>> {
-        let data = BTree { blocks: txn.context() };
+        let data = BTree {
+            blocks: txn.context(),
+        };
         Ok(Arc::new(Index { config, data }))
     }
 }

@@ -15,6 +15,7 @@ use crate::host::{Host, NetworkTime};
 use crate::internal::block::Store;
 use crate::state::State;
 use crate::value::link::*;
+use crate::value::op::*;
 use crate::value::*;
 
 #[async_trait]
@@ -119,9 +120,9 @@ impl<'a> TxnState<'a> {
                     ))
                 } else {
                     if required.is_empty() {
-                        self.queue.push_front((value.0, op, auth));
+                        self.queue.push_front((value.0, *op, auth));
                     } else {
-                        self.queue.push_back((value.0, op, auth));
+                        self.queue.push_back((value.0, *op, auth));
                     }
 
                     Ok(())
@@ -267,41 +268,41 @@ impl<'a> Txn<'a> {
         let extension = self.subcontext(value_id).await?;
 
         match op {
-            Op::Get { subject, key } => match subject {
-                Subject::Link(l) => extension.get(l, *key, auth).await,
+            Op::Get(GetOp { subject, key }) => match subject {
+                Subject::Link(l) => extension.get(l, key, auth).await,
                 Subject::Ref(r) => match resolved.get(&r.value_id()) {
-                    Some(s) => s.get(&extension, *key, auth).await,
+                    Some(s) => s.get(&extension, key, auth).await,
                     None => Err(error::bad_request(
                         "Required value not provided",
                         r.value_id(),
                     )),
                 },
             },
-            Op::Put {
+            Op::Put(PutOp {
                 subject,
                 key,
                 value,
-            } => match subject {
+            }) => match subject {
                 Subject::Link(l) => {
                     extension
-                        .put(l, *key, resolve_val(resolved, *value)?, auth)
+                        .put(l, key, resolve_val(resolved, value)?, auth)
                         .await
                 }
                 Subject::Ref(r) => {
                     let subject = resolve_id(resolved, &r.value_id())?;
-                    let key = resolve_val(resolved, *key)?;
-                    let value = resolve_val(resolved, *value)?;
+                    let key = resolve_val(resolved, key)?;
+                    let value = resolve_val(resolved, value)?;
                     println!("{}.put({}, {})", subject, key, value);
                     subject
                         .put(&extension, key.try_into()?, value.try_into()?, auth)
                         .await
                 }
             },
-            Op::Post {
+            Op::Post(PostOp {
                 subject,
                 action,
                 requires,
-            } => {
+            }) => {
                 let mut deps: Vec<(ValueId, TCValue)> = Vec::with_capacity(requires.len());
                 for (dest_id, id) in requires {
                     let dep = resolve_val(resolved, id)?;

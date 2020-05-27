@@ -12,12 +12,11 @@ use crate::error;
 use crate::state::State;
 
 pub mod link;
-mod op;
+pub mod op;
 mod reference;
 mod version;
 
 pub type Args = op::Args;
-pub type Op = op::Op;
 pub type TCRef = reference::TCRef;
 pub type TCResult<T> = Result<T, error::TCError>;
 pub type Subject = op::Subject;
@@ -157,7 +156,7 @@ pub enum TCValue {
     Int32(i32),
     UInt64(u64),
     Link(link::Link),
-    Op(Op),
+    Op(Box<op::Op>),
     Ref(TCRef),
     r#String(String),
     Vector(Vec<TCValue>),
@@ -193,9 +192,9 @@ impl From<link::TCPath> for TCValue {
     }
 }
 
-impl From<Op> for TCValue {
-    fn from(op: Op) -> TCValue {
-        TCValue::Op(op)
+impl From<op::Op> for TCValue {
+    fn from(op: op::Op) -> TCValue {
+        TCValue::Op(Box::new(op))
     }
 }
 
@@ -288,7 +287,7 @@ impl TryFrom<TCValue> for op::Op {
 
     fn try_from(v: TCValue) -> TCResult<op::Op> {
         match v {
-            TCValue::Op(op) => Ok(op),
+            TCValue::Op(op) => Ok(*op),
             other => Err(error::bad_request("Expected Op but found", other)),
         }
     }
@@ -442,10 +441,18 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
 
                 if value.is_empty() {
                     Ok(link.into())
-                } else if value.len() == 1 {
-                    Ok(Op::get(link.into(), value.remove(0)).into())
-                } else if value.len() == 2 {
-                    Ok(Op::put(link.into(), value.remove(0), value.remove(0)).into())
+                } else if value.len() < 3 {
+                    let op_value: op::Op = if value.len() == 1 {
+                        let get_op: op::GetOp = (link, value.remove(0)).into();
+                        get_op.into()
+                    } else if value.len() == 2 {
+                        let put_op: op::PutOp = (link, value.remove(0), value.remove(0)).into();
+                        put_op.into()
+                    } else {
+                        panic!("This should be impossible");
+                    };
+
+                    Ok(op_value.into())
                 } else {
                     Err(de::Error::custom(format!(
                         "Expected a list of 0, 1, or 2 values for {}",
@@ -464,7 +471,8 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                         .into();
                     let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;
 
-                    Ok(Op::post(subject, method, requires).into())
+                    let post_op: op::PostOp = (subject, method, requires).into();
+                    Ok(op::Op::from(post_op).into())
                 } else {
                     let subject: TCRef = key[1..].parse().map_err(de::Error::custom)?;
                     let mut value = access.next_value::<Vec<TCValue>>()?;
@@ -472,9 +480,11 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                     if value.is_empty() {
                         Ok(subject.into())
                     } else if value.len() == 1 {
-                        Ok(Op::get(subject.into(), value.remove(0)).into())
+                        let get_op: op::GetOp = (subject, value.remove(0)).into();
+                        Ok(op::Op::from(get_op).into())
                     } else if value.len() == 2 {
-                        Ok(Op::put(subject.into(), value.remove(0), value.remove(0)).into())
+                        let put_op: op::PutOp = (subject, value.remove(0), value.remove(0)).into();
+                        Ok(op::Op::from(put_op).into())
                     } else {
                         Err(de::Error::custom(format!(
                             "Expected a list of 0, 1, or 2 Values for {}",

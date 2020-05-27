@@ -1,8 +1,7 @@
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signature};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -10,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::state::table;
 use crate::value::link::{Link, TCPath};
-use crate::value::{Op, TCResult, TCValue};
+use crate::value::op::{GetOp, PostOp};
+use crate::value::{TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Token {
@@ -22,14 +22,15 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn actor_id(&self) -> Op {
-        Op::Get {
-            subject: self.iss.clone().into(),
-            key: Box::new(self.actor_id.clone()),
-        }
+    pub fn actor_id(&self) -> GetOp {
+        (self.iss.clone(), self.actor_id.clone()).into()
     }
+}
 
-    pub fn get_actor(token: &str) -> TCResult<Op> {
+impl FromStr for Token {
+    type Err = error::TCError;
+
+    fn from_str(token: &str) -> TCResult<Token> {
         let token: Vec<&str> = token.split('.').collect();
         if token.len() != 3 {
             return Err(error::unauthorized(
@@ -42,23 +43,20 @@ impl Token {
         let token: Token = serde_json::from_slice(&token)
             .map_err(|e| error::unauthorized(&format!("Invalid bearer token: {}", e)))?;
 
-        Ok(Op::Get {
-            subject: token.iss.into(),
-            key: Box::new(token.actor_id),
-        })
+        Ok(token)
     }
 }
 
 pub struct Actor {
     host: Link,
     id: TCValue,
-    lock: Op,
+    lock: PostOp,
     public_key: PublicKey,
     private_key: SecretKey,
 }
 
 impl Actor {
-    pub fn new(host: Link, id: TCValue, lock: Op) -> Arc<Actor> {
+    pub fn new(host: Link, id: TCValue, lock: PostOp) -> Arc<Actor> {
         let mut rng = OsRng {};
         let keypair: Keypair = Keypair::generate(&mut rng);
 
@@ -166,56 +164,6 @@ impl Actor {
         ];
         let version = "0.0.1".parse().unwrap();
         table::Schema::from(key, columns, version)
-    }
-}
-
-impl TryFrom<table::Row> for Actor {
-    type Error = error::TCError;
-
-    fn try_from(row: table::Row) -> TCResult<Actor> {
-        let (mut key, mut values) = row.into();
-
-        if key.len() != 2 || values.len() != 2 {
-            Err(error::bad_request(
-                "Expected Actor, found",
-                format!("{:?}: {:?}", key, values),
-            ))
-        } else {
-            let id = key.pop().unwrap().try_into()?;
-            let host = key.pop().unwrap().try_into()?;
-            let private_key: Bytes = values
-                .pop()
-                .unwrap()
-                .ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "private_key"))?
-                .try_into()?;
-            let public_key: Bytes = values
-                .pop()
-                .unwrap()
-                .ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "public_key"))?
-                .try_into()?;
-            let lock = values
-                .pop()
-                .unwrap()
-                .ok_or_else(|| error::bad_request("Actor::from(Row) missing field", "lock"))?
-                .try_into()?;
-
-            if values.is_empty() {
-                Ok(Actor {
-                    host,
-                    id,
-                    lock,
-                    public_key: PublicKey::from_bytes(&public_key[..])
-                        .map_err(|e| error::bad_request("Unable to parse public key", e))?,
-                    private_key: SecretKey::from_bytes(&private_key[..])
-                        .map_err(|e| error::bad_request("Unable to parse private key", e))?,
-                })
-            } else {
-                Err(error::bad_request(
-                    "Got extra unknown values for Actor",
-                    format!("{:?}", values),
-                ))
-            }
-        }
     }
 }
 
