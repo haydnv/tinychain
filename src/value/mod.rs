@@ -154,6 +154,7 @@ pub enum TCValue {
     Bytes(Bytes),
     Id(ValueId),
     Int32(i32),
+    UInt64(u64),
     Link(link::Link),
     Op(Op),
     Ref(TCRef),
@@ -299,6 +300,17 @@ impl TryFrom<TCValue> for String {
         match v {
             TCValue::r#String(s) => Ok(s),
             other => Err(error::bad_request("Expected a String but found", other)),
+        }
+    }
+}
+
+impl TryFrom<TCValue> for u64 {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<u64> {
+        match v {
+            TCValue::UInt64(i) => Ok(i),
+            other => Err(error::bad_request("Expected a UInt64 but found", other)),
         }
     }
 }
@@ -521,6 +533,7 @@ impl Serialize for TCValue {
                 map.end()
             }
             TCValue::Int32(i) => s.serialize_i32(*i),
+            TCValue::UInt64(i) => s.serialize_u64(*i),
             TCValue::Link(l) => l.serialize(s),
             TCValue::Op(o) => o.serialize(s),
             TCValue::Ref(r) => r.serialize(s),
@@ -549,6 +562,7 @@ impl fmt::Display for TCValue {
             TCValue::Bytes(b) => write!(f, "Bytes({})", b.len()),
             TCValue::Id(id) => write!(f, "ValueId: {}", id),
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
+            TCValue::UInt64(i) => write!(f, "UInt64: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
             TCValue::Op(o) => write!(f, "Op: {}", o),
             TCValue::Ref(r) => write!(f, "Ref: {}", r),
