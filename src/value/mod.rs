@@ -442,11 +442,11 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                     Ok(link.into())
                 } else if value.len() < 3 {
                     let op_value: op::Op = if value.len() == 1 {
-                        let get_op: op::GetOp = (link, value.remove(0)).into();
-                        get_op.into()
+                        let get_op: op::GetOp = (value.remove(0),).into();
+                        (link, get_op).into()
                     } else if value.len() == 2 {
-                        let put_op: op::PutOp = (link, value.remove(0), value.remove(0)).into();
-                        put_op.into()
+                        let put_op: op::PutOp = (value.remove(0), value.remove(0)).into();
+                        (link, put_op).into()
                     } else {
                         panic!("This should be impossible");
                     };
@@ -470,8 +470,8 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                         .into();
                     let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;
 
-                    let post_op: op::PostOp = (subject, method, requires).into();
-                    Ok(op::Op::from(post_op).into())
+                    let post_op: op::PostOp = (method, requires).into();
+                    Ok(op::Op::from((subject, post_op)).into())
                 } else {
                     let subject: TCRef = key[1..].parse().map_err(de::Error::custom)?;
                     let mut value = access.next_value::<Vec<TCValue>>()?;
@@ -479,11 +479,11 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                     if value.is_empty() {
                         Ok(subject.into())
                     } else if value.len() == 1 {
-                        let get_op: op::GetOp = (subject, value.remove(0)).into();
-                        Ok(op::Op::from(get_op).into())
+                        let get_op: op::GetOp = (value.remove(0),).into();
+                        Ok(op::Op::from((subject, get_op)).into())
                     } else if value.len() == 2 {
-                        let put_op: op::PutOp = (subject, value.remove(0), value.remove(0)).into();
-                        Ok(op::Op::from(put_op).into())
+                        let put_op: op::PutOp = (value.remove(0), value.remove(0)).into();
+                        Ok(op::Op::from((subject, put_op)).into())
                     } else {
                         Err(de::Error::custom(format!(
                             "Expected a list of 0, 1, or 2 Values for {}",

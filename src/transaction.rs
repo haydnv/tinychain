@@ -266,10 +266,12 @@ impl<'a> Txn<'a> {
         auth: &Option<Token>,
     ) -> TCResult<State> {
         let extension = self.subcontext(value_id).await?;
+        let subject = op.subject();
 
-        match op {
-            Op::Get(GetOp { subject, key }) => match subject {
-                Subject::Link(l) => extension.get(l, key, auth).await,
+        use OpArgs::*;
+        match op.args().clone() {
+            Get(GetOp { key }) => match subject {
+                Subject::Link(l) => extension.get(l.clone(), key, auth).await,
                 Subject::Ref(r) => match resolved.get(&r.value_id()) {
                     Some(s) => s.get(&extension, key, auth).await,
                     None => Err(error::bad_request(
@@ -278,14 +280,10 @@ impl<'a> Txn<'a> {
                     )),
                 },
             },
-            Op::Put(PutOp {
-                subject,
-                key,
-                value,
-            }) => match subject {
+            Put(PutOp { key, value }) => match subject {
                 Subject::Link(l) => {
                     extension
-                        .put(l, key, resolve_val(resolved, value)?, auth)
+                        .put(l.clone(), key, resolve_val(resolved, value)?, auth)
                         .await
                 }
                 Subject::Ref(r) => {
@@ -298,22 +296,21 @@ impl<'a> Txn<'a> {
                         .await
                 }
             },
-            Op::Post(PostOp {
-                subject,
-                action,
-                requires,
-            }) => {
-                let mut deps: Vec<(ValueId, TCValue)> = Vec::with_capacity(requires.len());
-                for (dest_id, id) in requires {
-                    let dep = resolve_val(resolved, id)?;
-                    deps.push((dest_id, dep.try_into()?));
-                }
+            Post(PostOp { action, requires }) => match subject {
+                Subject::Ref(r) => {
+                    let mut deps: Vec<(ValueId, TCValue)> = Vec::with_capacity(requires.len());
+                    for (dest_id, id) in requires {
+                        let dep = resolve_val(resolved, id)?;
+                        deps.push((dest_id, dep.try_into()?));
+                    }
 
-                let subject = resolve_id(resolved, &subject.value_id())?;
-                subject
-                    .post(extension, &action.try_into()?, deps.into(), auth)
-                    .await
-            }
+                    let subject = resolve_id(resolved, &r.value_id())?;
+                    subject
+                        .post(extension, &action.try_into()?, deps.into(), auth)
+                        .await
+                }
+                Subject::Link(l) => Err(error::method_not_allowed(l)),
+            },
         }
     }
 

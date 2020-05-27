@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use serde::de::{Deserializer, Error, MapAccess, Visitor};
-use serde::ser::{Serialize, SerializeMap, Serializer};
-use serde::Deserialize;
+use serde::de::{Error, MapAccess, Visitor};
+use serde::ser::{SerializeMap, SerializeSeq};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::value::link::*;
 use crate::value::*;
@@ -52,118 +52,164 @@ impl Serialize for Subject {
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct GetOp {
-    pub subject: Subject,
     pub key: TCValue,
 }
 
-impl<S: Into<Subject>> From<(S, TCValue)> for GetOp {
-    fn from(tup: (S, TCValue)) -> GetOp {
-        GetOp {
-            subject: tup.0.into(),
-            key: tup.1,
-        }
+impl From<(TCValue,)> for GetOp {
+    fn from(tup: (TCValue,)) -> GetOp {
+        GetOp { key: tup.0 }
+    }
+}
+
+impl Serialize for GetOp {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut op = s.serialize_seq(Some(1))?;
+        op.serialize_element(&self.key)?;
+        op.end()
     }
 }
 
 impl fmt::Display for GetOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "GET {}/{}", self.subject, self.key)
+        write!(f, "GET {}", self.key)
     }
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct PutOp {
-    pub subject: Subject,
     pub key: TCValue,
     pub value: TCValue,
 }
 
-impl<S: Into<Subject>> From<(S, TCValue, TCValue)> for PutOp {
-    fn from(tup: (S, TCValue, TCValue)) -> PutOp {
+impl From<(TCValue, TCValue)> for PutOp {
+    fn from(tup: (TCValue, TCValue)) -> PutOp {
         PutOp {
-            subject: tup.0.into(),
-            key: tup.1,
-            value: tup.2,
+            key: tup.0,
+            value: tup.1,
         }
+    }
+}
+
+impl Serialize for PutOp {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut op = s.serialize_seq(Some(1))?;
+        op.serialize_element(&self.key)?;
+        op.serialize_element(&self.value)?;
+        op.end()
     }
 }
 
 impl fmt::Display for PutOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "PUT {}/{}:{}", self.subject, self.key, self.value)
+        write!(f, "PUT {}:{}", self.key, self.value)
     }
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct PostOp {
-    pub subject: TCRef,
     pub action: TCPath,
     pub requires: Vec<(ValueId, TCValue)>,
 }
 
-impl From<(TCRef, TCPath, Vec<(ValueId, TCValue)>)> for PostOp {
-    fn from(tup: (TCRef, TCPath, Vec<(ValueId, TCValue)>)) -> PostOp {
+impl From<(TCPath, Vec<(ValueId, TCValue)>)> for PostOp {
+    fn from(tup: (TCPath, Vec<(ValueId, TCValue)>)) -> PostOp {
         PostOp {
-            subject: tup.0,
-            action: tup.1,
-            requires: tup.2,
+            action: tup.0,
+            requires: tup.1,
         }
     }
 }
 
 impl fmt::Display for PostOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "POST {}{}: {:?}",
-            self.subject, self.action, self.requires
-        )
+        write!(f, "POST {}: {:?}", self.action, self.requires)
     }
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub enum Op {
+pub enum OpArgs {
     Get(GetOp),
     Put(PutOp),
     Post(PostOp),
 }
 
+impl fmt::Display for OpArgs {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use OpArgs::*;
+        match self {
+            Get(get_op) => write!(f, "{}", get_op),
+            Put(put_op) => write!(f, "{}", put_op),
+            Post(post_op) => write!(f, "{}", post_op),
+        }
+    }
+}
+
+impl From<GetOp> for OpArgs {
+    fn from(op: GetOp) -> OpArgs {
+        OpArgs::Get(op)
+    }
+}
+
+impl From<PutOp> for OpArgs {
+    fn from(op: PutOp) -> OpArgs {
+        OpArgs::Put(op)
+    }
+}
+
+impl From<PostOp> for OpArgs {
+    fn from(op: PostOp) -> OpArgs {
+        OpArgs::Post(op)
+    }
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct Op {
+    subject: Subject,
+    args: OpArgs,
+}
+
 impl Op {
+    pub fn subject(&'_ self) -> &'_ Subject {
+        &self.subject
+    }
+
+    pub fn args(&'_ self) -> &'_ OpArgs {
+        &self.args
+    }
+
     pub fn deps(&self) -> HashSet<TCRef> {
         let mut deps = vec![];
-        match self {
-            Op::Get(GetOp { subject, key }) => {
-                if let Subject::Ref(r) = subject {
-                    deps.push(r);
-                }
+        if let Subject::Ref(r) = &self.subject {
+            deps.push(r);
+        }
+
+        match &self.args {
+            OpArgs::Get(GetOp { key }) => {
                 if let TCValue::Ref(r) = key {
-                    deps.push(&r);
+                    deps.push(r);
                 }
             }
-            Op::Put(PutOp {
-                subject,
-                key,
-                value,
-            }) => {
-                if let Subject::Ref(r) = subject {
-                    deps.push(r);
-                }
+            OpArgs::Put(PutOp { key, value }) => {
                 if let TCValue::Ref(r) = key {
-                    deps.push(&r);
+                    deps.push(r);
                 }
                 if let TCValue::Ref(r) = value {
-                    deps.push(&r);
+                    deps.push(r);
                 }
             }
-            Op::Post(PostOp {
-                subject,
+            OpArgs::Post(PostOp {
                 action: _,
                 requires,
             }) => {
-                deps.push(subject);
                 for (_, v) in requires {
                     if let TCValue::Ref(r) = v {
-                        deps.push(&r);
+                        deps.push(r);
                     }
                 }
             }
@@ -173,31 +219,18 @@ impl Op {
     }
 }
 
-impl From<GetOp> for Op {
-    fn from(op: GetOp) -> Op {
-        Op::Get(op)
-    }
-}
-
-impl From<PutOp> for Op {
-    fn from(op: PutOp) -> Op {
-        Op::Put(op)
-    }
-}
-
-impl From<PostOp> for Op {
-    fn from(op: PostOp) -> Op {
-        Op::Post(op)
+impl<S: Into<Subject>, A: Into<OpArgs>> From<(S, A)> for Op {
+    fn from((subject, args): (S, A)) -> Op {
+        Op {
+            subject: subject.into(),
+            args: args.into(),
+        }
     }
 }
 
 impl fmt::Display for Op {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Op::Get(get_op) => write!(f, "{}", get_op),
-            Op::Put(put_op) => write!(f, "{}", put_op),
-            Op::Post(post_op) => write!(f, "{}", post_op),
-        }
+        write!(f, "{} - {}", self.subject, self.args)
     }
 }
 
@@ -226,30 +259,18 @@ impl<'de> Visitor<'de> for OpVisitor {
                     .map_err(Error::custom)?
                     .into();
                 let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;
-
-                Ok(PostOp {
-                    subject,
-                    action,
-                    requires,
-                }
-                .into())
+                let args: PostOp = (action, requires).into();
+                Ok((subject, args).into())
             } else {
                 let subject: TCRef = key[1..].parse().map_err(Error::custom)?;
                 let mut value = access.next_value::<Vec<TCValue>>()?;
 
                 if value.len() == 1 {
-                    Ok(GetOp {
-                        subject: subject.into(),
-                        key: value.remove(0),
-                    }
-                    .into())
+                    let args: GetOp = (value.remove(0),).into();
+                    Ok((subject, args).into())
                 } else if value.len() == 2 {
-                    Ok(PutOp {
-                        subject: subject.into(),
-                        key: value.remove(0),
-                        value: value.remove(0),
-                    }
-                    .into())
+                    let args: PutOp = (value.remove(0), value.remove(0)).into();
+                    Ok((subject, args).into())
                 } else {
                     Err(Error::custom(format!(
                         "Expected either 1 (for a Get), or 2 (for a Put) Values for {}",
@@ -272,40 +293,23 @@ impl<'de> Deserialize<'de> for Op {
     }
 }
 
-// TODO: split this into op-specific definitions
 impl Serialize for Op {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        match self {
-            Op::Get(GetOp { subject, key }) => {
-                let mut op = s.serialize_map(Some(1))?;
-                let key: TCValue = vec![key.clone()].into();
-                op.serialize_entry(subject, &key)?;
-                op.end()
-            }
-            Op::Put(PutOp {
-                subject,
-                key,
-                value,
-            }) => {
-                let mut op = s.serialize_map(Some(1))?;
-                op.serialize_entry(
-                    subject,
-                    &TCValue::Vector([key.clone(), value.clone()].to_vec()),
-                )?;
-                op.end()
-            }
-            Op::Post(PostOp {
-                subject,
-                action,
-                requires,
-            }) => {
-                let mut op = s.serialize_map(Some(1))?;
-                op.serialize_entry(&format!("{}{}", subject, action), requires)?;
-                op.end()
+        let mut op = s.serialize_map(Some(1))?;
+
+        use OpArgs::*;
+        match &self.args {
+            Get(get_op) => op.serialize_entry(&self.subject, &get_op)?,
+            Put(put_op) => op.serialize_entry(&self.subject, &put_op)?,
+            Post(post_op) => {
+                let subject = format!("{}{}", self.subject, post_op.action);
+                op.serialize_entry(&subject, &post_op.requires)?
             }
         }
+
+        op.end()
     }
 }

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::state::table;
 use crate::value::link::{Link, TCPath};
-use crate::value::op::{GetOp, PostOp};
+use crate::value::op::{GetOp, Op, PostOp};
 use crate::value::{TCResult, TCValue};
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -22,8 +22,9 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn actor_id(&self) -> GetOp {
-        (self.iss.clone(), self.actor_id.clone()).into()
+    pub fn actor_id(&self) -> Op {
+        let op: GetOp = (self.actor_id.clone(),).into();
+        (self.iss.clone(), op).into()
     }
 }
 
