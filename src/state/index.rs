@@ -7,8 +7,9 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::block::Store;
 use crate::state::{Collection, Derived, State};
-use crate::transaction::Txn;
+use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
+use crate::value::op::PutOp;
 use crate::value::{TCResult, TCValue, ValueId};
 
 pub struct Slice;
@@ -80,10 +81,14 @@ impl Collection for Index {
 impl Derived for Index {
     type Config = IndexConfig;
 
-    async fn create(txn: &Arc<Txn<'_>>, config: Self::Config) -> TCResult<Arc<Self>> {
-        let data = BTree {
-            blocks: txn.context(),
-        };
-        Ok(Arc::new(Index { config, data }))
+    async fn new(_txn_id: &TxnId, context: Arc<Store>, config: Self::Config) -> TCResult<Self> {
+        let data = BTree { blocks: context };
+        Ok(Index { config, data })
+    }
+}
+
+impl Extend<PutOp> for Index {
+    fn extend<I: IntoIterator<Item = PutOp>>(&mut self, _iter: I) {
+        // TODO
     }
 }

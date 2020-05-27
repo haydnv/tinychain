@@ -6,9 +6,11 @@ use async_trait::async_trait;
 
 use crate::auth::Token;
 use crate::error;
+use crate::internal::block::Store;
 use crate::internal::file::File;
-use crate::transaction::{Transact, Txn};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::PathSegment;
+use crate::value::op::PutOp;
 use crate::value::{Args, TCResult, TCValue};
 
 mod directory;
@@ -60,10 +62,10 @@ pub trait Collection: Send + Sync {
 }
 
 #[async_trait]
-pub trait Derived: Collection {
+pub trait Derived: Collection + Extend<PutOp> + Sized {
     type Config: TryFrom<TCValue>;
 
-    async fn create(txn: &Arc<Txn<'_>>, config: Self::Config) -> TCResult<Arc<Self>>;
+    async fn new(txn_id: &TxnId, context: Arc<Store>, config: Self::Config) -> TCResult<Self>;
 }
 
 #[async_trait]

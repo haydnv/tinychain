@@ -8,8 +8,9 @@ use futures::future::try_join_all;
 use crate::error;
 use crate::internal::block::Store;
 use crate::state::{Collection, Derived, State};
-use crate::transaction::Txn;
+use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
+use crate::value::op::PutOp;
 use crate::value::{TCResult, TCValue};
 
 const BLOCK_SIZE: usize = 1_000_000;
@@ -107,18 +108,25 @@ impl Collection for Tensor {
 impl Derived for Tensor {
     type Config = TensorConfig;
 
-    async fn create(txn: &Arc<Txn<'_>>, config: TensorConfig) -> TCResult<Arc<Self>> {
-        let txn_id = txn.id();
-        let blocks = txn.context();
+    async fn new(txn_id: &TxnId, context: Arc<Store>, config: TensorConfig) -> TCResult<Self> {
         let size: u64 = (config.data_type.size() as u64) * config.dims.iter().product::<u64>();
-
         let num_blocks: usize = (size as f64 / BLOCK_SIZE as f64).ceil() as usize;
+
         let mut new_blocks = Vec::with_capacity(num_blocks);
         for i in 0..num_blocks + 1 {
-            new_blocks.push(blocks.new_block(&txn_id, i.into(), Bytes::from(&[0; BLOCK_SIZE][..])))
+            new_blocks.push(context.new_block(&txn_id, i.into(), Bytes::from(&[0; BLOCK_SIZE][..])))
         }
         try_join_all(new_blocks).await?;
 
-        Ok(Arc::new(Tensor { config, blocks }))
+        Ok(Tensor {
+            config,
+            blocks: context,
+        })
+    }
+}
+
+impl Extend<PutOp> for Tensor {
+    fn extend<I: IntoIterator<Item = PutOp>>(&mut self, _iter: I) {
+        // TODO
     }
 }
