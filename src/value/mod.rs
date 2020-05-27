@@ -3,6 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use bytes::Bytes;
+use num::PrimInt;
 use regex::Regex;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
@@ -134,10 +135,10 @@ impl TryFrom<&link::TCPath> for ValueId {
     }
 }
 
-impl From<u64> for ValueId {
-    fn from(u: u64) -> ValueId {
+impl<T: fmt::Display + PrimInt> From<T> for ValueId {
+    fn from(i: T) -> ValueId {
         ValueId {
-            id: format!("{}", u),
+            id: format!("{}", i),
         }
     }
 }

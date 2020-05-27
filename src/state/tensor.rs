@@ -2,6 +2,8 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::Bytes;
+use futures::future::try_join_all;
 
 use crate::auth::Token;
 use crate::error;
@@ -11,6 +13,8 @@ use crate::state::{Collection, Persistent, State};
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
 use crate::value::{TCResult, TCValue};
+
+const BLOCK_SIZE: usize = 1_000_000;
 
 pub struct Slice;
 
@@ -27,6 +31,16 @@ enum DataType {
     UInt64,
 }
 
+impl DataType {
+    fn size(&self) -> u8 {
+        use DataType::*;
+        match self {
+            Int32 => 32,
+            UInt64 => 64,
+        }
+    }
+}
+
 pub struct TensorConfig {
     data_type: DataType,
     dims: Vec<u64>,
@@ -37,14 +51,14 @@ impl TryFrom<TCValue> for TensorConfig {
 
     fn try_from(value: TCValue) -> TCResult<TensorConfig> {
         let (data_type, dims): (TCPath, Vec<u64>) = value.try_into()?;
-        if !data_type.starts_with("/sbin/value/number".parse().unwrap()) {
+        if !data_type.starts_with("/sbin/value/number".parse().unwrap()) || data_type.len() < 4 {
             return Err(error::bad_request(
                 "Tensor data type must be numeric, found",
                 data_type,
             ));
         }
 
-        let data_type = match data_type.slice_from(3).to_string().as_str() {
+        let data_type = match data_type.slice_from(4).to_string().as_str() {
             "/i32" => DataType::Int32,
             "/u64" => DataType::UInt64,
             other => {
@@ -61,6 +75,7 @@ impl TryFrom<TCValue> for TensorConfig {
 
 pub struct Tensor {
     config: TensorConfig,
+    blocks: Arc<Store>,
 }
 
 impl TryFrom<TCValue> for Tensor {
@@ -118,7 +133,19 @@ impl File for Tensor {
 impl Persistent for Tensor {
     type Config = TensorConfig;
 
-    async fn create(_txn: &Arc<Txn<'_>>, config: TensorConfig) -> TCResult<Arc<Self>> {
-        Ok(Arc::new(Tensor { config }))
+    async fn create(txn: &Arc<Txn<'_>>, config: TensorConfig) -> TCResult<Arc<Self>> {
+        let size =
+            (config.data_type.size() as u64) * config.dims.iter().fold(1, |size, d| size * d);
+        let blocks = txn.context();
+        let txn_id = txn.id();
+
+        let num_blocks: usize = (size as f64 / BLOCK_SIZE as f64).ceil() as usize;
+        let mut new_blocks = Vec::with_capacity(num_blocks);
+        for i in 0..num_blocks + 1 {
+            new_blocks.push(blocks.new_block(&txn_id, i.into(), Bytes::from(&[0; BLOCK_SIZE][..])))
+        }
+        try_join_all(new_blocks).await?;
+
+        Ok(Arc::new(Tensor { config, blocks }))
     }
 }
