@@ -11,7 +11,7 @@ use crate::internal::file::File;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::op::PutOp;
-use crate::value::{Args, TCResult, TCValue};
+use crate::value::{TCResult, TCValue, ValueId};
 
 mod directory;
 mod graph;
@@ -130,7 +130,7 @@ impl State {
         &self,
         _txn: Arc<Txn<'_>>,
         _method: &PathSegment,
-        _args: Args,
+        _args: Vec<(ValueId, TCValue)>,
         _auth: &Option<Token>,
     ) -> TCResult<State> {
         Err(error::method_not_allowed(format!(

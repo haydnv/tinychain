@@ -16,7 +16,6 @@ pub mod op;
 mod reference;
 mod version;
 
-pub type Args = op::Args;
 pub type TCRef = reference::TCRef;
 pub type TCResult<T> = Result<T, error::TCError>;
 pub type Subject = op::Subject;

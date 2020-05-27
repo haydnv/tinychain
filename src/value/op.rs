@@ -1,12 +1,10 @@
-use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
+use std::collections::HashSet;
 use std::fmt;
 
 use serde::de::{Deserializer, Error, MapAccess, Visitor};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde::Deserialize;
 
-use crate::error;
 use crate::value::link::*;
 use crate::value::*;
 
@@ -49,47 +47,6 @@ impl Serialize for Subject {
         S: Serializer,
     {
         s.serialize_str(&format!("{}", self))
-    }
-}
-
-pub struct Args(HashMap<ValueId, TCValue>);
-
-impl Args {
-    pub fn take<T: TryFrom<TCValue, Error = error::TCError>>(&mut self, name: &str) -> TCResult<T> {
-        if let Some(arg) = self.0.remove(&name.parse()?) {
-            arg.try_into()
-        } else {
-            Err(error::bad_request("Required argument not provided", name))
-        }
-    }
-
-    pub fn take_or<
-        E1: Into<error::TCError>,
-        E2: Into<error::TCError>,
-        T1: TryFrom<TCValue, Error = E1>,
-        T2: TryInto<T1, Error = E2>,
-    >(
-        &mut self,
-        name: &str,
-        else_val: T2,
-    ) -> TCResult<T1> {
-        if let Some(arg) = self.0.remove(&name.parse()?) {
-            arg.try_into().map_err(|e: E1| e.into())
-        } else {
-            else_val.try_into().map_err(|e: E2| e.into())
-        }
-    }
-}
-
-impl From<HashMap<ValueId, TCValue>> for Args {
-    fn from(v: HashMap<ValueId, TCValue>) -> Args {
-        Args(v)
-    }
-}
-
-impl From<Vec<(ValueId, TCValue)>> for Args {
-    fn from(v: Vec<(ValueId, TCValue)>) -> Args {
-        Args(v.into_iter().collect())
     }
 }
 

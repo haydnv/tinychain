@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::Infallible;
+use std::convert::{Infallible, TryInto};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -14,7 +14,7 @@ use crate::state::State;
 use crate::transaction::Txn;
 use crate::value::link::*;
 use crate::value::op::Op;
-use crate::value::{Args, TCRef, TCResult, TCValue, ValueId};
+use crate::value::{TCRef, TCResult, TCValue, ValueId};
 
 const UNSERIALIZABLE: &str =
     "The request completed successfully but some of the response could not be serialized";
@@ -59,12 +59,18 @@ async fn get<'a>(
 async fn post<'a>(
     txn: &'a Arc<Txn<'a>>,
     path: &TCPath,
-    mut args: Args,
+    mut args: HashMap<ValueId, TCValue>,
     auth: &'a Option<Token>,
 ) -> TCResult<State> {
     if path == "/sbin/transact" {
-        let capture: Vec<ValueId> = args.take_or("capture", vec![])?;
-        let mut values: Vec<(ValueId, TCValue)> = args.take_or("values", vec![])?;
+        let capture: Vec<ValueId> = args
+            .remove(&"capture".parse().unwrap())
+            .map(|v| v.try_into())
+            .unwrap_or_else(|| Ok(Vec::new()))?;
+        let mut values: Vec<(ValueId, TCValue)> = args
+            .remove(&"values".parse().unwrap())
+            .map(|v| v.try_into())
+            .unwrap_or_else(|| Ok(Vec::new()))?;
         txn.extend(values.drain(..), auth).await?;
 
         let mut results: Vec<TCValue> = Vec::with_capacity(capture.len());
@@ -137,7 +143,7 @@ async fn route<'a>(
                 }
             };
 
-            match post(txn, &path, args.into(), auth).await? {
+            match post(txn, &path, args, auth).await? {
                 State::Value(v) => serde_json::to_string_pretty(&v)
                     .and_then(|s| Ok(s.into_bytes()))
                     .or_else(|e| Err(error::bad_request(UNSERIALIZABLE, e))),
