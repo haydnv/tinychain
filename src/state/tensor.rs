@@ -8,9 +8,8 @@ use futures::future::try_join_all;
 use crate::auth::Token;
 use crate::error;
 use crate::internal::block::Store;
-use crate::internal::file::*;
-use crate::state::{Collection, Persistent, State};
-use crate::transaction::{Txn, TxnId};
+use crate::state::{Collection, Derived, State};
+use crate::transaction::Txn;
 use crate::value::link::TCPath;
 use crate::value::{TCResult, TCValue};
 
@@ -112,32 +111,13 @@ impl Collection for Tensor {
 }
 
 #[async_trait]
-impl File for Tensor {
-    async fn copy_from(_reader: &mut FileCopier, _txn_id: &TxnId, _dest: Arc<Store>) -> Arc<Self> {
-        // TODO
-        panic!("Tensor::copy_from is not implemented")
-    }
-
-    async fn copy_into(&self, _txn_id: TxnId, _writer: &mut FileCopier) {
-        // TODO
-        panic!("Tensor::copy_into is not implemented")
-    }
-
-    async fn from_store(_txn_id: &TxnId, _store: Arc<Store>) -> Arc<Tensor> {
-        // TODO
-        panic!("Tensor::from_store is not implemented")
-    }
-}
-
-#[async_trait]
-impl Persistent for Tensor {
+impl Derived for Tensor {
     type Config = TensorConfig;
 
     async fn create(txn: &Arc<Txn<'_>>, config: TensorConfig) -> TCResult<Arc<Self>> {
-        let size =
-            (config.data_type.size() as u64) * config.dims.iter().fold(1, |size, d| size * d);
-        let blocks = txn.context();
         let txn_id = txn.id();
+        let blocks = txn.context();
+        let size: u64 = (config.data_type.size() as u64) * config.dims.iter().product::<u64>();
 
         let num_blocks: usize = (size as f64 / BLOCK_SIZE as f64).ceil() as usize;
         let mut new_blocks = Vec::with_capacity(num_blocks);

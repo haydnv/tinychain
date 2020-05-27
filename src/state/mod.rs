@@ -43,6 +43,13 @@ pub trait Collection {
 }
 
 #[async_trait]
+pub trait Derived: Collection {
+    type Config: TryFrom<TCValue>;
+
+    async fn create(txn: &Arc<Txn<'_>>, config: Self::Config) -> TCResult<Arc<Self>>;
+}
+
+#[async_trait]
 pub trait Persistent: Collection + File {
     type Config: TryFrom<TCValue>;
 

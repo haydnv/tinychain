@@ -22,7 +22,6 @@ use crate::value::{Op, TCResult, TCValue};
 enum EntryType {
     Directory,
     Table,
-    Tensor,
     Graph,
 }
 
@@ -176,14 +175,10 @@ impl Collection for Directory {
                 FileCopier::copy(txn.id(), &*t, context).await;
                 DirEntry::new(path_clone, EntryType::Table, owner)
             }
-            State::Tensor(t) => {
-                FileCopier::copy(txn.id(), &*t, context).await;
-                DirEntry::new(path_clone, EntryType::Tensor, owner)
-            }
-            State::Value(v) => {
+            other => {
                 return Err(error::bad_request(
                     "Directory::put expected a persistent state but found",
-                    v,
+                    other,
                 ))
             }
         };
@@ -233,9 +228,6 @@ impl File for Directory {
                 EntryType::Table => {
                     table::Table::copy_from(reader, txn_id, dest).await;
                 }
-                EntryType::Tensor => {
-                    tensor::Tensor::copy_from(reader, txn_id, dest).await;
-                }
             }
         }
 
@@ -274,12 +266,6 @@ impl File for Directory {
                 }
                 EntryType::Table => {
                     table::Table::from_store(&txn_id, store)
-                        .await
-                        .copy_into(txn_id, writer)
-                        .await
-                }
-                EntryType::Tensor => {
-                    tensor::Tensor::from_store(&txn_id, store)
                         .await
                         .copy_into(txn_id, writer)
                         .await
