@@ -13,13 +13,11 @@ use crate::value::{Args, TCResult, TCValue};
 
 mod directory;
 mod graph;
-mod history;
 pub mod table;
 mod tensor;
 
 pub type Directory = directory::Directory;
 pub type Graph = graph::Graph;
-pub type History<O> = history::History<O>;
 
 #[async_trait]
 pub trait Collection {

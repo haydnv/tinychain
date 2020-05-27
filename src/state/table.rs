@@ -14,7 +14,7 @@ use crate::error;
 use crate::internal::block::Store;
 use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
-use crate::state::History;
+use crate::internal::History;
 use crate::state::{Collection, Persistent, State};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{PathSegment, TCPath};
