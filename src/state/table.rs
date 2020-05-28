@@ -22,20 +22,20 @@ use crate::value::{TCResult, TCValue, ValueId, Version};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Schema {
-    pub key: Vec<(ValueId, TCPath)>,
-    pub columns: Vec<(ValueId, TCPath)>,
-    pub version: Version,
+    key: Vec<(ValueId, TCPath)>,
+    columns: Vec<(ValueId, TCPath)>,
+    version: Version,
 }
 
 impl Schema {
-    pub fn as_map(&self) -> HashMap<ValueId, TCPath> {
+    fn as_map(&self) -> HashMap<ValueId, TCPath> {
         [&self.key[..], &self.columns[..]]
             .concat()
             .into_iter()
             .collect()
     }
 
-    pub fn from(
+    fn from(
         key: Vec<(ValueId, TCPath)>,
         columns: Vec<(ValueId, TCPath)>,
         version: Version,
