@@ -132,45 +132,44 @@ impl fmt::Display for PostOp {
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub enum OpArgs {
+pub enum Op {
     Get(GetOp),
     Put(PutOp),
     Post(PostOp),
 }
 
-impl fmt::Display for OpArgs {
+impl fmt::Display for Op {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use OpArgs::*;
         match self {
-            Get(get_op) => write!(f, "{}", get_op),
-            Put(put_op) => write!(f, "{}", put_op),
-            Post(post_op) => write!(f, "{}", post_op),
+            Op::Get(get_op) => write!(f, "{}", get_op),
+            Op::Put(put_op) => write!(f, "{}", put_op),
+            Op::Post(post_op) => write!(f, "{}", post_op),
         }
     }
 }
 
-impl From<GetOp> for OpArgs {
-    fn from(op: GetOp) -> OpArgs {
-        OpArgs::Get(op)
+impl From<GetOp> for Op {
+    fn from(op: GetOp) -> Op {
+        Op::Get(op)
     }
 }
 
-impl From<PutOp> for OpArgs {
-    fn from(op: PutOp) -> OpArgs {
-        OpArgs::Put(op)
+impl From<PutOp> for Op {
+    fn from(op: PutOp) -> Op {
+        Op::Put(op)
     }
 }
 
-impl From<PostOp> for OpArgs {
-    fn from(op: PostOp) -> OpArgs {
-        OpArgs::Post(op)
+impl From<PostOp> for Op {
+    fn from(op: PostOp) -> Op {
+        Op::Post(op)
     }
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct Request {
     subject: Subject,
-    op: OpArgs,
+    op: Op,
 }
 
 impl Request {
@@ -178,7 +177,7 @@ impl Request {
         &self.subject
     }
 
-    pub fn op(&'_ self) -> &'_ OpArgs {
+    pub fn op(&'_ self) -> &'_ Op {
         &self.op
     }
 
@@ -189,12 +188,12 @@ impl Request {
         }
 
         match &self.op {
-            OpArgs::Get(GetOp { key }) => {
+            Op::Get(GetOp { key }) => {
                 if let TCValue::Ref(r) = key {
                     deps.push(r);
                 }
             }
-            OpArgs::Put(PutOp { key, value }) => {
+            Op::Put(PutOp { key, value }) => {
                 if let TCValue::Ref(r) = key {
                     deps.push(r);
                 }
@@ -202,7 +201,7 @@ impl Request {
                     deps.push(r);
                 }
             }
-            OpArgs::Post(PostOp {
+            Op::Post(PostOp {
                 action: _,
                 requires,
             }) => {
@@ -274,7 +273,7 @@ impl TryFrom<(&str, Vec<TCValue>)> for Request {
     }
 }
 
-impl<S: Into<Subject>, O: Into<OpArgs>> From<(S, O)> for Request {
+impl<S: Into<Subject>, O: Into<Op>> From<(S, O)> for Request {
     fn from((subject, args): (S, O)) -> Request {
         Request {
             subject: subject.into(),
@@ -328,11 +327,10 @@ impl Serialize for Request {
     {
         let mut op = s.serialize_map(Some(1))?;
 
-        use OpArgs::*;
         match &self.op {
-            Get(get_op) => op.serialize_entry(&self.subject, &get_op)?,
-            Put(put_op) => op.serialize_entry(&self.subject, &put_op)?,
-            Post(post_op) => {
+            Op::Get(get_op) => op.serialize_entry(&self.subject, &get_op)?,
+            Op::Put(put_op) => op.serialize_entry(&self.subject, &put_op)?,
+            Op::Post(post_op) => {
                 let subject = format!("{}{}", self.subject, post_op.action);
                 op.serialize_entry(&subject, &post_op.requires)?
             }

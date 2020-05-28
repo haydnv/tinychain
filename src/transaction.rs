@@ -268,9 +268,8 @@ impl<'a> Txn<'a> {
         let extension = self.subcontext(value_id).await?;
         let subject = request.subject();
 
-        use OpArgs::*;
         match request.op().clone() {
-            Get(GetOp { key }) => match subject {
+            Op::Get(GetOp { key }) => match subject {
                 Subject::Link(l) => extension.get(l.clone(), key, auth).await,
                 Subject::Ref(r) => match resolved.get(&r.value_id()) {
                     Some(s) => s.get(&extension, key, auth).await,
@@ -280,7 +279,7 @@ impl<'a> Txn<'a> {
                     )),
                 },
             },
-            Put(PutOp { key, value }) => match subject {
+            Op::Put(PutOp { key, value }) => match subject {
                 Subject::Link(l) => {
                     extension
                         .put(l.clone(), key, resolve_val(resolved, value)?, auth)
@@ -296,7 +295,7 @@ impl<'a> Txn<'a> {
                         .await
                 }
             },
-            Post(PostOp { action, requires }) => match subject {
+            Op::Post(PostOp { action, requires }) => match subject {
                 Subject::Ref(r) => {
                     let mut deps: Vec<(ValueId, TCValue)> = Vec::with_capacity(requires.len());
                     for (dest_id, id) in requires {
@@ -306,7 +305,7 @@ impl<'a> Txn<'a> {
 
                     let subject = resolve_id(resolved, &r.value_id())?;
                     subject
-                        .post(extension, &action.try_into()?, deps.into(), auth)
+                        .post(extension, &action.try_into()?, deps, auth)
                         .await
                 }
                 Subject::Link(l) => Err(error::method_not_allowed(l)),
