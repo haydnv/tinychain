@@ -4,6 +4,7 @@ use std::fmt;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::internal::chain::Mutation;
 use crate::value::link::*;
 use crate::value::*;
 
@@ -92,6 +93,47 @@ impl From<(TCValue, TCValue)> for PutOp {
     }
 }
 
+struct PutOpVisitor;
+
+impl<'de> de::Visitor<'de> for PutOpVisitor {
+    type Value = PutOp;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a PUT Op (i.e. [<selector>, <new_state>])")
+    }
+
+    fn visit_seq<S>(self, mut access: S) -> Result<Self::Value, S::Error>
+    where
+        S: de::SeqAccess<'de>,
+    {
+        let mut args = Vec::with_capacity(2);
+
+        while let Some(item) = access.next_element()? {
+            args.push(item)
+        }
+
+        if args.len() != 2 {
+            Err(de::Error::custom(format!(
+                "Expected a PUT Op, found {:?}",
+                args
+            )))
+        } else {
+            let value = args.pop().unwrap();
+            let key = args.pop().unwrap();
+            Ok((key, value).into())
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PutOp {
+    fn deserialize<D>(deserializer: D) -> Result<PutOp, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(PutOpVisitor)
+    }
+}
+
 impl Serialize for PutOp {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
@@ -103,6 +145,8 @@ impl Serialize for PutOp {
         op.end()
     }
 }
+
+impl Mutation for PutOp {}
 
 impl fmt::Display for PutOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
