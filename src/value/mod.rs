@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::hash::Hash;
 use std::str::FromStr;
 
 use bytes::Bytes;
@@ -315,8 +317,8 @@ impl TryFrom<TCValue> for u64 {
 }
 
 impl<
-        E1: fmt::Display,
-        E2: fmt::Display,
+        E1: Into<error::TCError>,
+        E2: Into<error::TCError>,
         T1: TryFrom<TCValue, Error = E1>,
         T2: TryFrom<TCValue, Error = E2>,
     > TryFrom<TCValue> for (T1, T2)
@@ -329,10 +331,10 @@ impl<
             Ok((
                 v.remove(0)
                     .try_into()
-                    .map_err(|e| error::bad_request("Unable to convert from Value", e))?,
+                    .map_err(|e: E1| e.into())?,
                 v.remove(0)
                     .try_into()
-                    .map_err(|e| error::bad_request("Unable to convert from Value", e))?,
+                    .map_err(|e: E2| e.into())?,
             ))
         } else {
             Err(error::bad_request(
@@ -354,17 +356,6 @@ impl TryFrom<TCValue> for i32 {
     }
 }
 
-impl TryFrom<TCValue> for Vec<TCValue> {
-    type Error = error::TCError;
-
-    fn try_from(v: TCValue) -> TCResult<Vec<TCValue>> {
-        match v {
-            TCValue::Vector(v) => Ok(v.to_vec()),
-            other => Err(error::bad_request("Expected Vector but found", other)),
-        }
-    }
-}
-
 impl TryFrom<TCValue> for ValueId {
     type Error = error::TCError;
 
@@ -374,12 +365,21 @@ impl TryFrom<TCValue> for ValueId {
     }
 }
 
-impl<T: TryFrom<TCValue, Error = error::TCError>> TryFrom<TCValue> for Vec<T> {
+impl<E: Into<error::TCError>, T: TryFrom<TCValue, Error = E>> TryFrom<TCValue> for Vec<T> {
     type Error = error::TCError;
 
     fn try_from(v: TCValue) -> TCResult<Vec<T>> {
         let items: Vec<TCValue> = v.try_into()?;
-        items.into_iter().map(|i| i.try_into()).collect()
+        items.into_iter().map(|i| i.try_into().map_err(|e: E| e.into())).collect()
+    }
+}
+
+impl<E1: Into<error::TCError>, E2: Into<error::TCError>, T1: Eq + Hash + TryFrom<TCValue, Error=E1>, T2: TryFrom<TCValue, Error=E2>> TryFrom<TCValue> for HashMap<T1, T2> {
+    type Error = error::TCError;
+
+    fn try_from(v: TCValue) -> TCResult<HashMap<T1, T2>> {
+        let items: Vec<TCValue> = v.try_into()?;
+        items.into_iter().map(|i| { i.try_into() }).collect()
     }
 }
 
