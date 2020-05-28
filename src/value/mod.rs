@@ -155,8 +155,8 @@ pub enum TCValue {
     Int32(i32),
     UInt64(u64),
     Link(link::Link),
-    Op(Box<op::Op>),
     Ref(TCRef),
+    Request(Box<op::Request>),
     r#String(String),
     Vector(Vec<TCValue>),
 }
@@ -191,9 +191,9 @@ impl From<link::TCPath> for TCValue {
     }
 }
 
-impl From<op::Op> for TCValue {
-    fn from(op: op::Op) -> TCValue {
-        TCValue::Op(Box::new(op))
+impl From<op::Request> for TCValue {
+    fn from(op: op::Request) -> TCValue {
+        TCValue::Request(Box::new(op))
     }
 }
 
@@ -281,13 +281,13 @@ impl TryFrom<TCValue> for link::TCPath {
     }
 }
 
-impl TryFrom<TCValue> for op::Op {
+impl TryFrom<TCValue> for op::Request {
     type Error = error::TCError;
 
-    fn try_from(v: TCValue) -> TCResult<op::Op> {
+    fn try_from(v: TCValue) -> TCResult<op::Request> {
         match v {
-            TCValue::Op(op) => Ok(*op),
-            other => Err(error::bad_request("Expected Op but found", other)),
+            TCValue::Request(request) => Ok(*request),
+            other => Err(error::bad_request("Expected Request but found", other)),
         }
     }
 }
@@ -443,8 +443,8 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
                     Ok(link.into())
                 }
             } else {
-                let op: op::Op = (key, value).try_into().map_err(de::Error::custom)?;
-                Ok(op.into())
+                let request: op::Request = (key, value).try_into().map_err(de::Error::custom)?;
+                Ok(request.into())
             }
         } else {
             Err(de::Error::custom("Unable to parse map entry"))
@@ -494,8 +494,8 @@ impl Serialize for TCValue {
             TCValue::Int32(i) => s.serialize_i32(*i),
             TCValue::UInt64(i) => s.serialize_u64(*i),
             TCValue::Link(l) => l.serialize(s),
-            TCValue::Op(o) => o.serialize(s),
             TCValue::Ref(r) => r.serialize(s),
+            TCValue::Request(r) => r.serialize(s),
             TCValue::r#String(v) => s.serialize_str(v),
             TCValue::Vector(v) => {
                 let mut seq = s.serialize_seq(Some(v.len()))?;
@@ -523,8 +523,8 @@ impl fmt::Display for TCValue {
             TCValue::Int32(i) => write!(f, "Int32: {}", i),
             TCValue::UInt64(i) => write!(f, "UInt64: {}", i),
             TCValue::Link(l) => write!(f, "Link: {}", l),
-            TCValue::Op(o) => write!(f, "Op: {}", o),
             TCValue::Ref(r) => write!(f, "Ref: {}", r),
+            TCValue::Request(r) => write!(f, "Request: {}", r),
             TCValue::r#String(s) => write!(f, "String: {}", s),
             TCValue::Vector(v) => write!(f, "Vector: {:?}", v),
         }

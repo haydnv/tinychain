@@ -77,7 +77,7 @@ impl fmt::Display for TxnId {
 #[derive(Default)]
 struct TxnState<'a> {
     known: HashSet<TCRef>,
-    queue: VecDeque<(ValueId, Op, &'a Option<Token>)>,
+    queue: VecDeque<(ValueId, Request, &'a Option<Token>)>,
     resolved: HashMap<ValueId, State>,
 }
 
@@ -109,8 +109,8 @@ impl<'a> TxnState<'a> {
         self.known.insert(value.0.clone().into());
 
         match value.1 {
-            TCValue::Op(op) => {
-                let required = op.deps();
+            TCValue::Request(request) => {
+                let required = request.deps();
                 let unknown: Vec<&TCRef> = required.difference(&self.known).collect();
                 if !unknown.is_empty() {
                     let unknown: TCValue = unknown.into_iter().cloned().collect();
@@ -120,9 +120,9 @@ impl<'a> TxnState<'a> {
                     ))
                 } else {
                     if required.is_empty() {
-                        self.queue.push_front((value.0, *op, auth));
+                        self.queue.push_front((value.0, *request, auth));
                     } else {
-                        self.queue.push_back((value.0, *op, auth));
+                        self.queue.push_back((value.0, *request, auth));
                     }
 
                     Ok(())
@@ -262,14 +262,14 @@ impl<'a> Txn<'a> {
         self: &Arc<Self>,
         resolved: &HashMap<ValueId, State>,
         value_id: ValueId,
-        op: Op,
+        request: Request,
         auth: &Option<Token>,
     ) -> TCResult<State> {
         let extension = self.subcontext(value_id).await?;
-        let subject = op.subject();
+        let subject = request.subject();
 
         use OpArgs::*;
-        match op.args().clone() {
+        match request.op().clone() {
             Get(GetOp { key }) => match subject {
                 Subject::Link(l) => extension.get(l.clone(), key, auth).await,
                 Subject::Ref(r) => match resolved.get(&r.value_id()) {

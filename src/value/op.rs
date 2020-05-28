@@ -168,18 +168,18 @@ impl From<PostOp> for OpArgs {
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct Op {
+pub struct Request {
     subject: Subject,
-    args: OpArgs,
+    op: OpArgs,
 }
 
-impl Op {
+impl Request {
     pub fn subject(&'_ self) -> &'_ Subject {
         &self.subject
     }
 
-    pub fn args(&'_ self) -> &'_ OpArgs {
-        &self.args
+    pub fn op(&'_ self) -> &'_ OpArgs {
+        &self.op
     }
 
     pub fn deps(&self) -> HashSet<TCRef> {
@@ -188,7 +188,7 @@ impl Op {
             deps.push(r);
         }
 
-        match &self.args {
+        match &self.op {
             OpArgs::Get(GetOp { key }) => {
                 if let TCValue::Ref(r) = key {
                     deps.push(r);
@@ -218,10 +218,10 @@ impl Op {
     }
 }
 
-impl TryFrom<(&str, Vec<TCValue>)> for Op {
+impl TryFrom<(&str, Vec<TCValue>)> for Request {
     type Error = error::TCError;
 
-    fn try_from(tup: (&str, Vec<TCValue>)) -> TCResult<Op> {
+    fn try_from(tup: (&str, Vec<TCValue>)) -> TCResult<Request> {
         let key = tup.0;
         let mut values = tup.1;
 
@@ -274,18 +274,18 @@ impl TryFrom<(&str, Vec<TCValue>)> for Op {
     }
 }
 
-impl<S: Into<Subject>, A: Into<OpArgs>> From<(S, A)> for Op {
-    fn from((subject, args): (S, A)) -> Op {
-        Op {
+impl<S: Into<Subject>, O: Into<OpArgs>> From<(S, O)> for Request {
+    fn from((subject, args): (S, O)) -> Request {
+        Request {
             subject: subject.into(),
-            args: args.into(),
+            op: args.into(),
         }
     }
 }
 
-impl fmt::Display for Op {
+impl fmt::Display for Request {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} - {}", self.subject, self.args)
+        write!(f, "{} - {}", self.subject, self.op)
     }
 }
 
@@ -293,7 +293,7 @@ impl fmt::Display for Op {
 struct OpVisitor;
 
 impl<'de> de::Visitor<'de> for OpVisitor {
-    type Value = Op;
+    type Value = Request;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Tinychain Op, e.g. {\"/sbin/table/new\": [(\"columns\", [(\"foo\", \"/sbin/value/string\"), ...]]}")
@@ -312,7 +312,7 @@ impl<'de> de::Visitor<'de> for OpVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for Op {
+impl<'de> Deserialize<'de> for Request {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -321,7 +321,7 @@ impl<'de> Deserialize<'de> for Op {
     }
 }
 
-impl Serialize for Op {
+impl Serialize for Request {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -329,7 +329,7 @@ impl Serialize for Op {
         let mut op = s.serialize_map(Some(1))?;
 
         use OpArgs::*;
-        match &self.args {
+        match &self.op {
             Get(get_op) => op.serialize_entry(&self.subject, &get_op)?,
             Put(put_op) => op.serialize_entry(&self.subject, &put_op)?,
             Post(post_op) => {

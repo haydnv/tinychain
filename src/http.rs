@@ -13,7 +13,7 @@ use crate::host::Host;
 use crate::state::State;
 use crate::transaction::Txn;
 use crate::value::link::*;
-use crate::value::op::Op;
+use crate::value::op;
 use crate::value::{TCRef, TCResult, TCValue, ValueId};
 
 const UNSERIALIZABLE: &str =
@@ -193,8 +193,11 @@ async fn validate_token(txn: Arc<Txn<'_>>, auth_header: &HeaderValue) -> TCResul
             if t.starts_with("Bearer: ") {
                 let token: Token = t[8..].parse()?;
                 let value_id: ValueId = "__actor_id".parse().unwrap();
-                txn.push((value_id.clone(), Op::from(token.actor_id()).into()), &None)
-                    .await?;
+                txn.push(
+                    (value_id.clone(), op::Request::from(token.actor_id()).into()),
+                    &None,
+                )
+                .await?;
                 txn.resolve(vec![value_id.clone()])
                     .await
                     .map(|_actor| Err(error::not_implemented()))?
