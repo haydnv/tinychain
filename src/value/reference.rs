@@ -35,7 +35,13 @@ impl FromStr for TCRef {
     type Err = error::TCError;
 
     fn from_str(to: &str) -> TCResult<TCRef> {
-        Ok(TCRef { to: to.parse()? })
+        if !to.starts_with('$') || to.len() < 2 {
+            Err(error::bad_request("Invalid Ref", to))
+        } else {
+            Ok(TCRef {
+                to: to[1..].parse()?,
+            })
+        }
     }
 }
 

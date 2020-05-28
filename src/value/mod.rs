@@ -433,69 +433,18 @@ impl<'de> de::Visitor<'de> for TCValueVisitor {
         M: de::MapAccess<'de>,
     {
         if let Some(key) = access.next_key::<&str>()? {
-            if key.starts_with('/') || key.starts_with("http://") {
-                let mut value = access.next_value::<Vec<TCValue>>()?;
-
-                let link: link::Link = key.parse().map_err(de::Error::custom)?;
-
-                if value.is_empty() {
+            let value: Vec<TCValue> = access.next_value()?;
+            if value.is_empty() {
+                if key.starts_with('$') {
+                    let r: TCRef = key.parse().map_err(de::Error::custom)?;
+                    Ok(r.into())
+                } else {
+                    let link: link::Link = key.parse().map_err(de::Error::custom)?;
                     Ok(link.into())
-                } else if value.len() < 3 {
-                    let op_value: op::Op = if value.len() == 1 {
-                        let get_op: op::GetOp = (value.remove(0),).into();
-                        (link, get_op).into()
-                    } else if value.len() == 2 {
-                        let put_op: op::PutOp = (value.remove(0), value.remove(0)).into();
-                        (link, put_op).into()
-                    } else {
-                        panic!("This should be impossible");
-                    };
-
-                    Ok(op_value.into())
-                } else {
-                    Err(de::Error::custom(format!(
-                        "Expected a list of 0, 1, or 2 values for {}",
-                        key
-                    )))
-                }
-            } else if key.starts_with('$') {
-                if key.contains('/') {
-                    let key: Vec<&str> = key.split('/').collect();
-                    let subject: TCRef = key[0][1..].parse().map_err(de::Error::custom)?;
-                    let method: link::TCPath = key[1..]
-                        .iter()
-                        .map(|s| s.parse())
-                        .collect::<TCResult<Vec<link::PathSegment>>>()
-                        .map_err(de::Error::custom)?
-                        .into();
-                    let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;
-
-                    let post_op: op::PostOp = (method, requires).into();
-                    Ok(op::Op::from((subject, post_op)).into())
-                } else {
-                    let subject: TCRef = key[1..].parse().map_err(de::Error::custom)?;
-                    let mut value = access.next_value::<Vec<TCValue>>()?;
-
-                    if value.is_empty() {
-                        Ok(subject.into())
-                    } else if value.len() == 1 {
-                        let get_op: op::GetOp = (value.remove(0),).into();
-                        Ok(op::Op::from((subject, get_op)).into())
-                    } else if value.len() == 2 {
-                        let put_op: op::PutOp = (value.remove(0), value.remove(0)).into();
-                        Ok(op::Op::from((subject, put_op)).into())
-                    } else {
-                        Err(de::Error::custom(format!(
-                            "Expected a list of 0, 1, or 2 Values for {}",
-                            key
-                        )))
-                    }
                 }
             } else {
-                Err(de::Error::custom(format!(
-                    "Unable to determine data type of {}",
-                    key
-                )))
+                let op: op::Op = (key, value).try_into().map_err(de::Error::custom)?;
+                Ok(op.into())
             }
         } else {
             Err(de::Error::custom("Unable to parse map entry"))

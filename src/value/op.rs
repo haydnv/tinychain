@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use serde::de::{Error, MapAccess, Visitor};
 use serde::ser::{SerializeMap, SerializeSeq};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::value::link::*;
 use crate::value::*;
@@ -219,6 +218,62 @@ impl Op {
     }
 }
 
+impl TryFrom<(&str, Vec<TCValue>)> for Op {
+    type Error = error::TCError;
+
+    fn try_from(tup: (&str, Vec<TCValue>)) -> TCResult<Op> {
+        let key = tup.0;
+        let mut values = tup.1;
+
+        if key.starts_with('$') && key.contains('/') {
+            let key: Vec<&str> = key.split('/').collect();
+            if key.len() != 2 || key[0].is_empty() || key[1].is_empty() {
+                return Err(error::bad_request(
+                    "Invalid Ref specified for POST Op",
+                    key.join("/"),
+                ));
+            }
+
+            let subject: TCRef = key[0].parse()?;
+            let action: TCPath = key[1..]
+                .iter()
+                .map(|s| s.parse())
+                .collect::<TCResult<Vec<PathSegment>>>()?
+                .into();
+
+            let requires = values
+                .drain(..)
+                .map(|v| v.try_into())
+                .collect::<TCResult<Vec<(ValueId, TCValue)>>>()?;
+            let args: PostOp = (action, requires).into();
+            Ok((subject, args).into())
+        } else {
+            let subject: Subject = if key.starts_with('/') || key.starts_with("http://") {
+                let subject: TCPath = key.parse()?;
+                subject.into()
+            } else if key.starts_with('$') {
+                let subject: TCRef = key.parse()?;
+                subject.into()
+            } else {
+                return Err(error::bad_request("Unrecognized Op subject", key));
+            };
+
+            if values.len() == 1 {
+                let args: GetOp = (values.remove(0),).into();
+                Ok((subject, args).into())
+            } else if values.len() == 2 {
+                let args: PutOp = (values.remove(0), values.remove(0)).into();
+                Ok((subject, args).into())
+            } else {
+                Err(error::bad_request(
+                    "Expected either 1 (for a Get), or 2 (for a Put) Values for",
+                    key,
+                ))
+            }
+        }
+    }
+}
+
 impl<S: Into<Subject>, A: Into<OpArgs>> From<(S, A)> for Op {
     fn from((subject, args): (S, A)) -> Op {
         Op {
@@ -237,49 +292,22 @@ impl fmt::Display for Op {
 // TODO: split this into op-specific Visitors
 struct OpVisitor;
 
-impl<'de> Visitor<'de> for OpVisitor {
+impl<'de> de::Visitor<'de> for OpVisitor {
     type Value = Op;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("A Tinychain Op, e.g. {\"/sbin/table/new\": [(\"columns\", [(\"foo\", \"/sbin/value/string\"), ...]]}")
+        f.write_str("a Tinychain Op, e.g. {\"/sbin/table/new\": [(\"columns\", [(\"foo\", \"/sbin/value/string\"), ...]]}")
     }
 
     fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
     where
-        M: MapAccess<'de>,
+        M: de::MapAccess<'de>,
     {
-        if let Some(key) = access.next_key::<String>()? {
-            if key.contains('/') {
-                let key: Vec<&str> = key.split('/').collect();
-                let subject: TCRef = key[0][1..].parse().map_err(Error::custom)?;
-                let action: TCPath = key[1..]
-                    .iter()
-                    .map(|s| s.parse())
-                    .collect::<TCResult<Vec<PathSegment>>>()
-                    .map_err(Error::custom)?
-                    .into();
-                let requires = access.next_value::<Vec<(ValueId, TCValue)>>()?;
-                let args: PostOp = (action, requires).into();
-                Ok((subject, args).into())
-            } else {
-                let subject: TCRef = key[1..].parse().map_err(Error::custom)?;
-                let mut value = access.next_value::<Vec<TCValue>>()?;
-
-                if value.len() == 1 {
-                    let args: GetOp = (value.remove(0),).into();
-                    Ok((subject, args).into())
-                } else if value.len() == 2 {
-                    let args: PutOp = (value.remove(0), value.remove(0)).into();
-                    Ok((subject, args).into())
-                } else {
-                    Err(Error::custom(format!(
-                        "Expected either 1 (for a Get), or 2 (for a Put) Values for {}",
-                        key
-                    )))
-                }
-            }
+        if let Some(key) = access.next_key::<&str>()? {
+            let values: Vec<TCValue> = access.next_value()?;
+            (key, values).try_into().map_err(de::Error::custom)
         } else {
-            Err(Error::custom("Op subject must be a Link or Ref, e.g. \"/sbin/value/string\" or \"$result/filter\""))
+            Err(de::Error::custom("Op subject must be a Link or Ref, e.g. \"/sbin/value/string\" or \"$result/filter\""))
         }
     }
 }
