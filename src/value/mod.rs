@@ -329,12 +329,8 @@ impl<
         let mut v: Vec<TCValue> = v.try_into()?;
         if v.len() == 2 {
             Ok((
-                v.remove(0)
-                    .try_into()
-                    .map_err(|e: E1| e.into())?,
-                v.remove(0)
-                    .try_into()
-                    .map_err(|e: E2| e.into())?,
+                v.remove(0).try_into().map_err(|e: E1| e.into())?,
+                v.remove(0).try_into().map_err(|e: E2| e.into())?,
             ))
         } else {
             Err(error::bad_request(
@@ -351,7 +347,7 @@ impl TryFrom<TCValue> for i32 {
     fn try_from(v: TCValue) -> TCResult<i32> {
         match v {
             TCValue::Int32(i) => Ok(i),
-            other => Err(error::bad_request("Expected Int32 but found", other)),
+            other => Err(error::bad_request("Expected an Int32 but found", other)),
         }
     }
 }
@@ -369,17 +365,28 @@ impl<E: Into<error::TCError>, T: TryFrom<TCValue, Error = E>> TryFrom<TCValue> f
     type Error = error::TCError;
 
     fn try_from(v: TCValue) -> TCResult<Vec<T>> {
-        let items: Vec<TCValue> = v.try_into()?;
-        items.into_iter().map(|i| i.try_into().map_err(|e: E| e.into())).collect()
+        match v {
+            TCValue::Vector(v) => v
+                .into_iter()
+                .map(|i| i.try_into().map_err(|e: E| e.into()))
+                .collect(),
+            other => Err(error::bad_request("Expected a Vector, found", other)),
+        }
     }
 }
 
-impl<E1: Into<error::TCError>, E2: Into<error::TCError>, T1: Eq + Hash + TryFrom<TCValue, Error=E1>, T2: TryFrom<TCValue, Error=E2>> TryFrom<TCValue> for HashMap<T1, T2> {
+impl<
+        E1: Into<error::TCError>,
+        E2: Into<error::TCError>,
+        T1: Eq + Hash + TryFrom<TCValue, Error = E1>,
+        T2: TryFrom<TCValue, Error = E2>,
+    > TryFrom<TCValue> for HashMap<T1, T2>
+{
     type Error = error::TCError;
 
     fn try_from(v: TCValue) -> TCResult<HashMap<T1, T2>> {
         let items: Vec<TCValue> = v.try_into()?;
-        items.into_iter().map(|i| { i.try_into() }).collect()
+        items.into_iter().map(|i| i.try_into()).collect()
     }
 }
 

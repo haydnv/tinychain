@@ -12,7 +12,9 @@ impl FromStr for Locale {
     type Err = error::TCError;
 
     fn from_str(s: &str) -> TCResult<Locale> {
-        let uloc: ULoc = s.try_into().map_err(|e| error::bad_request(&format!("Unsupported locale code ({}): ", e), s))?;
+        let uloc: ULoc = s
+            .try_into()
+            .map_err(|e| error::bad_request(&format!("Unsupported locale code ({}): ", e), s))?;
         Ok(Locale(uloc))
     }
 }
