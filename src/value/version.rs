@@ -6,7 +6,7 @@ use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
 use crate::error;
-use crate::value::{TCResult, TCValue};
+use crate::value::{TCResult, Value};
 
 #[derive(Clone)]
 pub struct Version {
@@ -41,10 +41,10 @@ impl FromStr for Version {
     }
 }
 
-impl TryFrom<TCValue> for Version {
+impl TryFrom<Value> for Version {
     type Error = error::TCError;
 
-    fn try_from(value: TCValue) -> TCResult<Version> {
+    fn try_from(value: Value) -> TCResult<Version> {
         let version: String = value.try_into()?;
         version.parse()
     }

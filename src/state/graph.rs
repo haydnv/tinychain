@@ -8,7 +8,7 @@ use crate::internal::block::Store;
 use crate::internal::file::*;
 use crate::state::*;
 use crate::transaction::{Txn, TxnId};
-use crate::value::{TCResult, TCValue};
+use crate::value::{TCResult, Value};
 
 pub struct GraphConfig;
 
@@ -25,21 +25,17 @@ pub struct Graph {}
 
 #[async_trait]
 impl Collection for Graph {
-    type Key = TCValue;
-    type Value = TCValue;
-    async fn get(
-        self: &Arc<Self>,
-        _txn: &Arc<Txn<'_>>,
-        _node_id: &TCValue,
-    ) -> TCResult<Self::Value> {
+    type Key = Value;
+    type Value = Value;
+    async fn get(self: &Arc<Self>, _txn: &Arc<Txn<'_>>, _node_id: &Value) -> TCResult<Self::Value> {
         Err(error::not_implemented())
     }
 
     async fn put(
         self: Arc<Self>,
         _txn: &Arc<Txn<'_>>,
-        _node_id: TCValue,
-        _node: TCValue,
+        _node_id: Value,
+        _node: Value,
     ) -> TCResult<State> {
         Ok(self.into())
     }

@@ -18,7 +18,7 @@ use crate::state::table::Table;
 use crate::state::*;
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, PathSegment, TCPath};
-use crate::value::{TCResult, TCValue, ValueId};
+use crate::value::{TCResult, Value, ValueId};
 
 const RESERVED: [&str; 1] = ["/sbin"];
 
@@ -157,7 +157,7 @@ impl Host {
         self: &Arc<Self>,
         txn: &Arc<Txn<'_>>,
         link: &Link,
-        key: TCValue,
+        key: Value,
         auth: &Option<Token>,
     ) -> TCResult<State> {
         println!("GET {}", link);
@@ -193,7 +193,7 @@ impl Host {
         self: &Arc<Self>,
         txn: &Arc<Txn<'_>>,
         dest: Link,
-        key: TCValue,
+        key: Value,
         state: State,
         _auth: &Option<Token>,
     ) -> TCResult<State> {
@@ -231,7 +231,7 @@ impl Host {
 struct Sbin;
 
 impl Sbin {
-    fn auth(path: &TCPath, key: TCValue) -> TCResult<TCValue> {
+    fn auth(path: &TCPath, key: Value) -> TCResult<Value> {
         match path.to_string().as_str() {
             "/hash/sha256" => {
                 let data: String = key.try_into()?;
@@ -245,7 +245,7 @@ impl Sbin {
         }
     }
 
-    async fn state(txn: &Arc<Txn<'_>>, path: &TCPath, key: TCValue) -> TCResult<State> {
+    async fn state(txn: &Arc<Txn<'_>>, path: &TCPath, key: Value) -> TCResult<State> {
         match path.to_string().as_str() {
             "/table" => {
                 let args: Args = key.try_into()?;
@@ -255,14 +255,14 @@ impl Sbin {
         }
     }
 
-    fn value(path: &TCPath, key: TCValue) -> TCResult<TCValue> {
+    fn value(path: &TCPath, key: Value) -> TCResult<Value> {
         match path.to_string().as_str() {
             "/" => Ok(key),
             "/bytes" => {
                 let encoded: String = key.try_into()?;
                 let decoded = base64::decode(encoded)
                     .map_err(|e| error::bad_request("Unable to decode base64 string", e))?;
-                Ok(TCValue::Bytes(Bytes::from(decoded)))
+                Ok(Value::Bytes(Bytes::from(decoded)))
             }
             "/id" => {
                 let id: ValueId = key.try_into()?;
@@ -278,7 +278,7 @@ impl Sbin {
                 let address: Link = address.into();
                 Ok(address.into())
             }
-            "/number/int32" => Ok(TCValue::Int32(key.try_into()?)),
+            "/number/int32" => Ok(Value::Int32(key.try_into()?)),
             "/string" => {
                 let s: String = key.try_into()?;
                 Ok(s.into())

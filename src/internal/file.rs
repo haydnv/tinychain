@@ -8,7 +8,6 @@ use bytes::Bytes;
 use futures::Stream;
 
 use crate::internal::block::Store;
-//use crate::internal::cache::Deque;
 use crate::transaction::TxnId;
 use crate::value::link::TCPath;
 

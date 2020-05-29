@@ -12,7 +12,7 @@ use crate::internal::file::File;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::op::PutOp;
-use crate::value::{TCResult, TCValue, ValueId};
+use crate::value::{TCResult, Value, ValueId};
 
 mod directory;
 mod graph;
@@ -49,8 +49,8 @@ pub trait Authorized: Collection {
 
 #[async_trait]
 pub trait Collection: Send + Sync {
-    type Key: TryFrom<TCValue> + Send + Sync;
-    type Value: TryFrom<TCValue> + Send + Sync;
+    type Key: TryFrom<Value> + Send + Sync;
+    type Value: TryFrom<Value> + Send + Sync;
 
     async fn get(self: &Arc<Self>, txn: &Arc<Txn<'_>>, key: &Self::Key) -> TCResult<Self::Value>;
 
@@ -76,7 +76,7 @@ pub trait Persistent: Collection + File {
     async fn create(txn: &Arc<Txn<'_>>, config: Self::Config) -> TCResult<Arc<Self>>;
 }
 
-pub struct Args(HashMap<ValueId, TCValue>);
+pub struct Args(HashMap<ValueId, Value>);
 
 impl Args {
     fn assert_empty(&self) -> TCResult<()> {
@@ -91,7 +91,7 @@ impl Args {
         }
     }
 
-    fn take<E: Into<error::TCError>, T: TryFrom<TCValue, Error = E>>(
+    fn take<E: Into<error::TCError>, T: TryFrom<Value, Error = E>>(
         &mut self,
         name: &str,
     ) -> TCResult<T> {
@@ -102,7 +102,7 @@ impl Args {
         }
     }
 
-    fn take_or<E: Into<error::TCError>, T: TryFrom<TCValue, Error = E>>(
+    fn take_or<E: Into<error::TCError>, T: TryFrom<Value, Error = E>>(
         &mut self,
         name: &str,
         default: T,
@@ -115,11 +115,11 @@ impl Args {
     }
 }
 
-impl TryFrom<TCValue> for Args {
+impl TryFrom<Value> for Args {
     type Error = error::TCError;
 
-    fn try_from(value: TCValue) -> TCResult<Args> {
-        let args: HashMap<ValueId, TCValue> = value.try_into()?;
+    fn try_from(value: Value) -> TCResult<Args> {
+        let args: HashMap<ValueId, Value> = value.try_into()?;
         Ok(Args(args))
     }
 }
@@ -130,14 +130,14 @@ pub enum State {
     Graph(Arc<Graph>),
     Table(Arc<table::Table>),
     Tensor(Arc<tensor::Tensor>),
-    Value(TCValue),
+    Value(Value),
 }
 
 impl State {
     pub async fn get(
         &self,
         txn: &Arc<Txn<'_>>,
-        key: TCValue,
+        key: Value,
         _auth: &Option<Token>,
     ) -> TCResult<State> {
         // TODO: authorize
@@ -162,8 +162,8 @@ impl State {
     pub async fn put(
         &self,
         txn: &Arc<Txn<'_>>,
-        key: TCValue,
-        value: TCValue,
+        key: Value,
+        value: Value,
         _auth: &Option<Token>,
     ) -> TCResult<State> {
         // TODO: authorize
@@ -179,7 +179,7 @@ impl State {
         &self,
         _txn: Arc<Txn<'_>>,
         _method: &PathSegment,
-        _args: Vec<(ValueId, TCValue)>,
+        _args: Vec<(ValueId, Value)>,
         _auth: &Option<Token>,
     ) -> TCResult<State> {
         Err(error::method_not_allowed(format!(
@@ -207,7 +207,7 @@ impl From<Arc<table::Table>> for State {
     }
 }
 
-impl<T: Into<TCValue>> From<T> for State {
+impl<T: Into<Value>> From<T> for State {
     fn from(value: T) -> State {
         State::Value(value.into())
     }

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use serde::ser::{SerializeMap, SerializeSeq};
@@ -52,11 +53,11 @@ impl Serialize for Subject {
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct GetOp {
-    pub key: TCValue,
+    pub key: Value,
 }
 
-impl From<(TCValue,)> for GetOp {
-    fn from(tup: (TCValue,)) -> GetOp {
+impl From<(Value,)> for GetOp {
+    fn from(tup: (Value,)) -> GetOp {
         GetOp { key: tup.0 }
     }
 }
@@ -80,12 +81,12 @@ impl fmt::Display for GetOp {
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct PutOp {
-    pub key: TCValue,
-    pub value: TCValue,
+    pub key: Value,
+    pub value: Value,
 }
 
-impl From<(TCValue, TCValue)> for PutOp {
-    fn from(tup: (TCValue, TCValue)) -> PutOp {
+impl From<(Value, Value)> for PutOp {
+    fn from(tup: (Value, Value)) -> PutOp {
         PutOp {
             key: tup.0,
             value: tup.1,
@@ -157,11 +158,11 @@ impl fmt::Display for PutOp {
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct PostOp {
     pub action: TCPath,
-    pub requires: Vec<(ValueId, TCValue)>,
+    pub requires: Vec<(ValueId, Value)>,
 }
 
-impl From<(TCPath, Vec<(ValueId, TCValue)>)> for PostOp {
-    fn from(tup: (TCPath, Vec<(ValueId, TCValue)>)) -> PostOp {
+impl From<(TCPath, Vec<(ValueId, Value)>)> for PostOp {
+    fn from(tup: (TCPath, Vec<(ValueId, Value)>)) -> PostOp {
         PostOp {
             action: tup.0,
             requires: tup.1,
@@ -233,15 +234,15 @@ impl Request {
 
         match &self.op {
             Op::Get(GetOp { key }) => {
-                if let TCValue::Ref(r) = key {
+                if let Value::Ref(r) = key {
                     deps.push(r);
                 }
             }
             Op::Put(PutOp { key, value }) => {
-                if let TCValue::Ref(r) = key {
+                if let Value::Ref(r) = key {
                     deps.push(r);
                 }
-                if let TCValue::Ref(r) = value {
+                if let Value::Ref(r) = value {
                     deps.push(r);
                 }
             }
@@ -250,7 +251,7 @@ impl Request {
                 requires,
             }) => {
                 for (_, v) in requires {
-                    if let TCValue::Ref(r) = v {
+                    if let Value::Ref(r) = v {
                         deps.push(r);
                     }
                 }
@@ -261,10 +262,10 @@ impl Request {
     }
 }
 
-impl TryFrom<(&str, Vec<TCValue>)> for Request {
+impl TryFrom<(&str, Vec<Value>)> for Request {
     type Error = error::TCError;
 
-    fn try_from(tup: (&str, Vec<TCValue>)) -> TCResult<Request> {
+    fn try_from(tup: (&str, Vec<Value>)) -> TCResult<Request> {
         let key = tup.0;
         let mut values = tup.1;
 
@@ -287,7 +288,7 @@ impl TryFrom<(&str, Vec<TCValue>)> for Request {
             let requires = values
                 .drain(..)
                 .map(|v| v.try_into())
-                .collect::<TCResult<Vec<(ValueId, TCValue)>>>()?;
+                .collect::<TCResult<Vec<(ValueId, Value)>>>()?;
             let args: PostOp = (action, requires).into();
             Ok((subject, args).into())
         } else {
@@ -347,7 +348,7 @@ impl<'de> de::Visitor<'de> for OpVisitor {
         M: de::MapAccess<'de>,
     {
         if let Some(key) = access.next_key::<&str>()? {
-            let values: Vec<TCValue> = access.next_value()?;
+            let values: Vec<Value> = access.next_value()?;
             (key, values).try_into().map_err(de::Error::custom)
         } else {
             Err(de::Error::custom("Op subject must be a Link or Ref, e.g. \"/sbin/value/string\" or \"$result/filter\""))

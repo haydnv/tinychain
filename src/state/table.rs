@@ -18,7 +18,7 @@ use crate::internal::History;
 use crate::state::{Args, Collection, Persistent, State};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{PathSegment, TCPath};
-use crate::value::{TCResult, TCValue, ValueId, Version};
+use crate::value::{TCResult, Value, ValueId, Version};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Schema {
@@ -66,44 +66,41 @@ impl TryFrom<Args> for Schema {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-pub struct Row(Vec<TCValue>, Vec<Option<TCValue>>);
+pub struct Row(Vec<Value>, Vec<Option<Value>>);
 
-impl From<(Vec<TCValue>, Vec<Option<TCValue>>)> for Row {
-    fn from(data: (Vec<TCValue>, Vec<Option<TCValue>>)) -> Row {
+impl From<(Vec<Value>, Vec<Option<Value>>)> for Row {
+    fn from(data: (Vec<Value>, Vec<Option<Value>>)) -> Row {
         Row(data.0, data.1)
     }
 }
 
-impl From<Row> for (Vec<TCValue>, Vec<Option<TCValue>>) {
-    fn from(row: Row) -> (Vec<TCValue>, Vec<Option<TCValue>>) {
+impl From<Row> for (Vec<Value>, Vec<Option<Value>>) {
+    fn from(row: Row) -> (Vec<Value>, Vec<Option<Value>>) {
         (row.0, row.1)
     }
 }
 
-impl From<Row> for TCValue {
-    fn from(mut row: Row) -> TCValue {
-        TCValue::Vector(vec![
+impl From<Row> for Value {
+    fn from(mut row: Row) -> Value {
+        Value::Vector(vec![
             row.0.into(),
-            row.1
-                .drain(..)
-                .map(|i| i.unwrap_or(TCValue::None))
-                .collect(),
+            row.1.drain(..).map(|i| i.unwrap_or(Value::None)).collect(),
         ])
     }
 }
 
-impl TryFrom<TCValue> for Row {
+impl TryFrom<Value> for Row {
     type Error = error::TCError;
 
-    fn try_from(value: TCValue) -> TCResult<Row> {
-        let mut value: Vec<TCValue> = value.try_into()?;
+    fn try_from(value: Value) -> TCResult<Row> {
+        let mut value: Vec<Value> = value.try_into()?;
         if value.len() == 2 {
-            let mut row_values: Vec<TCValue> = value.pop().unwrap().try_into()?;
-            let row_values: Vec<Option<TCValue>> = row_values.drain(..).map(|v| v.into()).collect();
-            let row_key: Vec<TCValue> = value.pop().unwrap().try_into()?;
+            let mut row_values: Vec<Value> = value.pop().unwrap().try_into()?;
+            let row_values: Vec<Option<Value>> = row_values.drain(..).map(|v| v.into()).collect();
+            let row_key: Vec<Value> = value.pop().unwrap().try_into()?;
             Ok(Row(row_key, row_values))
         } else {
-            let value: TCValue = value.into();
+            let value: Value = value.into();
             Err(error::bad_request("Expected Row but found", value))
         }
     }
@@ -127,9 +124,9 @@ impl Table {
     async fn row_id(
         &self,
         txn: &Arc<Txn<'_>>,
-        value: &[TCValue],
+        value: &[Value],
         auth: &Option<Token>,
-    ) -> TCResult<Vec<TCValue>> {
+    ) -> TCResult<Vec<Value>> {
         let schema = self.schema(txn.id()).await?;
         let key_size = schema.key.len();
 
@@ -140,7 +137,7 @@ impl Table {
             ));
         }
 
-        let mut row_id: Vec<TCValue> = Vec::with_capacity(key_size);
+        let mut row_id: Vec<Value> = Vec::with_capacity(key_size);
         for value in try_join_all(
             value
                 .iter()
@@ -158,14 +155,14 @@ impl Table {
     async fn new_row(
         &self,
         txn: &Arc<Txn<'_>>,
-        row_id: &[TCValue],
+        row_id: &[Value],
         auth: &Option<Token>,
     ) -> TCResult<Row> {
         let row_id = self.row_id(txn, row_id, auth).await?;
         let schema = self.schema(txn.id()).await?;
 
         if row_id.len() != schema.key.len() {
-            let key: TCValue = row_id.into();
+            let key: Value = row_id.into();
             return Err(error::bad_request(
                 &format!("Expected a key of length {}, found", schema.key.len()),
                 key,
@@ -181,8 +178,8 @@ impl Table {
 
 #[async_trait]
 impl Collection for Table {
-    type Key = Vec<TCValue>;
-    type Value = Vec<TCValue>;
+    type Key = Vec<Value>;
+    type Value = Vec<Value>;
 
     async fn get(
         self: &Arc<Self>,
@@ -211,18 +208,14 @@ impl Collection for Table {
             )
             .await;
 
-        Ok(row
-            .1
-            .drain(..)
-            .map(|v| v.unwrap_or(TCValue::None))
-            .collect())
+        Ok(row.1.drain(..).map(|v| v.unwrap_or(Value::None)).collect())
     }
 
     async fn put(
         self: Arc<Self>,
         txn: &Arc<Txn<'_>>,
-        row_id: Vec<TCValue>,
-        column_values: Vec<TCValue>,
+        row_id: Vec<Value>,
+        column_values: Vec<Value>,
     ) -> TCResult<State> {
         // TODO: authorize
         let auth = &None;
@@ -233,7 +226,7 @@ impl Collection for Table {
         let mut names = vec![];
         let mut values = vec![];
         for column_value in column_values.iter() {
-            let (column, value): (ValueId, TCValue) = column_value.clone().try_into()?;
+            let (column, value): (ValueId, Value) = column_value.clone().try_into()?;
 
             if let Some(ctr) = schema_map.get(&column) {
                 names.push(column);
@@ -246,17 +239,17 @@ impl Collection for Table {
             }
         }
 
-        let mut values: HashMap<ValueId, TCValue> = try_join_all(values)
+        let mut values: HashMap<ValueId, Value> = try_join_all(values)
             .await?
             .iter()
             .map(|v| v.clone().try_into())
-            .collect::<TCResult<Vec<TCValue>>>()?
+            .collect::<TCResult<Vec<Value>>>()?
             .iter()
             .enumerate()
             .map(|(i, v)| (names[i].clone(), v.clone()))
             .collect();
 
-        let mut mutated: Vec<Option<TCValue>> =
+        let mut mutated: Vec<Option<Value>> =
             iter::repeat(None).take(schema.columns.len()).collect();
         for (i, col) in schema.columns.iter().enumerate() {
             if let Some(value) = values.remove(&col.0) {

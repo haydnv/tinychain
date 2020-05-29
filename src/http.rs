@@ -13,7 +13,7 @@ use crate::host::Host;
 use crate::state::State;
 use crate::transaction::Txn;
 use crate::value::link::*;
-use crate::value::{TCRef, TCResult, TCValue, ValueId};
+use crate::value::{TCRef, TCResult, Value, ValueId};
 
 const UNSERIALIZABLE: &str =
     "The request completed successfully but some of the response could not be serialized";
@@ -49,7 +49,7 @@ pub async fn listen(
 async fn get<'a>(
     txn: &'a Arc<Txn<'a>>,
     path: TCPath,
-    key: TCValue,
+    key: Value,
     auth: &Option<Token>,
 ) -> TCResult<State> {
     txn.get(path.into(), key, auth).await
@@ -58,7 +58,7 @@ async fn get<'a>(
 async fn post<'a>(
     txn: &'a Arc<Txn<'a>>,
     path: &TCPath,
-    mut args: HashMap<ValueId, TCValue>,
+    mut args: HashMap<ValueId, Value>,
     auth: &'a Option<Token>,
 ) -> TCResult<State> {
     if path == "/sbin/transact" {
@@ -66,13 +66,13 @@ async fn post<'a>(
             .remove(&"capture".parse().unwrap())
             .map(|v| v.try_into())
             .unwrap_or_else(|| Ok(Vec::new()))?;
-        let mut values: Vec<(ValueId, TCValue)> = args
+        let mut values: Vec<(ValueId, Value)> = args
             .remove(&"values".parse().unwrap())
             .map(|v| v.try_into())
             .unwrap_or_else(|| Ok(Vec::new()))?;
         txn.extend(values.drain(..), auth).await?;
 
-        let mut results: Vec<TCValue> = Vec::with_capacity(capture.len());
+        let mut results: Vec<Value> = Vec::with_capacity(capture.len());
         match txn.resolve(capture.into_iter().collect()).await {
             Ok(responses) => {
                 for (id, r) in responses {
@@ -116,10 +116,10 @@ async fn route<'a>(
     match method {
         Method::GET => {
             let key = if let Some(key) = params.get("key") {
-                serde_json::from_str::<TCValue>(key)
+                serde_json::from_str::<Value>(key)
                     .map_err(|e| error::bad_request("Unable to parse 'key' param", e))?
             } else {
-                TCValue::None
+                Value::None
             };
 
             match get(txn, path, key, &auth).await? {
@@ -131,7 +131,7 @@ async fn route<'a>(
             }
         }
         Method::POST => {
-            let args: HashMap<ValueId, TCValue> = match serde_json::from_slice(&body) {
+            let args: HashMap<ValueId, Value> = match serde_json::from_slice(&body) {
                 Ok(params) => params,
                 Err(cause) => {
                     let body = line_numbers(std::str::from_utf8(&body).unwrap());

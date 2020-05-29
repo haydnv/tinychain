@@ -9,14 +9,14 @@ use serde::{Deserialize, Serialize};
 use crate::error;
 use crate::value::link::{Link, TCPath};
 use crate::value::op::{GetOp, PostOp, Request};
-use crate::value::{TCResult, TCValue};
+use crate::value::{TCResult, Value};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Token {
     iss: Link,
     iat: u64,
     exp: u64,
-    actor_id: TCValue,
+    actor_id: Value,
     scopes: Vec<TCPath>,
 }
 
@@ -49,14 +49,14 @@ impl FromStr for Token {
 
 pub struct Actor {
     host: Link,
-    id: TCValue,
+    id: Value,
     lock: PostOp,
     public_key: PublicKey,
     private_key: SecretKey,
 }
 
 impl Actor {
-    pub fn new(host: Link, id: TCValue, lock: PostOp) -> Arc<Actor> {
+    pub fn new(host: Link, id: Value, lock: PostOp) -> Arc<Actor> {
         let mut rng = OsRng {};
         let keypair: Keypair = Keypair::generate(&mut rng);
 

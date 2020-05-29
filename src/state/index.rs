@@ -11,17 +11,17 @@ use crate::state::{Args, Collection, Derived, State};
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
 use crate::value::op::PutOp;
-use crate::value::{TCResult, TCValue, ValueId};
+use crate::value::{TCResult, Value, ValueId};
 use crate::DEFAULT_LOCALE;
 
 const DEFAULT_BLOCK_SIZE: u64 = 100_000;
 
 pub struct Slice;
 
-impl TryFrom<TCValue> for Slice {
+impl TryFrom<Value> for Slice {
     type Error = error::TCError;
 
-    fn try_from(_value: TCValue) -> TCResult<Slice> {
+    fn try_from(_value: Value) -> TCResult<Slice> {
         Err(error::not_implemented())
     }
 }
@@ -57,10 +57,10 @@ pub struct Index {
     blocks: Arc<Store>,
 }
 
-impl TryFrom<TCValue> for Index {
+impl TryFrom<Value> for Index {
     type Error = error::TCError;
 
-    fn try_from(_value: TCValue) -> TCResult<Index> {
+    fn try_from(_value: Value) -> TCResult<Index> {
         Err(error::not_implemented())
     }
 }

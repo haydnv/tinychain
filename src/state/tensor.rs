@@ -11,16 +11,16 @@ use crate::state::{Args, Collection, Derived, State};
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
 use crate::value::op::PutOp;
-use crate::value::{TCResult, TCValue};
+use crate::value::{TCResult, Value};
 
 const BLOCK_SIZE: usize = 1_000_000;
 
 pub struct Slice;
 
-impl TryFrom<TCValue> for Slice {
+impl TryFrom<Value> for Slice {
     type Error = error::TCError;
 
-    fn try_from(_value: TCValue) -> TCResult<Slice> {
+    fn try_from(_value: Value) -> TCResult<Slice> {
         Err(error::not_implemented())
     }
 }
@@ -79,10 +79,10 @@ pub struct Tensor {
     blocks: Arc<Store>,
 }
 
-impl TryFrom<TCValue> for Tensor {
+impl TryFrom<Value> for Tensor {
     type Error = error::TCError;
 
-    fn try_from(_value: TCValue) -> TCResult<Tensor> {
+    fn try_from(_value: Value) -> TCResult<Tensor> {
         Err(error::not_implemented())
     }
 }

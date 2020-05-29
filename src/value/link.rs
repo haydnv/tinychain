@@ -10,7 +10,7 @@ use serde::de;
 use serde::ser::{SerializeMap, Serializer};
 
 use crate::error;
-use crate::value::{TCResult, TCValue, ValueId};
+use crate::value::{TCResult, Value, ValueId};
 
 pub type PathSegment = ValueId;
 
@@ -369,7 +369,7 @@ impl<'de> serde::Deserialize<'de> for Link {
     where
         D: de::Deserializer<'de>,
     {
-        let m: HashMap<String, HashMap<ValueId, TCValue>> =
+        let m: HashMap<String, HashMap<ValueId, Value>> =
             de::Deserialize::deserialize(deserializer)?;
         if m.len() != 1 {
             Err(de::Error::custom(format!(
@@ -397,7 +397,7 @@ impl serde::Serialize for Link {
         S: Serializer,
     {
         let mut map = s.serialize_map(Some(1))?;
-        let data: HashMap<ValueId, TCValue> = HashMap::new();
+        let data: HashMap<ValueId, Value> = HashMap::new();
         map.serialize_entry(&self.to_string(), &data)?;
         map.end()
     }

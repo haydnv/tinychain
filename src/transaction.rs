@@ -90,7 +90,7 @@ impl<'a> TxnState<'a> {
         }
     }
 
-    fn extend<I: Iterator<Item = (ValueId, TCValue)>>(
+    fn extend<I: Iterator<Item = (ValueId, Value)>>(
         &mut self,
         values: I,
         auth: &'a Option<Token>,
@@ -102,18 +102,18 @@ impl<'a> TxnState<'a> {
         Ok(())
     }
 
-    fn push(&mut self, value: (ValueId, TCValue), auth: &'a Option<Token>) -> TCResult<()> {
+    fn push(&mut self, value: (ValueId, Value), auth: &'a Option<Token>) -> TCResult<()> {
         if self.resolved.contains_key(&value.0) {
             return Err(error::bad_request("Duplicate value provided for", value.0));
         }
         self.known.insert(value.0.clone().into());
 
         match value.1 {
-            TCValue::Request(request) => {
+            Value::Request(request) => {
                 let required = request.deps();
                 let unknown: Vec<&TCRef> = required.difference(&self.known).collect();
                 if !unknown.is_empty() {
-                    let unknown: TCValue = unknown.into_iter().cloned().collect();
+                    let unknown: Value = unknown.into_iter().cloned().collect();
                     Err(error::bad_request(
                         "Some required values were not provided",
                         unknown,
@@ -219,7 +219,7 @@ impl<'a> Txn<'a> {
         self.id.clone()
     }
 
-    pub async fn extend<I: Iterator<Item = (ValueId, TCValue)>>(
+    pub async fn extend<I: Iterator<Item = (ValueId, Value)>>(
         &self,
         iter: I,
         auth: &'a Option<Token>,
@@ -227,7 +227,7 @@ impl<'a> Txn<'a> {
         self.state.lock().await.extend(iter, auth)
     }
 
-    pub async fn push(&self, item: (ValueId, TCValue), auth: &'a Option<Token>) -> TCResult<()> {
+    pub async fn push(&self, item: (ValueId, Value), auth: &'a Option<Token>) -> TCResult<()> {
         self.state.lock().await.push(item, auth)
     }
 
@@ -297,7 +297,7 @@ impl<'a> Txn<'a> {
             },
             Op::Post(PostOp { action, requires }) => match subject {
                 Subject::Ref(r) => {
-                    let mut deps: Vec<(ValueId, TCValue)> = Vec::with_capacity(requires.len());
+                    let mut deps: Vec<(ValueId, Value)> = Vec::with_capacity(requires.len());
                     for (dest_id, id) in requires {
                         let dep = resolve_val(resolved, id)?;
                         deps.push((dest_id, dep.try_into()?));
@@ -320,7 +320,7 @@ impl<'a> Txn<'a> {
     pub async fn get(
         self: &Arc<Self>,
         link: Link,
-        key: TCValue,
+        key: Value,
         auth: &Option<Token>,
     ) -> TCResult<State> {
         println!("txn::get {} {}", link, key);
@@ -330,7 +330,7 @@ impl<'a> Txn<'a> {
     pub async fn put(
         self: &Arc<Self>,
         dest: Link,
-        key: TCValue,
+        key: Value,
         state: State,
         auth: &Option<Token>,
     ) -> TCResult<State> {
@@ -346,11 +346,11 @@ fn resolve_id(resolved: &HashMap<ValueId, State>, id: &ValueId) -> TCResult<Stat
     }
 }
 
-fn resolve_val(resolved: &HashMap<ValueId, State>, value: TCValue) -> TCResult<State> {
+fn resolve_val(resolved: &HashMap<ValueId, State>, value: Value) -> TCResult<State> {
     match value {
-        TCValue::Ref(r) => resolve_id(resolved, &r.value_id()),
-        TCValue::Vector(mut v) => {
-            let mut val: Vec<TCValue> = vec![];
+        Value::Ref(r) => resolve_id(resolved, &r.value_id()),
+        Value::Vector(mut v) => {
+            let mut val: Vec<Value> = vec![];
             for item in v.drain(..) {
                 match resolve_val(resolved, item)? {
                     State::Value(i) => val.push(i),
@@ -363,7 +363,7 @@ fn resolve_val(resolved: &HashMap<ValueId, State>, value: TCValue) -> TCResult<S
                 }
             }
 
-            Ok(TCValue::Vector(val).into())
+            Ok(Value::Vector(val).into())
         }
         _ => Ok(value.into()),
     }
