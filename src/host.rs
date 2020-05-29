@@ -120,13 +120,13 @@ impl Host {
                 ));
             }
 
-            let dir = if let Some(store) = host.data_dir.get_store(txn_id, &path).await {
-                Directory::from_store(txn_id, store).await
+            let cluster = if let Some(store) = host.data_dir.get_store(txn_id, &path).await {
+                Cluster::from_store(txn_id, store).await
             } else {
-                Directory::new(txn_id, host.data_dir.reserve(txn_id, path.clone()).await?).await?
+                Cluster::new(txn_id, host.data_dir.reserve(txn_id, path.clone()).await?).await?
             };
 
-            host.root.push(path, dir);
+            host.root.push(path, cluster);
         }
 
         host.data_dir.commit(&txn.id()).await;
@@ -173,16 +173,16 @@ impl Host {
         }
 
         if path[0] == "sbin" {
-            let dir = &path[1];
+            let name = &path[1];
             let path = &path.slice_from(2);
-            match dir.as_str() {
+            match name.as_str() {
                 "auth" => Ok(Sbin::auth(path, key)?.into()),
                 "state" => Sbin::state(txn, path, key).await,
                 "value" => Ok(Sbin::value(path, key)?.into()),
                 _ => Err(error::not_found(path)),
             }
-        } else if let Some((path, dir)) = self.root.get(path) {
-            let state = dir.get(txn, &path).await?;
+        } else if let Some((path, cluster)) = self.root.get(path) {
+            let state = cluster.get(txn, &path).await?;
             state.get(txn, key, auth).await
         } else {
             Err(error::not_found(path))
@@ -210,18 +210,18 @@ impl Host {
         if path.is_empty() {
             Err(error::method_not_allowed(path))
         } else if path[0] == "sbin" {
-            let dir = &path[1];
+            let name = &path[1];
             let path = &path.slice_from(2);
-            match dir.as_str() {
+            match name.as_str() {
                 "auth" => Err(error::method_not_allowed(path)),
                 "state" => Err(error::method_not_allowed(path)),
                 "value" => Err(error::method_not_allowed(path)),
                 _ => Err(error::not_found(path)),
             }
-        } else if let Some((mut path, dir)) = self.root.get(path) {
+        } else if let Some((mut path, cluster)) = self.root.get(path) {
             let key: TCPath = key.try_into()?;
             path.extend(key.into_iter());
-            Ok(dir.clone().put(txn, path, state).await?)
+            Ok(cluster.clone().put(txn, path, state).await?)
         } else {
             Err(error::not_found(path))
         }
@@ -296,7 +296,7 @@ struct HostedNode {
 #[derive(Clone)]
 struct Hosted {
     root: HostedNode,
-    hosted: HashMap<TCPath, Arc<Directory>>,
+    hosted: HashMap<TCPath, Arc<Cluster>>,
 }
 
 impl Hosted {
@@ -309,8 +309,8 @@ impl Hosted {
         }
     }
 
-    fn get(&self, path: &TCPath) -> Option<(TCPath, Arc<Directory>)> {
-        println!("checking for hosted directory {}", path);
+    fn get(&self, path: &TCPath) -> Option<(TCPath, Arc<Cluster>)> {
+        println!("checking for hosted cluster {}", path);
         let mut node = &self.root;
         let mut found_path = TCPath::default();
         for segment in path.clone() {
@@ -329,14 +329,14 @@ impl Hosted {
             }
         }
 
-        if let Some(dir) = self.hosted.get(&found_path) {
-            Some((path.from_path(&found_path).unwrap(), dir.clone()))
+        if let Some(cluster) = self.hosted.get(&found_path) {
+            Some((path.from_path(&found_path).unwrap(), cluster.clone()))
         } else {
             None
         }
     }
 
-    fn push(&mut self, path: TCPath, dir: Arc<Directory>) -> Option<Arc<Directory>> {
+    fn push(&mut self, path: TCPath, cluster: Arc<Cluster>) -> Option<Arc<Cluster>> {
         let mut node = &mut self.root;
         for segment in path.clone() {
             node = node.children.entry(segment).or_insert(HostedNode {
@@ -345,6 +345,6 @@ impl Hosted {
         }
 
         println!("Hosted directory: {}", path);
-        self.hosted.insert(path, dir)
+        self.hosted.insert(path, cluster)
     }
 }

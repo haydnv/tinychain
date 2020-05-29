@@ -14,13 +14,13 @@ use crate::value::link::PathSegment;
 use crate::value::op::PutOp;
 use crate::value::{TCResult, Value, ValueId};
 
-mod directory;
+mod cluster;
 mod graph;
 mod index;
 pub mod table;
 mod tensor;
 
-pub type Directory = directory::Directory;
+pub type Cluster = cluster::Cluster;
 pub type Graph = graph::Graph;
 
 #[async_trait]
@@ -126,7 +126,7 @@ impl TryFrom<Value> for Args {
 
 #[derive(Clone)]
 pub enum State {
-    Directory(Arc<Directory>),
+    Cluster(Arc<Cluster>),
     Graph(Arc<Graph>),
     Table(Arc<table::Table>),
     Tensor(Arc<tensor::Tensor>),
@@ -142,7 +142,7 @@ impl State {
     ) -> TCResult<State> {
         // TODO: authorize
         match self {
-            State::Directory(d) => d.clone().get(txn, &key.try_into()?).await,
+            State::Cluster(d) => d.clone().get(txn, &key.try_into()?).await,
             State::Graph(g) => Ok(g.clone().get(txn, &key).await?.into()),
             State::Table(t) => Ok(t.clone().get(txn, &key.try_into()?).await?.into()),
             _ => Err(error::bad_request(
@@ -168,7 +168,7 @@ impl State {
     ) -> TCResult<State> {
         // TODO: authorize
         match self {
-            State::Directory(d) => d.clone().put(txn, key.try_into()?, value.try_into()?).await,
+            State::Cluster(d) => d.clone().put(txn, key.try_into()?, value.try_into()?).await,
             State::Graph(g) => g.clone().put(txn, key, value).await,
             State::Table(t) => t.clone().put(txn, key.try_into()?, value.try_into()?).await,
             _ => Err(error::bad_request("Cannot PUT to", self)),
@@ -189,9 +189,9 @@ impl State {
     }
 }
 
-impl From<Arc<Directory>> for State {
-    fn from(dir: Arc<Directory>) -> State {
-        State::Directory(dir)
+impl From<Arc<Cluster>> for State {
+    fn from(cluster: Arc<Cluster>) -> State {
+        State::Cluster(cluster)
     }
 }
 
@@ -216,7 +216,7 @@ impl<T: Into<Value>> From<T> for State {
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            State::Directory(_) => write!(f, "(directory)"),
+            State::Cluster(_) => write!(f, "(cluster)"),
             State::Graph(_) => write!(f, "(graph)"),
             State::Table(_) => write!(f, "(table)"),
             State::Tensor(_) => write!(f, "(tensor)"),
