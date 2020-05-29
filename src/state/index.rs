@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::error;
 use crate::i18n::Locale;
 use crate::internal::block::Store;
-use crate::state::{Collection, Derived, State};
+use crate::state::{Args, Collection, Derived, State};
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
 use crate::value::op::PutOp;
@@ -33,36 +33,15 @@ pub struct IndexConfig {
     values: HashMap<ValueId, TCPath>,
 }
 
-impl TryFrom<TCValue> for IndexConfig {
+impl TryFrom<Args> for IndexConfig {
     type Error = error::TCError;
 
-    fn try_from(value: TCValue) -> TCResult<IndexConfig> {
-        let mut params: HashMap<String, TCValue> = value.try_into()?;
-
-        let block_size: u64 = params
-            .remove("block_size")
-            .map(|v| v.try_into())
-            .unwrap_or(Ok(DEFAULT_BLOCK_SIZE))?;
-
-        let locale: String = params
-            .remove("block_size")
-            .map(|v| v.try_into())
-            .unwrap_or(Ok(DEFAULT_LOCALE.to_string()))?;
+    fn try_from(mut args: Args) -> TCResult<IndexConfig> {
+        let block_size: u64 = args.take_or("block_size", DEFAULT_BLOCK_SIZE)?;
+        let locale: String = args.take_or("locale", DEFAULT_LOCALE.to_string())?;
         let locale: Locale = locale.parse()?;
-
-        let key: HashMap<ValueId, TCPath> =
-            params
-                .remove("key")
-                .map(|k| k.try_into())
-                .unwrap_or(Err(error::bad_request(
-                    "Index key must be specified",
-                    TCValue::None,
-                )))?;
-
-        let values: HashMap<ValueId, TCPath> = params
-            .remove("key")
-            .unwrap_or(TCValue::Vector(vec![]))
-            .try_into()?;
+        let key: HashMap<ValueId, TCPath> = args.take("key")?;
+        let values: HashMap<ValueId, TCPath> = args.take("values")?;
 
         Ok(IndexConfig {
             block_size,

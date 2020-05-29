@@ -34,18 +34,6 @@ impl Schema {
             .into_iter()
             .collect()
     }
-
-    fn from(
-        key: Vec<(ValueId, TCPath)>,
-        columns: Vec<(ValueId, TCPath)>,
-        version: Version,
-    ) -> Schema {
-        Schema {
-            key,
-            columns,
-            version,
-        }
-    }
 }
 
 impl Default for Schema {

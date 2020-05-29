@@ -64,7 +64,7 @@ pub trait Collection: Send + Sync {
 
 #[async_trait]
 pub trait Derived: Collection + Extend<PutOp> + Sized {
-    type Config: TryFrom<TCValue>;
+    type Config: TryFrom<Args>;
 
     async fn new(txn_id: &TxnId, context: Arc<Store>, config: Self::Config) -> TCResult<Self>;
 }
@@ -99,6 +99,18 @@ impl Args {
             value.try_into().map_err(|e: E| e.into())
         } else {
             Err(error::bad_request("Required argument not provided", name))
+        }
+    }
+
+    fn take_or<E: Into<error::TCError>, T: TryFrom<TCValue, Error = E>>(
+        &mut self,
+        name: &str,
+        default: T,
+    ) -> TCResult<T> {
+        if let Some(value) = self.0.remove(&name.parse()?) {
+            value.try_into().map_err(|e: E| e.into())
+        } else {
+            Ok(default)
         }
     }
 }

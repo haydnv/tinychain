@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,7 +7,7 @@ use futures::future::try_join_all;
 
 use crate::error;
 use crate::internal::block::Store;
-use crate::state::{Collection, Derived, State};
+use crate::state::{Args, Collection, Derived, State};
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
 use crate::value::op::PutOp;
@@ -45,11 +45,13 @@ pub struct TensorConfig {
     dims: Vec<u64>,
 }
 
-impl TryFrom<TCValue> for TensorConfig {
+impl TryFrom<Args> for TensorConfig {
     type Error = error::TCError;
 
-    fn try_from(value: TCValue) -> TCResult<TensorConfig> {
-        let (data_type, dims): (TCPath, Vec<u64>) = value.try_into()?;
+    fn try_from(mut args: Args) -> TCResult<TensorConfig> {
+        let data_type: TCPath = args.take("data_type")?;
+        let dims: Vec<u64> = args.take("dims")?;
+
         if !data_type.starts_with("/sbin/value/number".parse().unwrap()) || data_type.len() < 4 {
             return Err(error::bad_request(
                 "Tensor data type must be numeric, found",
