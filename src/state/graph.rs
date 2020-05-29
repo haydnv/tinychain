@@ -6,16 +6,16 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::block::Store;
 use crate::internal::file::*;
-use crate::state::{Collection, Persistent, State, Transact};
+use crate::state::*;
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCValue};
 
 pub struct GraphConfig;
 
-impl TryFrom<TCValue> for GraphConfig {
+impl TryFrom<Args> for GraphConfig {
     type Error = error::TCError;
 
-    fn try_from(_value: TCValue) -> TCResult<GraphConfig> {
+    fn try_from(_args: Args) -> TCResult<GraphConfig> {
         Err(error::not_implemented())
     }
 }

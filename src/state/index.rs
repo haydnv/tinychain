@@ -12,9 +12,9 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
 use crate::value::op::PutOp;
 use crate::value::{TCResult, TCValue, ValueId};
+use crate::DEFAULT_LOCALE;
 
 const DEFAULT_BLOCK_SIZE: u64 = 100_000;
-const DEFAULT_LOCALE: &str = "en_US";
 
 pub struct Slice;
 

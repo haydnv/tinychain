@@ -12,6 +12,7 @@ mod state;
 mod transaction;
 mod value;
 
+const DEFAULT_LOCALE: &str = "en_US";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]

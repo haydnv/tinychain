@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
@@ -70,9 +71,45 @@ pub trait Derived: Collection + Extend<PutOp> + Sized {
 
 #[async_trait]
 pub trait Persistent: Collection + File {
-    type Config: TryFrom<TCValue>;
+    type Config: TryFrom<Args>;
 
     async fn create(txn: &Arc<Txn<'_>>, config: Self::Config) -> TCResult<Arc<Self>>;
+}
+
+pub struct Args(HashMap<ValueId, TCValue>);
+
+impl Args {
+    fn assert_empty(&self) -> TCResult<()> {
+        if self.0.is_empty() {
+            Ok(())
+        } else {
+            let keys: Vec<String> = self.0.keys().map(|v| v.to_string()).collect();
+            Err(error::bad_request(
+                "Unrecognized arguments provided",
+                keys[..].join(", "),
+            ))
+        }
+    }
+
+    fn take<E: Into<error::TCError>, T: TryFrom<TCValue, Error = E>>(
+        &mut self,
+        name: &str,
+    ) -> TCResult<T> {
+        if let Some(value) = self.0.remove(&name.parse()?) {
+            value.try_into().map_err(|e: E| e.into())
+        } else {
+            Err(error::bad_request("Required argument not provided", name))
+        }
+    }
+}
+
+impl TryFrom<TCValue> for Args {
+    type Error = error::TCError;
+
+    fn try_from(value: TCValue) -> TCResult<Args> {
+        let args: HashMap<ValueId, TCValue> = value.try_into()?;
+        Ok(Args(args))
+    }
 }
 
 #[derive(Clone)]

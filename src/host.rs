@@ -15,7 +15,7 @@ use crate::http;
 use crate::internal::block::Store;
 use crate::internal::file::File;
 use crate::state::table::Table;
-use crate::state::{Collection, Directory, Persistent, State};
+use crate::state::*;
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost, PathSegment, TCPath};
 use crate::value::{TCResult, TCValue, ValueId};
@@ -247,7 +247,10 @@ impl Sbin {
 
     async fn state(txn: &Arc<Txn<'_>>, path: &TCPath, key: TCValue) -> TCResult<State> {
         match path.to_string().as_str() {
-            "/table" => Ok(Table::create(txn, key.try_into()?).await?.into()),
+            "/table" => {
+                let args: Args = key.try_into()?;
+                Ok(Table::create(txn, args.try_into()?).await?.into())
+            }
             _ => Err(error::not_found(path)),
         }
     }

@@ -15,7 +15,17 @@ use crate::internal::file::*;
 use crate::state::*;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{PathSegment, TCPath};
-use crate::value::{TCResult, TCValue};
+use crate::value::TCResult;
+
+pub struct DirConfig;
+
+impl TryFrom<Args> for DirConfig {
+    type Error = error::TCError;
+
+    fn try_from(_args: Args) -> TCResult<DirConfig> {
+        Ok(DirConfig)
+    }
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 enum EntryType {
@@ -277,9 +287,9 @@ impl File for Directory {
 
 #[async_trait]
 impl Persistent for Directory {
-    type Config = TCValue; // TODO: permissions
+    type Config = DirConfig; // TODO: permissions
 
-    async fn create(txn: &Arc<Txn<'_>>, _: TCValue) -> TCResult<Arc<Directory>> {
+    async fn create(txn: &Arc<Txn<'_>>, _: DirConfig) -> TCResult<Arc<Directory>> {
         Directory::new(&txn.id(), txn.context()).await
     }
 }

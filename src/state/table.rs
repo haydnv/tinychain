@@ -15,7 +15,7 @@ use crate::internal::block::Store;
 use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
 use crate::internal::History;
-use crate::state::{Collection, Persistent, State};
+use crate::state::{Args, Collection, Persistent, State};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{PathSegment, TCPath};
 use crate::value::{TCResult, TCValue, ValueId, Version};
@@ -60,24 +60,20 @@ impl Default for Schema {
 
 impl Mutation for Schema {}
 
-impl TryFrom<TCValue> for Schema {
+impl TryFrom<Args> for Schema {
     type Error = error::TCError;
 
-    fn try_from(value: TCValue) -> TCResult<Schema> {
-        let value: Vec<TCValue> = value.try_into()?;
-        if value.len() == 3 {
-            let key: Vec<(ValueId, TCPath)> = value[0].clone().try_into()?;
-            let columns: Vec<(ValueId, TCPath)> = value[1].clone().try_into()?;
-            let version: Version = value[2].clone().try_into()?;
-            Ok(Schema {
-                key,
-                columns,
-                version,
-            })
-        } else {
-            let value: TCValue = value.into();
-            Err(error::bad_request("Expected Schema of the form ([(name, constructor)...], [(name, constructor), ...], Version), found", value))
-        }
+    fn try_from(mut args: Args) -> TCResult<Schema> {
+        let key: Vec<(ValueId, TCPath)> = args.take("key")?;
+        let columns: Vec<(ValueId, TCPath)> = args.take("columns")?;
+        let version: Version = args.take("version")?;
+
+        args.assert_empty()?;
+        Ok(Schema {
+            key,
+            columns,
+            version,
+        })
     }
 }
 
