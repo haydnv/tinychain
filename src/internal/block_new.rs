@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
+use futures::lock::Mutex;
 
 use crate::error;
 use crate::value::link::{PathSegment, TCPath};
@@ -17,14 +18,14 @@ enum DirEntry {
 
 pub struct Dir {
     context: PathBuf,
-    children: HashMap<PathSegment, DirEntry>,
+    children: Mutex<HashMap<PathSegment, DirEntry>>,
 }
 
 impl Dir {
     pub fn new(mount_point: PathBuf) -> Arc<Dir> {
         Arc::new(Dir {
             context: mount_point,
-            children: HashMap::new(),
+            children: Mutex::new(HashMap::new()),
         })
     }
 
@@ -32,7 +33,7 @@ impl Dir {
         Box::pin(async move {
             if path.is_empty() {
                 None
-            } else if let Some(DirEntry::Dir(dir)) = self.children.get(&path[0]) {
+            } else if let Some(DirEntry::Dir(dir)) = self.children.lock().await.get(&path[0]) {
                 if path.len() == 1 {
                     Some(dir.clone())
                 } else {
@@ -44,17 +45,36 @@ impl Dir {
         })
     }
 
-    pub fn new_dir<'a>(&'a mut self, path: TCPath) -> BoxFuture<'a, TCResult<Arc<Dir>>> {
+    pub fn get_or_create_dir<'a>(&'a self, path: TCPath) -> BoxFuture<'a, TCResult<Arc<Dir>>> {
         Box::pin(async move {
             if path.is_empty() {
-                Err(error::not_found(path))
+                return Err(error::bad_request("Not a valid directory name", path));
+            }
+
+            match self.children.lock().await.get(&path[0]) {
+                Some(DirEntry::Store(_)) => Err(error::bad_request(
+                    "Requested a Directory but found a Store",
+                    path,
+                )),
+                Some(DirEntry::Dir(dir)) if path.len() == 1 => Ok(dir.clone()),
+                Some(DirEntry::Dir(dir)) => dir.get_or_create_dir(path.slice_from(1)).await,
+                None => self.new_dir(path).await,
+            }
+        })
+    }
+
+    pub fn new_dir<'a>(&'a self, path: TCPath) -> BoxFuture<'a, TCResult<Arc<Dir>>> {
+        Box::pin(async move {
+            if path.is_empty() {
+                Err(error::bad_request("Not a valid directory name", path))
             } else if path.len() == 1 {
                 let path = path[0].clone();
-                if self.children.contains_key(&path) {
+                let mut children = self.children.lock().await;
+                if children.contains_key(&path) {
                     Err(error::bad_request("Tried to create a new directory but there is already an entry at this path", &path))
                 } else {
                     let dir = Dir::new(self.fs_path(&path));
-                    self.children.insert(path, DirEntry::Dir(dir.clone()));
+                    children.insert(path, DirEntry::Dir(dir.clone()));
                     Ok(dir)
                 }
             } else {
