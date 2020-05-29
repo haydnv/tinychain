@@ -1,4 +1,8 @@
 pub mod block;
+
+#[allow(dead_code)]
+mod block_new;
+
 pub mod chain;
 pub mod file;
 mod history;

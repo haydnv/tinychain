@@ -15,9 +15,15 @@ use crate::value::op::PutOp;
 use crate::value::{TCResult, Value, ValueId};
 
 mod cluster;
+
+#[allow(dead_code)]
 mod graph;
+
+#[allow(dead_code)]
 mod index;
 pub mod table;
+
+#[allow(dead_code)]
 mod tensor;
 
 pub type Cluster = cluster::Cluster;
