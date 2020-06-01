@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::lock::Mutex;
 
 use crate::error;
-use crate::transaction::TxnId;
+use crate::transaction::{Transact, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
@@ -146,5 +147,21 @@ impl Store {
             .insert(block_id, block);
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Transact for Store {
+    async fn commit(&self, txn_id: &TxnId) {
+        let mut state = self.state.lock().await;
+        if let Some(mut blocks) = state.txn_cache.remove(txn_id) {
+            state
+                .blocks
+                .extend(blocks.drain().map(|(id, block)| (id, block.freeze())));
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.state.lock().await.txn_cache.remove(txn_id);
     }
 }
