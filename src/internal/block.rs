@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -165,20 +165,6 @@ impl Store {
         }
 
         state.blocks.contains_key(block_id)
-    }
-
-    pub async fn get_block<B: Block>(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        block_id: PathSegment,
-    ) -> TCResult<B> {
-        // TODO: read from filesystem
-
-        if let Some(buffer) = self.get_bytes(txn_id, block_id.clone()).await {
-            buffer.try_into()
-        } else {
-            Err(error::not_found(block_id))
-        }
     }
 
     pub async fn get_bytes(self: Arc<Self>, txn_id: TxnId, block_id: PathSegment) -> Option<Bytes> {
