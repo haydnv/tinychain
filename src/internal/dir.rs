@@ -3,11 +3,12 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::lock::Mutex;
 
 use crate::error;
-use crate::transaction::TxnId;
+use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
 use crate::value::TCResult;
 
@@ -161,5 +162,19 @@ impl Dir {
         let mut path = self.context.clone();
         path.push(name.to_string());
         path
+    }
+}
+
+#[async_trait]
+impl Transact for Dir {
+    async fn commit(&self, txn_id: &TxnId) {
+        let mut state = self.state.lock().await;
+        if let Some(mut txn_data) = state.txn_cache.remove(txn_id) {
+            state.children.extend(txn_data.drain())
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.state.lock().await.txn_cache.remove(txn_id);
     }
 }

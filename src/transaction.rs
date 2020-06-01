@@ -179,7 +179,7 @@ pub struct Txn<'a> {
     id: TxnId,
     context: Arc<Store>,
     host: Arc<Host>,
-    mutated: Arc<RwLock<Vec<Arc<dyn Transact>>>>,
+    mutated: Arc<RwLock<Vec<Arc<dyn Transact>>>>, // TODO: this should be a Set of some kind
     state: Mutex<TxnState<'a>>,
 }
 
