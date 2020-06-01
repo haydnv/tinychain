@@ -23,6 +23,20 @@ impl StoreState {
             txn_cache: HashMap::new(),
         }
     }
+
+    async fn get_block(&self, txn_id: &TxnId, block_id: &BlockId) -> Option<Bytes> {
+        if let Some(Some(block)) = self
+            .txn_cache
+            .get(txn_id)
+            .map(|blocks| blocks.get(block_id))
+        {
+            Some(Bytes::copy_from_slice(&block[..]))
+        } else if let Some(block) = self.blocks.get(block_id) {
+            Some(Bytes::copy_from_slice(&block[..]))
+        } else {
+            None
+        }
+    }
 }
 
 pub struct Store {
@@ -45,6 +59,7 @@ impl Store {
             .get_mut(block_id)
         {
             block.put(data);
+
             Ok(())
         } else if let Some(block) = state.blocks.get(block_id) {
             let mut block_txn_copy = BytesMut::from(&block[..]);
@@ -54,6 +69,7 @@ impl Store {
                 .get_mut(txn_id)
                 .unwrap()
                 .insert(block_id.clone(), block_txn_copy);
+
             Ok(())
         } else {
             Err(error::not_found(block_id))
@@ -71,6 +87,38 @@ impl Store {
         }
 
         false
+    }
+
+    pub async fn get_block(&self, txn_id: &TxnId, block_id: &BlockId) -> Option<Bytes> {
+        self.state.lock().await.get_block(txn_id, block_id).await
+    }
+
+    pub async fn insert(
+        &self,
+        txn_id: &TxnId,
+        block_id: BlockId,
+        data: Bytes,
+        offset: usize,
+    ) -> TCResult<()> {
+        let mut state = self.state.lock().await;
+        let block = state
+            .get_block(txn_id, &block_id)
+            .await
+            .ok_or(error::not_found(&block_id))?;
+        let mut new_block = BytesMut::with_capacity(block.len() + data.len());
+        new_block.put(&block[..offset]);
+        new_block.put(data);
+        new_block.put(&block[offset..]);
+
+        if let Some(txn_data) = state.txn_cache.get_mut(txn_id) {
+            txn_data.insert(block_id, new_block);
+        } else {
+            let mut txn_data = HashMap::new();
+            txn_data.insert(block_id, new_block);
+            state.txn_cache.insert(txn_id.clone(), txn_data);
+        }
+
+        Ok(())
     }
 
     pub async fn new_block(
@@ -98,20 +146,5 @@ impl Store {
             .insert(block_id, block);
 
         Ok(())
-    }
-
-    pub async fn get_block(&'_ self, txn_id: &'_ TxnId, block_id: &'_ BlockId) -> TCResult<Bytes> {
-        let state = self.state.lock().await;
-        if let Some(Some(block)) = state
-            .txn_cache
-            .get(txn_id)
-            .map(|blocks| blocks.get(block_id))
-        {
-            Ok(Bytes::copy_from_slice(&block[..]))
-        } else if let Some(block) = state.blocks.get(block_id) {
-            Ok(Bytes::copy_from_slice(&block[..]))
-        } else {
-            Err(error::not_found(block_id))
-        }
     }
 }
