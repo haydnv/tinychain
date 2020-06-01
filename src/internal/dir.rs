@@ -39,6 +39,22 @@ impl DirState {
             txn_cache: HashMap::new(),
         }
     }
+
+    async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Arc<Dir>>> {
+        if let Some(Some(entry)) = self.txn_cache.get(txn_id).map(|data| data.get(name)) {
+            match entry {
+                DirEntry::Dir(dir) => Ok(Some(dir.clone())),
+                other => Err(error::bad_request("Not a directory", other)),
+            }
+        } else if let Some(entry) = self.children.get(name) {
+            match entry {
+                DirEntry::Dir(dir) => Ok(Some(dir.clone())),
+                other => Err(error::bad_request("Not a directory", other)),
+            }
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 pub struct Dir {
@@ -98,24 +114,15 @@ impl Dir {
             if path.is_empty() {
                 Err(error::bad_request("Not a valid directory name", path))
             } else {
-                let state = self.state.lock().await;
-                let dir = if let Some(Some(entry)) =
-                    state.txn_cache.get(txn_id).map(|data| data.get(&path[0]))
-                {
-                    match entry {
-                        DirEntry::Dir(dir) => dir.clone(),
-                        other => return Err(error::bad_request("Not a directory", other)),
-                    }
-                } else if let Some(entry) = state.children.get(&path[0]) {
-                    match entry {
-                        DirEntry::Dir(dir) => dir.clone(),
-                        other => return Err(error::bad_request("Not a directory", other)),
+                if let Some(dir) = self.state.lock().await.get_dir(txn_id, &path[0]).await? {
+                    if path.len() == 1 {
+                        Ok(dir)
+                    } else {
+                        dir.get_dir(txn_id, path.slice_from(1)).await
                     }
                 } else {
-                    return Err(error::bad_request("No such directory", path));
-                };
-
-                Ok(dir)
+                    Err(error::not_found(path))
+                }
             }
         })
     }
@@ -129,39 +136,23 @@ impl Dir {
             if path.is_empty() {
                 Err(error::bad_request("Not a valid directory name", path))
             } else if path.len() == 1 {
-                let path = path[0].clone();
                 let mut state = self.state.lock().await;
-                let dir = if let Some(entry) = state
-                    .txn_cache
-                    .entry(txn_id.clone())
-                    .or_insert(HashMap::new())
-                    .get(&path)
-                {
-                    match entry {
-                        DirEntry::Dir(dir) => dir.clone(),
-                        other => return Err(error::bad_request("Not a directory", other)),
-                    }
-                } else if let Some(entry) = state.children.get(&path) {
-                    match entry {
-                        DirEntry::Dir(dir) => dir.clone(),
-                        other => return Err(error::bad_request("Not a directory", other)),
-                    }
+                if let Some(dir) = state.get_dir(txn_id, &path[0]).await? {
+                    Ok(dir)
                 } else {
-                    let dir = Dir::new(self.fs_path(&path));
+                    let dir = Dir::new(self.fs_path(&path[0]));
                     state
                         .txn_cache
                         .get_mut(&txn_id)
                         .unwrap()
-                        .insert(path, DirEntry::Dir(dir.clone()));
-                    dir
-                };
-
-                Ok(dir)
+                        .insert(path[0].clone(), DirEntry::Dir(dir.clone()));
+                    Ok(dir)
+                }
             } else {
-                let dir = self
-                    .get_or_create_dir(txn_id, path[0].clone().into())
-                    .await?;
-                dir.get_or_create_dir(txn_id, path.slice_from(1)).await
+                self.get_or_create_dir(txn_id, path[0].clone().into())
+                    .await?
+                    .get_or_create_dir(txn_id, path.slice_from(1))
+                    .await
             }
         })
     }
