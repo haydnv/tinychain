@@ -51,17 +51,40 @@ impl Store {
 
     pub async fn new_block(
         &self,
-        txn_id: &TxnId,
+        txn_id: TxnId,
         block_id: BlockId,
-        _initial_value: Bytes,
+        initial_value: Bytes,
     ) -> TCResult<()> {
-        if self.exists(txn_id, &block_id).await {
+        if self.exists(&txn_id, &block_id).await {
             return Err(error::bad_request(
                 "Tried to create a block that already exists",
                 block_id,
             ));
         }
 
-        Err(error::not_implemented())
+        self.state
+            .lock()
+            .await
+            .txn_cache
+            .entry(txn_id)
+            .or_insert(HashMap::new())
+            .insert(block_id, initial_value);
+
+        Ok(())
+    }
+
+    pub async fn get_block(&self, txn_id: &TxnId, block_id: &BlockId) -> TCResult<Bytes> {
+        let state = self.state.lock().await;
+        if let Some(Some(block)) = state
+            .txn_cache
+            .get(txn_id)
+            .map(|blocks| blocks.get(block_id))
+        {
+            Ok(block)
+        } else if let Some(block) = state.blocks.get(block_id) {
+            Ok(block)
+        } else {
+            Err(error::not_found(block_id))
+        }
     }
 }
