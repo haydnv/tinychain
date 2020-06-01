@@ -11,7 +11,7 @@ use crate::transaction::TxnId;
 use crate::value::link::{PathSegment, TCPath};
 use crate::value::TCResult;
 
-pub type BlockId = PathSegment;
+use super::store::Store;
 
 enum DirEntry {
     Dir(Arc<Dir>),
@@ -172,5 +172,3 @@ impl Dir {
         path
     }
 }
-
-pub struct Store {}
