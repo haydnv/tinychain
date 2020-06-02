@@ -4,6 +4,7 @@ use structopt::StructOpt;
 mod auth;
 
 mod error;
+mod gateway;
 mod host;
 mod http;
 mod i18n;
