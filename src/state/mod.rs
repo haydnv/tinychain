@@ -7,14 +7,14 @@ use async_trait::async_trait;
 
 use crate::auth::Token;
 use crate::error;
-use crate::internal::block::Store;
 use crate::internal::file::File;
+use crate::internal::Store;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::op::PutOp;
 use crate::value::{TCResult, Value, ValueId};
 
-mod cluster;
+pub mod cluster;
 
 #[allow(dead_code)]
 mod graph;
@@ -26,7 +26,6 @@ pub mod table;
 #[allow(dead_code)]
 mod tensor;
 
-pub type Cluster = cluster::Cluster;
 pub type Graph = graph::Graph;
 
 #[async_trait]
@@ -132,7 +131,7 @@ impl TryFrom<Value> for Args {
 
 #[derive(Clone)]
 pub enum State {
-    Cluster(Arc<Cluster>),
+    Cluster(Arc<cluster::Cluster>),
     Graph(Arc<Graph>),
     Table(Arc<table::Table>),
     Tensor(Arc<tensor::Tensor>),
@@ -195,8 +194,8 @@ impl State {
     }
 }
 
-impl From<Arc<Cluster>> for State {
-    fn from(cluster: Arc<Cluster>) -> State {
+impl From<Arc<cluster::Cluster>> for State {
+    fn from(cluster: Arc<cluster::Cluster>) -> State {
         State::Cluster(cluster)
     }
 }

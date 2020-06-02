@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 
-use crate::internal::block::Store;
+use crate::internal::Dir;
 use crate::transaction::TxnId;
 use crate::value::link::TCPath;
 
@@ -16,11 +16,11 @@ type FileData = (TCPath, Blocks);
 
 #[async_trait]
 pub trait File {
-    async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, dest: Arc<Store>) -> Arc<Self>;
+    async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, dest: Arc<Dir>) -> Arc<Self>;
 
     async fn copy_into(&self, txn_id: TxnId, writer: &mut FileCopier);
 
-    async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> Arc<Self>;
+    async fn from_dir(txn_id: &TxnId, dir: Arc<Dir>) -> Arc<Self>;
 }
 
 struct SharedState {
@@ -44,7 +44,7 @@ impl FileCopier {
         }
     }
 
-    pub async fn copy<F: File>(txn_id: TxnId, state: &F, dest: Arc<Store>) -> Arc<F> {
+    pub async fn copy<F: File>(txn_id: TxnId, state: &F, dest: Arc<Dir>) -> Arc<F> {
         let mut copier = Self::open();
         state.copy_into(txn_id.clone(), &mut copier).await;
         copier.close();

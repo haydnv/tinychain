@@ -12,11 +12,10 @@ use structopt::StructOpt;
 use crate::auth::Token;
 use crate::error;
 use crate::http;
-use crate::internal::block::Store;
 use crate::internal::file::File;
-use crate::state::table::Table;
+use crate::internal::Dir;
 use crate::state::*;
-use crate::transaction::Txn;
+use crate::transaction::{Transact, Txn};
 use crate::value::link::{Link, LinkHost, PathSegment, TCPath};
 use crate::value::{TCResult, Value, ValueId};
 
@@ -77,8 +76,8 @@ impl std::ops::Add<std::time::Duration> for NetworkTime {
 pub struct Host {
     address: IpAddr,
     http_port: u16,
-    data_dir: Arc<Store>,
-    workspace: Arc<Store>,
+    data_dir: Arc<Dir>,
+    workspace: Arc<Dir>,
     root: Hosted,
 }
 
@@ -86,8 +85,8 @@ impl Host {
     pub async fn new(config: HostConfig) -> TCResult<Arc<Host>> {
         // TODO: figure out a way to populate `root` without locking
 
-        let data_dir = Store::new(config.data_dir);
-        let workspace = Store::new_tmp(config.workspace);
+        let data_dir = Dir::new(config.data_dir);
+        let workspace = Dir::new_tmp(config.workspace);
 
         let mut hosted = config.hosted;
         hosted.sort_by(|a, b| b.len().partial_cmp(&a.len()).unwrap());
@@ -120,16 +119,23 @@ impl Host {
                 ));
             }
 
-            let cluster = if let Some(store) = host.data_dir.get_store(txn_id, &path).await {
-                Cluster::from_store(txn_id, store).await
+            let hosted_cluster = if let Some(dir) = host.data_dir.get_dir(txn_id, &path).await? {
+                cluster::Cluster::from_dir(txn_id, dir).await
             } else {
-                Cluster::new(txn_id, host.data_dir.reserve(txn_id, path.clone()).await?).await?
+                cluster::Cluster::new(
+                    txn_id,
+                    host.data_dir.create_dir(txn_id, path.clone()).await?,
+                )
+                .await?
             };
 
-            host.root.push(path, cluster);
+            host.root.push(path, hosted_cluster);
         }
 
         host.data_dir.commit(&txn.id()).await;
+        if host.data_dir.is_empty().await {
+            panic!("Committed to data_dir but it's still empty!");
+        }
 
         Ok(Arc::new(host))
     }
@@ -249,7 +255,7 @@ impl Sbin {
         match path.to_string().as_str() {
             "/table" => {
                 let args: Args = key.try_into()?;
-                Ok(Table::create(txn, args.try_into()?).await?.into())
+                Ok(table::Table::create(txn, args.try_into()?).await?.into())
             }
             _ => Err(error::not_found(path)),
         }
@@ -296,7 +302,7 @@ struct HostedNode {
 #[derive(Clone)]
 struct Hosted {
     root: HostedNode,
-    hosted: HashMap<TCPath, Arc<Cluster>>,
+    hosted: HashMap<TCPath, Arc<cluster::Cluster>>,
 }
 
 impl Hosted {
@@ -309,7 +315,7 @@ impl Hosted {
         }
     }
 
-    fn get(&self, path: &TCPath) -> Option<(TCPath, Arc<Cluster>)> {
+    fn get(&self, path: &TCPath) -> Option<(TCPath, Arc<cluster::Cluster>)> {
         println!("checking for hosted cluster {}", path);
         let mut node = &self.root;
         let mut found_path = TCPath::default();
@@ -336,7 +342,11 @@ impl Hosted {
         }
     }
 
-    fn push(&mut self, path: TCPath, cluster: Arc<Cluster>) -> Option<Arc<Cluster>> {
+    fn push(
+        &mut self,
+        path: TCPath,
+        cluster: Arc<cluster::Cluster>,
+    ) -> Option<Arc<cluster::Cluster>> {
         let mut node = &mut self.root;
         for segment in path.clone() {
             node = node.children.entry(segment).or_insert(HostedNode {

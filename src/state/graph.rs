@@ -4,8 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::error;
-use crate::internal::block::Store;
 use crate::internal::file::*;
+use crate::internal::Dir;
 use crate::state::*;
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, Value};
@@ -43,7 +43,7 @@ impl Collection for Graph {
 
 #[async_trait]
 impl File for Graph {
-    async fn copy_from(_reader: &mut FileCopier, _txn_id: &TxnId, _dest: Arc<Store>) -> Arc<Self> {
+    async fn copy_from(_reader: &mut FileCopier, _txn_id: &TxnId, _dest: Arc<Dir>) -> Arc<Self> {
         // TODO
         Arc::new(Graph {})
     }
@@ -52,7 +52,7 @@ impl File for Graph {
         // TODO
     }
 
-    async fn from_store(_txn_id: &TxnId, _store: Arc<Store>) -> Arc<Graph> {
+    async fn from_dir(_txn_id: &TxnId, _dir: Arc<Dir>) -> Arc<Graph> {
         // TODO
         Arc::new(Graph {})
     }

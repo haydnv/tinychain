@@ -11,10 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::Token;
 use crate::error;
-use crate::internal::block::Store;
 use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
-use crate::internal::History;
+use crate::internal::{Dir, History};
 use crate::state::{Args, Collection, Persistent, State};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{PathSegment, TCPath};
@@ -286,16 +285,31 @@ impl File for Table {
         println!("wrote table chain to file");
     }
 
-    async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, dest: Arc<Store>) -> Arc<Table> {
+    async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, dest: Arc<Dir>) -> Arc<Table> {
         println!("copying table from FileCopier");
-        let schema_history = History::copy_from(reader, txn_id, dest.clone()).await;
+        let schema_history = History::copy_from(
+            reader,
+            txn_id,
+            dest.create_dir(txn_id, "history".parse().unwrap())
+                .await
+                .unwrap()
+                .clone(),
+        )
+        .await;
         println!("copied schema");
 
         println!("reading blocks from FileCopier");
         let (path, blocks) = reader.next().await.unwrap();
         println!("got blocks");
         let chain = Mutex::new(
-            Chain::copy_from(blocks, txn_id, dest.reserve(txn_id, path).await.unwrap()).await,
+            Chain::copy_from(
+                blocks,
+                txn_id.clone(),
+                dest.create_store(txn_id, path.try_into().unwrap())
+                    .await
+                    .unwrap(),
+            )
+            .await,
         );
         println!("copied Chain");
 
@@ -305,16 +319,22 @@ impl File for Table {
         })
     }
 
-    async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> Arc<Table> {
-        let schema_history: Arc<History<Schema>> = History::from_store(txn_id, store.clone()).await;
+    async fn from_dir(txn_id: &TxnId, dir: Arc<Dir>) -> Arc<Table> {
+        let schema_history: Arc<History<Schema>> = History::from_dir(
+            txn_id,
+            dir.get_dir(txn_id, &"history".parse().unwrap())
+                .await
+                .unwrap()
+                .unwrap(),
+        )
+        .await;
 
         let latest_schema = schema_history.at(txn_id.clone()).await.unwrap();
         let chain_path: PathSegment = latest_schema.version.to_string().parse().unwrap();
         let chain = Mutex::new(
             Chain::from_store(
                 txn_id,
-                store
-                    .get_store(txn_id, &chain_path.try_into().unwrap())
+                dir.get_store(txn_id, &chain_path.try_into().unwrap())
                     .await
                     .unwrap(),
             )
@@ -334,15 +354,21 @@ impl Persistent for Table {
     type Config = Schema;
 
     async fn create(txn: &Arc<Txn<'_>>, schema: Schema) -> TCResult<Arc<Table>> {
+        let txn_id = &txn.id();
+
         let chain = Chain::new(
-            &txn.id(),
+            txn.id(),
             txn.context()
-                .reserve(&txn.id(), schema.version.to_string().parse()?)
+                .create_store(txn_id, schema.version.to_string().parse()?)
                 .await?,
         )
         .await;
 
-        let schema_history = History::new(txn.id(), txn.context()).await?;
+        let schema_history = History::new(
+            txn.id(),
+            txn.context().create_dir(txn_id, "history".parse()?).await?,
+        )
+        .await?;
         schema_history.put(txn.id(), schema).await?;
         txn.mutate(schema_history.clone());
 

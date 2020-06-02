@@ -9,9 +9,9 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
 use crate::error;
-use crate::internal::block::Store;
 use crate::internal::chain::{Chain, Mutation};
 use crate::internal::file::*;
+use crate::internal::Dir;
 use crate::state::*;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{PathSegment, TCPath};
@@ -49,15 +49,19 @@ impl ClusterState {
 impl Mutation for ClusterState {}
 
 pub struct Cluster {
-    context: Arc<Store>,
+    context: Arc<Dir>,
     chain: Mutex<Chain<ClusterState>>,
 }
 
 impl Cluster {
-    pub async fn new(txn_id: &TxnId, context: Arc<Store>) -> TCResult<Arc<Cluster>> {
+    pub async fn new(txn_id: &TxnId, context: Arc<Dir>) -> TCResult<Arc<Cluster>> {
         println!("Cluster::new");
 
-        let chain = Chain::new(txn_id, context.reserve(txn_id, ".contents".parse()?).await?).await;
+        let chain = Chain::new(
+            txn_id.clone(),
+            context.create_store(txn_id, "chain".parse()?).await?,
+        )
+        .await;
 
         Ok(Arc::new(Cluster {
             context: context.clone(),
@@ -104,14 +108,14 @@ impl Collection for Cluster {
         if let Some(entry) = entry {
             let txn_id = &txn.id();
 
-            if let Some(store) = self
+            if let Some(dir) = self
                 .context
-                .get_store(txn_id, &path[0].clone().into())
-                .await
+                .get_dir(txn_id, &path[0].clone().into())
+                .await?
             {
                 match entry.state_type {
                     StateType::Cluster => {
-                        let cluster = Cluster::from_store(txn_id, store).await;
+                        let cluster = Cluster::from_dir(txn_id, dir).await;
                         if path.len() == 1 {
                             Ok(cluster.into())
                         } else {
@@ -119,10 +123,10 @@ impl Collection for Cluster {
                         }
                     }
                     StateType::Graph if path.len() == 1 => {
-                        Ok(Graph::from_store(txn_id, store).await.into())
+                        Ok(Graph::from_dir(txn_id, dir).await.into())
                     }
                     StateType::Table if path.len() == 1 => {
-                        Ok(table::Table::from_store(txn_id, store).await.into())
+                        Ok(table::Table::from_dir(txn_id, dir).await.into())
                     }
                     _ => Err(error::not_found(path)),
                 }
@@ -151,7 +155,10 @@ impl Collection for Cluster {
             ));
         }
 
-        let context = self.context.reserve(&txn.id(), path.clone().into()).await?;
+        let context = self
+            .context
+            .create_dir(&txn.id(), path.clone().into())
+            .await?;
         let path_clone = path.clone();
         let entry = match state {
             State::Cluster(d) => {
@@ -188,15 +195,18 @@ impl Collection for Cluster {
 
 #[async_trait]
 impl File for Cluster {
-    async fn copy_from(
-        reader: &mut FileCopier,
-        txn_id: &TxnId,
-        context: Arc<Store>,
-    ) -> Arc<Cluster> {
+    async fn copy_from(reader: &mut FileCopier, txn_id: &TxnId, context: Arc<Dir>) -> Arc<Cluster> {
         let (path, blocks) = reader.next().await.unwrap();
 
-        let chain =
-            Chain::copy_from(blocks, txn_id, context.reserve(txn_id, path).await.unwrap()).await;
+        let chain = Chain::copy_from(
+            blocks,
+            txn_id.clone(),
+            context
+                .create_store(txn_id, path.try_into().unwrap())
+                .await
+                .unwrap(),
+        )
+        .await;
         let chain = Mutex::new(chain);
         let cluster = Arc::new(Cluster { context, chain });
 
@@ -205,7 +215,7 @@ impl File for Cluster {
 
             let dest = cluster
                 .context
-                .reserve(txn_id, entry.name.into())
+                .create_dir(txn_id, entry.name.into())
                 .await
                 .unwrap();
 
@@ -236,27 +246,28 @@ impl File for Cluster {
             println!("Cluster::copy_into copying entry {}", entry.name);
 
             let txn_id = txn_id.clone();
-            let store = self
+            let dir = self
                 .context
-                .get_store(&txn_id, &entry.name.into())
+                .get_dir(&txn_id, &entry.name.into())
                 .await
+                .unwrap()
                 .unwrap();
 
             match entry.state_type {
                 StateType::Cluster => {
-                    Cluster::from_store(&txn_id, store)
+                    Cluster::from_dir(&txn_id, dir)
                         .await
                         .copy_into(txn_id, writer)
                         .await
                 }
                 StateType::Graph => {
-                    Graph::from_store(&txn_id, store)
+                    Graph::from_dir(&txn_id, dir)
                         .await
                         .copy_into(txn_id, writer)
                         .await
                 }
                 StateType::Table => {
-                    table::Table::from_store(&txn_id, store)
+                    table::Table::from_dir(&txn_id, dir)
                         .await
                         .copy_into(txn_id, writer)
                         .await
@@ -265,13 +276,12 @@ impl File for Cluster {
         }
     }
 
-    async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> Arc<Cluster> {
-        println!("Cluster::from_store");
+    async fn from_dir(txn_id: &TxnId, dir: Arc<Dir>) -> Arc<Cluster> {
+        println!("Cluster::from_dir");
 
         let chain = Chain::from_store(
             txn_id,
-            store
-                .get_store(txn_id, &".contents".parse().unwrap())
+            dir.get_store(txn_id, &"chain".parse().unwrap())
                 .await
                 .unwrap(),
         )
@@ -279,7 +289,7 @@ impl File for Cluster {
         .unwrap();
 
         Arc::new(Cluster {
-            context: store,
+            context: dir,
             chain: Mutex::new(chain),
         })
     }

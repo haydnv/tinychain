@@ -6,7 +6,7 @@ use async_trait::async_trait;
 
 use crate::error;
 use crate::i18n::Locale;
-use crate::internal::block::Store;
+use crate::internal::Store;
 use crate::state::{Args, Collection, Derived, State};
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;

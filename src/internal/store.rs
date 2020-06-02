@@ -38,6 +38,15 @@ impl StoreState {
             None
         }
     }
+
+    fn print_status(&self, txn_id: &TxnId) {
+        println!(
+            "StoreState has {:?} blocks for {}, {} total",
+            self.txn_cache.get(txn_id).map(|data| data.len()),
+            txn_id,
+            self.blocks.len()
+        );
+    }
 }
 
 pub struct Store {
@@ -53,6 +62,8 @@ impl Store {
 
     pub async fn append(&self, txn_id: &TxnId, block_id: &BlockId, data: Bytes) -> TCResult<()> {
         let mut state = self.state.lock().await;
+        state.print_status(txn_id);
+
         if let Some(block) = state
             .txn_cache
             .entry(txn_id.clone())
@@ -79,22 +90,35 @@ impl Store {
 
     pub async fn contains_block(&self, txn_id: &TxnId, block_id: &BlockId) -> bool {
         let state = self.state.lock().await;
+        state.print_status(txn_id);
+
         if let Some(txn_data) = state.txn_cache.get(txn_id) {
             if txn_data.get(block_id).is_some() {
+                println!("Store::contains_block {}", block_id);
                 return true;
             }
         } else if state.blocks.get(block_id).is_some() {
+            println!("Store::contains_block {}", block_id);
             return true;
         }
 
+        println!("Store::contains_block {} FALSE", block_id);
         false
     }
 
-    pub async fn get_block(&self, txn_id: &TxnId, block_id: &BlockId) -> Option<Bytes> {
-        self.state.lock().await.get_block(txn_id, block_id).await
+    pub async fn get_block_owned(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        block_id: BlockId,
+    ) -> Option<Bytes> {
+        self.get_block(&txn_id, &block_id).await
     }
 
-    pub async fn insert(
+    pub async fn get_block(&self, txn_id: &TxnId, block_id: &BlockId) -> Option<Bytes> {
+        self.state.lock().await.get_block(&txn_id, &block_id).await
+    }
+
+    pub async fn insert_into(
         &self,
         txn_id: &TxnId,
         block_id: BlockId,
@@ -128,6 +152,7 @@ impl Store {
         block_id: BlockId,
         initial_value: Bytes,
     ) -> TCResult<()> {
+        println!("Store::new_block {} {}", &txn_id, &block_id);
         if self.contains_block(&txn_id, &block_id).await {
             return Err(error::bad_request(
                 "Tried to create a block that already exists",

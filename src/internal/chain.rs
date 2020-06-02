@@ -13,13 +13,16 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::error;
-use crate::internal::block::{Block, Checksum, Store};
+use crate::internal::store::Store;
 use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
+use crate::transaction::Transact;
 use crate::transaction::TxnId;
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
 const BLOCK_SIZE: usize = 1_000_000;
+
+type Checksum = [u8; 32];
 
 pub trait Mutation: Clone + DeserializeOwned + Serialize + Send + Sync {}
 
@@ -77,8 +80,6 @@ impl<M: Mutation> ChainBlock<M> {
         self.mutations.iter()
     }
 }
-
-impl<M: Mutation> Block for ChainBlock<M> {}
 
 impl<M: Mutation> From<ChainBlock<M>> for Bytes {
     fn from(mut block: ChainBlock<M>) -> Bytes {
@@ -150,10 +151,10 @@ pub struct Chain<M: Mutation> {
 }
 
 impl<M: Mutation> Chain<M> {
-    pub async fn new(txn_id: &TxnId, store: Arc<Store>) -> Chain<M> {
+    pub async fn new(txn_id: TxnId, store: Arc<Store>) -> Chain<M> {
         let checksum = Bytes::from(&[0; 32][..]);
         store
-            .new_block(&txn_id, 0.into(), delimit_groups(&[checksum]))
+            .new_block(txn_id.clone(), 0.into(), delimit_groups(&[checksum]))
             .await
             .unwrap();
         println!("Chain::new created block 0");
@@ -164,14 +165,14 @@ impl<M: Mutation> Chain<M> {
             phantom: PhantomData,
         };
 
-        chain.put(txn_id.clone(), iter::empty()).await.unwrap();
+        chain.put(txn_id, iter::empty()).await.unwrap();
 
         chain
     }
 
     pub async fn copy_from(
         mut source: impl Stream<Item = Bytes> + Unpin,
-        txn_id: &TxnId,
+        txn_id: TxnId,
         dest: Arc<Store>,
     ) -> Chain<M> {
         let mut latest_block: u64 = 0;
@@ -191,9 +192,11 @@ impl<M: Mutation> Chain<M> {
 
             let block: ChainBlock<M> = block.try_into().unwrap();
             checksum = block.clone().into();
-            dest.new_block(&txn_id, block_id.clone(), block.into())
+            dest.new_block(txn_id.clone(), block_id.clone(), block.into())
                 .await
                 .unwrap();
+
+            println!("copied Chain block {}", latest_block);
             latest_block += 1;
         }
 
@@ -259,7 +262,7 @@ impl<M: Mutation> Chain<M> {
             stream.push(Box::new(
                 self.store
                     .clone()
-                    .get_bytes(txn_id.clone(), block_id.into())
+                    .get_block_owned(txn_id.clone(), block_id.into())
                     .map(move |block| {
                         let block = block.unwrap_or_else(|| {
                             panic!("This chain has a nonexistent block at {}!", block_id)
@@ -376,16 +379,17 @@ impl<M: Mutation> Chain<M> {
         let block = self
             .store
             .clone()
-            .get_bytes(txn_id.clone(), self.latest_block.into())
+            .get_block(txn_id, &self.latest_block.into())
             .await
             .unwrap();
+
         if block.len() > BLOCK_SIZE {
             self.latest_block += 1;
             let block: ChainBlock<M> = block.try_into().unwrap();
             let checksum: Checksum = block.into();
             self.store
                 .new_block(
-                    txn_id,
+                    txn_id.clone(),
                     self.latest_block.into(),
                     delimit_groups(&[Bytes::copy_from_slice(&checksum[..])]),
                 )

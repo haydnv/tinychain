@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 
 use crate::error;
-use crate::internal::block::Store;
+use crate::internal::Store;
 use crate::state::{Args, Collection, Derived, State};
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::TCPath;
@@ -116,7 +116,11 @@ impl Derived for Tensor {
 
         let mut new_blocks = Vec::with_capacity(num_blocks);
         for i in 0..num_blocks + 1 {
-            new_blocks.push(context.new_block(&txn_id, i.into(), Bytes::from(&[0; BLOCK_SIZE][..])))
+            new_blocks.push(context.new_block(
+                txn_id.clone(),
+                i.into(),
+                Bytes::from(&[0; BLOCK_SIZE][..]),
+            ))
         }
         try_join_all(new_blocks).await?;
 

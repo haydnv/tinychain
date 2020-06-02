@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::auth::Token;
 use crate::error;
 use crate::host::{Host, NetworkTime};
-use crate::internal::block::Store;
+use crate::internal::Dir;
 use crate::state::State;
 use crate::value::link::*;
 use crate::value::op::*;
@@ -177,17 +177,17 @@ impl<'a> TxnState<'a> {
 
 pub struct Txn<'a> {
     id: TxnId,
-    context: Arc<Store>,
+    context: Arc<Dir>,
     host: Arc<Host>,
     mutated: Arc<RwLock<Vec<Arc<dyn Transact>>>>, // TODO: this should be a Set of some kind
     state: Mutex<TxnState<'a>>,
 }
 
 impl<'a> Txn<'a> {
-    pub async fn new(host: Arc<Host>, root: Arc<Store>) -> TCResult<Arc<Txn<'a>>> {
+    pub async fn new(host: Arc<Host>, root: Arc<Dir>) -> TCResult<Arc<Txn<'a>>> {
         let id = TxnId::new(host.time());
         let context: PathSegment = id.clone().try_into()?;
-        let context = root.reserve(&id, context.into()).await?;
+        let context = root.create_dir(&id, context.into()).await?;
         let state = Mutex::new(TxnState::new());
 
         Ok(Arc::new(Txn {
@@ -199,12 +199,12 @@ impl<'a> Txn<'a> {
         }))
     }
 
-    pub fn context(self: &Arc<Self>) -> Arc<Store> {
+    pub fn context(self: &Arc<Self>) -> Arc<Dir> {
         self.context.clone()
     }
 
     pub async fn subcontext(self: &Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn<'a>>> {
-        let subcontext: Arc<Store> = self.context.reserve(&self.id, subcontext.into()).await?;
+        let subcontext: Arc<Dir> = self.context.create_dir(&self.id, subcontext.into()).await?;
 
         Ok(Arc::new(Txn {
             id: self.id.clone(),
