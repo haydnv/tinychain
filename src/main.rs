@@ -4,9 +4,16 @@ use structopt::StructOpt;
 mod auth;
 
 mod error;
+
+#[allow(dead_code)]
 mod gateway;
+
 mod host;
 mod http;
+
+#[allow(dead_code)]
+mod kernel;
+
 mod i18n;
 mod internal;
 mod state;
