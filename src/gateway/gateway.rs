@@ -21,7 +21,7 @@ impl Gateway {
         Gateway { kernel, hosted }
     }
 
-    pub fn authorize(_token: &str) -> TCResult<()> {
+    pub fn authenticate(_token: &str) -> TCResult<()> {
         Err(error::not_implemented())
     }
 
