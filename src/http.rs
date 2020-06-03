@@ -46,7 +46,7 @@ async fn handle(
     _gateway: Arc<Gateway>,
     _req: Request<Body>,
 ) -> Result<Response<Body>, hyper::Error> {
-    transform_error(Err(error::not_implemented()))
+    Ok(transform_error(error::not_implemented()))
 }
 
 const UNSERIALIZABLE: &str =
@@ -60,23 +60,18 @@ fn line_numbers(s: &str) -> String {
         .join("\n")
 }
 
-fn transform_error(result: TCResult<Vec<u8>>) -> Result<Response<Body>, hyper::Error> {
-    match result {
-        Ok(contents) => Ok(Response::new(Body::from(contents))),
-        Err(cause) => {
-            let mut response = Response::new(Body::from(cause.message().to_string()));
-            *response.status_mut() = match cause.reason() {
-                error::Code::BadRequest => StatusCode::BAD_REQUEST,
-                error::Code::Forbidden => StatusCode::FORBIDDEN,
-                error::Code::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-                error::Code::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
-                error::Code::NotFound => StatusCode::NOT_FOUND,
-                error::Code::NotImplemented => StatusCode::NOT_IMPLEMENTED,
-                error::Code::Unauthorized => StatusCode::UNAUTHORIZED,
-            };
-            Ok(response)
-        }
-    }
+fn transform_error(err: error::TCError) -> Response<Body> {
+    let mut response = Response::new(Body::from(err.message().to_string()));
+    *response.status_mut() = match err.reason() {
+        error::Code::BadRequest => StatusCode::BAD_REQUEST,
+        error::Code::Forbidden => StatusCode::FORBIDDEN,
+        error::Code::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+        error::Code::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
+        error::Code::NotFound => StatusCode::NOT_FOUND,
+        error::Code::NotImplemented => StatusCode::NOT_IMPLEMENTED,
+        error::Code::Unauthorized => StatusCode::UNAUTHORIZED,
+    };
+    response
 }
 
 // TODO: DELETE BELOW THIS LINE!
@@ -223,21 +218,23 @@ async fn handle_old(host: Arc<Host>, req: Request<Body>) -> Result<Response<Body
 
     let txn = match host.new_transaction().await {
         Ok(txn) => txn,
-        Err(cause) => return transform_error(Err(cause)),
+        Err(cause) => return Ok(transform_error(cause)),
     };
 
     let token = if let Some(header) = req.headers().get("Authorization") {
         match validate_token(txn.clone(), header).await {
             Ok(token) => Some(token),
-            Err(cause) => return transform_error(Err(cause)),
+            Err(cause) => return Ok(transform_error(cause)),
         }
     } else {
         None
     };
 
     let body = &hyper::body::to_bytes(req.into_body()).await?;
-
-    transform_error(route(&txn, method, path, params, body.to_vec(), &token).await)
+    match route(&txn, method, path, params, body.to_vec(), &token).await {
+        Ok(bytes) => Ok(Response::new(Body::from(bytes))),
+        Err(cause) => Ok(transform_error(cause)),
+    }
 }
 
 async fn validate_token(txn: Arc<Txn<'_>>, auth_header: &HeaderValue) -> TCResult<Token> {
