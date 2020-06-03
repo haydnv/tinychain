@@ -47,26 +47,22 @@ impl<S: Stream<Item = Result<Bytes, hyper::Error>> + Unpin> io::Read for StreamR
             let mut buffer = BytesMut::with_capacity(buf.len());
             buffer.put(&self.buffered[..]);
 
-            let buffer = block_on(async {
-                loop {
-                    if let Some(chunk) = self.source.next().await {
-                        match chunk {
-                            Ok(chunk) => buffer.put(chunk),
-                            Err(cause) => {
-                                return Err(io::Error::new(io::ErrorKind::InvalidInput, cause))
-                            }
+            loop {
+                if let Some(chunk) = block_on(self.source.next()) {
+                    match chunk {
+                        Ok(chunk) => buffer.put(chunk),
+                        Err(cause) => {
+                            return Err(io::Error::new(io::ErrorKind::InvalidInput, cause))
                         }
-                    } else {
-                        break;
                     }
-
-                    if buffer.len() > buf.len() {
-                        break;
-                    }
+                } else {
+                    break;
                 }
 
-                Ok(buffer)
-            })?;
+                if buffer.len() > buf.len() {
+                    break;
+                }
+            }
 
             let buffer = buffer.freeze();
             if buffer.is_empty() {
@@ -134,37 +130,34 @@ impl Http {
             &Method::GET => {
                 let id = Http::get_param(params, "key")?;
                 let op: op::Get = (id,).into();
-                match self.gateway.get(path.into(), op).await? {
-                    State::Value(value) => Ok(stream::once(future::ready(
-                        serde_json::to_string(&value)
-                            .map(|s| s.into())
-                            .map_err(|e| {
-                                error::internal(format!(
-                                    "Unable to serialize the requested value: {}",
-                                    e
-                                ))
-                            }),
-                    ))),
-                    other => Err(error::bad_request(
-                        "Unable to serialize requested State",
-                        other,
-                    )),
-                }
+                Http::encode_response(self.gateway.get(path.into(), op).await?)
             }
             &Method::PUT => {
-                // TODO: buffer the incoming request into a block Store
-                // and use that to let the destination verify that the size of each item is less than
-                // the maximum block size.
-
                 let reader = StreamReader::from(req.body_mut());
                 let reader = BufReader::new(reader);
-                let _op = op::Put::from(stream::iter(serde_json::from_reader(reader).into_iter()));
-
-                Err(error::not_implemented())
+                let op = op::Put::from(stream::iter(serde_json::from_reader(reader).into_iter()));
+                Http::encode_response(self.gateway.put(path.into(), op).await?)
             }
             &Method::POST => Err(error::not_implemented()),
             other => Err(error::bad_request(
                 "Tinychain does not support this HTTP method",
+                other,
+            )),
+        }
+    }
+
+    fn encode_response(state: State) -> TCResult<impl Stream<Item = TCResult<Bytes>>> {
+        match state {
+            State::Value(value) => Ok(stream::once(future::ready(
+                serde_json::to_string(&value)
+                    .map(|s| s.into())
+                    .map_err(|e| {
+                        error::internal(format!("Unable to serialize the requested value: {}", e))
+                    }),
+            ))),
+            // TODO: support State::Stream
+            other => Err(error::bad_request(
+                "Unable to serialize requested State",
                 other,
             )),
         }
