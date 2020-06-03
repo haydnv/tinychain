@@ -67,6 +67,12 @@ impl From<Infallible> for TCError {
     }
 }
 
+impl From<hyper::Error> for TCError {
+    fn from(e: hyper::Error) -> TCError {
+        internal(format!("HTTP interface error: {}", e))
+    }
+}
+
 impl From<serde_json::error::Error> for TCError {
     fn from(e: serde_json::error::Error) -> TCError {
         bad_request("Serialization error", e)

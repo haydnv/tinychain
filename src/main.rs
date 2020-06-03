@@ -4,11 +4,8 @@ use structopt::StructOpt;
 mod auth;
 
 mod error;
-
-#[allow(dead_code)]
 mod gateway;
-
-mod host;
+mod host; // TODO: DELETE
 mod http;
 
 #[allow(dead_code)]

@@ -10,7 +10,7 @@ use structopt::StructOpt;
 
 use crate::auth::Token;
 use crate::error;
-use crate::gateway::Hosted;
+use crate::gateway::{Hosted, NetworkTime};
 use crate::http;
 use crate::internal::file::File;
 use crate::internal::Dir;
@@ -40,36 +40,6 @@ pub struct HostConfig {
 
     #[structopt(long = "peer")]
     pub peers: Vec<LinkHost>,
-}
-
-#[derive(Clone)]
-pub struct NetworkTime {
-    nanos: u128,
-}
-
-impl NetworkTime {
-    pub fn as_millis(&self) -> u64 {
-        const MILLIS_PER_NANO: u128 = 1_000_000;
-        (self.nanos / MILLIS_PER_NANO).try_into().unwrap()
-    }
-
-    pub fn as_nanos(&self) -> u128 {
-        self.nanos
-    }
-
-    pub fn from_nanos(nanos: u128) -> NetworkTime {
-        NetworkTime { nanos }
-    }
-}
-
-impl std::ops::Add<std::time::Duration> for NetworkTime {
-    type Output = Self;
-
-    fn add(self, other: std::time::Duration) -> Self {
-        NetworkTime {
-            nanos: self.nanos + other.as_nanos(),
-        }
-    }
 }
 
 #[derive(Clone)]

@@ -2,20 +2,26 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-#[allow(clippy::module_inception)]
+use crate::internal::Dir;
+
+#[allow(dead_code, clippy::module_inception)]
 mod gateway;
 mod hosted;
+
+#[allow(dead_code)]
 pub mod op;
+mod time;
 
 pub type Gateway = gateway::Gateway;
 pub type Hosted = hosted::Hosted;
+pub type NetworkTime = time::NetworkTime;
 
 #[async_trait]
 pub trait Protocol {
     type Config;
     type Error;
 
-    fn new(gateway: Arc<Gateway>, config: Self::Config) -> Self;
+    fn new(config: Self::Config, gateway: Arc<Gateway>, workspace: Arc<Dir>) -> Arc<Self>;
 
-    async fn listen(&self) -> Result<(), Self::Error>;
+    async fn listen(self: Arc<Self>) -> Result<(), Self::Error>;
 }

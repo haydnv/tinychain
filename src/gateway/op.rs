@@ -26,9 +26,14 @@ impl<T: Into<Value>> From<(T,)> for Get {
     }
 }
 
-pub struct Put<S: Stream<Item = Value>> {
-    selector: Value,
+pub struct Put<S: Stream<Item = (Value, Value)>> {
     values: S,
+}
+
+impl<S: Stream<Item = (Value, Value)>> From<S> for Put<S> {
+    fn from(values: S) -> Put<S> {
+        Put { values }
+    }
 }
 
 pub struct Post<S: Stream<Item = (ValueId, Value)>> {

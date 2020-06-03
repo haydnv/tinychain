@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::Token;
 use crate::error;
-use crate::host::{Host, NetworkTime};
+use crate::gateway::NetworkTime;
+use crate::host::Host;
 use crate::internal::Dir;
 use crate::state::State;
 use crate::value::link::*;

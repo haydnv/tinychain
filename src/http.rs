@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::convert::{Infallible, TryInto};
+use std::io::{self, BufReader, Write};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
+use futures::executor::block_on;
 use futures::future;
-use futures::stream::{self, Stream};
+use futures::stream::{self, Stream, StreamExt};
 use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
@@ -16,78 +18,123 @@ use crate::error;
 use crate::gateway::op;
 use crate::gateway::{Gateway, Protocol};
 use crate::host::Host;
+use crate::internal::Dir;
 use crate::state::State;
 use crate::transaction::Txn;
 use crate::value::link::*;
 use crate::value::{TCRef, TCResult, Value, ValueId};
 
+struct StreamReader<S: Stream<Item = Result<Bytes, hyper::Error>>> {
+    source: S,
+    buffered: Bytes,
+}
+
+impl<S: Stream<Item = Result<Bytes, hyper::Error>>> From<S> for StreamReader<S> {
+    fn from(source: S) -> StreamReader<S> {
+        StreamReader {
+            source,
+            buffered: Bytes::from(&[][..]),
+        }
+    }
+}
+
+impl<S: Stream<Item = Result<Bytes, hyper::Error>> + Unpin> io::Read for StreamReader<S> {
+    fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
+        if buf.len() < self.buffered.len() {
+            self.buffered = Bytes::copy_from_slice(&self.buffered[buf.len()..]);
+            buf.write(&self.buffered[..buf.len()])
+        } else {
+            let mut buffer = BytesMut::with_capacity(buf.len());
+            buffer.put(&self.buffered[..]);
+
+            let buffer = block_on(async {
+                loop {
+                    if let Some(chunk) = self.source.next().await {
+                        match chunk {
+                            Ok(chunk) => buffer.put(chunk),
+                            Err(cause) => {
+                                return Err(io::Error::new(io::ErrorKind::InvalidInput, cause))
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+
+                    if buffer.len() > buf.len() {
+                        break;
+                    }
+                }
+
+                Ok(buffer)
+            })?;
+
+            let buffer = buffer.freeze();
+            if buffer.is_empty() {
+                Ok(0)
+            } else if buffer.len() < buf.len() {
+                self.buffered = Bytes::from(&[][..]);
+                buf.write(&buffer[..])
+            } else {
+                self.buffered = Bytes::copy_from_slice(&buffer[buf.len()..]);
+                buf.write(&buffer[..buf.len()])
+            }
+        }
+    }
+}
+
 pub struct Http {
     address: SocketAddr,
     gateway: Arc<Gateway>,
+    workspace: Arc<Dir>,
 }
 
-#[async_trait]
-impl Protocol for Http {
-    type Config = SocketAddr;
-    type Error = hyper::Error;
-
-    fn new(gateway: Arc<Gateway>, address: SocketAddr) -> Http {
-        Http { address, gateway }
+impl Http {
+    fn get_param(mut params: HashMap<String, String>, name: &str) -> TCResult<Value> {
+        if let Some(param) = params.remove(name) {
+            serde_json::from_str(&param).map_err(|e| {
+                error::bad_request(&format!("Unable to parse URI parameter '{}'", name), e)
+            })
+        } else {
+            Err(error::bad_request("Missing parameter", "key"))
+        }
     }
 
-    async fn listen(&self) -> Result<(), Self::Error> {
-        let gateway = self.gateway.clone();
-        Server::bind(&self.address)
-            .serve(make_service_fn(|_conn| {
-                let gateway = gateway.clone();
-                async { Ok::<_, Infallible>(service_fn(move |req| handle(gateway.clone(), req))) }
-            }))
-            .await
+    async fn handle(self: Arc<Self>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+        match self.authenticate_and_route(req).await {
+            Ok(stream) => Ok(Response::new(Body::wrap_stream(stream))),
+            Err(cause) => Ok(transform_error(cause)),
+        }
     }
-}
 
-async fn handle(gateway: Arc<Gateway>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    match authenticate_and_route(gateway, req).await {
-        Ok(stream) => Ok(Response::new(Body::wrap_stream(stream))),
-        Err(cause) => Ok(transform_error(cause)),
-    }
-}
-
-async fn authenticate_and_route(
-    gateway: Arc<Gateway>,
-    req: Request<Body>,
-) -> TCResult<impl Stream<Item = TCResult<Bytes>>> {
-    let _token =
-        if let Some(header) = req.headers().get("Authorization") {
-            Some(
-                gateway
-                    .authenticate(header.to_str().map_err(|e| {
-                        error::bad_request("Unable to parse Authorization header", e)
-                    })?)
-                    .await,
-            )
+    async fn authenticate_and_route(
+        self: Arc<Self>,
+        mut req: Request<Body>,
+    ) -> TCResult<impl Stream<Item = TCResult<Bytes>>> {
+        let _token: Option<Token> = if let Some(header) = req.headers().get("Authorization") {
+            let token = header
+                .to_str()
+                .map_err(|e| error::bad_request("Unable to parse Authorization header", e))?;
+            Some(self.gateway.authenticate(token).await?)
         } else {
             None
         };
 
-    let uri = req.uri().clone();
-    let path: TCPath = uri.path().parse()?;
-    let mut params: HashMap<String, String> = uri
-        .query()
-        .map(|v| {
-            url::form_urlencoded::parse(v.as_bytes())
-                .into_owned()
-                .collect()
-        })
-        .unwrap_or_else(HashMap::new);
+        let uri = req.uri().clone();
+        let path: TCPath = uri.path().parse()?;
+        let params: HashMap<String, String> = uri
+            .query()
+            .map(|v| {
+                url::form_urlencoded::parse(v.as_bytes())
+                    .into_owned()
+                    .collect()
+            })
+            .unwrap_or_else(HashMap::new);
 
-    match req.method() {
-        &Method::GET => {
-            if let Some(id) = params.remove("key") {
-                let id: Value = serde_json::from_str(&id)
-                    .map_err(|e| error::bad_request("Unable to parse URI parameter 'key'", e))?;
+        match req.method() {
+            &Method::GET => {
+                let id = Http::get_param(params, "key")?;
                 let op: op::Get = (id,).into();
-                match gateway.get(path.into(), op).await? {
+                match self.gateway.get(path.into(), op).await? {
                     State::Value(value) => Ok(stream::once(future::ready(
                         serde_json::to_string(&value)
                             .map(|s| s.into())
@@ -103,16 +150,47 @@ async fn authenticate_and_route(
                         other,
                     )),
                 }
-            } else {
-                Err(error::bad_request("Missing parameter", "key"))
             }
+            &Method::PUT => {
+                // TODO: buffer the incoming request into a block Store
+                // and use that to let the destination verify that the size of each item is less than
+                // the maximum block size.
+
+                let reader = StreamReader::from(req.body_mut());
+                let reader = BufReader::new(reader);
+                let _op = op::Put::from(stream::iter(serde_json::from_reader(reader).into_iter()));
+
+                Err(error::not_implemented())
+            }
+            &Method::POST => Err(error::not_implemented()),
+            other => Err(error::bad_request(
+                "Tinychain does not support this HTTP method",
+                other,
+            )),
         }
-        &Method::PUT => Err(error::not_implemented()),
-        &Method::POST => Err(error::not_implemented()),
-        other => Err(error::bad_request(
-            "Tinychain does not support this HTTP method",
-            other,
-        )),
+    }
+}
+
+#[async_trait]
+impl Protocol for Http {
+    type Config = SocketAddr;
+    type Error = hyper::Error;
+
+    fn new(address: SocketAddr, gateway: Arc<Gateway>, workspace: Arc<Dir>) -> Arc<Http> {
+        Arc::new(Http {
+            address,
+            gateway,
+            workspace,
+        })
+    }
+
+    async fn listen(self: Arc<Self>) -> Result<(), Self::Error> {
+        Server::bind(&self.address)
+            .serve(make_service_fn(|_conn| {
+                let self_clone = self.clone();
+                async { Ok::<_, Infallible>(service_fn(move |req| self_clone.clone().handle(req))) }
+            }))
+            .await
     }
 }
 
