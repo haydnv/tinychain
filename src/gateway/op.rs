@@ -39,3 +39,9 @@ impl<S: Stream<Item = (Value, Value)>> From<S> for Put<S> {
 pub struct Post<S: Stream<Item = (ValueId, Value)>> {
     data: S,
 }
+
+impl<S: Stream<Item = (ValueId, Value)>> From<S> for Post<S> {
+    fn from(data: S) -> Post<S> {
+        Post { data }
+    }
+}

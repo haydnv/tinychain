@@ -106,7 +106,7 @@ impl Http {
         self: Arc<Self>,
         mut req: Request<Body>,
     ) -> TCResult<impl Stream<Item = TCResult<Bytes>>> {
-        let _token: Option<Token> = if let Some(header) = req.headers().get("Authorization") {
+        let token: Option<Token> = if let Some(header) = req.headers().get("Authorization") {
             let token = header
                 .to_str()
                 .map_err(|e| error::bad_request("Unable to parse Authorization header", e))?;
@@ -130,15 +130,20 @@ impl Http {
             &Method::GET => {
                 let id = Http::get_param(params, "key")?;
                 let op: op::Get = (id,).into();
-                Http::encode_response(self.gateway.get(path.into(), op).await?)
+                Http::encode_response(self.gateway.get(path.into(), op, token).await?)
             }
             &Method::PUT => {
                 let reader = StreamReader::from(req.body_mut());
                 let reader = BufReader::new(reader);
                 let op = op::Put::from(stream::iter(serde_json::from_reader(reader).into_iter()));
-                Http::encode_response(self.gateway.put(path.into(), op).await?)
+                Http::encode_response(self.gateway.put(path.into(), op, token).await?)
             }
-            &Method::POST => Err(error::not_implemented()),
+            &Method::POST => {
+                let reader = StreamReader::from(req.body_mut());
+                let reader = BufReader::new(reader);
+                let op = op::Post::from(stream::iter(serde_json::from_reader(reader).into_iter()));
+                Http::encode_response(self.gateway.post(path.into(), op, token).await?)
+            }
             other => Err(error::bad_request(
                 "Tinychain does not support this HTTP method",
                 other,
