@@ -4,6 +4,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::Bytes;
+use futures::stream::FuturesOrdered;
+use futures::Future;
 use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
@@ -42,11 +45,31 @@ impl Protocol for Http {
     }
 }
 
-async fn handle(
-    _gateway: Arc<Gateway>,
-    _req: Request<Body>,
-) -> Result<Response<Body>, hyper::Error> {
-    Ok(transform_error(error::not_implemented()))
+async fn handle(gateway: Arc<Gateway>, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    match authenticate_and_route(gateway, req).await {
+        Ok(stream) => Ok(Response::new(Body::wrap_stream(stream))),
+        Err(cause) => Ok(transform_error(cause)),
+    }
+}
+
+async fn authenticate_and_route(
+    gateway: Arc<Gateway>,
+    req: Request<Body>,
+) -> TCResult<FuturesOrdered<Box<dyn Future<Output = TCResult<Bytes>> + Unpin + Send + Sync>>> {
+    let _token =
+        if let Some(header) = req.headers().get("Authorization") {
+            Some(
+                gateway
+                    .authenticate(header.to_str().map_err(|e| {
+                        error::bad_request("Unable to parse Authorization header", e)
+                    })?)
+                    .await,
+            )
+        } else {
+            None
+        };
+
+    Err(error::not_implemented())
 }
 
 const UNSERIALIZABLE: &str =

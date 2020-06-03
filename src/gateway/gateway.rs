@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use futures::Stream;
 
+use crate::auth::Token;
 use crate::error;
 use crate::kernel::Kernel;
 use crate::state::State;
@@ -21,7 +22,7 @@ impl Gateway {
         Gateway { kernel, hosted }
     }
 
-    pub fn authenticate(_token: &str) -> TCResult<()> {
+    pub async fn authenticate(&self, _token: &str) -> TCResult<()> {
         Err(error::not_implemented())
     }
 
@@ -31,11 +32,12 @@ impl Gateway {
 
     // /transact/execute
     pub fn execute<I: Stream<Item = (ValueId, Value)>>(
+        _auth: Option<Token>,
         _capture: HashSet<ValueId>,
         _request: op::Post<I>,
     ) -> TCResult<State> {
         Err(error::not_implemented())
     }
 
-    // TODO: /transact/hypothetical, /transact/explain
+    // TODO: /transact/hypothetical, /transact/explain, /transact/background
 }
