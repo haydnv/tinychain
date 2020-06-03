@@ -5,14 +5,15 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::stream::FuturesOrdered;
-use futures::Future;
+use futures::future;
+use futures::stream::{self, Stream};
 use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 
 use crate::auth::Token;
 use crate::error;
+use crate::gateway::op;
 use crate::gateway::{Gateway, Protocol};
 use crate::host::Host;
 use crate::state::State;
@@ -55,7 +56,7 @@ async fn handle(gateway: Arc<Gateway>, req: Request<Body>) -> Result<Response<Bo
 async fn authenticate_and_route(
     gateway: Arc<Gateway>,
     req: Request<Body>,
-) -> TCResult<FuturesOrdered<Box<dyn Future<Output = TCResult<Bytes>> + Unpin + Send + Sync>>> {
+) -> TCResult<impl Stream<Item = TCResult<Bytes>>> {
     let _token =
         if let Some(header) = req.headers().get("Authorization") {
             Some(
@@ -69,7 +70,50 @@ async fn authenticate_and_route(
             None
         };
 
-    Err(error::not_implemented())
+    let uri = req.uri().clone();
+    let path: TCPath = uri.path().parse()?;
+    let mut params: HashMap<String, String> = uri
+        .query()
+        .map(|v| {
+            url::form_urlencoded::parse(v.as_bytes())
+                .into_owned()
+                .collect()
+        })
+        .unwrap_or_else(HashMap::new);
+
+    match req.method() {
+        &Method::GET => {
+            if let Some(id) = params.remove("key") {
+                let id: Value = serde_json::from_str(&id)
+                    .map_err(|e| error::bad_request("Unable to parse URI parameter 'key'", e))?;
+                let op: op::Get = (id,).into();
+                match gateway.get(path.into(), op).await? {
+                    State::Value(value) => Ok(stream::once(future::ready(
+                        serde_json::to_string(&value)
+                            .map(|s| s.into())
+                            .map_err(|e| {
+                                error::internal(format!(
+                                    "Unable to serialize the requested value: {}",
+                                    e
+                                ))
+                            }),
+                    ))),
+                    other => Err(error::bad_request(
+                        "Unable to serialize requested State",
+                        other,
+                    )),
+                }
+            } else {
+                Err(error::bad_request("Missing parameter", "key"))
+            }
+        }
+        &Method::PUT => Err(error::not_implemented()),
+        &Method::POST => Err(error::not_implemented()),
+        other => Err(error::bad_request(
+            "Tinychain does not support this HTTP method",
+            other,
+        )),
+    }
 }
 
 const UNSERIALIZABLE: &str =

@@ -26,12 +26,13 @@ impl Gateway {
         Err(error::not_implemented())
     }
 
-    pub fn resolve(_link: Link) -> TCResult<State> {
+    pub async fn resolve(&self, _link: Link) -> TCResult<State> {
         Err(error::not_implemented())
     }
 
     // /transact/execute
-    pub fn execute<I: Stream<Item = (ValueId, Value)>>(
+    pub async fn execute<I: Stream<Item = (ValueId, Value)>>(
+        &self,
         _auth: Option<Token>,
         _capture: HashSet<ValueId>,
         _request: op::Post<I>,
@@ -40,4 +41,8 @@ impl Gateway {
     }
 
     // TODO: /transact/hypothetical, /transact/explain, /transact/background
+
+    pub async fn get(&self, _subject: op::Subject, _op: op::Get) -> TCResult<State> {
+        Err(error::not_implemented())
+    }
 }
