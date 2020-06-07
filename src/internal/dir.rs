@@ -143,27 +143,25 @@ impl Dir {
                 let mut state = self.state.lock().await;
                 if state.children.contains_key(&path) {
                     Err(error::bad_request("Tried to create a new directory but there is already an entry at this path", &path))
-                } else {
-                    if let Some(txn_data) = state.txn_cache.get_mut(txn_id) {
-                        if txn_data.contains_key(&path) {
-                            Err(error::bad_request(
-                                "Tried to create the same directory twice",
-                                &path,
-                            ))
-                        } else {
-                            println!("Created new Dir: {}", &path);
-                            let dir = Dir::new(self.fs_path(&path));
-                            txn_data.insert(path, DirEntry::Dir(dir.clone()));
-                            Ok(dir)
-                        }
+                } else if let Some(txn_data) = state.txn_cache.get_mut(txn_id) {
+                    if txn_data.contains_key(&path) {
+                        Err(error::bad_request(
+                            "Tried to create the same directory twice",
+                            &path,
+                        ))
                     } else {
-                        println!("Created new Dir {} in new Txn {}", &path, txn_id);
+                        println!("Created new Dir: {}", &path);
                         let dir = Dir::new(self.fs_path(&path));
-                        let mut txn_data = HashMap::new();
                         txn_data.insert(path, DirEntry::Dir(dir.clone()));
-                        state.txn_cache.insert(txn_id.clone(), txn_data);
                         Ok(dir)
                     }
+                } else {
+                    println!("Created new Dir {} in new Txn {}", &path, txn_id);
+                    let dir = Dir::new(self.fs_path(&path));
+                    let mut txn_data = HashMap::new();
+                    txn_data.insert(path, DirEntry::Dir(dir.clone()));
+                    state.txn_cache.insert(txn_id.clone(), txn_data);
+                    Ok(dir)
                 }
             } else {
                 let dir = self

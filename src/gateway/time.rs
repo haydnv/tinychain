@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::ops;
 use std::time;
 
@@ -15,11 +14,6 @@ impl NetworkTime {
                 .unwrap()
                 .as_nanos(),
         )
-    }
-
-    pub fn as_millis(&self) -> u64 {
-        const MILLIS_PER_NANO: u128 = 1_000_000;
-        (self.nanos / MILLIS_PER_NANO).try_into().unwrap()
     }
 
     pub fn as_nanos(&self) -> u128 {

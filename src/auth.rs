@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::value::link::{Link, TCPath};
-use crate::value::op::{GetOp, PostOp, Request};
 use crate::value::{TCResult, Value};
+
+pub type Auth = Option<Token>;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Token {
@@ -21,9 +22,8 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn actor_id(&self) -> Request {
-        let op: GetOp = (self.actor_id.clone(),).into();
-        (self.iss.clone(), op).into()
+    pub fn actor_id(&self) -> (Link, Value) {
+        (self.iss.clone(), self.actor_id.clone())
     }
 }
 
@@ -50,20 +50,18 @@ impl FromStr for Token {
 pub struct Actor {
     host: Link,
     id: Value,
-    lock: PostOp,
     public_key: PublicKey,
     private_key: SecretKey,
 }
 
 impl Actor {
-    pub fn new(host: Link, id: Value, lock: PostOp) -> Arc<Actor> {
+    pub fn new(host: Link, id: Value) -> Arc<Actor> {
         let mut rng = OsRng {};
         let keypair: Keypair = Keypair::generate(&mut rng);
 
         Arc::new(Actor {
             host,
             id,
-            lock,
             public_key: keypair.public,
             private_key: keypair.secret,
         })

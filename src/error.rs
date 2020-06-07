@@ -10,7 +10,6 @@ pub enum Code {
     Forbidden,
 
     // "Something that really should have worked didn't work--you should file a bug report"
-    #[allow(dead_code)]
     Internal,
 
     // "This resource exists but it doesn't support the request method you used"
@@ -20,7 +19,6 @@ pub enum Code {
     NotFound,
 
     // "This is marked for implementation in the future"
-    #[allow(dead_code)]
     NotImplemented,
 
     // "This resource requires authorization but your credentials are absent or nonsensical"
@@ -95,6 +93,10 @@ impl fmt::Display for TCError {
 
 pub fn bad_request<T: fmt::Display>(message: &str, info: T) -> TCError {
     TCError::of(Code::BadRequest, format!("{}: {}", message, info))
+}
+
+pub fn forbidden<T: fmt::Display>(message: &str, info: T) -> TCError {
+    TCError::of(Code::Forbidden, format!("{}: {}", message, info))
 }
 
 pub fn internal<T: fmt::Display>(cause: T) -> TCError {

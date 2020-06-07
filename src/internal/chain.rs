@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
 use std::iter;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
@@ -13,26 +12,46 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::error;
-use crate::internal::store::Store;
-use crate::internal::{GROUP_DELIMITER, RECORD_DELIMITER};
-use crate::transaction::Transact;
-use crate::transaction::TxnId;
+use crate::state::Collect;
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
+
+use super::store::Store;
+use super::{GROUP_DELIMITER, RECORD_DELIMITER};
 
 const BLOCK_SIZE: usize = 1_000_000;
 
 type Checksum = [u8; 32];
 
-pub trait Mutation: Clone + DeserializeOwned + Serialize + Send + Sync {}
+// TODO: remove Mutation
+// give Chain an object instead with either a value type (: Object) or (Selector, Data) (: Collection)
+// use this as the type param for ChainBlock
 
 #[derive(Clone)]
-pub struct ChainBlock<M: Mutation> {
+pub struct ChainBlock<M: Clone + DeserializeOwned + Serialize> {
     checksum: Checksum,
     mutations: Vec<(TxnId, Vec<M>)>,
 }
 
-impl<M: Mutation> ChainBlock<M> {
+impl<M: Clone + DeserializeOwned + Serialize> ChainBlock<M> {
+    fn checksum(self) -> Checksum {
+        if self.is_empty() {
+            return [0; 32];
+        }
+
+        let mut hasher = Sha256::new();
+        let data: Bytes = self.into();
+        hasher.input(data);
+        let mut checksum = [0; 32];
+        checksum.copy_from_slice(&hasher.result()[..]);
+        checksum
+    }
+
+    fn iter(&self) -> std::slice::Iter<(TxnId, Vec<M>)> {
+        self.mutations.iter()
+    }
+
     fn len(&self) -> usize {
         self.mutations.len() + 1
     }
@@ -48,7 +67,7 @@ fn valid_encoding(val: &[u8]) -> bool {
     true
 }
 
-impl<M: Mutation> ChainBlock<M> {
+impl<M: Clone + DeserializeOwned + Serialize> ChainBlock<M> {
     fn encode_transaction<I: Iterator<Item = M>>(txn_id: &TxnId, mutations: I) -> TCResult<Bytes> {
         let mut buf = BytesMut::new();
         buf.extend(serde_json::to_string_pretty(txn_id).unwrap().as_bytes());
@@ -75,13 +94,9 @@ impl<M: Mutation> ChainBlock<M> {
     fn is_empty(&self) -> bool {
         self.mutations.is_empty()
     }
-
-    pub fn iter(&self) -> std::slice::Iter<(TxnId, Vec<M>)> {
-        self.mutations.iter()
-    }
 }
 
-impl<M: Mutation> From<ChainBlock<M>> for Bytes {
+impl<M: Clone + DeserializeOwned + Serialize> From<ChainBlock<M>> for Bytes {
     fn from(mut block: ChainBlock<M>) -> Bytes {
         let mut buf = BytesMut::new();
         buf.put(&block.checksum[..]);
@@ -95,22 +110,7 @@ impl<M: Mutation> From<ChainBlock<M>> for Bytes {
     }
 }
 
-impl<M: Mutation> From<ChainBlock<M>> for Checksum {
-    fn from(block: ChainBlock<M>) -> Checksum {
-        if block.is_empty() {
-            return [0; 32];
-        }
-
-        let mut hasher = Sha256::new();
-        let data: Bytes = block.into();
-        hasher.input(data);
-        let mut checksum = [0; 32];
-        checksum.copy_from_slice(&hasher.result()[..]);
-        checksum
-    }
-}
-
-impl<M: Mutation> TryFrom<Bytes> for ChainBlock<M> {
+impl<M: Clone + DeserializeOwned + Serialize> TryFrom<Bytes> for ChainBlock<M> {
     type Error = error::TCError;
 
     fn try_from(buf: Bytes) -> TCResult<ChainBlock<M>> {
@@ -144,25 +144,25 @@ impl<M: Mutation> TryFrom<Bytes> for ChainBlock<M> {
 type BlockStream =
     FuturesOrdered<Box<dyn Future<Output = (Checksum, Vec<(TxnId, Vec<Bytes>)>)> + Unpin + Send>>;
 
-pub struct Chain<M: Mutation> {
+pub struct Chain<T: Collect> {
+    object: T,
     store: Arc<Store>,
     latest_block: u64,
-    phantom: PhantomData<M>,
 }
 
-impl<M: Mutation> Chain<M> {
-    pub async fn new(txn_id: TxnId, store: Arc<Store>) -> Chain<M> {
+impl<T: Collect> Chain<T> {
+    pub async fn new(txn_id: TxnId, store: Arc<Store>, object: T) -> Chain<T> {
         let checksum = Bytes::from(&[0; 32][..]);
         store
-            .new_block(txn_id.clone(), 0.into(), delimit_groups(&[checksum]))
+            .new_block(txn_id.clone(), 0u8.into(), delimit_groups(&[checksum]))
             .await
             .unwrap();
         println!("Chain::new created block 0");
 
         let chain = Chain {
+            object,
             store,
             latest_block: 0,
-            phantom: PhantomData,
         };
 
         chain.put(txn_id, iter::empty()).await.unwrap();
@@ -172,11 +172,12 @@ impl<M: Mutation> Chain<M> {
 
     pub async fn copy_from(
         mut source: impl Stream<Item = Bytes> + Unpin,
-        txn_id: TxnId,
+        txn: &Arc<Txn>,
         dest: Arc<Store>,
-    ) -> Chain<M> {
+        object: T,
+    ) -> Chain<T> {
         let mut latest_block: u64 = 0;
-        let mut checksum = [0; 32];
+        let mut checksum: Checksum = [0; 32];
         while let Some(block) = source.next().await {
             let block_id: PathSegment = latest_block.into();
             println!("copying Chain block {}", block_id);
@@ -190,9 +191,11 @@ impl<M: Mutation> Chain<M> {
                 );
             }
 
-            let block: ChainBlock<M> = block.try_into().unwrap();
-            checksum = block.clone().into();
-            dest.new_block(txn_id.clone(), block_id.clone(), block.into())
+            let block: ChainBlock<(T::Selector, T::Item)> = block.try_into().unwrap();
+            checksum = block.clone().checksum();
+            Chain::populate(txn, block.clone(), &object).await;
+
+            dest.new_block(txn.id().clone(), block_id.clone(), block.into())
                 .await
                 .unwrap();
 
@@ -208,14 +211,14 @@ impl<M: Mutation> Chain<M> {
 
         Chain {
             store: dest,
+            object,
             latest_block,
-            phantom: PhantomData,
         }
     }
 
-    pub async fn from_store(txn_id: &TxnId, store: Arc<Store>) -> TCResult<Chain<M>> {
+    pub async fn from_store(txn: &Arc<Txn>, store: Arc<Store>, object: T) -> TCResult<Chain<T>> {
         let mut latest_block = 0;
-        if !store.contains_block(txn_id, &latest_block.into()).await {
+        if !store.contains_block(txn.id(), &latest_block.into()).await {
             return Err(error::bad_request(
                 "This store does not contain a Chain",
                 "",
@@ -224,21 +227,24 @@ impl<M: Mutation> Chain<M> {
             println!("Chain::from_store");
         }
 
-        while store
-            .contains_block(txn_id, &(latest_block + 1).into())
-            .await
-        {
+        while let Some(block) = store.get_block(txn.id(), &(latest_block + 1).into()).await {
+            let block: ChainBlock<(T::Selector, T::Item)> = block.try_into()?;
+            Chain::populate(txn, block.clone(), &object).await;
             latest_block += 1;
         }
 
         Ok(Chain {
             store,
+            object,
             latest_block,
-            phantom: PhantomData,
         })
     }
 
-    pub async fn put<I: Iterator<Item = M>>(&self, txn_id: TxnId, mutations: I) -> TCResult<()> {
+    pub async fn put<I: Iterator<Item = (T::Selector, T::Item)>>(
+        &self,
+        txn_id: TxnId,
+        mutations: I,
+    ) -> TCResult<()> {
         let block_id: PathSegment = self.latest_block.into();
 
         self.store
@@ -306,7 +312,10 @@ impl<M: Mutation> Chain<M> {
         stream
     }
 
-    pub fn stream_blocks(&self, txn_id: TxnId) -> impl Stream<Item = ChainBlock<M>> {
+    pub fn stream_blocks(
+        &self,
+        txn_id: TxnId,
+    ) -> impl Stream<Item = ChainBlock<(T::Selector, T::Item)>> {
         let txn_id_clone = txn_id.clone();
 
         self.stream(txn_id.clone())
@@ -338,7 +347,9 @@ impl<M: Mutation> Chain<M> {
                             (
                                 txn_id.clone(),
                                 list.iter()
-                                    .map(|m| serde_json::from_slice::<M>(m).unwrap())
+                                    .map(|m| {
+                                        serde_json::from_slice::<(T::Selector, T::Item)>(m).unwrap()
+                                    })
                                     .collect(),
                             )
                         })
@@ -351,14 +362,14 @@ impl<M: Mutation> Chain<M> {
 
     pub fn stream_bytes(&self, txn_id: TxnId) -> impl Stream<Item = Bytes> {
         self.stream_blocks(txn_id)
-            .map(|block: ChainBlock<M>| block.into())
+            .map(|block: ChainBlock<(T::Selector, T::Item)>| block.into())
     }
 
-    pub fn stream_into(&self, txn_id: TxnId) -> impl Stream<Item = M> {
+    pub fn stream_into(&self, txn_id: TxnId) -> impl Stream<Item = (T::Selector, T::Item)> {
         self.stream_blocks(txn_id)
             .filter_map(|block| {
                 println!("stream_into read block");
-                let mutations: Vec<M> = block
+                let mutations: Vec<(T::Selector, T::Item)> = block
                     .mutations
                     .into_iter()
                     .map(|(_, mutations)| mutations)
@@ -385,8 +396,8 @@ impl<M: Mutation> Chain<M> {
 
         if block.len() > BLOCK_SIZE {
             self.latest_block += 1;
-            let block: ChainBlock<M> = block.try_into().unwrap();
-            let checksum: Checksum = block.into();
+            let block: ChainBlock<(T::Item, T::Selector)> = block.try_into().unwrap();
+            let checksum: Checksum = block.checksum();
             self.store
                 .new_block(
                     txn_id.clone(),
@@ -403,6 +414,17 @@ impl<M: Mutation> Chain<M> {
     pub async fn rollback(&self, txn_id: &TxnId) {
         println!("Chain::rollback");
         self.store.rollback(txn_id).await
+    }
+
+    async fn populate(txn: &Arc<Txn>, block: ChainBlock<(T::Selector, T::Item)>, object: &T) {
+        let mut put_ops = Vec::with_capacity(block.len());
+        for (_, mutations) in block.iter() {
+            for (key, val) in mutations.iter() {
+                put_ops.push(object.put(txn, key.clone(), val.clone()));
+            }
+        }
+
+        future::try_join_all(put_ops).await.unwrap();
     }
 }
 

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::hash::Hash;
@@ -8,12 +7,10 @@ use bytes::Bytes;
 use num::PrimInt;
 use regex::Regex;
 use serde::de;
-use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::error;
-use crate::state::State;
 use crate::value::link::{Link, TCPath};
-use crate::value::op::Request;
 use crate::value::{TCRef, TCResult};
 
 const RESERVED_CHARS: [&str; 21] = [
@@ -151,9 +148,7 @@ pub enum Value {
     UInt64(u64),
     Link(Link),
     Ref(TCRef),
-    Request(Box<Request>),
     r#String(String),
-    Vector(Vec<Value>),
 }
 
 impl From<()> for Value {
@@ -183,12 +178,6 @@ impl From<Link> for Value {
 impl From<TCPath> for Value {
     fn from(path: TCPath) -> Value {
         Value::Link(path.into())
-    }
-}
-
-impl From<Request> for Value {
-    fn from(op: Request) -> Value {
-        Value::Request(Box::new(op))
     }
 }
 
@@ -222,18 +211,6 @@ impl From<String> for Value {
 impl From<Vec<u8>> for Value {
     fn from(b: Vec<u8>) -> Value {
         Value::Bytes(Bytes::copy_from_slice(&b[..]))
-    }
-}
-
-impl<T: Into<Value>> From<Vec<T>> for Value {
-    fn from(v: Vec<T>) -> Value {
-        Value::Vector(v.into_iter().map(|i| i.into()).collect())
-    }
-}
-
-impl<T1: Into<Value>, T2: Into<Value>> From<(T1, T2)> for Value {
-    fn from(tuple: (T1, T2)) -> Value {
-        Value::Vector(vec![tuple.0.into(), tuple.1.into()])
     }
 }
 
@@ -276,17 +253,6 @@ impl TryFrom<Value> for TCPath {
     }
 }
 
-impl TryFrom<Value> for Request {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<Request> {
-        match v {
-            Value::Request(request) => Ok(*request),
-            other => Err(error::bad_request("Expected Request but found", other)),
-        }
-    }
-}
-
 impl TryFrom<Value> for String {
     type Error = error::TCError;
 
@@ -309,31 +275,6 @@ impl TryFrom<Value> for u64 {
     }
 }
 
-impl<
-        E1: Into<error::TCError>,
-        E2: Into<error::TCError>,
-        T1: TryFrom<Value, Error = E1>,
-        T2: TryFrom<Value, Error = E2>,
-    > TryFrom<Value> for (T1, T2)
-{
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<(T1, T2)> {
-        let mut v: Vec<Value> = v.try_into()?;
-        if v.len() == 2 {
-            Ok((
-                v.remove(0).try_into().map_err(|e: E1| e.into())?,
-                v.remove(0).try_into().map_err(|e: E2| e.into())?,
-            ))
-        } else {
-            Err(error::bad_request(
-                "Expected a 2-tuple, found",
-                Value::Vector(v),
-            ))
-        }
-    }
-}
-
 impl TryFrom<Value> for i32 {
     type Error = error::TCError;
 
@@ -351,57 +292,6 @@ impl TryFrom<Value> for ValueId {
     fn try_from(v: Value) -> TCResult<ValueId> {
         let s: String = v.try_into()?;
         s.parse()
-    }
-}
-
-impl<E: Into<error::TCError>, T: TryFrom<Value, Error = E>> TryFrom<Value> for Vec<T> {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<Vec<T>> {
-        match v {
-            Value::Vector(v) => v
-                .into_iter()
-                .map(|i| i.try_into().map_err(|e: E| e.into()))
-                .collect(),
-            other => Err(error::bad_request("Expected a Vector, found", other)),
-        }
-    }
-}
-
-impl<
-        E1: Into<error::TCError>,
-        E2: Into<error::TCError>,
-        T1: Eq + Hash + TryFrom<Value, Error = E1>,
-        T2: TryFrom<Value, Error = E2>,
-    > TryFrom<Value> for HashMap<T1, T2>
-{
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<HashMap<T1, T2>> {
-        let items: Vec<Value> = v.try_into()?;
-        items.into_iter().map(|i| i.try_into()).collect()
-    }
-}
-
-impl<T: Into<Value>> std::iter::FromIterator<T> for Value {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut v: Vec<Value> = vec![];
-        for item in iter {
-            v.push(item.into());
-        }
-
-        v.into()
-    }
-}
-
-impl TryFrom<State> for Value {
-    type Error = error::TCError;
-
-    fn try_from(state: State) -> TCResult<Value> {
-        match state {
-            State::Value(value) => Ok(value),
-            other => Err(error::bad_request("Expected a Value but found", other)),
-        }
     }
 }
 
@@ -443,25 +333,11 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                     Ok(link.into())
                 }
             } else {
-                let request: Request = (key, value).try_into().map_err(de::Error::custom)?;
-                Ok(request.into())
+                panic!("What to do?")
             }
         } else {
             Err(de::Error::custom("Unable to parse map entry"))
         }
-    }
-
-    fn visit_seq<S>(self, mut access: S) -> Result<Self::Value, S::Error>
-    where
-        S: de::SeqAccess<'de>,
-    {
-        let mut seq: Vec<Value> = vec![];
-
-        while let Some(e) = access.next_element()? {
-            seq.push(e);
-        }
-
-        Ok(Value::Vector(seq))
     }
 }
 
@@ -495,15 +371,7 @@ impl Serialize for Value {
             Value::UInt64(i) => s.serialize_u64(*i),
             Value::Link(l) => l.serialize(s),
             Value::Ref(r) => r.serialize(s),
-            Value::Request(r) => r.serialize(s),
             Value::r#String(v) => s.serialize_str(v),
-            Value::Vector(v) => {
-                let mut seq = s.serialize_seq(Some(v.len()))?;
-                for element in v {
-                    seq.serialize_element(element)?;
-                }
-                seq.end()
-            }
         }
     }
 }
@@ -524,9 +392,7 @@ impl fmt::Display for Value {
             Value::UInt64(i) => write!(f, "UInt64: {}", i),
             Value::Link(l) => write!(f, "Link: {}", l),
             Value::Ref(r) => write!(f, "Ref: {}", r),
-            Value::Request(r) => write!(f, "Request: {}", r),
             Value::r#String(s) => write!(f, "String: {}", s),
-            Value::Vector(v) => write!(f, "Vector: {:?}", v),
         }
     }
 }

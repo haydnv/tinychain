@@ -1,7 +1,6 @@
 use crate::error;
 
 pub mod link;
-pub mod op; // TODO: delete this!
 mod reference;
 
 #[allow(clippy::module_inception)]
