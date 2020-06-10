@@ -17,7 +17,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
-use super::store::Store;
+use super::file::File;
 use super::{GROUP_DELIMITER, RECORD_DELIMITER};
 
 const BLOCK_SIZE: usize = 1_000_000;
@@ -146,14 +146,14 @@ type BlockStream =
 
 pub struct Chain<T: Collect> {
     object: T,
-    store: Arc<Store>,
+    file: Arc<File>,
     latest_block: u64,
 }
 
 impl<T: Collect> Chain<T> {
-    pub async fn new(txn_id: TxnId, store: Arc<Store>, object: T) -> Chain<T> {
+    pub async fn new(txn_id: TxnId, file: Arc<File>, object: T) -> Chain<T> {
         let checksum = Bytes::from(&[0; 32][..]);
-        store
+        file
             .new_block(txn_id.clone(), 0u8.into(), delimit_groups(&[checksum]))
             .await
             .unwrap();
@@ -161,7 +161,7 @@ impl<T: Collect> Chain<T> {
 
         let chain = Chain {
             object,
-            store,
+            file,
             latest_block: 0,
         };
 
@@ -173,7 +173,7 @@ impl<T: Collect> Chain<T> {
     pub async fn copy_from(
         mut source: impl Stream<Item = Bytes> + Unpin,
         txn: &Arc<Txn>,
-        dest: Arc<Store>,
+        dest: Arc<File>,
         object: T,
     ) -> Chain<T> {
         let mut latest_block: u64 = 0;
@@ -210,15 +210,15 @@ impl<T: Collect> Chain<T> {
         }
 
         Chain {
-            store: dest,
+            file: dest,
             object,
             latest_block,
         }
     }
 
-    pub async fn from_store(txn: &Arc<Txn>, store: Arc<Store>, object: T) -> TCResult<Chain<T>> {
+    pub async fn from_store(txn: &Arc<Txn>, file: Arc<File>, object: T) -> TCResult<Chain<T>> {
         let mut latest_block = 0;
-        if !store.contains_block(txn.id(), &latest_block.into()).await {
+        if !file.contains_block(txn.id(), &latest_block.into()).await {
             return Err(error::bad_request(
                 "This store does not contain a Chain",
                 "",
@@ -227,14 +227,14 @@ impl<T: Collect> Chain<T> {
             println!("Chain::from_store");
         }
 
-        while let Some(block) = store.get_block(txn.id(), &(latest_block + 1).into()).await {
+        while let Some(block) = file.get_block(txn.id(), &(latest_block + 1).into()).await {
             let block: ChainBlock<(T::Selector, T::Item)> = block.try_into()?;
             Chain::populate(txn, block.clone(), &object).await;
             latest_block += 1;
         }
 
         Ok(Chain {
-            store,
+            file,
             object,
             latest_block,
         })
@@ -247,7 +247,7 @@ impl<T: Collect> Chain<T> {
     ) -> TCResult<()> {
         let block_id: PathSegment = self.latest_block.into();
 
-        self.store
+        self.file
             .append(
                 &txn_id,
                 &block_id,
@@ -266,7 +266,7 @@ impl<T: Collect> Chain<T> {
         loop {
             let block_id = i;
             stream.push(Box::new(
-                self.store
+                self.file
                     .clone()
                     .get_block_owned(txn_id.clone(), block_id.into())
                     .map(move |block| {
@@ -388,7 +388,7 @@ impl<T: Collect> Chain<T> {
     pub async fn commit(&mut self, txn_id: &TxnId) {
         println!("Chain::commit");
         let block = self
-            .store
+            .file
             .clone()
             .get_block(txn_id, &self.latest_block.into())
             .await
@@ -398,7 +398,7 @@ impl<T: Collect> Chain<T> {
             self.latest_block += 1;
             let block: ChainBlock<(T::Item, T::Selector)> = block.try_into().unwrap();
             let checksum: Checksum = block.checksum();
-            self.store
+            self.file
                 .new_block(
                     txn_id.clone(),
                     self.latest_block.into(),
@@ -408,12 +408,12 @@ impl<T: Collect> Chain<T> {
                 .unwrap();
         }
 
-        self.store.commit(txn_id).await;
+        self.file.commit(txn_id).await;
     }
 
     pub async fn rollback(&self, txn_id: &TxnId) {
         println!("Chain::rollback");
-        self.store.rollback(txn_id).await
+        self.file.rollback(txn_id).await
     }
 
     async fn populate(txn: &Arc<Txn>, block: ChainBlock<(T::Selector, T::Item)>, object: &T) {

@@ -12,14 +12,14 @@ use crate::value::TCResult;
 
 pub type BlockId = PathSegment;
 
-struct StoreState {
+struct FileState {
     blocks: HashMap<BlockId, Bytes>,
     txn_cache: HashMap<TxnId, HashMap<BlockId, BytesMut>>,
 }
 
-impl StoreState {
-    fn new() -> StoreState {
-        StoreState {
+impl FileState {
+    fn new() -> FileState {
+        FileState {
             blocks: HashMap::new(),
             txn_cache: HashMap::new(),
         }
@@ -38,31 +38,19 @@ impl StoreState {
             None
         }
     }
-
-    fn print_status(&self, txn_id: &TxnId) {
-        println!(
-            "StoreState has {:?} blocks for {}, {} total",
-            self.txn_cache.get(txn_id).map(|data| data.len()),
-            txn_id,
-            self.blocks.len()
-        );
-    }
 }
 
-pub struct Store {
-    state: Mutex<StoreState>,
+pub struct File {
+    state: Mutex<FileState>,
 }
 
-impl Store {
-    pub fn new() -> Arc<Store> {
-        Arc::new(Store {
-            state: Mutex::new(StoreState::new()),
-        })
+impl File {
+    pub fn new() -> Arc<File> {
+        Arc::new(File { state: Mutex::new(FileState::new()) })
     }
 
     pub async fn append(&self, txn_id: &TxnId, block_id: &BlockId, data: Bytes) -> TCResult<()> {
         let mut state = self.state.lock().await;
-        state.print_status(txn_id);
 
         if let Some(block) = state
             .txn_cache
@@ -90,19 +78,18 @@ impl Store {
 
     pub async fn contains_block(&self, txn_id: &TxnId, block_id: &BlockId) -> bool {
         let state = self.state.lock().await;
-        state.print_status(txn_id);
 
         if let Some(txn_data) = state.txn_cache.get(txn_id) {
             if txn_data.get(block_id).is_some() {
-                println!("Store::contains_block {}", block_id);
+                println!("File::contains_block {}", block_id);
                 return true;
             }
         } else if state.blocks.get(block_id).is_some() {
-            println!("Store::contains_block {}", block_id);
+            println!("File::contains_block {}", block_id);
             return true;
         }
 
-        println!("Store::contains_block {} FALSE", block_id);
+        println!("File::contains_block {} FALSE", block_id);
         false
     }
 
@@ -152,7 +139,7 @@ impl Store {
         block_id: BlockId,
         initial_value: Bytes,
     ) -> TCResult<()> {
-        println!("Store::new_block {} {}", &txn_id, &block_id);
+        println!("File::new_block {} {}", &txn_id, &block_id);
         if self.contains_block(&txn_id, &block_id).await {
             return Err(error::bad_request(
                 "Tried to create a block that already exists",
@@ -176,7 +163,7 @@ impl Store {
 }
 
 #[async_trait]
-impl Transact for Store {
+impl Transact for File {
     async fn commit(&self, txn_id: &TxnId) {
         let mut state = self.state.lock().await;
         if let Some(mut blocks) = state.txn_cache.remove(txn_id) {

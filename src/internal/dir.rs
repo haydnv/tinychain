@@ -12,11 +12,11 @@ use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
 use crate::value::TCResult;
 
-use super::store::Store;
+use super::file::File;
 
 enum DirEntry {
     Dir(Arc<Dir>),
-    Store(Arc<Store>),
+    File(Arc<File>),
 }
 
 #[async_trait]
@@ -24,14 +24,14 @@ impl Transact for DirEntry {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             DirEntry::Dir(dir) => dir.commit(txn_id).await,
-            DirEntry::Store(store) => store.commit(txn_id).await,
+            DirEntry::File(file) => file.commit(txn_id).await,
         }
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
             DirEntry::Dir(dir) => dir.rollback(txn_id).await,
-            DirEntry::Store(store) => store.rollback(txn_id).await,
+            DirEntry::File(file) => file.rollback(txn_id).await,
         }
     }
 }
@@ -40,7 +40,7 @@ impl fmt::Display for DirEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             DirEntry::Dir(_) => write!(f, "(directory)"),
-            DirEntry::Store(_) => write!(f, "(block store)"),
+            DirEntry::File(_) => write!(f, "(file)"),
         }
     }
 }
@@ -74,36 +74,20 @@ impl DirState {
         }
     }
 
-    async fn get_store(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Arc<Store>>> {
+    async fn get_file(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Arc<File>>> {
         if let Some(Some(entry)) = self.txn_cache.get(txn_id).map(|data| data.get(name)) {
             match entry {
-                DirEntry::Store(store) => Ok(Some(store.clone())),
-                other => Err(error::bad_request("Not a Store", other)),
+                DirEntry::File(file) => Ok(Some(file.clone())),
+                other => Err(error::bad_request("Not a File", other)),
             }
         } else if let Some(entry) = self.children.get(name) {
             match entry {
-                DirEntry::Store(store) => Ok(Some(store.clone())),
-                other => Err(error::bad_request("Not a Store", other)),
+                DirEntry::File(file) => Ok(Some(file.clone())),
+                other => Err(error::bad_request("Not a File", other)),
             }
         } else {
             Ok(None)
         }
-    }
-
-    fn print_status(&self) {
-        let mut dir_count = 0;
-        let mut store_count = 0;
-        for (_, entry) in &self.children {
-            match entry {
-                DirEntry::Dir(_) => dir_count += 1,
-                DirEntry::Store(_) => store_count += 1,
-            }
-        }
-
-        println!(
-            "DirState has {} subdirectories and {} block stores",
-            dir_count, store_count
-        );
     }
 }
 
@@ -172,30 +156,30 @@ impl Dir {
         })
     }
 
-    pub async fn create_store(&self, txn_id: &TxnId, name: PathSegment) -> TCResult<Arc<Store>> {
+    pub async fn create_file(&self, txn_id: &TxnId, name: PathSegment) -> TCResult<Arc<File>> {
         let mut state = self.state.lock().await;
         if let Some(txn_data) = state.txn_cache.get_mut(txn_id) {
             if txn_data.contains_key(&name) {
                 Err(error::bad_request(
-                    "Tried to create a new block store but there is already an entry at",
+                    "Tried to create a new File but there is already an entry at",
                     name,
                 ))
             } else {
-                let store = Store::new();
-                txn_data.insert(name, DirEntry::Store(store.clone()));
-                Ok(store)
+                let file = File::new();
+                txn_data.insert(name, DirEntry::File(file.clone()));
+                Ok(file)
             }
         } else if state.children.contains_key(&name) {
             Err(error::bad_request(
-                "Tried to create a new block store but there is already an entry at",
+                "Tried to create a new File but there is already an entry at",
                 name,
             ))
         } else {
             let mut txn_data = HashMap::new();
-            let store = Store::new();
-            txn_data.insert(name, DirEntry::Store(store.clone()));
+            let file = File::new();
+            txn_data.insert(name, DirEntry::File(file.clone()));
             state.txn_cache.insert(txn_id.clone(), txn_data);
-            Ok(store)
+            Ok(file)
         }
     }
 
@@ -250,11 +234,11 @@ impl Dir {
         })
     }
 
-    pub async fn get_store(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Arc<Store>> {
+    pub async fn get_file(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Arc<File>> {
         self.state
             .lock()
             .await
-            .get_store(txn_id, name)
+            .get_file(txn_id, name)
             .await?
             .ok_or_else(|| error::not_found(name))
     }
@@ -286,8 +270,6 @@ impl Transact for Dir {
         } else {
             println!("Dir::commit has no data!");
         }
-
-        state.print_status();
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
