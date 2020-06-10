@@ -1,6 +1,6 @@
+pub mod archive;
 pub mod chain;
 mod dir;
-pub mod file;
 mod store;
 
 pub const RECORD_DELIMITER: char = 30 as char;

@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 
 use crate::error;
-use crate::internal::file::File;
+use crate::internal::archive::Archive;
 use crate::transaction::{Transact, Txn};
 use crate::value::{TCResult, Value};
 
@@ -52,7 +52,7 @@ pub trait Collect: Transact + Send + Sync {
 }
 
 #[async_trait]
-pub trait Persist: Collect + File {}
+pub trait Persist: Archive + Collect {}
 
 pub enum State {
     Value(Value),
