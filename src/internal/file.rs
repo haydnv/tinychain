@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -47,6 +48,15 @@ pub struct File {
 impl File {
     pub fn new() -> Arc<File> {
         Arc::new(File { state: Mutex::new(FileState::new()) })
+    }
+
+    pub async fn is_empty(&self, txn_id: &TxnId) -> bool {
+        let state = self.state.lock().await;
+        if let Some(txn_data) = state.txn_cache.get(txn_id) {
+            txn_data.is_empty() && state.blocks.is_empty()
+        } else {
+            state.blocks.is_empty()
+        }
     }
 
     pub async fn append(&self, txn_id: &TxnId, block_id: &BlockId, data: Bytes) -> TCResult<()> {
@@ -175,5 +185,11 @@ impl Transact for File {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.state.lock().await.txn_cache.remove(txn_id);
+    }
+}
+
+impl fmt::Display for File {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "(file)")
     }
 }
