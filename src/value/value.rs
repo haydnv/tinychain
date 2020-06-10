@@ -7,7 +7,7 @@ use bytes::Bytes;
 use num::PrimInt;
 use regex::Regex;
 use serde::de;
-use serde::ser::{Serialize, SerializeMap, Serializer};
+use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::error;
 use crate::value::link::{Link, TCPath};
@@ -149,6 +149,7 @@ pub enum Value {
     Link(Link),
     Ref(TCRef),
     r#String(String),
+    Vector(Vec<Value>),
 }
 
 impl From<()> for Value {
@@ -295,6 +296,20 @@ impl TryFrom<Value> for ValueId {
     }
 }
 
+impl<E: Into<error::TCError>, T: TryFrom<Value, Error = E>> TryFrom<Value> for Vec<T> {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<Vec<T>> {
+        match v {
+            Value::Vector(mut v) => v
+                .drain(..)
+                .map(|i| i.try_into().map_err(|e: E| e.into()))
+                .collect(),
+            other => Err(error::bad_request("Expected a Vector but found", other)),
+        }
+    }
+}
+
 struct ValueVisitor;
 
 impl<'de> de::Visitor<'de> for ValueVisitor {
@@ -372,6 +387,13 @@ impl Serialize for Value {
             Value::Link(l) => l.serialize(s),
             Value::Ref(r) => r.serialize(s),
             Value::r#String(v) => s.serialize_str(v),
+            Value::Vector(v) => {
+                let mut seq = s.serialize_seq(Some(v.len()))?;
+                for item in v {
+                    seq.serialize_element(item)?;
+                }
+                seq.end()
+            }
         }
     }
 }
@@ -393,6 +415,14 @@ impl fmt::Display for Value {
             Value::Link(l) => write!(f, "Link: {}", l),
             Value::Ref(r) => write!(f, "Ref: {}", r),
             Value::r#String(s) => write!(f, "String: {}", s),
+            Value::Vector(v) => write!(
+                f,
+                "[{}]",
+                v.iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
         }
     }
 }

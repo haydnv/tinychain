@@ -20,7 +20,6 @@ pub type GetResult = TCResult<Box<dyn Stream<Item = State> + Send + Unpin>>;
 
 #[async_trait]
 pub trait Collect: Transact + Send + Sync {
-
     type Selector: Clone
         + DeserializeOwned
         + Serialize
@@ -37,14 +36,10 @@ pub trait Collect: Transact + Send + Sync {
         + Sync
         + 'static;
 
-    async fn get(
-        &self,
-        txn: &Arc<Txn>,
-        selector: &Self::Selector,
-    ) -> TCResult<Box<dyn Stream<Item = State> + Send + Unpin>>;
+    async fn get(&self, txn: &Arc<Txn>, selector: &Self::Selector) -> GetResult;
 
     async fn put(
-        &self,
+        self: Arc<Self>,
         txn: &Arc<Txn>,
         selector: Self::Selector,
         value: Self::Item,
@@ -55,6 +50,7 @@ pub trait Collect: Transact + Send + Sync {
 pub trait Persist: Archive + Collect {}
 
 pub enum State {
+    Index(Arc<index::Index>),
     Value(Value),
 }
 
@@ -68,6 +64,12 @@ impl State {
     }
 }
 
+impl From<Arc<index::Index>> for State {
+    fn from(i: Arc<index::Index>) -> State {
+        State::Index(i)
+    }
+}
+
 impl From<Value> for State {
     fn from(v: Value) -> State {
         State::Value(v)
@@ -77,6 +79,7 @@ impl From<Value> for State {
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            State::Index(_) => write!(f, "(index)"),
             State::Value(v) => write!(f, "state: {}", v),
         }
     }

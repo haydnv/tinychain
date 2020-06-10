@@ -145,16 +145,15 @@ type BlockStream =
     FuturesOrdered<Box<dyn Future<Output = (Checksum, Vec<(TxnId, Vec<Bytes>)>)> + Unpin + Send>>;
 
 pub struct Chain<T: Collect> {
-    object: T,
+    object: Arc<T>,
     file: Arc<File>,
     latest_block: u64,
 }
 
 impl<T: Collect> Chain<T> {
-    pub async fn new(txn_id: TxnId, file: Arc<File>, object: T) -> Chain<T> {
+    pub async fn new(txn_id: TxnId, file: Arc<File>, object: Arc<T>) -> Chain<T> {
         let checksum = Bytes::from(&[0; 32][..]);
-        file
-            .new_block(txn_id.clone(), 0u8.into(), delimit_groups(&[checksum]))
+        file.new_block(txn_id.clone(), 0u8.into(), delimit_groups(&[checksum]))
             .await
             .unwrap();
         println!("Chain::new created block 0");
@@ -174,7 +173,7 @@ impl<T: Collect> Chain<T> {
         mut source: impl Stream<Item = Bytes> + Unpin,
         txn: &Arc<Txn>,
         dest: Arc<File>,
-        object: T,
+        object: Arc<T>,
     ) -> Chain<T> {
         let mut latest_block: u64 = 0;
         let mut checksum: Checksum = [0; 32];
@@ -193,7 +192,7 @@ impl<T: Collect> Chain<T> {
 
             let block: ChainBlock<(T::Selector, T::Item)> = block.try_into().unwrap();
             checksum = block.clone().checksum();
-            Chain::populate(txn, block.clone(), &object).await;
+            Chain::populate(txn, block.clone(), object.clone()).await;
 
             dest.new_block(txn.id().clone(), block_id.clone(), block.into())
                 .await
@@ -216,7 +215,7 @@ impl<T: Collect> Chain<T> {
         }
     }
 
-    pub async fn from_store(txn: &Arc<Txn>, file: Arc<File>, object: T) -> TCResult<Chain<T>> {
+    pub async fn from_store(txn: &Arc<Txn>, file: Arc<File>, object: Arc<T>) -> TCResult<Chain<T>> {
         let mut latest_block = 0;
         if !file.contains_block(txn.id(), &latest_block.into()).await {
             return Err(error::bad_request(
@@ -229,7 +228,7 @@ impl<T: Collect> Chain<T> {
 
         while let Some(block) = file.get_block(txn.id(), &(latest_block + 1).into()).await {
             let block: ChainBlock<(T::Selector, T::Item)> = block.try_into()?;
-            Chain::populate(txn, block.clone(), &object).await;
+            Chain::populate(txn, block.clone(), object.clone()).await;
             latest_block += 1;
         }
 
@@ -416,11 +415,11 @@ impl<T: Collect> Chain<T> {
         self.file.rollback(txn_id).await
     }
 
-    async fn populate(txn: &Arc<Txn>, block: ChainBlock<(T::Selector, T::Item)>, object: &T) {
+    async fn populate(txn: &Arc<Txn>, block: ChainBlock<(T::Selector, T::Item)>, object: Arc<T>) {
         let mut put_ops = Vec::with_capacity(block.len());
         for (_, mutations) in block.iter() {
             for (key, val) in mutations.iter() {
-                put_ops.push(object.put(txn, key.clone(), val.clone()));
+                put_ops.push(object.clone().put(txn, key.clone(), val.clone()));
             }
         }
 

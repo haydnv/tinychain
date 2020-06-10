@@ -12,3 +12,14 @@ pub type TCResult<T> = Result<T, error::TCError>;
 pub type Value = value::Value;
 pub type ValueId = value::ValueId;
 pub type Version = version::Version;
+
+pub enum TCType {
+    None,
+    Bytes,
+    Id,
+    Int32,
+    UInt64,
+    Link,
+    Ref,
+    r#String,
+}
