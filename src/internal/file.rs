@@ -47,7 +47,9 @@ pub struct File {
 
 impl File {
     pub fn new() -> Arc<File> {
-        Arc::new(File { state: Mutex::new(FileState::new()) })
+        Arc::new(File {
+            state: Mutex::new(FileState::new()),
+        })
     }
 
     pub async fn is_empty(&self, txn_id: &TxnId) -> bool {

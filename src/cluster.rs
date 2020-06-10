@@ -4,7 +4,7 @@ use crate::internal::Dir;
 use crate::transaction::TxnId;
 
 pub struct Cluster {
-    context: Arc<Dir>
+    context: Arc<Dir>,
 }
 
 impl Cluster {

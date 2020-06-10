@@ -4,8 +4,8 @@ use futures::{future, stream, Stream};
 
 use crate::auth::{Auth, Token};
 use crate::error;
-use crate::kernel;
 use crate::internal::Dir;
+use crate::kernel;
 use crate::state::{GetResult, State};
 use crate::transaction::{Txn, TxnState};
 use crate::value::link::Link;
@@ -35,12 +35,7 @@ impl Gateway {
         Txn::new(self.clone(), self.workspace.clone()).await
     }
 
-    pub async fn get(
-        &self,
-        subject: &Link,
-        selector: Value,
-        _auth: &Auth,
-    ) -> GetResult {
+    pub async fn get(&self, subject: &Link, selector: Value, _auth: &Auth) -> GetResult {
         if subject.host().is_none() {
             let state = kernel::get(subject.path(), selector)?;
             Ok(Box::new(stream::once(future::ready(state))))

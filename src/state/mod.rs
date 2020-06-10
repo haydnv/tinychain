@@ -39,11 +39,11 @@ pub trait Collect: Transact + Send + Sync {
     async fn get(&self, txn: &Arc<Txn>, selector: &Self::Selector) -> GetResult;
 
     async fn put(
-        self: Arc<Self>,
+        &self,
         txn: &Arc<Txn>,
         selector: Self::Selector,
         value: Self::Item,
-    ) -> TCResult<State>;
+    ) -> TCResult<()>;
 }
 
 #[async_trait]

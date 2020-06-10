@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let workspace = internal::Dir::new_tmp(config.workspace.clone());
     let hosted = configure(config, workspace.clone()).await?;
-    let gateway = gateway::Gateway::new(hosted, workspace);
+    let _gateway = gateway::Gateway::new(hosted, workspace);
 
     Ok(())
 }
@@ -97,9 +97,9 @@ async fn configure(
                 ));
             }
 
-            let hosted_cluster = if let Some(dir) = data_dir.get_dir(txn_id, &path).await? {
-//                use internal::file::File;
-//                cluster::Cluster::from_dir(txn_id, dir).await
+            let hosted_cluster = if let Some(_dir) = data_dir.get_dir(txn_id, &path).await? {
+                //                use internal::file::File;
+                //                cluster::Cluster::from_dir(txn_id, dir).await
                 panic!("NOT IMPLEMENTED")
             } else {
                 cluster::Cluster::new(txn_id, data_dir.create_dir(&txn_id, path.clone()).await?)

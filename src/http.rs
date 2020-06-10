@@ -113,7 +113,10 @@ impl Http {
         })
     }
 
-    fn get_param<T: DeserializeOwned>(params: &mut HashMap<String, String>, name: &str) -> TCResult<Option<T>> {
+    fn get_param<T: DeserializeOwned>(
+        params: &mut HashMap<String, String>,
+        name: &str,
+    ) -> TCResult<Option<T>> {
         if let Some(param) = params.remove(name) {
             let val: T = serde_json::from_str(&param).map_err(|e| {
                 error::bad_request(&format!("Unable to parse URI parameter '{}'", name), e)
@@ -169,14 +172,15 @@ impl Http {
             })
             .unwrap_or_else(HashMap::new);
 
-        let txn_id: Option<TxnId> = Http::get_param(&mut params, "txn_id")?;
+        let _txn_id: Option<TxnId> = Http::get_param(&mut params, "txn_id")?;
 
         // TODO: stream the response back to the client
         match request.method() {
             &Method::GET => {
-                let id = Http::get_param(&mut params, "key")?.ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
+                let id = Http::get_param(&mut params, "key")?
+                    .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
                 let mut data = self.gateway.get(&path.clone().into(), id, &token).await?;
-                while let Some(state) = data.next().await {
+                while let Some(_state) = data.next().await {
                     // TODO: serialize & write to output stream
                 }
                 Ok(())

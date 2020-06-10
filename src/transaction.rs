@@ -145,7 +145,8 @@ impl Txn {
 
         future::join_all(self.mutated.write().unwrap().drain(..).map(|s| async move {
             s.commit(&self.id).await;
-        })).await;
+        }))
+        .await;
     }
 
     pub async fn rollback(&self) {
@@ -153,7 +154,8 @@ impl Txn {
 
         future::join_all(self.mutated.write().unwrap().drain(..).map(|s| async move {
             s.rollback(&self.id).await;
-        })).await;
+        }))
+        .await;
     }
 
     pub fn mutate(self: &Arc<Self>, state: Arc<dyn Transact>) {
@@ -173,7 +175,7 @@ impl Txn {
                 Ok(state) => state.get(self, selector).await,
                 Err(cause) => Err(cause),
             },
-            Subject::Link(l) => self.gateway.get(&l, selector, auth).await
+            Subject::Link(l) => self.gateway.get(&l, selector, auth).await,
         }
     }
 

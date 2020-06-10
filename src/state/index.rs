@@ -7,7 +7,7 @@ use crate::internal::File;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{TCResult, TCType, Value};
 
-use super::{Collect, GetResult, State};
+use super::{Collect, GetResult};
 
 pub struct Index {
     file: Arc<File>,
@@ -37,13 +37,12 @@ impl Collect for Index {
     }
 
     async fn put(
-        self: Arc<Self>,
+        &self,
         _txn: &Arc<Txn>,
         _selector: Self::Selector,
         _value: Self::Item,
-    ) -> TCResult<State> {
-        // TODO
-        Ok(self.into())
+    ) -> TCResult<()> {
+        Err(error::not_implemented())
     }
 }
 
