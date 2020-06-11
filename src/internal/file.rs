@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -50,6 +50,17 @@ impl File {
         Arc::new(File {
             state: Mutex::new(FileState::new()),
         })
+    }
+
+    pub async fn block_ids(&self, txn_id: &TxnId) -> HashSet<BlockId> {
+        let mut block_ids = HashSet::new();
+        let state = self.state.lock().await;
+        block_ids.extend(state.blocks.keys().cloned());
+        if let Some(blocks) = state.txn_cache.get(txn_id) {
+            block_ids.extend(blocks.keys().cloned());
+        }
+
+        block_ids
     }
 
     pub async fn is_empty(&self, txn_id: &TxnId) -> bool {

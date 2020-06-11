@@ -15,6 +15,9 @@ use super::{Collect, GetResult};
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
+const ERR_CORRUPT: &str = "Index corrupted! Please restart Tinychain and file a bug report";
+
+type NodeId = BlockId;
 
 #[derive(Deserialize, Serialize)]
 struct Key {
@@ -36,11 +39,16 @@ impl Key {
 struct Node {
     leaf: bool,
     keys: Vec<Key>,
+    children: Vec<NodeId>,
 }
 
 impl Node {
     fn new(leaf: bool) -> Node {
-        Node { leaf, keys: vec![] }
+        Node {
+            leaf,
+            keys: vec![],
+            children: vec![],
+        }
     }
 }
 
@@ -131,6 +139,31 @@ impl Index {
 
         Ok(())
     }
+
+    async fn get_node(&self, txn_id: &TxnId, node_id: &NodeId) -> TCResult<Node> {
+        if let Some(node) = self.file.get_block(txn_id, node_id).await {
+            bincode::deserialize(&node).map_err(|e| error::internal(ERR_CORRUPT))
+        } else {
+            Err(error::internal(ERR_CORRUPT))
+        }
+    }
+
+    async fn split_child(self, txn_id: &TxnId, mut node: Node, i: usize) -> TCResult<()> {
+        let mut child = self.get_node(txn_id, &node.children[i]).await?;
+        let mut new_node = Node::new(child.leaf);
+        let new_node_id = new_node_id(self.file.block_ids(txn_id).await);
+
+        node.children.insert(i + 1, new_node_id);
+        node.keys.insert(i, child.keys.remove(self.order - 1));
+
+        new_node.keys = child.keys.drain((self.order - 1)..).collect();
+
+        if !child.leaf {
+            new_node.children = child.children.drain(self.order..).collect();
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -146,7 +179,7 @@ impl Collect for Index {
         &self,
         _txn: &Arc<Txn>,
         selector: Self::Selector,
-        _value: Self::Item,
+        _key: Self::Item,
     ) -> TCResult<()> {
         self.validate_key(selector)?;
 
@@ -165,7 +198,7 @@ impl Transact for Index {
     }
 }
 
-fn new_block_id(existing_ids: HashSet<ValueId>) -> ValueId {
+fn new_node_id(existing_ids: HashSet<NodeId>) -> NodeId {
     loop {
         let id: ValueId = Uuid::new_v4().into();
         if !existing_ids.contains(&id) {
