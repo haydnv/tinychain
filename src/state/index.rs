@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use len_trait::{Empty, Len};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -24,13 +23,11 @@ struct Key {
     deleted: bool,
 }
 
-impl Empty for Key {
+impl Key {
     fn is_empty(&self) -> bool {
         self.value.is_empty()
     }
-}
 
-impl Len for Key {
     fn len(&self) -> usize {
         self.value.len()
     }
