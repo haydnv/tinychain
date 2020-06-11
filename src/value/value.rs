@@ -10,8 +10,9 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::error;
-use crate::value::link::{Link, TCPath};
-use crate::value::{TCRef, TCResult};
+
+use super::link::{Link, TCPath};
+use super::{TCRef, TCResult, TCType};
 
 const RESERVED_CHARS: [&str; 21] = [
     "/", "..", "~", "$", "`", "^", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":",
@@ -150,6 +151,23 @@ pub enum Value {
     Ref(TCRef),
     r#String(String),
     Vector(Vec<Value>),
+}
+
+impl Value {
+    pub fn is_a(&self, dtype: &TCType) -> bool {
+        use Value::*;
+        match self {
+            None => dtype == &TCType::None,
+            Bytes(_) => dtype == &TCType::Bytes,
+            Id(_) => dtype == &TCType::Id,
+            Int32(_) => dtype == &TCType::Int32,
+            UInt64(_) => dtype == &TCType::UInt64,
+            Link(_) => dtype == &TCType::Link,
+            Ref(_) => dtype == &TCType::Ref,
+            r#String(_) => dtype == &TCType::r#String,
+            Vector(_) => dtype == &TCType::Vector,
+        }
+    }
 }
 
 impl From<()> for Value {

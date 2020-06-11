@@ -25,11 +25,35 @@ impl Index {
             ))
         }
     }
+
+    fn validate_key(&self, key: Vec<Value>) -> TCResult<()> {
+        if self.schema.len() != key.len() {
+            return Err(error::bad_request(
+                &format!("Invalid key {}, expected", Value::Vector(key)),
+                self.schema
+                    .iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<String>>()
+                    .join(","),
+            ));
+        }
+
+        for (i, val) in key.iter().enumerate() {
+            if !val.is_a(&self.schema[i]) {
+                return Err(error::bad_request(
+                    &format!("Expected {}", self.schema[i]),
+                    &key[i],
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl Collect for Index {
-    type Selector = Vec<Value>; // TODO
+    type Selector = Vec<Value>;
     type Item = Vec<Value>;
 
     async fn get(&self, _txn: &Arc<Txn>, _selector: &Self::Selector) -> GetResult {
@@ -39,9 +63,11 @@ impl Collect for Index {
     async fn put(
         &self,
         _txn: &Arc<Txn>,
-        _selector: Self::Selector,
+        selector: Self::Selector,
         _value: Self::Item,
     ) -> TCResult<()> {
+        self.validate_key(selector)?;
+
         Err(error::not_implemented())
     }
 }

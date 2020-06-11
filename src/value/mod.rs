@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::error;
 
 pub mod link;
@@ -13,6 +15,7 @@ pub type Value = value::Value;
 pub type ValueId = value::ValueId;
 pub type Version = version::Version;
 
+#[derive(Clone, Hash, Eq, PartialEq)]
 pub enum TCType {
     None,
     Bytes,
@@ -22,4 +25,22 @@ pub enum TCType {
     Link,
     Ref,
     r#String,
+    Vector,
+}
+
+impl fmt::Display for TCType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use TCType::*;
+        match self {
+            None => write!(f, "type None"),
+            Bytes => write!(f, "type Bytes"),
+            Id => write!(f, "Id"),
+            Int32 => write!(f, "type Int32"),
+            UInt64 => write!(f, "type UInt64"),
+            Link => write!(f, "type Link"),
+            Ref => write!(f, "type Ref"),
+            r#String => write!(f, "type String"),
+            Vector => write!(f, "type Vector"),
+        }
+    }
 }
