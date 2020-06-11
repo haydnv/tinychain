@@ -13,9 +13,8 @@ use crate::value::{TCResult, TCType, Value, ValueId};
 
 use super::{Collect, GetResult};
 
-const BLOCK_SIZE: usize = 100_000;
+const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
-const MAX_KEY_SIZE: usize = ((BLOCK_SIZE - BLOCK_ID_SIZE) / 2) - BLOCK_ID_SIZE;
 
 #[derive(Deserialize, Serialize)]
 struct Key {
@@ -54,23 +53,28 @@ pub struct Column {
 pub struct Index {
     file: Arc<File>,
     schema: Vec<Column>,
+    block_size: usize,
     order: usize,
     root: BlockId,
 }
 
 impl Index {
     async fn create(txn_id: TxnId, schema: Vec<Column>, file: Arc<File>) -> TCResult<Index> {
+        // the "leaf" boolean adds 1 byte to each key as-stored
         // length-delimited serialization adds 32 bytes to each key as-stored
-        let key_size: usize = 32 + schema.iter().map(|c| c.max_len).sum::<usize>();
+        let key_size: usize = 1 + 32 + schema.iter().map(|c| c.max_len).sum::<usize>();
 
-        if key_size >= MAX_KEY_SIZE {
-            return Err(error::bad_request(
-                "The specified Index schema exceeds the maximum size",
-                MAX_KEY_SIZE,
-            ));
-        }
-
-        let order: usize = (BLOCK_SIZE - BLOCK_ID_SIZE) / (key_size + BLOCK_ID_SIZE);
+        let (block_size, order) = if DEFAULT_BLOCK_SIZE > (key_size * 2) + BLOCK_ID_SIZE {
+            // let m := order
+            // maximum block size = (m * key_size) + ((m + 1) * block_id_size)
+            // therefore block_size = (m * (key_size + block_id_size)) + block_id_size
+            // therefore block_size - block_id_size = m * (key_size + block_id_size)
+            // therefore m = floor((block_size - block_id_size) / (key_size + block_id_size))
+            let order = (DEFAULT_BLOCK_SIZE - BLOCK_ID_SIZE) / (key_size + BLOCK_ID_SIZE);
+            (DEFAULT_BLOCK_SIZE, order)
+        } else {
+            ((2 * key_size) + (3 * BLOCK_ID_SIZE), 2)
+        };
 
         if file.is_empty(&txn_id).await {
             let root: BlockId = Uuid::new_v4().into();
@@ -84,6 +88,7 @@ impl Index {
             Ok(Index {
                 file,
                 schema,
+                block_size,
                 order,
                 root,
             })
