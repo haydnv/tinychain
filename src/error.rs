@@ -59,6 +59,12 @@ impl TCError {
     }
 }
 
+impl From<Box<bincode::ErrorKind>> for TCError {
+    fn from(e: Box<bincode::ErrorKind>) -> TCError {
+        bad_request("Serialization error", e)
+    }
+}
+
 impl From<Infallible> for TCError {
     fn from(e: Infallible) -> TCError {
         internal(format!("Internal system error: {}", e))

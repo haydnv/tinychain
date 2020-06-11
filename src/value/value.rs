@@ -4,10 +4,10 @@ use std::hash::Hash;
 use std::str::FromStr;
 
 use bytes::Bytes;
-use num::PrimInt;
 use regex::Regex;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+use uuid::Uuid;
 
 use crate::error;
 
@@ -63,6 +63,18 @@ impl ValueId {
 
     pub fn starts_with(&self, prefix: &str) -> bool {
         self.id.starts_with(prefix)
+    }
+}
+
+impl From<Uuid> for ValueId {
+    fn from(id: Uuid) -> ValueId {
+        id.to_hyphenated().to_string().parse().unwrap()
+    }
+}
+
+impl From<u64> for ValueId {
+    fn from(i: u64) -> ValueId {
+        i.to_string().parse().unwrap()
     }
 }
 
@@ -122,14 +134,6 @@ impl TryFrom<&TCPath> for ValueId {
             Ok(path[0].clone())
         } else {
             Err(error::bad_request("Expected a ValueId, found", path))
-        }
-    }
-}
-
-impl<T: fmt::Display + PrimInt> From<T> for ValueId {
-    fn from(i: T) -> ValueId {
-        ValueId {
-            id: format!("{}", i),
         }
     }
 }

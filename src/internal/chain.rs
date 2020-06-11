@@ -153,7 +153,7 @@ pub struct Chain<T: Collect> {
 impl<T: Collect> Chain<T> {
     pub async fn new(txn_id: TxnId, file: Arc<File>, object: T) -> Chain<T> {
         let checksum = Bytes::from(&[0; 32][..]);
-        file.new_block(txn_id.clone(), 0u8.into(), delimit_groups(&[checksum]))
+        file.new_block(txn_id.clone(), 0u64.into(), delimit_groups(&[checksum]))
             .await
             .unwrap();
         println!("Chain::new created block 0");
