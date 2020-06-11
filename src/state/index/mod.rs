@@ -1,8 +1,10 @@
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -165,25 +167,54 @@ impl Index {
         }
     }
 
-    async fn put_node(&self, txn_id: &TxnId, node_id: NodeId, node: Node) -> TCResult<()> {
+    async fn put_node(&self, txn_id: &TxnId, node_id: NodeId, node: &Node) -> TCResult<()> {
         self.file
             .put_block(
                 txn_id.clone(),
                 node_id,
-                (&bincode::serialize(&node)?[..]).into(),
+                (&bincode::serialize(node)?[..]).into(),
             )
             .await
     }
 
-    async fn insert(self, _node_id: &NodeId, _node: Node, _i: usize) -> TCResult<()> {
-        Err(error::not_implemented())
+    fn insert<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        node_id: &'a NodeId,
+        node: &'a mut Node,
+        key: Key,
+    ) -> BoxFuture<'a, TCResult<()>> {
+        Box::pin(async move {
+            let mut i = self.collator.bisect_left(&node.keys, &key);
+            if node.leaf {
+                if i == node.keys.len()
+                    || self.collator.compare(&node.keys[i], &key) != Ordering::Equal
+                {
+                    node.keys.insert(i, key);
+                    self.put_node(txn_id, node_id.clone(), &node).await?;
+                }
+
+                Ok(())
+            } else {
+                let mut child = self.get_node(txn_id, &node.children[i]).await?;
+                if child.keys.len() == (2 * self.order) - 1 {
+                    self.split_child(txn_id, node_id.clone(), node, i).await?;
+                    if self.collator.compare(&key, &node.keys[i]) == Ordering::Greater {
+                        i += 1
+                    }
+                }
+
+                self.insert(txn_id, &node.children[i], &mut child, key)
+                    .await
+            }
+        })
     }
 
     async fn split_child(
-        self,
+        &self,
         txn_id: &TxnId,
         node_id: NodeId,
-        mut node: Node,
+        node: &mut Node,
         i: usize,
     ) -> TCResult<()> {
         let mut child = self.get_node(txn_id, &node.children[i]).await?;
@@ -199,7 +230,7 @@ impl Index {
             new_node.children = child.children.drain(self.order..).collect();
         }
 
-        self.put_node(txn_id, new_node_id, new_node).await?;
+        self.put_node(txn_id, new_node_id, &new_node).await?;
         self.put_node(txn_id, node_id, node).await?;
 
         Ok(())
