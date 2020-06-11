@@ -13,6 +13,8 @@ use crate::value::{TCResult, TCType, Value, ValueId};
 
 use super::{Collect, GetResult};
 
+mod collator;
+
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
 const ERR_CORRUPT: &str = "Index corrupted! Please restart Tinychain and file a bug report";
@@ -20,7 +22,7 @@ const ERR_CORRUPT: &str = "Index corrupted! Please restart Tinychain and file a 
 type NodeId = BlockId;
 
 #[derive(Deserialize, Serialize)]
-struct Key {
+pub struct Key {
     value: Vec<Value>,
     deleted: bool,
 }
@@ -32,6 +34,17 @@ impl Key {
 
     fn len(&self) -> usize {
         self.value.len()
+    }
+}
+
+impl<Idx> std::ops::Index<Idx> for Key
+where
+    Idx: std::slice::SliceIndex<[Value]>,
+{
+    type Output = Idx::Output;
+
+    fn index(&self, index: Idx) -> &Self::Output {
+        &self.value[index]
     }
 }
 
@@ -64,6 +77,7 @@ pub struct Index {
     block_size: usize,
     order: usize,
     root: BlockId,
+    collator: collator::Collator,
 }
 
 impl Index {
@@ -93,12 +107,15 @@ impl Index {
             )
             .await?;
 
+            let collator =
+                collator::Collator::new(schema.iter().map(|c| c.dtype.clone()).collect())?;
             Ok(Index {
                 file,
                 schema,
                 block_size,
                 order,
                 root,
+                collator,
             })
         } else {
             Err(error::bad_request(
@@ -142,7 +159,7 @@ impl Index {
 
     async fn get_node(&self, txn_id: &TxnId, node_id: &NodeId) -> TCResult<Node> {
         if let Some(node) = self.file.get_block(txn_id, node_id).await {
-            bincode::deserialize(&node).map_err(|e| error::internal(ERR_CORRUPT))
+            bincode::deserialize(&node).map_err(|_| error::internal(ERR_CORRUPT))
         } else {
             Err(error::internal(ERR_CORRUPT))
         }
@@ -158,13 +175,23 @@ impl Index {
             .await
     }
 
-    async fn split_child(self, txn_id: &TxnId, mut node: (NodeId, Node), i: usize) -> TCResult<()> {
-        let mut child = self.get_node(txn_id, &node.1.children[i]).await?;
+    async fn insert(self, _node_id: &NodeId, _node: Node, _i: usize) -> TCResult<()> {
+        Err(error::not_implemented())
+    }
+
+    async fn split_child(
+        self,
+        txn_id: &TxnId,
+        node_id: NodeId,
+        mut node: Node,
+        i: usize,
+    ) -> TCResult<()> {
+        let mut child = self.get_node(txn_id, &node.children[i]).await?;
         let mut new_node = Node::new(child.leaf);
         let new_node_id = new_node_id(self.file.block_ids(txn_id).await);
 
-        node.1.children.insert(i + 1, new_node_id.clone());
-        node.1.keys.insert(i, child.keys.remove(self.order - 1));
+        node.children.insert(i + 1, new_node_id.clone());
+        node.keys.insert(i, child.keys.remove(self.order - 1));
 
         new_node.keys = child.keys.drain((self.order - 1)..).collect();
 
@@ -173,7 +200,7 @@ impl Index {
         }
 
         self.put_node(txn_id, new_node_id, new_node).await?;
-        self.put_node(txn_id, node.0, node.1).await?;
+        self.put_node(txn_id, node_id, node).await?;
 
         Ok(())
     }

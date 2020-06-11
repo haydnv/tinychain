@@ -287,6 +287,28 @@ impl TryFrom<Value> for String {
     }
 }
 
+impl TryFrom<Value> for i32 {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<i32> {
+        match v {
+            Value::Int32(i) => Ok(i),
+            other => Err(error::bad_request("Expected an Int32 but found", other)),
+        }
+    }
+}
+
+impl TryFrom<&Value> for i32 {
+    type Error = error::TCError;
+
+    fn try_from(v: &Value) -> TCResult<i32> {
+        match v {
+            Value::Int32(i) => Ok(*i),
+            other => Err(error::bad_request("Expected an Int32 but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Value> for u64 {
     type Error = error::TCError;
 
@@ -298,12 +320,12 @@ impl TryFrom<Value> for u64 {
     }
 }
 
-impl TryFrom<Value> for i32 {
+impl TryFrom<&Value> for u64 {
     type Error = error::TCError;
 
-    fn try_from(v: Value) -> TCResult<i32> {
+    fn try_from(v: &Value) -> TCResult<u64> {
         match v {
-            Value::Int32(i) => Ok(i),
+            Value::UInt64(i) => Ok(*i),
             other => Err(error::bad_request("Expected an Int32 but found", other)),
         }
     }
