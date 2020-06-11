@@ -44,10 +44,7 @@ impl<S: Stream<Item = Result<Bytes, hyper::Error>> + Unpin> io::Read for StreamR
         if self.total_offset > self.size_cutoff {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                error::bad_request(
-                    "This request exceeds the maximum allowed size",
-                    self.size_cutoff,
-                ),
+                error::request_too_large(self.size_cutoff),
             ));
         }
 
@@ -129,15 +126,19 @@ impl Http {
 
     fn transform_error(err: error::TCError) -> Response<Body> {
         let mut response = Response::new(Body::from(err.message().to_string()));
+
+        use error::Code::*;
         *response.status_mut() = match err.reason() {
-            error::Code::BadRequest => StatusCode::BAD_REQUEST,
-            error::Code::Forbidden => StatusCode::FORBIDDEN,
-            error::Code::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-            error::Code::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
-            error::Code::NotFound => StatusCode::NOT_FOUND,
-            error::Code::NotImplemented => StatusCode::NOT_IMPLEMENTED,
-            error::Code::Unauthorized => StatusCode::UNAUTHORIZED,
+            BadRequest => StatusCode::BAD_REQUEST,
+            Forbidden => StatusCode::FORBIDDEN,
+            Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
+            NotFound => StatusCode::NOT_FOUND,
+            NotImplemented => StatusCode::NOT_IMPLEMENTED,
+            RequestTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            Unauthorized => StatusCode::UNAUTHORIZED,
         };
+
         response
     }
 

@@ -21,6 +21,9 @@ pub enum Code {
     // "This is marked for implementation in the future"
     NotImplemented,
 
+    // "The request payload itself is dangerously large"
+    RequestTooLarge,
+
     // "This resource requires authorization but your credentials are absent or nonsensical"
     Unauthorized,
 }
@@ -34,6 +37,7 @@ impl fmt::Display for Code {
             Code::MethodNotAllowed => write!(f, "Method not allowed"),
             Code::NotFound => write!(f, "Not found"),
             Code::NotImplemented => write!(f, "Not implemented"),
+            Code::RequestTooLarge => write!(f, "Request too large"),
             Code::Unauthorized => write!(f, "Unauthorized"),
         }
     }
@@ -128,6 +132,16 @@ pub fn not_implemented() -> TCError {
     TCError::of(
         Code::NotImplemented,
         "This functionality is not yet implemented".into(),
+    )
+}
+
+pub fn request_too_large(max_size: usize) -> TCError {
+    TCError::of(
+        Code::RequestTooLarge,
+        format!(
+            "This request exceeds the maximum allowed size of {} bytes",
+            max_size
+        ),
     )
 }
 
