@@ -148,19 +148,32 @@ impl Index {
         }
     }
 
-    async fn split_child(self, txn_id: &TxnId, mut node: Node, i: usize) -> TCResult<()> {
-        let mut child = self.get_node(txn_id, &node.children[i]).await?;
+    async fn put_node(&self, txn_id: &TxnId, node_id: NodeId, node: Node) -> TCResult<()> {
+        self.file
+            .put_block(
+                txn_id.clone(),
+                node_id,
+                (&bincode::serialize(&node)?[..]).into(),
+            )
+            .await
+    }
+
+    async fn split_child(self, txn_id: &TxnId, mut node: (NodeId, Node), i: usize) -> TCResult<()> {
+        let mut child = self.get_node(txn_id, &node.1.children[i]).await?;
         let mut new_node = Node::new(child.leaf);
         let new_node_id = new_node_id(self.file.block_ids(txn_id).await);
 
-        node.children.insert(i + 1, new_node_id);
-        node.keys.insert(i, child.keys.remove(self.order - 1));
+        node.1.children.insert(i + 1, new_node_id.clone());
+        node.1.keys.insert(i, child.keys.remove(self.order - 1));
 
         new_node.keys = child.keys.drain((self.order - 1)..).collect();
 
         if !child.leaf {
             new_node.children = child.children.drain(self.order..).collect();
         }
+
+        self.put_node(txn_id, new_node_id, new_node).await?;
+        self.put_node(txn_id, node.0, node.1).await?;
 
         Ok(())
     }

@@ -26,6 +26,21 @@ impl FileState {
         }
     }
 
+    fn contains_block(&self, txn_id: &TxnId, block_id: &BlockId) -> bool {
+        if let Some(txn_data) = self.txn_cache.get(txn_id) {
+            if txn_data.get(block_id).is_some() {
+                println!("File::contains_block {}", block_id);
+                return true;
+            }
+        } else if self.blocks.get(block_id).is_some() {
+            println!("File::contains_block {}", block_id);
+            return true;
+        }
+
+        println!("File::contains_block {} FALSE", block_id);
+        false
+    }
+
     async fn get_block(&self, txn_id: &TxnId, block_id: &BlockId) -> Option<Bytes> {
         if let Some(Some(block)) = self
             .txn_cache
@@ -72,6 +87,10 @@ impl File {
         }
     }
 
+    pub async fn contains_block(&self, txn_id: &TxnId, block_id: &BlockId) -> bool {
+        self.state.lock().await.contains_block(txn_id, block_id)
+    }
+
     pub async fn append(&self, txn_id: &TxnId, block_id: &BlockId, data: Bytes) -> TCResult<()> {
         let mut state = self.state.lock().await;
 
@@ -99,23 +118,6 @@ impl File {
         }
     }
 
-    pub async fn contains_block(&self, txn_id: &TxnId, block_id: &BlockId) -> bool {
-        let state = self.state.lock().await;
-
-        if let Some(txn_data) = state.txn_cache.get(txn_id) {
-            if txn_data.get(block_id).is_some() {
-                println!("File::contains_block {}", block_id);
-                return true;
-            }
-        } else if state.blocks.get(block_id).is_some() {
-            println!("File::contains_block {}", block_id);
-            return true;
-        }
-
-        println!("File::contains_block {} FALSE", block_id);
-        false
-    }
-
     pub async fn get_block_owned(
         self: Arc<Self>,
         txn_id: TxnId,
@@ -128,34 +130,6 @@ impl File {
         self.state.lock().await.get_block(&txn_id, &block_id).await
     }
 
-    pub async fn insert_into(
-        &self,
-        txn_id: &TxnId,
-        block_id: BlockId,
-        data: Bytes,
-        offset: usize,
-    ) -> TCResult<()> {
-        let mut state = self.state.lock().await;
-        let block = state
-            .get_block(txn_id, &block_id)
-            .await
-            .ok_or(error::not_found(&block_id))?;
-        let mut new_block = BytesMut::with_capacity(block.len() + data.len());
-        new_block.put(&block[..offset]);
-        new_block.put(data);
-        new_block.put(&block[offset..]);
-
-        if let Some(txn_data) = state.txn_cache.get_mut(txn_id) {
-            txn_data.insert(block_id, new_block);
-        } else {
-            let mut txn_data = HashMap::new();
-            txn_data.insert(block_id, new_block);
-            state.txn_cache.insert(txn_id.clone(), txn_data);
-        }
-
-        Ok(())
-    }
-
     pub async fn new_block(
         &self,
         txn_id: TxnId,
@@ -163,7 +137,9 @@ impl File {
         initial_value: Bytes,
     ) -> TCResult<()> {
         println!("File::new_block {} {}", &txn_id, &block_id);
-        if self.contains_block(&txn_id, &block_id).await {
+        let mut state = self.state.lock().await;
+
+        if state.contains_block(&txn_id, &block_id) {
             return Err(error::bad_request(
                 "Tried to create a block that already exists",
                 block_id,
@@ -173,12 +149,34 @@ impl File {
         let mut block = BytesMut::with_capacity(initial_value.len());
         block.put(initial_value);
 
-        self.state
-            .lock()
-            .await
+        state
             .txn_cache
             .entry(txn_id)
-            .or_insert(HashMap::new())
+            .or_insert_with(HashMap::new)
+            .insert(block_id, block);
+
+        Ok(())
+    }
+
+    pub async fn put_block(
+        &self,
+        txn_id: TxnId,
+        block_id: BlockId,
+        block: BytesMut,
+    ) -> TCResult<()> {
+        let mut state = self.state.lock().await;
+
+        if !state.contains_block(&txn_id, &block_id) {
+            return Err(error::bad_request(
+                "Tried to overwrite a nonexistent block",
+                block_id,
+            ));
+        }
+
+        state
+            .txn_cache
+            .entry(txn_id)
+            .or_insert_with(HashMap::new)
             .insert(block_id, block);
 
         Ok(())
