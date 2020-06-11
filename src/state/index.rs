@@ -9,7 +9,11 @@ use crate::value::{TCResult, TCType, Value, ValueId};
 
 use super::{Collect, GetResult};
 
-struct Column {
+const BLOCK_SIZE: usize = 100_000;
+const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
+const MAX_KEY_SIZE: usize = ((BLOCK_SIZE - BLOCK_ID_SIZE) / 2) - BLOCK_ID_SIZE;
+
+pub struct Column {
     name: ValueId,
     dtype: TCType,
     max_len: usize,
@@ -18,12 +22,29 @@ struct Column {
 pub struct Index {
     file: Arc<File>,
     schema: Vec<Column>,
+    order: usize,
 }
 
 impl Index {
     async fn create(txn_id: &TxnId, schema: Vec<Column>, file: Arc<File>) -> TCResult<Index> {
+        // length-delimited serialization adds 32 bytes to each key as-stored
+        let key_size: usize = 32 + schema.iter().map(|c| c.max_len).sum::<usize>();
+
+        if key_size >= MAX_KEY_SIZE {
+            return Err(error::bad_request(
+                "The specified Index schema exceeds the maximum size",
+                MAX_KEY_SIZE,
+            ));
+        }
+
+        let order: usize = (BLOCK_SIZE - BLOCK_ID_SIZE) / (key_size + BLOCK_ID_SIZE);
+
         if file.is_empty(txn_id).await {
-            Ok(Index { file, schema })
+            Ok(Index {
+                file,
+                schema,
+                order,
+            })
         } else {
             Err(error::bad_request(
                 "Tried to create a new Index without a new File",
