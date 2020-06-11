@@ -73,7 +73,9 @@ impl Index {
                 ));
             }
 
-            if serde_json::to_string(&key[i])?.as_bytes().len() > column.max_len {
+            let key_size = bincode::serialized_size(&key[i])
+                .map_err(|e| error::bad_request("Serialization error", e))?;
+            if key_size as usize > column.max_len {
                 return Err(error::bad_request(
                     "Column value exceeds the maximum length",
                     &column.name,
