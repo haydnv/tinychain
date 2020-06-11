@@ -5,17 +5,23 @@ use async_trait::async_trait;
 use crate::error;
 use crate::internal::File;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{TCResult, TCType, Value};
+use crate::value::{TCResult, TCType, Value, ValueId};
 
 use super::{Collect, GetResult};
 
+struct Column {
+    name: ValueId,
+    dtype: TCType,
+    max_len: usize,
+}
+
 pub struct Index {
     file: Arc<File>,
-    schema: Vec<TCType>,
+    schema: Vec<Column>,
 }
 
 impl Index {
-    async fn new(txn_id: &TxnId, schema: Vec<TCType>, file: Arc<File>) -> TCResult<Index> {
+    async fn create(txn_id: &TxnId, schema: Vec<Column>, file: Arc<File>) -> TCResult<Index> {
         if file.is_empty(txn_id).await {
             Ok(Index { file, schema })
         } else {
@@ -32,17 +38,24 @@ impl Index {
                 &format!("Invalid key {}, expected", Value::Vector(key)),
                 self.schema
                     .iter()
-                    .map(|c| c.to_string())
+                    .map(|c| c.dtype.to_string())
                     .collect::<Vec<String>>()
                     .join(","),
             ));
         }
 
-        for (i, val) in key.iter().enumerate() {
-            if !val.is_a(&self.schema[i]) {
+        for (i, column) in self.schema.iter().enumerate() {
+            if !key[i].is_a(&column.dtype) {
                 return Err(error::bad_request(
-                    &format!("Expected {}", self.schema[i]),
-                    &key[i],
+                    &format!("Expected {} for", column.dtype),
+                    &column.name,
+                ));
+            }
+
+            if serde_json::to_string(&key[i])?.as_bytes().len() > column.max_len {
+                return Err(error::bad_request(
+                    "Column value exceeds the maximum length",
+                    &column.name,
                 ));
             }
         }
