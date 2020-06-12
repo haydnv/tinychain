@@ -157,24 +157,32 @@ impl Index {
     fn validate_key(&self, key: Vec<Value>) -> TCResult<Key> {
         if self.schema.len() != key.len() {
             return Err(error::bad_request(
-                &format!("Invalid key {}, expected", Value::Vector(key.to_vec())),
-                self.schema
-                    .iter()
-                    .map(|c| c.dtype.to_string())
-                    .collect::<Vec<String>>()
-                    .join(","),
+                &format!("Invalid key {}, expected", Value::Vector(key)),
+                schema_to_string(&self.schema),
             ));
         }
 
-        for (i, column) in self.schema.iter().enumerate() {
-            if !key[i].is_a(&column.dtype) {
+        self.validate_selector(key)
+    }
+
+    fn validate_selector(&self, selector: Vec<Value>) -> TCResult<Key> {
+        if selector.len() > self.schema.len() {
+            return Err(error::bad_request(
+                &format!("Invalid selector {}, expected", Value::Vector(selector)),
+                schema_to_string(&self.schema),
+            ));
+        }
+
+        for (i, val) in selector.iter().enumerate() {
+            let column = &self.schema[i];
+            if !val.is_a(&column.dtype) {
                 return Err(error::bad_request(
                     &format!("Expected {} for", column.dtype),
                     &column.name,
                 ));
             }
 
-            let key_size = bincode::serialized_size(&key[i])?;
+            let key_size = bincode::serialized_size(&val)?;
             if let Some(size) = column.max_len {
                 if key_size as usize > size {
                     return Err(error::bad_request(
@@ -185,7 +193,39 @@ impl Index {
             }
         }
 
-        Ok(Key(key))
+        Ok(Key(selector))
+    }
+
+    async fn get_node(&self, txn_id: &TxnId, node_id: &NodeId) -> TCResult<Node> {
+        if let Some(node) = self.file.get_block(txn_id, node_id).await {
+            bincode::deserialize(&node).map_err(|_| error::internal(ERR_CORRUPT))
+        } else {
+            Err(error::internal(ERR_CORRUPT))
+        }
+    }
+
+    async fn put_node(&self, txn_id: &TxnId, node_id: NodeId, node: &Node) -> TCResult<()> {
+        self.file
+            .put_block(
+                txn_id.clone(),
+                node_id,
+                (&bincode::serialize(node)?[..]).into(),
+            )
+            .await
+    }
+
+    async fn put_node_if_updated(
+        &self,
+        txn_id: &TxnId,
+        node_id: NodeId,
+        node: Node,
+        updated: bool,
+    ) -> TCResult<()> {
+        if updated {
+            self.put_node(txn_id, node_id, &node).await
+        } else {
+            Ok(())
+        }
     }
 
     fn select(self: Arc<Self>, txn_id: TxnId, node: Node, key: Key) -> Selection {
@@ -229,22 +269,42 @@ impl Index {
         }
     }
 
-    async fn get_node(&self, txn_id: &TxnId, node_id: &NodeId) -> TCResult<Node> {
-        if let Some(node) = self.file.get_block(txn_id, node_id).await {
-            bincode::deserialize(&node).map_err(|_| error::internal(ERR_CORRUPT))
-        } else {
-            Err(error::internal(ERR_CORRUPT))
-        }
-    }
+    fn update<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        node_id: &'a NodeId,
+        selector: &'a Key,
+        value: &'a Key,
+    ) -> BoxFuture<'a, TCResult<()>> {
+        Box::pin(async move {
+            let mut node = self.get_node(txn_id, node_id).await?;
+            let l = self.collator.bisect_left(&node.keys, &selector);
+            let r = self.collator.bisect(&node.keys, &selector);
+            let mut updated = false;
 
-    async fn put_node(&self, txn_id: &TxnId, node_id: NodeId, node: &Node) -> TCResult<()> {
-        self.file
-            .put_block(
-                txn_id.clone(),
-                node_id,
-                (&bincode::serialize(node)?[..]).into(),
-            )
-            .await
+            if node.leaf {
+                for i in l..r {
+                    node.keys[i] = value.clone();
+                    updated = true;
+                }
+
+                self.put_node_if_updated(txn_id, node_id.clone(), node, updated)
+                    .await?;
+                Ok(())
+            } else {
+                for i in l..r {
+                    self.update(txn_id, &node.children[i], selector, value)
+                        .await?;
+                    node.keys[i] = value.clone();
+                    updated = true;
+                }
+
+                let last_child = node.children.last().unwrap().clone();
+                self.put_node_if_updated(txn_id, node_id.clone(), node, updated)
+                    .await?;
+                self.update(txn_id, &last_child, selector, value).await
+            }
+        })
     }
 
     fn insert<'a>(
@@ -326,24 +386,30 @@ impl Collect for Index {
     }
 
     async fn put(&self, txn: &Arc<Txn>, selector: Self::Selector, key: Self::Item) -> TCResult<()> {
-        let _selector = self.validate_key(selector)?;
+        let selector = self.validate_selector(selector)?;
         let key = self.validate_key(key)?;
 
         let mut root_id = self.root.lock().await;
-        let mut root = self.get_node(txn.id(), &root_id).await?;
-        if root.keys.len() == (2 * self.order) - 1 {
-            let old_root_id = (*root_id).clone();
-            let mut old_root = root;
 
-            *root_id = new_node_id(self.file.block_ids(txn.id()).await);
-            let mut new_root = Node::new(false);
-            new_root.children.push(old_root_id.clone());
-            self.split_child(txn.id(), old_root_id, &mut old_root, 0)
-                .await?;
+        if self.collator.compare(&selector, &key) == Ordering::Equal {
+            let mut root = self.get_node(txn.id(), &root_id).await?;
 
-            self.insert(txn.id(), &*root_id, &mut new_root, key).await
+            if root.keys.len() == (2 * self.order) - 1 {
+                let old_root_id = (*root_id).clone();
+                let mut old_root = root;
+
+                *root_id = new_node_id(self.file.block_ids(txn.id()).await);
+                let mut new_root = Node::new(false);
+                new_root.children.push(old_root_id.clone());
+                self.split_child(txn.id(), old_root_id, &mut old_root, 0)
+                    .await?;
+
+                self.insert(txn.id(), &*root_id, &mut new_root, key).await
+            } else {
+                self.insert(txn.id(), &*root_id, &mut root, key).await
+            }
         } else {
-            self.insert(txn.id(), &*root_id, &mut root, key).await
+            self.update(txn.id(), &*root_id, &selector, &key).await
         }
     }
 }
@@ -357,6 +423,14 @@ impl Transact for Index {
     async fn rollback(&self, txn_id: &TxnId) {
         self.file.rollback(txn_id).await
     }
+}
+
+fn schema_to_string(schema: &[Column]) -> String {
+    schema
+        .iter()
+        .map(|c| c.dtype.to_string())
+        .collect::<Vec<String>>()
+        .join(",")
 }
 
 fn new_node_id(existing_ids: HashSet<NodeId>) -> NodeId {
