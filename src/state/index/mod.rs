@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::BoxFuture;
+use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -24,18 +25,15 @@ const ERR_CORRUPT: &str = "Index corrupted! Please restart Tinychain and file a 
 type NodeId = BlockId;
 
 #[derive(Deserialize, Serialize)]
-pub struct Key {
-    value: Vec<Value>,
-    deleted: bool,
-}
+pub struct Key(Vec<Value>);
 
 impl Key {
     fn is_empty(&self) -> bool {
-        self.value.is_empty()
+        self.0.is_empty()
     }
 
     fn len(&self) -> usize {
-        self.value.len()
+        self.0.len()
     }
 }
 
@@ -46,7 +44,7 @@ where
     type Output = Idx::Output;
 
     fn index(&self, index: Idx) -> &Self::Output {
-        &self.value[index]
+        &self.0[index]
     }
 }
 
@@ -76,28 +74,25 @@ pub struct Column {
 pub struct Index {
     file: Arc<File>,
     schema: Vec<Column>,
-    block_size: usize,
     order: usize,
-    root: BlockId,
     collator: collator::Collator,
+    root: Mutex<BlockId>,
 }
 
 impl Index {
     async fn create(txn_id: TxnId, schema: Vec<Column>, file: Arc<File>) -> TCResult<Index> {
         // the "leaf" boolean adds 1 byte to each key as-stored
-        // length-delimited serialization adds 32 bytes to each key as-stored
-        let key_size: usize = 1 + 32 + schema.iter().map(|c| c.max_len).sum::<usize>();
+        let key_size: usize = 1 + schema.iter().map(|c| c.max_len).sum::<usize>();
 
-        let (block_size, order) = if DEFAULT_BLOCK_SIZE > (key_size * 2) + BLOCK_ID_SIZE {
+        let order = if DEFAULT_BLOCK_SIZE > (key_size * 2) + (BLOCK_ID_SIZE * 3) {
             // let m := order
             // maximum block size = (m * key_size) + ((m + 1) * block_id_size)
             // therefore block_size = (m * (key_size + block_id_size)) + block_id_size
             // therefore block_size - block_id_size = m * (key_size + block_id_size)
             // therefore m = floor((block_size - block_id_size) / (key_size + block_id_size))
-            let order = (DEFAULT_BLOCK_SIZE - BLOCK_ID_SIZE) / (key_size + BLOCK_ID_SIZE);
-            (DEFAULT_BLOCK_SIZE, order)
+            (DEFAULT_BLOCK_SIZE - BLOCK_ID_SIZE) / (key_size + BLOCK_ID_SIZE)
         } else {
-            ((2 * key_size) + (3 * BLOCK_ID_SIZE), 2)
+            2
         };
 
         if file.is_empty(&txn_id).await {
@@ -114,10 +109,9 @@ impl Index {
             Ok(Index {
                 file,
                 schema,
-                block_size,
                 order,
-                root,
                 collator,
+                root: Mutex::new(root),
             })
         } else {
             Err(error::bad_request(
@@ -127,10 +121,10 @@ impl Index {
         }
     }
 
-    fn validate_key(&self, key: Vec<Value>) -> TCResult<()> {
+    fn validate_key(&self, key: &[Value]) -> TCResult<()> {
         if self.schema.len() != key.len() {
             return Err(error::bad_request(
-                &format!("Invalid key {}, expected", Value::Vector(key)),
+                &format!("Invalid key {}, expected", Value::Vector(key.to_vec())),
                 self.schema
                     .iter()
                     .map(|c| c.dtype.to_string())
@@ -242,19 +236,32 @@ impl Collect for Index {
     type Selector = Vec<Value>;
     type Item = Vec<Value>;
 
-    async fn get(&self, _txn: &Arc<Txn>, _selector: &Self::Selector) -> GetResult {
-        Err(error::not_implemented())
-    }
-
-    async fn put(
-        &self,
-        _txn: &Arc<Txn>,
-        selector: Self::Selector,
-        _key: Self::Item,
-    ) -> TCResult<()> {
+    async fn get(&self, _txn: &Arc<Txn>, selector: &Self::Selector) -> GetResult {
         self.validate_key(selector)?;
 
         Err(error::not_implemented())
+    }
+
+    async fn put(&self, txn: &Arc<Txn>, selector: Self::Selector, key: Self::Item) -> TCResult<()> {
+        self.validate_key(&selector)?;
+        let key = Key(key);
+
+        let mut root_id = self.root.lock().await;
+        let mut root = self.get_node(txn.id(), &root_id).await?;
+        if root.keys.len() == (2 * self.order) - 1 {
+            let old_root_id = (*root_id).clone();
+            let mut old_root = root;
+
+            *root_id = new_node_id(self.file.block_ids(txn.id()).await);
+            let mut new_root = Node::new(false);
+            new_root.children.push(old_root_id.clone());
+            self.split_child(txn.id(), old_root_id, &mut old_root, 0)
+                .await?;
+
+            self.insert(txn.id(), &*root_id, &mut new_root, key).await
+        } else {
+            self.insert(txn.id(), &*root_id, &mut root, key).await
+        }
     }
 }
 
