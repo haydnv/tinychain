@@ -1,11 +1,13 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::BoxFuture;
+use futures::future::{self, BoxFuture, Future, FutureExt};
 use futures::lock::Mutex;
+use futures::stream::{self, FuturesOrdered, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -14,7 +16,7 @@ use crate::internal::{BlockId, File};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{TCResult, TCType, Value, ValueId};
 
-use super::{Collect, GetResult};
+use super::{Collect, GetResult, State};
 
 mod collator;
 
@@ -24,7 +26,7 @@ const ERR_CORRUPT: &str = "Index corrupted! Please restart Tinychain and file a 
 
 type NodeId = BlockId;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Key(Vec<Value>);
 
 impl Key {
@@ -48,6 +50,12 @@ where
     }
 }
 
+impl From<Key> for State {
+    fn from(key: Key) -> State {
+        Value::Vector(key.0).into()
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 struct Node {
     leaf: bool,
@@ -63,7 +71,13 @@ impl Node {
             children: vec![],
         }
     }
+
+    fn into_keys<R: RangeBounds<usize>>(mut self, range: R) -> Vec<Key> {
+        self.keys.drain(range).collect()
+    }
 }
+
+type Selection = Box<dyn Stream<Item = Key> + Unpin + Send>;
 
 pub struct Column {
     name: ValueId,
@@ -140,7 +154,7 @@ impl Index {
         }
     }
 
-    fn validate_key(&self, key: &[Value]) -> TCResult<()> {
+    fn validate_key(&self, key: Vec<Value>) -> TCResult<Key> {
         if self.schema.len() != key.len() {
             return Err(error::bad_request(
                 &format!("Invalid key {}, expected", Value::Vector(key.to_vec())),
@@ -171,7 +185,48 @@ impl Index {
             }
         }
 
-        Ok(())
+        Ok(Key(key))
+    }
+
+    fn select(self: Arc<Self>, txn_id: TxnId, node: Node, key: Key) -> Selection {
+        let l = self.collator.bisect_left(&node.keys, &key);
+        let r = self.collator.bisect(&node.keys, &key);
+
+        if node.leaf {
+            Box::new(stream::iter(node.into_keys(l..r)).boxed())
+        } else {
+            let mut selected: FuturesOrdered<Box<dyn Future<Output = Selection> + Unpin + Send>> =
+                FuturesOrdered::new();
+            for i in l..r {
+                let index = self.clone();
+                let child = node.children[i].clone();
+                let txn_id = txn_id.clone();
+                let key = key.clone();
+
+                selected.push(Box::new(
+                    async move {
+                        let node = index.get_node(&txn_id, &child).await.unwrap();
+                        index.select(txn_id, node, key)
+                    }
+                    .boxed(),
+                ));
+
+                let key_at_i = node.keys[i].clone(); // TODO: drain the node instead of cloning its keys
+                let key_at_i: Selection = Box::new(stream::once(future::ready(key_at_i)).boxed());
+                selected.push(Box::new(future::ready(key_at_i)));
+            }
+
+            let last_child = node.children[r].clone();
+            selected.push(Box::new(
+                async move {
+                    let node = self.get_node(&txn_id, &last_child).await.unwrap();
+                    self.select(txn_id, node, key)
+                }
+                .boxed(),
+            ));
+
+            Box::new(selected.flatten())
+        }
     }
 
     async fn get_node(&self, txn_id: &TxnId, node_id: &NodeId) -> TCResult<Node> {
@@ -257,15 +312,22 @@ impl Collect for Index {
     type Selector = Vec<Value>;
     type Item = Vec<Value>;
 
-    async fn get(&self, _txn: &Arc<Txn>, selector: &Self::Selector) -> GetResult {
-        self.validate_key(selector)?;
-
-        Err(error::not_implemented())
+    async fn get(self: Arc<Self>, txn: Arc<Txn>, selector: Self::Selector) -> GetResult {
+        let key = self.validate_key(selector)?;
+        let txn_id = txn.id().clone();
+        let root_id = self.root.lock().await;
+        let root_node = self.get_node(&txn_id, &root_id).await?;
+        Ok(Box::new(
+            self.clone()
+                .select(txn_id, root_node, key.clone())
+                .map(|row| row.into())
+                .boxed(),
+        ))
     }
 
     async fn put(&self, txn: &Arc<Txn>, selector: Self::Selector, key: Self::Item) -> TCResult<()> {
-        self.validate_key(&selector)?;
-        let key = Key(key);
+        let _selector = self.validate_key(selector)?;
+        let key = self.validate_key(key)?;
 
         let mut root_id = self.root.lock().await;
         let mut root = self.get_node(txn.id(), &root_id).await?;

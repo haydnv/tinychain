@@ -36,7 +36,7 @@ pub trait Collect: Transact + Send + Sync {
         + Sync
         + 'static;
 
-    async fn get(&self, txn: &Arc<Txn>, selector: &Self::Selector) -> GetResult;
+    async fn get(self: Arc<Self>, txn: Arc<Txn>, selector: Self::Selector) -> GetResult;
 
     async fn put(
         &self,
