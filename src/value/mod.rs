@@ -28,6 +28,18 @@ pub enum TCType {
     Vector,
 }
 
+impl TCType {
+    pub fn size(&self) -> Option<usize> {
+        use TCType::*;
+        match self {
+            None => Some(1),
+            Int32 => Some(4),
+            UInt64 => Some(8),
+            _ => Option::None,
+        }
+    }
+}
+
 impl fmt::Display for TCType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use TCType::*;

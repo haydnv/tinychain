@@ -68,7 +68,7 @@ impl Node {
 pub struct Column {
     name: ValueId,
     dtype: TCType,
-    max_len: usize,
+    max_len: Option<usize>,
 }
 
 pub struct Index {
@@ -81,8 +81,27 @@ pub struct Index {
 
 impl Index {
     async fn create(txn_id: TxnId, schema: Vec<Column>, file: Arc<File>) -> TCResult<Index> {
+        let mut key_size = 0;
+        for col in &schema {
+            if let Some(size) = col.dtype.size() {
+                key_size += size;
+                if col.max_len.is_some() {
+                    return Err(error::bad_request(
+                        "Found maximum length specified for a scalar type",
+                        &col.dtype,
+                    ));
+                }
+            } else if let Some(size) = col.max_len {
+                key_size += size + 8; // add 8 bytes for bincode to encode the length
+            } else {
+                return Err(error::bad_request(
+                    "Type requires a maximum length",
+                    &col.dtype,
+                ));
+            }
+        }
         // the "leaf" boolean adds 1 byte to each key as-stored
-        let key_size: usize = 1 + schema.iter().map(|c| c.max_len).sum::<usize>();
+        key_size += 1;
 
         let order = if DEFAULT_BLOCK_SIZE > (key_size * 2) + (BLOCK_ID_SIZE * 3) {
             // let m := order
@@ -142,11 +161,13 @@ impl Index {
             }
 
             let key_size = bincode::serialized_size(&key[i])?;
-            if key_size as usize > column.max_len {
-                return Err(error::bad_request(
-                    "Column value exceeds the maximum length",
-                    &column.name,
-                ));
+            if let Some(size) = column.max_len {
+                if key_size as usize > size {
+                    return Err(error::bad_request(
+                        "Column value exceeds the maximum length",
+                        &column.name,
+                    ));
+                }
             }
         }
 
