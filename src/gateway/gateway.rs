@@ -38,7 +38,7 @@ impl Gateway {
     pub async fn get(&self, subject: &Link, selector: Value, _auth: &Auth) -> GetResult {
         if subject.host().is_none() {
             let state = kernel::get(subject.path(), selector)?;
-            Ok(Box::new(stream::once(future::ready(state))))
+            Ok(Box::pin(stream::once(future::ready(state))))
         } else if let Some((_rel_path, _cluster)) = self.hosted.get(subject.path()) {
             Err(error::not_implemented())
         } else {

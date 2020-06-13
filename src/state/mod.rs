@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
 use std::fmt;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -16,7 +17,7 @@ pub mod graph;
 pub mod index;
 
 // TODO: can this `Box<dyn...>` be replaced by `impl Stream<...>`?
-pub type GetResult = TCResult<Box<dyn Stream<Item = State> + Send + Unpin>>;
+pub type GetResult = TCResult<Pin<Box<dyn Stream<Item = State> + Send + Sync + Unpin>>>;
 
 #[async_trait]
 pub trait Collect: Transact + Send + Sync {

@@ -94,11 +94,7 @@ pub struct Http {
 }
 
 impl Http {
-    pub fn new(
-        address: SocketAddr,
-        gateway: Arc<Gateway>,
-        request_limit: usize,
-    ) -> Arc<Http> {
+    pub fn new(address: SocketAddr, gateway: Arc<Gateway>, request_limit: usize) -> Arc<Http> {
         Arc::new(Http {
             address,
             gateway,

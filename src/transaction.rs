@@ -12,7 +12,7 @@ use crate::auth::Auth;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::internal::Dir;
-use crate::state::State;
+use crate::state::{GetResult, State};
 use crate::value::link::*;
 use crate::value::*;
 
@@ -167,7 +167,7 @@ impl Txn {
         subject: Subject,
         selector: Value,
         auth: &Auth,
-    ) -> TCResult<Box<dyn Stream<Item = State> + Send + Unpin>> {
+    ) -> GetResult {
         println!("txn::get {}", subject);
 
         match subject {

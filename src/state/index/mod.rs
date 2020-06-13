@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::ops::RangeBounds;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::{self, BoxFuture, Future, FutureExt};
+use futures::future::{self, BoxFuture, Future};
 use futures::lock::Mutex;
 use futures::stream::{self, FuturesOrdered, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -41,13 +41,9 @@ impl Node {
             children: vec![],
         }
     }
-
-    fn into_keys<R: RangeBounds<usize>>(mut self, range: R) -> Vec<Vec<Value>> {
-        self.keys.drain(range).collect()
-    }
 }
 
-type Selection = Box<dyn Stream<Item = Vec<Value>> + Unpin + Send>;
+type Selection = Pin<Box<dyn Stream<Item = Vec<Value>> + Send + Sync + Unpin>>;
 
 pub struct Column {
     name: ValueId,
@@ -201,44 +197,42 @@ impl Index {
         }
     }
 
-    fn select(self: Arc<Self>, txn_id: TxnId, node: Node, key: Vec<Value>) -> Selection {
+    fn select(self: Arc<Self>, txn_id: TxnId, mut node: Node, key: Vec<Value>) -> Selection {
         let l = self.collator.bisect_left(&node.keys, &key);
         let r = self.collator.bisect(&node.keys, &key);
 
         if node.leaf {
-            Box::new(stream::iter(node.into_keys(l..r)).boxed())
+            let keys: Vec<Vec<Value>> = node.keys.drain(l..r).collect();
+            Box::pin(stream::iter(keys))
         } else {
-            let mut selected: FuturesOrdered<Box<dyn Future<Output = Selection> + Unpin + Send>> =
-                FuturesOrdered::new();
+            let mut selected: FuturesOrdered<
+                Pin<Box<dyn Future<Output = Selection> + Send + Sync + Unpin>>,
+            > = FuturesOrdered::new();
             for i in l..r {
                 let index = self.clone();
                 let child = node.children[i].clone();
                 let txn_id = txn_id.clone();
                 let key = key.clone();
 
-                selected.push(Box::new(
-                    async move {
-                        let node = index.get_node(&txn_id, &child).await.unwrap();
-                        index.select(txn_id, node, key)
-                    }
-                    .boxed(),
-                ));
+                let selection = Box::pin(async move {
+                    let node = index.get_node(&txn_id, &child).await.unwrap();
+                    index.select(txn_id, node, key)
+                });
+                selected.push(Box::pin(selection));
 
                 let key_at_i = node.keys[i].clone(); // TODO: drain the node instead of cloning its keys
-                let key_at_i: Selection = Box::new(stream::once(future::ready(key_at_i)).boxed());
-                selected.push(Box::new(future::ready(key_at_i)));
+                let key_at_i: Selection = Box::pin(stream::once(future::ready(key_at_i)));
+                selected.push(Box::pin(future::ready(key_at_i)));
             }
 
             let last_child = node.children[r].clone();
-            selected.push(Box::new(
-                async move {
-                    let node = self.get_node(&txn_id, &last_child).await.unwrap();
-                    self.select(txn_id, node, key)
-                }
-                .boxed(),
-            ));
+            let selection = Box::pin(async move {
+                let node = self.get_node(&txn_id, &last_child).await.unwrap();
+                self.select(txn_id, node, key)
+            });
+            selected.push(Box::pin(selection));
 
-            Box::new(selected.flatten())
+            Box::pin(selected.flatten())
         }
     }
 
@@ -350,11 +344,10 @@ impl Collect for Index {
         let txn_id = txn.id().clone();
         let root_id = self.root.lock().await;
         let root_node = self.get_node(&txn_id, &root_id).await?;
-        Ok(Box::new(
+        Ok(Box::pin(
             self.clone()
                 .select(txn_id, root_node, selector)
-                .map(|row| State::Value(row.into()))
-                .boxed(),
+                .map(|row| State::Value(row.into())),
         ))
     }
 
