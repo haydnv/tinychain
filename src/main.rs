@@ -79,10 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
 
     use gateway::Protocol;
-    match http_server.listen().await {
-        Ok(()) => Ok(()),
-        Err(cause) => Err(cause.into()),
-    }
+    http_server.listen().await.map_err(|e| e.into())
 }
 
 async fn configure(
@@ -94,6 +91,7 @@ async fn configure(
         .transaction()
         .await?;
     let txn_id = txn.id();
+
     let mut hosted = gateway::Hosted::new();
     for path in clusters {
         for reserved in RESERVED.iter() {
@@ -119,6 +117,8 @@ async fn configure(
             hosted.push(path.clone(), hosted_cluster);
         }
     }
+
+    txn.commit().await;
 
     Ok(hosted)
 }
