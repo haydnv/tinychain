@@ -38,7 +38,7 @@ struct Config {
     #[structopt(long = "address", default_value = "127.0.0.1")]
     pub address: IpAddr,
 
-    #[structopt(long = "block_size", default_value = "1K", parse(try_from_str = block_size))]
+    #[structopt(long = "block_size", default_value = "4K", parse(try_from_str = block_size))]
     pub block_size: usize,
 
     #[structopt(long = "data_dir", default_value = "/tmp/tc/data")]
@@ -66,25 +66,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
     println!();
 
+    let data_dir = internal::Dir::new(config.data_dir);
     let workspace = internal::Dir::new_tmp(config.workspace.clone());
-    let hosted = configure(config, workspace.clone()).await?;
-    let _gateway = gateway::Gateway::new(hosted, workspace);
+    let hosted = configure(config.hosted, data_dir.clone(), workspace.clone()).await?;
+    let gateway = gateway::Gateway::new(hosted, workspace.clone());
 
-    Ok(())
+    let http_server = http::Http::new(
+        (config.address, config.http_port).into(),
+        gateway,
+        workspace,
+        config.block_size,
+    );
+
+    use gateway::Protocol;
+    match http_server.listen().await {
+        Ok(()) => Ok(()),
+        Err(cause) => Err(cause.into()),
+    }
 }
 
 async fn configure(
-    config: Config,
+    clusters: Vec<value::link::TCPath>,
+    data_dir: Arc<internal::Dir>,
     workspace: Arc<internal::Dir>,
 ) -> value::TCResult<gateway::Hosted> {
-    let data_dir = internal::Dir::new(config.data_dir);
-
     let txn = gateway::Gateway::new(gateway::Hosted::new(), workspace)
         .transaction()
         .await?;
     let txn_id = txn.id();
     let mut hosted = gateway::Hosted::new();
-    for path in config.hosted {
+    for path in clusters {
         for reserved in RESERVED.iter() {
             if path.to_string().starts_with(reserved) {
                 return Err(error::bad_request("Attempt to host a reserved path", path));

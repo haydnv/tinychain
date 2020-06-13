@@ -96,7 +96,7 @@ pub struct Http {
 }
 
 impl Http {
-    fn new(
+    pub fn new(
         address: SocketAddr,
         gateway: Arc<Gateway>,
         workspace: Arc<Dir>,
