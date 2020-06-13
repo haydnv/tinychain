@@ -3,6 +3,7 @@ use std::fmt;
 use crate::error;
 
 pub mod link;
+mod op;
 mod reference;
 
 #[allow(clippy::module_inception)]
@@ -13,7 +14,6 @@ pub type TCRef = reference::TCRef;
 pub type TCResult<T> = Result<T, error::TCError>;
 pub type Value = value::Value;
 pub type ValueId = value::ValueId;
-pub type Version = version::Version;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub enum TCType {
@@ -23,6 +23,7 @@ pub enum TCType {
     Int32,
     UInt64,
     Link,
+    Op,
     Ref,
     r#String,
     Vector,
@@ -50,6 +51,7 @@ impl fmt::Display for TCType {
             Int32 => write!(f, "type Int32"),
             UInt64 => write!(f, "type UInt64"),
             Link => write!(f, "type Link"),
+            Op => write!(f, "type Op"),
             Ref => write!(f, "type Ref"),
             r#String => write!(f, "type String"),
             Vector => write!(f, "type Vector"),

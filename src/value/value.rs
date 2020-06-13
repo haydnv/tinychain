@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::error;
 
 use super::link::{Link, TCPath};
+use super::op::Op;
 use super::{TCRef, TCResult, TCType};
 
 const RESERVED_CHARS: [&str; 21] = [
@@ -152,6 +153,7 @@ pub enum Value {
     Int32(i32),
     UInt64(u64),
     Link(Link),
+    Op(Box<Op>),
     Ref(TCRef),
     r#String(String),
     Vector(Vec<Value>),
@@ -167,6 +169,7 @@ impl Value {
             Int32(_) => dtype == &TCType::Int32,
             UInt64(_) => dtype == &TCType::UInt64,
             Link(_) => dtype == &TCType::Link,
+            Op(_) => dtype == &TCType::Op,
             Ref(_) => dtype == &TCType::Ref,
             r#String(_) => dtype == &TCType::r#String,
             Vector(_) => dtype == &TCType::Vector,
@@ -195,6 +198,12 @@ impl From<Bytes> for Value {
 impl From<Link> for Value {
     fn from(l: Link) -> Value {
         Value::Link(l)
+    }
+}
+
+impl From<Op> for Value {
+    fn from(op: Op) -> Value {
+        Value::Op(Box::new(op))
     }
 }
 
@@ -388,17 +397,23 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         M: de::MapAccess<'de>,
     {
         if let Some(key) = access.next_key::<&str>()? {
-            let value: Vec<Value> = access.next_value()?;
-            if value.is_empty() {
-                if key.starts_with('$') {
-                    let r: TCRef = key.parse().map_err(de::Error::custom)?;
-                    Ok(r.into())
-                } else {
-                    let link: Link = key.parse().map_err(de::Error::custom)?;
-                    Ok(link.into())
+            let mut value: Vec<Value> = access.next_value()?;
+
+            if key.starts_with('$') {
+                let subject = key.parse::<TCRef>().map_err(de::Error::custom)?;
+                match value.len() {
+                    0 => Ok(subject.into()),
+                    1 => Ok(Op::Get(subject.into(), value.remove(0)).into()),
+                    2 => Ok(Op::Put(subject.into(), value.remove(0), value.remove(0)).into()),
+                    _ => Err(de::Error::custom(format!(
+                        "Expected a Get or Put op, found {}",
+                        Value::Vector(value)
+                    ))),
                 }
+            } else if let Ok(link) = key.parse::<Link>() {
+                Ok(link.into())
             } else {
-                panic!("What to do?")
+                panic!("NOT IMPLEMENTED")
             }
         } else {
             Err(de::Error::custom("Unable to parse map entry"))
@@ -435,6 +450,18 @@ impl Serialize for Value {
             Value::Int32(i) => s.serialize_i32(*i),
             Value::UInt64(i) => s.serialize_u64(*i),
             Value::Link(l) => l.serialize(s),
+            Value::Op(op) => {
+                let mut map = s.serialize_map(Some(1))?;
+                match &**op {
+                    Op::Get(subject, selector) => {
+                        map.serialize_entry(&subject.to_string(), &[selector])?
+                    }
+                    Op::Put(subject, selector, value) => {
+                        map.serialize_entry(&subject.to_string(), &[selector, value])?
+                    }
+                }
+                map.end()
+            }
             Value::Ref(r) => r.serialize(s),
             Value::r#String(v) => s.serialize_str(v),
             Value::Vector(v) => {
@@ -463,6 +490,7 @@ impl fmt::Display for Value {
             Value::Int32(i) => write!(f, "Int32: {}", i),
             Value::UInt64(i) => write!(f, "UInt64: {}", i),
             Value::Link(l) => write!(f, "Link: {}", l),
+            Value::Op(op) => write!(f, "Op: {}", op),
             Value::Ref(r) => write!(f, "Ref: {}", r),
             Value::r#String(s) => write!(f, "String: {}", s),
             Value::Vector(v) => write!(

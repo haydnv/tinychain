@@ -74,7 +74,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let http_server = http::Http::new(
         (config.address, config.http_port).into(),
         gateway,
-        workspace,
         config.block_size,
     );
 

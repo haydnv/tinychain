@@ -16,7 +16,6 @@ use serde::de::DeserializeOwned;
 use crate::auth::Token;
 use crate::error;
 use crate::gateway::{Gateway, Protocol};
-use crate::internal::Dir;
 use crate::transaction::TxnId;
 use crate::value::link::*;
 use crate::value::{TCResult, Value};
@@ -91,7 +90,6 @@ impl<S: Stream<Item = Result<Bytes, hyper::Error>> + Unpin> io::Read for StreamR
 pub struct Http {
     address: SocketAddr,
     gateway: Arc<Gateway>,
-    workspace: Arc<Dir>,
     request_limit: usize,
 }
 
@@ -99,13 +97,11 @@ impl Http {
     pub fn new(
         address: SocketAddr,
         gateway: Arc<Gateway>,
-        workspace: Arc<Dir>,
         request_limit: usize,
     ) -> Arc<Http> {
         Arc::new(Http {
             address,
             gateway,
-            workspace,
             request_limit,
         })
     }
