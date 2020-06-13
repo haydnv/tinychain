@@ -419,7 +419,7 @@ impl<T: Collect> Chain<T> {
         let mut put_ops = Vec::with_capacity(block.len());
         for (_, mutations) in block.iter() {
             for (key, val) in mutations.iter() {
-                put_ops.push(object.put(txn, key.clone(), val.clone()));
+                put_ops.push(object.put(txn, &key, val.clone()));
             }
         }
 

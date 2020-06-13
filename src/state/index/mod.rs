@@ -26,40 +26,10 @@ const ERR_CORRUPT: &str = "Index corrupted! Please restart Tinychain and file a 
 
 type NodeId = BlockId;
 
-#[derive(Clone, Deserialize, Serialize)]
-pub struct Key(Vec<Value>);
-
-impl Key {
-    fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-}
-
-impl<Idx> std::ops::Index<Idx> for Key
-where
-    Idx: std::slice::SliceIndex<[Value]>,
-{
-    type Output = Idx::Output;
-
-    fn index(&self, index: Idx) -> &Self::Output {
-        &self.0[index]
-    }
-}
-
-impl From<Key> for State {
-    fn from(key: Key) -> State {
-        Value::Vector(key.0).into()
-    }
-}
-
 #[derive(Deserialize, Serialize)]
 struct Node {
     leaf: bool,
-    keys: Vec<Key>,
+    keys: Vec<Vec<Value>>,
     children: Vec<NodeId>,
 }
 
@@ -72,12 +42,12 @@ impl Node {
         }
     }
 
-    fn into_keys<R: RangeBounds<usize>>(mut self, range: R) -> Vec<Key> {
+    fn into_keys<R: RangeBounds<usize>>(mut self, range: R) -> Vec<Vec<Value>> {
         self.keys.drain(range).collect()
     }
 }
 
-type Selection = Box<dyn Stream<Item = Key> + Unpin + Send>;
+type Selection = Box<dyn Stream<Item = Vec<Value>> + Unpin + Send>;
 
 pub struct Column {
     name: ValueId,
@@ -154,10 +124,10 @@ impl Index {
         }
     }
 
-    fn validate_key(&self, key: Vec<Value>) -> TCResult<Key> {
+    fn validate_key(&self, key: &[Value]) -> TCResult<()> {
         if self.schema.len() != key.len() {
             return Err(error::bad_request(
-                &format!("Invalid key {}, expected", Value::Vector(key)),
+                &format!("Invalid key {}, expected", Value::Vector(key.to_vec())),
                 schema_to_string(&self.schema),
             ));
         }
@@ -165,10 +135,13 @@ impl Index {
         self.validate_selector(key)
     }
 
-    fn validate_selector(&self, selector: Vec<Value>) -> TCResult<Key> {
+    fn validate_selector(&self, selector: &[Value]) -> TCResult<()> {
         if selector.len() > self.schema.len() {
             return Err(error::bad_request(
-                &format!("Invalid selector {}, expected", Value::Vector(selector)),
+                &format!(
+                    "Invalid selector {}, expected",
+                    Value::Vector(selector.to_vec())
+                ),
                 schema_to_string(&self.schema),
             ));
         }
@@ -193,7 +166,7 @@ impl Index {
             }
         }
 
-        Ok(Key(selector))
+        Ok(())
     }
 
     async fn get_node(&self, txn_id: &TxnId, node_id: &NodeId) -> TCResult<Node> {
@@ -228,7 +201,7 @@ impl Index {
         }
     }
 
-    fn select(self: Arc<Self>, txn_id: TxnId, node: Node, key: Key) -> Selection {
+    fn select(self: Arc<Self>, txn_id: TxnId, node: Node, key: Vec<Value>) -> Selection {
         let l = self.collator.bisect_left(&node.keys, &key);
         let r = self.collator.bisect(&node.keys, &key);
 
@@ -273,8 +246,8 @@ impl Index {
         &'a self,
         txn_id: &'a TxnId,
         node_id: &'a NodeId,
-        selector: &'a Key,
-        value: &'a Key,
+        selector: &'a [Value],
+        value: &'a [Value],
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
             let mut node = self.get_node(txn_id, node_id).await?;
@@ -284,7 +257,7 @@ impl Index {
 
             if node.leaf {
                 for i in l..r {
-                    node.keys[i] = value.clone();
+                    node.keys[i] = value.to_vec();
                     updated = true;
                 }
 
@@ -295,7 +268,7 @@ impl Index {
                 for i in l..r {
                     self.update(txn_id, &node.children[i], selector, value)
                         .await?;
-                    node.keys[i] = value.clone();
+                    node.keys[i] = value.to_vec();
                     updated = true;
                 }
 
@@ -312,7 +285,7 @@ impl Index {
         txn_id: &'a TxnId,
         node_id: &'a NodeId,
         node: &'a mut Node,
-        key: Key,
+        key: Vec<Value>,
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
             let mut i = self.collator.bisect_left(&node.keys, &key);
@@ -373,25 +346,30 @@ impl Collect for Index {
     type Item = Vec<Value>;
 
     async fn get(self: Arc<Self>, txn: Arc<Txn>, selector: Self::Selector) -> GetResult {
-        let key = self.validate_key(selector)?;
+        self.validate_key(&selector)?;
         let txn_id = txn.id().clone();
         let root_id = self.root.lock().await;
         let root_node = self.get_node(&txn_id, &root_id).await?;
         Ok(Box::new(
             self.clone()
-                .select(txn_id, root_node, key.clone())
-                .map(|row| row.into())
+                .select(txn_id, root_node, selector)
+                .map(|row| State::Value(row.into()))
                 .boxed(),
         ))
     }
 
-    async fn put(&self, txn: &Arc<Txn>, selector: Self::Selector, key: Self::Item) -> TCResult<()> {
-        let selector = self.validate_selector(selector)?;
-        let key = self.validate_key(key)?;
+    async fn put(
+        &self,
+        txn: &Arc<Txn>,
+        selector: &Self::Selector,
+        key: Self::Item,
+    ) -> TCResult<()> {
+        self.validate_selector(selector)?;
+        self.validate_key(&key)?;
 
         let mut root_id = self.root.lock().await;
 
-        if self.collator.compare(&selector, &key) == Ordering::Equal {
+        if self.collator.compare(selector, &key) == Ordering::Equal {
             let mut root = self.get_node(txn.id(), &root_id).await?;
 
             if root.keys.len() == (2 * self.order) - 1 {

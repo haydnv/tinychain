@@ -41,7 +41,7 @@ pub trait Collect: Transact + Send + Sync {
     async fn put(
         &self,
         txn: &Arc<Txn>,
-        selector: Self::Selector,
+        selector: &Self::Selector,
         value: Self::Item,
     ) -> TCResult<()>;
 }

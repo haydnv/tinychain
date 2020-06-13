@@ -225,6 +225,12 @@ impl From<TCRef> for Value {
     }
 }
 
+impl<T: Into<Value>> From<Vec<T>> for Value {
+    fn from(mut v: Vec<T>) -> Value {
+        Value::Vector(v.drain(..).map(|i| i.into()).collect())
+    }
+}
+
 impl From<String> for Value {
     fn from(s: String) -> Value {
         Value::r#String(s)

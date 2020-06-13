@@ -4,9 +4,7 @@ use std::convert::TryInto;
 use num::Integer;
 
 use crate::error;
-use crate::value::{TCResult, TCType};
-
-use super::Key;
+use crate::value::{TCResult, TCType, Value};
 
 pub struct Collator {
     schema: Vec<TCType>,
@@ -32,7 +30,7 @@ impl Collator {
         }
     }
 
-    pub fn bisect(&self, keys: &[Key], key: &Key) -> usize {
+    pub fn bisect(&self, keys: &[Vec<Value>], key: &[Value]) -> usize {
         if keys.is_empty() {
             return 0;
         }
@@ -64,7 +62,7 @@ impl Collator {
         }
     }
 
-    pub fn bisect_left(&self, keys: &[Key], key: &Key) -> usize {
+    pub fn bisect_left(&self, keys: &[Vec<Value>], key: &[Value]) -> usize {
         if keys.is_empty() {
             return 0;
         }
@@ -96,7 +94,7 @@ impl Collator {
         }
     }
 
-    pub fn compare(&self, key1: &Key, key2: &Key) -> Ordering {
+    pub fn compare(&self, key1: &[Value], key2: &[Value]) -> Ordering {
         for i in 0..Ord::min(key1.len(), key2.len()) {
             match self.schema[i] {
                 TCType::Int32 => {
