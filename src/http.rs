@@ -7,6 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::executor::block_on;
+use futures::future;
 use futures::stream::{self, Stream};
 use futures_util::stream::StreamExt;
 use hyper::service::{make_service_fn, service_fn};
@@ -16,9 +17,10 @@ use serde::de::DeserializeOwned;
 use crate::auth::Token;
 use crate::error;
 use crate::gateway::{Gateway, Protocol};
+use crate::state::State;
 use crate::transaction::TxnId;
 use crate::value::link::*;
-use crate::value::{TCResult, Value};
+use crate::value::{TCResult, TCStream, Value};
 
 struct StreamReader<S: Stream<Item = Result<Bytes, hyper::Error>>> {
     source: S,
@@ -140,11 +142,14 @@ impl Http {
     ) -> Result<Response<Body>, hyper::Error> {
         match self.authenticate_and_route(request).await {
             Err(cause) => Ok(Http::transform_error(cause)),
-            Ok(()) => Ok(Response::new(Body::from(""))),
+            Ok(response) => Ok(Response::new(Body::wrap_stream(response))),
         }
     }
 
-    async fn authenticate_and_route(self: Arc<Self>, mut request: Request<Body>) -> TCResult<()> {
+    async fn authenticate_and_route(
+        self: Arc<Self>,
+        mut request: Request<Body>,
+    ) -> TCResult<TCStream<TCResult<Bytes>>> {
         let token: Option<Token> = if let Some(header) = request.headers().get("Authorization") {
             let token = header
                 .to_str()
@@ -167,16 +172,30 @@ impl Http {
 
         let _txn_id: Option<TxnId> = Http::get_param(&mut params, "txn_id")?;
 
-        // TODO: stream the response back to the client
         match request.method() {
             &Method::GET => {
                 let id = Http::get_param(&mut params, "key")?
                     .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
-                let mut data = self.gateway.get(&path.clone().into(), id, &token).await?;
-                while let Some(_state) = data.next().await {
-                    // TODO: serialize & write to output stream
-                }
-                Ok(())
+                let data = self.gateway.get(&path.clone().into(), id, &token).await?;
+                let start_delimiter: TCStream<TCResult<Bytes>> = Box::pin(stream::once(
+                    future::ready(Ok(Bytes::copy_from_slice(b"["))),
+                ));
+
+                let response: TCStream<TCResult<Bytes>> = Box::pin(data.map(|state| match state {
+                    State::Value(value) => match serde_json::to_string_pretty(&value) {
+                        Ok(s) => Ok(Bytes::from(format!("{},", s))),
+                        Err(cause) => Err(cause.into()),
+                    },
+                    _ => Err(error::not_implemented()),
+                }));
+
+                let end_delimiter: TCStream<TCResult<Bytes>> = Box::pin(stream::once(
+                    future::ready(Ok(Bytes::copy_from_slice(b"]"))),
+                ));
+
+                Ok(Box::pin(
+                    start_delimiter.chain(response).chain(end_delimiter),
+                ))
             }
             &Method::PUT => {
                 let reader = StreamReader::new(request.body_mut(), self.request_limit);
@@ -187,14 +206,15 @@ impl Http {
                         .put(&path.clone().into(), selector, state.into(), &token)
                         .await?;
                 }
-                Ok(())
+
+                Ok(Box::pin(stream::empty()))
             }
             &Method::POST => {
                 let reader = StreamReader::new(request.body_mut(), self.request_limit);
                 let reader = BufReader::new(reader);
                 let op = stream::iter(serde_json::from_reader(reader).into_iter());
                 self.gateway.post(&path.clone().into(), op, &token).await?;
-                Ok(())
+                Ok(Box::pin(stream::empty()))
             }
             other => Err(error::bad_request(
                 "Tinychain does not support this HTTP method",

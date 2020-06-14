@@ -10,8 +10,9 @@ use futures::Stream;
 use crate::internal::Dir;
 use crate::transaction::TxnId;
 use crate::value::link::TCPath;
+use crate::value::TCStream;
 
-type Blocks = Box<dyn Stream<Item = Bytes> + Send + Unpin>;
+type Blocks = TCStream<Bytes>;
 type FileData = (TCPath, Blocks);
 
 #[async_trait]

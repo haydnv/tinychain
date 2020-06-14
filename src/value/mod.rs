@@ -1,4 +1,7 @@
 use std::fmt;
+use std::pin::Pin;
+
+use futures::stream::Stream;
 
 use crate::error;
 
@@ -10,6 +13,7 @@ mod reference;
 mod value;
 mod version;
 
+pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + Unpin>>;
 pub type TCRef = reference::TCRef;
 pub type TCResult<T> = Result<T, error::TCError>;
 pub type Value = value::Value;

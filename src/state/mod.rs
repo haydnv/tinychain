@@ -1,23 +1,21 @@
 use std::convert::TryFrom;
 use std::fmt;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream::Stream;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 
 use crate::error;
 use crate::internal::archive::Archive;
 use crate::transaction::{Transact, Txn};
-use crate::value::{TCResult, Value};
+use crate::value::{TCResult, TCStream, Value};
 
 pub mod graph;
 pub mod index;
 
 // TODO: can this `Box<dyn...>` be replaced by `impl Stream<...>`?
-pub type GetResult = TCResult<Pin<Box<dyn Stream<Item = State> + Send + Sync + Unpin>>>;
+pub type GetResult = TCResult<TCStream<State>>;
 
 #[async_trait]
 pub trait Collect: Transact + Send + Sync {

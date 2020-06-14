@@ -7,14 +7,14 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{self, BoxFuture, Future};
 use futures::lock::Mutex;
-use futures::stream::{self, FuturesOrdered, Stream, StreamExt};
+use futures::stream::{self, FuturesOrdered, StreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error;
 use crate::internal::{BlockId, File};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{TCResult, TCType, Value, ValueId};
+use crate::value::{TCResult, TCStream, TCType, Value, ValueId};
 
 use super::{Collect, GetResult, State};
 
@@ -43,7 +43,8 @@ impl Node {
     }
 }
 
-type Selection = Pin<Box<dyn Stream<Item = Vec<Value>> + Send + Sync + Unpin>>;
+type Key = Vec<Value>;
+type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Sync + Unpin>>>;
 
 pub struct Column {
     name: ValueId,
@@ -197,17 +198,15 @@ impl Index {
         }
     }
 
-    fn select(self: Arc<Self>, txn_id: TxnId, mut node: Node, key: Vec<Value>) -> Selection {
+    fn select(self: Arc<Self>, txn_id: TxnId, mut node: Node, key: Key) -> TCStream<Key> {
         let l = self.collator.bisect_left(&node.keys, &key);
         let r = self.collator.bisect(&node.keys, &key);
 
         if node.leaf {
-            let keys: Vec<Vec<Value>> = node.keys.drain(l..r).collect();
+            let keys: Vec<Key> = node.keys.drain(l..r).collect();
             Box::pin(stream::iter(keys))
         } else {
-            let mut selected: FuturesOrdered<
-                Pin<Box<dyn Future<Output = Selection> + Send + Sync + Unpin>>,
-            > = FuturesOrdered::new();
+            let mut selected: Selection = FuturesOrdered::new();
             for i in l..r {
                 let index = self.clone();
                 let child = node.children[i].clone();
@@ -221,7 +220,7 @@ impl Index {
                 selected.push(Box::pin(selection));
 
                 let key_at_i = node.keys[i].clone(); // TODO: drain the node instead of cloning its keys
-                let key_at_i: Selection = Box::pin(stream::once(future::ready(key_at_i)));
+                let key_at_i: TCStream<Key> = Box::pin(stream::once(future::ready(key_at_i)));
                 selected.push(Box::pin(future::ready(key_at_i)));
             }
 
@@ -279,7 +278,7 @@ impl Index {
         txn_id: &'a TxnId,
         node_id: &'a NodeId,
         node: &'a mut Node,
-        key: Vec<Value>,
+        key: Key,
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
             let mut i = self.collator.bisect_left(&node.keys, &key);
@@ -336,8 +335,8 @@ impl Index {
 
 #[async_trait]
 impl Collect for Index {
-    type Selector = Vec<Value>;
-    type Item = Vec<Value>;
+    type Selector = Key;
+    type Item = Key;
 
     async fn get(self: Arc<Self>, txn: Arc<Txn>, selector: Self::Selector) -> GetResult {
         self.validate_key(&selector)?;
