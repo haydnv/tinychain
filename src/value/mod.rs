@@ -6,7 +6,7 @@ use futures::stream::Stream;
 use crate::error;
 
 pub mod link;
-mod op;
+pub mod op;
 mod reference;
 
 #[allow(clippy::module_inception)]
