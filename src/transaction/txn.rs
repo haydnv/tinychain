@@ -3,7 +3,6 @@ use std::fmt;
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
 
-use async_trait::async_trait;
 use futures::{future, Stream};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -16,7 +15,7 @@ use crate::state::{GetResult, State};
 use crate::value::link::*;
 use crate::value::*;
 
-pub struct TxnState;
+use super::{Transact, TxnState};
 
 pub enum Subject {
     Ref(TCRef),
@@ -42,13 +41,6 @@ impl fmt::Display for Subject {
             Subject::Ref(r) => write!(f, "{}", r),
         }
     }
-}
-
-#[async_trait]
-pub trait Transact: Send + Sync {
-    async fn commit(&self, txn_id: &TxnId);
-
-    async fn rollback(&self, txn_id: &TxnId);
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
