@@ -1,10 +1,12 @@
 use async_trait::async_trait;
 
 mod context;
+mod lock;
 mod txn;
 
 pub type Txn = txn::Txn;
 pub type TxnContext = context::TxnContext;
+pub type TxnLock<T> = lock::TxnLock<T>;
 pub type TxnId = txn::TxnId;
 
 #[async_trait]
