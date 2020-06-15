@@ -124,6 +124,7 @@ impl Http {
         use error::Code::*;
         *response.status_mut() = match err.reason() {
             BadRequest => StatusCode::BAD_REQUEST,
+            Conflict => StatusCode::CONFLICT,
             Forbidden => StatusCode::FORBIDDEN,
             Internal => StatusCode::INTERNAL_SERVER_ERROR,
             MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,

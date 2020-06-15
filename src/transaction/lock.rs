@@ -1,5 +1,5 @@
 use std::cell::UnsafeCell;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -7,14 +7,17 @@ use std::sync::{Arc, Mutex};
 use futures::future::Future;
 use futures::task::{Context, Poll, Waker};
 
-use super::{Transact, TxnId};
+use crate::error;
+use crate::value::TCResult;
 
-pub struct TxnLockReadGuard<T: Clone + Transact> {
+use super::TxnId;
+
+pub struct TxnLockReadGuard<T: Clone + Send + Sync> {
     txn_id: TxnId,
     lock: TxnLock<T>,
 }
 
-impl<T: Clone + Transact> Deref for TxnLockReadGuard<T> {
+impl<T: Clone + Send + Sync> Deref for TxnLockReadGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -22,7 +25,7 @@ impl<T: Clone + Transact> Deref for TxnLockReadGuard<T> {
     }
 }
 
-impl<T: Clone + Transact> Drop for TxnLockReadGuard<T> {
+impl<T: Clone + Send + Sync> Drop for TxnLockReadGuard<T> {
     fn drop(&mut self) {
         let mut lock_state = self.lock.inner.lock_state.lock().unwrap();
         match lock_state.readers.get_mut(&self.txn_id) {
@@ -39,29 +42,29 @@ impl<T: Clone + Transact> Drop for TxnLockReadGuard<T> {
     }
 }
 
-pub struct TxnLockWriteGuard<T: Clone + Transact> {
-    txn_id: TxnId,
+pub struct TxnLockWriteGuard<T: Clone + Send + Sync> {
     lock: TxnLock<T>,
+    value: T,
 }
 
-impl<T: Clone + Transact> Deref for TxnLockWriteGuard<T> {
+impl<T: Clone + Send + Sync> Deref for TxnLockWriteGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        unsafe { &*self.lock.inner.value.get() }
+        &self.value
     }
 }
 
-impl<T: Clone + Transact> DerefMut for TxnLockWriteGuard<T> {
+impl<T: Clone + Send + Sync> DerefMut for TxnLockWriteGuard<T> {
     fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *self.lock.inner.value.get() }
+        &mut self.value
     }
 }
 
-impl<T: Clone + Transact> Drop for TxnLockWriteGuard<T> {
+impl<T: Clone + Send + Sync> Drop for TxnLockWriteGuard<T> {
     fn drop(&mut self) {
         let mut lock_state = self.lock.inner.lock_state.lock().unwrap();
-        lock_state.writers.remove(&self.txn_id);
+        lock_state.writer = None;
 
         while let Some(waker) = lock_state.wakers.pop_front() {
             waker.wake()
@@ -70,26 +73,26 @@ impl<T: Clone + Transact> Drop for TxnLockWriteGuard<T> {
 }
 
 struct LockState {
-    readers: HashMap<TxnId, usize>,
-    writers: HashSet<TxnId>,
+    readers: BTreeMap<TxnId, usize>,
+    writer: Option<TxnId>,
     wakers: VecDeque<Waker>,
 }
 
-struct Inner<T: Clone + Transact> {
+struct Inner<T: Clone + Send + Sync> {
     value: UnsafeCell<T>,
     lock_state: Mutex<LockState>,
 }
 
 #[derive(Clone)]
-pub struct TxnLock<T: Clone + Transact> {
+pub struct TxnLock<T: Clone + Send + Sync> {
     inner: Arc<Inner<T>>,
 }
 
-impl<T: Clone + Transact> TxnLock<T> {
+impl<T: Clone + Send + Sync> TxnLock<T> {
     pub fn new(value: T) -> TxnLock<T> {
         let lock_state = LockState {
-            readers: HashMap::new(),
-            writers: HashSet::new(),
+            readers: BTreeMap::new(),
+            writer: None,
             wakers: VecDeque::new(),
         };
 
@@ -105,7 +108,7 @@ impl<T: Clone + Transact> TxnLock<T> {
 
     pub fn try_read<'a>(&self, txn_id: &'a TxnId) -> Option<TxnLockReadGuard<T>> {
         let mut lock_state = self.inner.lock_state.lock().unwrap();
-        if lock_state.writers.contains(&txn_id) {
+        if lock_state.writer.is_some() && lock_state.writer.as_ref().unwrap() <= txn_id {
             None
         } else {
             *lock_state.readers.entry(txn_id.clone()).or_insert(0) += 1;
@@ -123,16 +126,21 @@ impl<T: Clone + Transact> TxnLock<T> {
         }
     }
 
-    pub fn try_write<'a>(&self, txn_id: &'a TxnId) -> Option<TxnLockWriteGuard<T>> {
+    pub fn try_write<'a>(&self, txn_id: &'a TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
         let mut lock_state = self.inner.lock_state.lock().unwrap();
-        if lock_state.readers.contains_key(txn_id) || lock_state.writers.contains(txn_id) {
-            None
+
+        if (lock_state.writer.is_some() && lock_state.writer.as_ref().unwrap() > txn_id)
+            || (!lock_state.readers.is_empty() && lock_state.readers.keys().max().unwrap() > txn_id)
+        {
+            Err(error::conflict())
+        } else if lock_state.readers.contains_key(txn_id) {
+            Ok(None)
         } else {
-            lock_state.writers.insert(txn_id.clone());
-            Some(TxnLockWriteGuard {
-                txn_id: txn_id.clone(),
+            lock_state.writer = Some(txn_id.clone());
+            Ok(Some(TxnLockWriteGuard {
                 lock: self.clone(),
-            })
+                value: unsafe { &*self.inner.value.get() }.clone(),
+            }))
         }
     }
 
@@ -144,18 +152,18 @@ impl<T: Clone + Transact> TxnLock<T> {
     }
 }
 
-impl<T: Clone + Default + Transact> Default for TxnLock<T> {
+impl<T: Clone + Default + Send + Sync> Default for TxnLock<T> {
     fn default() -> TxnLock<T> {
         TxnLock::new(Default::default())
     }
 }
 
-pub struct TxnLockReadFuture<'a, T: Clone + Transact> {
+pub struct TxnLockReadFuture<'a, T: Clone + Send + Sync> {
     txn_id: &'a TxnId,
     lock: TxnLock<T>,
 }
 
-impl<'a, T: Clone + Transact> Future for TxnLockReadFuture<'a, T> {
+impl<'a, T: Clone + Send + Sync> Future for TxnLockReadFuture<'a, T> {
     type Output = TxnLockReadGuard<T>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
@@ -175,27 +183,29 @@ impl<'a, T: Clone + Transact> Future for TxnLockReadFuture<'a, T> {
     }
 }
 
-pub struct TxnLockWriteFuture<'a, T: Clone + Transact> {
+pub struct TxnLockWriteFuture<'a, T: Clone + Send + Sync> {
     txn_id: &'a TxnId,
     lock: TxnLock<T>,
 }
 
-impl<'a, T: Clone + Transact> Future for TxnLockWriteFuture<'a, T> {
-    type Output = TxnLockWriteGuard<T>;
+impl<'a, T: Clone + Send + Sync> Future for TxnLockWriteFuture<'a, T> {
+    type Output = TCResult<TxnLockWriteGuard<T>>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
-        if let Some(guard) = self.lock.try_write(self.txn_id) {
-            Poll::Ready(guard)
-        } else {
-            self.lock
-                .inner
-                .lock_state
-                .lock()
-                .unwrap()
-                .wakers
-                .push_back(context.waker().clone());
+        match self.lock.try_write(self.txn_id) {
+            Ok(Some(guard)) => Poll::Ready(Ok(guard)),
+            Err(cause) => Poll::Ready(Err(cause)),
+            Ok(None) => {
+                self.lock
+                    .inner
+                    .lock_state
+                    .lock()
+                    .unwrap()
+                    .wakers
+                    .push_back(context.waker().clone());
 
-            Poll::Pending
+                Poll::Pending
+            }
         }
     }
 }

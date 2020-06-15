@@ -6,6 +6,9 @@ pub enum Code {
     // "I know that what you're asking for doesn't make sense"
     BadRequest,
 
+    // "Another caller has reserved this resource so that your request cannot be fulfilled"
+    Conflict,
+
     // "I know who you are and you're not allowed to do this!"
     Forbidden,
 
@@ -32,6 +35,7 @@ impl fmt::Display for Code {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Code::BadRequest => write!(f, "Bad request"),
+            Code::Conflict => write!(f, "Conflict"),
             Code::Forbidden => write!(f, "Forbidden"),
             Code::Internal => write!(f, "Internal server error"),
             Code::MethodNotAllowed => write!(f, "Method not allowed"),
@@ -103,6 +107,13 @@ impl fmt::Display for TCError {
 
 pub fn bad_request<T: fmt::Display>(message: &str, info: T) -> TCError {
     TCError::of(Code::BadRequest, format!("{}: {}", message, info))
+}
+
+pub fn conflict() -> TCError {
+    TCError::of(
+        Code::Conflict,
+        format!("Transaction failed due to a concurrent access conflict"),
+    )
 }
 
 pub fn forbidden<T: fmt::Display>(message: &str, info: T) -> TCError {
