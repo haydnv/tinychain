@@ -13,35 +13,10 @@ use crate::gateway::{Gateway, NetworkTime};
 use crate::internal::Dir;
 use crate::state::{GetResult, State};
 use crate::value::link::*;
+use crate::value::op::Subject;
 use crate::value::*;
 
 use super::{Transact, TxnState};
-
-pub enum Subject {
-    Ref(TCRef),
-    Link(Link),
-}
-
-impl From<Link> for Subject {
-    fn from(l: Link) -> Subject {
-        Subject::Link(l)
-    }
-}
-
-impl From<TCRef> for Subject {
-    fn from(r: TCRef) -> Subject {
-        Subject::Ref(r)
-    }
-}
-
-impl fmt::Display for Subject {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Subject::Link(l) => write!(f, "{}", l),
-            Subject::Ref(r) => write!(f, "{}", r),
-        }
-    }
-}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct TxnId {
