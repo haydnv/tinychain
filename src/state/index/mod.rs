@@ -174,6 +174,30 @@ impl Index {
         }
     }
 
+    async fn put_node(&self, txn_id: &TxnId, node_id: NodeId, node: &Node) -> TCResult<()> {
+        self.file
+            .put_block(
+                txn_id.clone(),
+                node_id,
+                (&bincode::serialize(node)?[..]).into(),
+            )
+            .await
+    }
+
+    async fn put_node_if_updated(
+        &self,
+        txn_id: &TxnId,
+        node_id: NodeId,
+        node: Node,
+        updated: bool,
+    ) -> TCResult<()> {
+        if updated {
+            self.put_node(txn_id, node_id, &node).await
+        } else {
+            Ok(())
+        }
+    }
+
     fn select(self: Arc<Self>, txn_id: TxnId, mut node: Node, key: Key) -> TCStream<Key> {
         let l = self.collator.bisect_left(&node.keys, &key);
         let r = self.collator.bisect(&node.keys, &key);
@@ -230,6 +254,8 @@ impl Index {
                     updated = true;
                 }
 
+                self.put_node_if_updated(txn_id, node_id.clone(), node, updated)
+                    .await?;
                 Ok(())
             } else {
                 for i in l..r {
@@ -240,6 +266,8 @@ impl Index {
                 }
 
                 let last_child = node.children.last().unwrap().clone();
+                self.put_node_if_updated(txn_id, node_id.clone(), node, updated)
+                    .await?;
                 self.update(txn_id, &last_child, selector, value).await
             }
         })
@@ -259,6 +287,7 @@ impl Index {
                     || self.collator.compare(&node.keys[i], &key) != Ordering::Equal
                 {
                     node.keys.insert(i, key);
+                    self.put_node(txn_id, node_id.clone(), &node).await?;
                 }
 
                 Ok(())
@@ -296,6 +325,9 @@ impl Index {
         if !child.leaf {
             new_node.children = child.children.drain(self.order..).collect();
         }
+
+        self.put_node(txn_id, new_node_id, &new_node).await?;
+        self.put_node(txn_id, node_id, node).await?;
 
         Ok(())
     }

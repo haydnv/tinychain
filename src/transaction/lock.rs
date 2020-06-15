@@ -12,22 +12,22 @@ use crate::value::TCResult;
 
 use super::TxnId;
 
-pub struct TxnLockReadGuard<T: Clone> {
+pub struct TxnLockReadGuard<T: Clone + Send + Sync> {
     txn_id: TxnId,
     lock: TxnLock<T>,
 }
 
-impl<T: Clone> Deref for TxnLockReadGuard<T> {
+impl<T: Clone + Send + Sync> Deref for TxnLockReadGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        unsafe { &*self.lock.inner.lock().unwrap().value.get() }
+        unsafe { &*self.lock.inner.value.get() }
     }
 }
 
-impl<T: Clone> Drop for TxnLockReadGuard<T> {
+impl<T: Clone + Send + Sync> Drop for TxnLockReadGuard<T> {
     fn drop(&mut self) {
-        let mut lock_state = self.lock.inner.lock().unwrap().lock_state;
+        let mut lock_state = self.lock.inner.lock_state.lock().unwrap();
         match lock_state.readers.get_mut(&self.txn_id) {
             Some(count) if *count > 1 => (*count) -= 1,
             Some(1) => {
@@ -42,12 +42,12 @@ impl<T: Clone> Drop for TxnLockReadGuard<T> {
     }
 }
 
-pub struct TxnLockWriteGuard<T: Clone> {
+pub struct TxnLockWriteGuard<T: Clone + Send + Sync> {
     lock: TxnLock<T>,
     value: T,
 }
 
-impl<T: Clone> Deref for TxnLockWriteGuard<T> {
+impl<T: Clone + Send + Sync> Deref for TxnLockWriteGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -55,15 +55,15 @@ impl<T: Clone> Deref for TxnLockWriteGuard<T> {
     }
 }
 
-impl<T: Clone> DerefMut for TxnLockWriteGuard<T> {
+impl<T: Clone + Send + Sync> DerefMut for TxnLockWriteGuard<T> {
     fn deref_mut(&mut self) -> &mut T {
         &mut self.value
     }
 }
 
-impl<T: Clone> Drop for TxnLockWriteGuard<T> {
+impl<T: Clone + Send + Sync> Drop for TxnLockWriteGuard<T> {
     fn drop(&mut self) {
-        let mut lock_state = self.lock.inner.lock().unwrap().lock_state;
+        let mut lock_state = self.lock.inner.lock_state.lock().unwrap();
         lock_state.writer = None;
 
         while let Some(waker) = lock_state.wakers.pop_front() {
@@ -78,17 +78,17 @@ struct LockState {
     wakers: VecDeque<Waker>,
 }
 
-struct Inner<T: Clone> {
+struct Inner<T: Clone + Send + Sync> {
     value: UnsafeCell<T>,
-    lock_state: LockState,
+    lock_state: Mutex<LockState>,
 }
 
 #[derive(Clone)]
-pub struct TxnLock<T: Clone> {
-    inner: Arc<Mutex<Inner<T>>>,
+pub struct TxnLock<T: Clone + Send + Sync> {
+    inner: Arc<Inner<T>>,
 }
 
-impl<T: Clone> TxnLock<T> {
+impl<T: Clone + Send + Sync> TxnLock<T> {
     pub fn new(value: T) -> TxnLock<T> {
         let lock_state = LockState {
             readers: BTreeMap::new(),
@@ -98,16 +98,16 @@ impl<T: Clone> TxnLock<T> {
 
         let inner = Inner {
             value: UnsafeCell::new(value),
-            lock_state: lock_state,
+            lock_state: Mutex::new(lock_state),
         };
 
         TxnLock {
-            inner: Arc::new(Mutex::new(inner)),
+            inner: Arc::new(inner),
         }
     }
 
     pub fn try_read<'a>(&self, txn_id: &'a TxnId) -> Option<TxnLockReadGuard<T>> {
-        let mut lock_state = self.inner.lock().unwrap().lock_state;
+        let mut lock_state = self.inner.lock_state.lock().unwrap();
         if lock_state.writer.is_some() && lock_state.writer.as_ref().unwrap() <= txn_id {
             None
         } else {
@@ -127,7 +127,7 @@ impl<T: Clone> TxnLock<T> {
     }
 
     pub fn try_write<'a>(&self, txn_id: &'a TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
-        let mut lock_state = self.inner.lock().unwrap().lock_state;
+        let mut lock_state = self.inner.lock_state.lock().unwrap();
 
         if (lock_state.writer.is_some() && lock_state.writer.as_ref().unwrap() > txn_id)
             || (!lock_state.readers.is_empty() && lock_state.readers.keys().max().unwrap() > txn_id)
@@ -139,7 +139,7 @@ impl<T: Clone> TxnLock<T> {
             lock_state.writer = Some(txn_id.clone());
             Ok(Some(TxnLockWriteGuard {
                 lock: self.clone(),
-                value: unsafe { &*self.inner.lock().unwrap().value.get() }.clone(),
+                value: unsafe { &*self.inner.value.get() }.clone(),
             }))
         }
     }
@@ -152,18 +152,18 @@ impl<T: Clone> TxnLock<T> {
     }
 }
 
-impl<T: Clone + Default> Default for TxnLock<T> {
+impl<T: Clone + Default + Send + Sync> Default for TxnLock<T> {
     fn default() -> TxnLock<T> {
         TxnLock::new(Default::default())
     }
 }
 
-pub struct TxnLockReadFuture<'a, T: Clone> {
+pub struct TxnLockReadFuture<'a, T: Clone + Send + Sync> {
     txn_id: &'a TxnId,
     lock: TxnLock<T>,
 }
 
-impl<'a, T: Clone> Future for TxnLockReadFuture<'a, T> {
+impl<'a, T: Clone + Send + Sync> Future for TxnLockReadFuture<'a, T> {
     type Output = TxnLockReadGuard<T>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
@@ -172,9 +172,9 @@ impl<'a, T: Clone> Future for TxnLockReadFuture<'a, T> {
         } else {
             self.lock
                 .inner
+                .lock_state
                 .lock()
                 .unwrap()
-                .lock_state
                 .wakers
                 .push_back(context.waker().clone());
 
@@ -183,7 +183,7 @@ impl<'a, T: Clone> Future for TxnLockReadFuture<'a, T> {
     }
 }
 
-pub struct TxnLockWriteFuture<'a, T: Clone> {
+pub struct TxnLockWriteFuture<'a, T: Clone + Send + Sync> {
     txn_id: &'a TxnId,
     lock: TxnLock<T>,
 }
@@ -198,9 +198,9 @@ impl<'a, T: Clone + Send + Sync> Future for TxnLockWriteFuture<'a, T> {
             Ok(None) => {
                 self.lock
                     .inner
+                    .lock_state
                     .lock()
                     .unwrap()
-                    .lock_state
                     .wakers
                     .push_back(context.waker().clone());
 
