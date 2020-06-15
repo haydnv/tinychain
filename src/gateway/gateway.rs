@@ -7,7 +7,7 @@ use crate::error;
 use crate::internal::Dir;
 use crate::kernel;
 use crate::state::{GetResult, State};
-use crate::transaction::{Txn, TxnState};
+use crate::transaction::{Txn, TxnContext};
 use crate::value::link::Link;
 use crate::value::{TCResult, Value, ValueId};
 
@@ -61,7 +61,7 @@ impl Gateway {
         subject: &Link,
         op: S,
         auth: &Auth,
-    ) -> TCResult<TxnState> {
+    ) -> TCResult<TxnContext> {
         if subject.host().is_none() {
             kernel::post(subject.path(), op, auth).await
         } else {

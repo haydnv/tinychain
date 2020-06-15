@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 
-mod state;
+mod context;
 mod txn;
 
 pub type Txn = txn::Txn;
+pub type TxnContext = context::TxnContext;
 pub type TxnId = txn::TxnId;
-pub type TxnState = state::TxnState;
 
 #[async_trait]
 pub trait Transact: Send + Sync {

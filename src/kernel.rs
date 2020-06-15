@@ -15,6 +15,6 @@ pub async fn post<S: Stream<Item = (ValueId, Value)>>(
     _endpoint: &TCPath,
     _op: S,
     _auth: &Auth,
-) -> TCResult<TxnState> {
+) -> TCResult<TxnContext> {
     Err(error::not_implemented())
 }

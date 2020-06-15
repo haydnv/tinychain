@@ -16,7 +16,7 @@ use crate::value::link::*;
 use crate::value::op::Subject;
 use crate::value::*;
 
-use super::{Transact, TxnState};
+use super::{Transact, TxnContext};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct TxnId {
@@ -169,7 +169,7 @@ impl Txn {
         subject: Subject,
         _op: S,
         _auth: &Auth,
-    ) -> TCResult<TxnState> {
+    ) -> TCResult<TxnContext> {
         println!("txn::post {}", subject);
 
         Err(error::not_implemented())
