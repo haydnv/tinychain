@@ -27,7 +27,7 @@ impl<T: Clone> Deref for TxnLockReadGuard<T> {
 
 impl<T: Clone> Drop for TxnLockReadGuard<T> {
     fn drop(&mut self) {
-        let mut lock_state = self.lock.inner.lock().unwrap().lock_state;
+        let lock_state = &mut self.lock.inner.lock().unwrap().lock_state;
         match lock_state.readers.get_mut(&self.txn_id) {
             Some(count) if *count > 1 => (*count) -= 1,
             Some(1) => {
@@ -63,7 +63,7 @@ impl<T: Clone> DerefMut for TxnLockWriteGuard<T> {
 
 impl<T: Clone> Drop for TxnLockWriteGuard<T> {
     fn drop(&mut self) {
-        let mut lock_state = self.lock.inner.lock().unwrap().lock_state;
+        let lock_state = &mut self.lock.inner.lock().unwrap().lock_state;
         lock_state.writer = None;
 
         while let Some(waker) = lock_state.wakers.pop_front() {
@@ -107,7 +107,7 @@ impl<T: Clone> TxnLock<T> {
     }
 
     pub fn try_read<'a>(&self, txn_id: &'a TxnId) -> Option<TxnLockReadGuard<T>> {
-        let mut lock_state = self.inner.lock().unwrap().lock_state;
+        let lock_state = &mut self.inner.lock().unwrap().lock_state;
         if lock_state.writer.is_some() && lock_state.writer.as_ref().unwrap() <= txn_id {
             None
         } else {
@@ -127,7 +127,7 @@ impl<T: Clone> TxnLock<T> {
     }
 
     pub fn try_write<'a>(&self, txn_id: &'a TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
-        let mut lock_state = self.inner.lock().unwrap().lock_state;
+        let lock_state = &mut self.inner.lock().unwrap().lock_state;
 
         if (lock_state.writer.is_some() && lock_state.writer.as_ref().unwrap() > txn_id)
             || (!lock_state.readers.is_empty() && lock_state.readers.keys().max().unwrap() > txn_id)
