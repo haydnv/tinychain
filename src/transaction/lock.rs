@@ -159,8 +159,9 @@ impl<T: Mutable> TxnLock<T> {
             // If the requested time is too old, just return an error.
             // We can't keep track of every historical version here.
             Err(error::conflict())
-        } else if lock.state.writer && txn_id >= &lock.state.reserved.as_ref().unwrap() {
-            // If a current writer can mutate the locked value at the requested time, wait it out.
+        } else if lock.state.reserved.is_some() && txn_id >= &lock.state.reserved.as_ref().unwrap()
+        {
+            // If a writer can mutate the locked value at the requested time, wait it out.
             Ok(None)
         } else {
             // Otherwise, return a ReadGuard.
@@ -173,10 +174,6 @@ impl<T: Mutable> TxnLock<T> {
                 txn_id: txn_id.clone(),
                 lock: self.clone(),
             }))
-
-            // There is an unhandled edge case here where transaction C is committed before
-            // transaction B begins, and creates an inconsistency. This is handled by the Paxos
-            // algorithm implemented in Cluster (as is reading at a state in the distant past).
         }
     }
 
