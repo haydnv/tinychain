@@ -6,13 +6,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{self, BoxFuture, Future};
-use futures::lock::Mutex;
 use futures::stream::{self, FuturesOrdered, StreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error;
 use crate::internal::{BlockId, File};
+use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{TCResult, TCStream, TCType, Value, ValueId};
 
@@ -46,6 +46,16 @@ impl Node {
 type Key = Vec<Value>;
 type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Sync + Unpin>>>;
 
+#[derive(Clone)]
+struct IndexRoot(NodeId);
+
+#[async_trait]
+impl Mutate for IndexRoot {
+    async fn commit(&mut self, new_value: IndexRoot) {
+        self.0 = new_value.0
+    }
+}
+
 pub struct Column {
     name: ValueId,
     dtype: TCType,
@@ -57,7 +67,7 @@ pub struct Index {
     schema: Vec<Column>,
     order: usize,
     collator: collator::Collator,
-    root: Mutex<BlockId>,
+    root: TxnLock<IndexRoot>,
 }
 
 impl Index {
@@ -98,7 +108,7 @@ impl Index {
         if file.is_empty(&txn_id).await {
             let root: BlockId = Uuid::new_v4().into();
             file.new_block(
-                txn_id,
+                txn_id.clone(),
                 root.clone(),
                 Bytes::from(bincode::serialize(&Node::new(true))?),
             )
@@ -111,7 +121,7 @@ impl Index {
                 schema,
                 order,
                 collator,
-                root: Mutex::new(root),
+                root: TxnLock::new(txn_id, IndexRoot(root)),
             })
         } else {
             Err(error::bad_request(
@@ -341,8 +351,8 @@ impl Collect for Index {
     async fn get(self: Arc<Self>, txn: Arc<Txn>, selector: Self::Selector) -> GetResult {
         self.validate_key(&selector)?;
         let txn_id = txn.id().clone();
-        let root_id = self.root.lock().await;
-        let root_node = self.get_node(&txn_id, &root_id).await?;
+        let root_id = &self.root.read(&txn_id).await?.0;
+        let root_node = self.get_node(&txn_id, root_id).await?;
         Ok(Box::pin(
             self.clone()
                 .select(txn_id, root_node, selector)
@@ -359,27 +369,27 @@ impl Collect for Index {
         self.validate_selector(selector)?;
         self.validate_key(&key)?;
 
-        let mut root_id = self.root.lock().await;
+        let mut root_id = self.root.write(txn.id()).await?;
 
         if self.collator.compare(selector, &key) == Ordering::Equal {
-            let mut root = self.get_node(txn.id(), &root_id).await?;
+            let mut root = self.get_node(txn.id(), &root_id.0).await?;
 
             if root.keys.len() == (2 * self.order) - 1 {
-                let old_root_id = (*root_id).clone();
+                let old_root_id = root_id.0.clone();
                 let mut old_root = root;
 
-                *root_id = new_node_id(self.file.block_ids(txn.id()).await);
+                root_id.0 = new_node_id(self.file.block_ids(txn.id()).await);
                 let mut new_root = Node::new(false);
                 new_root.children.push(old_root_id.clone());
                 self.split_child(txn.id(), old_root_id, &mut old_root, 0)
                     .await?;
 
-                self.insert(txn.id(), &*root_id, &mut new_root, key).await
+                self.insert(txn.id(), &root_id.0, &mut new_root, key).await
             } else {
-                self.insert(txn.id(), &*root_id, &mut root, key).await
+                self.insert(txn.id(), &root_id.0, &mut root, key).await
             }
         } else {
-            self.update(txn.id(), &*root_id, &selector, &key).await
+            self.update(txn.id(), &root_id.0, &selector, &key).await
         }
     }
 }
