@@ -10,7 +10,7 @@ use futures::task::{Context, Poll, Waker};
 use crate::error;
 use crate::value::TCResult;
 
-use super::{Txn, TxnId};
+use super::TxnId;
 
 pub struct TxnLockReadGuard<T: Clone> {
     txn_id: TxnId,
@@ -147,30 +147,28 @@ impl<T: Clone> TxnLock<T> {
         }
     }
 
-    pub fn try_write<'a>(&self, txn: &'a Txn) -> TCResult<Option<Arc<TxnLockWriteGuard<T>>>> {
+    pub fn try_write<'a>(&self, txn_id: &'a TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
         let lock = &mut self.inner.lock().unwrap();
 
-        if (lock.state.writer.is_some() && lock.state.writer.as_ref().unwrap() > txn.id())
-            || (!lock.state.readers.is_empty()
-                && lock.state.readers.keys().max().unwrap() > txn.id())
+        if (lock.state.writer.is_some() && lock.state.writer.as_ref().unwrap() > txn_id)
+            || (!lock.state.readers.is_empty() && lock.state.readers.keys().max().unwrap() > txn_id)
         {
             Err(error::conflict())
-        } else if lock.state.readers.contains_key(txn.id()) {
+        } else if lock.state.readers.contains_key(txn_id) {
             Ok(None)
         } else {
-            lock.state.writer = Some(txn.id().clone());
+            lock.state.writer = Some(txn_id.clone());
             if lock.mutation.is_none() {
                 lock.mutation = Some(UnsafeCell::new(unsafe { (&*lock.value.get()).clone() }));
             }
 
-            let guard = Arc::new(TxnLockWriteGuard { lock: self.clone() });
-            Ok(Some(guard))
+            Ok(Some(TxnLockWriteGuard { lock: self.clone() }))
         }
     }
 
-    pub fn write<'a>(&self, txn: &'a Txn) -> TxnLockWriteFuture<'a, T> {
+    pub fn write<'a>(&self, txn_id: &'a TxnId) -> TxnLockWriteFuture<'a, T> {
         TxnLockWriteFuture {
-            txn,
+            txn_id,
             lock: self.clone(),
         }
     }
@@ -208,15 +206,15 @@ impl<'a, T: Clone> Future for TxnLockReadFuture<'a, T> {
 }
 
 pub struct TxnLockWriteFuture<'a, T: Clone> {
-    txn: &'a Txn,
+    txn_id: &'a TxnId,
     lock: TxnLock<T>,
 }
 
 impl<'a, T: Clone + Send + Sync> Future for TxnLockWriteFuture<'a, T> {
-    type Output = TCResult<Arc<TxnLockWriteGuard<T>>>;
+    type Output = TCResult<TxnLockWriteGuard<T>>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
-        match self.lock.try_write(self.txn) {
+        match self.lock.try_write(self.txn_id) {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {
