@@ -14,16 +14,16 @@ use crate::value::TCResult;
 use super::{Transact, TxnId};
 
 #[async_trait]
-pub trait Mutable: Clone + Send + Sync {
+pub trait Mutate: Clone + Send + Sync {
     async fn commit(&mut self, txn_id: &TxnId, new_value: Self);
 }
 
-pub struct TxnLockReadGuard<T: Mutable> {
+pub struct TxnLockReadGuard<T: Mutate> {
     txn_id: TxnId,
     lock: TxnLock<T>,
 }
 
-impl<T: Mutable> Deref for TxnLockReadGuard<T> {
+impl<T: Mutate> Deref for TxnLockReadGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -41,7 +41,7 @@ impl<T: Mutable> Deref for TxnLockReadGuard<T> {
     }
 }
 
-impl<T: Mutable> Drop for TxnLockReadGuard<T> {
+impl<T: Mutate> Drop for TxnLockReadGuard<T> {
     fn drop(&mut self) {
         let lock = &mut self.lock.inner.lock().unwrap();
         match lock.state.readers.get_mut(&self.txn_id) {
@@ -60,12 +60,12 @@ impl<T: Mutable> Drop for TxnLockReadGuard<T> {
     }
 }
 
-pub struct TxnLockWriteGuard<T: Mutable> {
+pub struct TxnLockWriteGuard<T: Mutate> {
     txn_id: TxnId,
     lock: TxnLock<T>,
 }
 
-impl<T: Mutable> Deref for TxnLockWriteGuard<T> {
+impl<T: Mutate> Deref for TxnLockWriteGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -83,7 +83,7 @@ impl<T: Mutable> Deref for TxnLockWriteGuard<T> {
     }
 }
 
-impl<T: Mutable> DerefMut for TxnLockWriteGuard<T> {
+impl<T: Mutate> DerefMut for TxnLockWriteGuard<T> {
     fn deref_mut(&mut self) -> &mut T {
         unsafe {
             &mut *self
@@ -99,7 +99,7 @@ impl<T: Mutable> DerefMut for TxnLockWriteGuard<T> {
     }
 }
 
-impl<T: Mutable> Drop for TxnLockWriteGuard<T> {
+impl<T: Mutate> Drop for TxnLockWriteGuard<T> {
     fn drop(&mut self) {
         let lock = &mut self.lock.inner.lock().unwrap();
         lock.state.writer = false;
@@ -120,18 +120,18 @@ struct LockState {
     wakers: VecDeque<Waker>,
 }
 
-struct Inner<T: Mutable> {
+struct Inner<T: Mutate> {
     state: LockState,
     value: UnsafeCell<T>,
     value_at: BTreeMap<TxnId, UnsafeCell<T>>,
 }
 
 #[derive(Clone)]
-pub struct TxnLock<T: Mutable> {
+pub struct TxnLock<T: Mutate> {
     inner: Arc<Mutex<Inner<T>>>,
 }
 
-impl<T: Mutable> TxnLock<T> {
+impl<T: Mutate> TxnLock<T> {
     pub fn new(last_commit: TxnId, value: T) -> TxnLock<T> {
         let state = LockState {
             last_commit,
@@ -169,6 +169,7 @@ impl<T: Mutable> TxnLock<T> {
                 lock.value_at.insert(txn_id.clone(), value_at_txn_id);
             }
 
+            *lock.state.readers.entry(txn_id.clone()).or_insert(0) += 1;
             Ok(Some(TxnLockReadGuard {
                 txn_id: txn_id.clone(),
                 lock: self.clone(),
@@ -225,7 +226,7 @@ impl<T: Mutable> TxnLock<T> {
 }
 
 #[async_trait]
-impl<T: Mutable> Transact for TxnLock<T> {
+impl<T: Mutate> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
         async {
             let _ = self.write(txn_id).await; // prevent any more writes
@@ -250,12 +251,12 @@ impl<T: Mutable> Transact for TxnLock<T> {
     }
 }
 
-pub struct TxnLockReadFuture<'a, T: Mutable> {
+pub struct TxnLockReadFuture<'a, T: Mutate> {
     txn_id: &'a TxnId,
     lock: TxnLock<T>,
 }
 
-impl<'a, T: Mutable> Future for TxnLockReadFuture<'a, T> {
+impl<'a, T: Mutate> Future for TxnLockReadFuture<'a, T> {
     type Output = TCResult<TxnLockReadGuard<T>>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
@@ -277,12 +278,12 @@ impl<'a, T: Mutable> Future for TxnLockReadFuture<'a, T> {
     }
 }
 
-pub struct TxnLockWriteFuture<'a, T: Mutable> {
+pub struct TxnLockWriteFuture<'a, T: Mutate> {
     txn_id: &'a TxnId,
     lock: TxnLock<T>,
 }
 
-impl<'a, T: Mutable> Future for TxnLockWriteFuture<'a, T> {
+impl<'a, T: Mutate> Future for TxnLockWriteFuture<'a, T> {
     type Output = TCResult<TxnLockWriteGuard<T>>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {

@@ -19,16 +19,16 @@ pub struct Gateway {
 }
 
 impl Gateway {
+    pub fn time() -> NetworkTime {
+        NetworkTime::now()
+    }
+
     pub fn new(hosted: Hosted, workspace: Arc<Dir>) -> Arc<Gateway> {
         Arc::new(Gateway { hosted, workspace })
     }
 
     pub async fn authenticate(&self, _token: &str) -> TCResult<Token> {
         Err(error::not_implemented())
-    }
-
-    pub fn time(&self) -> NetworkTime {
-        NetworkTime::now()
     }
 
     pub async fn transaction<'a>(self: &Arc<Self>) -> TCResult<Arc<Txn>> {

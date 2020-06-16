@@ -66,8 +66,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
     println!();
 
-    let data_dir = internal::Dir::new(config.data_dir);
-    let workspace = internal::Dir::new_tmp(config.workspace.clone());
+    let txn_id = transaction::TxnId::new(gateway::Gateway::time());
+    let data_dir = internal::Dir::create(txn_id.clone(), config.data_dir, false);
+    let workspace = internal::Dir::create(txn_id.clone(), config.workspace.clone(), true);
+
+    use transaction::Transact;
+    data_dir.commit(&txn_id).await;
+    workspace.commit(&txn_id).await;
+
     let hosted = configure(config.hosted, data_dir.clone(), workspace.clone()).await?;
     let gateway = gateway::Gateway::new(hosted, workspace.clone());
 

@@ -76,7 +76,7 @@ pub struct Txn {
 
 impl Txn {
     pub async fn new(gateway: Arc<Gateway>, workspace: Arc<Dir>) -> TCResult<Arc<Txn>> {
-        let id = TxnId::new(gateway.time());
+        let id = TxnId::new(Gateway::time());
         let context: PathSegment = id.clone().try_into()?;
         let context = workspace.create_dir(&id, context.into()).await?;
 
@@ -125,7 +125,7 @@ impl Txn {
         .await;
     }
 
-    pub fn mutate(self: &Arc<Self>, state: Arc<dyn Transact>) {
+    fn mutate(self: &Arc<Self>, state: Arc<dyn Transact>) {
         self.mutated.write().unwrap().push(state)
     }
 

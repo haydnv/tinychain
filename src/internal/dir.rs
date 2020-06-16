@@ -1,39 +1,23 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::BoxFuture;
-use futures::lock::Mutex;
 
 use crate::error;
+use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
 use crate::value::TCResult;
 
 use super::file::File;
 
+#[derive(Clone)]
 enum DirEntry {
     Dir(Arc<Dir>),
     File(Arc<File>),
-}
-
-#[async_trait]
-impl Transact for DirEntry {
-    async fn commit(&self, txn_id: &TxnId) {
-        match self {
-            DirEntry::Dir(dir) => dir.commit(txn_id).await,
-            DirEntry::File(file) => file.commit(txn_id).await,
-        }
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        match self {
-            DirEntry::Dir(dir) => dir.rollback(txn_id).await,
-            DirEntry::File(file) => file.rollback(txn_id).await,
-        }
-    }
 }
 
 impl fmt::Display for DirEntry {
@@ -45,73 +29,77 @@ impl fmt::Display for DirEntry {
     }
 }
 
-struct DirState {
-    children: HashMap<PathSegment, DirEntry>,
-    txn_cache: HashMap<TxnId, HashMap<PathSegment, DirEntry>>,
-}
+#[derive(Clone)]
+struct DirContents(HashMap<PathSegment, DirEntry>);
 
-impl DirState {
-    fn new() -> DirState {
-        DirState {
-            children: HashMap::new(),
-            txn_cache: HashMap::new(),
-        }
-    }
+#[async_trait]
+impl Mutate for DirContents {
+    async fn commit(&mut self, _txn_id: &TxnId, mut new_value: DirContents) {
+        let existing: HashSet<PathSegment> = self.0.keys().cloned().into_iter().collect();
+        let new: HashSet<PathSegment> = new_value.0.keys().cloned().into_iter().collect();
+        let deleted = existing.difference(&new);
 
-    async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Arc<Dir>>> {
-        if let Some(Some(entry)) = self.txn_cache.get(txn_id).map(|data| data.get(name)) {
-            match entry {
-                DirEntry::Dir(dir) => Ok(Some(dir.clone())),
-                other => Err(error::bad_request("Not a Dir", other)),
-            }
-        } else if let Some(entry) = self.children.get(name) {
-            match entry {
-                DirEntry::Dir(dir) => Ok(Some(dir.clone())),
-                other => Err(error::bad_request("Not a Dir", other)),
-            }
-        } else {
-            Ok(None)
-        }
-    }
+        self.0.extend(new_value.0.drain());
 
-    async fn get_file(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Arc<File>>> {
-        if let Some(Some(entry)) = self.txn_cache.get(txn_id).map(|data| data.get(name)) {
-            match entry {
-                DirEntry::File(file) => Ok(Some(file.clone())),
-                other => Err(error::bad_request("Not a File", other)),
-            }
-        } else if let Some(entry) = self.children.get(name) {
-            match entry {
-                DirEntry::File(file) => Ok(Some(file.clone())),
-                other => Err(error::bad_request("Not a File", other)),
-            }
-        } else {
-            Ok(None)
+        for name in deleted {
+            self.0.remove(name);
         }
     }
 }
 
 pub struct Dir {
     context: PathBuf,
-    state: Mutex<DirState>,
     temporary: bool,
+    contents: TxnLock<DirContents>,
 }
 
 impl Dir {
-    pub fn new(mount_point: PathBuf) -> Arc<Dir> {
+    pub fn create(txn_id: TxnId, mount_point: PathBuf, temporary: bool) -> Arc<Dir> {
         Arc::new(Dir {
             context: mount_point,
-            state: Mutex::new(DirState::new()),
-            temporary: false,
+            temporary,
+            contents: TxnLock::new(txn_id, DirContents(HashMap::new())),
         })
     }
 
-    pub fn new_tmp(mount_point: PathBuf) -> Arc<Dir> {
-        Arc::new(Dir {
-            context: mount_point,
-            state: Mutex::new(DirState::new()),
-            temporary: true,
+    pub fn get_dir<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        path: &'a TCPath,
+    ) -> BoxFuture<'a, TCResult<Option<Arc<Dir>>>> {
+        Box::pin(async move {
+            if path.is_empty() {
+                Err(error::bad_request("Cannot get Dir at empty path", path))
+            } else if path.len() == 1 {
+                if let Some(entry) = self.contents.read(txn_id).await?.0.get(&path[0]) {
+                    match entry {
+                        DirEntry::Dir(dir) => Ok(Some(dir.clone())),
+                        other => Err(error::bad_request("Not a Dir", other)),
+                    }
+                } else {
+                    Ok(None)
+                }
+            } else if let Some(dir) = self.get_dir(txn_id, &path[0].clone().into()).await? {
+                dir.get_dir(txn_id, &path.slice_from(1)).await
+            } else {
+                Ok(None)
+            }
         })
+    }
+
+    pub async fn get_file(
+        &self,
+        txn_id: &TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<Arc<File>>> {
+        if let Some(entry) = self.contents.read(txn_id).await?.0.get(name) {
+            match entry {
+                DirEntry::File(file) => Ok(Some(file.clone())),
+                other => Err(error::bad_request("Not a File", other)),
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn create_dir<'a>(
@@ -124,27 +112,15 @@ impl Dir {
                 Err(error::bad_request("Not a valid directory name", path))
             } else if path.len() == 1 {
                 let path = path[0].clone();
-                let mut state = self.state.lock().await;
-                if state.children.contains_key(&path) {
-                    Err(error::bad_request("Tried to create a new directory but there is already an entry at this path", &path))
-                } else if let Some(txn_data) = state.txn_cache.get_mut(txn_id) {
-                    if txn_data.contains_key(&path) {
-                        Err(error::bad_request(
-                            "Tried to create the same directory twice",
-                            &path,
-                        ))
-                    } else {
-                        println!("Created new Dir: {}", &path);
-                        let dir = Dir::new(self.fs_path(&path));
-                        txn_data.insert(path, DirEntry::Dir(dir.clone()));
-                        Ok(dir)
-                    }
+                let mut contents = self.contents.write(txn_id).await?;
+                if contents.0.contains_key(&path) {
+                    Err(error::bad_request(
+                        "Tried to create a new Dir but there is already an entry at",
+                        path,
+                    ))
                 } else {
-                    println!("Created new Dir {} in new Txn {}", &path, txn_id);
-                    let dir = Dir::new(self.fs_path(&path));
-                    let mut txn_data = HashMap::new();
-                    txn_data.insert(path, DirEntry::Dir(dir.clone()));
-                    state.txn_cache.insert(txn_id.clone(), txn_data);
+                    let dir = Dir::create(txn_id.clone(), self.fs_path(&path), self.temporary);
+                    contents.0.insert(path, DirEntry::Dir(dir.clone()));
                     Ok(dir)
                 }
             } else {
@@ -157,50 +133,17 @@ impl Dir {
     }
 
     pub async fn create_file(&self, txn_id: &TxnId, name: PathSegment) -> TCResult<Arc<File>> {
-        let mut state = self.state.lock().await;
-        if let Some(txn_data) = state.txn_cache.get_mut(txn_id) {
-            if txn_data.contains_key(&name) {
-                Err(error::bad_request(
-                    "Tried to create a new File but there is already an entry at",
-                    name,
-                ))
-            } else {
-                let file = File::new();
-                txn_data.insert(name, DirEntry::File(file.clone()));
-                Ok(file)
-            }
-        } else if state.children.contains_key(&name) {
+        let mut contents = self.contents.write(txn_id).await?;
+        if contents.0.contains_key(&name) {
             Err(error::bad_request(
                 "Tried to create a new File but there is already an entry at",
                 name,
             ))
         } else {
-            let mut txn_data = HashMap::new();
             let file = File::new();
-            txn_data.insert(name, DirEntry::File(file.clone()));
-            state.txn_cache.insert(txn_id.clone(), txn_data);
+            contents.0.insert(name, DirEntry::File(file.clone()));
             Ok(file)
         }
-    }
-
-    pub fn get_dir<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        path: &'a TCPath,
-    ) -> BoxFuture<'a, TCResult<Option<Arc<Dir>>>> {
-        Box::pin(async move {
-            if path.is_empty() {
-                Err(error::bad_request("Not a valid directory name", path))
-            } else if let Some(dir) = self.state.lock().await.get_dir(txn_id, &path[0]).await? {
-                if path.len() == 1 {
-                    Ok(Some(dir))
-                } else {
-                    dir.get_dir(txn_id, &path.slice_from(1)).await
-                }
-            } else {
-                Ok(None)
-            }
-        })
     }
 
     pub fn get_or_create_dir<'a>(
@@ -212,18 +155,18 @@ impl Dir {
             if path.is_empty() {
                 Err(error::bad_request("Not a valid directory name", path))
             } else if path.len() == 1 {
-                let mut state = self.state.lock().await;
-                if let Some(dir) = state.get_dir(txn_id, &path[0]).await? {
-                    Ok(dir)
-                } else {
-                    let dir = Dir::new(self.fs_path(&path[0]));
-                    state
-                        .txn_cache
-                        .get_mut(&txn_id)
-                        .unwrap()
-                        .insert(path[0].clone(), DirEntry::Dir(dir.clone()));
-
-                    Ok(dir)
+                let mut contents = self.contents.write(txn_id).await?;
+                match contents.0.get(&path[0]) {
+                    Some(DirEntry::Dir(dir)) => Ok(dir.clone()),
+                    Some(other) => Err(error::bad_request("Expected a Dir but found", other)),
+                    None => {
+                        let dir =
+                            Dir::create(txn_id.clone(), self.fs_path(&path[0]), self.temporary);
+                        contents
+                            .0
+                            .insert(path[0].clone(), DirEntry::Dir(dir.clone()));
+                        Ok(dir)
+                    }
                 }
             } else {
                 self.get_or_create_dir(txn_id, &path[0].clone().into())
@@ -234,17 +177,8 @@ impl Dir {
         })
     }
 
-    pub async fn get_file(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Arc<File>> {
-        self.state
-            .lock()
-            .await
-            .get_file(txn_id, name)
-            .await?
-            .ok_or_else(|| error::not_found(name))
-    }
-
-    pub async fn is_empty(&self) -> bool {
-        self.state.lock().await.children.is_empty()
+    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+        Ok(self.contents.read(txn_id).await?.0.is_empty())
     }
 
     fn fs_path(&self, name: &PathSegment) -> PathBuf {
@@ -257,28 +191,10 @@ impl Dir {
 #[async_trait]
 impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) {
-        println!("Dir::commit {}", txn_id);
-
-        let mut state = self.state.lock().await;
-        if let Some(mut txn_data) = state.txn_cache.remove(txn_id) {
-            for (name, entry) in txn_data.drain() {
-                entry.commit(txn_id).await;
-                state.children.insert(name, entry);
-            }
-
-            println!("Dir::commit!");
-        } else {
-            println!("Dir::commit has no data!");
-        }
+        self.contents.commit(txn_id).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        if let Some(mut txn_data) = self.state.lock().await.txn_cache.remove(txn_id) {
-            for (_name, entry) in txn_data.drain() {
-                entry.rollback(txn_id).await;
-            }
-        }
-
-        println!("Dir::rollback!");
+        self.contents.rollback(txn_id).await
     }
 }
