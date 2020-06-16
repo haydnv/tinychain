@@ -15,30 +15,12 @@ use super::{Transact, TxnId};
 
 #[async_trait]
 pub trait Mutate: Clone + Send + Sync {
-    async fn commit(&mut self, txn_id: &TxnId, new_value: Self);
+    async fn commit(&mut self, new_value: Self);
 }
 
 pub struct TxnLockReadGuard<T: Mutate> {
     txn_id: TxnId,
     lock: TxnLock<T>,
-}
-
-impl<T: Mutate> Clone for TxnLockReadGuard<T> {
-    fn clone(&self) -> Self {
-        *self
-            .lock
-            .inner
-            .lock()
-            .unwrap()
-            .state
-            .readers
-            .get_mut(&self.txn_id)
-            .unwrap() += 1;
-        TxnLockReadGuard {
-            txn_id: self.txn_id.clone(),
-            lock: self.lock.clone(),
-        }
-    }
 }
 
 impl<T: Mutate> Deref for TxnLockReadGuard<T> {
@@ -254,7 +236,7 @@ impl<T: Mutate> Transact for TxnLock<T> {
 
             let value = unsafe { &mut *lock.value.get() };
             if let Some(new_value) = lock.value_at.remove(txn_id) {
-                value.commit(txn_id, new_value.into_inner())
+                value.commit(new_value.into_inner())
             } else {
                 Box::pin(future::ready(()))
             }
