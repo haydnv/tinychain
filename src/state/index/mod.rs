@@ -369,12 +369,13 @@ impl Collect for Index {
         self.validate_selector(selector)?;
         self.validate_key(&key)?;
 
-        let mut root_id = self.root.write(txn.id()).await?;
+        let root_id = self.root.read(txn.id()).await?;
 
         if self.collator.compare(selector, &key) == Ordering::Equal {
             let mut root = self.get_node(txn.id(), &root_id.0).await?;
 
             if root.keys.len() == (2 * self.order) - 1 {
+                let mut root_id = root_id.upgrade().await?;
                 let old_root_id = root_id.0.clone();
                 let mut old_root = root;
 

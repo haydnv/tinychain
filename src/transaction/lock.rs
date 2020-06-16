@@ -23,6 +23,15 @@ pub struct TxnLockReadGuard<T: Mutate> {
     lock: TxnLock<T>,
 }
 
+impl<T: Mutate> TxnLockReadGuard<T> {
+    pub fn upgrade(self) -> TxnLockWriteFuture<T> {
+        TxnLockWriteFuture {
+            txn_id: self.txn_id.clone(),
+            lock: self.lock.clone(),
+        }
+    }
+}
+
 impl<T: Mutate> Deref for TxnLockReadGuard<T> {
     type Target = T;
 
@@ -217,7 +226,7 @@ impl<T: Mutate> TxnLock<T> {
         }
     }
 
-    pub fn write<'a>(&self, txn_id: &'a TxnId) -> TxnLockWriteFuture<'a, T> {
+    pub fn write(&self, txn_id: TxnId) -> TxnLockWriteFuture<T> {
         TxnLockWriteFuture {
             txn_id,
             lock: self.clone(),
@@ -229,7 +238,7 @@ impl<T: Mutate> TxnLock<T> {
 impl<T: Mutate> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
         async {
-            let _ = self.write(txn_id).await; // prevent any more writes
+            let _ = self.write(txn_id.clone()).await; // prevent any more writes
             let lock = &mut self.inner.lock().unwrap();
             lock.state.last_commit = txn_id.clone();
             lock.state.reserved = None;
@@ -245,7 +254,7 @@ impl<T: Mutate> Transact for TxnLock<T> {
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        let _ = self.write(txn_id).await; // prevent any more writes
+        let _ = self.write(txn_id.clone()).await; // prevent any more writes
         let lock = &mut self.inner.lock().unwrap();
         lock.value_at.remove(txn_id);
     }
@@ -278,16 +287,16 @@ impl<'a, T: Mutate> Future for TxnLockReadFuture<'a, T> {
     }
 }
 
-pub struct TxnLockWriteFuture<'a, T: Mutate> {
-    txn_id: &'a TxnId,
+pub struct TxnLockWriteFuture<T: Mutate> {
+    txn_id: TxnId,
     lock: TxnLock<T>,
 }
 
-impl<'a, T: Mutate> Future for TxnLockWriteFuture<'a, T> {
+impl<T: Mutate> Future for TxnLockWriteFuture<T> {
     type Output = TCResult<TxnLockWriteGuard<T>>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
-        match self.lock.try_write(self.txn_id) {
+        match self.lock.try_write(&self.txn_id) {
             Ok(Some(guard)) => Poll::Ready(Ok(guard)),
             Err(cause) => Poll::Ready(Err(cause)),
             Ok(None) => {

@@ -112,7 +112,7 @@ impl Dir {
                 Err(error::bad_request("Not a valid directory name", path))
             } else if path.len() == 1 {
                 let path = path[0].clone();
-                let mut contents = self.contents.write(txn_id).await?;
+                let mut contents = self.contents.write(txn_id.clone()).await?;
                 if contents.0.contains_key(&path) {
                     Err(error::bad_request(
                         "Tried to create a new Dir but there is already an entry at",
@@ -133,7 +133,7 @@ impl Dir {
     }
 
     pub async fn create_file(&self, txn_id: &TxnId, name: PathSegment) -> TCResult<Arc<File>> {
-        let mut contents = self.contents.write(txn_id).await?;
+        let mut contents = self.contents.write(txn_id.clone()).await?;
         if contents.0.contains_key(&name) {
             Err(error::bad_request(
                 "Tried to create a new File but there is already an entry at",
@@ -155,7 +155,7 @@ impl Dir {
             if path.is_empty() {
                 Err(error::bad_request("Not a valid directory name", path))
             } else if path.len() == 1 {
-                let mut contents = self.contents.write(txn_id).await?;
+                let mut contents = self.contents.write(txn_id.clone()).await?;
                 match contents.0.get(&path[0]) {
                     Some(DirEntry::Dir(dir)) => Ok(dir.clone()),
                     Some(other) => Err(error::bad_request("Expected a Dir but found", other)),
