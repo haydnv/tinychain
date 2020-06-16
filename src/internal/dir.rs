@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::{Entry, HashMap};
+use std::collections::HashSet;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -111,17 +112,18 @@ impl Dir {
             if path.is_empty() {
                 Err(error::bad_request("Not a valid directory name", path))
             } else if path.len() == 1 {
-                let path = path[0].clone();
                 let mut contents = self.contents.write(txn_id.clone()).await?;
-                if contents.0.contains_key(&path) {
-                    Err(error::bad_request(
+                match contents.0.entry(path[0].clone()) {
+                    Entry::Vacant(entry) => {
+                        let dir =
+                            Dir::create(txn_id.clone(), self.fs_path(&path[0]), self.temporary);
+                        entry.insert(DirEntry::Dir(dir.clone()));
+                        Ok(dir)
+                    }
+                    _ => Err(error::bad_request(
                         "Tried to create a new Dir but there is already an entry at",
                         path,
-                    ))
-                } else {
-                    let dir = Dir::create(txn_id.clone(), self.fs_path(&path), self.temporary);
-                    contents.0.insert(path, DirEntry::Dir(dir.clone()));
-                    Ok(dir)
+                    )),
                 }
             } else {
                 let dir = self
@@ -134,15 +136,16 @@ impl Dir {
 
     pub async fn create_file(&self, txn_id: &TxnId, name: PathSegment) -> TCResult<Arc<File>> {
         let mut contents = self.contents.write(txn_id.clone()).await?;
-        if contents.0.contains_key(&name) {
-            Err(error::bad_request(
+        match contents.0.entry(name) {
+            Entry::Vacant(entry) => {
+                let file = File::new();
+                entry.insert(DirEntry::File(file.clone()));
+                Ok(file)
+            }
+            Entry::Occupied(entry) => Err(error::bad_request(
                 "Tried to create a new File but there is already an entry at",
-                name,
-            ))
-        } else {
-            let file = File::new();
-            contents.0.insert(name, DirEntry::File(file.clone()));
-            Ok(file)
+                entry.key(),
+            )),
         }
     }
 
