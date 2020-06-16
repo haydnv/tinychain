@@ -13,6 +13,7 @@ use crate::value::{TCResult, TCStream, Value};
 
 pub mod graph;
 pub mod index;
+mod table;
 
 // TODO: can this `Box<dyn...>` be replaced by `impl Stream<...>`?
 pub type GetResult = TCResult<TCStream<State>>;
