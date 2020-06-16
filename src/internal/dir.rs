@@ -34,7 +34,7 @@ struct DirContents(HashMap<PathSegment, DirEntry>);
 
 #[async_trait]
 impl Mutate for DirContents {
-    async fn commit(&mut self, mut new_value: DirContents) {
+    async fn commit(&mut self, _txn_id: &TxnId, mut new_value: DirContents) {
         let existing: HashSet<PathSegment> = self.0.keys().cloned().collect();
         let new: HashSet<PathSegment> = new_value.0.keys().cloned().collect();
         let deleted = existing.difference(&new);
