@@ -84,6 +84,7 @@ impl<T: Clone> Drop for TxnLockWriteGuard<T> {
     fn drop(&mut self) {
         let lock = &mut self.lock.inner.lock().unwrap();
         lock.state.writer = None;
+        lock.mutation = None;
 
         while let Some(waker) = lock.state.wakers.pop_front() {
             waker.wake()
