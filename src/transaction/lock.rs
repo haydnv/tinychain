@@ -49,13 +49,11 @@ impl<T: Mutable> Drop for TxnLockReadGuard<T> {
             Some(1) => {
                 lock.state.readers.remove(&self.txn_id);
 
-                if self.txn_id < lock.state.last_commit {
-                    lock.value_at.remove(&self.txn_id);
-                }
-
                 while let Some(waker) = lock.state.wakers.pop_front() {
                     waker.wake()
                 }
+
+                lock.state.wakers.shrink_to_fit()
             }
             _ => panic!("TxnLockReadGuard count updated incorrectly!"),
         }
@@ -109,6 +107,8 @@ impl<T: Mutable> Drop for TxnLockWriteGuard<T> {
         while let Some(waker) = lock.state.wakers.pop_front() {
             waker.wake()
         }
+
+        lock.state.wakers.shrink_to_fit();
     }
 }
 
@@ -159,8 +159,7 @@ impl<T: Mutable> TxnLock<T> {
             // If the requested time is too old, just return an error.
             // We can't keep track of every historical version here.
             Err(error::conflict())
-        } else if lock.state.reserved.is_some() && txn_id >= &lock.state.reserved.as_ref().unwrap()
-        {
+        } else if lock.state.reserved.is_some() && txn_id >= lock.state.reserved.as_ref().unwrap() {
             // If a writer can mutate the locked value at the requested time, wait it out.
             Ok(None)
         } else {
