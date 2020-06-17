@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::internal::Dir;
+use crate::state::Dir;
 use crate::transaction::TxnId;
 
 pub struct Cluster {

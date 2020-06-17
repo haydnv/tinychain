@@ -67,8 +67,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!();
 
     let txn_id = transaction::TxnId::new(gateway::Gateway::time());
-    let data_dir = internal::Dir::create(txn_id.clone(), config.data_dir, false);
-    let workspace = internal::Dir::create(txn_id.clone(), config.workspace.clone(), true);
+    let data_dir = state::Dir::create(txn_id.clone(), config.data_dir, false);
+    let workspace = state::Dir::create(txn_id.clone(), config.workspace.clone(), true);
 
     use transaction::Transact;
     data_dir.commit(&txn_id).await;
@@ -89,8 +89,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 async fn configure(
     clusters: Vec<value::link::TCPath>,
-    data_dir: Arc<internal::Dir>,
-    workspace: Arc<internal::Dir>,
+    data_dir: Arc<state::Dir>,
+    workspace: Arc<state::Dir>,
 ) -> value::TCResult<gateway::Hosted> {
     let txn = gateway::Gateway::new(gateway::Hosted::new(), workspace)
         .transaction()

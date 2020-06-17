@@ -11,9 +11,12 @@ use crate::internal::archive::Archive;
 use crate::transaction::{Transact, Txn};
 use crate::value::{TCResult, TCStream, Value};
 
+mod dir;
 pub mod graph;
 pub mod index;
 mod table;
+
+pub type Dir = dir::Dir;
 
 // TODO: can this `Box<dyn...>` be replaced by `impl Stream<...>`?
 pub type GetResult = TCResult<TCStream<State>>;

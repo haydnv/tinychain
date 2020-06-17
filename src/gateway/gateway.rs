@@ -4,9 +4,8 @@ use futures::{future, stream, Stream};
 
 use crate::auth::{Auth, Token};
 use crate::error;
-use crate::internal::Dir;
 use crate::kernel;
-use crate::state::{GetResult, State};
+use crate::state::{Dir, GetResult, State};
 use crate::transaction::{Txn, TxnContext, TxnId};
 use crate::value::link::Link;
 use crate::value::{TCResult, Value, ValueId};

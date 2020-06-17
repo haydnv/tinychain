@@ -8,12 +8,11 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 
 use crate::error;
+use crate::internal::File;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
 use crate::value::TCResult;
-
-use super::file::File;
 
 #[derive(Clone)]
 enum DirEntry {
