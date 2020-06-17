@@ -171,13 +171,16 @@ impl Http {
             })
             .unwrap_or_else(HashMap::new);
 
-        let _txn_id: Option<TxnId> = Http::get_param(&mut params, "txn_id")?;
+        let txn_id: Option<TxnId> = Http::get_param(&mut params, "txn_id")?;
 
         match request.method() {
             &Method::GET => {
                 let id = Http::get_param(&mut params, "key")?
                     .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
-                let data = self.gateway.get(&path.clone().into(), id, &token).await?;
+                let data = self
+                    .gateway
+                    .get(&path.clone().into(), id, &token, txn_id.clone())
+                    .await?;
                 let start_delimiter: TCStream<TCResult<Bytes>> = Box::pin(stream::once(
                     future::ready(Ok(Bytes::copy_from_slice(b"["))),
                 ));

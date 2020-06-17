@@ -33,12 +33,6 @@ impl TxnId {
     }
 }
 
-impl PartialOrd for TxnId {
-    fn partial_cmp(&self, other: &TxnId) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl Ord for TxnId {
     fn cmp(&self, other: &TxnId) -> std::cmp::Ordering {
         if self.timestamp == other.timestamp {
@@ -46,6 +40,12 @@ impl Ord for TxnId {
         } else {
             self.timestamp.cmp(&other.timestamp)
         }
+    }
+}
+
+impl PartialOrd for TxnId {
+    fn partial_cmp(&self, other: &TxnId) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -142,7 +142,11 @@ impl Txn {
                 Ok(state) => state.get(self, selector).await,
                 Err(cause) => Err(cause),
             },
-            Subject::Link(l) => self.gateway.get(&l, selector, auth).await,
+            Subject::Link(l) => {
+                self.gateway
+                    .get(&l, selector, auth, Some(self.id.clone()))
+                    .await
+            }
         }
     }
 
