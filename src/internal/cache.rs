@@ -8,6 +8,8 @@ use crate::error;
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
+use super::lock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
 #[derive(Eq, PartialEq)]
 enum BlockDelta {
     None,
@@ -94,30 +96,14 @@ impl Block {
     }
 }
 
-enum DirEntry {
+pub enum DirEntry {
     Block(Block),
     Dir(Dir),
 }
 
-impl DirEntry {
-    fn as_block(&self) -> &Block {
-        match self {
-            DirEntry::Block(block) => &block,
-            DirEntry::Dir(_) => panic!("Expected a Block!"),
-        }
-    }
-
-    fn as_dir(&self) -> &Dir {
-        match self {
-            DirEntry::Block(_) => panic!("Expected a Dir!"),
-            DirEntry::Dir(dir) => &dir,
-        }
-    }
-}
-
 pub struct Dir {
     name: PathSegment,
-    contents: HashMap<PathSegment, DirEntry>,
+    contents: HashMap<PathSegment, RwLock<DirEntry>>,
     exists_on_fs: bool,
 }
 
@@ -130,7 +116,7 @@ impl Dir {
         }
     }
 
-    pub fn create_block<'a>(&'a mut self, name: PathSegment) -> TCResult<&'a Block> {
+    pub fn create_block(&mut self, name: PathSegment) -> TCResult<()> {
         match self.contents.entry(name) {
             Entry::Occupied(entry) => Err(error::bad_request(
                 "The filesystem already has an entry at",
@@ -138,12 +124,13 @@ impl Dir {
             )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
-                Ok(entry.insert(DirEntry::Block(Block::new(name))).as_block())
+                entry.insert(RwLock::new(DirEntry::Block(Block::new(name))));
+                Ok(())
             }
         }
     }
 
-    pub fn create_dir<'a>(&'a mut self, name: PathSegment) -> TCResult<&'a Dir> {
+    pub fn create_dir(&mut self, name: PathSegment) -> TCResult<()> {
         match self.contents.entry(name) {
             Entry::Occupied(entry) => Err(error::bad_request(
                 "The filesystem already has an entry at",
@@ -151,30 +138,23 @@ impl Dir {
             )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
-                Ok(entry.insert(DirEntry::Dir(Dir::new(name))).as_dir())
+                entry.insert(RwLock::new(DirEntry::Dir(Dir::new(name))));
+                Ok(())
             }
         }
     }
 
-    pub fn get_block<'a>(&'a self, name: &PathSegment) -> TCResult<Option<&'a Block>> {
+    pub async fn get(&self, name: &PathSegment) -> Option<RwLockReadGuard<DirEntry>> {
         match self.contents.get(name) {
-            None => Ok(None),
-            Some(DirEntry::Block(block)) => Ok(Some(&block)),
-            Some(DirEntry::Dir(_)) => Err(error::bad_request(
-                "Expected filesystem block but found",
-                "(directory)",
-            )),
+            None => None,
+            Some(lock) => Some(lock.read().await),
         }
     }
 
-    pub fn get_dir<'a>(&'a self, name: &PathSegment) -> TCResult<Option<&'a Dir>> {
+    pub async fn get_mut(&self, name: &PathSegment) -> Option<RwLockWriteGuard<DirEntry>> {
         match self.contents.get(name) {
-            None => Ok(None),
-            Some(DirEntry::Dir(dir)) => Ok(Some(&dir)),
-            Some(DirEntry::Block(_)) => Err(error::bad_request(
-                "Expected filesystem directory but found",
-                "(block)",
-            )),
+            None => None,
+            Some(lock) => Some(lock.write().await),
         }
     }
 }

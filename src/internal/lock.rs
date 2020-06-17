@@ -98,7 +98,7 @@ impl<T> Clone for RwLock<T> {
 }
 
 impl<T> RwLock<T> {
-    fn new(value: T) -> RwLock<T> {
+    pub fn new(value: T) -> RwLock<T> {
         let state = LockState {
             readers: 0,
             writer: false,
