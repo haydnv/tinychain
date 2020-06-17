@@ -14,10 +14,14 @@ use crate::value::TCResult;
 use super::{Transact, TxnId};
 
 #[async_trait]
-pub trait Mutate: Clone + Send + Sync {
+pub trait Mutate: Sized + Send + Sync {
     fn diverge(&self) -> Self;
 
     fn converge(&mut self, new_value: Self);
+
+    fn upgrade(self) -> Self {
+        self
+    }
 }
 
 pub struct TxnLockReadGuard<T: Mutate> {
@@ -137,9 +141,16 @@ struct Inner<T: Mutate> {
     value_at: BTreeMap<TxnId, UnsafeCell<T>>,
 }
 
-#[derive(Clone)]
 pub struct TxnLock<T: Mutate> {
     inner: Arc<Mutex<Inner<T>>>,
+}
+
+impl<T: Mutate> Clone for TxnLock<T> {
+    fn clone(&self) -> Self {
+        TxnLock {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 impl<T: Mutate> TxnLock<T> {
@@ -176,7 +187,7 @@ impl<T: Mutate> TxnLock<T> {
         } else {
             // Otherwise, return a ReadGuard.
             if !lock.value_at.contains_key(txn_id) {
-                let value_at_txn_id = UnsafeCell::new(unsafe { (&*lock.value.get()).clone() });
+                let value_at_txn_id = UnsafeCell::new(unsafe { (&*lock.value.get()).diverge() });
                 lock.value_at.insert(txn_id.clone(), value_at_txn_id);
             }
 
@@ -215,10 +226,15 @@ impl<T: Mutate> TxnLock<T> {
                 // Otherwise, copy the value to be mutated in this transaction.
                 lock.state.writer = true;
                 lock.state.reserved = Some(txn_id.clone());
-                if !lock.value_at.contains_key(txn_id) {
-                    let mutation = UnsafeCell::new(unsafe { (&*lock.value.get()).clone() });
-                    lock.value_at.insert(txn_id.clone(), mutation);
-                }
+                let mutable_value = if let Some(value) = lock.value_at.remove(txn_id) {
+                    value.into_inner().upgrade()
+                } else {
+                    let value = unsafe { &*lock.value.get() };
+                    value.diverge().upgrade()
+                };
+
+                lock.value_at
+                    .insert(txn_id.clone(), UnsafeCell::new(mutable_value));
 
                 Ok(Some(TxnLockWriteGuard {
                     txn_id: txn_id.clone(),
