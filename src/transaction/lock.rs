@@ -15,7 +15,7 @@ use super::{Transact, TxnId};
 
 #[async_trait]
 pub trait Mutate: Send + Sync {
-    fn diverge(&self) -> Self;
+    fn diverge(&self, txn_id: &TxnId) -> Self;
 
     fn converge(&mut self, new_value: Self);
 }
@@ -143,7 +143,9 @@ pub struct TxnLock<T: Mutate> {
 
 impl<T: Mutate> Clone for TxnLock<T> {
     fn clone(&self) -> Self {
-        TxnLock { inner: self.inner.clone() }
+        TxnLock {
+            inner: self.inner.clone(),
+        }
     }
 }
 
@@ -181,7 +183,7 @@ impl<T: Mutate> TxnLock<T> {
         } else {
             // Otherwise, return a ReadGuard.
             if !lock.value_at.contains_key(txn_id) {
-                let value_at_txn_id = UnsafeCell::new(unsafe { (&*lock.value.get()).diverge() });
+                let value_at_txn_id = UnsafeCell::new(unsafe { (&*lock.value.get()).diverge(txn_id) });
                 lock.value_at.insert(txn_id.clone(), value_at_txn_id);
             }
 
@@ -221,7 +223,7 @@ impl<T: Mutate> TxnLock<T> {
                 lock.state.writer = true;
                 lock.state.reserved = Some(txn_id.clone());
                 if !lock.value_at.contains_key(txn_id) {
-                    let mutation = UnsafeCell::new(unsafe { (&*lock.value.get()).diverge() });
+                    let mutation = UnsafeCell::new(unsafe { (&*lock.value.get()).diverge(txn_id) });
                     lock.value_at.insert(txn_id.clone(), mutation);
                 }
 

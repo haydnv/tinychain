@@ -51,7 +51,7 @@ struct IndexRoot(NodeId);
 
 #[async_trait]
 impl Mutate for IndexRoot {
-    fn diverge(&self) -> Self {
+    fn diverge(&self, _txn_id: &TxnId) -> Self {
         self.clone()
     }
 

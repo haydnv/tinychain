@@ -8,7 +8,7 @@ use crate::error;
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
-use super::lock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use super::lock::RwLock;
 
 #[derive(Eq, PartialEq)]
 enum BlockDelta {

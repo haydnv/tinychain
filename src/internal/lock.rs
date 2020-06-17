@@ -20,6 +20,15 @@ pub struct RwLockReadGuard<T> {
     lock: RwLock<T>,
 }
 
+impl<T> Clone for RwLockReadGuard<T> {
+    fn clone(&self) -> RwLockReadGuard<T> {
+        self.lock.inner.lock().unwrap().state.readers += 1;
+        RwLockReadGuard {
+            lock: self.lock.clone(),
+        }
+    }
+}
+
 impl<T> Deref for RwLockReadGuard<T> {
     type Target = T;
 

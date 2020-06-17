@@ -34,7 +34,7 @@ struct DirContents(HashMap<PathSegment, DirEntry>);
 
 #[async_trait]
 impl Mutate for DirContents {
-    fn diverge(&self) -> Self {
+    fn diverge(&self, _txn_id: &TxnId) -> Self {
         self.clone()
     }
 

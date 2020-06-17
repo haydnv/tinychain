@@ -1,7 +1,7 @@
 pub mod archive;
-mod cache;
+pub mod cache;
 pub mod chain;
-mod lock;
+pub mod lock;
 
 // TODO: DELETE
 mod file;

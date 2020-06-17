@@ -12,6 +12,7 @@ use crate::transaction::{Transact, Txn};
 use crate::value::{TCResult, TCStream, Value};
 
 mod dir;
+mod file;
 pub mod graph;
 pub mod index;
 mod table;
