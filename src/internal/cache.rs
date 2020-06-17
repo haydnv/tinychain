@@ -68,6 +68,10 @@ impl Block {
         }
     }
 
+    pub fn name(&'_ self) -> &'_ PathSegment {
+        &self.name
+    }
+
     pub async fn copy_from(&mut self, mut other: Block) {
         if other.data.is_some() {
             mem::swap(&mut self.data, &mut other.data);
@@ -97,13 +101,13 @@ impl Block {
 }
 
 pub enum DirEntry {
-    Block(Block),
-    Dir(Dir),
+    Block(RwLock<Block>),
+    Dir(RwLock<Dir>),
 }
 
 pub struct Dir {
     name: PathSegment,
-    contents: HashMap<PathSegment, RwLock<DirEntry>>,
+    contents: HashMap<PathSegment, DirEntry>,
     exists_on_fs: bool,
 }
 
@@ -124,7 +128,7 @@ impl Dir {
             )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
-                entry.insert(RwLock::new(DirEntry::Block(Block::new(name))));
+                entry.insert(DirEntry::Block(RwLock::new(Block::new(name))));
                 Ok(())
             }
         }
@@ -138,23 +142,31 @@ impl Dir {
             )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
-                entry.insert(RwLock::new(DirEntry::Dir(Dir::new(name))));
+                entry.insert(DirEntry::Dir(RwLock::new(Dir::new(name))));
                 Ok(())
             }
         }
     }
 
-    pub async fn get(&self, name: &PathSegment) -> Option<RwLockReadGuard<DirEntry>> {
+    pub fn get_block(&self, name: &PathSegment) -> TCResult<Option<RwLock<Block>>> {
         match self.contents.get(name) {
-            None => None,
-            Some(lock) => Some(lock.read().await),
+            None => Ok(None),
+            Some(DirEntry::Block(block)) => Ok(Some(block.clone())),
+            Some(DirEntry::Dir(_)) => Err(error::bad_request(
+                "Expected filesystem block but found",
+                "(directory)",
+            )),
         }
     }
 
-    pub async fn get_mut(&self, name: &PathSegment) -> Option<RwLockWriteGuard<DirEntry>> {
+    pub fn get_dir(&self, name: &PathSegment) -> TCResult<Option<RwLock<Dir>>> {
         match self.contents.get(name) {
-            None => None,
-            Some(lock) => Some(lock.write().await),
+            None => Ok(None),
+            Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
+            Some(DirEntry::Block(_)) => Err(error::bad_request(
+                "Expected filesystem directory but found",
+                "(block)",
+            )),
         }
     }
 }
