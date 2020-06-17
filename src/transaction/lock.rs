@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures::future::{self, Future};
+use futures::future::Future;
 use futures::task::{Context, Poll, Waker};
 
 use crate::error;
@@ -15,7 +15,9 @@ use super::{Transact, TxnId};
 
 #[async_trait]
 pub trait Mutate: Clone + Send + Sync {
-    async fn commit(&mut self, new_value: Self);
+    fn diverge(&self) -> Self;
+
+    fn converge(&mut self, new_value: Self);
 }
 
 pub struct TxnLockReadGuard<T: Mutate> {
@@ -237,20 +239,15 @@ impl<T: Mutate> TxnLock<T> {
 #[async_trait]
 impl<T: Mutate> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
-        async {
-            let _ = self.write(txn_id.clone()).await; // prevent any more writes
-            let lock = &mut self.inner.lock().unwrap();
-            lock.state.last_commit = txn_id.clone();
-            lock.state.reserved = None;
+        let _ = self.write(txn_id.clone()).await; // prevent any more writes
+        let lock = &mut self.inner.lock().unwrap();
+        lock.state.last_commit = txn_id.clone();
+        lock.state.reserved = None;
 
+        if let Some(new_value) = lock.value_at.remove(txn_id) {
             let value = unsafe { &mut *lock.value.get() };
-            if let Some(new_value) = lock.value_at.remove(txn_id) {
-                value.commit(new_value.into_inner())
-            } else {
-                Box::pin(future::ready(()))
-            }
+            value.converge(new_value.into_inner())
         }
-        .await;
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
