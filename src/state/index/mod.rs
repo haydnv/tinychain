@@ -55,7 +55,7 @@ impl Mutate for IndexRoot {
         self.clone()
     }
 
-    fn converge(&mut self, new_value: IndexRoot) {
+    async fn converge(&mut self, new_value: IndexRoot) {
         self.0 = new_value.0
     }
 }

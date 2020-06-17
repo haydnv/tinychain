@@ -55,6 +55,15 @@ impl CachedBlock {
     }
 }
 
+impl From<Bytes> for CachedBlock {
+    fn from(source: Bytes) -> CachedBlock {
+        CachedBlock {
+            delta: BlockDelta::None,
+            contents: BytesMut::from(&source[..]),
+        }
+    }
+}
+
 pub struct Block {
     name: PathSegment,
     data: Option<CachedBlock>,
@@ -72,11 +81,11 @@ impl Block {
         &self.name
     }
 
-    pub async fn copy_from(&mut self, mut other: Block) {
+    pub async fn swap(&mut self, other: &mut Block) {
         if other.data.is_some() {
-            mem::swap(&mut self.data, &mut other.data);
+            mem::swap(&mut self.data, &mut other.data)
         } else {
-            // TODO: replace this block on the filesystem
+            // TODO: pull the new data from the filesystem
             panic!("NOT IMPLEMENTED")
         }
     }
@@ -120,7 +129,7 @@ impl Dir {
         }
     }
 
-    pub fn create_block(&mut self, name: PathSegment) -> TCResult<()> {
+    pub fn create_block(&mut self, name: PathSegment) -> TCResult<RwLock<Block>> {
         match self.contents.entry(name) {
             Entry::Occupied(entry) => Err(error::bad_request(
                 "The filesystem already has an entry at",
@@ -128,13 +137,14 @@ impl Dir {
             )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
-                entry.insert(DirEntry::Block(RwLock::new(Block::new(name))));
-                Ok(())
+                let block = RwLock::new(Block::new(name));
+                entry.insert(DirEntry::Block(block.clone()));
+                Ok(block)
             }
         }
     }
 
-    pub fn create_dir(&mut self, name: PathSegment) -> TCResult<()> {
+    pub fn create_dir(&mut self, name: PathSegment) -> TCResult<RwLock<Dir>> {
         match self.contents.entry(name) {
             Entry::Occupied(entry) => Err(error::bad_request(
                 "The filesystem already has an entry at",
@@ -142,8 +152,9 @@ impl Dir {
             )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
-                entry.insert(DirEntry::Dir(RwLock::new(Dir::new(name))));
-                Ok(())
+                let dir = RwLock::new(Dir::new(name));
+                entry.insert(DirEntry::Dir(dir.clone()));
+                Ok(dir)
             }
         }
     }

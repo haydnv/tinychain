@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures::future::Future;
+use futures::future::{self, Future};
 use futures::task::{Context, Poll, Waker};
 
 use crate::error;
@@ -17,7 +17,7 @@ use super::{Transact, TxnId};
 pub trait Mutate: Send + Sync {
     fn diverge(&self, txn_id: &TxnId) -> Self;
 
-    fn converge(&mut self, new_value: Self);
+    async fn converge(&mut self, new_value: Self);
 }
 
 pub struct TxnLockReadGuard<T: Mutate> {
@@ -183,7 +183,8 @@ impl<T: Mutate> TxnLock<T> {
         } else {
             // Otherwise, return a ReadGuard.
             if !lock.value_at.contains_key(txn_id) {
-                let value_at_txn_id = UnsafeCell::new(unsafe { (&*lock.value.get()).diverge(txn_id) });
+                let value_at_txn_id =
+                    UnsafeCell::new(unsafe { (&*lock.value.get()).diverge(txn_id) });
                 lock.value_at.insert(txn_id.clone(), value_at_txn_id);
             }
 
@@ -246,15 +247,21 @@ impl<T: Mutate> TxnLock<T> {
 #[async_trait]
 impl<T: Mutate> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
-        let _ = self.write(txn_id.clone()).await; // prevent any more writes
-        let lock = &mut self.inner.lock().unwrap();
-        lock.state.last_commit = txn_id.clone();
-        lock.state.reserved = None;
+        async {
+            let _ = self.write(txn_id.clone()).await; // prevent any more writes
+            let lock = &mut self.inner.lock().unwrap();
+            lock.state.last_commit = txn_id.clone();
+            lock.state.reserved = None;
 
-        if let Some(new_value) = lock.value_at.remove(txn_id) {
-            let value = unsafe { &mut *lock.value.get() };
-            value.converge(new_value.into_inner())
+            if let Some(new_value) = lock.value_at.remove(txn_id) {
+                let value = unsafe { &mut *lock.value.get() };
+                value.converge(new_value.into_inner())
+            } else {
+                Box::pin(future::ready(()))
+            }
         }
+        .await
+        .await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
