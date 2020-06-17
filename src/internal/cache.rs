@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::error;
-use crate::value::TCResult;
 use crate::value::link::PathSegment;
+use crate::value::TCResult;
 
 #[derive(Eq, PartialEq)]
 enum BlockDelta {
@@ -22,7 +22,10 @@ struct CachedBlock {
 
 impl CachedBlock {
     fn new() -> CachedBlock {
-        CachedBlock { delta: BlockDelta::None, contents: BytesMut::new() }
+        CachedBlock {
+            delta: BlockDelta::None,
+            contents: BytesMut::new(),
+        }
     }
 
     fn append(&mut self, data: Bytes) {
@@ -57,7 +60,10 @@ pub struct Block {
 
 impl Block {
     pub fn new(name: PathSegment) -> Block {
-        Block { name, data: Some(CachedBlock::new()) }
+        Block {
+            name,
+            data: Some(CachedBlock::new()),
+        }
     }
 
     pub async fn copy_from(&mut self, mut other: Block) {
@@ -117,12 +123,19 @@ pub struct Dir {
 
 impl Dir {
     fn new(name: PathSegment) -> Dir {
-        Dir { name, contents: HashMap::new(), exists_on_fs: false }
+        Dir {
+            name,
+            contents: HashMap::new(),
+            exists_on_fs: false,
+        }
     }
 
     pub fn create_block<'a>(&'a mut self, name: PathSegment) -> TCResult<&'a Block> {
         match self.contents.entry(name) {
-            Entry::Occupied(entry) => Err(error::bad_request("The filesystem already has an entry at", entry.key())),
+            Entry::Occupied(entry) => Err(error::bad_request(
+                "The filesystem already has an entry at",
+                entry.key(),
+            )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
                 Ok(entry.insert(DirEntry::Block(Block::new(name))).as_block())
@@ -132,7 +145,10 @@ impl Dir {
 
     pub fn create_dir<'a>(&'a mut self, name: PathSegment) -> TCResult<&'a Dir> {
         match self.contents.entry(name) {
-            Entry::Occupied(entry) => Err(error::bad_request("The filesystem already has an entry at", entry.key())),
+            Entry::Occupied(entry) => Err(error::bad_request(
+                "The filesystem already has an entry at",
+                entry.key(),
+            )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
                 Ok(entry.insert(DirEntry::Dir(Dir::new(name))).as_dir())
@@ -144,7 +160,10 @@ impl Dir {
         match self.contents.get(name) {
             None => Ok(None),
             Some(DirEntry::Block(block)) => Ok(Some(&block)),
-            Some(DirEntry::Dir(_)) => Err(error::bad_request("Expected filesystem block but found", "(directory)"))
+            Some(DirEntry::Dir(_)) => Err(error::bad_request(
+                "Expected filesystem block but found",
+                "(directory)",
+            )),
         }
     }
 
@@ -152,7 +171,10 @@ impl Dir {
         match self.contents.get(name) {
             None => Ok(None),
             Some(DirEntry::Dir(dir)) => Ok(Some(&dir)),
-            Some(DirEntry::Block(_)) => Err(error::bad_request("Expected filesystem directory but found", "(block)"))
+            Some(DirEntry::Block(_)) => Err(error::bad_request(
+                "Expected filesystem directory but found",
+                "(block)",
+            )),
         }
     }
 }
@@ -165,12 +187,18 @@ pub struct FileSystem {
 impl FileSystem {
     pub async fn new(mount_point: PathBuf) -> FileSystem {
         // TODO: load from disk
-        FileSystem { mount_point, contents: HashMap::new() }
+        FileSystem {
+            mount_point,
+            contents: HashMap::new(),
+        }
     }
 
     pub fn create_dir<'a>(&'a mut self, name: PathSegment) -> TCResult<&'a Dir> {
         match self.contents.entry(name) {
-            Entry::Occupied(entry) => Err(error::bad_request("The filesystem cache already has a directory at", entry.key())),
+            Entry::Occupied(entry) => Err(error::bad_request(
+                "The filesystem cache already has a directory at",
+                entry.key(),
+            )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
                 Ok(entry.insert(Dir::new(name)))
