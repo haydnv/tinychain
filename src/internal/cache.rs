@@ -192,6 +192,10 @@ impl Dir {
             )),
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.contents.is_empty()
+    }
 }
 
 pub struct FileSystem {
