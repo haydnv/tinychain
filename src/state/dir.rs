@@ -77,7 +77,7 @@ impl Dir {
             if path.is_empty() {
                 Err(error::bad_request("Cannot get Dir at empty path", path))
             } else if path.len() == 1 {
-                if let Some(entry) = self.contents.read(txn_id).await?.0.get(&path[0]) {
+                if let Some(entry) = self.contents.read(txn_id.clone()).await?.0.get(&path[0]) {
                     match entry {
                         DirEntry::Dir(dir) => Ok(Some(dir.clone())),
                         other => Err(error::bad_request("Not a Dir", other)),
@@ -93,11 +93,7 @@ impl Dir {
         })
     }
 
-    pub async fn get_file(
-        &self,
-        txn_id: &TxnId,
-        name: &PathSegment,
-    ) -> TCResult<Option<Arc<File>>> {
+    pub async fn get_file(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<Arc<File>>> {
         if let Some(entry) = self.contents.read(txn_id).await?.0.get(name) {
             match entry {
                 DirEntry::File(file) => Ok(Some(file.clone())),
@@ -169,7 +165,7 @@ impl Dir {
         })
     }
 
-    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+    pub async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
         Ok(self.contents.read(txn_id).await?.0.is_empty())
     }
 }

@@ -20,6 +20,12 @@ pub struct RwLockReadGuard<T> {
     lock: RwLock<T>,
 }
 
+impl<T> RwLockReadGuard<T> {
+    fn upgrade(self) -> RwLockWriteFuture<T> {
+        self.lock.write()
+    }
+}
+
 impl<T> Clone for RwLockReadGuard<T> {
     fn clone(&self) -> RwLockReadGuard<T> {
         self.lock.inner.lock().unwrap().state.readers += 1;

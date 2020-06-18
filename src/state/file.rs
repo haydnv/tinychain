@@ -123,7 +123,7 @@ impl File {
         }))
     }
 
-    pub async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>> {
+    pub async fn block_ids(&self, txn_id: TxnId) -> TCResult<HashSet<BlockId>> {
         Ok(self
             .contents
             .read(txn_id)
@@ -134,7 +134,7 @@ impl File {
             .collect())
     }
 
-    pub async fn contains_block(&self, txn_id: &TxnId, block_id: &BlockId) -> TCResult<bool> {
+    pub async fn contains_block(&self, txn_id: TxnId, block_id: &BlockId) -> TCResult<bool> {
         Ok(self.contents.read(txn_id).await?.0.contains_key(block_id))
     }
 
@@ -143,7 +143,7 @@ impl File {
         txn_id: TxnId,
         block_id: BlockId,
         initial_value: Bytes,
-    ) -> TCResult<()> {
+    ) -> TCResult<TxnLockReadGuard<Block>> {
         if block_id.to_string() == TXN_CACHE {
             return Err(error::bad_request("This name is reserved", block_id));
         }
@@ -164,18 +164,20 @@ impl File {
                     file: self,
                     cached: block,
                 };
-                entry.insert(TxnLock::new(txn_id, block));
-                Ok(())
+                entry
+                    .insert(TxnLock::new(txn_id.clone(), block))
+                    .read(txn_id)
+                    .await
             }
         }
     }
 
     pub async fn get_block(
         &self,
-        txn_id: &TxnId,
+        txn_id: TxnId,
         block_id: &BlockId,
     ) -> TCResult<Option<TxnLockReadGuard<Block>>> {
-        let contents = &self.contents.read(txn_id).await?.0;
+        let contents = &self.contents.read(txn_id.clone()).await?.0;
         match contents.get(block_id) {
             Some(block) => Ok(Some(block.read(txn_id).await?)),
             None => Ok(None),
@@ -187,7 +189,7 @@ impl File {
         txn_id: TxnId,
         block_id: BlockId,
     ) -> TCResult<Option<TxnLockWriteGuard<Block>>> {
-        let contents = &self.contents.read(&txn_id).await?.0;
+        let contents = &self.contents.read(txn_id.clone()).await?.0;
         match contents.get(&block_id) {
             Some(block) => {
                 self.mutated
@@ -202,7 +204,7 @@ impl File {
         }
     }
 
-    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+    pub async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
         Ok(self.contents.read(txn_id).await?.0.is_empty())
     }
 }
@@ -210,7 +212,7 @@ impl File {
 #[async_trait]
 impl Transact for File {
     async fn commit(&self, txn_id: &TxnId) {
-        let contents = &self.contents.read(txn_id).await.unwrap().0;
+        let contents = &self.contents.read(txn_id.clone()).await.unwrap().0;
         if let Some(mut mutated) = self.mutated.lock().await.remove(txn_id) {
             let mut commits = Vec::with_capacity(mutated.len());
             for block_id in mutated.drain() {
@@ -222,7 +224,7 @@ impl Transact for File {
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        let contents = &self.contents.read(txn_id).await.unwrap().0;
+        let contents = &self.contents.read(txn_id.clone()).await.unwrap().0;
         if let Some(mut mutated) = self.mutated.lock().await.remove(txn_id) {
             let mut rollbacks = Vec::with_capacity(mutated.len());
             for block_id in mutated.drain() {
