@@ -51,16 +51,22 @@ impl CachedBlock {
         self.contents.put(data);
     }
 
-    fn insert(&mut self, offset: usize, data: Bytes) {
-        if data.is_empty() {
-            return;
-        }
-
+    fn rewrite(&mut self, data: Bytes) {
         self.delta = BlockDelta::Rewrite;
-
-        let tail = self.contents.split_to(offset);
+        self.contents.clear();
         self.contents.put(data);
-        self.contents.put(tail);
+    }
+}
+
+impl From<Bytes> for CachedBlock {
+    fn from(data: Bytes) -> CachedBlock {
+        let mut contents = BytesMut::with_capacity(data.len());
+        contents.put(data);
+
+        CachedBlock {
+            delta: BlockDelta::Rewrite,
+            contents,
+        }
     }
 }
 
@@ -103,12 +109,21 @@ impl Block {
         }
     }
 
-    pub async fn insert(&mut self, offset: usize, data: Bytes) {
+    pub async fn rewrite(&mut self, data: Bytes) {
         if let Some(cached) = &mut self.data {
-            cached.insert(offset, data);
+            cached.rewrite(data);
         } else {
             // TODO: read data from filesystem
             panic!("NOT IMPLEMENTED")
+        }
+    }
+}
+
+impl From<(PathSegment, Bytes)> for Block {
+    fn from(block: (PathSegment, Bytes)) -> Block {
+        Block {
+            name: block.0,
+            data: Some(CachedBlock::from(block.1)),
         }
     }
 }
@@ -119,21 +134,25 @@ pub enum DirEntry {
 }
 
 pub struct Dir {
-    name: PathSegment,
+    mount_point: PathBuf,
     contents: HashMap<PathSegment, DirEntry>,
     exists_on_fs: bool,
 }
 
 impl Dir {
-    fn new(name: PathSegment) -> Dir {
+    fn new(mount_point: PathBuf) -> Dir {
         Dir {
-            name,
+            mount_point,
             contents: HashMap::new(),
             exists_on_fs: false,
         }
     }
 
-    pub fn create_block(&mut self, name: PathSegment) -> TCResult<RwLock<Block>> {
+    pub fn create_block(
+        &mut self,
+        name: PathSegment,
+        initial_value: Bytes,
+    ) -> TCResult<RwLock<Block>> {
         match self.contents.entry(name) {
             Entry::Occupied(entry) => Err(error::bad_request(
                 "The filesystem already has an entry at",
@@ -141,7 +160,7 @@ impl Dir {
             )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
-                let block = RwLock::new(Block::new(name));
+                let block = RwLock::new((name, initial_value).into());
                 entry.insert(DirEntry::Block(block.clone()));
                 Ok(block)
             }
@@ -156,7 +175,7 @@ impl Dir {
             )),
             Entry::Vacant(entry) => {
                 let name = entry.key().clone();
-                let dir = RwLock::new(Dir::new(name));
+                let dir = RwLock::new(Dir::new(fs_path(&self.mount_point, &name)));
                 entry.insert(DirEntry::Dir(dir.clone()));
                 Ok(dir)
             }
@@ -198,42 +217,12 @@ impl Dir {
     }
 }
 
-pub struct FileSystem {
-    mount_point: PathBuf,
-    contents: HashMap<PathSegment, Dir>,
+pub fn mount(mount_point: PathBuf) -> RwLock<Dir> {
+    RwLock::new(Dir::new(mount_point))
 }
 
-impl FileSystem {
-    pub async fn new(mount_point: PathBuf) -> FileSystem {
-        // TODO: load from disk
-        FileSystem {
-            mount_point,
-            contents: HashMap::new(),
-        }
-    }
-
-    pub fn create_dir<'a>(&'a mut self, name: PathSegment) -> TCResult<&'a Dir> {
-        match self.contents.entry(name) {
-            Entry::Occupied(entry) => Err(error::bad_request(
-                "The filesystem cache already has a directory at",
-                entry.key(),
-            )),
-            Entry::Vacant(entry) => {
-                let name = entry.key().clone();
-                Ok(entry.insert(Dir::new(name)))
-            }
-        }
-    }
-
-    pub fn get_dir<'a>(&'a self, name: &PathSegment) -> Option<&'a Dir> {
-        self.contents.get(name)
-    }
-
-    pub fn get_or_create_dir<'a>(&'a mut self, name: &'a PathSegment) -> Option<&'a Dir> {
-        if self.contents.contains_key(name) {
-            self.get_dir(name)
-        } else {
-            Some(self.create_dir(name.clone()).unwrap())
-        }
-    }
+fn fs_path(mount_point: &PathBuf, name: &PathSegment) -> PathBuf {
+    let mut path = mount_point.clone();
+    path.push(name.to_string());
+    path
 }

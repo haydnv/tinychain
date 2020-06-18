@@ -30,7 +30,7 @@ impl Gateway {
         Err(error::not_implemented())
     }
 
-    pub async fn transaction<'a>(self: &Arc<Self>) -> TCResult<Arc<Txn>> {
+    pub async fn transaction(self: &Arc<Self>) -> TCResult<Arc<Txn>> {
         Txn::new(self.clone(), self.workspace.clone()).await
     }
 

@@ -1,18 +1,20 @@
 use std::collections::hash_map::{Entry, HashMap};
 use std::collections::HashSet;
 use std::fmt;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 
 use crate::error;
-use crate::internal::File;
+use crate::internal::cache;
+use crate::internal::lock::RwLock;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
 use crate::value::TCResult;
+
+use super::file::File;
 
 #[derive(Clone)]
 enum DirEntry {
@@ -52,15 +54,15 @@ impl Mutate for DirContents {
 }
 
 pub struct Dir {
-    context: PathBuf,
+    cache: RwLock<cache::Dir>,
     temporary: bool,
     contents: TxnLock<DirContents>,
 }
 
 impl Dir {
-    pub fn create(txn_id: TxnId, mount_point: PathBuf, temporary: bool) -> Arc<Dir> {
+    pub fn create(txn_id: TxnId, cache: RwLock<cache::Dir>, temporary: bool) -> Arc<Dir> {
         Arc::new(Dir {
-            context: mount_point,
+            cache,
             temporary,
             contents: TxnLock::new(txn_id, DirContents(HashMap::new())),
         })
@@ -109,7 +111,7 @@ impl Dir {
     pub fn create_dir<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        path: TCPath,
+        path: &'a TCPath,
     ) -> BoxFuture<'a, TCResult<Arc<Dir>>> {
         Box::pin(async move {
             if path.is_empty() {
@@ -118,10 +120,10 @@ impl Dir {
                 let mut contents = self.contents.write(txn_id.clone()).await?;
                 match contents.0.entry(path[0].clone()) {
                     Entry::Vacant(entry) => {
-                        let dir =
-                            Dir::create(txn_id.clone(), self.fs_path(&path[0]), self.temporary);
-                        entry.insert(DirEntry::Dir(dir.clone()));
-                        Ok(dir)
+                        let fs_dir = self.cache.write().await.create_dir(path[0].clone())?;
+                        let new_dir = Dir::create(txn_id.clone(), fs_dir, self.temporary);
+                        entry.insert(DirEntry::Dir(new_dir.clone()));
+                        Ok(new_dir)
                     }
                     _ => Err(error::bad_request(
                         "Tried to create a new Dir but there is already an entry at",
@@ -130,18 +132,19 @@ impl Dir {
                 }
             } else {
                 let dir = self
-                    .get_or_create_dir(txn_id, &path[0].clone().into())
+                    .get_or_create_dir(&txn_id, &path[0].clone().into())
                     .await?;
-                dir.create_dir(txn_id, path.slice_from(1)).await
+                dir.create_dir(txn_id, &path.slice_from(1)).await
             }
         })
     }
 
-    pub async fn create_file(&self, txn_id: &TxnId, name: PathSegment) -> TCResult<Arc<File>> {
+    pub async fn create_file(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Arc<File>> {
         let mut contents = self.contents.write(txn_id.clone()).await?;
         match contents.0.entry(name) {
             Entry::Vacant(entry) => {
-                let file = File::new();
+                let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
+                let file = File::create(txn_id, fs_cache).await?;
                 entry.insert(DirEntry::File(file.clone()));
                 Ok(file)
             }
@@ -158,39 +161,16 @@ impl Dir {
         path: &'a TCPath,
     ) -> BoxFuture<'a, TCResult<Arc<Dir>>> {
         Box::pin(async move {
-            if path.is_empty() {
-                Err(error::bad_request("Not a valid directory name", path))
-            } else if path.len() == 1 {
-                let mut contents = self.contents.write(txn_id.clone()).await?;
-                match contents.0.get(&path[0]) {
-                    Some(DirEntry::Dir(dir)) => Ok(dir.clone()),
-                    Some(other) => Err(error::bad_request("Expected a Dir but found", other)),
-                    None => {
-                        let dir =
-                            Dir::create(txn_id.clone(), self.fs_path(&path[0]), self.temporary);
-                        contents
-                            .0
-                            .insert(path[0].clone(), DirEntry::Dir(dir.clone()));
-                        Ok(dir)
-                    }
-                }
+            if let Some(dir) = self.get_dir(txn_id, path).await? {
+                Ok(dir)
             } else {
-                self.get_or_create_dir(txn_id, &path[0].clone().into())
-                    .await?
-                    .get_or_create_dir(txn_id, &path.slice_from(1))
-                    .await
+                self.create_dir(txn_id, path).await
             }
         })
     }
 
     pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
         Ok(self.contents.read(txn_id).await?.0.is_empty())
-    }
-
-    fn fs_path(&self, name: &PathSegment) -> PathBuf {
-        let mut path = self.context.clone();
-        path.push(name.to_string());
-        path
     }
 }
 

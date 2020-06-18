@@ -7,7 +7,7 @@ use crate::transaction::*;
 use crate::value::link::TCPath;
 use crate::value::{TCResult, Value, ValueId};
 
-pub fn get(endpoint: &TCPath, _id: Value) -> TCResult<State> {
+pub fn get(_endpoint: &TCPath, _id: Value) -> TCResult<State> {
     Err(error::not_implemented())
 }
 

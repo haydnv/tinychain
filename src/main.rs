@@ -67,8 +67,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!();
 
     let txn_id = transaction::TxnId::new(gateway::Gateway::time());
-    let data_dir = state::Dir::create(txn_id.clone(), config.data_dir, false);
-    let workspace = state::Dir::create(txn_id.clone(), config.workspace.clone(), true);
+    let fs_cache_persistent = internal::cache::mount(config.data_dir);
+    let data_dir = state::Dir::create(txn_id.clone(), fs_cache_persistent, false);
+    let fs_cache_temporary = internal::cache::mount(config.workspace);
+    let workspace = state::Dir::create(txn_id.clone(), fs_cache_temporary, true);
 
     use transaction::Transact;
     data_dir.commit(&txn_id).await;
@@ -116,7 +118,7 @@ async fn configure(
                 //                cluster::Cluster::from_dir(txn_id, dir).await
                 panic!("NOT IMPLEMENTED")
             } else {
-                cluster::Cluster::new(txn_id, data_dir.create_dir(&txn_id, path.clone()).await?)
+                cluster::Cluster::new(txn_id, data_dir.create_dir(&txn_id, &path).await?)
             };
 
             hosted.push(path.clone(), hosted_cluster);

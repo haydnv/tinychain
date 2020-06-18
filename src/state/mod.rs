@@ -12,7 +12,7 @@ use crate::transaction::{Transact, Txn};
 use crate::value::{TCResult, TCStream, Value};
 
 mod dir;
-mod file;
+pub mod file;
 pub mod graph;
 pub mod index;
 mod table;
@@ -56,16 +56,6 @@ pub trait Persist: Archive + Collect {}
 pub enum State {
     Index(Arc<index::Index>),
     Value(Value),
-}
-
-impl State {
-    pub async fn get(&self, _txn: &Arc<Txn>, _selector: Value) -> GetResult {
-        Err(error::not_implemented())
-    }
-
-    pub async fn put(&self, _txn: &Arc<Txn>, _selector: Value, _data: State) -> TCResult<State> {
-        Err(error::not_implemented())
-    }
 }
 
 impl From<Arc<index::Index>> for State {

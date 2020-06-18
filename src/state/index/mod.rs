@@ -7,11 +7,12 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{self, BoxFuture, Future};
 use futures::stream::{self, FuturesOrdered, StreamExt};
+use futures::try_join;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error;
-use crate::internal::{BlockId, File};
+use crate::state::file::{Block, BlockId, File};
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{TCResult, TCStream, TCType, Value, ValueId};
@@ -26,6 +27,7 @@ const ERR_CORRUPT: &str = "Index corrupted! Please restart Tinychain and file a 
 
 type NodeId = BlockId;
 
+// TODO: have node retain a TxnLock[Read|Write]Guard, for locking
 #[derive(Deserialize, Serialize)]
 struct Node {
     leaf: bool,
@@ -41,6 +43,11 @@ impl Node {
             children: vec![],
         }
     }
+}
+
+struct BlockNode {
+    block: Block,
+    data: Node,
 }
 
 type Key = Vec<Value>;
@@ -109,14 +116,15 @@ impl Index {
             2
         };
 
-        if file.is_empty(&txn_id).await {
+        if file.is_empty(&txn_id).await? {
             let root: BlockId = Uuid::new_v4().into();
-            file.new_block(
-                txn_id.clone(),
-                root.clone(),
-                Bytes::from(bincode::serialize(&Node::new(true))?),
-            )
-            .await?;
+            file.clone()
+                .create_block(
+                    txn_id.clone(),
+                    root.clone(),
+                    Bytes::from(bincode::serialize(&Node::new(true))?),
+                )
+                .await?;
 
             let collator =
                 collator::Collator::new(schema.iter().map(|c| c.dtype.clone()).collect())?;
@@ -181,32 +189,31 @@ impl Index {
     }
 
     async fn get_node(&self, txn_id: &TxnId, node_id: &NodeId) -> TCResult<Node> {
-        if let Some(node) = self.file.get_block(txn_id, node_id).await {
-            bincode::deserialize(&node).map_err(|_| error::internal(ERR_CORRUPT))
+        if let Some(block) = self.file.get_block(txn_id, node_id).await? {
+            bincode::deserialize(&block.as_bytes().await).map_err(|_| error::internal(ERR_CORRUPT))
         } else {
             Err(error::internal(ERR_CORRUPT))
         }
     }
 
-    async fn put_node(&self, txn_id: &TxnId, node_id: NodeId, node: &Node) -> TCResult<()> {
-        self.file
-            .put_block(
-                txn_id.clone(),
-                node_id,
-                (&bincode::serialize(node)?[..]).into(),
-            )
-            .await
+    async fn sync_node(&self, txn_id: TxnId, node_id: NodeId, node: &Node) -> TCResult<()> {
+        if let Some(block) = self.file.get_block_mut(txn_id, node_id).await? {
+            block.rewrite(Bytes::from(bincode::serialize(node)?)).await;
+            Ok(())
+        } else {
+            Err(error::internal(ERR_CORRUPT))
+        }
     }
 
-    async fn put_node_if_updated(
+    async fn sync_node_if_updated(
         &self,
         txn_id: &TxnId,
         node_id: NodeId,
-        node: Node,
+        node: &Node,
         updated: bool,
     ) -> TCResult<()> {
         if updated {
-            self.put_node(txn_id, node_id, &node).await
+            self.sync_node(txn_id.clone(), node_id, node).await
         } else {
             Ok(())
         }
@@ -268,7 +275,7 @@ impl Index {
                     updated = true;
                 }
 
-                self.put_node_if_updated(txn_id, node_id.clone(), node, updated)
+                self.sync_node_if_updated(txn_id, node_id.clone(), &node, updated)
                     .await?;
                 Ok(())
             } else {
@@ -280,7 +287,7 @@ impl Index {
                 }
 
                 let last_child = node.children.last().unwrap().clone();
-                self.put_node_if_updated(txn_id, node_id.clone(), node, updated)
+                self.sync_node_if_updated(txn_id, node_id.clone(), &node, updated)
                     .await?;
                 self.update(txn_id, &last_child, selector, value).await
             }
@@ -301,7 +308,8 @@ impl Index {
                     || self.collator.compare(&node.keys[i], &key) != Ordering::Equal
                 {
                     node.keys.insert(i, key);
-                    self.put_node(txn_id, node_id.clone(), &node).await?;
+                    self.sync_node(txn_id.clone(), node_id.clone(), &node)
+                        .await?;
                 }
 
                 Ok(())
@@ -329,7 +337,7 @@ impl Index {
     ) -> TCResult<()> {
         let mut child = self.get_node(txn_id, &node.children[i]).await?;
         let mut new_node = Node::new(child.leaf);
-        let new_node_id = new_node_id(self.file.block_ids(txn_id).await);
+        let new_node_id = new_node_id(self.file.block_ids(txn_id).await?);
 
         node.children.insert(i + 1, new_node_id.clone());
         node.keys.insert(i, child.keys.remove(self.order - 1));
@@ -340,8 +348,10 @@ impl Index {
             new_node.children = child.children.drain(self.order..).collect();
         }
 
-        self.put_node(txn_id, new_node_id, &new_node).await?;
-        self.put_node(txn_id, node_id, node).await?;
+        try_join!(
+            self.sync_node(txn_id.clone(), new_node_id, &new_node),
+            self.sync_node(txn_id.clone(), node_id, node)
+        )?;
 
         Ok(())
     }
@@ -383,7 +393,7 @@ impl Collect for Index {
                 let old_root_id = root_id.0.clone();
                 let mut old_root = root;
 
-                root_id.0 = new_node_id(self.file.block_ids(txn.id()).await);
+                root_id.0 = new_node_id(self.file.block_ids(txn.id()).await?);
                 let mut new_root = Node::new(false);
                 new_root.children.push(old_root_id.clone());
                 self.split_child(txn.id(), old_root_id, &mut old_root, 0)

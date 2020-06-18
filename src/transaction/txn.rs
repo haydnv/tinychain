@@ -77,7 +77,7 @@ impl Txn {
     pub async fn new(gateway: Arc<Gateway>, workspace: Arc<Dir>) -> TCResult<Arc<Txn>> {
         let id = TxnId::new(Gateway::time());
         let context: PathSegment = id.clone().try_into()?;
-        let context = workspace.create_dir(&id, context.into()).await?;
+        let context = workspace.create_dir(&id, &context.into()).await?;
 
         Ok(Arc::new(Txn {
             id,
@@ -91,8 +91,11 @@ impl Txn {
         self.context.clone()
     }
 
-    pub async fn subcontext(self: &Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn>> {
-        let subcontext: Arc<Dir> = self.context.create_dir(&self.id, subcontext.into()).await?;
+    pub async fn subcontext(self: Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn>> {
+        let subcontext: Arc<Dir> = self
+            .context
+            .create_dir(&self.id, &subcontext.into())
+            .await?;
 
         Ok(Arc::new(Txn {
             id: self.id.clone(),
@@ -138,7 +141,7 @@ impl Txn {
 
         match subject {
             Subject::Ref(r) => match self.resolve(r) {
-                Ok(state) => state.get(self, selector).await,
+                Ok(_state) => Err(error::not_implemented()),
                 Err(cause) => Err(cause),
             },
             Subject::Link(l) => {
@@ -160,7 +163,7 @@ impl Txn {
 
         match subject {
             Subject::Ref(r) => match self.resolve(r) {
-                Ok(state) => state.put(self, selector, data).await,
+                Ok(_state) => Err(error::not_implemented()),
                 Err(cause) => Err(cause),
             },
             Subject::Link(l) => self.gateway.put(&l, selector, data, auth).await,

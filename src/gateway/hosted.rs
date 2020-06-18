@@ -9,7 +9,6 @@ struct HostedNode {
     children: HashMap<PathSegment, HostedNode>,
 }
 
-#[derive(Clone)] // TODO: remove Clone trait
 pub struct Hosted {
     root: HostedNode,
     hosted: HashMap<TCPath, Arc<Cluster>>,
