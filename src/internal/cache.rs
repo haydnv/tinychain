@@ -1,5 +1,4 @@
 use std::collections::hash_map::{Entry, HashMap};
-use std::mem;
 use std::path::PathBuf;
 
 use bytes::{BufMut, Bytes, BytesMut};
@@ -30,6 +29,16 @@ impl CachedBlock {
         }
     }
 
+    fn copy_from_slice(slice: &[u8]) -> CachedBlock {
+        let mut contents = BytesMut::with_capacity(slice.len());
+        contents.extend_from_slice(slice);
+
+        CachedBlock {
+            delta: BlockDelta::Rewrite,
+            contents,
+        }
+    }
+
     fn append(&mut self, data: Bytes) {
         if data.is_empty() {
             return;
@@ -55,15 +64,6 @@ impl CachedBlock {
     }
 }
 
-impl From<Bytes> for CachedBlock {
-    fn from(source: Bytes) -> CachedBlock {
-        CachedBlock {
-            delta: BlockDelta::None,
-            contents: BytesMut::from(&source[..]),
-        }
-    }
-}
-
 pub struct Block {
     name: PathSegment,
     data: Option<CachedBlock>,
@@ -77,17 +77,21 @@ impl Block {
         }
     }
 
+    pub async fn as_bytes(&'_ self) -> &'_ [u8] {
+        if let Some(data) = &self.data {
+            &data.contents[..]
+        } else {
+            // TODO: read from filesystem
+            panic!("NOT IMPLEMENTED")
+        }
+    }
+
     pub fn name(&'_ self) -> &'_ PathSegment {
         &self.name
     }
 
-    pub async fn swap(&mut self, other: &mut Block) {
-        if other.data.is_some() {
-            mem::swap(&mut self.data, &mut other.data)
-        } else {
-            // TODO: pull the new data from the filesystem
-            panic!("NOT IMPLEMENTED")
-        }
+    pub async fn copy_from(&mut self, other: &Block) {
+        self.data = Some(CachedBlock::copy_from_slice(other.as_bytes().await))
     }
 
     pub async fn append(&mut self, data: Bytes) {
@@ -156,6 +160,14 @@ impl Dir {
                 entry.insert(DirEntry::Dir(dir.clone()));
                 Ok(dir)
             }
+        }
+    }
+
+    pub fn create_or_get_dir(&mut self, name: &PathSegment) -> TCResult<RwLock<Dir>> {
+        match self.get_dir(name) {
+            Ok(Some(dir)) => Ok(dir),
+            Err(cause) => Err(cause),
+            Ok(None) => self.create_dir(name.clone()),
         }
     }
 
