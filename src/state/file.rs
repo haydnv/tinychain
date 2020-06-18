@@ -123,7 +123,7 @@ impl File {
         }))
     }
 
-    pub async fn block_ids(&self, txn_id: TxnId) -> TCResult<HashSet<BlockId>> {
+    pub async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>> {
         Ok(self
             .contents
             .read(txn_id)
@@ -134,13 +134,13 @@ impl File {
             .collect())
     }
 
-    pub async fn contains_block(&self, txn_id: TxnId, block_id: &BlockId) -> TCResult<bool> {
+    pub async fn contains_block(&self, txn_id: &TxnId, block_id: &BlockId) -> TCResult<bool> {
         Ok(self.contents.read(txn_id).await?.0.contains_key(block_id))
     }
 
     pub async fn create_block(
         self: Arc<Self>,
-        txn_id: TxnId,
+        txn_id: &TxnId,
         block_id: BlockId,
         initial_value: Bytes,
     ) -> TCResult<TxnLockReadGuard<Block>> {
@@ -174,10 +174,10 @@ impl File {
 
     pub async fn get_block(
         &self,
-        txn_id: TxnId,
+        txn_id: &TxnId,
         block_id: &BlockId,
     ) -> TCResult<Option<TxnLockReadGuard<Block>>> {
-        let contents = &self.contents.read(txn_id.clone()).await?.0;
+        let contents = &self.contents.read(txn_id).await?.0;
         match contents.get(block_id) {
             Some(block) => Ok(Some(block.read(txn_id).await?)),
             None => Ok(None),
@@ -186,10 +186,10 @@ impl File {
 
     pub async fn get_block_mut(
         &self,
-        txn_id: TxnId,
+        txn_id: &TxnId,
         block_id: BlockId,
     ) -> TCResult<Option<TxnLockWriteGuard<Block>>> {
-        let contents = &self.contents.read(txn_id.clone()).await?.0;
+        let contents = &self.contents.read(txn_id).await?.0;
         match contents.get(&block_id) {
             Some(block) => {
                 self.mutated
@@ -198,13 +198,13 @@ impl File {
                     .entry(txn_id.clone())
                     .or_insert_with(HashSet::new)
                     .insert(block_id);
-                Ok(Some(block.write(txn_id).await?))
+                Ok(Some(block.write(txn_id.clone()).await?))
             }
             None => Ok(None),
         }
     }
 
-    pub async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
         Ok(self.contents.read(txn_id).await?.0.is_empty())
     }
 }
@@ -212,7 +212,7 @@ impl File {
 #[async_trait]
 impl Transact for File {
     async fn commit(&self, txn_id: &TxnId) {
-        let contents = &self.contents.read(txn_id.clone()).await.unwrap().0;
+        let contents = &self.contents.read(txn_id).await.unwrap().0;
         if let Some(mut mutated) = self.mutated.lock().await.remove(txn_id) {
             let mut commits = Vec::with_capacity(mutated.len());
             for block_id in mutated.drain() {
@@ -224,7 +224,7 @@ impl Transact for File {
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        let contents = &self.contents.read(txn_id.clone()).await.unwrap().0;
+        let contents = &self.contents.read(txn_id).await.unwrap().0;
         if let Some(mut mutated) = self.mutated.lock().await.remove(txn_id) {
             let mut rollbacks = Vec::with_capacity(mutated.len());
             for block_id in mutated.drain() {

@@ -77,11 +77,12 @@ pub struct TxnLockWriteGuard<T: Mutate> {
 }
 
 impl<T: Mutate> TxnLockWriteGuard<T> {
-    pub fn downgrade(self) -> TxnLockReadFuture<T> {
-        TxnLockReadFuture {
-            txn_id: self.txn_id.clone(),
-            lock: self.lock.clone(),
+    pub fn downgrade<'a>(self, txn_id: &'a TxnId) -> TxnLockReadFuture<'a, T> {
+        if txn_id != &self.txn_id {
+            panic!("Tried to downgrade into a different transaction!");
         }
+
+        self.lock.read(&txn_id)
     }
 }
 
@@ -205,7 +206,7 @@ impl<T: Mutate> TxnLock<T> {
         }
     }
 
-    pub fn read(&self, txn_id: TxnId) -> TxnLockReadFuture<T> {
+    pub fn read<'a>(&self, txn_id: &'a TxnId) -> TxnLockReadFuture<'a, T> {
         TxnLockReadFuture {
             txn_id,
             lock: self.clone(),
@@ -280,12 +281,12 @@ impl<T: Mutate> Transact for TxnLock<T> {
     }
 }
 
-pub struct TxnLockReadFuture<T: Mutate> {
-    txn_id: TxnId,
+pub struct TxnLockReadFuture<'a, T: Mutate> {
+    txn_id: &'a TxnId,
     lock: TxnLock<T>,
 }
 
-impl<T: Mutate> Future for TxnLockReadFuture<T> {
+impl<'a, T: Mutate> Future for TxnLockReadFuture<'a, T> {
     type Output = TCResult<TxnLockReadGuard<T>>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
