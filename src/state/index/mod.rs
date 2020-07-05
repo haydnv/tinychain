@@ -52,15 +52,19 @@ impl From<Vec<Value>> for NodeKey {
 struct NodeData {
     leaf: bool,
     keys: Vec<NodeKey>,
+    parent: Option<NodeId>,
     children: Vec<NodeId>,
+    rebalance: bool,
 }
 
 impl NodeData {
-    fn new(leaf: bool) -> NodeData {
+    fn new(leaf: bool, parent: Option<NodeId>) -> NodeData {
         NodeData {
             leaf,
             keys: vec![],
+            parent,
             children: vec![],
+            rebalance: false,
         }
     }
 
@@ -84,12 +88,13 @@ impl Node {
         txn_id: &TxnId,
         node_id: NodeId,
         leaf: bool,
+        parent: Option<NodeId>,
     ) -> TCResult<Node> {
         Self::try_from(
             file.create_block(
                 txn_id,
                 node_id,
-                bincode::serialize(&NodeData::new(leaf))?.into(),
+                bincode::serialize(&NodeData::new(leaf, parent))?.into(),
             )
             .await?,
         )
@@ -108,9 +113,13 @@ impl Node {
         })
     }
 
+    async fn sync(self) -> TCResult<()> {
+        self.upgrade().await?.sync().await
+    }
+
     async fn sync_if_updated(self, updated: bool) -> TCResult<()> {
         if updated {
-            self.upgrade().await?.sync().await
+            self.sync().await
         } else {
             Ok(())
         }
@@ -174,6 +183,13 @@ pub struct Index {
 
 impl Index {
     async fn create(txn_id: TxnId, schema: Vec<Column>, file: Arc<File>) -> TCResult<Index> {
+        if !file.is_empty(&txn_id).await? {
+            return Err(error::bad_request(
+                "Tried to create a new Index without a new File",
+                file,
+            ));
+        }
+
         let mut key_size = 0;
         for col in &schema {
             if let Some(size) = col.dtype.size() {
@@ -207,31 +223,23 @@ impl Index {
             2
         };
 
-        if file.is_empty(&txn_id).await? {
-            let root: BlockId = Uuid::new_v4().into();
-            file.clone()
-                .create_block(
-                    &txn_id,
-                    root.clone(),
-                    Bytes::from(bincode::serialize(&NodeData::new(true))?),
-                )
-                .await?;
+        let root: BlockId = Uuid::new_v4().into();
+        file.clone()
+            .create_block(
+                &txn_id,
+                root.clone(),
+                Bytes::from(bincode::serialize(&NodeData::new(true, None))?),
+            )
+            .await?;
 
-            let collator =
-                collator::Collator::new(schema.iter().map(|c| c.dtype.clone()).collect())?;
-            Ok(Index {
-                file,
-                schema,
-                order,
-                collator,
-                root: TxnLock::new(txn_id, IndexRoot(root)),
-            })
-        } else {
-            Err(error::bad_request(
-                "Tried to create a new Index without a new File",
-                file,
-            ))
-        }
+        let collator = collator::Collator::new(schema.iter().map(|c| c.dtype.clone()).collect())?;
+        Ok(Index {
+            file,
+            schema,
+            order,
+            collator,
+            root: TxnLock::new(txn_id, IndexRoot(root)),
+        })
     }
 
     fn validate_key(&self, key: &[Value]) -> TCResult<()> {
@@ -386,10 +394,13 @@ impl Index {
                     Ok(())
                 }
             } else {
-                let mut child = self.get_node(txn_id, &node.data.children[i]).await?;
+                let child_id = &node.data.children[i];
+                let mut child = self.get_node(txn_id, child_id).await?;
                 if child.data.keys.len() == (2 * self.order) - 1 {
                     let this_key = &node.data.keys[i].values.to_vec();
-                    node = self.split_child(txn_id, node.upgrade().await?, i).await?;
+                    node = self
+                        .split_child(txn_id, child_id.clone(), node.upgrade().await?, i)
+                        .await?;
                     if self.collator.compare(&key, &this_key) == Ordering::Greater {
                         child = self.get_node(txn_id, &node.data.children[i + 1]).await?;
                     }
@@ -400,7 +411,13 @@ impl Index {
         })
     }
 
-    async fn split_child(&self, txn_id: &TxnId, mut node: NodeMut, i: usize) -> TCResult<Node> {
+    async fn split_child(
+        &self,
+        txn_id: &TxnId,
+        node_id: NodeId,
+        mut node: NodeMut,
+        i: usize,
+    ) -> TCResult<Node> {
         let mut child = self.get_node(txn_id, &node.data.children[i]).await?;
         let new_node_id = new_node_id(self.file.block_ids(txn_id).await?);
 
@@ -413,6 +430,7 @@ impl Index {
             txn_id,
             new_node_id.clone(),
             node.data.leaf,
+            Some(node_id),
         )
         .await?
         .upgrade()
@@ -426,6 +444,41 @@ impl Index {
         let (_, node) = try_join!(new_node.sync(), node.sync_and_downgrade(txn_id))?;
 
         Ok(node)
+    }
+
+    fn delete<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        mut node: Node,
+        key: Key,
+    ) -> BoxFuture<'a, TCResult<()>> {
+        Box::pin(async move {
+            let keys = node.data.keys();
+            let l = self.collator.bisect_left(&keys, &key);
+            let r = self.collator.bisect(&keys, &key);
+
+            if node.data.leaf {
+                for i in l..r {
+                    node.data.keys[i].deleted = true;
+                }
+            } else {
+                for i in l..r {
+                    node.data.keys[i].deleted = true;
+                    let child = self.get_node(txn_id, &node.data.children[i]).await?;
+                    self.delete(txn_id, child, key.clone()).await?;
+                }
+
+                let child = self.get_node(txn_id, &node.data.children[r]).await?;
+                self.delete(txn_id, child, key).await?;
+            }
+
+            if l < r {
+                node.data.rebalance = true;
+                node.sync().await
+            } else {
+                Ok(())
+            }
+        })
     }
 }
 
@@ -466,12 +519,12 @@ impl Collect for Index {
 
                 root_id.0 = new_node_id(self.file.block_ids(txn.id()).await?);
                 let mut new_root =
-                    Node::create(self.file.clone(), txn.id(), root_id.0.clone(), false)
+                    Node::create(self.file.clone(), txn.id(), root_id.0.clone(), false, None)
                         .await?
                         .upgrade()
                         .await?;
                 new_root.data.children.push(old_root_id.clone());
-                self.split_child(txn.id(), old_root.upgrade().await?, 0)
+                self.split_child(txn.id(), old_root_id, old_root.upgrade().await?, 0)
                     .await?;
 
                 self.insert(txn.id(), new_root.sync_and_downgrade(txn.id()).await?, key)
