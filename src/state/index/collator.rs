@@ -30,7 +30,7 @@ impl Collator {
         }
     }
 
-    pub fn bisect(&self, keys: &[Vec<Value>], key: &[Value]) -> usize {
+    pub fn bisect(&self, keys: &[&[Value]], key: &[Value]) -> usize {
         if keys.is_empty() {
             return 0;
         }
@@ -62,7 +62,7 @@ impl Collator {
         }
     }
 
-    pub fn bisect_left(&self, keys: &[Vec<Value>], key: &[Value]) -> usize {
+    pub fn bisect_left(&self, keys: &[&[Value]], key: &[Value]) -> usize {
         if keys.is_empty() {
             return 0;
         }

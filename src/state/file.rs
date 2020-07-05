@@ -198,6 +198,7 @@ impl File {
                     .entry(txn_id.clone())
                     .or_insert_with(HashSet::new)
                     .insert(block_id);
+
                 Ok(Some(block.write(txn_id.clone()).await?))
             }
             None => Ok(None),

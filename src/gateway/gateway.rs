@@ -42,8 +42,13 @@ impl Gateway {
         _txn_id: Option<TxnId>,
     ) -> GetResult {
         if subject.host().is_none() {
-            let state = kernel::get(subject.path(), selector)?;
-            Ok(Box::pin(stream::once(future::ready(state))))
+            let path = subject.path();
+            if path[0] == "sbin" {
+                let state = kernel::get(&path.slice_from(1), selector)?;
+                Ok(Box::pin(stream::once(future::ready(state))))
+            } else {
+                Err(error::not_implemented())
+            }
         } else if let Some((_rel_path, _cluster)) = self.hosted.get(subject.path()) {
             Err(error::not_implemented())
         } else {

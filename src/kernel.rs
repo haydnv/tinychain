@@ -7,8 +7,8 @@ use crate::transaction::*;
 use crate::value::link::TCPath;
 use crate::value::{TCResult, Value, ValueId};
 
-pub fn get(_endpoint: &TCPath, _id: Value) -> TCResult<State> {
-    Err(error::not_implemented())
+pub fn get(endpoint: &TCPath, _id: Value) -> TCResult<State> {
+    Err(error::not_found(endpoint))
 }
 
 pub async fn post<S: Stream<Item = (ValueId, Value)>>(

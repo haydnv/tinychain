@@ -27,11 +27,31 @@ const ERR_CORRUPT: &str = "Index corrupted! Please restart Tinychain and file a 
 
 type NodeId = BlockId;
 
-// TODO: have node retain a TxnLock[Read|Write]Guard, for locking
+#[derive(Deserialize, Serialize)]
+struct NodeKey {
+    values: Vec<Value>,
+    deleted: bool,
+}
+
+impl From<&[Value]> for NodeKey {
+    fn from(values: &[Value]) -> NodeKey {
+        values.to_vec().into()
+    }
+}
+
+impl From<Vec<Value>> for NodeKey {
+    fn from(values: Vec<Value>) -> NodeKey {
+        NodeKey {
+            values,
+            deleted: false,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 struct NodeData {
     leaf: bool,
-    keys: Vec<Vec<Value>>,
+    keys: Vec<NodeKey>,
     children: Vec<NodeId>,
 }
 
@@ -42,6 +62,14 @@ impl NodeData {
             keys: vec![],
             children: vec![],
         }
+    }
+
+    fn keys(&self) -> Vec<&[Value]> {
+        self.keys
+            .iter()
+            .filter(|k| !k.deleted)
+            .map(|k| &k.values[..])
+            .collect()
     }
 }
 
@@ -259,12 +287,16 @@ impl Index {
         }
     }
 
-    fn select(self: Arc<Self>, txn_id: TxnId, mut node: Node, key: Key) -> TCStream<Key> {
-        let l = self.collator.bisect_left(&node.data.keys, &key);
-        let r = self.collator.bisect(&node.data.keys, &key);
+    fn select(self: Arc<Self>, txn_id: TxnId, node: Node, key: Key) -> TCStream<Key> {
+        let keys = node.data.keys();
+        let l = self.collator.bisect_left(&keys, &key);
+        let r = self.collator.bisect(&keys, &key);
 
         if node.data.leaf {
-            let keys: Vec<Key> = node.data.keys.drain(l..r).collect();
+            let keys: Vec<Key> = node.data.keys[l..r]
+                .iter()
+                .map(|k| k.values.to_vec())
+                .collect();
             Box::pin(stream::iter(keys))
         } else {
             let mut selected: Selection = FuturesOrdered::new();
@@ -280,9 +312,11 @@ impl Index {
                 });
                 selected.push(Box::pin(selection));
 
-                let key_at_i = node.data.keys[i].clone(); // TODO: drain the node instead of cloning its keys
-                let key_at_i: TCStream<Key> = Box::pin(stream::once(future::ready(key_at_i)));
-                selected.push(Box::pin(future::ready(key_at_i)));
+                if !node.data.keys[i].deleted {
+                    let key_at_i = node.data.keys[i].values.clone();
+                    let key_at_i: TCStream<Key> = Box::pin(stream::once(future::ready(key_at_i)));
+                    selected.push(Box::pin(future::ready(key_at_i)));
+                }
             }
 
             let last_child = node.data.children[r].clone();
@@ -305,13 +339,14 @@ impl Index {
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
             let mut node = self.get_node(txn_id, node_id).await?;
-            let l = self.collator.bisect_left(&node.data.keys, &selector);
-            let r = self.collator.bisect(&node.data.keys, &selector);
+            let keys = node.data.keys();
+            let l = self.collator.bisect_left(&keys, &selector);
+            let r = self.collator.bisect(&keys, &selector);
             let mut updated = false;
 
             if node.data.leaf {
                 for i in l..r {
-                    node.data.keys[i] = value.to_vec();
+                    node.data.keys[i] = value.into();
                     updated = true;
                 }
 
@@ -320,7 +355,7 @@ impl Index {
                 for i in l..r {
                     self.update(txn_id, &node.data.children[i], selector, value)
                         .await?;
-                    node.data.keys[i] = value.to_vec();
+                    node.data.keys[i] = value.into();
                     updated = true;
                 }
 
@@ -338,13 +373,14 @@ impl Index {
         key: Key,
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
-            let i = self.collator.bisect_left(&node.data.keys, &key);
+            let keys = node.data.keys();
+            let i = self.collator.bisect_left(&keys, &key);
             if node.data.leaf {
                 if i == node.data.keys.len()
-                    || self.collator.compare(&node.data.keys[i], &key) != Ordering::Equal
+                    || self.collator.compare(&keys[i], &key) != Ordering::Equal
                 {
                     let mut node = node.upgrade().await?;
-                    node.data.keys.insert(i, key);
+                    node.data.keys.insert(i, key.into());
                     node.sync().await
                 } else {
                     Ok(())
@@ -352,7 +388,7 @@ impl Index {
             } else {
                 let mut child = self.get_node(txn_id, &node.data.children[i]).await?;
                 if child.data.keys.len() == (2 * self.order) - 1 {
-                    let this_key = &node.data.keys[i].clone();
+                    let this_key = &node.data.keys[i].values.to_vec();
                     node = self.split_child(txn_id, node.upgrade().await?, i).await?;
                     if self.collator.compare(&key, &this_key) == Ordering::Greater {
                         child = self.get_node(txn_id, &node.data.children[i + 1]).await?;
