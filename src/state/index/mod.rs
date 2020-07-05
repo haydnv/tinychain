@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::{self, BoxFuture, Future};
+use futures::future::{self, join, BoxFuture, Future};
 use futures::stream::{self, FuturesOrdered, StreamExt};
 use futures::try_join;
 use serde::{Deserialize, Serialize};
@@ -182,6 +182,8 @@ pub struct Index {
 }
 
 impl Index {
+    // TODO: add `slice` method to iterate over all nodes within a range of keys
+
     async fn create(txn_id: TxnId, schema: Vec<Column>, file: Arc<File>) -> TCResult<Index> {
         if !file.is_empty(&txn_id).await? {
             return Err(error::bad_request(
@@ -541,11 +543,11 @@ impl Collect for Index {
 #[async_trait]
 impl Transact for Index {
     async fn commit(&self, txn_id: &TxnId) {
-        self.file.commit(txn_id).await
+        join(self.file.commit(txn_id), self.root.commit(txn_id)).await;
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.file.rollback(txn_id).await
+        join(self.file.rollback(txn_id), self.root.rollback(txn_id)).await;
     }
 }
 
