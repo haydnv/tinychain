@@ -10,6 +10,7 @@ license = "Apache-2.0"
 [dependencies]
 addr = "0.2"
 async-trait = "0.1"
+arrayfire = "3.7"
 base64 = "0.12"
 bincode = "1.2"
 bytes = "0.5"

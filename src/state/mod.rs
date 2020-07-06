@@ -16,6 +16,7 @@ pub mod file;
 pub mod graph;
 pub mod index;
 mod table;
+pub mod tensor;
 
 pub type Dir = dir::Dir;
 
