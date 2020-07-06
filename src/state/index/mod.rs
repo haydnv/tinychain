@@ -29,7 +29,7 @@ type NodeId = BlockId;
 
 #[derive(Deserialize, Serialize)]
 struct NodeKey {
-    values: Vec<Value>,
+    value: Vec<Value>,
     deleted: bool,
 }
 
@@ -40,9 +40,9 @@ impl From<&[Value]> for NodeKey {
 }
 
 impl From<Vec<Value>> for NodeKey {
-    fn from(values: Vec<Value>) -> NodeKey {
+    fn from(value: Vec<Value>) -> NodeKey {
         NodeKey {
-            values,
+            value,
             deleted: false,
         }
     }
@@ -68,11 +68,10 @@ impl NodeData {
         }
     }
 
-    fn keys(&self) -> Vec<&[Value]> {
+    fn values(&self) -> Vec<&[Value]> {
         self.keys
             .iter()
-            .filter(|k| !k.deleted)
-            .map(|k| &k.values[..])
+            .map(|k| &k.value[..])
             .collect()
     }
 }
@@ -286,14 +285,15 @@ impl Index {
     }
 
     fn select(self: Arc<Self>, txn_id: TxnId, node: Node, key: Key) -> TCStream<Key> {
-        let keys = node.data.keys();
+        let keys = node.data.values();
         let l = self.collator.bisect_left(&keys, &key);
         let r = self.collator.bisect(&keys, &key);
 
         if node.data.leaf {
             let keys: Vec<Key> = node.data.keys[l..r]
                 .iter()
-                .map(|k| k.values.to_vec())
+                .filter(|k| !k.deleted)
+                .map(|k| k.value.to_vec())
                 .collect();
             Box::pin(stream::iter(keys))
         } else {
@@ -311,7 +311,7 @@ impl Index {
                 selected.push(Box::pin(selection));
 
                 if !node.data.keys[i].deleted {
-                    let key_at_i = node.data.keys[i].values.clone();
+                    let key_at_i = node.data.keys[i].value.to_vec();
                     let key_at_i: TCStream<Key> = Box::pin(stream::once(future::ready(key_at_i)));
                     selected.push(Box::pin(future::ready(key_at_i)));
                 }
@@ -337,7 +337,7 @@ impl Index {
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
             let node = self.get_node(txn_id, node_id).await?;
-            let keys = node.data.keys();
+            let keys = node.data.values();
             let l = self.collator.bisect_left(&keys, &selector);
             let r = self.collator.bisect(&keys, &selector);
 
@@ -380,14 +380,18 @@ impl Index {
         key: Key,
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
-            let keys = node.data.keys();
-            let i = self.collator.bisect_left(&keys, &key);
+            let keys = &node.data.keys;
+            let i = self.collator.bisect_left(&node.data.values(), &key);
             if node.data.leaf {
                 if i == node.data.keys.len()
-                    || self.collator.compare(&keys[i], &key) != Ordering::Equal
+                    || self.collator.compare(&keys[i].value, &key) != Ordering::Equal
                 {
                     let mut node = node.upgrade().await?;
                     node.data.keys.insert(i, key.into());
+                    node.sync().await
+                } else if keys[i].value == key && keys[i].deleted {
+                    let mut node = node.upgrade().await?;
+                    node.data.keys[i].deleted = false;
                     node.sync().await
                 } else {
                     Ok(())
@@ -396,7 +400,7 @@ impl Index {
                 let child_id = &node.data.children[i];
                 let mut child = self.get_node(txn_id, child_id).await?;
                 if child.data.keys.len() == (2 * self.order) - 1 {
-                    let this_key = &node.data.keys[i].values.to_vec();
+                    let this_key = &node.data.keys[i].value.to_vec();
                     node = self
                         .split_child(txn_id, child_id.clone(), node.upgrade().await?, i)
                         .await?;
@@ -453,7 +457,7 @@ impl Index {
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
             let node = self.get_node(txn_id, node_id).await?;
-            let keys = node.data.keys();
+            let keys = node.data.values();
             let l = self.collator.bisect_left(&keys, &key);
             let r = self.collator.bisect(&keys, &key);
 
