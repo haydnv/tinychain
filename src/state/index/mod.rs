@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::{self, join, BoxFuture, Future};
+use futures::future::{self, join, try_join, try_join_all, BoxFuture, Future, FutureExt};
 use futures::stream::{self, FuturesOrdered, StreamExt};
 use futures::try_join;
 use serde::{Deserialize, Serialize};
@@ -112,18 +112,6 @@ impl Node {
             data: self.data,
         })
     }
-
-    async fn sync(self) -> TCResult<()> {
-        self.upgrade().await?.sync().await
-    }
-
-    async fn sync_if_updated(self, updated: bool) -> TCResult<()> {
-        if updated {
-            self.sync().await
-        } else {
-            Ok(())
-        }
-    }
 }
 
 struct NodeMut {
@@ -211,8 +199,8 @@ impl Index {
                 ));
             }
         }
-        // the "leaf" boolean adds 1 byte to each key as-stored
-        key_size += 1;
+        // the "leaf" and "deleted" booleans each add one byte to a key as-stored
+        key_size += 2;
 
         let order = if DEFAULT_BLOCK_SIZE > (key_size * 2) + (BLOCK_ID_SIZE * 3) {
             // let m := order
@@ -348,30 +336,39 @@ impl Index {
         value: &'a [Value],
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
-            let mut node = self.get_node(txn_id, node_id).await?;
+            let node = self.get_node(txn_id, node_id).await?;
             let keys = node.data.keys();
             let l = self.collator.bisect_left(&keys, &selector);
             let r = self.collator.bisect(&keys, &selector);
-            let mut updated = false;
 
             if node.data.leaf {
-                for i in l..r {
-                    node.data.keys[i] = value.into();
-                    updated = true;
+                if l == r {
+                    return Ok(());
                 }
 
-                node.sync_if_updated(updated).await
+                let mut node = node.upgrade().await?;
+                for i in l..r {
+                    node.data.keys[i] = value.into();
+                }
+                node.sync().await
             } else {
-                for i in l..r {
-                    self.update(txn_id, &node.data.children[i], selector, value)
-                        .await?;
-                    node.data.keys[i] = value.into();
-                    updated = true;
-                }
+                let children = node.data.children.to_vec();
 
-                let last_child = node.data.children.last().unwrap().clone();
-                node.sync_if_updated(updated).await?;
-                self.update(txn_id, &last_child, selector, value).await
+                if r > l {
+                    let mut updates = Vec::with_capacity(r - l);
+                    let mut node = node.upgrade().await?;
+                    for (i, child) in children.iter().enumerate().take(r).skip(l) {
+                        node.data.keys[i] = value.into();
+                        updates.push(self.update(txn_id, &child, selector, value));
+                    }
+                    node.sync().await?;
+
+                    let last_update = self.update(txn_id, &children[r], selector, value);
+                    try_join(try_join_all(updates), last_update).await?;
+                    Ok(())
+                } else {
+                    self.update(txn_id, &children[r], selector, value).await
+                }
             }
         })
     }
@@ -451,34 +448,45 @@ impl Index {
     fn delete<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        mut node: Node,
+        node_id: &'a NodeId,
         key: Key,
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
+            let node = self.get_node(txn_id, node_id).await?;
             let keys = node.data.keys();
             let l = self.collator.bisect_left(&keys, &key);
             let r = self.collator.bisect(&keys, &key);
 
             if node.data.leaf {
+                if l == r {
+                    return Ok(());
+                }
+
+                let mut node = node.upgrade().await?;
                 for i in l..r {
                     node.data.keys[i].deleted = true;
                 }
-            } else {
-                for i in l..r {
-                    node.data.keys[i].deleted = true;
-                    let child = self.get_node(txn_id, &node.data.children[i]).await?;
-                    self.delete(txn_id, child, key.clone()).await?;
-                }
-
-                let child = self.get_node(txn_id, &node.data.children[r]).await?;
-                self.delete(txn_id, child, key).await?;
-            }
-
-            if l < r {
                 node.data.rebalance = true;
                 node.sync().await
             } else {
-                Ok(())
+                let children = node.data.children.to_vec();
+
+                if r > l {
+                    let mut deletes = Vec::with_capacity(r - l);
+                    let mut node = node.upgrade().await?;
+                    for i in l..r {
+                        node.data.keys[i].deleted = true;
+                        deletes.push(self.delete(txn_id, &children[i], key.clone()));
+                    }
+                    node.data.rebalance = true;
+                    node.sync().await?;
+
+                    let last_delete = self.delete(txn_id, &children[r], key);
+                    try_join(try_join_all(deletes), last_delete).await?;
+                    Ok(())
+                } else {
+                    self.delete(txn_id, &children[r], key).await
+                }
             }
         })
     }
