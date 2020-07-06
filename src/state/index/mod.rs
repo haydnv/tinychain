@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::{self, join, try_join, try_join_all, BoxFuture, Future, FutureExt};
+use futures::future::{self, join, try_join, try_join_all, BoxFuture, Future};
 use futures::stream::{self, FuturesOrdered, StreamExt};
 use futures::try_join;
 use serde::{Deserialize, Serialize};
@@ -54,7 +54,7 @@ struct NodeData {
     keys: Vec<NodeKey>,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
-    rebalance: bool,
+    rebalance: bool, // TODO: implement rebalancing to clear deleted values
 }
 
 impl NodeData {
@@ -69,10 +69,7 @@ impl NodeData {
     }
 
     fn values(&self) -> Vec<&[Value]> {
-        self.keys
-            .iter()
-            .map(|k| &k.value[..])
-            .collect()
+        self.keys.iter().map(|k| &k.value[..]).collect()
     }
 }
 
@@ -123,6 +120,7 @@ impl NodeMut {
         self.block
             .rewrite(bincode::serialize(&self.data)?.into())
             .await;
+
         Ok(())
     }
 
@@ -130,6 +128,7 @@ impl NodeMut {
         self.block
             .rewrite(bincode::serialize(&self.data)?.into())
             .await;
+
         Ok(Node {
             block: self.block.downgrade(txn_id).await?,
             data: self.data,
