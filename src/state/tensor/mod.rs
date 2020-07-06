@@ -1,16 +1,127 @@
-use std::sync::Arc;
+use std::fmt;
+use std::iter;
+use std::ops::{Bound, Index};
+use std::slice::SliceIndex;
 
-use arrayfire::{Array, HasAfEnum};
+use arrayfire::HasAfEnum;
 use async_trait::async_trait;
 
-use crate::transaction::{Txn, TxnId};
-use crate::value::{TCResult, TCStream, TCType};
+use crate::error;
+use crate::transaction::TxnId;
+use crate::value::TCResult;
+
+mod dense;
+mod sparse;
+
+#[derive(Clone)]
+pub enum AxisSlice {
+    At(u64),
+    In(Bound<i64>, Bound<i64>),
+    Stride(Bound<i64>, Bound<i64>, u64),
+}
+
+impl AxisSlice {
+    fn unbounded() -> AxisSlice {
+        AxisSlice::In(Bound::Unbounded, Bound::Unbounded)
+    }
+}
+
+impl From<u64> for AxisSlice {
+    fn from(at: u64) -> AxisSlice {
+        AxisSlice::At(at)
+    }
+}
+
+impl fmt::Display for AxisSlice {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use AxisSlice::*;
+        match self {
+            At(at) => write!(f, "{}", at),
+            In(start, stop) => write!(f, "{}", format_bound(start, stop)),
+            Stride(start, stop, step) => write!(f, "{} step {}", format_bound(start, stop), step),
+        }
+    }
+}
+
+pub struct Slice {
+    axes: Vec<AxisSlice>,
+}
+
+impl Slice {
+    fn len(&self) -> usize {
+        self.axes.len()
+    }
+}
+
+impl<Idx: SliceIndex<[AxisSlice]>> Index<Idx> for Slice {
+    type Output = Idx::Output;
+
+    fn index(&self, index: Idx) -> &Self::Output {
+        &self.axes[index]
+    }
+}
+
+impl From<Vec<AxisSlice>> for Slice {
+    fn from(axes: Vec<AxisSlice>) -> Slice {
+        Slice { axes }
+    }
+}
+
+impl fmt::Display for Slice {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.axes
+                .iter()
+                .map(|axis| format!("{}", axis))
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+    }
+}
+
+pub struct Shape(Vec<u64>);
+
+impl Shape {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn size(&self) -> u64 {
+        self.0.iter().product()
+    }
+}
+
+impl<Idx: SliceIndex<[u64]>> Index<Idx> for Shape {
+    type Output = Idx::Output;
+
+    fn index(&self, index: Idx) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl fmt::Display for Shape {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.0
+                .iter()
+                .map(|dim| format!("{}", dim))
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+    }
+}
 
 #[async_trait]
-pub trait TensorView {
+pub trait TensorView: Send + Sync {
     type DType: HasAfEnum;
 
-    fn shape(&'_ self) -> &'_ [u64];
+    fn ndim(&self) -> usize;
+
+    fn shape(&'_ self) -> &'_ Shape;
 
     fn size(&self) -> u64;
 
@@ -18,85 +129,150 @@ pub trait TensorView {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool>;
 
-    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Self::DType>;
-}
-
-#[async_trait]
-pub trait BlockTensorView: TensorView {
-    async fn sum(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<BlockTensor>;
-
-    async fn product(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<BlockTensor>;
-
-    async fn add<T: BlockTensorView>(&self, txn: &Arc<Txn>, other: T) -> TCResult<BlockTensor>;
-
-    async fn multiply<T: BlockTensorView>(&self, txn: &Arc<Txn>, other: T)
-        -> TCResult<BlockTensor>;
-
-    async fn subtract<T: BlockTensorView>(
-        &self,
-        txn: &Arc<Txn>,
-        other: &T,
-    ) -> TCResult<BlockTensor>;
-
-    async fn equals<T: BlockTensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<BlockTensor>;
-
-    async fn and<T: BlockTensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<BlockTensor>;
-
-    async fn or<T: TensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<BlockTensor>;
-
-    async fn xor<T: BlockTensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<BlockTensor>;
-
-    async fn not(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
-
-    async fn ones(&self, txn: &Arc<Txn>, shape: Vec<u64>) -> BlockTensor;
-
-    async fn blocks(&self, txn_id: &Arc<TxnId>) -> TCStream<Array<<Self as TensorView>::DType>>;
-}
-
-#[async_trait]
-pub trait SparseTensorView: TensorView {
-    async fn sum(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<SparseTensor>;
-
-    async fn product(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<SparseTensor>;
-
-    async fn add<T: TensorView>(&self, txn: &Arc<Txn>, other: T) -> TCResult<SparseTensor>;
-
-    async fn multiply<T: TensorView>(&self, txn: &Arc<Txn>, other: T) -> TCResult<SparseTensor>;
-
-    async fn subtract<T: TensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<SparseTensor>;
-
-    async fn equals<T: TensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<BlockTensor>;
-
-    async fn and<T: TensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<SparseTensor>;
-
-    async fn or<T: SparseTensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<SparseTensor>;
-
-    async fn xor<T: TensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<BlockTensor>;
-
-    async fn not(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
-
-    async fn filled(&self, txn_id: &TxnId) -> TCStream<(Vec<u64>, <Self as TensorView>::DType)>;
-
-    async fn filled_at(&self, txn_id: &TxnId, axes: &[usize]) -> TCStream<Vec<u64>>;
-
-    async fn filled_count(&self, txn_id: &TxnId) -> TCResult<u64>;
-
-    async fn to_dense(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
-}
-
-pub struct BlockTensor {
-    dtype: TCType,
-    shape: Vec<u64>,
-    size: u64,
-}
-
-pub struct SparseTensor {
-    dtype: TCType,
-    shape: Vec<u64>,
-    size: u64,
+    async fn slice(&self, txn_id: &TxnId, slice: Slice) -> TCResult<TensorSlice>;
 }
 
 pub enum Tensor {
-    Dense(BlockTensor),
-    Sparse(SparseTensor),
+    Dense(dense::BlockTensor),
+    Sparse(sparse::SparseTensor),
+}
+
+trait Rebase: TensorView {
+    fn invert_coord(&self, coord: Slice) -> TCResult<Slice>;
+
+    fn map_coord(&self, source_coord: Slice) -> TCResult<Slice>;
+}
+
+struct Broadcast<T: TensorView> {
+    source: T,
+    shape: Shape,
+    size: u64,
+    ndim: usize,
+    broadcast: Vec<bool>,
+    offset: usize,
+}
+
+impl<T: TensorView> Broadcast<T> {
+    fn new(source: T, shape: Shape) -> TCResult<Broadcast<T>> {
+        let ndim = shape.len();
+        if source.ndim() > ndim {
+            return Err(error::bad_request(
+                &format!("Cannot broadcast into {}", shape),
+                source.shape(),
+            ));
+        }
+
+        let size = shape.size();
+        let offset = ndim - source.ndim();
+        let mut broadcast: Vec<bool> = iter::repeat(true).take(ndim).collect();
+
+        let source_shape = source.shape();
+        for axis in offset..ndim {
+            if shape[axis] == source_shape[axis - offset] {
+                broadcast[axis] = false;
+            } else if shape[axis] == 1 || source_shape[axis - offset] == 1 {
+                // no-op
+            } else {
+                return Err(error::bad_request(
+                    &format!("Cannot broadcast into {}", shape),
+                    source_shape,
+                ));
+            }
+        }
+
+        Ok(Broadcast {
+            source,
+            shape,
+            size,
+            ndim,
+            broadcast,
+            offset,
+        })
+    }
+}
+
+#[async_trait]
+impl<T: TensorView> TensorView for Broadcast<T> {
+    type DType = T::DType;
+
+    fn ndim(&self) -> usize {
+        self.ndim
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        &self.shape
+    }
+
+    fn size(&self) -> u64 {
+        self.size
+    }
+
+    async fn all(&self, txn_id: &TxnId) -> TCResult<bool> {
+        self.source.all(txn_id).await
+    }
+
+    async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
+        self.source.any(txn_id).await
+    }
+
+    async fn slice(&self, txn_id: &TxnId, coord: Slice) -> TCResult<TensorSlice> {
+        self.source.slice(txn_id, self.invert_coord(coord)?).await
+    }
+}
+
+impl<T: TensorView> Rebase for Broadcast<T> {
+    fn invert_coord(&self, coord: Slice) -> TCResult<Slice> {
+        if coord.len() > self.ndim {
+            return Err(error::bad_request("Invalid coordinate", coord));
+        }
+
+        let source_ndim = self.source.ndim();
+        let mut source_coord = Vec::with_capacity(source_ndim);
+        for axis in 0..source_ndim {
+            if self.broadcast[axis + self.offset] {
+                source_coord.push(AxisSlice::from(0))
+            } else {
+                source_coord.push(coord[axis + self.offset].clone())
+            }
+        }
+
+        Ok(source_coord.into())
+    }
+
+    fn map_coord(&self, source_coord: Slice) -> TCResult<Slice> {
+        let mut coord: Vec<AxisSlice> = iter::repeat(AxisSlice::unbounded())
+            .take(self.ndim)
+            .collect();
+        for axis in 0..self.ndim {
+            if !self.broadcast[axis + self.offset] {
+                coord[axis + self.offset] = source_coord[axis].clone();
+            }
+        }
+
+        Ok(coord.into())
+    }
+}
+
+pub struct TensorSlice {}
+
+fn format_bound(start: &Bound<i64>, stop: &Bound<i64>) -> String {
+    use Bound::*;
+
+    if start == &Unbounded && stop == &Unbounded {
+        return "[...]".to_string();
+    }
+
+    let start = match start {
+        Included(i) => format!("[{}", i),
+        Excluded(i) => format!("({}", i),
+        Unbounded => "[...".to_string(),
+    };
+
+    let stop = match stop {
+        Included(i) => format!("{}]", i),
+        Excluded(i) => format!("{})", i),
+        Unbounded => "...]".to_string(),
+    };
+
+    format!("{}{}", start, stop)
 }
