@@ -124,14 +124,15 @@ impl fmt::Display for Index {
     }
 }
 
+#[derive(Clone)]
 pub struct Shape(Vec<u64>);
 
 impl Shape {
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.0.len()
     }
 
-    fn size(&self) -> u64 {
+    pub fn size(&self) -> u64 {
         self.0.iter().product()
     }
 }

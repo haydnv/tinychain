@@ -67,7 +67,17 @@ impl TCType {
         use TCType::*;
         match self {
             None => Some(1),
+            Bool => Some(1),
+            Complex32 => Some(8),
+            Complex64 => Some(16),
+            Float32 => Some(4),
+            Float64 => Some(8),
+            Int16 => Some(2),
             Int32 => Some(4),
+            Int64 => Some(8),
+            UInt8 => Some(1),
+            UInt16 => Some(2),
+            UInt32 => Some(4),
             UInt64 => Some(8),
             _ => Option::None,
         }
