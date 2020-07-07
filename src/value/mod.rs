@@ -19,7 +19,7 @@ pub type TCResult<T> = Result<T, error::TCError>;
 pub type Value = value::Value;
 pub type ValueId = value::ValueId;
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub enum TCType {
     None,
     Bool,
