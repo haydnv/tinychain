@@ -361,8 +361,7 @@ pub struct Permutation<T: TensorView> {
     shape: Shape,
     size: u64,
     ndim: usize,
-    permute_from: HashMap<usize, usize>,
-    permute_to: HashMap<usize, usize>,
+    permutation: Vec<usize>,
 }
 
 impl<T: TensorView> Permutation<T> {
@@ -379,15 +378,10 @@ impl<T: TensorView> Permutation<T> {
         assert!(permutation.len() == ndim);
 
         let source_shape = source.shape();
-        let mut permute_from: HashMap<usize, usize> = HashMap::new();
-        let mut permute_to: HashMap<usize, usize> = HashMap::new();
         let mut shape: Vec<u64> = Vec::with_capacity(ndim);
-        for (source_axis, dest_axis) in permutation.iter().enumerate() {
-            permute_from.insert(source_axis, *dest_axis);
-            permute_to.insert(*dest_axis, source_axis);
-            shape.push(source_shape[*dest_axis]);
+        for axis in &permutation {
+            shape.push(source_shape[*axis]);
         }
-
         let shape: Shape = shape.into();
         let size = shape.size();
         Permutation {
@@ -395,8 +389,7 @@ impl<T: TensorView> Permutation<T> {
             shape,
             size,
             ndim,
-            permute_from,
-            permute_to,
+            permutation,
         }
     }
 }
@@ -430,7 +423,7 @@ impl<T: TensorView> Rebase for Permutation<T> {
     fn invert_coord(&self, coord: Slice) -> Slice {
         let mut source_coord = Slice::all(self.source.shape());
         for axis in 0..coord.len() {
-            source_coord[self.permute_to[&axis]] = coord[axis].clone();
+            source_coord[self.permutation[axis]] = coord[axis].clone();
         }
         source_coord
     }
@@ -438,7 +431,7 @@ impl<T: TensorView> Rebase for Permutation<T> {
     fn map_coord(&self, source_coord: Slice) -> Slice {
         let mut coord = Slice::all(&self.shape);
         for axis in 0..source_coord.len() {
-            coord[self.permute_from[&axis]] = source_coord[axis].clone();
+            coord[self.permutation[axis]] = source_coord[axis].clone();
         }
         coord
     }
