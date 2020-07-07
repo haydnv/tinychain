@@ -22,9 +22,19 @@ pub type ValueId = value::ValueId;
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub enum TCType {
     None,
+    Bool,
     Bytes,
+    Complex32,
+    Complex64,
+    Float32,
+    Float64,
     Id,
+    Int16,
     Int32,
+    Int64,
+    UInt8,
+    UInt16,
+    UInt32,
     UInt64,
     Link,
     Op,
@@ -34,6 +44,25 @@ pub enum TCType {
 }
 
 impl TCType {
+    pub fn is_numeric(&self) -> bool {
+        use TCType::*;
+        match self {
+            Bool => true,
+            Complex32 => true,
+            Complex64 => true,
+            Float32 => true,
+            Float64 => true,
+            Int16 => true,
+            Int32 => true,
+            Int64 => true,
+            UInt8 => true,
+            UInt16 => true,
+            UInt32 => true,
+            UInt64 => true,
+            _ => false,
+        }
+    }
+
     pub fn size(&self) -> Option<usize> {
         use TCType::*;
         match self {
@@ -50,9 +79,19 @@ impl fmt::Display for TCType {
         use TCType::*;
         match self {
             None => write!(f, "type None"),
+            Bool => write!(f, "type Bool"),
             Bytes => write!(f, "type Bytes"),
-            Id => write!(f, "Id"),
+            Complex32 => write!(f, "type Complex32"),
+            Complex64 => write!(f, "type Complex64"),
+            Id => write!(f, "type Id"),
+            Float32 => write!(f, "type Float32"),
+            Float64 => write!(f, "type Float64"),
+            Int16 => write!(f, "type Int16"),
             Int32 => write!(f, "type Int32"),
+            Int64 => write!(f, "type Int64"),
+            UInt8 => write!(f, "type UInt8"),
+            UInt16 => write!(f, "type UInt26"),
+            UInt32 => write!(f, "type UInt32"),
             UInt64 => write!(f, "type UInt64"),
             Link => write!(f, "type Link"),
             Op => write!(f, "type Op"),

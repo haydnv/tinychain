@@ -30,7 +30,7 @@ impl From<Link> for Subject {
     }
 }
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Op {
     Get(Subject, Value),
     Put(Subject, Value, Value),

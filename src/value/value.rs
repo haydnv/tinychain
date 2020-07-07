@@ -145,12 +145,20 @@ impl From<&ValueId> for String {
     }
 }
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Value {
     None,
+    Bool(bool),
     Bytes(Bytes),
+    Complex32(num::Complex<f32>),
+    Complex64(num::Complex<f64>),
     Id(ValueId),
+    Int16(i16),
     Int32(i32),
+    Int64(i64),
+    UInt8(u8),
+    UInt16(u16),
+    UInt32(u32),
     UInt64(u64),
     Link(Link),
     Op(Box<Op>),
@@ -161,18 +169,30 @@ pub enum Value {
 
 impl Value {
     pub fn is_a(&self, dtype: &TCType) -> bool {
+        dtype == &self.dtype()
+    }
+
+    pub fn dtype(&self) -> TCType {
         use Value::*;
         match self {
-            None => dtype == &TCType::None,
-            Bytes(_) => dtype == &TCType::Bytes,
-            Id(_) => dtype == &TCType::Id,
-            Int32(_) => dtype == &TCType::Int32,
-            UInt64(_) => dtype == &TCType::UInt64,
-            Link(_) => dtype == &TCType::Link,
-            Op(_) => dtype == &TCType::Op,
-            Ref(_) => dtype == &TCType::Ref,
-            r#String(_) => dtype == &TCType::r#String,
-            Vector(_) => dtype == &TCType::Vector,
+            None => TCType::None,
+            Bool(_) => TCType::Bool,
+            Bytes(_) => TCType::Bytes,
+            Complex32(_) => TCType::Complex32,
+            Complex64(_) => TCType::Complex64,
+            Id(_) => TCType::Id,
+            Int16(_) => TCType::Int16,
+            Int32(_) => TCType::Int32,
+            Int64(_) => TCType::Int64,
+            UInt8(_) => TCType::UInt8,
+            UInt16(_) => TCType::UInt16,
+            UInt32(_) => TCType::UInt32,
+            UInt64(_) => TCType::UInt64,
+            Link(_) => TCType::Link,
+            Op(_) => TCType::Op,
+            Ref(_) => TCType::Ref,
+            r#String(_) => TCType::String,
+            Vector(_) => TCType::Vector,
         }
     }
 }
@@ -437,9 +457,20 @@ impl Serialize for Value {
     {
         match self {
             Value::None => s.serialize_none(),
+            Value::Bool(b) => s.serialize_bool(*b),
             Value::Bytes(b) => {
                 let mut map = s.serialize_map(Some(1))?;
                 map.serialize_entry("/sbin/value/bytes", &[base64::encode(b)])?;
+                map.end()
+            }
+            Value::Complex32(c) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry("/sbin/value/complex/32", &[[c.re, c.im]])?;
+                map.end()
+            }
+            Value::Complex64(c) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry("/sbin/value/complex/64", &[[c.re, c.im]])?;
                 map.end()
             }
             Value::Id(i) => {
@@ -447,7 +478,12 @@ impl Serialize for Value {
                 map.serialize_entry("/sbin/value/id", &[i.as_str()])?;
                 map.end()
             }
+            Value::Int16(i) => s.serialize_i16(*i),
             Value::Int32(i) => s.serialize_i32(*i),
+            Value::Int64(i) => s.serialize_i64(*i),
+            Value::UInt8(i) => s.serialize_u8(*i),
+            Value::UInt16(i) => s.serialize_u16(*i),
+            Value::UInt32(i) => s.serialize_u32(*i),
             Value::UInt64(i) => s.serialize_u64(*i),
             Value::Link(l) => l.serialize(s),
             Value::Op(op) => {
@@ -486,8 +522,16 @@ impl fmt::Display for Value {
         match self {
             Value::None => write!(f, "None"),
             Value::Bytes(b) => write!(f, "Bytes({})", b.len()),
+            Value::Bool(b) => write!(f, "Bool({})", b),
+            Value::Complex32(c) => write!(f, "Complex32({})", c),
+            Value::Complex64(c) => write!(f, "Complex64({})", c),
             Value::Id(id) => write!(f, "ValueId: {}", id),
+            Value::Int16(i) => write!(f, "Int16: {}", i),
             Value::Int32(i) => write!(f, "Int32: {}", i),
+            Value::Int64(i) => write!(f, "Int64: {}", i),
+            Value::UInt8(i) => write!(f, "UInt8: {}", i),
+            Value::UInt16(i) => write!(f, "UInt16: {}", i),
+            Value::UInt32(i) => write!(f, "UInt32: {}", i),
             Value::UInt64(i) => write!(f, "UInt64: {}", i),
             Value::Link(l) => write!(f, "Link: {}", l),
             Value::Op(op) => write!(f, "Op: {}", op),
