@@ -47,11 +47,7 @@ pub trait BlockTensorView: TensorView + Slice {
 
     async fn not(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn blocks(
-        &self,
-        txn_id: &Arc<TxnId>,
-        len: usize,
-    ) -> TCStream<Array<<Self as TensorView>::DType>>;
+    async fn blocks(&self, txn_id: &Arc<TxnId>, len: usize) -> TCStream<Block>;
 }
 
 pub struct BlockTensor {
@@ -112,6 +108,45 @@ impl BlockTensor {
             file,
         })
     }
+
+    fn write<T: TensorView + Broadcast>(
+        &self,
+        _txn_id: &TxnId,
+        coord: &Index,
+        _value: T,
+    ) -> TCResult<()> {
+        if !self.shape.contains(coord) {
+            return Err(error::bad_request(
+                &format!("Tensor with shape {} does not contain", self.shape),
+                coord,
+            ));
+        }
+
+        Err(error::not_implemented())
+    }
+}
+
+#[async_trait]
+impl TensorView for BlockTensor {
+    fn ndim(&self) -> usize {
+        self.ndim
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        &self.shape
+    }
+
+    fn size(&self) -> u64 {
+        self.size
+    }
+
+    async fn all(&self, _txn_id: &TxnId) -> TCResult<bool> {
+        panic!("NOT IMPLEMENTED")
+    }
+
+    async fn any(&self, _txn_id: &TxnId) -> TCResult<bool> {
+        panic!("NOT IMPLEMENTED")
+    }
 }
 
 pub struct DenseRebase<T: Rebase + 'static> {
@@ -120,8 +155,6 @@ pub struct DenseRebase<T: Rebase + 'static> {
 
 #[async_trait]
 impl<T: Rebase> TensorView for DenseRebase<T> {
-    type DType = T::DType;
-
     fn ndim(&self) -> usize {
         self.source.ndim()
     }
@@ -148,7 +181,7 @@ type DenseExpansion<T> = DenseRebase<Expansion<T>>;
 type DensePermutation<T> = DenseRebase<Permutation<T>>;
 type DenseTensorSlice<T> = DenseRebase<TensorSlice<T>>;
 
-enum Block {
+pub enum Block {
     Bool(Array<bool>),
     C32(Array<Complex<f32>>),
     C64(Array<Complex<f64>>),

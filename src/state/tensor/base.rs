@@ -4,7 +4,6 @@ use std::iter;
 use std::ops;
 use std::sync::Arc;
 
-use arrayfire::HasAfEnum;
 use async_trait::async_trait;
 use num::Integer;
 
@@ -128,6 +127,37 @@ impl fmt::Display for Index {
 pub struct Shape(Vec<u64>);
 
 impl Shape {
+    pub fn contains(&self, coord: &Index) -> bool {
+        if coord.len() > self.len() {
+            return false;
+        }
+
+        for axis in 0..coord.len() {
+            let size = &self[axis];
+            match &coord[axis] {
+                AxisIndex::At(i) => {
+                    if i > size {
+                        return false;
+                    }
+                }
+                AxisIndex::In(range, _) => {
+                    if range.start > *size || range.end > *size {
+                        return false;
+                    }
+                }
+                AxisIndex::Of(indices) => {
+                    for i in indices {
+                        if i > size {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+        true
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -167,8 +197,6 @@ impl fmt::Display for Shape {
 
 #[async_trait]
 pub trait TensorView: Sized + Send + Sync {
-    type DType: HasAfEnum + Send + Sync;
-
     fn ndim(&self) -> usize;
 
     fn shape(&'_ self) -> &'_ Shape;
@@ -272,8 +300,6 @@ impl<T: TensorView> TensorBroadcast<T> {
 
 #[async_trait]
 impl<T: TensorView> TensorView for TensorBroadcast<T> {
-    type DType = T::DType;
-
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -359,8 +385,6 @@ impl<T: TensorView> Expansion<T> {
 
 #[async_trait]
 impl<T: TensorView> TensorView for Expansion<T> {
-    type DType = T::DType;
-
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -450,8 +474,6 @@ impl<T: TensorView + Slice> Permutation<T> {
 
 #[async_trait]
 impl<T: TensorView + Slice> TensorView for Permutation<T> {
-    type DType = T::DType;
-
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -584,8 +606,6 @@ impl<T: TensorView> TensorSlice<T> {
 
 #[async_trait]
 impl<T: TensorView> TensorView for TensorSlice<T> {
-    type DType = T::DType;
-
     fn ndim(&self) -> usize {
         self.ndim
     }

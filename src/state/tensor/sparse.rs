@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::transaction::{Txn, TxnId};
-use crate::value::{TCResult, TCStream, TCType};
+use crate::value::{TCResult, TCStream, TCType, Value};
 
 use super::base::TensorView;
 use super::dense::BlockTensor;
@@ -41,7 +41,7 @@ pub trait SparseTensorView: TensorView {
 
     async fn not(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn filled(&self, txn_id: &TxnId) -> TCStream<(Vec<u64>, <Self as TensorView>::DType)>;
+    async fn filled(&self, txn_id: &TxnId) -> TCStream<(Vec<u64>, Value)>;
 
     async fn filled_at(&self, txn_id: &TxnId, axes: &[usize]) -> TCStream<Vec<u64>>;
 
