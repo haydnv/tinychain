@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, TCType};
 
-use super::TensorView;
+use super::base::TensorView;
 
 #[async_trait]
 pub trait BlockTensorView: TensorView {

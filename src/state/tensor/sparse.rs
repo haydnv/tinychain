@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, TCType};
 
+use super::base::TensorView;
 use super::dense::BlockTensor;
-use super::TensorView;
 
 #[async_trait]
 pub trait SparseTensorView: TensorView {
