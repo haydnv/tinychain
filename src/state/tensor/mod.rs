@@ -301,6 +301,99 @@ impl<T: TensorView> Rebase for Broadcast<T> {
     }
 }
 
+struct Permutation<T: TensorView> {
+    source: T,
+    shape: Shape,
+    size: u64,
+    ndim: usize,
+    permute_from: HashMap<usize, usize>,
+    permute_to: HashMap<usize, usize>,
+}
+
+impl<T: TensorView> Permutation<T> {
+    fn new(source: T, permutation: Option<Vec<usize>>) -> Permutation<T> {
+        let ndim = source.ndim();
+        let mut permutation = permutation
+            .or_else(|| {
+                let mut axes: Vec<usize> = (0..ndim).collect();
+                axes.reverse();
+                Some(axes)
+            })
+            .unwrap();
+
+        assert!(permutation.len() == ndim);
+
+        let source_shape = source.shape();
+        let mut permute_from: HashMap<usize, usize> = HashMap::new();
+        let mut permute_to: HashMap<usize, usize> = HashMap::new();
+        let mut shape: Vec<u64> = Vec::with_capacity(ndim);
+        for (source_axis, dest_axis) in permutation.iter().enumerate() {
+            permute_from.insert(source_axis, *dest_axis);
+            permute_to.insert(*dest_axis, source_axis);
+            shape.push(source_shape[*dest_axis]);
+        }
+
+        let shape: Shape = shape.into();
+        let size = shape.size();
+        Permutation {
+            source,
+            shape,
+            size,
+            ndim,
+            permute_from,
+            permute_to,
+        }
+    }
+}
+
+#[async_trait]
+impl<T: TensorView> TensorView for Permutation<T> {
+    type DType = T::DType;
+    type SliceType = T::SliceType;
+
+    fn ndim(&self) -> usize {
+        self.ndim
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        &self.shape
+    }
+
+    fn size(&self) -> u64 {
+        self.size
+    }
+
+    async fn all(&self, txn_id: &TxnId) -> TCResult<bool> {
+        self.source.all(txn_id).await
+    }
+
+    async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
+        self.source.any(txn_id).await
+    }
+
+    async fn slice(&self, txn_id: &TxnId, coord: Slice) -> TCResult<TensorSlice<T::SliceType>> {
+        self.source.slice(txn_id, self.invert_coord(coord)).await
+    }
+}
+
+impl<T: TensorView> Rebase for Permutation<T> {
+    fn invert_coord(&self, coord: Slice) -> Slice {
+        let mut source_coord = Slice::all(self.source.shape());
+        for axis in 0..coord.len() {
+            source_coord[self.permute_to[&axis]] = coord[axis].clone();
+        }
+        source_coord
+    }
+
+    fn map_coord(&self, source_coord: Slice) -> Slice {
+        let mut coord = Slice::all(&self.shape);
+        for axis in 0..source_coord.len() {
+            coord[self.permute_from[&axis]] = source_coord[axis].clone();
+        }
+        coord
+    }
+}
+
 struct TensorSlice<T: TensorView> {
     source: T,
     shape: Shape,
