@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::iter;
-use std::ops::{Index, IndexMut, Range};
+use std::ops;
 
 use arrayfire::HasAfEnum;
 use async_trait::async_trait;
@@ -12,39 +12,39 @@ use crate::transaction::TxnId;
 use crate::value::TCResult;
 
 #[derive(Clone)]
-pub enum AxisSlice {
+pub enum AxisIndex {
     At(u64),
-    In(Range<u64>, u64),
+    In(ops::Range<u64>, u64),
     Of(Vec<u64>),
 }
 
-impl AxisSlice {
-    fn all(dim: u64) -> AxisSlice {
-        AxisSlice::In(0..dim, 1)
+impl AxisIndex {
+    fn all(dim: u64) -> AxisIndex {
+        AxisIndex::In(0..dim, 1)
     }
 }
 
-impl From<u64> for AxisSlice {
-    fn from(at: u64) -> AxisSlice {
-        AxisSlice::At(at)
+impl From<u64> for AxisIndex {
+    fn from(at: u64) -> AxisIndex {
+        AxisIndex::At(at)
     }
 }
 
-impl From<Vec<u64>> for AxisSlice {
-    fn from(of: Vec<u64>) -> AxisSlice {
-        AxisSlice::Of(of)
+impl From<Vec<u64>> for AxisIndex {
+    fn from(of: Vec<u64>) -> AxisIndex {
+        AxisIndex::Of(of)
     }
 }
 
-impl From<(Range<u64>, u64)> for AxisSlice {
-    fn from(slice: (Range<u64>, u64)) -> AxisSlice {
-        AxisSlice::In(slice.0, slice.1)
+impl From<(ops::Range<u64>, u64)> for AxisIndex {
+    fn from(slice: (ops::Range<u64>, u64)) -> AxisIndex {
+        AxisIndex::In(slice.0, slice.1)
     }
 }
 
-impl fmt::Display for AxisSlice {
+impl fmt::Display for AxisIndex {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use AxisSlice::*;
+        use AxisIndex::*;
         match self {
             At(at) => write!(f, "{}", at),
             In(range, 1) => write!(f, "[{}, {})", range.start, range.end),
@@ -62,17 +62,17 @@ impl fmt::Display for AxisSlice {
     }
 }
 
-pub struct Slice {
-    axes: Vec<AxisSlice>,
+pub struct Index {
+    axes: Vec<AxisIndex>,
 }
 
-impl Slice {
-    fn all(shape: &Shape) -> Slice {
+impl Index {
+    fn all(shape: &Shape) -> Index {
         shape
             .0
             .iter()
-            .map(|dim| AxisSlice::In(0..*dim, 1))
-            .collect::<Vec<AxisSlice>>()
+            .map(|dim| AxisIndex::In(0..*dim, 1))
+            .collect::<Vec<AxisIndex>>()
             .into()
     }
 
@@ -84,12 +84,12 @@ impl Slice {
         assert!(self.len() <= shape.len());
 
         for axis in self.axes.len()..shape.len() {
-            self.axes.push(AxisSlice::all(shape[axis]))
+            self.axes.push(AxisIndex::all(shape[axis]))
         }
     }
 }
 
-impl<Idx: std::slice::SliceIndex<[AxisSlice]>> Index<Idx> for Slice {
+impl<Idx: std::slice::SliceIndex<[AxisIndex]>> ops::Index<Idx> for Index {
     type Output = Idx::Output;
 
     fn index(&self, index: Idx) -> &Self::Output {
@@ -97,19 +97,19 @@ impl<Idx: std::slice::SliceIndex<[AxisSlice]>> Index<Idx> for Slice {
     }
 }
 
-impl<Idx: std::slice::SliceIndex<[AxisSlice]>> IndexMut<Idx> for Slice {
+impl<Idx: std::slice::SliceIndex<[AxisIndex]>> ops::IndexMut<Idx> for Index {
     fn index_mut(&mut self, index: Idx) -> &mut Self::Output {
         &mut self.axes[index]
     }
 }
 
-impl From<Vec<AxisSlice>> for Slice {
-    fn from(axes: Vec<AxisSlice>) -> Slice {
-        Slice { axes }
+impl From<Vec<AxisIndex>> for Index {
+    fn from(axes: Vec<AxisIndex>) -> Index {
+        Index { axes }
     }
 }
 
-impl fmt::Display for Slice {
+impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -135,7 +135,7 @@ impl Shape {
     }
 }
 
-impl<Idx: std::slice::SliceIndex<[u64]>> Index<Idx> for Shape {
+impl<Idx: std::slice::SliceIndex<[u64]>> ops::Index<Idx> for Shape {
     type Output = Idx::Output;
 
     fn index(&self, index: Idx) -> &Self::Output {
@@ -179,9 +179,9 @@ pub trait TensorView: Sized + Send + Sync {
 }
 
 pub trait Rebase: TensorView {
-    fn invert_coord(&self, coord: Slice) -> Slice;
+    fn invert_coord(&self, coord: Index) -> Index;
 
-    fn map_coord(&self, source_coord: Slice) -> Slice;
+    fn map_coord(&self, source_coord: Index) -> Index;
 }
 
 pub struct Broadcast<T: TensorView> {
@@ -258,12 +258,12 @@ impl<T: TensorView> TensorView for Broadcast<T> {
 }
 
 impl<T: TensorView> Rebase for Broadcast<T> {
-    fn invert_coord(&self, coord: Slice) -> Slice {
+    fn invert_coord(&self, coord: Index) -> Index {
         let source_ndim = self.source.ndim();
         let mut source_coord = Vec::with_capacity(source_ndim);
         for axis in 0..source_ndim {
             if self.broadcast[axis + self.offset] {
-                source_coord.push(AxisSlice::from(0))
+                source_coord.push(AxisIndex::from(0))
             } else {
                 source_coord.push(coord[axis + self.offset].clone())
             }
@@ -272,8 +272,8 @@ impl<T: TensorView> Rebase for Broadcast<T> {
         source_coord.into()
     }
 
-    fn map_coord(&self, source_coord: Slice) -> Slice {
-        let mut coord = Slice::all(&self.shape);
+    fn map_coord(&self, source_coord: Index) -> Index {
+        let mut coord = Index::all(&self.shape);
 
         for axis in 0..self.ndim {
             if !self.broadcast[axis + self.offset] {
@@ -339,7 +339,7 @@ impl<T: TensorView> TensorView for Expansion<T> {
 }
 
 impl<T: TensorView> Rebase for Expansion<T> {
-    fn invert_coord(&self, mut coord: Slice) -> Slice {
+    fn invert_coord(&self, mut coord: Index) -> Index {
         if coord.len() >= self.expand {
             coord.axes.remove(self.expand);
         }
@@ -347,7 +347,7 @@ impl<T: TensorView> Rebase for Expansion<T> {
         coord
     }
 
-    fn map_coord(&self, mut coord: Slice) -> Slice {
+    fn map_coord(&self, mut coord: Index) -> Index {
         if coord.len() >= self.expand {
             coord.axes.insert(self.expand, 0.into());
         }
@@ -420,16 +420,16 @@ impl<T: TensorView> TensorView for Permutation<T> {
 }
 
 impl<T: TensorView> Rebase for Permutation<T> {
-    fn invert_coord(&self, coord: Slice) -> Slice {
-        let mut source_coord = Slice::all(self.source.shape());
+    fn invert_coord(&self, coord: Index) -> Index {
+        let mut source_coord = Index::all(self.source.shape());
         for axis in 0..coord.len() {
             source_coord[self.permutation[axis]] = coord[axis].clone();
         }
         source_coord
     }
 
-    fn map_coord(&self, source_coord: Slice) -> Slice {
-        let mut coord = Slice::all(&self.shape);
+    fn map_coord(&self, source_coord: Index) -> Index {
+        let mut coord = Index::all(&self.shape);
         for axis in 0..source_coord.len() {
             coord[self.permutation[axis]] = source_coord[axis].clone();
         }
@@ -442,28 +442,28 @@ pub struct TensorSlice<T: TensorView> {
     shape: Shape,
     size: u64,
     ndim: usize,
-    slice: Slice,
+    slice: Index,
     offset: HashMap<usize, u64>,
     elided: HashSet<usize>,
 }
 
 impl<T: TensorView> TensorSlice<T> {
-    fn new(source: T, slice: Slice) -> TCResult<TensorSlice<T>> {
+    fn new(source: T, slice: Index) -> TCResult<TensorSlice<T>> {
         let mut shape: Vec<u64> = Vec::with_capacity(slice.len());
         let mut offset = HashMap::new();
         let mut elided = HashSet::new();
 
         for axis in 0..slice.len() {
             match &slice[axis] {
-                AxisSlice::At(_) => {
+                AxisIndex::At(_) => {
                     elided.insert(axis);
                 }
-                AxisSlice::In(range, step) => {
+                AxisIndex::In(range, step) => {
                     let dim = (range.end - range.start).div_ceil(step);
                     shape.push(dim);
                     offset.insert(axis, range.start);
                 }
-                AxisSlice::Of(indices) => shape.push(indices.len() as u64),
+                AxisIndex::Of(indices) => shape.push(indices.len() as u64),
             }
         }
 
@@ -509,7 +509,7 @@ impl<T: TensorView> TensorView for TensorSlice<T> {
 }
 
 impl<T: TensorView> Rebase for TensorSlice<T> {
-    fn invert_coord(&self, mut coord: Slice) -> Slice {
+    fn invert_coord(&self, mut coord: Index) -> Index {
         coord.normalize(&self.shape);
 
         let mut source_coord = Vec::with_capacity(self.source.ndim());
@@ -520,7 +520,7 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
                 continue;
             }
 
-            use AxisSlice::*;
+            use AxisIndex::*;
             match &coord[source_axis] {
                 In(range, this_step) => {
                     if let In(source_range, source_step) = &self.slice[axis] {
@@ -554,7 +554,7 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
         source_coord.into()
     }
 
-    fn map_coord(&self, source_coord: Slice) -> Slice {
+    fn map_coord(&self, source_coord: Index) -> Index {
         assert!(source_coord.len() == self.ndim);
 
         let mut coord = Vec::with_capacity(self.ndim);
@@ -564,7 +564,7 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
                 continue;
             }
 
-            use AxisSlice::*;
+            use AxisIndex::*;
             match &source_coord[axis] {
                 In(_, _) => panic!("NOT IMPLEMENTED"),
                 Of(indices) => {
@@ -586,7 +586,7 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
 
         for axis in source_coord.len()..self.ndim {
             if !self.elided.contains(&axis) {
-                coord.push(AxisSlice::all(self.shape[axis]))
+                coord.push(AxisIndex::all(self.shape[axis]))
             }
         }
 
