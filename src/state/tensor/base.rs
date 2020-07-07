@@ -180,10 +180,24 @@ pub trait TensorView: Sized + Send + Sync {
 }
 
 #[async_trait]
-pub trait Slice: TensorView {
-    type SliceType: TensorView;
+pub trait Broadcast: TensorView {
+    type Broadcast: TensorView;
 
-    async fn slice(&self, txn: &Arc<Txn>, coord: Index) -> TCResult<Self::SliceType>;
+    async fn broadcast(&self, txn: &Arc<Txn>, shape: Shape) -> TCResult<Self::Broadcast>;
+}
+
+#[async_trait]
+pub trait Expand: TensorView {
+    type Expansion: TensorView;
+
+    async fn broadcast(&self, txn: &Arc<Txn>, shape: Shape) -> TCResult<Self::Expansion>;
+}
+
+#[async_trait]
+pub trait Slice: TensorView {
+    type Slice: TensorView;
+
+    async fn slice(&self, txn: &Arc<Txn>, coord: Index) -> TCResult<Self::Slice>;
 }
 
 pub trait Rebase: TensorView {
@@ -207,7 +221,7 @@ pub trait Transpose: TensorView {
     ) -> TCResult<Self::Permutation>;
 }
 
-pub struct Broadcast<T: TensorView> {
+pub struct TensorBroadcast<T: TensorView> {
     source: T,
     shape: Shape,
     size: u64,
@@ -216,8 +230,8 @@ pub struct Broadcast<T: TensorView> {
     offset: usize,
 }
 
-impl<T: TensorView> Broadcast<T> {
-    fn new(source: T, shape: Shape) -> TCResult<Broadcast<T>> {
+impl<T: TensorView> TensorBroadcast<T> {
+    fn new(source: T, shape: Shape) -> TCResult<TensorBroadcast<T>> {
         let ndim = shape.len();
         if source.ndim() > ndim {
             return Err(error::bad_request(
@@ -244,7 +258,7 @@ impl<T: TensorView> Broadcast<T> {
             }
         }
 
-        Ok(Broadcast {
+        Ok(TensorBroadcast {
             source,
             shape,
             size,
@@ -256,7 +270,7 @@ impl<T: TensorView> Broadcast<T> {
 }
 
 #[async_trait]
-impl<T: TensorView> TensorView for Broadcast<T> {
+impl<T: TensorView> TensorView for TensorBroadcast<T> {
     type DType = T::DType;
 
     fn ndim(&self) -> usize {
@@ -280,7 +294,7 @@ impl<T: TensorView> TensorView for Broadcast<T> {
     }
 }
 
-impl<T: TensorView + Slice> Rebase for Broadcast<T> {
+impl<T: TensorView + Slice> Rebase for TensorBroadcast<T> {
     type Source = T;
 
     fn invert_coord(&self, coord: Index) -> Index {

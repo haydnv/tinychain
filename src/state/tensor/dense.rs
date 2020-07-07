@@ -14,11 +14,7 @@ use super::base::*;
 pub trait BlockTensorView: TensorView + Slice {
     async fn as_dtype(&self, txn: &Arc<Txn>, dtype: TCType) -> TCResult<BlockTensor>;
 
-    async fn broadcast(&self, txn: &Arc<Txn>, shape: Shape) -> TCResult<DenseBroadcast<Self>>;
-
     async fn copy(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
-
-    async fn expand_dims(&self, txn: &Arc<Txn>, dim: usize) -> TCResult<DenseExpansion<Self>>;
 
     async fn sum(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<BlockTensor>;
 
@@ -45,7 +41,11 @@ pub trait BlockTensorView: TensorView + Slice {
 
     async fn not(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn blocks(&self, txn_id: &Arc<TxnId>) -> TCStream<Array<<Self as TensorView>::DType>>;
+    async fn blocks(
+        &self,
+        txn_id: &Arc<TxnId>,
+        len: usize,
+    ) -> TCStream<Array<<Self as TensorView>::DType>>;
 }
 
 pub struct BlockTensor {
@@ -83,7 +83,7 @@ impl<T: Rebase> TensorView for DenseRebase<T> {
     }
 }
 
-type DenseBroadcast<T> = DenseRebase<Broadcast<T>>;
+type DenseBroadcast<T> = DenseRebase<TensorBroadcast<T>>;
 type DenseExpansion<T> = DenseRebase<Expansion<T>>;
 type DensePermutation<T> = DenseRebase<Permutation<T>>;
 type DenseTensorSlice<T> = DenseRebase<TensorSlice<T>>;
@@ -91,11 +91,11 @@ type DenseTensorSlice<T> = DenseRebase<TensorSlice<T>>;
 #[async_trait]
 impl<T: TensorView + Slice> Slice for DensePermutation<T>
 where
-    <T as Slice>::SliceType: Slice + Transpose,
+    <T as Slice>::Slice: Slice + Transpose,
 {
-    type SliceType = <<T as Slice>::SliceType as Transpose>::Permutation;
+    type Slice = <<T as Slice>::Slice as Transpose>::Permutation;
 
-    async fn slice(&self, txn: &Arc<Txn>, coord: Index) -> TCResult<Self::SliceType> {
+    async fn slice(&self, txn: &Arc<Txn>, coord: Index) -> TCResult<Self::Slice> {
         let mut permutation: BTreeMap<usize, usize> = self
             .source
             .permutation()
@@ -103,6 +103,7 @@ where
             .into_iter()
             .enumerate()
             .collect();
+
         let mut elided = HashSet::new();
         for axis in 0..coord.len() {
             if let AxisIndex::At(_) = coord[axis] {
