@@ -23,7 +23,7 @@ mod collator;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
-const ERR_CORRUPT: &str = "Index corrupted! Please restart Tinychain and file a bug report";
+const ERR_CORRUPT: &str = "BTree corrupted! Please restart Tinychain and file a bug report";
 
 type NodeId = BlockId;
 
@@ -140,15 +140,15 @@ type Key = Vec<Value>;
 type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Sync + Unpin>>>;
 
 #[derive(Clone)]
-struct IndexRoot(NodeId);
+struct BTreeRoot(NodeId);
 
 #[async_trait]
-impl Mutate for IndexRoot {
+impl Mutate for BTreeRoot {
     fn diverge(&self, _txn_id: &TxnId) -> Self {
         self.clone()
     }
 
-    async fn converge(&mut self, new_value: IndexRoot) {
+    async fn converge(&mut self, new_value: BTreeRoot) {
         self.0 = new_value.0
     }
 }
@@ -159,21 +159,21 @@ pub struct Column {
     max_len: Option<usize>,
 }
 
-pub struct Index {
+pub struct BTree {
     file: Arc<File>,
     schema: Vec<Column>,
     order: usize,
     collator: collator::Collator,
-    root: TxnLock<IndexRoot>,
+    root: TxnLock<BTreeRoot>,
 }
 
-impl Index {
+impl BTree {
     // TODO: add `slice` method to iterate over all nodes within a range of keys
 
-    async fn create(txn_id: TxnId, schema: Vec<Column>, file: Arc<File>) -> TCResult<Index> {
+    async fn create(txn_id: TxnId, schema: Vec<Column>, file: Arc<File>) -> TCResult<BTree> {
         if !file.is_empty(&txn_id).await? {
             return Err(error::bad_request(
-                "Tried to create a new Index without a new File",
+                "Tried to create a new BTree without a new File",
                 file,
             ));
         }
@@ -221,12 +221,12 @@ impl Index {
             .await?;
 
         let collator = collator::Collator::new(schema.iter().map(|c| c.dtype.clone()).collect())?;
-        Ok(Index {
+        Ok(BTree {
             file,
             schema,
             order,
             collator,
-            root: TxnLock::new(txn_id, IndexRoot(root)),
+            root: TxnLock::new(txn_id, BTreeRoot(root)),
         })
     }
 
@@ -496,7 +496,7 @@ impl Index {
 }
 
 #[async_trait]
-impl Collect for Index {
+impl Collect for BTree {
     type Selector = Key;
     type Item = Key;
 
@@ -552,7 +552,7 @@ impl Collect for Index {
 }
 
 #[async_trait]
-impl Transact for Index {
+impl Transact for BTree {
     async fn commit(&self, txn_id: &TxnId) {
         join(self.file.commit(txn_id), self.root.commit(txn_id)).await;
     }

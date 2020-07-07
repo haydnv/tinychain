@@ -12,9 +12,9 @@ use crate::transaction::{Transact, Txn};
 use crate::value::{TCResult, TCStream, Value};
 
 mod dir;
+pub mod btree;
 pub mod file;
 pub mod graph;
-pub mod index;
 mod table;
 pub mod tensor;
 
@@ -55,12 +55,12 @@ pub trait Collect: Transact + Send + Sync {
 pub trait Persist: Archive + Collect {}
 
 pub enum State {
-    Index(Arc<index::Index>),
+    Index(Arc<btree::BTree>),
     Value(Value),
 }
 
-impl From<Arc<index::Index>> for State {
-    fn from(i: Arc<index::Index>) -> State {
+impl From<Arc<btree::BTree>> for State {
+    fn from(i: Arc<btree::BTree>) -> State {
         State::Index(i)
     }
 }

@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{TCResult, Value};
 
-use super::index::Index;
+use super::btree::BTree;
 use super::{Collect, GetResult};
 
 pub struct Table {
-    contents: Arc<Index>,
+    contents: Arc<BTree>,
 }
 
 #[async_trait]
