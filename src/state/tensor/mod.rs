@@ -301,6 +301,82 @@ impl<T: TensorView> Rebase for Broadcast<T> {
     }
 }
 
+struct Expansion<T: TensorView> {
+    source: T,
+    shape: Shape,
+    size: u64,
+    ndim: usize,
+    expand: usize,
+}
+
+impl<T: TensorView> Expansion<T> {
+    fn new(source: T, expand: usize) -> Expansion<T> {
+        assert!(expand < source.ndim());
+
+        let mut shape = source.shape().0.to_vec();
+        shape.insert(expand, 1);
+
+        let shape: Shape = shape.into();
+        let size = shape.size();
+        let ndim = shape.len();
+        Expansion {
+            source,
+            shape,
+            size,
+            ndim,
+            expand,
+        }
+    }
+}
+
+#[async_trait]
+impl<T: TensorView> TensorView for Expansion<T> {
+    type DType = T::DType;
+    type SliceType = T::SliceType;
+
+    fn ndim(&self) -> usize {
+        self.ndim
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        &self.shape
+    }
+
+    fn size(&self) -> u64 {
+        self.size
+    }
+
+    async fn all(&self, txn_id: &TxnId) -> TCResult<bool> {
+        self.source.all(txn_id).await
+    }
+
+    async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
+        self.source.any(txn_id).await
+    }
+
+    async fn slice(&self, txn_id: &TxnId, coord: Slice) -> TCResult<TensorSlice<T::SliceType>> {
+        self.source.slice(txn_id, self.invert_coord(coord)).await
+    }
+}
+
+impl<T: TensorView> Rebase for Expansion<T> {
+    fn invert_coord(&self, mut coord: Slice) -> Slice {
+        if coord.len() >= self.expand {
+            coord.axes.remove(self.expand);
+        }
+
+        coord
+    }
+
+    fn map_coord(&self, mut coord: Slice) -> Slice {
+        if coord.len() >= self.expand {
+            coord.axes.insert(self.expand, 0.into());
+        }
+
+        coord
+    }
+}
+
 struct Permutation<T: TensorView> {
     source: T,
     shape: Shape,
