@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::iter;
 use std::ops;
@@ -493,6 +493,45 @@ impl<T: TensorView + Slice> Rebase for Permutation<T> {
 
     fn source(&'_ self) -> &'_ Self::Source {
         &self.source
+    }
+}
+
+#[async_trait]
+impl<T: TensorView + Slice> Slice for Permutation<T>
+where
+    <T as Slice>::Slice: Slice + Transpose,
+{
+    type Slice = <<T as Slice>::Slice as Transpose>::Permutation;
+
+    async fn slice(&self, txn: &Arc<Txn>, coord: Index) -> TCResult<Self::Slice> {
+        let mut permutation: BTreeMap<usize, usize> = self
+            .permutation()
+            .to_vec()
+            .into_iter()
+            .enumerate()
+            .collect();
+
+        let mut elided = HashSet::new();
+        for axis in 0..coord.len() {
+            if let AxisIndex::At(_) = coord[axis] {
+                elided.insert(axis);
+                permutation.remove(&axis);
+            }
+        }
+
+        for axis in elided {
+            permutation = permutation
+                .into_iter()
+                .map(|(s, d)| if d > axis { (s, d - 1) } else { (s, d) })
+                .collect();
+        }
+
+        let permutation: Vec<usize> = permutation.values().cloned().collect();
+        self.source()
+            .slice(txn, self.invert_coord(coord))
+            .await?
+            .transpose(txn, Some(permutation))
+            .await
     }
 }
 

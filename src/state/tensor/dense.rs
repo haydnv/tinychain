@@ -1,4 +1,3 @@
-use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use arrayfire::Array;
@@ -87,44 +86,3 @@ type DenseBroadcast<T> = DenseRebase<TensorBroadcast<T>>;
 type DenseExpansion<T> = DenseRebase<Expansion<T>>;
 type DensePermutation<T> = DenseRebase<Permutation<T>>;
 type DenseTensorSlice<T> = DenseRebase<TensorSlice<T>>;
-
-#[async_trait]
-impl<T: TensorView + Slice> Slice for DensePermutation<T>
-where
-    <T as Slice>::Slice: Slice + Transpose,
-{
-    type Slice = <<T as Slice>::Slice as Transpose>::Permutation;
-
-    async fn slice(&self, txn: &Arc<Txn>, coord: Index) -> TCResult<Self::Slice> {
-        let mut permutation: BTreeMap<usize, usize> = self
-            .source
-            .permutation()
-            .to_vec()
-            .into_iter()
-            .enumerate()
-            .collect();
-
-        let mut elided = HashSet::new();
-        for axis in 0..coord.len() {
-            if let AxisIndex::At(_) = coord[axis] {
-                elided.insert(axis);
-                permutation.remove(&axis);
-            }
-        }
-
-        for axis in elided {
-            permutation = permutation
-                .into_iter()
-                .map(|(s, d)| if d > axis { (s, d - 1) } else { (s, d) })
-                .collect();
-        }
-
-        let permutation: Vec<usize> = permutation.values().cloned().collect();
-        self.source
-            .source()
-            .slice(txn, self.source.invert_coord(coord))
-            .await?
-            .transpose(txn, Some(permutation))
-            .await
-    }
-}
