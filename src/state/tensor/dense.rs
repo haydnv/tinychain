@@ -1,15 +1,17 @@
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use arrayfire::Array;
 use async_trait::async_trait;
 
 use crate::transaction::{Txn, TxnId};
+
 use crate::value::{TCResult, TCStream, TCType};
 
 use super::base::*;
 
 #[async_trait]
-pub trait BlockTensorView: TensorView {
+pub trait BlockTensorView: TensorView + Slice {
     async fn as_dtype(&self, txn: &Arc<Txn>, dtype: TCType) -> TCResult<BlockTensor>;
 
     async fn broadcast(&self, txn: &Arc<Txn>, shape: Shape) -> TCResult<DenseBroadcast<Self>>;
@@ -21,18 +23,6 @@ pub trait BlockTensorView: TensorView {
     async fn sum(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<BlockTensor>;
 
     async fn product(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<BlockTensor>;
-
-    async fn slice(
-        &self,
-        txn: &Arc<Txn>,
-        permutation: Option<Vec<usize>>,
-    ) -> TCResult<DenseTensorSlice<Self>>;
-
-    async fn transpose(
-        &self,
-        txn: &Arc<Txn>,
-        permutation: Option<Vec<usize>>,
-    ) -> TCResult<DensePermutation<Self>>;
 
     async fn add<T: BlockTensorView>(&self, txn: &Arc<Txn>, other: T) -> TCResult<BlockTensor>;
 
@@ -97,3 +87,43 @@ type DenseBroadcast<T> = DenseRebase<Broadcast<T>>;
 type DenseExpansion<T> = DenseRebase<Expansion<T>>;
 type DensePermutation<T> = DenseRebase<Permutation<T>>;
 type DenseTensorSlice<T> = DenseRebase<TensorSlice<T>>;
+
+#[async_trait]
+impl<T: TensorView + Slice> Slice for DensePermutation<T>
+where
+    <T as Slice>::SliceType: Slice + Transpose,
+{
+    type SliceType = <<T as Slice>::SliceType as Transpose>::Permutation;
+
+    async fn slice(&self, txn: &Arc<Txn>, coord: Index) -> TCResult<Self::SliceType> {
+        let mut permutation: BTreeMap<usize, usize> = self
+            .source
+            .permutation()
+            .to_vec()
+            .into_iter()
+            .enumerate()
+            .collect();
+        let mut elided = HashSet::new();
+        for axis in 0..coord.len() {
+            if let AxisIndex::At(_) = coord[axis] {
+                elided.insert(axis);
+                permutation.remove(&axis);
+            }
+        }
+
+        for axis in elided {
+            permutation = permutation
+                .into_iter()
+                .map(|(s, d)| if d > axis { (s, d - 1) } else { (s, d) })
+                .collect();
+        }
+
+        let permutation: Vec<usize> = permutation.values().cloned().collect();
+        self.source
+            .source()
+            .slice(txn, self.source.invert_coord(coord))
+            .await?
+            .transpose(txn, Some(permutation))
+            .await
+    }
+}

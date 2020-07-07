@@ -11,8 +11,8 @@ use crate::internal::archive::Archive;
 use crate::transaction::{Transact, Txn};
 use crate::value::{TCResult, TCStream, Value};
 
-mod dir;
 pub mod btree;
+mod dir;
 pub mod file;
 pub mod graph;
 mod table;

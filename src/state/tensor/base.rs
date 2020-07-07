@@ -2,13 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::iter;
 use std::ops;
+use std::sync::Arc;
 
 use arrayfire::HasAfEnum;
 use async_trait::async_trait;
 use num::Integer;
 
 use crate::error;
-use crate::transaction::TxnId;
+use crate::transaction::{Txn, TxnId};
 use crate::value::TCResult;
 
 #[derive(Clone)]
@@ -67,7 +68,7 @@ pub struct Index {
 }
 
 impl Index {
-    fn all(shape: &Shape) -> Index {
+    pub fn all(shape: &Shape) -> Index {
         shape
             .0
             .iter()
@@ -76,11 +77,11 @@ impl Index {
             .into()
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.axes.len()
     }
 
-    fn normalize(&mut self, shape: &Shape) {
+    pub fn normalize(&mut self, shape: &Shape) {
         assert!(self.len() <= shape.len());
 
         for axis in self.axes.len()..shape.len() {
@@ -178,10 +179,32 @@ pub trait TensorView: Sized + Send + Sync {
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool>;
 }
 
+#[async_trait]
+pub trait Slice: TensorView {
+    type SliceType: TensorView;
+
+    async fn slice(&self, txn: &Arc<Txn>, coord: Index) -> TCResult<Self::SliceType>;
+}
+
 pub trait Rebase: TensorView {
+    type Source: TensorView + Slice;
+
     fn invert_coord(&self, coord: Index) -> Index;
 
     fn map_coord(&self, source_coord: Index) -> Index;
+
+    fn source(&'_ self) -> &'_ Self::Source;
+}
+
+#[async_trait]
+pub trait Transpose: TensorView {
+    type Permutation: TensorView;
+
+    async fn transpose(
+        &self,
+        txn: &Arc<Txn>,
+        permutation: Option<Vec<usize>>,
+    ) -> TCResult<Self::Permutation>;
 }
 
 pub struct Broadcast<T: TensorView> {
@@ -257,7 +280,9 @@ impl<T: TensorView> TensorView for Broadcast<T> {
     }
 }
 
-impl<T: TensorView> Rebase for Broadcast<T> {
+impl<T: TensorView + Slice> Rebase for Broadcast<T> {
+    type Source = T;
+
     fn invert_coord(&self, coord: Index) -> Index {
         let source_ndim = self.source.ndim();
         let mut source_coord = Vec::with_capacity(source_ndim);
@@ -282,6 +307,10 @@ impl<T: TensorView> Rebase for Broadcast<T> {
         }
 
         coord
+    }
+
+    fn source(&'_ self) -> &'_ Self::Source {
+        &self.source
     }
 }
 
@@ -338,7 +367,9 @@ impl<T: TensorView> TensorView for Expansion<T> {
     }
 }
 
-impl<T: TensorView> Rebase for Expansion<T> {
+impl<T: TensorView + Slice> Rebase for Expansion<T> {
+    type Source = T;
+
     fn invert_coord(&self, mut coord: Index) -> Index {
         if coord.len() >= self.expand {
             coord.axes.remove(self.expand);
@@ -354,9 +385,13 @@ impl<T: TensorView> Rebase for Expansion<T> {
 
         coord
     }
+
+    fn source(&'_ self) -> &'_ Self::Source {
+        &self.source
+    }
 }
 
-pub struct Permutation<T: TensorView> {
+pub struct Permutation<T: TensorView + Slice> {
     source: T,
     shape: Shape,
     size: u64,
@@ -364,7 +399,7 @@ pub struct Permutation<T: TensorView> {
     permutation: Vec<usize>,
 }
 
-impl<T: TensorView> Permutation<T> {
+impl<T: TensorView + Slice> Permutation<T> {
     fn new(source: T, permutation: Option<Vec<usize>>) -> Permutation<T> {
         let ndim = source.ndim();
         let permutation = permutation
@@ -392,10 +427,14 @@ impl<T: TensorView> Permutation<T> {
             permutation,
         }
     }
+
+    pub fn permutation(&'_ self) -> &'_ [usize] {
+        &self.permutation
+    }
 }
 
 #[async_trait]
-impl<T: TensorView> TensorView for Permutation<T> {
+impl<T: TensorView + Slice> TensorView for Permutation<T> {
     type DType = T::DType;
 
     fn ndim(&self) -> usize {
@@ -419,7 +458,9 @@ impl<T: TensorView> TensorView for Permutation<T> {
     }
 }
 
-impl<T: TensorView> Rebase for Permutation<T> {
+impl<T: TensorView + Slice> Rebase for Permutation<T> {
+    type Source = T;
+
     fn invert_coord(&self, coord: Index) -> Index {
         let mut source_coord = Index::all(self.source.shape());
         for axis in 0..coord.len() {
@@ -434,6 +475,10 @@ impl<T: TensorView> Rebase for Permutation<T> {
             coord[self.permutation[axis]] = source_coord[axis].clone();
         }
         coord
+    }
+
+    fn source(&'_ self) -> &'_ Self::Source {
+        &self.source
     }
 }
 
@@ -508,7 +553,9 @@ impl<T: TensorView> TensorView for TensorSlice<T> {
     }
 }
 
-impl<T: TensorView> Rebase for TensorSlice<T> {
+impl<T: TensorView + Slice> Rebase for TensorSlice<T> {
+    type Source = T;
+
     fn invert_coord(&self, mut coord: Index) -> Index {
         coord.normalize(&self.shape);
 
@@ -591,5 +638,9 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
         }
 
         coord.into()
+    }
+
+    fn source(&'_ self) -> &'_ Self::Source {
+        &self.source
     }
 }
