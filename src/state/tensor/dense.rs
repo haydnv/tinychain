@@ -6,17 +6,33 @@ use async_trait::async_trait;
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, TCType};
 
-use super::base::TensorView;
+use super::base::*;
 
 #[async_trait]
 pub trait BlockTensorView: TensorView {
     async fn as_dtype(&self, txn: &Arc<Txn>, dtype: TCType) -> TCResult<BlockTensor>;
 
+    async fn broadcast(&self, txn: &Arc<Txn>, shape: Shape) -> TCResult<DenseBroadcast<Self>>;
+
     async fn copy(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
+
+    async fn expand_dims(&self, txn: &Arc<Txn>, dim: usize) -> TCResult<DenseExpansion<Self>>;
 
     async fn sum(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<BlockTensor>;
 
     async fn product(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<BlockTensor>;
+
+    async fn slice(
+        &self,
+        txn: &Arc<Txn>,
+        permutation: Option<Vec<usize>>,
+    ) -> TCResult<DenseTensorSlice<Self>>;
+
+    async fn transpose(
+        &self,
+        txn: &Arc<Txn>,
+        permutation: Option<Vec<usize>>,
+    ) -> TCResult<DensePermutation<Self>>;
 
     async fn add<T: BlockTensorView>(&self, txn: &Arc<Txn>, other: T) -> TCResult<BlockTensor>;
 
@@ -43,7 +59,41 @@ pub trait BlockTensorView: TensorView {
 }
 
 pub struct BlockTensor {
-    dtype: TCType,
     shape: Vec<u64>,
     size: u64,
+    ndim: usize,
 }
+
+pub struct DenseRebase<T: Rebase + 'static> {
+    source: T,
+}
+
+#[async_trait]
+impl<T: Rebase> TensorView for DenseRebase<T> {
+    type DType = T::DType;
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        &self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+
+    async fn all(&self, txn_id: &TxnId) -> TCResult<bool> {
+        self.source.all(txn_id).await
+    }
+
+    async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
+        self.source.any(txn_id).await
+    }
+}
+
+type DenseBroadcast<T> = DenseRebase<Broadcast<T>>;
+type DenseExpansion<T> = DenseRebase<Expansion<T>>;
+type DensePermutation<T> = DenseRebase<Permutation<T>>;
+type DenseTensorSlice<T> = DenseRebase<TensorSlice<T>>;

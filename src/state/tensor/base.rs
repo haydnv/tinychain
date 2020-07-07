@@ -12,7 +12,7 @@ use crate::transaction::TxnId;
 use crate::value::TCResult;
 
 #[derive(Clone)]
-enum AxisSlice {
+pub enum AxisSlice {
     At(u64),
     In(Range<u64>, u64),
     Of(Vec<u64>),
@@ -62,7 +62,7 @@ impl fmt::Display for AxisSlice {
     }
 }
 
-struct Slice {
+pub struct Slice {
     axes: Vec<AxisSlice>,
 }
 
@@ -164,9 +164,8 @@ impl fmt::Display for Shape {
 }
 
 #[async_trait]
-pub trait TensorView: Send + Sync {
-    type DType: HasAfEnum;
-    type SliceType: TensorView;
+pub trait TensorView: Sized + Send + Sync {
+    type DType: HasAfEnum + Send + Sync;
 
     fn ndim(&self) -> usize;
 
@@ -177,17 +176,15 @@ pub trait TensorView: Send + Sync {
     async fn all(&self, txn_id: &TxnId) -> TCResult<bool>;
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool>;
-
-    async fn slice(&self, txn_id: &TxnId, slice: Slice) -> TCResult<TensorSlice<Self::SliceType>>;
 }
 
-trait Rebase: TensorView {
+pub trait Rebase: TensorView {
     fn invert_coord(&self, coord: Slice) -> Slice;
 
     fn map_coord(&self, source_coord: Slice) -> Slice;
 }
 
-struct Broadcast<T: TensorView> {
+pub struct Broadcast<T: TensorView> {
     source: T,
     shape: Shape,
     size: u64,
@@ -238,7 +235,6 @@ impl<T: TensorView> Broadcast<T> {
 #[async_trait]
 impl<T: TensorView> TensorView for Broadcast<T> {
     type DType = T::DType;
-    type SliceType = T::SliceType;
 
     fn ndim(&self) -> usize {
         self.ndim
@@ -258,10 +254,6 @@ impl<T: TensorView> TensorView for Broadcast<T> {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
-    }
-
-    async fn slice(&self, txn_id: &TxnId, coord: Slice) -> TCResult<TensorSlice<T::SliceType>> {
-        self.source.slice(txn_id, self.invert_coord(coord)).await
     }
 }
 
@@ -293,7 +285,7 @@ impl<T: TensorView> Rebase for Broadcast<T> {
     }
 }
 
-struct Expansion<T: TensorView> {
+pub struct Expansion<T: TensorView> {
     source: T,
     shape: Shape,
     size: u64,
@@ -324,7 +316,6 @@ impl<T: TensorView> Expansion<T> {
 #[async_trait]
 impl<T: TensorView> TensorView for Expansion<T> {
     type DType = T::DType;
-    type SliceType = T::SliceType;
 
     fn ndim(&self) -> usize {
         self.ndim
@@ -344,10 +335,6 @@ impl<T: TensorView> TensorView for Expansion<T> {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
-    }
-
-    async fn slice(&self, txn_id: &TxnId, coord: Slice) -> TCResult<TensorSlice<T::SliceType>> {
-        self.source.slice(txn_id, self.invert_coord(coord)).await
     }
 }
 
@@ -369,7 +356,7 @@ impl<T: TensorView> Rebase for Expansion<T> {
     }
 }
 
-struct Permutation<T: TensorView> {
+pub struct Permutation<T: TensorView> {
     source: T,
     shape: Shape,
     size: u64,
@@ -381,7 +368,7 @@ struct Permutation<T: TensorView> {
 impl<T: TensorView> Permutation<T> {
     fn new(source: T, permutation: Option<Vec<usize>>) -> Permutation<T> {
         let ndim = source.ndim();
-        let mut permutation = permutation
+        let permutation = permutation
             .or_else(|| {
                 let mut axes: Vec<usize> = (0..ndim).collect();
                 axes.reverse();
@@ -417,7 +404,6 @@ impl<T: TensorView> Permutation<T> {
 #[async_trait]
 impl<T: TensorView> TensorView for Permutation<T> {
     type DType = T::DType;
-    type SliceType = T::SliceType;
 
     fn ndim(&self) -> usize {
         self.ndim
@@ -437,10 +423,6 @@ impl<T: TensorView> TensorView for Permutation<T> {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
-    }
-
-    async fn slice(&self, txn_id: &TxnId, coord: Slice) -> TCResult<TensorSlice<T::SliceType>> {
-        self.source.slice(txn_id, self.invert_coord(coord)).await
     }
 }
 
@@ -462,7 +444,7 @@ impl<T: TensorView> Rebase for Permutation<T> {
     }
 }
 
-struct TensorSlice<T: TensorView> {
+pub struct TensorSlice<T: TensorView> {
     source: T,
     shape: Shape,
     size: u64,
@@ -511,7 +493,6 @@ impl<T: TensorView> TensorSlice<T> {
 #[async_trait]
 impl<T: TensorView> TensorView for TensorSlice<T> {
     type DType = T::DType;
-    type SliceType = T::SliceType;
 
     fn ndim(&self) -> usize {
         self.ndim
@@ -531,10 +512,6 @@ impl<T: TensorView> TensorView for TensorSlice<T> {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
-    }
-
-    async fn slice(&self, txn_id: &TxnId, coord: Slice) -> TCResult<TensorSlice<T::SliceType>> {
-        self.source.slice(txn_id, self.invert_coord(coord)).await
     }
 }
 
