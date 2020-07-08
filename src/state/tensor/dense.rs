@@ -2,6 +2,7 @@ use std::iter;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use arrayfire as af;
 use async_trait::async_trait;
 use futures::future;
 use futures::stream::{self, StreamExt};
@@ -109,7 +110,7 @@ pub trait BlockTensorView<'a>: TensorView<'a> {
         Box::pin(stream::empty())
     }
 
-    fn into_blocks(self, txn_id: TxnId, len: usize) -> TCStream<Chunk> {
+    fn into_blocks(self, _txn_id: TxnId, _len: usize) -> TCStream<Chunk> {
         Box::pin(stream::empty())
     }
 }
@@ -146,10 +147,10 @@ impl<'a> BlockTensor<'a> {
         let size = shape.size();
 
         let blocks =
-            (0..(size / per_block as u64)).map(move |_| ChunkData::new(&dtype, per_block).unwrap());
+            (0..(size / per_block as u64)).map(move |_| ChunkData::new(dtype, per_block).unwrap());
         let trailing_len = (size % (per_block as u64)) as usize;
         let blocks: TCStream<ChunkData> = if trailing_len > 0 {
-            let blocks = blocks.chain(iter::once(ChunkData::new(&dtype, trailing_len).unwrap()));
+            let blocks = blocks.chain(iter::once(ChunkData::new(dtype, trailing_len).unwrap()));
             Box::pin(stream::iter(blocks))
         } else {
             Box::pin(stream::iter(blocks))
@@ -218,11 +219,64 @@ impl<'a> BlockTensor<'a> {
 
         let value = value.broadcast(self.shape.selection(index))?;
         let block_size = BLOCK_SIZE / (8 * value.ndim()); // how many coordinates take up one block
+        let ndim = value.ndim();
+
+        let coord_index = af::Array::new(
+            &self.coord_index,
+            af::Dim4::new(&[self.ndim as u64, 1, 1, 1]),
+        );
+        let per_block = self.per_block as u64;
 
         value
-            .into_blocks(txn_id, block_size)
+            .into_blocks(txn_id.clone(), block_size)
             .zip(stream::iter(&index.affected().chunks(block_size)))
-            .map(|(chunk, coords)| Err::<(), error::TCError>(error::not_implemented()))
+            .then(|(values, coords)| {
+                let coords: Vec<u64> = coords.flatten().collect();
+                let num_coords = coords.len() / ndim;
+                let af_coords_dim = af::Dim4::new(&[num_coords as u64, ndim as u64, 1, 1]);
+                let af_coords = af::Array::new(&coords, af_coords_dim)
+                    * af::tile(&coord_index.copy(), af_coords_dim);
+                let af_coords = af::sum(&af_coords, 1);
+                let af_per_block =
+                    af::constant(per_block, af::Dim4::new(&[1, num_coords as u64, 1, 1]));
+                let af_offsets = af_coords.copy() % af_per_block.copy();
+                let af_indices = af_coords / af_per_block;
+                let af_chunk_ids = af::set_unique(&af_indices, true);
+
+                let mut chunk_ids: Vec<u64> = Vec::with_capacity(af_chunk_ids.elements());
+                af_chunk_ids.host(&mut chunk_ids);
+
+                let txn_id = txn_id.clone();
+                async move {
+                    let mut i = 0.0f64;
+                    for chunk_id in chunk_ids {
+                        let num_to_update = af::sum_all(&af::eq(
+                            &af_indices,
+                            &af::constant(chunk_id, af_indices.dims()),
+                            false,
+                        ))
+                        .0;
+                        let block_offsets = af::index(
+                            &af_offsets,
+                            &[
+                                af::Seq::new(chunk_id as f64, chunk_id as f64, 1.0f64),
+                                af::Seq::new(i, (i + num_to_update) - 1.0f64, 1.0f64),
+                            ],
+                        );
+                        let block_offsets = af::moddims(
+                            &block_offsets,
+                            af::Dim4::new(&[num_coords as u64, 1, 1, 1]),
+                        );
+
+                        let mut chunk = self.get_chunk(&txn_id, chunk_id).await?.upgrade().await?;
+                        chunk.data().set(block_offsets, values.data())?;
+                        chunk.sync().await?;
+                        i += num_to_update;
+                    }
+
+                    Ok(())
+                }
+            })
             .take_while(|r| future::ready(r.is_ok()))
             .fold(Ok(()), |_, last| future::ready(last))
             .await

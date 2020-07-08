@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 
 use arrayfire as af;
 use bytes::Bytes;
@@ -76,8 +76,8 @@ pub enum ChunkData {
 }
 
 impl ChunkData {
-    pub fn new(dtype: &TCType, len: usize) -> TCResult<ChunkData> {
-        let dim = dim4(len as u64);
+    pub fn new(dtype: TCType, len: usize) -> TCResult<ChunkData> {
+        let dim = dim4(len);
 
         use ChunkData::*;
         use TCType::*;
@@ -111,7 +111,7 @@ impl ChunkData {
                         other => panic!("BlockTensor corrupted! {} is not a valid boolean", other),
                     }
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(ChunkData::Bool(af::Array::new(&array, dim)))
             }
             Complex32 => {
@@ -123,7 +123,7 @@ impl ChunkData {
                     let im = f32::from_be_bytes(c[4..8].try_into().unwrap());
                     array.push(Complex::new(re, im));
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(C32(af::Array::new(&array, dim)))
             }
             Complex64 => {
@@ -135,7 +135,7 @@ impl ChunkData {
                     let im = f64::from_be_bytes(c[8..16].try_into().unwrap());
                     array.push(Complex::new(re, im));
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(C64(af::Array::new(&array, dim)))
             }
             Float32 => {
@@ -145,7 +145,7 @@ impl ChunkData {
                 for f in data[..].chunks_exact(4) {
                     array.push(f32::from_be_bytes(f.try_into().unwrap()));
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(F32(af::Array::new(&array, dim)))
             }
             Float64 => {
@@ -155,7 +155,7 @@ impl ChunkData {
                 for f in data[..].chunks_exact(8) {
                     array.push(f64::from_be_bytes(f.try_into().unwrap()));
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(F64(af::Array::new(&array, dim)))
             }
             Int16 => {
@@ -165,7 +165,7 @@ impl ChunkData {
                 for f in data[..].chunks_exact(2) {
                     array.push(i16::from_be_bytes(f.try_into().unwrap()));
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(I16(af::Array::new(&array, dim)))
             }
             Int32 => {
@@ -175,7 +175,7 @@ impl ChunkData {
                 for f in data[..].chunks_exact(4) {
                     array.push(i32::from_be_bytes(f.try_into().unwrap()));
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(I32(af::Array::new(&array, dim)))
             }
             Int64 => {
@@ -185,11 +185,11 @@ impl ChunkData {
                 for f in data[..].chunks_exact(8) {
                     array.push(i32::from_be_bytes(f.try_into().unwrap()));
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(I32(af::Array::new(&array, dim)))
             }
             UInt8 => {
-                let dim = dim4(data.len() as u64);
+                let dim = dim4(data.len());
                 Ok(U8(af::Array::new(&data, dim)))
             }
             UInt16 => {
@@ -199,7 +199,7 @@ impl ChunkData {
                 for f in data[..].chunks_exact(2) {
                     array.push(u16::from_be_bytes(f.try_into().unwrap()));
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(U16(af::Array::new(&array, dim)))
             }
             UInt32 => {
@@ -209,7 +209,7 @@ impl ChunkData {
                 for f in data[..].chunks_exact(4) {
                     array.push(u32::from_be_bytes(f.try_into().unwrap()));
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(U32(af::Array::new(&array, dim)))
             }
             UInt64 => {
@@ -219,7 +219,7 @@ impl ChunkData {
                 for f in data[..].chunks_exact(8) {
                     array.push(u32::from_be_bytes(f.try_into().unwrap()));
                 }
-                let dim = dim4(array.len() as u64);
+                let dim = dim4(array.len());
                 Ok(U32(af::Array::new(&array, dim)))
             }
             other => Err(error::bad_request("Tensor does not support", other)),
@@ -293,71 +293,66 @@ impl ChunkData {
         }
     }
 
-    pub fn set(&mut self, index: usize, value: Value) -> TCResult<()> {
+    pub fn set(&mut self, index: af::Array<u64>, other: &ChunkData) -> TCResult<()> {
+        let mut indexer = af::Indexer::default();
+        indexer.set_index(&index, 0, Some(false));
+        self.set_at(indexer, other)
+    }
+
+    pub fn set_one(&mut self, index: usize, value: Value) -> TCResult<()> {
+        let mut indexer = af::Indexer::default();
         let seq = af::Seq::new(index as f64, index as f64, 1.0f64);
+        indexer.set_index(&seq, 0, Some(false));
+        self.set_at(indexer, &value.try_into()?)
+    }
+
+    fn set_at(&mut self, index: af::Indexer, value: &ChunkData) -> TCResult<()> {
         use ChunkData::*;
-        match self {
-            Bool(b) => {
-                let value: bool = value.try_into()?;
-                af::assign_seq(b, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+        match (self, value) {
+            (Bool(l), Bool(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            C32(c) => {
-                let value: Complex<f32> = value.try_into()?;
-                af::assign_seq(c, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (C32(l), C32(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            C64(c) => {
-                let value: Complex<f64> = value.try_into()?;
-                af::assign_seq(c, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (C64(l), C64(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            F32(f) => {
-                let value: f32 = value.try_into()?;
-                af::assign_seq(f, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (F32(l), F32(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            F64(c) => {
-                let value: f64 = value.try_into()?;
-                af::assign_seq(c, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (F64(l), F64(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            I16(i) => {
-                let value: i16 = value.try_into()?;
-                af::assign_seq(i, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (I16(l), I16(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            I32(i) => {
-                let value: i32 = value.try_into()?;
-                af::assign_seq(i, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (I32(l), I32(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            I64(i) => {
-                let value: i64 = value.try_into()?;
-                af::assign_seq(i, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (I64(l), I64(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            U8(u) => {
-                let value: u8 = value.try_into()?;
-                af::assign_seq(u, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (U8(l), U8(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            U16(u) => {
-                let value: u16 = value.try_into()?;
-                af::assign_seq(u, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (U16(l), U16(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            U32(u) => {
-                let value: u32 = value.try_into()?;
-                af::assign_seq(u, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (U32(l), U32(r)) => {
+                af::assign_gen(l, &index, &r);
             }
-            U64(u) => {
-                let value: u64 = value.try_into()?;
-                af::assign_seq(u, &[seq], &af::constant(value, dim4(1)));
-                Ok(())
+            (U64(l), U64(r)) => {
+                af::assign_gen(l, &index, &r);
+            }
+            _ => {
+                return Err(error::internal(
+                    "Attempted to assign a Tensor chunk with the wrong datatype!",
+                ));
             }
         }
+
+        Ok(())
     }
 }
 
@@ -446,6 +441,104 @@ impl From<ChunkData> for Bytes {
     }
 }
 
-fn dim4(size: u64) -> af::Dim4 {
-    af::Dim4::new(&[size, 1, 1, 1])
+impl TryFrom<Value> for ChunkData {
+    type Error = error::TCError;
+
+    fn try_from(value: Value) -> TCResult<ChunkData> {
+        match value {
+            Value::Bool(b) => Ok(vec![b].into()),
+            _ => Err(error::internal(format!(
+                "Attepted to update a Tensor index to {}",
+                value.dtype()
+            ))),
+        }
+    }
+}
+
+impl From<Vec<bool>> for ChunkData {
+    fn from(b: Vec<bool>) -> ChunkData {
+        let data = af::Array::new(&b, dim4(b.len()));
+        ChunkData::Bool(data)
+    }
+}
+
+impl From<Vec<Complex<f32>>> for ChunkData {
+    fn from(c: Vec<Complex<f32>>) -> ChunkData {
+        let data = af::Array::new(&c, dim4(c.len()));
+        ChunkData::C32(data)
+    }
+}
+
+impl From<Vec<Complex<f64>>> for ChunkData {
+    fn from(c: Vec<Complex<f64>>) -> ChunkData {
+        let data = af::Array::new(&c, dim4(c.len()));
+        ChunkData::C64(data)
+    }
+}
+
+impl From<Vec<f32>> for ChunkData {
+    fn from(f: Vec<f32>) -> ChunkData {
+        let data = af::Array::new(&f, dim4(f.len()));
+        ChunkData::F32(data)
+    }
+}
+
+impl From<Vec<f64>> for ChunkData {
+    fn from(f: Vec<f64>) -> ChunkData {
+        let data = af::Array::new(&f, dim4(f.len()));
+        ChunkData::F64(data)
+    }
+}
+
+impl From<Vec<i16>> for ChunkData {
+    fn from(i: Vec<i16>) -> ChunkData {
+        let data = af::Array::new(&i, dim4(i.len()));
+        ChunkData::I16(data)
+    }
+}
+
+impl From<Vec<i32>> for ChunkData {
+    fn from(i: Vec<i32>) -> ChunkData {
+        let data = af::Array::new(&i, dim4(i.len()));
+        ChunkData::I32(data)
+    }
+}
+
+impl From<Vec<i64>> for ChunkData {
+    fn from(i: Vec<i64>) -> ChunkData {
+        let data = af::Array::new(&i, dim4(i.len()));
+        ChunkData::I64(data)
+    }
+}
+
+impl From<Vec<u8>> for ChunkData {
+    fn from(u: Vec<u8>) -> ChunkData {
+        let data = af::Array::new(&u, dim4(u.len()));
+        ChunkData::U8(data)
+    }
+}
+
+impl From<Vec<u16>> for ChunkData {
+    fn from(u: Vec<u16>) -> ChunkData {
+        let data = af::Array::new(&u, dim4(u.len()));
+        ChunkData::U16(data)
+    }
+}
+
+impl From<Vec<u32>> for ChunkData {
+    fn from(u: Vec<u32>) -> ChunkData {
+        let data = af::Array::new(&u, dim4(u.len()));
+        ChunkData::U32(data)
+    }
+}
+
+impl From<Vec<u64>> for ChunkData {
+    fn from(u: Vec<u64>) -> ChunkData {
+        let data = af::Array::new(&u, dim4(u.len()));
+        ChunkData::U64(data)
+    }
+}
+
+fn dim4(size: usize) -> af::Dim4 {
+    af::Dim4::new(&[size as u64, 1, 1, 1])
 }
