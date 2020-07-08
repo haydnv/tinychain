@@ -1,4 +1,5 @@
 mod base;
+mod chunk;
 mod dense;
 mod sparse;
 
