@@ -197,11 +197,11 @@ impl<'a> BlockTensor<'a> {
         }
     }
 
-    async fn write_dense<T: BlockTensorView<'a> + Rebase<'a> + Slice<'a>>(
+    async fn write_dense<T: BlockTensorView<'a> + Broadcast<'a>>(
         &self,
         _txn_id: &TxnId,
         index: &Index,
-        _value: T,
+        value: &'a T,
     ) -> TCResult<()> {
         if !self.shape.contains(index) {
             return Err(error::bad_request(
@@ -209,6 +209,10 @@ impl<'a> BlockTensor<'a> {
                 index,
             ));
         }
+
+        let _value = value.broadcast(self.shape.selection(index))?;
+        let _block_size = BLOCK_SIZE / (8 * value.ndim()); // how many coordinates take up one block
+        let _affected = index.affected();
 
         Err(error::not_implemented())
     }

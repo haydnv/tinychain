@@ -1,6 +1,8 @@
 use std::fmt;
+use std::iter;
 use std::ops;
 
+use itertools::{Itertools, MultiProduct};
 use num::integer::Integer;
 
 #[derive(Clone)]
@@ -67,6 +69,20 @@ impl Index {
             .map(|dim| AxisIndex::In(0..*dim, 1))
             .collect::<Vec<AxisIndex>>()
             .into()
+    }
+
+    pub fn affected(&self) -> MultiProduct<AxisIter> {
+        use AxisIndex::*;
+        let mut axes = Vec::with_capacity(self.len());
+        for axis in 0..self.len() {
+            axes.push(match &self[axis] {
+                At(i) => AxisIter::One(iter::once(*i)),
+                In(range, step) => AxisIter::Step(range.clone().step_by(*step as usize)),
+                Of(indices) => AxisIter::Each(indices.iter()),
+            });
+        }
+
+        axes.iter().cloned().multi_cartesian_product()
     }
 
     pub fn to_coord(self) -> Vec<u64> {
@@ -169,7 +185,7 @@ impl Shape {
         true
     }
 
-    pub fn selection_shape(&self, coord: &Index) -> Shape {
+    pub fn selection(&self, coord: &Index) -> Shape {
         assert!(self.contains(coord));
 
         let mut shape = Vec::with_capacity(self.len());
@@ -228,5 +244,25 @@ impl fmt::Display for Shape {
                 .collect::<Vec<String>>()
                 .join(", ")
         )
+    }
+}
+
+#[derive(Clone)]
+pub enum AxisIter<'a> {
+    One(std::iter::Once<u64>),
+    Each(std::slice::Iter<'a, u64>),
+    Step(iter::StepBy<ops::Range<u64>>),
+}
+
+impl<'a> Iterator for AxisIter<'a> {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<u64> {
+        use AxisIter::*;
+        match self {
+            One(iter) => iter.next(),
+            Each(iter) => iter.next().map(|i| *i),
+            Step(iter) => iter.next(),
+        }
     }
 }

@@ -26,18 +26,16 @@ pub trait TensorView<'a>: Sized + Send + Sync {
     async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value>;
 }
 
-#[async_trait]
 pub trait Broadcast<'a>: TensorView<'a> {
     type Broadcast: TensorView<'a>;
 
-    async fn broadcast(&'a self, shape: Shape) -> TCResult<Self::Broadcast>;
+    fn broadcast(&'a self, shape: Shape) -> TCResult<Self::Broadcast>;
 }
 
-#[async_trait]
 pub trait Expand<'a>: TensorView<'a> {
     type Expansion: TensorView<'a>;
 
-    async fn expand_dims(&'a self, axis: usize) -> TCResult<Self::Expansion>;
+    fn expand_dims(&'a self, axis: usize) -> TCResult<Self::Expansion>;
 }
 
 pub trait Slice<'a>: TensorView<'a> {
