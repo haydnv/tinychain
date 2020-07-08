@@ -99,14 +99,14 @@ impl Collator {
             match self.schema[i] {
                 TCType::Int32 => {
                     return Collator::compare_integer::<i32>(
-                        (&key1[i]).try_into().unwrap(),
-                        (&key2[i]).try_into().unwrap(),
+                        key1[i].clone().try_into().unwrap(),
+                        key2[i].clone().try_into().unwrap(),
                     )
                 }
                 TCType::UInt64 => {
                     return Collator::compare_integer::<u64>(
-                        (&key1[i]).try_into().unwrap(),
-                        (&key2[i]).try_into().unwrap(),
+                        key1[i].clone().try_into().unwrap(),
+                        key2[i].clone().try_into().unwrap(),
                     )
                 }
                 _ => panic!("Collator::compare does not support {}", self.schema[i]),

@@ -9,7 +9,7 @@ use num::Integer;
 
 use crate::error;
 use crate::transaction::{Txn, TxnId};
-use crate::value::TCResult;
+use crate::value::{TCResult, Value};
 
 #[derive(Clone)]
 pub enum AxisIndex {
@@ -62,6 +62,7 @@ impl fmt::Display for AxisIndex {
     }
 }
 
+#[derive(Clone)]
 pub struct Index {
     axes: Vec<AxisIndex>,
 }
@@ -74,6 +75,17 @@ impl Index {
             .map(|dim| AxisIndex::In(0..*dim, 1))
             .collect::<Vec<AxisIndex>>()
             .into()
+    }
+
+    pub fn to_coord(self) -> Vec<u64> {
+        let mut indices = Vec::with_capacity(self.len());
+        for i in self.axes {
+            match i {
+                AxisIndex::At(i) => indices.push(i),
+                _ => panic!("Expected u64 but found {}", i),
+            }
+        }
+        indices
     }
 
     pub fn len(&self) -> usize {
@@ -105,6 +117,13 @@ impl<Idx: std::slice::SliceIndex<[AxisIndex]>> ops::IndexMut<Idx> for Index {
 
 impl From<Vec<AxisIndex>> for Index {
     fn from(axes: Vec<AxisIndex>) -> Index {
+        Index { axes }
+    }
+}
+
+impl From<&[u64]> for Index {
+    fn from(coord: &[u64]) -> Index {
+        let axes = coord.iter().map(|i| AxisIndex::At(*i)).collect();
         Index { axes }
     }
 }
@@ -158,12 +177,37 @@ impl Shape {
         true
     }
 
+    pub fn selection_shape(&self, coord: &Index) -> Shape {
+        assert!(self.contains(coord));
+
+        let mut shape = Vec::with_capacity(self.len());
+        for axis in 0..coord.len() {
+            match &coord[axis] {
+                AxisIndex::At(_) => {}
+                AxisIndex::In(range, step) => {
+                    let dim = (range.end - range.start).div_ceil(&step);
+                    shape.push(dim)
+                }
+                AxisIndex::Of(indices) => shape.push(indices.len() as u64),
+            }
+        }
+        shape.into()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
     pub fn size(&self) -> u64 {
         self.0.iter().product()
+    }
+
+    pub fn to_vec(&self) -> Vec<u64> {
+        self.0.to_vec()
     }
 }
 
@@ -206,6 +250,8 @@ pub trait TensorView: Sized + Send + Sync {
     async fn all(&self, txn_id: &TxnId) -> TCResult<bool>;
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool>;
+
+    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value>;
 }
 
 #[async_trait]
@@ -299,7 +345,7 @@ impl<T: TensorView> TensorBroadcast<T> {
 }
 
 #[async_trait]
-impl<T: TensorView> TensorView for TensorBroadcast<T> {
+impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -318,6 +364,12 @@ impl<T: TensorView> TensorView for TensorBroadcast<T> {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
+    }
+
+    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
+        self.source
+            .at(txn_id, &self.invert_coord(coord.into()).to_coord())
+            .await
     }
 }
 
@@ -384,7 +436,7 @@ impl<T: TensorView> Expansion<T> {
 }
 
 #[async_trait]
-impl<T: TensorView> TensorView for Expansion<T> {
+impl<T: TensorView + Slice> TensorView for Expansion<T> {
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -403,6 +455,12 @@ impl<T: TensorView> TensorView for Expansion<T> {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
+    }
+
+    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
+        self.source
+            .at(txn_id, &self.invert_coord(coord.into()).to_coord())
+            .await
     }
 }
 
@@ -492,6 +550,12 @@ impl<T: TensorView + Slice> TensorView for Permutation<T> {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
+    }
+
+    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
+        self.source
+            .at(txn_id, &self.invert_coord(coord.into()).to_coord())
+            .await
     }
 }
 
@@ -605,7 +669,7 @@ impl<T: TensorView> TensorSlice<T> {
 }
 
 #[async_trait]
-impl<T: TensorView> TensorView for TensorSlice<T> {
+impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -624,6 +688,12 @@ impl<T: TensorView> TensorView for TensorSlice<T> {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
+    }
+
+    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
+        self.source
+            .at(txn_id, &self.invert_coord(coord.into()).to_coord())
+            .await
     }
 }
 
