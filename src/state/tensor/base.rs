@@ -27,9 +27,7 @@ pub trait TensorView<'a>: Sized + Send + Sync {
 }
 
 pub trait Broadcast<'a>: TensorView<'a> {
-    type Broadcast: TensorView<'a>;
-
-    fn broadcast(&'a self, shape: Shape) -> TCResult<Self::Broadcast>;
+    fn broadcast(self, shape: Shape) -> TCResult<TensorBroadcast<'a, Self>>;
 }
 
 pub trait Expand<'a>: TensorView<'a> {

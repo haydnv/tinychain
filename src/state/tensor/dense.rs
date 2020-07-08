@@ -3,7 +3,9 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::future;
 use futures::stream::{self, StreamExt};
+use itertools::Itertools;
 
 use crate::error;
 use crate::state::file::File;
@@ -103,7 +105,11 @@ pub trait BlockTensorView<'a>: TensorView<'a> {
         Err(error::not_implemented())
     }
 
-    async fn blocks(&'a self, _txn_id: &'a TxnId, _len: usize) -> TCStream<Chunk> {
+    fn blocks(&'a self, _txn_id: &TxnId, _len: usize) -> TCStream<Chunk> {
+        Box::pin(stream::empty())
+    }
+
+    fn into_blocks(self, txn_id: TxnId, len: usize) -> TCStream<Chunk> {
         Box::pin(stream::empty())
     }
 }
@@ -197,11 +203,11 @@ impl<'a> BlockTensor<'a> {
         }
     }
 
-    async fn write_dense<T: BlockTensorView<'a> + Broadcast<'a>>(
+    async fn write_dense<T: BlockTensorView<'a> + Broadcast<'a> + Slice<'a> + 'static>(
         &self,
-        _txn_id: &TxnId,
+        txn_id: TxnId,
         index: &Index,
-        value: &'a T,
+        value: T,
     ) -> TCResult<()> {
         if !self.shape.contains(index) {
             return Err(error::bad_request(
@@ -210,13 +216,21 @@ impl<'a> BlockTensor<'a> {
             ));
         }
 
-        let _value = value.broadcast(self.shape.selection(index))?;
-        let _block_size = BLOCK_SIZE / (8 * value.ndim()); // how many coordinates take up one block
-        let _affected = index.affected();
+        let value = value.broadcast(self.shape.selection(index))?;
+        let block_size = BLOCK_SIZE / (8 * value.ndim()); // how many coordinates take up one block
 
-        Err(error::not_implemented())
+        value
+            .into_blocks(txn_id, block_size)
+            .zip(stream::iter(&index.affected().chunks(block_size)))
+            .map(|(chunk, coords)| Err::<(), error::TCError>(error::not_implemented()))
+            .take_while(|r| future::ready(r.is_ok()))
+            .fold(Ok(()), |_, last| future::ready(last))
+            .await
     }
 }
+
+#[async_trait]
+impl<'a, T: BlockTensorView<'a> + Slice<'a>> BlockTensorView<'a> for TensorBroadcast<'a, T> {}
 
 #[async_trait]
 impl<'a> TensorView<'a> for BlockTensor<'a> {
