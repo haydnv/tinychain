@@ -60,6 +60,7 @@ pub struct BlockTensor {
     ndim: usize,
     file: Arc<File>,
     per_block: usize,
+    coord_index: Vec<u64>,
 }
 
 impl BlockTensor {
@@ -105,6 +106,10 @@ impl BlockTensor {
             i += 1;
         }
 
+        let coord_index = (0..ndim)
+            .map(|axis| shape[axis + 1..].iter().product())
+            .collect();
+
         Ok(BlockTensor {
             dtype,
             shape,
@@ -112,6 +117,7 @@ impl BlockTensor {
             ndim,
             file,
             per_block,
+            coord_index,
         })
     }
 
@@ -148,11 +154,12 @@ impl BlockTensor {
                 .clone()
                 .to_coord()
                 .iter()
-                .zip(self.shape.to_vec().iter())
+                .zip(self.coord_index.iter())
                 .map(|(c, i)| c * i)
                 .sum();
             let block_id = index / (self.per_block as u64);
             let offset = index % (self.per_block as u64);
+
             let mut chunk = self.get_chunk(txn_id, block_id).await?.upgrade().await?;
             chunk
                 .data
