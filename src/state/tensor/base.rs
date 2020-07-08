@@ -1,246 +1,18 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt;
 use std::iter;
-use std::ops;
-use std::sync::Arc;
+use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use num::Integer;
 
 use crate::error;
-use crate::transaction::{Txn, TxnId};
+use crate::transaction::TxnId;
 use crate::value::{TCResult, Value};
 
-#[derive(Clone)]
-pub enum AxisIndex {
-    At(u64),
-    In(ops::Range<u64>, u64),
-    Of(Vec<u64>),
-}
-
-impl AxisIndex {
-    fn all(dim: u64) -> AxisIndex {
-        AxisIndex::In(0..dim, 1)
-    }
-}
-
-impl From<u64> for AxisIndex {
-    fn from(at: u64) -> AxisIndex {
-        AxisIndex::At(at)
-    }
-}
-
-impl From<Vec<u64>> for AxisIndex {
-    fn from(of: Vec<u64>) -> AxisIndex {
-        AxisIndex::Of(of)
-    }
-}
-
-impl From<(ops::Range<u64>, u64)> for AxisIndex {
-    fn from(slice: (ops::Range<u64>, u64)) -> AxisIndex {
-        AxisIndex::In(slice.0, slice.1)
-    }
-}
-
-impl fmt::Display for AxisIndex {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use AxisIndex::*;
-        match self {
-            At(at) => write!(f, "{}", at),
-            In(range, 1) => write!(f, "[{}, {})", range.start, range.end),
-            In(range, step) => write!(f, "[{}, {}) step {}", range.start, range.end, step),
-            Of(indices) => write!(
-                f,
-                "({})",
-                indices
-                    .iter()
-                    .map(|i| format!("{}", i))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct Index {
-    axes: Vec<AxisIndex>,
-}
-
-impl Index {
-    pub fn all(shape: &Shape) -> Index {
-        shape
-            .0
-            .iter()
-            .map(|dim| AxisIndex::In(0..*dim, 1))
-            .collect::<Vec<AxisIndex>>()
-            .into()
-    }
-
-    pub fn to_coord(self) -> Vec<u64> {
-        let mut indices = Vec::with_capacity(self.len());
-        for i in self.axes {
-            match i {
-                AxisIndex::At(i) => indices.push(i),
-                _ => panic!("Expected u64 but found {}", i),
-            }
-        }
-        indices
-    }
-
-    pub fn len(&self) -> usize {
-        self.axes.len()
-    }
-
-    pub fn normalize(&mut self, shape: &Shape) {
-        assert!(self.len() <= shape.len());
-
-        for axis in self.axes.len()..shape.len() {
-            self.axes.push(AxisIndex::all(shape[axis]))
-        }
-    }
-}
-
-impl<Idx: std::slice::SliceIndex<[AxisIndex]>> ops::Index<Idx> for Index {
-    type Output = Idx::Output;
-
-    fn index(&self, index: Idx) -> &Self::Output {
-        &self.axes[index]
-    }
-}
-
-impl<Idx: std::slice::SliceIndex<[AxisIndex]>> ops::IndexMut<Idx> for Index {
-    fn index_mut(&mut self, index: Idx) -> &mut Self::Output {
-        &mut self.axes[index]
-    }
-}
-
-impl From<Vec<AxisIndex>> for Index {
-    fn from(axes: Vec<AxisIndex>) -> Index {
-        Index { axes }
-    }
-}
-
-impl From<&[u64]> for Index {
-    fn from(coord: &[u64]) -> Index {
-        let axes = coord.iter().map(|i| AxisIndex::At(*i)).collect();
-        Index { axes }
-    }
-}
-
-impl fmt::Display for Index {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "[{}]",
-            self.axes
-                .iter()
-                .map(|axis| format!("{}", axis))
-                .collect::<Vec<String>>()
-                .join(", ")
-        )
-    }
-}
-
-#[derive(Clone)]
-pub struct Shape(Vec<u64>);
-
-impl Shape {
-    pub fn contains(&self, coord: &Index) -> bool {
-        if coord.len() > self.len() {
-            return false;
-        }
-
-        for axis in 0..coord.len() {
-            let size = &self[axis];
-            match &coord[axis] {
-                AxisIndex::At(i) => {
-                    if i > size {
-                        return false;
-                    }
-                }
-                AxisIndex::In(range, _) => {
-                    if range.start > *size || range.end > *size {
-                        return false;
-                    }
-                }
-                AxisIndex::Of(indices) => {
-                    for i in indices {
-                        if i > size {
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-
-        true
-    }
-
-    pub fn selection_shape(&self, coord: &Index) -> Shape {
-        assert!(self.contains(coord));
-
-        let mut shape = Vec::with_capacity(self.len());
-        for axis in 0..coord.len() {
-            match &coord[axis] {
-                AxisIndex::At(_) => {}
-                AxisIndex::In(range, step) => {
-                    let dim = (range.end - range.start).div_ceil(&step);
-                    shape.push(dim)
-                }
-                AxisIndex::Of(indices) => shape.push(indices.len() as u64),
-            }
-        }
-        shape.into()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn size(&self) -> u64 {
-        self.0.iter().product()
-    }
-
-    pub fn to_vec(&self) -> Vec<u64> {
-        self.0.to_vec()
-    }
-}
-
-impl<Idx: std::slice::SliceIndex<[u64]>> ops::Index<Idx> for Shape {
-    type Output = Idx::Output;
-
-    fn index(&self, index: Idx) -> &Self::Output {
-        &self.0[index]
-    }
-}
-
-impl From<Vec<u64>> for Shape {
-    fn from(shape: Vec<u64>) -> Shape {
-        Shape(shape)
-    }
-}
-
-impl fmt::Display for Shape {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "[{}]",
-            self.0
-                .iter()
-                .map(|dim| format!("{}", dim))
-                .collect::<Vec<String>>()
-                .join(", ")
-        )
-    }
-}
+use super::index::*;
 
 #[async_trait]
-pub trait TensorView: Sized + Send + Sync {
+pub trait TensorView<'a>: Sized + Send + Sync {
     fn ndim(&self) -> usize;
 
     fn shape(&'_ self) -> &'_ Shape;
@@ -255,58 +27,55 @@ pub trait TensorView: Sized + Send + Sync {
 }
 
 #[async_trait]
-pub trait Broadcast: TensorView {
-    type Broadcast: TensorView;
+pub trait Broadcast<'a>: TensorView<'a> {
+    type Broadcast: TensorView<'a>;
 
-    async fn broadcast(&self, txn: &Arc<Txn>, shape: Shape) -> TCResult<Self::Broadcast>;
+    async fn broadcast(&'a self, shape: Shape) -> TCResult<Self::Broadcast>;
 }
 
 #[async_trait]
-pub trait Expand: TensorView {
-    type Expansion: TensorView;
+pub trait Expand<'a>: TensorView<'a> {
+    type Expansion: TensorView<'a>;
 
-    async fn broadcast(&self, txn: &Arc<Txn>, shape: Shape) -> TCResult<Self::Expansion>;
+    async fn expand_dims(&'a self, axis: usize) -> TCResult<Self::Expansion>;
 }
 
-#[async_trait]
-pub trait Slice: TensorView {
-    type Slice: TensorView;
+pub trait Slice<'a>: TensorView<'a> {
+    type Slice: TensorView<'a>;
 
-    async fn slice(&self, txn: &Arc<Txn>, coord: Index) -> TCResult<Self::Slice>;
+    fn slice(&'a self, coord: Index) -> TCResult<Self::Slice>;
 }
 
-pub trait Rebase: TensorView {
-    type Source: TensorView + Slice;
+pub trait Rebase<'a>: TensorView<'a> {
+    type Source: TensorView<'a> + Slice<'a>;
 
-    fn invert_coord(&self, coord: Index) -> Index;
+    fn invert_index(&self, index: Index) -> Index;
 
-    fn map_coord(&self, source_coord: Index) -> Index;
+    fn map_index(&self, source_index: Index) -> Index;
 
-    fn source(&'_ self) -> &'_ Self::Source;
+    fn source(&'a self) -> &'a Self::Source;
 }
 
-#[async_trait]
-pub trait Transpose: TensorView {
-    type Permutation: TensorView;
+pub trait Transpose<'a>: TensorView<'a> {
+    type Permutation: TensorView<'a>;
 
-    async fn transpose(
-        &self,
-        txn: &Arc<Txn>,
-        permutation: Option<Vec<usize>>,
-    ) -> TCResult<Self::Permutation>;
+    fn transpose(&'a self, permutation: Option<Vec<usize>>) -> TCResult<Self::Permutation>;
+
+    fn transpose_into(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Permutation>;
 }
 
-pub struct TensorBroadcast<T: TensorView> {
+pub struct TensorBroadcast<'a, T: TensorView<'a>> {
     source: T,
     shape: Shape,
     size: u64,
     ndim: usize,
     broadcast: Vec<bool>,
     offset: usize,
+    phantom: PhantomData<&'a T>,
 }
 
-impl<T: TensorView> TensorBroadcast<T> {
-    fn new(source: T, shape: Shape) -> TCResult<TensorBroadcast<T>> {
+impl<'a, T: TensorView<'a>> TensorBroadcast<'a, T> {
+    fn new(source: T, shape: Shape) -> TCResult<TensorBroadcast<'a, T>> {
         let ndim = shape.len();
         if source.ndim() > ndim {
             return Err(error::bad_request(
@@ -340,12 +109,13 @@ impl<T: TensorView> TensorBroadcast<T> {
             ndim,
             broadcast,
             offset,
+            phantom: PhantomData,
         })
     }
 }
 
 #[async_trait]
-impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
+impl<'a, T: TensorView<'a> + Slice<'a>> TensorView<'a> for TensorBroadcast<'a, T> {
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -368,58 +138,59 @@ impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
 
     async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
         self.source
-            .at(txn_id, &self.invert_coord(coord.into()).to_coord())
+            .at(txn_id, &self.invert_index(coord.into()).to_coord())
             .await
     }
 }
 
-impl<T: TensorView + Slice> Rebase for TensorBroadcast<T> {
+impl<'a, T: TensorView<'a> + Slice<'a>> Rebase<'a> for TensorBroadcast<'a, T> {
     type Source = T;
 
-    fn invert_coord(&self, coord: Index) -> Index {
+    fn invert_index(&self, index: Index) -> Index {
         let source_ndim = self.source.ndim();
-        let mut source_coord = Vec::with_capacity(source_ndim);
+        let mut source_index = Vec::with_capacity(source_ndim);
         for axis in 0..source_ndim {
             if self.broadcast[axis + self.offset] {
-                source_coord.push(AxisIndex::from(0))
+                source_index.push(AxisIndex::from(0))
             } else {
-                source_coord.push(coord[axis + self.offset].clone())
+                source_index.push(index[axis + self.offset].clone())
             }
         }
 
-        source_coord.into()
+        source_index.into()
     }
 
-    fn map_coord(&self, source_coord: Index) -> Index {
-        let mut coord = Index::all(&self.shape);
+    fn map_index(&self, source_index: Index) -> Index {
+        let mut index = Index::all(&self.shape);
 
         for axis in 0..self.ndim {
             if !self.broadcast[axis + self.offset] {
-                coord[axis + self.offset] = source_coord[axis].clone();
+                index[axis + self.offset] = source_index[axis].clone();
             }
         }
 
-        coord
+        index
     }
 
-    fn source(&'_ self) -> &'_ Self::Source {
+    fn source(&'a self) -> &'a Self::Source {
         &self.source
     }
 }
 
-pub struct Expansion<T: TensorView> {
+pub struct Expansion<'a, T: TensorView<'a>> {
     source: T,
     shape: Shape,
     size: u64,
     ndim: usize,
     expand: usize,
+    phantom: PhantomData<&'a T>,
 }
 
-impl<T: TensorView> Expansion<T> {
-    fn new(source: T, expand: usize) -> Expansion<T> {
+impl<'a, T: TensorView<'a>> Expansion<'a, T> {
+    fn new(source: T, expand: usize) -> Expansion<'a, T> {
         assert!(expand < source.ndim());
 
-        let mut shape = source.shape().0.to_vec();
+        let mut shape = source.shape().to_vec();
         shape.insert(expand, 1);
 
         let shape: Shape = shape.into();
@@ -431,12 +202,13 @@ impl<T: TensorView> Expansion<T> {
             size,
             ndim,
             expand,
+            phantom: PhantomData,
         }
     }
 }
 
 #[async_trait]
-impl<T: TensorView + Slice> TensorView for Expansion<T> {
+impl<'a, T: TensorView<'a> + Slice<'a>> TensorView<'a> for Expansion<'a, T> {
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -459,45 +231,46 @@ impl<T: TensorView + Slice> TensorView for Expansion<T> {
 
     async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
         self.source
-            .at(txn_id, &self.invert_coord(coord.into()).to_coord())
+            .at(txn_id, &self.invert_index(coord.into()).to_coord())
             .await
     }
 }
 
-impl<T: TensorView + Slice> Rebase for Expansion<T> {
+impl<'a, T: TensorView<'a> + Slice<'a>> Rebase<'a> for Expansion<'a, T> {
     type Source = T;
 
-    fn invert_coord(&self, mut coord: Index) -> Index {
-        if coord.len() >= self.expand {
-            coord.axes.remove(self.expand);
+    fn invert_index(&self, mut index: Index) -> Index {
+        if index.len() >= self.expand {
+            index.axes.remove(self.expand);
         }
 
-        coord
+        index
     }
 
-    fn map_coord(&self, mut coord: Index) -> Index {
-        if coord.len() >= self.expand {
-            coord.axes.insert(self.expand, 0.into());
+    fn map_index(&self, mut index: Index) -> Index {
+        if index.len() >= self.expand {
+            index.axes.insert(self.expand, 0.into());
         }
 
-        coord
+        index
     }
 
-    fn source(&'_ self) -> &'_ Self::Source {
+    fn source(&'a self) -> &'a Self::Source {
         &self.source
     }
 }
 
-pub struct Permutation<T: TensorView + Slice> {
+pub struct Permutation<'a, T: TensorView<'a> + Slice<'a>> {
     source: T,
     shape: Shape,
     size: u64,
     ndim: usize,
     permutation: Vec<usize>,
+    phantom: PhantomData<&'a T>,
 }
 
-impl<T: TensorView + Slice> Permutation<T> {
-    fn new(source: T, permutation: Option<Vec<usize>>) -> Permutation<T> {
+impl<'a, T: TensorView<'a> + Slice<'a>> Permutation<'a, T> {
+    fn new(source: T, permutation: Option<Vec<usize>>) -> Permutation<'a, T> {
         let ndim = source.ndim();
         let permutation = permutation
             .or_else(|| {
@@ -522,16 +295,17 @@ impl<T: TensorView + Slice> Permutation<T> {
             size,
             ndim,
             permutation,
+            phantom: PhantomData,
         }
     }
 
-    pub fn permutation(&'_ self) -> &'_ [usize] {
+    pub fn permutation(&'a self) -> &'a [usize] {
         &self.permutation
     }
 }
 
 #[async_trait]
-impl<T: TensorView + Slice> TensorView for Permutation<T> {
+impl<'a, T: TensorView<'a> + Slice<'a>> TensorView<'a> for Permutation<'a, T> {
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -554,43 +328,42 @@ impl<T: TensorView + Slice> TensorView for Permutation<T> {
 
     async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
         self.source
-            .at(txn_id, &self.invert_coord(coord.into()).to_coord())
+            .at(txn_id, &self.invert_index(coord.into()).to_coord())
             .await
     }
 }
 
-impl<T: TensorView + Slice> Rebase for Permutation<T> {
+impl<'a, T: TensorView<'a> + Slice<'a>> Rebase<'a> for Permutation<'a, T> {
     type Source = T;
 
-    fn invert_coord(&self, coord: Index) -> Index {
-        let mut source_coord = Index::all(self.source.shape());
-        for axis in 0..coord.len() {
-            source_coord[self.permutation[axis]] = coord[axis].clone();
+    fn invert_index(&self, index: Index) -> Index {
+        let mut source_index = Index::all(self.source.shape());
+        for axis in 0..index.len() {
+            source_index[self.permutation[axis]] = index[axis].clone();
         }
-        source_coord
+        source_index
     }
 
-    fn map_coord(&self, source_coord: Index) -> Index {
-        let mut coord = Index::all(&self.shape);
-        for axis in 0..source_coord.len() {
-            coord[self.permutation[axis]] = source_coord[axis].clone();
+    fn map_index(&self, source_index: Index) -> Index {
+        let mut index = Index::all(&self.shape);
+        for axis in 0..source_index.len() {
+            index[self.permutation[axis]] = source_index[axis].clone();
         }
-        coord
+        index
     }
 
-    fn source(&'_ self) -> &'_ Self::Source {
+    fn source(&'a self) -> &'a Self::Source {
         &self.source
     }
 }
 
-#[async_trait]
-impl<T: TensorView + Slice> Slice for Permutation<T>
+impl<'a, T: TensorView<'a> + Slice<'a>> Slice<'a> for Permutation<'a, T>
 where
-    <T as Slice>::Slice: Slice + Transpose,
+    <T as Slice<'a>>::Slice: Slice<'a> + Transpose<'a>,
 {
-    type Slice = <<T as Slice>::Slice as Transpose>::Permutation;
+    type Slice = <<T as Slice<'a>>::Slice as Transpose<'a>>::Permutation;
 
-    async fn slice(&self, txn: &Arc<Txn>, coord: Index) -> TCResult<Self::Slice> {
+    fn slice(&'a self, index: Index) -> TCResult<Self::Slice> {
         let mut permutation: BTreeMap<usize, usize> = self
             .permutation()
             .to_vec()
@@ -599,8 +372,8 @@ where
             .collect();
 
         let mut elided = HashSet::new();
-        for axis in 0..coord.len() {
-            if let AxisIndex::At(_) = coord[axis] {
+        for axis in 0..index.len() {
+            if let AxisIndex::At(_) = index[axis] {
                 elided.insert(axis);
                 permutation.remove(&axis);
             }
@@ -614,26 +387,26 @@ where
         }
 
         let permutation: Vec<usize> = permutation.values().cloned().collect();
-        self.source()
-            .slice(txn, self.invert_coord(coord))
-            .await?
-            .transpose(txn, Some(permutation))
-            .await
+        let source_index = self.invert_index(index);
+        let source = self.source();
+        let slice = source.slice(source_index)?;
+        slice.transpose_into(Some(permutation))
     }
 }
 
-pub struct TensorSlice<T: TensorView> {
-    source: T,
+pub struct TensorSlice<'a, T: TensorView<'a>> {
+    source: &'a T,
     shape: Shape,
     size: u64,
     ndim: usize,
     slice: Index,
     offset: HashMap<usize, u64>,
     elided: HashSet<usize>,
+    phantom: PhantomData<&'a T>,
 }
 
-impl<T: TensorView> TensorSlice<T> {
-    fn new(source: T, slice: Index) -> TCResult<TensorSlice<T>> {
+impl<'a, T: TensorView<'a>> TensorSlice<'a, T> {
+    pub fn new(source: &'a T, slice: Index) -> TCResult<TensorSlice<T>> {
         let mut shape: Vec<u64> = Vec::with_capacity(slice.len());
         let mut offset = HashMap::new();
         let mut elided = HashSet::new();
@@ -664,12 +437,21 @@ impl<T: TensorView> TensorSlice<T> {
             slice,
             offset,
             elided,
+            phantom: PhantomData,
         })
     }
 }
 
+impl<'a, T: TensorView<'a> + Slice<'a>> Slice<'a> for TensorSlice<'a, T> {
+    type Slice = TensorSlice<'a, T>;
+
+    fn slice(&'a self, index: Index) -> TCResult<Self::Slice> {
+        TensorSlice::new(self.source, self.invert_index(index))
+    }
+}
+
 #[async_trait]
-impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
+impl<'a, T: TensorView<'a> + Slice<'a>> TensorView<'a> for TensorSlice<'a, T> {
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -692,41 +474,41 @@ impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
 
     async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
         self.source
-            .at(txn_id, &self.invert_coord(coord.into()).to_coord())
+            .at(txn_id, &self.invert_index(coord.into()).to_coord())
             .await
     }
 }
 
-impl<T: TensorView + Slice> Rebase for TensorSlice<T> {
+impl<'a, T: TensorView<'a> + Slice<'a>> Rebase<'a> for TensorSlice<'a, T> {
     type Source = T;
 
-    fn invert_coord(&self, mut coord: Index) -> Index {
-        coord.normalize(&self.shape);
+    fn invert_index(&self, mut index: Index) -> Index {
+        index.normalize(&self.shape);
 
-        let mut source_coord = Vec::with_capacity(self.source.ndim());
+        let mut source_index = Vec::with_capacity(self.source.ndim());
         let mut source_axis = 0;
         for axis in 0..self.ndim {
             if self.elided.contains(&axis) {
-                source_coord.push(self.slice[axis].clone());
+                source_index.push(self.slice[axis].clone());
                 continue;
             }
 
             use AxisIndex::*;
-            match &coord[source_axis] {
+            match &index[source_axis] {
                 In(range, this_step) => {
                     if let In(source_range, source_step) = &self.slice[axis] {
                         let start = range.start + source_range.start;
                         let end = start + (source_step * (range.end - range.start));
                         let step = source_step * this_step;
-                        source_coord.push((start..end, step).into());
+                        source_index.push((start..end, step).into());
                     } else {
                         assert!(range.start == 0);
-                        source_coord.push(self.slice[axis].clone());
+                        source_index.push(self.slice[axis].clone());
                     }
                 }
                 Of(indices) => {
                     let offset = self.offset.get(&axis).unwrap_or(&0);
-                    source_coord.push(
+                    source_index.push(
                         indices
                             .iter()
                             .map(|i| i + offset)
@@ -736,17 +518,17 @@ impl<T: TensorView + Slice> Rebase for TensorSlice<T> {
                 }
                 At(i) => {
                     let offset = self.offset.get(&axis).unwrap_or(&0);
-                    source_coord.push((i + offset).into())
+                    source_index.push((i + offset).into())
                 }
             }
             source_axis += 1;
         }
 
-        source_coord.into()
+        source_index.into()
     }
 
-    fn map_coord(&self, source_coord: Index) -> Index {
-        assert!(source_coord.len() == self.ndim);
+    fn map_index(&self, source_index: Index) -> Index {
+        assert!(source_index.len() == self.ndim);
 
         let mut coord = Vec::with_capacity(self.ndim);
 
@@ -756,7 +538,7 @@ impl<T: TensorView + Slice> Rebase for TensorSlice<T> {
             }
 
             use AxisIndex::*;
-            match &source_coord[axis] {
+            match &source_index[axis] {
                 In(_, _) => panic!("NOT IMPLEMENTED"),
                 Of(indices) => {
                     let offset = self.offset.get(&axis).unwrap_or(&0);
@@ -775,7 +557,7 @@ impl<T: TensorView + Slice> Rebase for TensorSlice<T> {
             }
         }
 
-        for axis in source_coord.len()..self.ndim {
+        for axis in source_index.len()..self.ndim {
             if !self.elided.contains(&axis) {
                 coord.push(AxisIndex::all(self.shape[axis]))
             }
@@ -784,7 +566,7 @@ impl<T: TensorView + Slice> Rebase for TensorSlice<T> {
         coord.into()
     }
 
-    fn source(&'_ self) -> &'_ Self::Source {
+    fn source(&'a self) -> &'a Self::Source {
         &self.source
     }
 }

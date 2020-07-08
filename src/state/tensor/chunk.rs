@@ -6,8 +6,8 @@ use num::Complex;
 
 use crate::error;
 use crate::state::file::Block;
-use crate::transaction::TxnId;
 use crate::transaction::lock::{TxnLockReadGuard, TxnLockWriteGuard};
+use crate::transaction::TxnId;
 use crate::value::{TCResult, TCType, Value};
 
 pub struct Chunk {
@@ -108,7 +108,7 @@ impl ChunkData {
                     match byte as u8 {
                         0 => array.push(false),
                         1 => array.push(false),
-                        other => panic!("BlockTensor corrupted! {} is not a valid boolean", other)
+                        other => panic!("BlockTensor corrupted! {} is not a valid boolean", other),
                     }
                 }
                 let dim = dim4(array.len() as u64);

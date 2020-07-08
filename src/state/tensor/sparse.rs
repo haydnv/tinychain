@@ -9,7 +9,7 @@ use super::base::TensorView;
 use super::dense::BlockTensor;
 
 #[async_trait]
-pub trait SparseTensorView: TensorView {
+pub trait SparseTensorView<'a>: TensorView<'a> {
     async fn as_dtype(&self, txn: &Arc<Txn>, dtype: TCType) -> TCResult<SparseTensor>;
 
     async fn copy(&self, txn: &Arc<Txn>) -> TCResult<SparseTensor>;
@@ -18,26 +18,41 @@ pub trait SparseTensorView: TensorView {
 
     async fn product(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<SparseTensor>;
 
-    async fn multiply<T: SparseTensorView>(
+    async fn multiply<T: SparseTensorView<'a>>(
         &self,
         txn: &Arc<Txn>,
         other: T,
     ) -> TCResult<SparseTensor>;
 
-    async fn subtract<T: SparseTensorView>(
+    async fn subtract<T: SparseTensorView<'a>>(
         &self,
         txn: &Arc<Txn>,
         other: &T,
     ) -> TCResult<SparseTensor>;
 
-    async fn equals<T: SparseTensorView>(&self, txn: &Arc<Txn>, other: &T)
-        -> TCResult<BlockTensor>;
+    async fn equals<T: SparseTensorView<'a>>(
+        &self,
+        txn: &Arc<Txn>,
+        other: &T,
+    ) -> TCResult<BlockTensor>;
 
-    async fn and<T: SparseTensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<SparseTensor>;
+    async fn and<T: SparseTensorView<'a>>(
+        &self,
+        txn: &Arc<Txn>,
+        other: &T,
+    ) -> TCResult<SparseTensor>;
 
-    async fn or<T: SparseTensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<SparseTensor>;
+    async fn or<T: SparseTensorView<'a>>(
+        &self,
+        txn: &Arc<Txn>,
+        other: &T,
+    ) -> TCResult<SparseTensor>;
 
-    async fn xor<T: SparseTensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<BlockTensor>;
+    async fn xor<T: SparseTensorView<'a>>(
+        &self,
+        txn: &Arc<Txn>,
+        other: &T,
+    ) -> TCResult<BlockTensor>;
 
     async fn not(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
 
