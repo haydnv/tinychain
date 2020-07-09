@@ -138,6 +138,13 @@ impl From<&[u64]> for Index {
     }
 }
 
+impl From<Vec<u64>> for Index {
+    fn from(coord: Vec<u64>) -> Index {
+        let axes = coord.iter().map(|i| AxisIndex::At(*i)).collect();
+        Index { axes }
+    }
+}
+
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

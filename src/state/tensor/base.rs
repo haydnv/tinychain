@@ -25,7 +25,7 @@ pub trait TensorView: Sized + Send + Sync {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool>;
 
-    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value>;
+    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value>;
 }
 
 pub trait Broadcast: TensorView {
@@ -137,9 +137,9 @@ impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
         self.source.any(txn_id).await
     }
 
-    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
+    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value> {
         self.source
-            .at(txn_id, &self.invert_index(coord.into()).to_coord())
+            .at(txn_id, self.invert_index(coord.into()).to_coord())
             .await
     }
 }
@@ -232,9 +232,9 @@ impl<T: TensorView + Slice> TensorView for Expansion<T> {
         self.source.any(txn_id).await
     }
 
-    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
+    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value> {
         self.source
-            .at(txn_id, &self.invert_index(coord.into()).to_coord())
+            .at(txn_id, self.invert_index(coord.into()).to_coord())
             .await
     }
 }
@@ -331,9 +331,9 @@ impl<T: TensorView + Slice> TensorView for Permutation<T> {
         self.source.any(txn_id).await
     }
 
-    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
+    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value> {
         self.source
-            .at(txn_id, &self.invert_index(coord.into()).to_coord())
+            .at(txn_id, self.invert_index(coord.into()).to_coord())
             .await
     }
 }
@@ -482,9 +482,9 @@ impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
         panic!("NOT IMPLEMENTED")
     }
 
-    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
+    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value> {
         self.source
-            .at(txn_id, &self.invert_index(coord.into()).to_coord())
+            .at(txn_id, self.invert_index(coord.into()).to_coord())
             .await
     }
 }

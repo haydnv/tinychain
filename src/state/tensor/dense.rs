@@ -1,4 +1,5 @@
 use std::iter;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use arrayfire as af;
@@ -131,7 +132,7 @@ impl BlockTensor {
         txn: Arc<Txn>,
         shape: Shape,
         dtype: TCType,
-        mut blocks: TCStream<ChunkData>,
+        mut blocks: Pin<Box<dyn Stream<Item = ChunkData> + Send>>,
         per_block: usize,
     ) -> TCResult<BlockTensor> {
         let file = txn
@@ -306,7 +307,7 @@ impl TensorView for BlockTensor {
         panic!("NOT IMPLEMENTED")
     }
 
-    async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
+    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value> {
         let index: u64 = coord
             .iter()
             .zip(self.shape.to_vec().iter())
@@ -336,4 +337,49 @@ impl BlockTensorView for BlockTensor {
 }
 
 #[async_trait]
-impl<T: BlockTensorView + Slice> BlockTensorView for TensorBroadcast<T> {}
+impl<T: BlockTensorView + Slice + 'static> BlockTensorView for TensorBroadcast<T> {
+    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<BlockTensor> {
+        let dtype = self.source().dtype();
+        let shape = self.shape().clone();
+        let size = shape.size();
+        let ndim = shape.len();
+        let per_block = BLOCK_SIZE / self.dtype().size().unwrap();
+
+        let source_coords = stream::iter(self.shape().all().affected())
+            .map(|coord| self.invert_index(coord.into()));
+        let mut value_stream = source_coords.then(|index| self.at(txn.id(), index.to_coord()));
+
+        let file = txn
+            .context()
+            .create_file(txn.id().clone(), "block_tensor".parse()?)
+            .await?;
+
+        let mut chunk: Vec<Value> = Vec::with_capacity(per_block);
+        let mut block_id = 0;
+        while let Some(value) = value_stream.next().await {
+            chunk.push(value?);
+
+            if chunk.len() == per_block {
+                let block = ChunkData::try_from_values(chunk.drain(..).collect(), dtype)?;
+                file.clone()
+                    .create_block(txn.id(), block_id.into(), block.into())
+                    .await?;
+                block_id += 1;
+            }
+        }
+
+        let coord_index = (0..ndim)
+            .map(|axis| shape[axis + 1..].iter().product())
+            .collect();
+
+        Ok(BlockTensor {
+            dtype,
+            shape,
+            size,
+            ndim,
+            file,
+            per_block,
+            coord_index,
+        })
+    }
+}

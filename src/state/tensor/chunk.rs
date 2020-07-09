@@ -21,7 +21,7 @@ impl Chunk {
     }
 
     pub async fn try_from(block: TxnLockReadGuard<Block>, dtype: TCType) -> TCResult<Chunk> {
-        let data = ChunkData::try_from(block.as_bytes().await, dtype)?;
+        let data = ChunkData::try_from_bytes(block.as_bytes().await, dtype)?;
         Ok(Chunk { block, data })
     }
 
@@ -97,7 +97,7 @@ impl ChunkData {
         }
     }
 
-    fn try_from(data: Bytes, dtype: TCType) -> TCResult<ChunkData> {
+    fn try_from_bytes(data: Bytes, dtype: TCType) -> TCResult<ChunkData> {
         use ChunkData::*;
         use TCType::*;
         match dtype {
@@ -220,6 +220,65 @@ impl ChunkData {
                 }
                 let dim = dim4(array.len());
                 Ok(U32(af::Array::new(&array, dim)))
+            }
+            other => Err(error::bad_request("Tensor does not support", other)),
+        }
+    }
+
+    pub fn try_from_values(data: Vec<Value>, dtype: TCType) -> TCResult<ChunkData> {
+        let dim = dim4(data.len());
+        let data: Value = data.into();
+
+        use ChunkData::*;
+        use TCType::*;
+        match dtype {
+            TCType::Bool => {
+                let array: Vec<bool> = data.try_into()?;
+                Ok(ChunkData::Bool(af::Array::new(&array, dim)))
+            }
+            Complex32 => {
+                let array: Vec<Complex<f32>> = data.try_into()?;
+                Ok(C32(af::Array::new(&array, dim)))
+            }
+            Complex64 => {
+                let array: Vec<Complex<f64>> = data.try_into()?;
+                Ok(C64(af::Array::new(&array, dim)))
+            }
+            Float32 => {
+                let array: Vec<f32> = data.try_into()?;
+                Ok(F32(af::Array::new(&array, dim)))
+            }
+            Float64 => {
+                let array: Vec<f64> = data.try_into()?;
+                Ok(F64(af::Array::new(&array, dim)))
+            }
+            Int16 => {
+                let array: Vec<i16> = data.try_into()?;
+                Ok(I16(af::Array::new(&array, dim)))
+            }
+            Int32 => {
+                let array: Vec<i32> = data.try_into()?;
+                Ok(I32(af::Array::new(&array, dim)))
+            }
+            Int64 => {
+                let array: Vec<i64> = data.try_into()?;
+                Ok(I64(af::Array::new(&array, dim)))
+            }
+            UInt8 => {
+                let array: Vec<u8> = data.try_into()?;
+                Ok(U8(af::Array::new(&array, dim)))
+            }
+            UInt16 => {
+                let array: Vec<u16> = data.try_into()?;
+                Ok(U16(af::Array::new(&array, dim)))
+            }
+            UInt32 => {
+                let array: Vec<u32> = data.try_into()?;
+                Ok(U32(af::Array::new(&array, dim)))
+            }
+            UInt64 => {
+                let array: Vec<u64> = data.try_into()?;
+                Ok(U64(af::Array::new(&array, dim)))
             }
             other => Err(error::bad_request("Tensor does not support", other)),
         }
