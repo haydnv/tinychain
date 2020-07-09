@@ -25,7 +25,7 @@ pub trait BlockTensorView: TensorView {
         Err(error::not_implemented())
     }
 
-    async fn copy(&self, _txn: &Arc<Txn>) -> TCResult<BlockTensor> {
+    async fn copy(self: Arc<Self>, _txn: Arc<Txn>) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
@@ -194,7 +194,13 @@ impl BlockTensor {
 
         let selection_shape = self.shape.selection(index);
         if &selection_shape != value.shape() {
-            return Err(error::bad_request(&format!("Cannot write a Tensor of shape {} to a Tensor slice of shape", value.shape()), selection_shape));
+            return Err(error::bad_request(
+                &format!(
+                    "Cannot write a Tensor of shape {} to a Tensor slice of shape",
+                    value.shape()
+                ),
+                selection_shape,
+            ));
         }
 
         let block_size = value.per_block;
@@ -228,7 +234,6 @@ impl BlockTensor {
                 let this = self.clone();
                 let txn_id = txn_id.clone();
                 async move {
-                    let values = values?;
                     let mut i = 0.0f64;
                     for chunk_id in chunk_ids {
                         let num_to_update = af::sum_all(&af::eq(
@@ -263,12 +268,12 @@ impl BlockTensor {
             .await
     }
 
-    fn blocks(self: Arc<Self>, txn_id: TxnId) -> impl Stream<Item = TCResult<Chunk>> {
+    fn blocks(self: Arc<Self>, txn_id: TxnId) -> impl Stream<Item = Chunk> {
         let mut blocks = FuturesOrdered::new();
         for chunk_id in 0..(self.size / self.per_block as u64) {
             let txn_id = txn_id.clone();
             let this = self.clone();
-            blocks.push(async move { this.get_chunk(&txn_id, chunk_id).await })
+            blocks.push(async move { this.get_chunk(&txn_id, chunk_id).await.unwrap() })
         }
 
         blocks
@@ -315,7 +320,20 @@ impl TensorView for BlockTensor {
 }
 
 #[async_trait]
-impl BlockTensorView for BlockTensor {}
+impl BlockTensorView for BlockTensor {
+    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<BlockTensor> {
+        let blocks = self.clone().blocks(txn.id().clone());
+        let blocks = blocks.map(|chunk| chunk.data().clone());
+        BlockTensor::from_blocks(
+            txn,
+            self.shape().clone(),
+            self.dtype(),
+            Box::pin(blocks),
+            self.per_block,
+        )
+        .await
+    }
+}
 
 #[async_trait]
 impl<T: BlockTensorView + Slice> BlockTensorView for TensorBroadcast<T> {}
