@@ -1,5 +1,4 @@
 use std::iter;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use arrayfire as af;
@@ -21,112 +20,104 @@ const BLOCK_SIZE: usize = 1_000_000;
 const ERR_CORRUPT: &str = "BlockTensor corrupted! Please restart Tinychain and file a bug report";
 
 #[async_trait]
-pub trait BlockTensorView<'a>: TensorView<'a> {
-    async fn as_dtype(&'a self, _txn: &'a Arc<Txn>, _dtype: TCType) -> TCResult<BlockTensor<'a>> {
+pub trait BlockTensorView: TensorView {
+    async fn as_dtype(&self, _txn: &Arc<Txn>, _dtype: TCType) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    async fn copy<'b>(&'a self, _txn: &'a Arc<Txn>) -> TCResult<BlockTensor<'b>> {
+    async fn copy(&self, _txn: &Arc<Txn>) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    async fn sum<'b>(
-        &'a self,
-        _txn: &'a Arc<Txn>,
-        _axis: Option<usize>,
-    ) -> TCResult<BlockTensor<'b>> {
+    async fn sum(&self, _txn: &Arc<Txn>, _axis: Option<usize>) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    async fn product<'b>(
-        &'a self,
-        _txn: &'a Arc<Txn>,
-        _axis: Option<usize>,
-    ) -> TCResult<BlockTensor<'b>> {
-        Err(error::not_implemented())
-    }
-
-    async fn add<'b, T: BlockTensorView<'a>>(
-        &'a self,
+    async fn product(
+        &self,
         _txn: &Arc<Txn>,
-        _other: &'a T,
-    ) -> TCResult<BlockTensor<'b>> {
+        _axis: Option<usize>,
+    ) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    async fn multiply<'b, T: BlockTensorView<'a>>(
-        &'a self,
-        _txn: &'a Arc<Txn>,
-        _other: &'a T,
-    ) -> TCResult<BlockTensor<'b>> {
+    async fn add<T: BlockTensorView>(
+        &self,
+        _txn: &Arc<Txn>,
+        _other: &T,
+    ) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    async fn subtract<'b, T: BlockTensorView<'a>>(
-        &'a self,
-        _txn: &'a Arc<Txn>,
-        _other: &'a T,
-    ) -> TCResult<BlockTensor<'b>> {
+    async fn multiply<T: BlockTensorView>(
+        &self,
+        _txn: &Arc<Txn>,
+        _other: &T,
+    ) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    async fn equals<'b, T: BlockTensorView<'a>>(
-        &'a self,
-        _txn: &'a Arc<Txn>,
-        _other: &'a T,
-    ) -> TCResult<BlockTensor<'b>> {
+    async fn subtract<T: BlockTensorView>(
+        &self,
+        _txn: &Arc<Txn>,
+        _other: &T,
+    ) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    async fn and<'b, T: BlockTensorView<'a>>(
-        &'a self,
-        _txn: &'a Arc<Txn>,
-        _other: &'a T,
-    ) -> TCResult<BlockTensor<'b>> {
+    async fn equals<'b, T: BlockTensorView>(
+        &self,
+        _txn: &Arc<Txn>,
+        _other: &T,
+    ) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    async fn or<'b, T: BlockTensorView<'a>>(
-        &'a self,
-        _txn: &'a Arc<Txn>,
-        _other: &'a T,
-    ) -> TCResult<BlockTensor<'b>> {
+    async fn and<T: BlockTensorView>(
+        &self,
+        _txn: &Arc<Txn>,
+        _other: &T,
+    ) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    async fn xor<'b, T: BlockTensorView<'a>>(
-        &'a self,
-        _txn: &'a Arc<Txn>,
-        _other: &'a T,
-    ) -> TCResult<BlockTensor<'b>> {
+    async fn or<T: BlockTensorView>(
+        &self,
+        _txn: &Arc<Txn>,
+        _other: &T,
+    ) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    async fn not<'b>(&'a self, _txn: &'a Arc<Txn>) -> TCResult<BlockTensor<'b>> {
+    async fn xor<T: BlockTensorView>(
+        &self,
+        _txn: &Arc<Txn>,
+        _other: &T,
+    ) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
-    fn blocks(&'a self, _txn_id: &TxnId, _len: usize) -> TCStream<Chunk> {
-        Box::pin(stream::empty())
+    async fn not(&self, _txn: &Arc<Txn>) -> TCResult<BlockTensor> {
+        Err(error::not_implemented())
     }
 
-    fn into_blocks(self, _txn_id: TxnId, _len: usize) -> TCStream<Chunk> {
+    fn into_blocks(&self, _txn_id: &TxnId, _block_len: usize) -> TCStream<Chunk> {
         Box::pin(stream::empty())
     }
 }
 
-impl<'a> Slice<'a> for BlockTensor<'a> {
-    type Slice = TensorSlice<'a, BlockTensor<'a>>;
+impl Slice for BlockTensor {
+    type Slice = TensorSlice<BlockTensor>;
 
-    fn slice(&'a self, index: Index) -> TCResult<Self::Slice> {
-        TensorSlice::new(self, index)
+    fn slice(self: Arc<Self>, index: Index) -> TCResult<Arc<Self::Slice>> {
+        Ok(Arc::new(TensorSlice::new(self, index)?))
     }
 }
 
 #[async_trait]
-impl<'a> BlockTensorView<'a> for TensorSlice<'a, BlockTensor<'a>> {}
+impl BlockTensorView for TensorSlice<BlockTensor> {}
 
-pub struct BlockTensor<'a> {
+pub struct BlockTensor {
     dtype: TCType,
     shape: Shape,
     size: u64,
@@ -134,28 +125,30 @@ pub struct BlockTensor<'a> {
     file: Arc<File>,
     per_block: usize,
     coord_index: Vec<u64>,
-    phantom: PhantomData<&'a Shape>,
 }
 
-impl<'a> BlockTensor<'a> {
-    async fn zeros(txn: Arc<Txn>, shape: Shape, dtype: TCType) -> TCResult<BlockTensor<'a>> {
-        if !dtype.is_numeric() {
-            return Err(error::bad_request("Tensor does not support", dtype));
+impl BlockTensor {
+    async fn constant(txn: Arc<Txn>, shape: Shape, value: Value) -> TCResult<BlockTensor> {
+        if !value.dtype().is_numeric() {
+            return Err(error::bad_request("Tensor does not support", value.dtype()));
         }
 
-        let per_block = BLOCK_SIZE / dtype.size().unwrap();
+        let per_block = BLOCK_SIZE / value.dtype().size().unwrap();
         let size = shape.size();
 
-        let blocks =
-            (0..(size / per_block as u64)).map(move |_| ChunkData::new(dtype, per_block).unwrap());
+        let value_clone = value.clone();
+        let blocks = (0..(size / per_block as u64))
+            .map(move |_| ChunkData::constant(value_clone.clone(), per_block).unwrap());
         let trailing_len = (size % (per_block as u64)) as usize;
         let blocks: TCStream<ChunkData> = if trailing_len > 0 {
-            let blocks = blocks.chain(iter::once(ChunkData::new(dtype, trailing_len).unwrap()));
+            let blocks = blocks.chain(iter::once(
+                ChunkData::constant(value.clone(), trailing_len).unwrap(),
+            ));
             Box::pin(stream::iter(blocks))
         } else {
             Box::pin(stream::iter(blocks))
         };
-        BlockTensor::from_blocks(txn, shape, dtype, blocks, per_block).await
+        BlockTensor::from_blocks(txn, shape, value.dtype(), blocks, per_block).await
     }
 
     async fn from_blocks(
@@ -164,7 +157,7 @@ impl<'a> BlockTensor<'a> {
         dtype: TCType,
         mut blocks: TCStream<ChunkData>,
         per_block: usize,
-    ) -> TCResult<BlockTensor<'a>> {
+    ) -> TCResult<BlockTensor> {
         let file = txn
             .context()
             .create_file(txn.id().clone(), "block_tensor".parse()?)
@@ -192,7 +185,6 @@ impl<'a> BlockTensor<'a> {
             file,
             per_block,
             coord_index,
-            phantom: PhantomData,
         })
     }
 
@@ -204,11 +196,11 @@ impl<'a> BlockTensor<'a> {
         }
     }
 
-    async fn write_dense<T: BlockTensorView<'a> + Broadcast<'a> + Slice<'a> + 'static>(
-        &self,
+    async fn write_dense<T: BlockTensorView + Broadcast + Slice>(
+        self: Arc<Self>,
         txn_id: TxnId,
         index: &Index,
-        value: T,
+        value: Arc<T>,
     ) -> TCResult<()> {
         if !self.shape.contains(index) {
             return Err(error::bad_request(
@@ -228,7 +220,7 @@ impl<'a> BlockTensor<'a> {
         let per_block = self.per_block as u64;
 
         value
-            .into_blocks(txn_id.clone(), block_size)
+            .into_blocks(&txn_id, block_size)
             .zip(stream::iter(&index.affected().chunks(block_size)))
             .then(|(values, coords)| {
                 let coords: Vec<u64> = coords.flatten().collect();
@@ -246,6 +238,7 @@ impl<'a> BlockTensor<'a> {
                 let mut chunk_ids: Vec<u64> = Vec::with_capacity(af_chunk_ids.elements());
                 af_chunk_ids.host(&mut chunk_ids);
 
+                let this = self.clone();
                 let txn_id = txn_id.clone();
                 async move {
                     let mut i = 0.0f64;
@@ -268,7 +261,7 @@ impl<'a> BlockTensor<'a> {
                             af::Dim4::new(&[num_coords as u64, 1, 1, 1]),
                         );
 
-                        let mut chunk = self.get_chunk(&txn_id, chunk_id).await?.upgrade().await?;
+                        let mut chunk = this.get_chunk(&txn_id, chunk_id).await?.upgrade().await?;
                         chunk.data().set(block_offsets, values.data())?;
                         chunk.sync().await?;
                         i += num_to_update;
@@ -284,10 +277,10 @@ impl<'a> BlockTensor<'a> {
 }
 
 #[async_trait]
-impl<'a, T: BlockTensorView<'a> + Slice<'a>> BlockTensorView<'a> for TensorBroadcast<'a, T> {}
+impl<T: BlockTensorView + Slice> BlockTensorView for TensorBroadcast<T> {}
 
 #[async_trait]
-impl<'a> TensorView<'a> for BlockTensor<'a> {
+impl TensorView for BlockTensor {
     fn ndim(&self) -> usize {
         self.ndim
     }

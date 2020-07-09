@@ -76,25 +76,24 @@ pub enum ChunkData {
 }
 
 impl ChunkData {
-    pub fn new(dtype: TCType, len: usize) -> TCResult<ChunkData> {
+    pub fn constant(value: Value, len: usize) -> TCResult<ChunkData> {
         let dim = dim4(len);
 
         use ChunkData::*;
-        use TCType::*;
-        match dtype {
-            TCType::Bool => Ok(ChunkData::Bool(af::constant(false, dim))),
-            Complex32 => Ok(C32(af::constant(Complex::new(0.0f32, 0.0f32), dim))),
-            Complex64 => Ok(C64(af::constant(Complex::new(0.0f64, 0.0f64), dim))),
-            Float32 => Ok(F32(af::constant(0.0f32, dim))),
-            Float64 => Ok(F64(af::constant(0.0f64, dim))),
-            Int16 => Ok(I16(af::constant(0i16, dim))),
-            Int32 => Ok(I32(af::constant(0i32, dim))),
-            Int64 => Ok(I64(af::constant(0i64, dim))),
-            UInt8 => Ok(U8(af::constant(0u8, dim))),
-            UInt16 => Ok(U16(af::constant(0u16, dim))),
-            UInt32 => Ok(U32(af::constant(0u32, dim))),
-            UInt64 => Ok(U64(af::constant(0u64, dim))),
-            _ => Err(error::bad_request("Tensor does not support", dtype)),
+        match value {
+            Value::Bool(b) => Ok(ChunkData::Bool(af::constant(b, dim))),
+            Value::Complex32(c) => Ok(C32(af::constant(c, dim))),
+            Value::Complex64(c) => Ok(C64(af::constant(c, dim))),
+            Value::Float32(f) => Ok(F32(af::constant(f, dim))),
+            Value::Float64(f) => Ok(F64(af::constant(f, dim))),
+            Value::Int16(i) => Ok(I16(af::constant(i, dim))),
+            Value::Int32(i) => Ok(I32(af::constant(i, dim))),
+            Value::Int64(i) => Ok(I64(af::constant(i, dim))),
+            Value::UInt8(i) => Ok(U8(af::constant(i, dim))),
+            Value::UInt16(u) => Ok(U16(af::constant(u, dim))),
+            Value::UInt32(u) => Ok(U32(af::constant(u, dim))),
+            Value::UInt64(u) => Ok(U64(af::constant(u, dim))),
+            _ => Err(error::bad_request("Tensor does not support", value.dtype())),
         }
     }
 
