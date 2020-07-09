@@ -21,8 +21,6 @@ const ERR_CORRUPT: &str = "BlockTensor corrupted! Please restart Tinychain and f
 
 #[async_trait]
 pub trait BlockTensorView: TensorView {
-    fn dtype(&self) -> TCType;
-
     async fn as_dtype(&self, _txn: &Arc<Txn>, _dtype: TCType) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
@@ -93,11 +91,7 @@ impl Slice for BlockTensor {
 }
 
 #[async_trait]
-impl BlockTensorView for TensorSlice<BlockTensor> {
-    fn dtype(&self) -> TCType {
-        self.source().dtype()
-    }
-}
+impl BlockTensorView for TensorSlice<BlockTensor> {}
 
 pub struct BlockTensor {
     dtype: TCType,
@@ -278,6 +272,10 @@ impl BlockTensor {
 
 #[async_trait]
 impl TensorView for BlockTensor {
+    fn dtype(&self) -> TCType {
+        self.dtype
+    }
+
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -312,15 +310,7 @@ impl TensorView for BlockTensor {
 }
 
 #[async_trait]
-impl BlockTensorView for BlockTensor {
-    fn dtype(&self) -> TCType {
-        self.dtype
-    }
-}
+impl BlockTensorView for BlockTensor {}
 
 #[async_trait]
-impl<T: BlockTensorView + Slice> BlockTensorView for TensorBroadcast<T> {
-    fn dtype(&self) -> TCType {
-        self.source().dtype()
-    }
-}
+impl<T: BlockTensorView + Slice> BlockTensorView for TensorBroadcast<T> {}

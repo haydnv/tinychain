@@ -7,12 +7,14 @@ use num::Integer;
 
 use crate::error;
 use crate::transaction::TxnId;
-use crate::value::{TCResult, Value};
+use crate::value::{TCResult, TCType, Value};
 
 use super::index::*;
 
 #[async_trait]
 pub trait TensorView: Sized + Send + Sync {
+    fn dtype(&self) -> TCType;
+
     fn ndim(&self) -> usize;
 
     fn shape(&'_ self) -> &'_ Shape;
@@ -111,6 +113,10 @@ impl<T: TensorView> TensorBroadcast<T> {
 
 #[async_trait]
 impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
+    fn dtype(&self) -> TCType {
+        self.source.dtype()
+    }
+
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -202,6 +208,10 @@ impl<T: TensorView> Expansion<T> {
 
 #[async_trait]
 impl<T: TensorView + Slice> TensorView for Expansion<T> {
+    fn dtype(&self) -> TCType {
+        self.source().dtype()
+    }
+
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -297,6 +307,10 @@ impl<T: TensorView + Slice> Permutation<T> {
 
 #[async_trait]
 impl<T: TensorView + Slice> TensorView for Permutation<T> {
+    fn dtype(&self) -> TCType {
+        self.source().dtype()
+    }
+
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -444,6 +458,10 @@ impl<T: TensorView + Slice> Slice for TensorSlice<T> {
 
 #[async_trait]
 impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
+    fn dtype(&self) -> TCType {
+        self.source().dtype()
+    }
+
     fn ndim(&self) -> usize {
         self.ndim
     }
@@ -456,12 +474,12 @@ impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
         self.size
     }
 
-    async fn all(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.source.all(txn_id).await
+    async fn all(&self, _txn_id: &TxnId) -> TCResult<bool> {
+        panic!("NOT IMPLEMENTED")
     }
 
-    async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.source.any(txn_id).await
+    async fn any(&self, _txn_id: &TxnId) -> TCResult<bool> {
+        panic!("NOT IMPLEMENTED")
     }
 
     async fn at(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Value> {
