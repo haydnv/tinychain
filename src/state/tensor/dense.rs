@@ -31,7 +31,7 @@ pub trait BlockTensorView: TensorView + 'static {
         let per_block = per_block(dtype)?;
         let source = self
             .chunk_stream(txn.id().clone())
-            .map(move |data| data.map(|d| d.into_type(dtype.clone())));
+            .map(move |data| data.and_then(|d| d.into_type(dtype.clone())));
         let values = ValueStream::new(source);
         let chunks = ValueChunkStream::new(values, dtype, per_block);
         BlockTensor::from_blocks(txn, shape, dtype, Box::pin(chunks)).await
