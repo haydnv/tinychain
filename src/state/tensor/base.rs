@@ -11,7 +11,6 @@ use crate::value::{TCResult, TCType};
 
 use super::index::*;
 
-#[async_trait]
 pub trait TensorView: Sized + Send + Sync {
     fn dtype(&self) -> TCType;
 
@@ -20,7 +19,10 @@ pub trait TensorView: Sized + Send + Sync {
     fn shape(&'_ self) -> &'_ Shape;
 
     fn size(&self) -> u64;
+}
 
+#[async_trait]
+pub trait AnyAll: TensorView {
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool>;
 
     async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool>;
@@ -126,7 +128,10 @@ impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
     fn size(&self) -> u64 {
         self.size
     }
+}
 
+#[async_trait]
+impl<T: TensorView + Slice + AnyAll> AnyAll for TensorBroadcast<T> {
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().all(txn_id).await
     }
@@ -198,7 +203,6 @@ impl<T: TensorView> Expansion<T> {
     }
 }
 
-#[async_trait]
 impl<T: TensorView + Slice> TensorView for Expansion<T> {
     fn dtype(&self) -> TCType {
         self.source().dtype()
@@ -215,7 +219,10 @@ impl<T: TensorView + Slice> TensorView for Expansion<T> {
     fn size(&self) -> u64 {
         self.size
     }
+}
 
+#[async_trait]
+impl<T: TensorView + Slice + AnyAll> AnyAll for Expansion<T> {
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().all(txn_id).await
     }
@@ -291,7 +298,6 @@ impl<T: TensorView + Slice> Permutation<T> {
     }
 }
 
-#[async_trait]
 impl<T: TensorView + Slice> TensorView for Permutation<T> {
     fn dtype(&self) -> TCType {
         self.source().dtype()
@@ -308,7 +314,10 @@ impl<T: TensorView + Slice> TensorView for Permutation<T> {
     fn size(&self) -> u64 {
         self.size
     }
+}
 
+#[async_trait]
+impl<T: TensorView + Slice + AnyAll> AnyAll for Permutation<T> {
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().all(txn_id).await
     }
@@ -452,14 +461,6 @@ impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
 
     fn size(&self) -> u64 {
         self.size
-    }
-
-    async fn all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<bool> {
-        panic!("NOT IMPLEMENTED")
-    }
-
-    async fn any(self: Arc<Self>, _txn_id: TxnId) -> TCResult<bool> {
-        panic!("NOT IMPLEMENTED")
     }
 }
 

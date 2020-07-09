@@ -87,14 +87,6 @@ pub trait BlockTensorView: TensorView + 'static {
     fn value_stream(self: Arc<Self>, txn_id: TxnId, index: Index) -> Self::ValueStream;
 }
 
-impl Slice for BlockTensor {
-    type Slice = TensorSlice<BlockTensor>;
-
-    fn slice(self: Arc<Self>, index: Index) -> TCResult<Arc<Self::Slice>> {
-        Ok(Arc::new(TensorSlice::new(self, index)?))
-    }
-}
-
 pub struct BlockTensor {
     dtype: TCType,
     shape: Shape,
@@ -297,7 +289,6 @@ impl BlockTensor {
     }
 }
 
-#[async_trait]
 impl TensorView for BlockTensor {
     fn dtype(&self) -> TCType {
         self.dtype
@@ -314,7 +305,10 @@ impl TensorView for BlockTensor {
     fn size(&self) -> u64 {
         self.size
     }
+}
 
+#[async_trait]
+impl AnyAll for BlockTensor {
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
         let mut chunks = self.chunk_stream(txn_id);
         while let Some(chunk) = chunks.next().await {
@@ -418,6 +412,14 @@ impl BlockTensorView for BlockTensor {
     }
 }
 
+impl Slice for BlockTensor {
+    type Slice = TensorSlice<BlockTensor>;
+
+    fn slice(self: Arc<Self>, index: Index) -> TCResult<Arc<Self::Slice>> {
+        Ok(Arc::new(TensorSlice::new(self, index)?))
+    }
+}
+
 #[async_trait]
 impl<T: Rebase + 'static> BlockTensorView for T
 where
@@ -439,6 +441,31 @@ where
     fn value_stream(self: Arc<Self>, txn_id: TxnId, index: Index) -> Self::ValueStream {
         assert!(self.shape().contains(&index));
         self.source().value_stream(txn_id, self.invert_index(index))
+    }
+}
+
+#[async_trait]
+impl AnyAll for TensorSlice<BlockTensor> {
+    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        let mut chunks = self.chunk_stream(txn_id);
+        while let Some(chunk) = chunks.next().await {
+            if !chunk?.all() {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        let mut chunks = self.chunk_stream(txn_id);
+        while let Some(chunk) = chunks.next().await {
+            if !chunk?.any() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 }
 
