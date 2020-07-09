@@ -59,20 +59,133 @@ impl ChunkMut {
     }
 }
 
+pub trait TensorChunk {
+    type DType: af::HasAfEnum + Into<Value>;
+
+    fn array(&'_ self) -> &'_ af::Array<Self::DType>;
+
+    fn as_type<T: af::HasAfEnum>(&self) -> ArrayExt<T> {
+        ArrayExt(self.array().cast())
+    }
+
+    fn get(&self, index: af::Indexer) -> Vec<Value> {
+        let array = af::index_gen(self.array(), index);
+        let mut value: Vec<Self::DType> = Vec::with_capacity(array.elements());
+        array.host(&mut value);
+        value.drain(..).map(|v| v.into()).collect()
+    }
+
+    fn set<T: TensorChunk<DType = Self::DType>>(&self, index: &af::Indexer, other: &T) {
+        af::assign_gen(self.array(), index, other.array());
+    }
+}
+
+impl<T: af::HasAfEnum + Into<Value>> TensorChunk for ArrayExt<T> {
+    type DType = T;
+
+    fn array(&'_ self) -> &'_ af::Array<Self::DType> {
+        &self.0
+    }
+}
+
+impl<T: af::HasAfEnum> From<ArrayExt<T>> for Vec<T> {
+    fn from(array: ArrayExt<T>) -> Vec<T> {
+        let mut v: Vec<T> = Vec::with_capacity(array.0.elements());
+        array.0.host(&mut v);
+        v
+    }
+}
+
+impl<T: af::HasAfEnum + Into<Value>> From<ArrayExt<T>> for Vec<Value> {
+    fn from(array: ArrayExt<T>) -> Vec<Value> {
+        let mut v: Vec<T> = array.into();
+        v.drain(..).map(|i| i.into()).collect()
+    }
+}
+
+#[derive(Clone)]
+pub struct ArrayExt<T: af::HasAfEnum>(af::Array<T>);
+
+impl<T: af::HasAfEnum> From<af::Array<T>> for ArrayExt<T> {
+    fn from(array: af::Array<T>) -> ArrayExt<T> {
+        ArrayExt(array)
+    }
+}
+
+impl<E: Into<error::TCError>, T: af::HasAfEnum + TryFrom<Value, Error = E>> TryFrom<Vec<Value>>
+    for ArrayExt<T>
+{
+    type Error = error::TCError;
+
+    fn try_from(mut values: Vec<Value>) -> TCResult<ArrayExt<T>> {
+        let array = values
+            .drain(..)
+            .map(|v| v.try_into().map_err(|e: E| e.into()))
+            .collect::<TCResult<Vec<T>>>()?;
+        let dim = dim4(array.len());
+        Ok(ArrayExt(af::Array::new(&array, dim)))
+    }
+}
+
+pub trait TensorChunkAnyAll: TensorChunk {
+    fn all(&self) -> bool {
+        af::all_true_all(self.array()).0 > 0.0f64
+    }
+
+    fn any(&self) -> bool {
+        af::any_true_all(self.array()).0 > 0.0f64
+    }
+}
+
+impl TensorChunkAnyAll for ArrayExt<bool> {}
+impl TensorChunkAnyAll for ArrayExt<f32> {}
+impl TensorChunkAnyAll for ArrayExt<f64> {}
+impl TensorChunkAnyAll for ArrayExt<i16> {}
+impl TensorChunkAnyAll for ArrayExt<i32> {}
+impl TensorChunkAnyAll for ArrayExt<i64> {}
+impl TensorChunkAnyAll for ArrayExt<u8> {}
+impl TensorChunkAnyAll for ArrayExt<u16> {}
+impl TensorChunkAnyAll for ArrayExt<u32> {}
+impl TensorChunkAnyAll for ArrayExt<u64> {}
+
+impl TensorChunkAnyAll for ArrayExt<Complex<f32>> {
+    fn all(&self) -> bool {
+        let all = af::all_true_all(self.array());
+        all.0 > 0.0f64 && all.1 > 0.0f64
+    }
+
+    fn any(&self) -> bool {
+        let any = af::any_true_all(self.array());
+        any.0 > 0.0f64 || any.1 > 0.0f64
+    }
+}
+
+impl TensorChunkAnyAll for ArrayExt<Complex<f64>> {
+    fn all(&self) -> bool {
+        let all = af::all_true_all(self.array());
+        all.0 > 0.0f64 && all.1 > 0.0f64
+    }
+
+    fn any(&self) -> bool {
+        let any = af::any_true_all(self.array());
+        any.0 > 0.0f64 || any.1 > 0.0f64
+    }
+}
+
 #[derive(Clone)]
 pub enum ChunkData {
-    Bool(af::Array<bool>),
-    C32(af::Array<Complex<f32>>),
-    C64(af::Array<Complex<f64>>),
-    F32(af::Array<f32>),
-    F64(af::Array<f64>),
-    I16(af::Array<i16>),
-    I32(af::Array<i32>),
-    I64(af::Array<i64>),
-    U8(af::Array<u8>),
-    U16(af::Array<u16>),
-    U32(af::Array<u32>),
-    U64(af::Array<u64>),
+    Bool(ArrayExt<bool>),
+    C32(ArrayExt<Complex<f32>>),
+    C64(ArrayExt<Complex<f64>>),
+    F32(ArrayExt<f32>),
+    F64(ArrayExt<f64>),
+    I16(ArrayExt<i16>),
+    I32(ArrayExt<i32>),
+    I64(ArrayExt<i64>),
+    U8(ArrayExt<u8>),
+    U16(ArrayExt<u16>),
+    U32(ArrayExt<u32>),
+    U64(ArrayExt<u64>),
 }
 
 impl ChunkData {
@@ -81,18 +194,18 @@ impl ChunkData {
 
         use ChunkData::*;
         match value {
-            Value::Bool(b) => Ok(ChunkData::Bool(af::constant(b, dim))),
-            Value::Complex32(c) => Ok(C32(af::constant(c, dim))),
-            Value::Complex64(c) => Ok(C64(af::constant(c, dim))),
-            Value::Float32(f) => Ok(F32(af::constant(f, dim))),
-            Value::Float64(f) => Ok(F64(af::constant(f, dim))),
-            Value::Int16(i) => Ok(I16(af::constant(i, dim))),
-            Value::Int32(i) => Ok(I32(af::constant(i, dim))),
-            Value::Int64(i) => Ok(I64(af::constant(i, dim))),
-            Value::UInt8(i) => Ok(U8(af::constant(i, dim))),
-            Value::UInt16(u) => Ok(U16(af::constant(u, dim))),
-            Value::UInt32(u) => Ok(U32(af::constant(u, dim))),
-            Value::UInt64(u) => Ok(U64(af::constant(u, dim))),
+            Value::Bool(b) => Ok(ChunkData::Bool(af::constant(b, dim).into())),
+            Value::Complex32(c) => Ok(C32(af::constant(c, dim).into())),
+            Value::Complex64(c) => Ok(C64(af::constant(c, dim).into())),
+            Value::Float32(f) => Ok(F32(af::constant(f, dim).into())),
+            Value::Float64(f) => Ok(F64(af::constant(f, dim).into())),
+            Value::Int16(i) => Ok(I16(af::constant(i, dim).into())),
+            Value::Int32(i) => Ok(I32(af::constant(i, dim).into())),
+            Value::Int64(i) => Ok(I64(af::constant(i, dim).into())),
+            Value::UInt8(i) => Ok(U8(af::constant(i, dim).into())),
+            Value::UInt16(u) => Ok(U16(af::constant(u, dim).into())),
+            Value::UInt32(u) => Ok(U32(af::constant(u, dim).into())),
+            Value::UInt64(u) => Ok(U64(af::constant(u, dim).into())),
             _ => Err(error::bad_request("Tensor does not support", value.dtype())),
         }
     }
@@ -111,7 +224,7 @@ impl ChunkData {
                     }
                 }
                 let dim = dim4(array.len());
-                Ok(ChunkData::Bool(af::Array::new(&array, dim)))
+                Ok(ChunkData::Bool(af::Array::new(&array, dim).into()))
             }
             Complex32 => {
                 assert!(data.len() % 8 == 0);
@@ -123,7 +236,7 @@ impl ChunkData {
                     array.push(Complex::new(re, im));
                 }
                 let dim = dim4(array.len());
-                Ok(C32(af::Array::new(&array, dim)))
+                Ok(C32(af::Array::new(&array, dim).into()))
             }
             Complex64 => {
                 assert!(data.len() % 16 == 0);
@@ -135,7 +248,7 @@ impl ChunkData {
                     array.push(Complex::new(re, im));
                 }
                 let dim = dim4(array.len());
-                Ok(C64(af::Array::new(&array, dim)))
+                Ok(C64(af::Array::new(&array, dim).into()))
             }
             Float32 => {
                 assert!(data.len() % 4 == 0);
@@ -145,7 +258,7 @@ impl ChunkData {
                     array.push(f32::from_be_bytes(f.try_into().unwrap()));
                 }
                 let dim = dim4(array.len());
-                Ok(F32(af::Array::new(&array, dim)))
+                Ok(F32(af::Array::new(&array, dim).into()))
             }
             Float64 => {
                 assert!(data.len() % 8 == 0);
@@ -155,7 +268,7 @@ impl ChunkData {
                     array.push(f64::from_be_bytes(f.try_into().unwrap()));
                 }
                 let dim = dim4(array.len());
-                Ok(F64(af::Array::new(&array, dim)))
+                Ok(F64(af::Array::new(&array, dim).into()))
             }
             Int16 => {
                 assert!(data.len() % 2 == 0);
@@ -165,7 +278,7 @@ impl ChunkData {
                     array.push(i16::from_be_bytes(f.try_into().unwrap()));
                 }
                 let dim = dim4(array.len());
-                Ok(I16(af::Array::new(&array, dim)))
+                Ok(I16(af::Array::new(&array, dim).into()))
             }
             Int32 => {
                 assert!(data.len() % 4 == 0);
@@ -175,7 +288,7 @@ impl ChunkData {
                     array.push(i32::from_be_bytes(f.try_into().unwrap()));
                 }
                 let dim = dim4(array.len());
-                Ok(I32(af::Array::new(&array, dim)))
+                Ok(I32(af::Array::new(&array, dim).into()))
             }
             Int64 => {
                 assert!(data.len() % 8 == 0);
@@ -185,11 +298,11 @@ impl ChunkData {
                     array.push(i32::from_be_bytes(f.try_into().unwrap()));
                 }
                 let dim = dim4(array.len());
-                Ok(I32(af::Array::new(&array, dim)))
+                Ok(I32(af::Array::new(&array, dim).into()))
             }
             UInt8 => {
                 let dim = dim4(data.len());
-                Ok(U8(af::Array::new(&data, dim)))
+                Ok(U8(af::Array::new(&data, dim).into()))
             }
             UInt16 => {
                 assert!(data.len() % 2 == 0);
@@ -199,7 +312,7 @@ impl ChunkData {
                     array.push(u16::from_be_bytes(f.try_into().unwrap()));
                 }
                 let dim = dim4(array.len());
-                Ok(U16(af::Array::new(&array, dim)))
+                Ok(U16(af::Array::new(&array, dim).into()))
             }
             UInt32 => {
                 assert!(data.len() % 4 == 0);
@@ -209,7 +322,7 @@ impl ChunkData {
                     array.push(u32::from_be_bytes(f.try_into().unwrap()));
                 }
                 let dim = dim4(array.len());
-                Ok(U32(af::Array::new(&array, dim)))
+                Ok(U32(af::Array::new(&array, dim).into()))
             }
             UInt64 => {
                 assert!(data.len() % 8 == 0);
@@ -219,104 +332,71 @@ impl ChunkData {
                     array.push(u32::from_be_bytes(f.try_into().unwrap()));
                 }
                 let dim = dim4(array.len());
-                Ok(U32(af::Array::new(&array, dim)))
+                Ok(U32(af::Array::new(&array, dim).into()))
             }
             other => Err(error::bad_request("Tensor does not support", other)),
         }
     }
 
     pub fn try_from_values(data: Vec<Value>, dtype: TCType) -> TCResult<ChunkData> {
-        let dim = dim4(data.len());
-        let data: Value = data.into();
-
         use ChunkData::*;
         use TCType::*;
-        match dtype {
-            TCType::Bool => {
-                let array: Vec<bool> = data.try_into()?;
-                Ok(ChunkData::Bool(af::Array::new(&array, dim)))
-            }
-            Complex32 => {
-                let array: Vec<Complex<f32>> = data.try_into()?;
-                Ok(C32(af::Array::new(&array, dim)))
-            }
-            Complex64 => {
-                let array: Vec<Complex<f64>> = data.try_into()?;
-                Ok(C64(af::Array::new(&array, dim)))
-            }
-            Float32 => {
-                let array: Vec<f32> = data.try_into()?;
-                Ok(F32(af::Array::new(&array, dim)))
-            }
-            Float64 => {
-                let array: Vec<f64> = data.try_into()?;
-                Ok(F64(af::Array::new(&array, dim)))
-            }
-            Int16 => {
-                let array: Vec<i16> = data.try_into()?;
-                Ok(I16(af::Array::new(&array, dim)))
-            }
-            Int32 => {
-                let array: Vec<i32> = data.try_into()?;
-                Ok(I32(af::Array::new(&array, dim)))
-            }
-            Int64 => {
-                let array: Vec<i64> = data.try_into()?;
-                Ok(I64(af::Array::new(&array, dim)))
-            }
-            UInt8 => {
-                let array: Vec<u8> = data.try_into()?;
-                Ok(U8(af::Array::new(&array, dim)))
-            }
-            UInt16 => {
-                let array: Vec<u16> = data.try_into()?;
-                Ok(U16(af::Array::new(&array, dim)))
-            }
-            UInt32 => {
-                let array: Vec<u32> = data.try_into()?;
-                Ok(U32(af::Array::new(&array, dim)))
-            }
-            UInt64 => {
-                let array: Vec<u64> = data.try_into()?;
-                Ok(U64(af::Array::new(&array, dim)))
-            }
-            other => Err(error::bad_request("Tensor does not support", other)),
-        }
+        let chunk = match dtype {
+            TCType::Bool => ChunkData::Bool(data.try_into()?),
+            Complex32 => C32(data.try_into()?),
+            Complex64 => C64(data.try_into()?),
+            Float32 => F32(data.try_into()?),
+            Float64 => F64(data.try_into()?),
+            Int16 => I16(data.try_into()?),
+            Int32 => I32(data.try_into()?),
+            Int64 => I64(data.try_into()?),
+            UInt8 => U8(data.try_into()?),
+            UInt16 => U16(data.try_into()?),
+            UInt32 => U32(data.try_into()?),
+            UInt64 => U64(data.try_into()?),
+            other => return Err(error::bad_request("Tensor does not support", other)),
+        };
+
+        Ok(chunk)
+    }
+
+    pub fn into_type(self, _dtype: TCType) -> ChunkData {
+        panic!("NOT IMPLEMENTED")
     }
 
     pub fn all(&self) -> bool {
         use ChunkData::*;
         match self {
-            Bool(b) => af::all_true_all(b).0 > 0.0f64,
-            C32(c) => af::all_true_all(c).0 > 0.0f64,
-            C64(c) => af::all_true_all(c).0 > 0.0f64,
-            F32(f) => af::all_true_all(f).0 > 0.0f64,
-            F64(f) => af::all_true_all(f).0 > 0.0f64,
-            I16(i) => af::all_true_all(i).0 > 0.0f64,
-            I32(i) => af::all_true_all(i).0 > 0.0f64,
-            I64(i) => af::all_true_all(i).0 > 0.0f64,
-            U8(u) => af::all_true_all(u).0 > 0.0f64,
-            U16(u) => af::all_true_all(u).0 > 0.0f64,
-            U32(u) => af::all_true_all(u).0 > 0.0f64,
-            U64(u) => af::all_true_all(u).0 > 0.0f64,
+            Bool(b) => b.all(),
+            C32(c) => c.all(),
+            C64(c) => c.all(),
+            F32(f) => f.all(),
+            F64(f) => f.all(),
+            I16(i) => i.all(),
+            I32(i) => i.all(),
+            I64(i) => i.all(),
+            U8(u) => u.all(),
+            U16(u) => u.all(),
+            U32(u) => u.all(),
+            U64(u) => u.all(),
         }
     }
 
     pub fn any(&self) -> bool {
         use ChunkData::*;
         match self {
-            Bool(b) => af::any_true_all(b).0 > 0.0f64,
-            C32(c) => af::any_true_all(c).0 > 0.0f64,
-            C64(c) => af::any_true_all(c).0 > 0.0f64,
-            F32(f) => af::any_true_all(f).0 > 0.0f64,
-            F64(f) => af::any_true_all(f).0 > 0.0f64,
-            I16(i) => af::any_true_all(i).0 > 0.0f64,
-            I32(i) => af::any_true_all(i).0 > 0.0f64,
-            I64(i) => af::any_true_all(i).0 > 0.0f64,
-            U8(u) => af::any_true_all(u).0 > 0.0f64,
-            U16(u) => af::any_true_all(u).0 > 0.0f64,
-            U32(u) => af::any_true_all(u).0 > 0.0f64,
-            U64(u) => af::any_true_all(u).0 > 0.0f64,
+            Bool(b) => b.any(),
+            C32(c) => c.any(),
+            C64(c) => c.any(),
+            F32(f) => f.any(),
+            F64(f) => f.any(),
+            I16(i) => i.any(),
+            I32(i) => i.any(),
+            I64(i) => i.any(),
+            U8(u) => u.any(),
+            U16(u) => u.any(),
+            U32(u) => u.any(),
+            U64(u) => u.any(),
         }
     }
 
@@ -336,78 +416,18 @@ impl ChunkData {
     fn get_at(&self, index: af::Indexer) -> Vec<Value> {
         use ChunkData::*;
         match self {
-            Bool(b) => {
-                let array = af::index_gen(b, index);
-                let mut value: Vec<bool> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            C32(c) => {
-                let array = af::index_gen(c, index);
-                let mut value: Vec<Complex<f32>> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            C64(c) => {
-                let array = af::index_gen(c, index);
-                let mut value: Vec<Complex<f64>> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            F32(f) => {
-                let array = af::index_gen(f, index);
-                let mut value: Vec<f32> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            F64(f) => {
-                let array = af::index_gen(f, index);
-                let mut value: Vec<f64> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            I16(i) => {
-                let array = af::index_gen(i, index);
-                let mut value: Vec<i16> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            I32(i) => {
-                let array = af::index_gen(i, index);
-                let mut value: Vec<i32> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            I64(i) => {
-                let array = af::index_gen(i, index);
-                let mut value: Vec<i64> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            U8(u) => {
-                let array = af::index_gen(u, index);
-                let mut value: Vec<u8> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            U16(u) => {
-                let array = af::index_gen(u, index);
-                let mut value: Vec<u16> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            U32(u) => {
-                let array = af::index_gen(u, index);
-                let mut value: Vec<u32> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
-            U64(u) => {
-                let array = af::index_gen(u, index);
-                let mut value: Vec<u64> = Vec::with_capacity(array.elements());
-                array.host(&mut value);
-                value.drain(..).map(|v| v.into()).collect()
-            }
+            Bool(b) => b.get(index),
+            C32(c) => c.get(index),
+            C64(c) => c.get(index),
+            F32(f) => f.get(index),
+            F64(f) => f.get(index),
+            I16(i) => i.get(index),
+            I32(i) => i.get(index),
+            I64(i) => i.get(index),
+            U8(i) => i.get(index),
+            U16(i) => i.get(index),
+            U32(i) => i.get(index),
+            U64(i) => i.get(index),
         }
     }
 
@@ -427,42 +447,18 @@ impl ChunkData {
     fn set_at(&mut self, index: af::Indexer, value: &ChunkData) -> TCResult<()> {
         use ChunkData::*;
         match (self, value) {
-            (Bool(l), Bool(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (C32(l), C32(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (C64(l), C64(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (F32(l), F32(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (F64(l), F64(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (I16(l), I16(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (I32(l), I32(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (I64(l), I64(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (U8(l), U8(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (U16(l), U16(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (U32(l), U32(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
-            (U64(l), U64(r)) => {
-                af::assign_gen(l, &index, &r);
-            }
+            (Bool(l), Bool(r)) => l.set(&index, r),
+            (C32(l), C32(r)) => l.set(&index, r),
+            (C64(l), C64(r)) => l.set(&index, r),
+            (F32(l), F32(r)) => l.set(&index, r),
+            (F64(l), F64(r)) => l.set(&index, r),
+            (I16(l), I16(r)) => l.set(&index, r),
+            (I32(l), I32(r)) => l.set(&index, r),
+            (I64(l), I64(r)) => l.set(&index, r),
+            (U8(l), U8(r)) => l.set(&index, r),
+            (U16(l), U16(r)) => l.set(&index, r),
+            (U32(l), U32(r)) => l.set(&index, r),
+            (U64(l), U64(r)) => l.set(&index, r),
             _ => {
                 return Err(error::internal(
                     "Attempted to assign a Tensor chunk with the wrong datatype!",
@@ -479,14 +475,12 @@ impl From<ChunkData> for Bytes {
         use ChunkData::*;
         match chunk {
             Bool(b) => {
-                let mut data: Vec<bool> = Vec::with_capacity(b.elements());
-                b.host(&mut data);
+                let mut data: Vec<bool> = b.into();
                 let data: Vec<u8> = data.drain(..).map(|i| if i { 1u8 } else { 0u8 }).collect();
                 data.into()
             }
             C32(c) => {
-                let mut data: Vec<Complex<f32>> = Vec::with_capacity(c.elements());
-                c.host(&mut data);
+                let mut data: Vec<Complex<f32>> = c.into();
                 let data: Vec<Vec<u8>> = data
                     .drain(..)
                     .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
@@ -494,8 +488,7 @@ impl From<ChunkData> for Bytes {
                 data.into_iter().flatten().collect::<Vec<u8>>().into()
             }
             C64(c) => {
-                let mut data: Vec<Complex<f64>> = Vec::with_capacity(c.elements());
-                c.host(&mut data);
+                let mut data: Vec<Complex<f64>> = c.into();
                 let data: Vec<Vec<u8>> = data
                     .drain(..)
                     .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
@@ -503,55 +496,46 @@ impl From<ChunkData> for Bytes {
                 data.into_iter().flatten().collect::<Vec<u8>>().into()
             }
             F32(f) => {
-                let mut data: Vec<f32> = Vec::with_capacity(f.elements());
-                f.host(&mut data);
+                let mut data: Vec<f32> = f.into();
                 let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
                 data[..].concat().into()
             }
             F64(f) => {
-                let mut data: Vec<f64> = Vec::with_capacity(f.elements());
-                f.host(&mut data);
+                let mut data: Vec<f64> = f.into();
                 let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
                 data[..].concat().into()
             }
             I16(i) => {
-                let mut data: Vec<i16> = Vec::with_capacity(i.elements());
-                i.host(&mut data);
+                let mut data: Vec<i16> = i.into();
                 let data: Vec<[u8; 2]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
                 data[..].concat().into()
             }
             I32(i) => {
-                let mut data: Vec<i32> = Vec::with_capacity(i.elements());
-                i.host(&mut data);
+                let mut data: Vec<i32> = i.into();
                 let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
                 data[..].concat().into()
             }
             I64(i) => {
-                let mut data: Vec<i64> = Vec::with_capacity(i.elements());
-                i.host(&mut data);
+                let mut data: Vec<i64> = i.into();
                 let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
                 data[..].concat().into()
             }
             U8(b) => {
-                let mut data: Vec<u8> = Vec::with_capacity(b.elements());
-                b.host(&mut data);
+                let data: Vec<u8> = b.into();
                 data.into()
             }
             U16(u) => {
-                let mut data: Vec<u16> = Vec::with_capacity(u.elements());
-                u.host(&mut data);
+                let mut data: Vec<u16> = u.into();
                 let data: Vec<[u8; 2]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
                 data[..].concat().into()
             }
             U32(u) => {
-                let mut data: Vec<u32> = Vec::with_capacity(u.elements());
-                u.host(&mut data);
+                let mut data: Vec<u32> = u.into();
                 let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
                 data[..].concat().into()
             }
             U64(u) => {
-                let mut data: Vec<u64> = Vec::with_capacity(u.elements());
-                u.host(&mut data);
+                let mut data: Vec<u64> = u.into();
                 let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
                 data[..].concat().into()
             }
@@ -576,84 +560,84 @@ impl TryFrom<Value> for ChunkData {
 impl From<Vec<bool>> for ChunkData {
     fn from(b: Vec<bool>) -> ChunkData {
         let data = af::Array::new(&b, dim4(b.len()));
-        ChunkData::Bool(data)
+        ChunkData::Bool(data.into())
     }
 }
 
 impl From<Vec<Complex<f32>>> for ChunkData {
     fn from(c: Vec<Complex<f32>>) -> ChunkData {
         let data = af::Array::new(&c, dim4(c.len()));
-        ChunkData::C32(data)
+        ChunkData::C32(data.into())
     }
 }
 
 impl From<Vec<Complex<f64>>> for ChunkData {
     fn from(c: Vec<Complex<f64>>) -> ChunkData {
         let data = af::Array::new(&c, dim4(c.len()));
-        ChunkData::C64(data)
+        ChunkData::C64(data.into())
     }
 }
 
 impl From<Vec<f32>> for ChunkData {
     fn from(f: Vec<f32>) -> ChunkData {
         let data = af::Array::new(&f, dim4(f.len()));
-        ChunkData::F32(data)
+        ChunkData::F32(data.into())
     }
 }
 
 impl From<Vec<f64>> for ChunkData {
     fn from(f: Vec<f64>) -> ChunkData {
         let data = af::Array::new(&f, dim4(f.len()));
-        ChunkData::F64(data)
+        ChunkData::F64(data.into())
     }
 }
 
 impl From<Vec<i16>> for ChunkData {
     fn from(i: Vec<i16>) -> ChunkData {
         let data = af::Array::new(&i, dim4(i.len()));
-        ChunkData::I16(data)
+        ChunkData::I16(data.into())
     }
 }
 
 impl From<Vec<i32>> for ChunkData {
     fn from(i: Vec<i32>) -> ChunkData {
         let data = af::Array::new(&i, dim4(i.len()));
-        ChunkData::I32(data)
+        ChunkData::I32(data.into())
     }
 }
 
 impl From<Vec<i64>> for ChunkData {
     fn from(i: Vec<i64>) -> ChunkData {
         let data = af::Array::new(&i, dim4(i.len()));
-        ChunkData::I64(data)
+        ChunkData::I64(data.into())
     }
 }
 
 impl From<Vec<u8>> for ChunkData {
     fn from(u: Vec<u8>) -> ChunkData {
         let data = af::Array::new(&u, dim4(u.len()));
-        ChunkData::U8(data)
+        ChunkData::U8(data.into())
     }
 }
 
 impl From<Vec<u16>> for ChunkData {
     fn from(u: Vec<u16>) -> ChunkData {
         let data = af::Array::new(&u, dim4(u.len()));
-        ChunkData::U16(data)
+        ChunkData::U16(data.into())
     }
 }
 
 impl From<Vec<u32>> for ChunkData {
     fn from(u: Vec<u32>) -> ChunkData {
         let data = af::Array::new(&u, dim4(u.len()));
-        ChunkData::U32(data)
+        ChunkData::U32(data.into())
     }
 }
 
 impl From<Vec<u64>> for ChunkData {
     fn from(u: Vec<u64>) -> ChunkData {
         let data = af::Array::new(&u, dim4(u.len()));
-        ChunkData::U64(data)
+        ChunkData::U64(data.into())
     }
 }
 
@@ -661,66 +645,18 @@ impl From<ChunkData> for Vec<Value> {
     fn from(chunk: ChunkData) -> Vec<Value> {
         use ChunkData::*;
         match chunk {
-            Bool(b) => {
-                let mut data: Vec<bool> = Vec::with_capacity(b.elements());
-                b.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            C32(c) => {
-                let mut data: Vec<Complex<f32>> = Vec::with_capacity(c.elements());
-                c.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            C64(c) => {
-                let mut data: Vec<Complex<f64>> = Vec::with_capacity(c.elements());
-                c.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            F32(f) => {
-                let mut data: Vec<f32> = Vec::with_capacity(f.elements());
-                f.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            F64(f) => {
-                let mut data: Vec<f64> = Vec::with_capacity(f.elements());
-                f.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            I16(i) => {
-                let mut data: Vec<i16> = Vec::with_capacity(i.elements());
-                i.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            I32(i) => {
-                let mut data: Vec<i32> = Vec::with_capacity(i.elements());
-                i.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            I64(i) => {
-                let mut data: Vec<i64> = Vec::with_capacity(i.elements());
-                i.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            U8(u) => {
-                let mut data: Vec<u8> = Vec::with_capacity(u.elements());
-                u.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            U16(u) => {
-                let mut data: Vec<u16> = Vec::with_capacity(u.elements());
-                u.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            U32(u) => {
-                let mut data: Vec<i32> = Vec::with_capacity(u.elements());
-                u.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
-            U64(u) => {
-                let mut data: Vec<u64> = Vec::with_capacity(u.elements());
-                u.host(&mut data);
-                data.drain(..).map(|v| v.into()).collect()
-            }
+            Bool(b) => b.into(),
+            C32(c) => c.into(),
+            C64(c) => c.into(),
+            F32(f) => f.into(),
+            F64(f) => f.into(),
+            I16(i) => i.into(),
+            I32(i) => i.into(),
+            I64(i) => i.into(),
+            U8(u) => u.into(),
+            U16(u) => u.into(),
+            U32(u) => u.into(),
+            U64(u) => u.into(),
         }
     }
 }

@@ -26,7 +26,18 @@ pub trait BlockTensorView: TensorView + 'static {
     type ChunkStream: Stream<Item = TCResult<ChunkData>> + Send;
     type ValueStream: Stream<Item = TCResult<Value>> + Send;
 
-    async fn as_dtype(&self, _txn: &Arc<Txn>, _dtype: TCType) -> TCResult<BlockTensor> {
+    async fn as_dtype(self: Arc<Self>, txn: Arc<Txn>, dtype: TCType) -> TCResult<BlockTensor> {
+        let shape = self.shape().clone();
+        let per_block = per_block(dtype)?;
+        let source = self
+            .chunk_stream(txn.id().clone())
+            .map(move |data| data.map(|d| d.into_type(dtype.clone())));
+        let values = ValueStream::new(source);
+        let chunks = ValueChunkStream::new(values, dtype, per_block);
+        BlockTensor::from_blocks(txn, shape, dtype, Box::pin(chunks)).await
+    }
+
+    async fn abs(&self, _txn: &Arc<Txn>) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
 
@@ -108,25 +119,22 @@ impl BlockTensor {
 
         let value_clone = value.clone();
         let blocks = (0..(size / per_block as u64))
-            .map(move |_| ChunkData::constant(value_clone.clone(), per_block).unwrap());
+            .map(move |_| ChunkData::constant(value_clone.clone(), per_block));
         let trailing_len = (size % (per_block as u64)) as usize;
-        let blocks: TCStream<ChunkData> = if trailing_len > 0 {
-            let blocks = blocks.chain(iter::once(
-                ChunkData::constant(value.clone(), trailing_len).unwrap(),
-            ));
+        let blocks: TCStream<TCResult<ChunkData>> = if trailing_len > 0 {
+            let blocks = blocks.chain(iter::once(ChunkData::constant(value.clone(), trailing_len)));
             Box::pin(stream::iter(blocks))
         } else {
             Box::pin(stream::iter(blocks))
         };
-        BlockTensor::from_blocks(txn, shape, value.dtype(), blocks, per_block).await
+        BlockTensor::from_blocks(txn, shape, value.dtype(), blocks).await
     }
 
     async fn from_blocks(
         txn: Arc<Txn>,
         shape: Shape,
         dtype: TCType,
-        mut blocks: Pin<Box<dyn Stream<Item = ChunkData> + Send>>,
-        per_block: usize,
+        mut blocks: Pin<Box<dyn Stream<Item = TCResult<ChunkData>> + Send>>,
     ) -> TCResult<BlockTensor> {
         let file = txn
             .context()
@@ -138,7 +146,7 @@ impl BlockTensor {
         let mut i: u64 = 0;
         while let Some(block) = blocks.next().await {
             file.clone()
-                .create_block(txn.id(), i.into(), block.into())
+                .create_block(txn.id(), i.into(), block?.into())
                 .await?;
             i += 1;
         }
@@ -153,7 +161,7 @@ impl BlockTensor {
             size,
             ndim,
             file,
-            per_block,
+            per_block: per_block(dtype).unwrap(),
             coord_index,
         })
     }

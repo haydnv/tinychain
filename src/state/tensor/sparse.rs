@@ -14,6 +14,8 @@ pub trait SparseTensorView: TensorView {
 
     async fn copy(&self, txn: &Arc<Txn>) -> TCResult<SparseTensor>;
 
+    async fn abs(&self, txn: &Arc<Txn>) -> TCResult<SparseTensor>;
+
     async fn sum(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<SparseTensor>;
 
     async fn product(&self, txn: &Arc<Txn>, axis: Option<usize>) -> TCResult<SparseTensor>;
