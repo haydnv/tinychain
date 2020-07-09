@@ -2,12 +2,10 @@ use std::fmt;
 use std::iter;
 use std::ops;
 
-use itertools::{Itertools, MultiProduct};
+use itertools::Itertools;
 use num::integer::Integer;
 
-use super::stream::AxisIter;
-
-pub type Coords = MultiProduct<AxisIter>;
+use super::stream::{AxisIter, Coords};
 
 #[derive(Clone)]
 pub enum AxisIndex {
@@ -19,6 +17,18 @@ pub enum AxisIndex {
 impl AxisIndex {
     pub fn all(dim: u64) -> AxisIndex {
         AxisIndex::In(0..dim, 1)
+    }
+}
+
+impl PartialEq for AxisIndex {
+    fn eq(&self, other: &AxisIndex) -> bool {
+        use AxisIndex::*;
+        match (self, other) {
+            (At(l), At(r)) if l == r => true,
+            (In(lr, ls), In(rr, rs)) if lr == rr && ls == rs => true,
+            (Of(l), Of(r)) if l == r => true,
+            _ => false,
+        }
     }
 }
 
@@ -89,19 +99,20 @@ impl Index {
         axes.iter().cloned().multi_cartesian_product()
     }
 
-    pub fn to_coord(self) -> Vec<u64> {
-        let mut indices = Vec::with_capacity(self.len());
-        for i in self.axes {
-            match i {
-                AxisIndex::At(i) => indices.push(i),
-                _ => panic!("Expected u64 but found {}", i),
-            }
-        }
-        indices
-    }
-
     pub fn len(&self) -> usize {
         self.axes.len()
+    }
+
+    pub fn ndim(&self) -> usize {
+        let mut ndim = 0;
+        use AxisIndex::*;
+        for axis in &self.axes {
+            match axis {
+                At(_) => {}
+                _ => ndim += 1,
+            }
+        }
+        ndim
     }
 
     pub fn normalize(&mut self, shape: &Shape) {
@@ -112,6 +123,24 @@ impl Index {
         }
     }
 }
+
+impl PartialEq for Index {
+    fn eq(&self, other: &Index) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        for axis in 0..self.len() {
+            if self[axis] != other[axis] {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl Eq for Index {}
 
 impl<Idx: std::slice::SliceIndex<[AxisIndex]>> ops::Index<Idx> for Index {
     type Output = Idx::Output;

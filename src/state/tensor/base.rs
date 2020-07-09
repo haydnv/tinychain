@@ -6,10 +6,9 @@ use async_trait::async_trait;
 use num::Integer;
 
 use crate::error;
-use crate::transaction::{Txn, TxnId};
-use crate::value::{TCResult, TCType, Value};
+use crate::transaction::TxnId;
+use crate::value::{TCResult, TCType};
 
-use super::dense::BlockTensor;
 use super::index::*;
 
 #[async_trait]
@@ -25,13 +24,6 @@ pub trait TensorView: Sized + Send + Sync {
     async fn all(&self, txn_id: &TxnId) -> TCResult<bool>;
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool>;
-
-    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value>;
-}
-
-#[async_trait]
-pub trait ToDense: TensorView {
-    async fn to_dense(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 pub trait Broadcast: TensorView {
@@ -142,12 +134,6 @@ impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
     }
-
-    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value> {
-        self.source
-            .at(txn_id, self.invert_index(coord.into()).to_coord())
-            .await
-    }
 }
 
 impl<T: TensorView + Slice> Rebase for TensorBroadcast<T> {
@@ -236,12 +222,6 @@ impl<T: TensorView + Slice> TensorView for Expansion<T> {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
-    }
-
-    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value> {
-        self.source
-            .at(txn_id, self.invert_index(coord.into()).to_coord())
-            .await
     }
 }
 
@@ -335,12 +315,6 @@ impl<T: TensorView + Slice> TensorView for Permutation<T> {
 
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.source.any(txn_id).await
-    }
-
-    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value> {
-        self.source
-            .at(txn_id, self.invert_index(coord.into()).to_coord())
-            .await
     }
 }
 
@@ -486,12 +460,6 @@ impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
 
     async fn any(&self, _txn_id: &TxnId) -> TCResult<bool> {
         panic!("NOT IMPLEMENTED")
-    }
-
-    async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value> {
-        self.source
-            .at(txn_id, self.invert_index(coord.into()).to_coord())
-            .await
     }
 }
 

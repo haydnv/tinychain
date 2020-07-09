@@ -284,69 +284,93 @@ impl ChunkData {
         }
     }
 
-    pub fn get(&self, index: usize) -> Value {
+    pub fn get_one(&self, index: usize) -> Option<Value> {
         let seq = af::Seq::new(index as f64, index as f64, 1.0f64);
+        let mut indexer = af::Indexer::default();
+        indexer.set_index(&seq, 0, None);
+        self.get_at(indexer).pop()
+    }
+
+    pub fn get(&self, index: af::Array<u64>) -> Vec<Value> {
+        let mut indexer = af::Indexer::default();
+        indexer.set_index(&index, 0, Some(false));
+        self.get_at(indexer)
+    }
+
+    fn get_at(&self, index: af::Indexer) -> Vec<Value> {
         use ChunkData::*;
         match self {
             Bool(b) => {
-                let mut value: Vec<bool> = Vec::with_capacity(1);
-                af::index(b, &[seq]).host(&mut value);
-                value[0].into()
+                let array = af::index_gen(b, index);
+                let mut value: Vec<bool> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
             C32(c) => {
-                let mut value: Vec<Complex<f32>> = Vec::with_capacity(1);
-                af::index(c, &[seq]).host(&mut value);
-                value[0].into()
+                let array = af::index_gen(c, index);
+                let mut value: Vec<Complex<f32>> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
             C64(c) => {
-                let mut value: Vec<Complex<f64>> = Vec::with_capacity(1);
-                af::index(c, &[seq]).host(&mut value);
-                value[0].into()
+                let array = af::index_gen(c, index);
+                let mut value: Vec<Complex<f64>> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
             F32(f) => {
-                let mut value: Vec<f32> = Vec::with_capacity(1);
-                af::index(f, &[seq]).host(&mut value);
-                value[0].into()
+                let array = af::index_gen(f, index);
+                let mut value: Vec<f32> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
             F64(f) => {
-                let mut value: Vec<f64> = Vec::with_capacity(1);
-                af::index(f, &[seq]).host(&mut value);
-                value[0].into()
+                let array = af::index_gen(f, index);
+                let mut value: Vec<f64> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
-            I16(f) => {
-                let mut value: Vec<i16> = Vec::with_capacity(1);
-                af::index(f, &[seq]).host(&mut value);
-                value[0].into()
+            I16(i) => {
+                let array = af::index_gen(i, index);
+                let mut value: Vec<i16> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
-            I32(f) => {
-                let mut value: Vec<i32> = Vec::with_capacity(1);
-                af::index(f, &[seq]).host(&mut value);
-                value[0].into()
+            I32(i) => {
+                let array = af::index_gen(i, index);
+                let mut value: Vec<i32> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
-            I64(f) => {
-                let mut value: Vec<i64> = Vec::with_capacity(1);
-                af::index(f, &[seq]).host(&mut value);
-                value[0].into()
+            I64(i) => {
+                let array = af::index_gen(i, index);
+                let mut value: Vec<i64> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
-            U8(f) => {
-                let mut value: Vec<u8> = Vec::with_capacity(1);
-                af::index(f, &[seq]).host(&mut value);
-                value[0].into()
+            U8(u) => {
+                let array = af::index_gen(u, index);
+                let mut value: Vec<u8> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
-            U16(f) => {
-                let mut value: Vec<u16> = Vec::with_capacity(1);
-                af::index(f, &[seq]).host(&mut value);
-                value[0].into()
+            U16(u) => {
+                let array = af::index_gen(u, index);
+                let mut value: Vec<u16> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
-            U32(f) => {
-                let mut value: Vec<u32> = Vec::with_capacity(1);
-                af::index(f, &[seq]).host(&mut value);
-                value[0].into()
+            U32(u) => {
+                let array = af::index_gen(u, index);
+                let mut value: Vec<u32> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
-            U64(f) => {
-                let mut value: Vec<u64> = Vec::with_capacity(1);
-                af::index(f, &[seq]).host(&mut value);
-                value[0].into()
+            U64(u) => {
+                let array = af::index_gen(u, index);
+                let mut value: Vec<u64> = Vec::with_capacity(array.elements());
+                array.host(&mut value);
+                value.drain(..).map(|v| v.into()).collect()
             }
         }
     }
@@ -594,6 +618,74 @@ impl From<Vec<u64>> for ChunkData {
     fn from(u: Vec<u64>) -> ChunkData {
         let data = af::Array::new(&u, dim4(u.len()));
         ChunkData::U64(data)
+    }
+}
+
+impl From<ChunkData> for Vec<Value> {
+    fn from(chunk: ChunkData) -> Vec<Value> {
+        use ChunkData::*;
+        match chunk {
+            Bool(b) => {
+                let mut data: Vec<bool> = Vec::with_capacity(b.elements());
+                b.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            C32(c) => {
+                let mut data: Vec<Complex<f32>> = Vec::with_capacity(c.elements());
+                c.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            C64(c) => {
+                let mut data: Vec<Complex<f64>> = Vec::with_capacity(c.elements());
+                c.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            F32(f) => {
+                let mut data: Vec<f32> = Vec::with_capacity(f.elements());
+                f.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            F64(f) => {
+                let mut data: Vec<f64> = Vec::with_capacity(f.elements());
+                f.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            I16(i) => {
+                let mut data: Vec<i16> = Vec::with_capacity(i.elements());
+                i.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            I32(i) => {
+                let mut data: Vec<i32> = Vec::with_capacity(i.elements());
+                i.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            I64(i) => {
+                let mut data: Vec<i64> = Vec::with_capacity(i.elements());
+                i.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            U8(u) => {
+                let mut data: Vec<u8> = Vec::with_capacity(u.elements());
+                u.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            U16(u) => {
+                let mut data: Vec<u16> = Vec::with_capacity(u.elements());
+                u.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            U32(u) => {
+                let mut data: Vec<i32> = Vec::with_capacity(u.elements());
+                u.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+            U64(u) => {
+                let mut data: Vec<u64> = Vec::with_capacity(u.elements());
+                u.host(&mut data);
+                data.drain(..).map(|v| v.into()).collect()
+            }
+        }
     }
 }
 
