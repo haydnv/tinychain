@@ -229,6 +229,14 @@ impl Shape {
     }
 }
 
+impl PartialEq for Shape {
+    fn eq(&self, other: &Shape) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Eq for Shape {}
+
 impl<Idx: std::slice::SliceIndex<[u64]>> ops::Index<Idx> for Shape {
     type Output = Idx::Output;
 

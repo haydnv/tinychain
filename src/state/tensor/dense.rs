@@ -192,6 +192,11 @@ impl BlockTensor {
             ));
         }
 
+        let selection_shape = self.shape.selection(index);
+        if &selection_shape != value.shape() {
+            return Err(error::bad_request(&format!("Cannot write a Tensor of shape {} to a Tensor slice of shape", value.shape()), selection_shape));
+        }
+
         let block_size = value.per_block;
         let ndim = value.ndim();
 
