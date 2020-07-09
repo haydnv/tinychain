@@ -5,6 +5,8 @@ use std::ops;
 use itertools::{Itertools, MultiProduct};
 use num::integer::Integer;
 
+pub type Coords = MultiProduct<AxisIter>;
+
 #[derive(Clone)]
 pub enum AxisIndex {
     At(u64),
@@ -71,14 +73,14 @@ impl Index {
             .into()
     }
 
-    pub fn affected(&self) -> MultiProduct<AxisIter> {
+    pub fn affected(&self) -> Coords {
         use AxisIndex::*;
         let mut axes = Vec::with_capacity(self.len());
         for axis in 0..self.len() {
             axes.push(match &self[axis] {
                 At(i) => AxisIter::One(iter::once(*i)),
                 In(range, step) => AxisIter::Step(range.clone().step_by(*step as usize)),
-                Of(indices) => AxisIter::Each(indices.iter()),
+                Of(indices) => AxisIter::Each(indices.to_vec(), 0),
             });
         }
 
@@ -154,6 +156,14 @@ impl fmt::Display for Index {
 pub struct Shape(Vec<u64>);
 
 impl Shape {
+    pub fn all(&self) -> Index {
+        let mut axes = Vec::with_capacity(self.len());
+        for dim in &self.0 {
+            axes.push(AxisIndex::In(0..*dim, 1));
+        }
+        axes.into()
+    }
+
     pub fn contains(&self, coord: &Index) -> bool {
         if coord.len() > self.len() {
             return false;
@@ -248,20 +258,26 @@ impl fmt::Display for Shape {
 }
 
 #[derive(Clone)]
-pub enum AxisIter<'a> {
+pub enum AxisIter {
     One(std::iter::Once<u64>),
-    Each(std::slice::Iter<'a, u64>),
+    Each(Vec<u64>, usize),
     Step(iter::StepBy<ops::Range<u64>>),
 }
 
-impl<'a> Iterator for AxisIter<'a> {
+impl Iterator for AxisIter {
     type Item = u64;
 
     fn next(&mut self) -> Option<u64> {
         use AxisIter::*;
         match self {
             One(iter) => iter.next(),
-            Each(iter) => iter.next().map(|i| *i),
+            Each(v, at) => {
+                if at == &v.len() {
+                    None
+                } else {
+                    Some(v[*at])
+                }
+            }
             Step(iter) => iter.next(),
         }
     }

@@ -30,29 +30,14 @@ pub trait SparseTensorView: TensorView {
         other: &T,
     ) -> TCResult<SparseTensor>;
 
-    async fn equals<T: SparseTensorView>(
-        &self,
-        txn: &Arc<Txn>,
-        other: &T,
-    ) -> TCResult<BlockTensor>;
+    async fn equals<T: SparseTensorView>(&self, txn: &Arc<Txn>, other: &T)
+        -> TCResult<BlockTensor>;
 
-    async fn and<T: SparseTensorView>(
-        &self,
-        txn: &Arc<Txn>,
-        other: &T,
-    ) -> TCResult<SparseTensor>;
+    async fn and<T: SparseTensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<SparseTensor>;
 
-    async fn or<T: SparseTensorView>(
-        &self,
-        txn: &Arc<Txn>,
-        other: &T,
-    ) -> TCResult<SparseTensor>;
+    async fn or<T: SparseTensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<SparseTensor>;
 
-    async fn xor<T: SparseTensorView>(
-        &self,
-        txn: &Arc<Txn>,
-        other: &T,
-    ) -> TCResult<BlockTensor>;
+    async fn xor<T: SparseTensorView>(&self, txn: &Arc<Txn>, other: &T) -> TCResult<BlockTensor>;
 
     async fn not(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
 

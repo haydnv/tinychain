@@ -27,7 +27,7 @@ pub trait TensorView: Sized + Send + Sync {
 }
 
 pub trait Broadcast: TensorView {
-    fn broadcast(self: Arc<Self>, shape: Shape) -> TCResult<TensorBroadcast<Self>>;
+    fn broadcast(self: Arc<Self>, shape: Shape) -> TCResult<Arc<TensorBroadcast<Self>>>;
 }
 
 pub trait Expand: TensorView {
@@ -55,7 +55,10 @@ pub trait Rebase: TensorView {
 pub trait Transpose: TensorView {
     type Permutation: TensorView;
 
-    fn transpose(self: Arc<Self>, permutation: Option<Vec<usize>>) -> TCResult<Arc<Self::Permutation>>;
+    fn transpose(
+        self: Arc<Self>,
+        permutation: Option<Vec<usize>>,
+    ) -> TCResult<Arc<Self::Permutation>>;
 }
 
 pub struct TensorBroadcast<T: TensorView> {
@@ -432,7 +435,10 @@ impl<T: TensorView + Slice> Slice for TensorSlice<T> {
     type Slice = TensorSlice<T>;
 
     fn slice(self: Arc<Self>, index: Index) -> TCResult<Arc<Self::Slice>> {
-        Ok(Arc::new(TensorSlice::new(self.source.clone(), self.invert_index(index))?))
+        Ok(Arc::new(TensorSlice::new(
+            self.source.clone(),
+            self.invert_index(index),
+        )?))
     }
 }
 
