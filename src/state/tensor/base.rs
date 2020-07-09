@@ -6,9 +6,10 @@ use async_trait::async_trait;
 use num::Integer;
 
 use crate::error;
-use crate::transaction::TxnId;
+use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCType, Value};
 
+use super::dense::BlockTensor;
 use super::index::*;
 
 #[async_trait]
@@ -26,6 +27,11 @@ pub trait TensorView: Sized + Send + Sync {
     async fn any(&self, txn_id: &TxnId) -> TCResult<bool>;
 
     async fn at<'a>(&'a self, txn_id: &'a TxnId, coord: Vec<u64>) -> TCResult<Value>;
+}
+
+#[async_trait]
+pub trait ToDense: TensorView {
+    async fn to_dense(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 pub trait Broadcast: TensorView {

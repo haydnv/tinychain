@@ -26,10 +26,6 @@ pub trait BlockTensorView: TensorView {
         Err(error::not_implemented())
     }
 
-    async fn copy(self: Arc<Self>, _txn: Arc<Txn>) -> TCResult<BlockTensor> {
-        Err(error::not_implemented())
-    }
-
     async fn sum(&self, _txn: &Arc<Txn>, _axis: Option<usize>) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
     }
@@ -90,9 +86,6 @@ impl Slice for BlockTensor {
         Ok(Arc::new(TensorSlice::new(self, index)?))
     }
 }
-
-#[async_trait]
-impl BlockTensorView for TensorSlice<BlockTensor> {}
 
 pub struct BlockTensor {
     dtype: TCType,
@@ -321,8 +314,8 @@ impl TensorView for BlockTensor {
 }
 
 #[async_trait]
-impl BlockTensorView for BlockTensor {
-    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<BlockTensor> {
+impl ToDense for BlockTensor {
+    async fn to_dense(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         let blocks = self.clone().blocks(txn.id().clone());
         let blocks = blocks.map(|chunk| chunk.data().clone());
         BlockTensor::from_blocks(
@@ -337,13 +330,16 @@ impl BlockTensorView for BlockTensor {
 }
 
 #[async_trait]
-impl<T: BlockTensorView + Slice + 'static> BlockTensorView for TensorBroadcast<T> {
-    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<BlockTensor> {
+impl<T: Rebase> ToDense for T {
+    async fn to_dense(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         let dtype = self.source().dtype();
         let shape = self.shape().clone();
         let size = shape.size();
         let ndim = shape.len();
         let per_block = BLOCK_SIZE / self.dtype().size().unwrap();
+        let coord_index = (0..ndim)
+            .map(|axis| shape[axis + 1..].iter().product())
+            .collect();
 
         let source_coords = stream::iter(self.shape().all().affected())
             .map(|coord| self.invert_index(coord.into()));
@@ -367,10 +363,6 @@ impl<T: BlockTensorView + Slice + 'static> BlockTensorView for TensorBroadcast<T
                 block_id += 1;
             }
         }
-
-        let coord_index = (0..ndim)
-            .map(|axis| shape[axis + 1..].iter().product())
-            .collect();
 
         Ok(BlockTensor {
             dtype,
