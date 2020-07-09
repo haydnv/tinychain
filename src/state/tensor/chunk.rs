@@ -284,6 +284,24 @@ impl ChunkData {
         }
     }
 
+    pub fn all(&self) -> bool {
+        use ChunkData::*;
+        match self {
+            Bool(b) => af::all_true_all(b).0 > 0.0f64,
+            C32(c) => af::all_true_all(c).0 > 0.0f64,
+            C64(c) => af::all_true_all(c).0 > 0.0f64,
+            F32(f) => af::all_true_all(f).0 > 0.0f64,
+            F64(f) => af::all_true_all(f).0 > 0.0f64,
+            I16(i) => af::all_true_all(i).0 > 0.0f64,
+            I32(i) => af::all_true_all(i).0 > 0.0f64,
+            I64(i) => af::all_true_all(i).0 > 0.0f64,
+            U8(u) => af::all_true_all(u).0 > 0.0f64,
+            U16(u) => af::all_true_all(u).0 > 0.0f64,
+            U32(u) => af::all_true_all(u).0 > 0.0f64,
+            U64(u) => af::all_true_all(u).0 > 0.0f64,
+        }
+    }
+
     pub fn get_one(&self, index: usize) -> Option<Value> {
         let seq = af::Seq::new(index as f64, index as f64, 1.0f64);
         let mut indexer = af::Indexer::default();

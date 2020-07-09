@@ -21,9 +21,9 @@ pub trait TensorView: Sized + Send + Sync {
 
     fn size(&self) -> u64;
 
-    async fn all(&self, txn_id: &TxnId) -> TCResult<bool>;
+    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool>;
 
-    async fn any(&self, txn_id: &TxnId) -> TCResult<bool>;
+    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool>;
 }
 
 pub trait Broadcast: TensorView {
@@ -127,12 +127,12 @@ impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
         self.size
     }
 
-    async fn all(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.source.all(txn_id).await
+    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        self.source.clone().all(txn_id).await
     }
 
-    async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.source.any(txn_id).await
+    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        self.source.clone().any(txn_id).await
     }
 }
 
@@ -216,12 +216,12 @@ impl<T: TensorView + Slice> TensorView for Expansion<T> {
         self.size
     }
 
-    async fn all(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.source.all(txn_id).await
+    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        self.source.clone().all(txn_id).await
     }
 
-    async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.source.any(txn_id).await
+    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        self.source.clone().any(txn_id).await
     }
 }
 
@@ -309,12 +309,12 @@ impl<T: TensorView + Slice> TensorView for Permutation<T> {
         self.size
     }
 
-    async fn all(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.source.all(txn_id).await
+    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        self.source.clone().all(txn_id).await
     }
 
-    async fn any(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.source.any(txn_id).await
+    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        self.source.clone().any(txn_id).await
     }
 }
 
@@ -454,11 +454,11 @@ impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
         self.size
     }
 
-    async fn all(&self, _txn_id: &TxnId) -> TCResult<bool> {
+    async fn all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<bool> {
         panic!("NOT IMPLEMENTED")
     }
 
-    async fn any(&self, _txn_id: &TxnId) -> TCResult<bool> {
+    async fn any(self: Arc<Self>, _txn_id: TxnId) -> TCResult<bool> {
         panic!("NOT IMPLEMENTED")
     }
 }

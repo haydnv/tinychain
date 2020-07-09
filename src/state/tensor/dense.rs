@@ -23,8 +23,8 @@ const ERR_CORRUPT: &str = "BlockTensor corrupted! Please restart Tinychain and f
 
 #[async_trait]
 pub trait BlockTensorView: TensorView + 'static {
-    type ChunkStream: Stream<Item = TCResult<ChunkData>>;
-    type ValueStream: Stream<Item = TCResult<Value>>;
+    type ChunkStream: Stream<Item = TCResult<ChunkData>> + Send;
+    type ValueStream: Stream<Item = TCResult<Value>> + Send;
 
     async fn as_dtype(&self, _txn: &Arc<Txn>, _dtype: TCType) -> TCResult<BlockTensor> {
         Err(error::not_implemented())
@@ -293,7 +293,7 @@ impl BlockTensor {
         chunk
             .data()
             .get_one(offset as usize)
-            .ok_or(error::internal(ERR_CORRUPT))
+            .ok_or_else(|| error::internal(ERR_CORRUPT))
     }
 }
 
@@ -315,19 +315,26 @@ impl TensorView for BlockTensor {
         self.size
     }
 
-    async fn all(&self, _txn_id: &TxnId) -> TCResult<bool> {
-        panic!("NOT IMPLEMENTED")
+    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        let mut chunks = self.chunk_stream(txn_id.clone());
+        while let Some(chunk) = chunks.next().await {
+            if !chunk?.all() {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
-    async fn any(&self, _txn_id: &TxnId) -> TCResult<bool> {
+    async fn any(self: Arc<Self>, _txn_id: TxnId) -> TCResult<bool> {
         panic!("NOT IMPLEMENTED")
     }
 }
 
 #[async_trait]
 impl BlockTensorView for BlockTensor {
-    type ChunkStream = Pin<Box<dyn Stream<Item = TCResult<ChunkData>>>>;
-    type ValueStream = Pin<Box<dyn Stream<Item = TCResult<Value>>>>;
+    type ChunkStream = Pin<Box<dyn Stream<Item = TCResult<ChunkData>> + Send>>;
+    type ValueStream = Pin<Box<dyn Stream<Item = TCResult<Value>> + Send>>;
 
     fn chunk_stream(self: Arc<Self>, txn_id: TxnId) -> Self::ChunkStream {
         Box::pin(self.blocks(txn_id).map(|chunk| Ok(chunk.data().clone())))
