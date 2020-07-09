@@ -103,23 +103,17 @@ impl<T: Stream<Item = TCResult<Value>>> Stream for ValueChunkStream<T> {
 
 pub struct ValueStream<T: Stream<Item = TCResult<ChunkData>>> {
     source: Pin<Box<T>>,
-    dtype: TCType,
     buffer: VecDeque<Value>,
     valid: bool,
 }
 
 impl<T: Stream<Item = TCResult<ChunkData>>> ValueStream<T> {
-    pub fn new(source: T, dtype: TCType) -> ValueStream<T> {
+    pub fn new(source: T) -> ValueStream<T> {
         ValueStream {
             source: Box::pin(source),
-            dtype,
             buffer: VecDeque::new(),
             valid: true,
         }
-    }
-
-    pub fn dtype(&self) -> TCType {
-        self.dtype
     }
 }
 

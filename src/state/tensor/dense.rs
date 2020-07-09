@@ -316,7 +316,7 @@ impl TensorView for BlockTensor {
     }
 
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
-        let mut chunks = self.chunk_stream(txn_id.clone());
+        let mut chunks = self.chunk_stream(txn_id);
         while let Some(chunk) = chunks.next().await {
             if !chunk?.all() {
                 return Ok(false);
@@ -326,8 +326,15 @@ impl TensorView for BlockTensor {
         Ok(true)
     }
 
-    async fn any(self: Arc<Self>, _txn_id: TxnId) -> TCResult<bool> {
-        panic!("NOT IMPLEMENTED")
+    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        let mut chunks = self.chunk_stream(txn_id);
+        while let Some(chunk) = chunks.next().await {
+            if !chunk?.any() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 }
 
@@ -342,8 +349,7 @@ impl BlockTensorView for BlockTensor {
 
     fn value_stream(self: Arc<Self>, txn_id: TxnId, index: Index) -> Self::ValueStream {
         if index == self.shape().all() {
-            let dtype = self.dtype;
-            return Box::pin(ValueStream::new(self.chunk_stream(txn_id), dtype));
+            return Box::pin(ValueStream::new(self.chunk_stream(txn_id)));
         }
 
         assert!(self.shape().contains(&index));
