@@ -47,8 +47,11 @@ impl<T: BlockTensorView> TensorUnary for T {
         BlockTensor::from_blocks(txn, shape, dtype, Box::pin(chunks)).await
     }
 
-    async fn copy(self: Arc<Self>, _txn: Arc<Txn>) -> TCResult<Self::Base> {
-        Err(error::not_implemented())
+    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Self::Base> {
+        let shape = self.shape().clone();
+        let dtype = self.dtype();
+        let blocks = Box::pin(self.chunk_stream(txn.id().clone()));
+        BlockTensor::from_blocks(txn, shape, dtype, blocks).await
     }
 
     async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Self::Base> {
