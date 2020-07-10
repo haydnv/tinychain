@@ -1,4 +1,3 @@
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::str::FromStr;
 
@@ -6,7 +5,7 @@ use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
 use crate::error;
-use crate::value::{TCResult, Value};
+use crate::value::TCResult;
 
 #[derive(Clone)]
 pub struct Version {
@@ -38,15 +37,6 @@ impl FromStr for Version {
                 patch: fields[2],
             })
         }
-    }
-}
-
-impl TryFrom<Value> for Version {
-    type Error = error::TCError;
-
-    fn try_from(value: Value) -> TCResult<Version> {
-        let version: String = value.try_into()?;
-        version.parse()
     }
 }
 

@@ -7,7 +7,7 @@ use num::Integer;
 
 use crate::error;
 use crate::transaction::{Txn, TxnId};
-use crate::value::{TCResult, TCType, Value};
+use crate::value::{Number, NumberType, TCResult};
 
 use super::index::*;
 
@@ -16,7 +16,7 @@ pub trait TensorUnary: TensorView {
     type Base: TensorView;
     type Dense: TensorView;
 
-    async fn as_dtype(self: Arc<Self>, txn: Arc<Txn>, dtype: TCType) -> TCResult<Self::Base>;
+    async fn as_dtype(self: Arc<Self>, txn: Arc<Txn>, dtype: NumberType) -> TCResult<Self::Base>;
 
     async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Self::Base>;
 
@@ -24,11 +24,11 @@ pub trait TensorUnary: TensorView {
 
     async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Self::Base>;
 
-    async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Value>;
+    async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
 
     async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Self::Base>;
 
-    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Value>;
+    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
 
     async fn not(self: Arc<Self>, txn: &Arc<Txn>) -> TCResult<Self::Dense>;
 }
@@ -61,7 +61,7 @@ pub trait TensorBoolean {
 }
 
 pub trait TensorView: Sized + Send + Sync {
-    fn dtype(&self) -> TCType;
+    fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;
 
@@ -162,7 +162,7 @@ impl<T: TensorView> TensorBroadcast<T> {
 
 #[async_trait]
 impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
-    fn dtype(&self) -> TCType {
+    fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
 
@@ -253,7 +253,7 @@ impl<T: TensorView> Expansion<T> {
 }
 
 impl<T: TensorView + Slice> TensorView for Expansion<T> {
-    fn dtype(&self) -> TCType {
+    fn dtype(&self) -> NumberType {
         self.source().dtype()
     }
 
@@ -348,7 +348,7 @@ impl<T: TensorView + Slice> Permutation<T> {
 }
 
 impl<T: TensorView + Slice> TensorView for Permutation<T> {
-    fn dtype(&self) -> TCType {
+    fn dtype(&self) -> NumberType {
         self.source().dtype()
     }
 
@@ -496,7 +496,7 @@ impl<T: TensorView + Slice> Slice for TensorSlice<T> {
 
 #[async_trait]
 impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
-    fn dtype(&self) -> TCType {
+    fn dtype(&self) -> NumberType {
         self.source().dtype()
     }
 

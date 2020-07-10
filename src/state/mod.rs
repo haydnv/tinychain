@@ -15,7 +15,6 @@ pub mod btree;
 mod dir;
 pub mod file;
 pub mod graph;
-mod table;
 pub mod tensor;
 
 pub type Dir = dir::Dir;

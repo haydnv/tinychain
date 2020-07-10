@@ -4,7 +4,7 @@ use std::convert::TryInto;
 use num::Integer;
 
 use crate::error;
-use crate::value::{TCResult, TCType, Value};
+use crate::value::{Number, NumberType, TCResult, TCType, Value};
 
 pub struct Collator {
     schema: Vec<TCType>,
@@ -22,10 +22,14 @@ impl Collator {
     }
 
     pub fn supports(dtype: &TCType) -> bool {
+        use NumberType::*;
         use TCType::*;
         match dtype {
-            Int32 => true,
-            UInt64 => true,
+            Number(ntype) => match ntype {
+                Int32 => true,
+                UInt64 => true,
+                _ => false,
+            },
             _ => false,
         }
     }
@@ -97,17 +101,24 @@ impl Collator {
     pub fn compare(&self, key1: &[Value], key2: &[Value]) -> Ordering {
         for i in 0..Ord::min(key1.len(), key2.len()) {
             match self.schema[i] {
-                TCType::Int32 => {
-                    return Collator::compare_integer::<i32>(
-                        key1[i].clone().try_into().unwrap(),
-                        key2[i].clone().try_into().unwrap(),
-                    )
-                }
-                TCType::UInt64 => {
-                    return Collator::compare_integer::<u64>(
-                        key1[i].clone().try_into().unwrap(),
-                        key2[i].clone().try_into().unwrap(),
-                    )
+                TCType::Number(ntype) => {
+                    let key1: Number = key1[i].clone().try_into().unwrap();
+                    let key2: Number = key2[i].clone().try_into().unwrap();
+                    match ntype {
+                        NumberType::Int32 => {
+                            return Collator::compare_integer::<i32>(
+                                key1.try_into().unwrap(),
+                                key2.try_into().unwrap(),
+                            )
+                        }
+                        NumberType::UInt64 => {
+                            return Collator::compare_integer::<u64>(
+                                key1.try_into().unwrap(),
+                                key2.try_into().unwrap(),
+                            )
+                        }
+                        _ => panic!("Collator::compare does not support {}", self.schema[i]),
+                    }
                 }
                 _ => panic!("Collator::compare does not support {}", self.schema[i]),
             }

@@ -11,7 +11,7 @@ use itertools::Itertools;
 use crate::error;
 use crate::state::file::File;
 use crate::transaction::{Txn, TxnId};
-use crate::value::{TCResult, TCStream, TCType, Value};
+use crate::value::{Number, NumberType, TCResult, TCStream, TypeImpl};
 
 use super::base::*;
 use super::chunk::*;
@@ -24,7 +24,7 @@ const ERR_CORRUPT: &str = "BlockTensor corrupted! Please restart Tinychain and f
 #[async_trait]
 pub trait BlockTensorView: TensorView + 'static {
     type ChunkStream: Stream<Item = TCResult<ChunkData>> + Send;
-    type ValueStream: Stream<Item = TCResult<Value>> + Send;
+    type ValueStream: Stream<Item = TCResult<Number>> + Send;
 
     fn chunk_stream(self: Arc<Self>, txn_id: TxnId) -> Self::ChunkStream;
 
@@ -36,9 +36,9 @@ impl<T: BlockTensorView> TensorUnary for T {
     type Base = BlockTensor;
     type Dense = BlockTensor;
 
-    async fn as_dtype(self: Arc<Self>, txn: Arc<Txn>, dtype: TCType) -> TCResult<BlockTensor> {
+    async fn as_dtype(self: Arc<Self>, txn: Arc<Txn>, dtype: NumberType) -> TCResult<BlockTensor> {
         let shape = self.shape().clone();
-        let per_block = per_block(dtype)?;
+        let per_block = per_block(dtype);
         let source = self
             .chunk_stream(txn.id().clone())
             .map(move |data| data.and_then(|d| d.into_type(dtype.clone())));
@@ -58,22 +58,22 @@ impl<T: BlockTensorView> TensorUnary for T {
         let shape = self.shape().clone();
         let txn_id = txn.id().clone();
 
-        use TCType::*;
+        use NumberType::*;
         let (chunks, dtype): (
             Pin<Box<dyn Stream<Item = TCResult<ChunkData>> + Send>>,
-            TCType,
+            NumberType,
         ) = match self.dtype() {
             Bool => (Box::pin(self.chunk_stream(txn_id)), Bool),
             Complex32 => {
                 let source = self.chunk_stream(txn_id).map(|d| d?.abs());
-                let per_block = per_block(Float32)?;
+                let per_block = per_block(Float32);
                 let values = ValueStream::new(source);
                 let chunks = ValueChunkStream::new(values, Float32, per_block);
                 (Box::pin(chunks), Float32)
             }
             Complex64 => {
                 let source = self.chunk_stream(txn_id).map(|d| d?.abs());
-                let per_block = per_block(Float64)?;
+                let per_block = per_block(Float64);
                 let values = ValueStream::new(source);
                 let chunks = ValueChunkStream::new(values, Float64, per_block);
                 (Box::pin(chunks), Float64)
@@ -93,7 +93,6 @@ impl<T: BlockTensorView> TensorUnary for T {
             UInt16 => (Box::pin(self.chunk_stream(txn_id)), UInt16),
             UInt32 => (Box::pin(self.chunk_stream(txn_id)), UInt32),
             UInt64 => (Box::pin(self.chunk_stream(txn_id)), UInt64),
-            _ => return Err(error::internal("Tensor has unsupported data type!")),
         };
 
         BlockTensor::from_blocks(txn, shape, dtype, chunks).await
@@ -103,7 +102,7 @@ impl<T: BlockTensorView> TensorUnary for T {
         Err(error::not_implemented())
     }
 
-    async fn sum_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Value> {
+    async fn sum_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Number> {
         Err(error::not_implemented())
     }
 
@@ -111,7 +110,7 @@ impl<T: BlockTensorView> TensorUnary for T {
         Err(error::not_implemented())
     }
 
-    async fn product_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Value> {
+    async fn product_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Number> {
         Err(error::not_implemented())
     }
 
@@ -121,7 +120,7 @@ impl<T: BlockTensorView> TensorUnary for T {
 }
 
 pub struct BlockTensor {
-    dtype: TCType,
+    dtype: NumberType,
     shape: Shape,
     size: u64,
     ndim: usize,
@@ -131,20 +130,19 @@ pub struct BlockTensor {
 }
 
 impl BlockTensor {
-    async fn constant(txn: Arc<Txn>, shape: Shape, value: Value) -> TCResult<BlockTensor> {
-        if !value.dtype().is_numeric() {
-            return Err(error::bad_request("Tensor does not support", value.dtype()));
-        }
-
-        let per_block = BLOCK_SIZE / value.dtype().size().unwrap();
+    async fn constant(txn: Arc<Txn>, shape: Shape, value: Number) -> TCResult<BlockTensor> {
+        let per_block = BLOCK_SIZE / value.dtype().size();
         let size = shape.size();
 
         let value_clone = value.clone();
         let blocks = (0..(size / per_block as u64))
-            .map(move |_| ChunkData::constant(value_clone.clone(), per_block));
+            .map(move |_| Ok(ChunkData::constant(value_clone.clone(), per_block)));
         let trailing_len = (size % (per_block as u64)) as usize;
         let blocks: TCStream<TCResult<ChunkData>> = if trailing_len > 0 {
-            let blocks = blocks.chain(iter::once(ChunkData::constant(value.clone(), trailing_len)));
+            let blocks = blocks.chain(iter::once(Ok(ChunkData::constant(
+                value.clone(),
+                trailing_len,
+            ))));
             Box::pin(stream::iter(blocks))
         } else {
             Box::pin(stream::iter(blocks))
@@ -155,7 +153,7 @@ impl BlockTensor {
     async fn from_blocks(
         txn: Arc<Txn>,
         shape: Shape,
-        dtype: TCType,
+        dtype: NumberType,
         mut blocks: Pin<Box<dyn Stream<Item = TCResult<ChunkData>> + Send>>,
     ) -> TCResult<BlockTensor> {
         let file = txn
@@ -183,7 +181,7 @@ impl BlockTensor {
             size,
             ndim,
             file,
-            per_block: per_block(dtype).unwrap(),
+            per_block: per_block(dtype),
             coord_index,
         })
     }
@@ -303,7 +301,7 @@ impl BlockTensor {
         blocks
     }
 
-    async fn at(self: Arc<Self>, txn_id: TxnId, coord: Vec<u64>) -> TCResult<Value> {
+    async fn at(self: Arc<Self>, txn_id: TxnId, coord: Vec<u64>) -> TCResult<Number> {
         let index: u64 = coord
             .iter()
             .zip(self.shape.to_vec().iter())
@@ -320,7 +318,7 @@ impl BlockTensor {
 }
 
 impl TensorView for BlockTensor {
-    fn dtype(&self) -> TCType {
+    fn dtype(&self) -> NumberType {
         self.dtype
     }
 
@@ -365,7 +363,7 @@ impl AnyAll for BlockTensor {
 #[async_trait]
 impl BlockTensorView for BlockTensor {
     type ChunkStream = Pin<Box<dyn Stream<Item = TCResult<ChunkData>> + Send>>;
-    type ValueStream = Pin<Box<dyn Stream<Item = TCResult<Value>> + Send>>;
+    type ValueStream = Pin<Box<dyn Stream<Item = TCResult<Number>> + Send>>;
 
     fn chunk_stream(self: Arc<Self>, txn_id: TxnId) -> Self::ChunkStream {
         Box::pin(self.blocks(txn_id).map(|chunk| Ok(chunk.data().clone())))
@@ -433,7 +431,7 @@ impl BlockTensorView for BlockTensor {
                     i += num_to_update;
                 }
 
-                let values: Vec<TCResult<Value>> = values.drain(..).map(Ok).collect();
+                let values: Vec<TCResult<Number>> = values.drain(..).map(Ok).collect();
                 stream::iter(values)
             });
         }
@@ -461,11 +459,7 @@ where
     fn chunk_stream(self: Arc<Self>, txn_id: TxnId) -> Self::ChunkStream {
         let dtype = self.source().dtype();
         let index = self.shape().all();
-        ValueChunkStream::new(
-            self.value_stream(txn_id, index),
-            dtype,
-            per_block(dtype).unwrap(),
-        )
+        ValueChunkStream::new(self.value_stream(txn_id, index), dtype, per_block(dtype))
     }
 
     fn value_stream(self: Arc<Self>, txn_id: TxnId, index: Index) -> Self::ValueStream {
@@ -499,9 +493,6 @@ impl AnyAll for TensorSlice<BlockTensor> {
     }
 }
 
-fn per_block(dtype: TCType) -> TCResult<usize> {
-    match dtype.size() {
-        Some(size) => Ok(BLOCK_SIZE / size),
-        None => Err(error::bad_request("Tensor does not support", dtype)),
-    }
+fn per_block(dtype: NumberType) -> usize {
+    BLOCK_SIZE / dtype.size()
 }

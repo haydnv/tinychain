@@ -15,7 +15,7 @@ use crate::error;
 use crate::state::file::{Block, BlockId, File};
 use crate::transaction::lock::{Mutate, TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{TCResult, TCStream, TCType, Value, ValueId};
+use crate::value::{TCResult, TCStream, TCType, TypeImpl, Value, ValueId};
 
 use super::{Collect, GetResult, State};
 
@@ -254,7 +254,7 @@ impl BTree {
 
         for (i, val) in selector.iter().enumerate() {
             let column = &self.schema[i];
-            if !val.is_a(&column.dtype) {
+            if !val.is_a(column.dtype) {
                 return Err(error::bad_request(
                     &format!("Expected {} for", column.dtype),
                     &column.name,

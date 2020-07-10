@@ -8,7 +8,7 @@ use crate::error;
 use crate::state::file::Block;
 use crate::transaction::lock::{TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::TxnId;
-use crate::value::{TCResult, TCType, Value};
+use crate::value::{Number, NumberType, TCResult};
 
 pub struct Chunk {
     block: TxnLockReadGuard<Block>,
@@ -20,7 +20,7 @@ impl Chunk {
         &self.data
     }
 
-    pub async fn try_from(block: TxnLockReadGuard<Block>, dtype: TCType) -> TCResult<Chunk> {
+    pub async fn try_from(block: TxnLockReadGuard<Block>, dtype: NumberType) -> TCResult<Chunk> {
         let data = ChunkData::try_from_bytes(block.as_bytes().await, dtype)?;
         Ok(Chunk { block, data })
     }
@@ -60,7 +60,7 @@ impl ChunkMut {
 }
 
 pub trait TensorChunk {
-    type DType: af::HasAfEnum + Into<Value>;
+    type DType: af::HasAfEnum + Into<Number>;
 
     fn array(&'_ self) -> &'_ af::Array<Self::DType>;
 
@@ -68,7 +68,7 @@ pub trait TensorChunk {
         ArrayExt(self.array().cast())
     }
 
-    fn get(&self, index: af::Indexer) -> Vec<Value> {
+    fn get(&self, index: af::Indexer) -> Vec<Number> {
         let array = af::index_gen(self.array(), index);
         let mut value: Vec<Self::DType> = Vec::with_capacity(array.elements());
         array.host(&mut value);
@@ -80,7 +80,7 @@ pub trait TensorChunk {
     }
 }
 
-impl<T: af::HasAfEnum + Into<Value>> TensorChunk for ArrayExt<T> {
+impl<T: af::HasAfEnum + Into<Number>> TensorChunk for ArrayExt<T> {
     type DType = T;
 
     fn array(&'_ self) -> &'_ af::Array<Self::DType> {
@@ -96,8 +96,8 @@ impl<T: af::HasAfEnum> From<ArrayExt<T>> for Vec<T> {
     }
 }
 
-impl<T: af::HasAfEnum + Into<Value>> From<ArrayExt<T>> for Vec<Value> {
-    fn from(array: ArrayExt<T>) -> Vec<Value> {
+impl<T: af::HasAfEnum + Into<Number>> From<ArrayExt<T>> for Vec<Number> {
+    fn from(array: ArrayExt<T>) -> Vec<Number> {
         let mut v: Vec<T> = array.into();
         v.drain(..).map(|i| i.into()).collect()
     }
@@ -112,12 +112,12 @@ impl<T: af::HasAfEnum> From<af::Array<T>> for ArrayExt<T> {
     }
 }
 
-impl<E: Into<error::TCError>, T: af::HasAfEnum + TryFrom<Value, Error = E>> TryFrom<Vec<Value>>
+impl<E: Into<error::TCError>, T: af::HasAfEnum + TryFrom<Number, Error = E>> TryFrom<Vec<Number>>
     for ArrayExt<T>
 {
     type Error = error::TCError;
 
-    fn try_from(mut values: Vec<Value>) -> TCResult<ArrayExt<T>> {
+    fn try_from(mut values: Vec<Number>) -> TCResult<ArrayExt<T>> {
         let array = values
             .drain(..)
             .map(|v| v.try_into().map_err(|e: E| e.into()))
@@ -128,7 +128,7 @@ impl<E: Into<error::TCError>, T: af::HasAfEnum + TryFrom<Value, Error = E>> TryF
 }
 
 pub trait TensorChunkAbs: TensorChunk {
-    type AbsValue: af::HasAfEnum + Into<Value>;
+    type AbsValue: af::HasAfEnum + Into<Number>;
 
     fn abs(&self) -> ArrayExt<Self::AbsValue>;
 }
@@ -251,32 +251,33 @@ pub enum ChunkData {
 }
 
 impl ChunkData {
-    pub fn constant(value: Value, len: usize) -> TCResult<ChunkData> {
+    pub fn constant(value: Number, len: usize) -> ChunkData {
         let dim = dim4(len);
 
         use ChunkData::*;
         match value {
-            Value::Bool(b) => Ok(ChunkData::Bool(af::constant(b, dim).into())),
-            Value::Complex32(c) => Ok(C32(af::constant(c, dim).into())),
-            Value::Complex64(c) => Ok(C64(af::constant(c, dim).into())),
-            Value::Float32(f) => Ok(F32(af::constant(f, dim).into())),
-            Value::Float64(f) => Ok(F64(af::constant(f, dim).into())),
-            Value::Int16(i) => Ok(I16(af::constant(i, dim).into())),
-            Value::Int32(i) => Ok(I32(af::constant(i, dim).into())),
-            Value::Int64(i) => Ok(I64(af::constant(i, dim).into())),
-            Value::UInt8(i) => Ok(U8(af::constant(i, dim).into())),
-            Value::UInt16(u) => Ok(U16(af::constant(u, dim).into())),
-            Value::UInt32(u) => Ok(U32(af::constant(u, dim).into())),
-            Value::UInt64(u) => Ok(U64(af::constant(u, dim).into())),
-            _ => Err(error::bad_request("Tensor does not support", value.dtype())),
+            Number::Bool(b) => ChunkData::Bool(af::constant(b, dim).into()),
+            Number::Complex32(c) => C32(af::constant(c, dim).into()),
+            Number::Complex64(c) => C64(af::constant(c, dim).into()),
+            Number::Float32(f) => F32(af::constant(f, dim).into()),
+            Number::Float64(f) => F64(af::constant(f, dim).into()),
+            Number::Int16(i) => I16(af::constant(i, dim).into()),
+            Number::Int32(i) => I32(af::constant(i, dim).into()),
+            Number::Int64(i) => I64(af::constant(i, dim).into()),
+            Number::UInt8(i) => U8(af::constant(i, dim).into()),
+            Number::UInt16(u) => U16(af::constant(u, dim).into()),
+            Number::UInt32(u) => U32(af::constant(u, dim).into()),
+            Number::UInt64(u) => U64(af::constant(u, dim).into()),
         }
     }
 
-    fn try_from_bytes(data: Bytes, dtype: TCType) -> TCResult<ChunkData> {
+    fn try_from_bytes(data: Bytes, dtype: NumberType) -> TCResult<ChunkData> {
+        // TODO: replace calls to assert! with `return Err...`
+
         use ChunkData::*;
-        use TCType::*;
+        use NumberType::*;
         match dtype {
-            TCType::Bool => {
+            NumberType::Bool => {
                 let mut array = Vec::with_capacity(data.len());
                 for byte in data {
                     match byte as u8 {
@@ -396,15 +397,14 @@ impl ChunkData {
                 let dim = dim4(array.len());
                 Ok(U32(af::Array::new(&array, dim).into()))
             }
-            other => Err(error::bad_request("Tensor does not support", other)),
         }
     }
 
-    pub fn try_from_values(data: Vec<Value>, dtype: TCType) -> TCResult<ChunkData> {
+    pub fn try_from_values(data: Vec<Number>, dtype: NumberType) -> TCResult<ChunkData> {
         use ChunkData::*;
-        use TCType::*;
+        use NumberType::*;
         let chunk = match dtype {
-            TCType::Bool => ChunkData::Bool(data.try_into()?),
+            NumberType::Bool => ChunkData::Bool(data.try_into()?),
             Complex32 => C32(data.try_into()?),
             Complex64 => C64(data.try_into()?),
             Float32 => F32(data.try_into()?),
@@ -416,18 +416,17 @@ impl ChunkData {
             UInt16 => U16(data.try_into()?),
             UInt32 => U32(data.try_into()?),
             UInt64 => U64(data.try_into()?),
-            other => return Err(error::bad_request("Tensor does not support", other)),
         };
 
         Ok(chunk)
     }
 
-    pub fn into_type(self, dtype: TCType) -> TCResult<ChunkData> {
+    pub fn into_type(self, dtype: NumberType) -> TCResult<ChunkData> {
         use ChunkData::*;
-        use TCType::*;
+        use NumberType::*;
         let converted = match self {
             ChunkData::Bool(b) => match dtype {
-                TCType::Bool => ChunkData::Bool(b.as_type()),
+                NumberType::Bool => ChunkData::Bool(b.as_type()),
                 Complex32 => C32(b.as_type()),
                 Complex64 => C64(b.as_type()),
                 Float32 => F32(b.as_type()),
@@ -439,10 +438,9 @@ impl ChunkData {
                 UInt16 => U16(b.as_type()),
                 UInt32 => U32(b.as_type()),
                 UInt64 => U64(b.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             C32(c) => match dtype {
-                TCType::Bool => ChunkData::Bool(c.as_type()),
+                NumberType::Bool => ChunkData::Bool(c.as_type()),
                 Complex32 => C32(c.as_type()),
                 Complex64 => C64(c.as_type()),
                 Float32 => F32(c.as_type()),
@@ -454,10 +452,9 @@ impl ChunkData {
                 UInt16 => U16(c.as_type()),
                 UInt32 => U32(c.as_type()),
                 UInt64 => U64(c.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             C64(c) => match dtype {
-                TCType::Bool => ChunkData::Bool(c.as_type()),
+                NumberType::Bool => ChunkData::Bool(c.as_type()),
                 Complex32 => C32(c.as_type()),
                 Complex64 => C64(c.as_type()),
                 Float32 => F32(c.as_type()),
@@ -469,10 +466,9 @@ impl ChunkData {
                 UInt16 => U16(c.as_type()),
                 UInt32 => U32(c.as_type()),
                 UInt64 => U64(c.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             F32(f) => match dtype {
-                TCType::Bool => ChunkData::Bool(f.as_type()),
+                NumberType::Bool => ChunkData::Bool(f.as_type()),
                 Complex32 => C32(f.as_type()),
                 Complex64 => C64(f.as_type()),
                 Float32 => F32(f.as_type()),
@@ -484,10 +480,9 @@ impl ChunkData {
                 UInt16 => U16(f.as_type()),
                 UInt32 => U32(f.as_type()),
                 UInt64 => U64(f.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             F64(f) => match dtype {
-                TCType::Bool => ChunkData::Bool(f.as_type()),
+                NumberType::Bool => ChunkData::Bool(f.as_type()),
                 Complex32 => C32(f.as_type()),
                 Complex64 => C64(f.as_type()),
                 Float32 => F32(f.as_type()),
@@ -499,10 +494,9 @@ impl ChunkData {
                 UInt16 => U16(f.as_type()),
                 UInt32 => U32(f.as_type()),
                 UInt64 => U64(f.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             I16(i) => match dtype {
-                TCType::Bool => ChunkData::Bool(i.as_type()),
+                NumberType::Bool => ChunkData::Bool(i.as_type()),
                 Complex32 => C32(i.as_type()),
                 Complex64 => C64(i.as_type()),
                 Float32 => F32(i.as_type()),
@@ -514,10 +508,9 @@ impl ChunkData {
                 UInt16 => U16(i.as_type()),
                 UInt32 => U32(i.as_type()),
                 UInt64 => U64(i.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             I32(c) => match dtype {
-                TCType::Bool => ChunkData::Bool(c.as_type()),
+                NumberType::Bool => ChunkData::Bool(c.as_type()),
                 Complex32 => C32(c.as_type()),
                 Complex64 => C64(c.as_type()),
                 Float32 => F32(c.as_type()),
@@ -529,10 +522,9 @@ impl ChunkData {
                 UInt16 => U16(c.as_type()),
                 UInt32 => U32(c.as_type()),
                 UInt64 => U64(c.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             I64(c) => match dtype {
-                TCType::Bool => ChunkData::Bool(c.as_type()),
+                NumberType::Bool => ChunkData::Bool(c.as_type()),
                 Complex32 => C32(c.as_type()),
                 Complex64 => C64(c.as_type()),
                 Float32 => F32(c.as_type()),
@@ -544,10 +536,9 @@ impl ChunkData {
                 UInt16 => U16(c.as_type()),
                 UInt32 => U32(c.as_type()),
                 UInt64 => U64(c.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             U8(u) => match dtype {
-                TCType::Bool => ChunkData::Bool(u.as_type()),
+                NumberType::Bool => ChunkData::Bool(u.as_type()),
                 Complex32 => C32(u.as_type()),
                 Complex64 => C64(u.as_type()),
                 Float32 => F32(u.as_type()),
@@ -559,10 +550,9 @@ impl ChunkData {
                 UInt16 => U16(u.as_type()),
                 UInt32 => U32(u.as_type()),
                 UInt64 => U64(u.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             U16(u) => match dtype {
-                TCType::Bool => ChunkData::Bool(u.as_type()),
+                NumberType::Bool => ChunkData::Bool(u.as_type()),
                 Complex32 => C32(u.as_type()),
                 Complex64 => C64(u.as_type()),
                 Float32 => F32(u.as_type()),
@@ -574,10 +564,9 @@ impl ChunkData {
                 UInt16 => U16(u.as_type()),
                 UInt32 => U32(u.as_type()),
                 UInt64 => U64(u.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             U32(u) => match dtype {
-                TCType::Bool => ChunkData::Bool(u.as_type()),
+                NumberType::Bool => ChunkData::Bool(u.as_type()),
                 Complex32 => C32(u.as_type()),
                 Complex64 => C64(u.as_type()),
                 Float32 => F32(u.as_type()),
@@ -589,10 +578,9 @@ impl ChunkData {
                 UInt16 => U16(u.as_type()),
                 UInt32 => U32(u.as_type()),
                 UInt64 => U64(u.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
             U64(u) => match dtype {
-                TCType::Bool => ChunkData::Bool(u.as_type()),
+                NumberType::Bool => ChunkData::Bool(u.as_type()),
                 Complex32 => C32(u.as_type()),
                 Complex64 => C64(u.as_type()),
                 Float32 => F32(u.as_type()),
@@ -604,7 +592,6 @@ impl ChunkData {
                 UInt16 => U16(u.as_type()),
                 UInt32 => U32(u.as_type()),
                 UInt64 => U64(u.as_type()),
-                other => return Err(error::bad_request("Cannot convert to", other)),
             },
         };
 
@@ -661,20 +648,20 @@ impl ChunkData {
         }
     }
 
-    pub fn get_one(&self, index: usize) -> Option<Value> {
+    pub fn get_one(&self, index: usize) -> Option<Number> {
         let seq = af::Seq::new(index as f64, index as f64, 1.0f64);
         let mut indexer = af::Indexer::default();
         indexer.set_index(&seq, 0, None);
         self.get_at(indexer).pop()
     }
 
-    pub fn get(&self, index: af::Array<u64>) -> Vec<Value> {
+    pub fn get(&self, index: af::Array<u64>) -> Vec<Number> {
         let mut indexer = af::Indexer::default();
         indexer.set_index(&index, 0, Some(false));
         self.get_at(indexer)
     }
 
-    fn get_at(&self, index: af::Indexer) -> Vec<Value> {
+    fn get_at(&self, index: af::Indexer) -> Vec<Number> {
         use ChunkData::*;
         match self {
             Bool(b) => b.get(index),
@@ -696,13 +683,6 @@ impl ChunkData {
         let mut indexer = af::Indexer::default();
         indexer.set_index(&index, 0, Some(false));
         self.set_at(indexer, other)
-    }
-
-    pub fn set_one(&mut self, index: usize, value: Value) -> TCResult<()> {
-        let mut indexer = af::Indexer::default();
-        let seq = af::Seq::new(index as f64, index as f64, 1.0f64);
-        indexer.set_index(&seq, 0, Some(false));
-        self.set_at(indexer, &value.try_into()?)
     }
 
     fn set_at(&mut self, index: af::Indexer, value: &ChunkData) -> TCResult<()> {
@@ -804,20 +784,6 @@ impl From<ChunkData> for Bytes {
     }
 }
 
-impl TryFrom<Value> for ChunkData {
-    type Error = error::TCError;
-
-    fn try_from(value: Value) -> TCResult<ChunkData> {
-        match value {
-            Value::Bool(b) => Ok(vec![b].into()),
-            _ => Err(error::internal(format!(
-                "Attepted to update a Tensor index to {}",
-                value.dtype()
-            ))),
-        }
-    }
-}
-
 impl From<Vec<bool>> for ChunkData {
     fn from(b: Vec<bool>) -> ChunkData {
         let data = af::Array::new(&b, dim4(b.len()));
@@ -902,8 +868,8 @@ impl From<Vec<u64>> for ChunkData {
     }
 }
 
-impl From<ChunkData> for Vec<Value> {
-    fn from(chunk: ChunkData) -> Vec<Value> {
+impl From<ChunkData> for Vec<Number> {
+    fn from(chunk: ChunkData) -> Vec<Number> {
         use ChunkData::*;
         match chunk {
             Bool(b) => b.into(),

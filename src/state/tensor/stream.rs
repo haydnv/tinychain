@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use futures::stream::Stream;
 use itertools::MultiProduct;
 
-use crate::value::{TCResult, TCType, Value};
+use crate::value::{Number, NumberType, TCResult};
 
 use super::chunk::ChunkData;
 
@@ -39,16 +39,16 @@ impl Iterator for AxisIter {
     }
 }
 
-pub struct ValueChunkStream<T: Stream<Item = TCResult<Value>>> {
+pub struct ValueChunkStream<T: Stream<Item = TCResult<Number>>> {
     source: Pin<Box<T>>,
-    dtype: TCType,
+    dtype: NumberType,
     chunk_len: usize,
-    buffer: Vec<Value>,
+    buffer: Vec<Number>,
     valid: bool,
 }
 
-impl<T: Stream<Item = TCResult<Value>>> ValueChunkStream<T> {
-    pub fn new(source: T, dtype: TCType, chunk_len: usize) -> ValueChunkStream<T> {
+impl<T: Stream<Item = TCResult<Number>>> ValueChunkStream<T> {
+    pub fn new(source: T, dtype: NumberType, chunk_len: usize) -> ValueChunkStream<T> {
         let buffer = Vec::with_capacity(chunk_len);
 
         ValueChunkStream {
@@ -61,7 +61,7 @@ impl<T: Stream<Item = TCResult<Value>>> ValueChunkStream<T> {
     }
 }
 
-impl<T: Stream<Item = TCResult<Value>>> Stream for ValueChunkStream<T> {
+impl<T: Stream<Item = TCResult<Number>>> Stream for ValueChunkStream<T> {
     type Item = TCResult<ChunkData>;
 
     fn poll_next(mut self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
@@ -103,7 +103,7 @@ impl<T: Stream<Item = TCResult<Value>>> Stream for ValueChunkStream<T> {
 
 pub struct ValueStream<T: Stream<Item = TCResult<ChunkData>>> {
     source: Pin<Box<T>>,
-    buffer: VecDeque<Value>,
+    buffer: VecDeque<Number>,
     valid: bool,
 }
 
@@ -118,7 +118,7 @@ impl<T: Stream<Item = TCResult<ChunkData>>> ValueStream<T> {
 }
 
 impl<T: Stream<Item = TCResult<ChunkData>>> Stream for ValueStream<T> {
-    type Item = TCResult<Value>;
+    type Item = TCResult<Number>;
 
     fn poll_next(mut self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         if !self.valid {
@@ -129,7 +129,7 @@ impl<T: Stream<Item = TCResult<ChunkData>>> Stream for ValueStream<T> {
             match Pin::as_mut(&mut self.source).poll_next(cxt) {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Some(Ok(chunk))) => {
-                    let buffered: Vec<Value> = chunk.into();
+                    let buffered: Vec<Number> = chunk.into();
                     self.buffer.extend(buffered);
                     Poll::Ready(self.buffer.pop_front().map(|v| Ok(v)))
                 }
