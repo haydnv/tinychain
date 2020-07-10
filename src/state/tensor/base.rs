@@ -6,10 +6,57 @@ use async_trait::async_trait;
 use num::Integer;
 
 use crate::error;
-use crate::transaction::TxnId;
-use crate::value::{TCResult, TCType};
+use crate::transaction::{Txn, TxnId};
+use crate::value::{TCResult, TCType, Value};
 
 use super::index::*;
+
+#[async_trait]
+pub trait TensorUnary: TensorView {
+    type Base: TensorView;
+    type Dense: TensorView;
+
+    async fn as_dtype(self: Arc<Self>, txn: Arc<Txn>, dtype: TCType) -> TCResult<Self::Base>;
+
+    async fn abs(self: Arc<Self>) -> TCResult<Self::Base>;
+
+    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Self::Base>;
+
+    async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Value>;
+
+    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Self::Base>;
+
+    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Value>;
+
+    async fn not(self: Arc<Self>, txn: &Arc<Txn>) -> TCResult<Self::Dense>;
+}
+
+#[async_trait]
+pub trait TensorArithmetic {
+    type Object: TensorView + Broadcast + Slice;
+    type Base: TensorView;
+
+    async fn add(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+
+    async fn multiply(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+
+    async fn subtract(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+}
+
+#[async_trait]
+pub trait TensorBoolean {
+    type Object: TensorView + Broadcast + Slice;
+    type Base: TensorView;
+    type Dense: TensorView;
+
+    async fn equals(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+
+    async fn and(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+
+    async fn or(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+
+    async fn xor(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Dense>;
+}
 
 pub trait TensorView: Sized + Send + Sync {
     fn dtype(&self) -> TCType;

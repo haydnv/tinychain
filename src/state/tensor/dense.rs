@@ -26,6 +26,16 @@ pub trait BlockTensorView: TensorView + 'static {
     type ChunkStream: Stream<Item = TCResult<ChunkData>> + Send;
     type ValueStream: Stream<Item = TCResult<Value>> + Send;
 
+    fn chunk_stream(self: Arc<Self>, txn_id: TxnId) -> Self::ChunkStream;
+
+    fn value_stream(self: Arc<Self>, txn_id: TxnId, index: Index) -> Self::ValueStream;
+}
+
+#[async_trait]
+impl<T: BlockTensorView> TensorUnary for T {
+    type Base = BlockTensor;
+    type Dense = BlockTensor;
+
     async fn as_dtype(self: Arc<Self>, txn: Arc<Txn>, dtype: TCType) -> TCResult<BlockTensor> {
         let shape = self.shape().clone();
         let per_block = per_block(dtype)?;
@@ -37,65 +47,29 @@ pub trait BlockTensorView: TensorView + 'static {
         BlockTensor::from_blocks(txn, shape, dtype, Box::pin(chunks)).await
     }
 
-    async fn abs(&self, _txn: &Arc<Txn>) -> TCResult<BlockTensor> {
+    async fn abs(self: Arc<Self>) -> TCResult<Self::Base> {
         Err(error::not_implemented())
     }
 
-    async fn sum(&self, _txn: &Arc<Txn>, _axis: Option<usize>) -> TCResult<BlockTensor> {
+    async fn sum(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self::Base> {
         Err(error::not_implemented())
     }
 
-    async fn product(&self, _txn: &Arc<Txn>, _axis: Option<usize>) -> TCResult<BlockTensor> {
+    async fn sum_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Value> {
         Err(error::not_implemented())
     }
 
-    async fn add<T: BlockTensorView>(&self, _txn: &Arc<Txn>, _other: &T) -> TCResult<BlockTensor> {
+    async fn product(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self::Base> {
         Err(error::not_implemented())
     }
 
-    async fn multiply<T: BlockTensorView>(
-        &self,
-        _txn: &Arc<Txn>,
-        _other: &T,
-    ) -> TCResult<BlockTensor> {
+    async fn product_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Value> {
         Err(error::not_implemented())
     }
 
-    async fn subtract<T: BlockTensorView>(
-        &self,
-        _txn: &Arc<Txn>,
-        _other: &T,
-    ) -> TCResult<BlockTensor> {
+    async fn not(self: Arc<Self>, _txn: &Arc<Txn>) -> TCResult<Self::Dense> {
         Err(error::not_implemented())
     }
-
-    async fn equals<'b, T: BlockTensorView>(
-        &self,
-        _txn: &Arc<Txn>,
-        _other: &T,
-    ) -> TCResult<BlockTensor> {
-        Err(error::not_implemented())
-    }
-
-    async fn and<T: BlockTensorView>(&self, _txn: &Arc<Txn>, _other: &T) -> TCResult<BlockTensor> {
-        Err(error::not_implemented())
-    }
-
-    async fn or<T: BlockTensorView>(&self, _txn: &Arc<Txn>, _other: &T) -> TCResult<BlockTensor> {
-        Err(error::not_implemented())
-    }
-
-    async fn xor<T: BlockTensorView>(&self, _txn: &Arc<Txn>, _other: &T) -> TCResult<BlockTensor> {
-        Err(error::not_implemented())
-    }
-
-    async fn not(&self, _txn: &Arc<Txn>) -> TCResult<BlockTensor> {
-        Err(error::not_implemented())
-    }
-
-    fn chunk_stream(self: Arc<Self>, txn_id: TxnId) -> Self::ChunkStream;
-
-    fn value_stream(self: Arc<Self>, txn_id: TxnId, index: Index) -> Self::ValueStream;
 }
 
 pub struct BlockTensor {
