@@ -1,14 +1,17 @@
 use std::convert::{TryFrom, TryInto};
+use std::fmt;
 
 use arrayfire as af;
 use bytes::Bytes;
-use num::Complex;
 
 use crate::error;
 use crate::state::file::Block;
 use crate::transaction::lock::{TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::TxnId;
-use crate::value::{Number, NumberType, TCResult};
+use crate::value::{
+    Complex, ComplexType, Float, FloatType, Int, IntType, Number, NumberType, TCResult, UInt,
+    UIntType,
+};
 
 pub struct Chunk {
     block: TxnLockReadGuard<Block>,
@@ -60,7 +63,7 @@ impl ChunkMut {
 }
 
 pub trait TensorChunk {
-    type DType: af::HasAfEnum + Into<Number>;
+    type DType: af::HasAfEnum;
 
     fn array(&'_ self) -> &'_ af::Array<Self::DType>;
 
@@ -68,11 +71,8 @@ pub trait TensorChunk {
         ArrayExt(self.array().cast())
     }
 
-    fn get(&self, index: af::Indexer) -> Vec<Number> {
-        let array = af::index_gen(self.array(), index);
-        let mut value: Vec<Self::DType> = Vec::with_capacity(array.elements());
-        array.host(&mut value);
-        value.drain(..).map(|v| v.into()).collect()
+    fn get(&self, index: af::Indexer) -> ArrayExt<Self::DType> {
+        ArrayExt(af::index_gen(self.array(), index))
     }
 
     fn set<T: TensorChunk<DType = Self::DType>>(&self, index: &af::Indexer, other: &T) {
@@ -80,10 +80,13 @@ pub trait TensorChunk {
     }
 }
 
-impl<T: af::HasAfEnum + Into<Number>> TensorChunk for ArrayExt<T> {
+#[derive(Clone)]
+pub struct ArrayExt<T: af::HasAfEnum>(af::Array<T>);
+
+impl<T: af::HasAfEnum> TensorChunk for ArrayExt<T> {
     type DType = T;
 
-    fn array(&'_ self) -> &'_ af::Array<Self::DType> {
+    fn array(&'_ self) -> &'_ af::Array<T> {
         &self.0
     }
 }
@@ -96,15 +99,100 @@ impl<T: af::HasAfEnum> From<ArrayExt<T>> for Vec<T> {
     }
 }
 
-impl<T: af::HasAfEnum + Into<Number>> From<ArrayExt<T>> for Vec<Number> {
-    fn from(array: ArrayExt<T>) -> Vec<Number> {
-        let mut v: Vec<T> = array.into();
-        v.drain(..).map(|i| i.into()).collect()
+impl From<ArrayExt<bool>> for Vec<Number> {
+    fn from(array: ArrayExt<bool>) -> Vec<Number> {
+        let array: Vec<bool> = array.into();
+        vec_into(array)
     }
 }
 
-#[derive(Clone)]
-pub struct ArrayExt<T: af::HasAfEnum>(af::Array<T>);
+impl From<ArrayExt<num::Complex<f32>>> for Vec<Number> {
+    fn from(array: ArrayExt<num::Complex<f32>>) -> Vec<Number> {
+        let array: Vec<num::Complex<f32>> = array.into();
+        let array: Vec<Complex> = vec_into(array);
+        vec_into(array)
+    }
+}
+
+impl From<ArrayExt<num::Complex<f64>>> for Vec<Number> {
+    fn from(array: ArrayExt<num::Complex<f64>>) -> Vec<Number> {
+        let array: Vec<num::Complex<f64>> = array.into();
+        let array: Vec<Complex> = vec_into(array);
+        vec_into(array)
+    }
+}
+
+impl From<ArrayExt<f32>> for Vec<Number> {
+    fn from(array: ArrayExt<f32>) -> Vec<Number> {
+        let array: Vec<f32> = array.into();
+        let array: Vec<Float> = vec_into(array);
+        vec_into(array)
+    }
+}
+
+impl From<ArrayExt<f64>> for Vec<Number> {
+    fn from(array: ArrayExt<f64>) -> Vec<Number> {
+        let array: Vec<f64> = array.into();
+        let array: Vec<Float> = vec_into(array);
+        vec_into(array)
+    }
+}
+
+impl From<ArrayExt<i16>> for Vec<Number> {
+    fn from(array: ArrayExt<i16>) -> Vec<Number> {
+        let array: Vec<i16> = array.into();
+        let array: Vec<Int> = vec_into(array);
+        vec_into(array)
+    }
+}
+
+impl From<ArrayExt<i32>> for Vec<Number> {
+    fn from(array: ArrayExt<i32>) -> Vec<Number> {
+        let array: Vec<i32> = array.into();
+        let array: Vec<Int> = vec_into(array);
+        vec_into(array)
+    }
+}
+
+impl From<ArrayExt<i64>> for Vec<Number> {
+    fn from(array: ArrayExt<i64>) -> Vec<Number> {
+        let array: Vec<i64> = array.into();
+        let array: Vec<Int> = vec_into(array);
+        vec_into(array)
+    }
+}
+
+impl From<ArrayExt<u8>> for Vec<Number> {
+    fn from(array: ArrayExt<u8>) -> Vec<Number> {
+        let array: Vec<u8> = array.into();
+        let array: Vec<UInt> = vec_into(array);
+        vec_into(array)
+    }
+}
+
+impl From<ArrayExt<u16>> for Vec<Number> {
+    fn from(array: ArrayExt<u16>) -> Vec<Number> {
+        let array: Vec<u16> = array.into();
+        let array: Vec<UInt> = vec_into(array);
+        vec_into(array)
+    }
+}
+
+impl From<ArrayExt<u32>> for Vec<Number> {
+    fn from(array: ArrayExt<u32>) -> Vec<Number> {
+        let array: Vec<u32> = array.into();
+        let array: Vec<UInt> = vec_into(array);
+        vec_into(array)
+    }
+}
+
+impl From<ArrayExt<u64>> for Vec<Number> {
+    fn from(array: ArrayExt<u64>) -> Vec<Number> {
+        let array: Vec<u64> = array.into();
+        let array: Vec<UInt> = vec_into(array);
+        vec_into(array)
+    }
+}
 
 impl<T: af::HasAfEnum> From<af::Array<T>> for ArrayExt<T> {
     fn from(array: af::Array<T>) -> ArrayExt<T> {
@@ -112,28 +200,235 @@ impl<T: af::HasAfEnum> From<af::Array<T>> for ArrayExt<T> {
     }
 }
 
-impl<E: Into<error::TCError>, T: af::HasAfEnum + TryFrom<Number, Error = E>> TryFrom<Vec<Number>>
-    for ArrayExt<T>
-{
+impl<T: af::HasAfEnum> From<Vec<T>> for ArrayExt<T> {
+    fn from(values: Vec<T>) -> ArrayExt<T> {
+        let dim = dim4(values.len());
+        ArrayExt(af::Array::new(&values, dim))
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<bool> {
     type Error = error::TCError;
 
-    fn try_from(mut values: Vec<Number>) -> TCResult<ArrayExt<T>> {
-        let array = values
-            .drain(..)
-            .map(|v| v.try_into().map_err(|e: E| e.into()))
-            .collect::<TCResult<Vec<T>>>()?;
+    fn try_from(data: Bytes) -> TCResult<ArrayExt<bool>> {
+        let mut array = Vec::with_capacity(data.len());
+        for byte in data {
+            match byte as u8 {
+                0 => array.push(false),
+                1 => array.push(false),
+                other => return Err(err_corrupt(format!("invalid boolean: {}", other))),
+            }
+        }
         let dim = dim4(array.len());
-        Ok(ArrayExt(af::Array::new(&array, dim)))
+        Ok(af::Array::new(&array, dim).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<num::Complex<f32>> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        if data.len() % 8 != 0 {
+            return Err(err_corrupt("invalid byte sequence for Complex<f32>"));
+        }
+
+        let mut array = Vec::with_capacity(data.len() / 8);
+        for c in data[..].chunks_exact(8) {
+            let re = f32::from_be_bytes(c[0..4].try_into().unwrap());
+            let im = f32::from_be_bytes(c[4..8].try_into().unwrap());
+            array.push(num::Complex::new(re, im));
+        }
+        let dim = dim4(array.len());
+        Ok(af::Array::new(&array, dim).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<num::Complex<f64>> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        if data.len() % 16 != 0 {
+            return Err(err_corrupt("invalid byte sequence for Complex<f64>"));
+        }
+
+        let mut array = Vec::with_capacity(data.len() / 16);
+        for c in data[..].chunks_exact(8) {
+            let re = f64::from_be_bytes(c[0..8].try_into().unwrap());
+            let im = f64::from_be_bytes(c[8..16].try_into().unwrap());
+            array.push(num::Complex::new(re, im));
+        }
+        let dim = dim4(array.len());
+        Ok(af::Array::new(&array, dim).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<f32> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        if data.len() % 4 != 0 {
+            return Err(err_corrupt(
+                "invalid byte sequence for 32-bit floating point",
+            ));
+        }
+
+        let mut array = Vec::with_capacity(data.len() / 4);
+        for f in data[..].chunks_exact(4) {
+            array.push(f32::from_be_bytes(f.try_into().unwrap()));
+        }
+        let dim = dim4(array.len());
+        Ok(af::Array::new(&array, dim).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<f64> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        if data.len() % 8 != 0 {
+            return Err(err_corrupt(
+                "invalid byte sequence for 64-bit floating point",
+            ));
+        }
+
+        let mut array = Vec::with_capacity(data.len() / 8);
+        for f in data[..].chunks_exact(8) {
+            array.push(f64::from_be_bytes(f.try_into().unwrap()));
+        }
+        let dim = dim4(array.len());
+        Ok(af::Array::new(&array, dim).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<i16> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        if data.len() % 2 != 0 {
+            return Err(err_corrupt(
+                "invalid byte sequence for 16-bit signed integer",
+            ));
+        }
+
+        let mut array = Vec::with_capacity(data.len() / 2);
+        for f in data[..].chunks_exact(2) {
+            array.push(i16::from_be_bytes(f.try_into().unwrap()));
+        }
+        let dim = dim4(array.len());
+        Ok(af::Array::new(&array, dim).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<i32> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        if data.len() % 4 != 0 {
+            return Err(err_corrupt(
+                "invalid byte sequence for 32-bit signed integer",
+            ));
+        }
+
+        let mut array = Vec::with_capacity(data.len() / 4);
+        for f in data[..].chunks_exact(4) {
+            array.push(i32::from_be_bytes(f.try_into().unwrap()));
+        }
+        let dim = dim4(array.len());
+        Ok(af::Array::new(&array, dim).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<i64> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        if data.len() % 8 != 0 {
+            return Err(err_corrupt(
+                "invalid byte sequence for 64-bit signed integer",
+            ));
+        }
+
+        let mut array = Vec::with_capacity(data.len() / 8);
+        for f in data[..].chunks_exact(8) {
+            array.push(i64::from_be_bytes(f.try_into().unwrap()));
+        }
+        let dim = dim4(array.len());
+        Ok(af::Array::new(&array, dim).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<u8> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        Ok(af::Array::new(&data[..], dim4(data.len())).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<u16> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        if data.len() % 2 != 0 {
+            return Err(err_corrupt(
+                "invalid byte sequence for 16-bit unsigned integer",
+            ));
+        }
+
+        let mut array = Vec::with_capacity(data.len() / 2);
+        for f in data[..].chunks_exact(2) {
+            array.push(u16::from_be_bytes(f.try_into().unwrap()));
+        }
+        let dim = dim4(array.len());
+        Ok(af::Array::new(&array, dim).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<u32> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        if data.len() % 4 != 0 {
+            return Err(err_corrupt(
+                "invalid byte sequence for 32-bit unsigned integer",
+            ));
+        }
+
+        let mut array = Vec::with_capacity(data.len() / 4);
+        for f in data[..].chunks_exact(4) {
+            array.push(u32::from_be_bytes(f.try_into().unwrap()));
+        }
+        let dim = dim4(array.len());
+        Ok(af::Array::new(&array, dim).into())
+    }
+}
+
+impl TryFrom<Bytes> for ArrayExt<u64> {
+    type Error = error::TCError;
+
+    fn try_from(data: Bytes) -> TCResult<Self> {
+        if data.len() % 8 != 0 {
+            return Err(err_corrupt(
+                "invalid byte sequence for 64-bit signed integer",
+            ));
+        }
+
+        let mut array = Vec::with_capacity(data.len() / 8);
+        for f in data[..].chunks_exact(8) {
+            array.push(u64::from_be_bytes(f.try_into().unwrap()));
+        }
+        let dim = dim4(array.len());
+        Ok(af::Array::new(&array, dim).into())
     }
 }
 
 pub trait TensorChunkAbs: TensorChunk {
-    type AbsValue: af::HasAfEnum + Into<Number>;
+    type AbsValue: af::HasAfEnum;
 
     fn abs(&self) -> ArrayExt<Self::AbsValue>;
 }
 
-impl TensorChunkAbs for ArrayExt<Complex<f32>> {
+impl TensorChunkAbs for ArrayExt<num::Complex<f32>> {
     type AbsValue = f32;
 
     fn abs(&self) -> ArrayExt<f32> {
@@ -141,7 +436,7 @@ impl TensorChunkAbs for ArrayExt<Complex<f32>> {
     }
 }
 
-impl TensorChunkAbs for ArrayExt<Complex<f64>> {
+impl TensorChunkAbs for ArrayExt<num::Complex<f64>> {
     type AbsValue = f64;
 
     fn abs(&self) -> ArrayExt<f64> {
@@ -210,7 +505,7 @@ impl TensorChunkAnyAll for ArrayExt<u16> {}
 impl TensorChunkAnyAll for ArrayExt<u32> {}
 impl TensorChunkAnyAll for ArrayExt<u64> {}
 
-impl TensorChunkAnyAll for ArrayExt<Complex<f32>> {
+impl TensorChunkAnyAll for ArrayExt<num::Complex<f32>> {
     fn all(&self) -> bool {
         let all = af::all_true_all(self.array());
         all.0 > 0.0f64 && all.1 > 0.0f64
@@ -222,7 +517,7 @@ impl TensorChunkAnyAll for ArrayExt<Complex<f32>> {
     }
 }
 
-impl TensorChunkAnyAll for ArrayExt<Complex<f64>> {
+impl TensorChunkAnyAll for ArrayExt<num::Complex<f64>> {
     fn all(&self) -> bool {
         let all = af::all_true_all(self.array());
         all.0 > 0.0f64 && all.1 > 0.0f64
@@ -237,8 +532,8 @@ impl TensorChunkAnyAll for ArrayExt<Complex<f64>> {
 #[derive(Clone)]
 pub enum ChunkData {
     Bool(ArrayExt<bool>),
-    C32(ArrayExt<Complex<f32>>),
-    C64(ArrayExt<Complex<f64>>),
+    C32(ArrayExt<num::Complex<f32>>),
+    C64(ArrayExt<num::Complex<f64>>),
     F32(ArrayExt<f32>),
     F64(ArrayExt<f64>),
     I16(ArrayExt<i16>),
@@ -257,165 +552,90 @@ impl ChunkData {
         use ChunkData::*;
         match value {
             Number::Bool(b) => ChunkData::Bool(af::constant(b, dim).into()),
-            Number::Complex32(c) => C32(af::constant(c, dim).into()),
-            Number::Complex64(c) => C64(af::constant(c, dim).into()),
-            Number::Float32(f) => F32(af::constant(f, dim).into()),
-            Number::Float64(f) => F64(af::constant(f, dim).into()),
-            Number::Int16(i) => I16(af::constant(i, dim).into()),
-            Number::Int32(i) => I32(af::constant(i, dim).into()),
-            Number::Int64(i) => I64(af::constant(i, dim).into()),
-            Number::UInt8(i) => U8(af::constant(i, dim).into()),
-            Number::UInt16(u) => U16(af::constant(u, dim).into()),
-            Number::UInt32(u) => U32(af::constant(u, dim).into()),
-            Number::UInt64(u) => U64(af::constant(u, dim).into()),
+            Number::Complex(c) => match c {
+                Complex::C32(c) => C32(af::constant(c, dim).into()),
+                Complex::C64(c) => C64(af::constant(c, dim).into()),
+            },
+            Number::Float(f) => match f {
+                Float::F32(f) => F32(af::constant(f, dim).into()),
+                Float::F64(f) => F64(af::constant(f, dim).into()),
+            },
+            Number::Int(i) => match i {
+                Int::I16(i) => I16(af::constant(i, dim).into()),
+                Int::I32(i) => I32(af::constant(i, dim).into()),
+                Int::I64(i) => I64(af::constant(i, dim).into()),
+            },
+            Number::UInt(u) => match u {
+                UInt::U8(i) => U8(af::constant(i, dim).into()),
+                UInt::U16(u) => U16(af::constant(u, dim).into()),
+                UInt::U32(u) => U32(af::constant(u, dim).into()),
+                UInt::U64(u) => U64(af::constant(u, dim).into()),
+            },
         }
     }
 
     fn try_from_bytes(data: Bytes, dtype: NumberType) -> TCResult<ChunkData> {
-        // TODO: replace calls to assert! with `return Err...`
-
         use ChunkData::*;
         use NumberType::*;
         match dtype {
-            NumberType::Bool => {
-                let mut array = Vec::with_capacity(data.len());
-                for byte in data {
-                    match byte as u8 {
-                        0 => array.push(false),
-                        1 => array.push(false),
-                        other => panic!("BlockTensor corrupted! {} is not a valid boolean", other),
-                    }
-                }
-                let dim = dim4(array.len());
-                Ok(ChunkData::Bool(af::Array::new(&array, dim).into()))
-            }
-            Complex32 => {
-                assert!(data.len() % 8 == 0);
-
-                let mut array = Vec::with_capacity(data.len() / 8);
-                for c in data[..].chunks_exact(8) {
-                    let re = f32::from_be_bytes(c[0..4].try_into().unwrap());
-                    let im = f32::from_be_bytes(c[4..8].try_into().unwrap());
-                    array.push(Complex::new(re, im));
-                }
-                let dim = dim4(array.len());
-                Ok(C32(af::Array::new(&array, dim).into()))
-            }
-            Complex64 => {
-                assert!(data.len() % 16 == 0);
-
-                let mut array = Vec::with_capacity(data.len() / 16);
-                for c in data[..].chunks_exact(16) {
-                    let re = f64::from_be_bytes(c[0..8].try_into().unwrap());
-                    let im = f64::from_be_bytes(c[8..16].try_into().unwrap());
-                    array.push(Complex::new(re, im));
-                }
-                let dim = dim4(array.len());
-                Ok(C64(af::Array::new(&array, dim).into()))
-            }
-            Float32 => {
-                assert!(data.len() % 4 == 0);
-
-                let mut array = Vec::with_capacity(data.len() / 4);
-                for f in data[..].chunks_exact(4) {
-                    array.push(f32::from_be_bytes(f.try_into().unwrap()));
-                }
-                let dim = dim4(array.len());
-                Ok(F32(af::Array::new(&array, dim).into()))
-            }
-            Float64 => {
-                assert!(data.len() % 8 == 0);
-
-                let mut array = Vec::with_capacity(data.len() / 8);
-                for f in data[..].chunks_exact(8) {
-                    array.push(f64::from_be_bytes(f.try_into().unwrap()));
-                }
-                let dim = dim4(array.len());
-                Ok(F64(af::Array::new(&array, dim).into()))
-            }
-            Int16 => {
-                assert!(data.len() % 2 == 0);
-
-                let mut array = Vec::with_capacity(data.len() / 2);
-                for f in data[..].chunks_exact(2) {
-                    array.push(i16::from_be_bytes(f.try_into().unwrap()));
-                }
-                let dim = dim4(array.len());
-                Ok(I16(af::Array::new(&array, dim).into()))
-            }
-            Int32 => {
-                assert!(data.len() % 4 == 0);
-
-                let mut array = Vec::with_capacity(data.len() / 4);
-                for f in data[..].chunks_exact(4) {
-                    array.push(i32::from_be_bytes(f.try_into().unwrap()));
-                }
-                let dim = dim4(array.len());
-                Ok(I32(af::Array::new(&array, dim).into()))
-            }
-            Int64 => {
-                assert!(data.len() % 8 == 0);
-
-                let mut array = Vec::with_capacity(data.len() / 8);
-                for f in data[..].chunks_exact(8) {
-                    array.push(i32::from_be_bytes(f.try_into().unwrap()));
-                }
-                let dim = dim4(array.len());
-                Ok(I32(af::Array::new(&array, dim).into()))
-            }
-            UInt8 => {
-                let dim = dim4(data.len());
-                Ok(U8(af::Array::new(&data, dim).into()))
-            }
-            UInt16 => {
-                assert!(data.len() % 2 == 0);
-
-                let mut array = Vec::with_capacity(data.len() / 2);
-                for f in data[..].chunks_exact(2) {
-                    array.push(u16::from_be_bytes(f.try_into().unwrap()));
-                }
-                let dim = dim4(array.len());
-                Ok(U16(af::Array::new(&array, dim).into()))
-            }
-            UInt32 => {
-                assert!(data.len() % 4 == 0);
-
-                let mut array = Vec::with_capacity(data.len() / 4);
-                for f in data[..].chunks_exact(4) {
-                    array.push(u32::from_be_bytes(f.try_into().unwrap()));
-                }
-                let dim = dim4(array.len());
-                Ok(U32(af::Array::new(&array, dim).into()))
-            }
-            UInt64 => {
-                assert!(data.len() % 8 == 0);
-
-                let mut array = Vec::with_capacity(data.len() / 8);
-                for f in data[..].chunks_exact(8) {
-                    array.push(u32::from_be_bytes(f.try_into().unwrap()));
-                }
-                let dim = dim4(array.len());
-                Ok(U32(af::Array::new(&array, dim).into()))
-            }
+            NumberType::Bool => Ok(ChunkData::Bool(data.try_into()?)),
+            Complex(c) => match c {
+                ComplexType::C32 => Ok(C32(data.try_into()?)),
+                ComplexType::C64 => Ok(C64(data.try_into()?)),
+            },
+            Float(f) => match f {
+                FloatType::F32 => Ok(F32(data.try_into()?)),
+                FloatType::F64 => Ok(F64(data.try_into()?)),
+            },
+            Int(i) => match i {
+                IntType::I16 => Ok(I16(data.try_into()?)),
+                IntType::I32 => Ok(I32(data.try_into()?)),
+                IntType::I64 => Ok(I64(data.try_into()?)),
+            },
+            UInt(u) => match u {
+                UIntType::U8 => Ok(U8(data.try_into()?)),
+                UIntType::U16 => Ok(U16(data.try_into()?)),
+                UIntType::U32 => Ok(U32(data.try_into()?)),
+                UIntType::U64 => Ok(U64(data.try_into()?)),
+            },
         }
     }
 
-    pub fn try_from_values(data: Vec<Number>, dtype: NumberType) -> TCResult<ChunkData> {
+    pub fn try_from_values(values: Vec<Number>, dtype: NumberType) -> TCResult<ChunkData> {
         use ChunkData::*;
-        use NumberType::*;
         let chunk = match dtype {
-            NumberType::Bool => ChunkData::Bool(data.try_into()?),
-            Complex32 => C32(data.try_into()?),
-            Complex64 => C64(data.try_into()?),
-            Float32 => F32(data.try_into()?),
-            Float64 => F64(data.try_into()?),
-            Int16 => I16(data.try_into()?),
-            Int32 => I32(data.try_into()?),
-            Int64 => I64(data.try_into()?),
-            UInt8 => U8(data.try_into()?),
-            UInt16 => U16(data.try_into()?),
-            UInt32 => U32(data.try_into()?),
-            UInt64 => U64(data.try_into()?),
+            NumberType::Bool => ChunkData::Bool(vec_try_into(values)?.into()),
+            NumberType::Complex(c) => {
+                let values: Vec<Complex> = vec_try_into(values)?;
+                match c {
+                    ComplexType::C32 => C32(vec_try_into(values)?.into()),
+                    ComplexType::C64 => C32(vec_try_into(values)?.into()),
+                }
+            }
+            NumberType::Float(f) => {
+                let values: Vec<Float> = vec_try_into(values)?;
+                match f {
+                    FloatType::F32 => F32(vec_try_into(values)?.into()),
+                    FloatType::F64 => F32(vec_try_into(values)?.into()),
+                }
+            }
+            NumberType::Int(i) => {
+                let values: Vec<Int> = vec_try_into(values)?;
+                match i {
+                    IntType::I16 => I16(vec_try_into(values)?.into()),
+                    IntType::I32 => I32(vec_try_into(values)?.into()),
+                    IntType::I64 => I64(vec_try_into(values)?.into()),
+                }
+            }
+            NumberType::UInt(u) => {
+                let values: Vec<UInt> = vec_try_into(values)?;
+                match u {
+                    UIntType::U8 => U8(vec_try_into(values)?.into()),
+                    UIntType::U16 => U16(vec_try_into(values)?.into()),
+                    UIntType::U32 => U32(vec_try_into(values)?.into()),
+                    UIntType::U64 => U64(vec_try_into(values)?.into()),
+                }
+            }
         };
 
         Ok(chunk)
@@ -427,171 +647,267 @@ impl ChunkData {
         let converted = match self {
             ChunkData::Bool(b) => match dtype {
                 NumberType::Bool => ChunkData::Bool(b.as_type()),
-                Complex32 => C32(b.as_type()),
-                Complex64 => C64(b.as_type()),
-                Float32 => F32(b.as_type()),
-                Float64 => F64(b.as_type()),
-                Int16 => I16(b.as_type()),
-                Int32 => I32(b.as_type()),
-                Int64 => I64(b.as_type()),
-                UInt8 => U8(b.as_type()),
-                UInt16 => U16(b.as_type()),
-                UInt32 => U32(b.as_type()),
-                UInt64 => U64(b.as_type()),
+                Complex(c) => match c {
+                    ComplexType::C32 => C32(b.as_type()),
+                    ComplexType::C64 => C64(b.as_type()),
+                },
+                Float(f) => match f {
+                    FloatType::F32 => F32(b.as_type()),
+                    FloatType::F64 => F64(b.as_type()),
+                },
+                Int(i) => match i {
+                    IntType::I16 => I16(b.as_type()),
+                    IntType::I32 => I32(b.as_type()),
+                    IntType::I64 => I64(b.as_type()),
+                },
+                UInt(u) => match u {
+                    UIntType::U8 => U8(b.as_type()),
+                    UIntType::U16 => U16(b.as_type()),
+                    UIntType::U32 => U32(b.as_type()),
+                    UIntType::U64 => U64(b.as_type()),
+                },
             },
             C32(c) => match dtype {
                 NumberType::Bool => ChunkData::Bool(c.as_type()),
-                Complex32 => C32(c.as_type()),
-                Complex64 => C64(c.as_type()),
-                Float32 => F32(c.as_type()),
-                Float64 => F64(c.as_type()),
-                Int16 => I16(c.as_type()),
-                Int32 => I32(c.as_type()),
-                Int64 => I64(c.as_type()),
-                UInt8 => U8(c.as_type()),
-                UInt16 => U16(c.as_type()),
-                UInt32 => U32(c.as_type()),
-                UInt64 => U64(c.as_type()),
+                Complex(ct) => match ct {
+                    ComplexType::C32 => C32(c.as_type()),
+                    ComplexType::C64 => C64(c.as_type()),
+                },
+                Float(f) => match f {
+                    FloatType::F32 => F32(c.as_type()),
+                    FloatType::F64 => F64(c.as_type()),
+                },
+                Int(i) => match i {
+                    IntType::I16 => I16(c.as_type()),
+                    IntType::I32 => I32(c.as_type()),
+                    IntType::I64 => I64(c.as_type()),
+                },
+                UInt(u) => match u {
+                    UIntType::U8 => U8(c.as_type()),
+                    UIntType::U16 => U16(c.as_type()),
+                    UIntType::U32 => U32(c.as_type()),
+                    UIntType::U64 => U64(c.as_type()),
+                },
             },
             C64(c) => match dtype {
                 NumberType::Bool => ChunkData::Bool(c.as_type()),
-                Complex32 => C32(c.as_type()),
-                Complex64 => C64(c.as_type()),
-                Float32 => F32(c.as_type()),
-                Float64 => F64(c.as_type()),
-                Int16 => I16(c.as_type()),
-                Int32 => I32(c.as_type()),
-                Int64 => I64(c.as_type()),
-                UInt8 => U8(c.as_type()),
-                UInt16 => U16(c.as_type()),
-                UInt32 => U32(c.as_type()),
-                UInt64 => U64(c.as_type()),
+                Complex(ct) => match ct {
+                    ComplexType::C32 => C32(c.as_type()),
+                    ComplexType::C64 => C64(c.as_type()),
+                },
+                Float(f) => match f {
+                    FloatType::F32 => F32(c.as_type()),
+                    FloatType::F64 => F64(c.as_type()),
+                },
+                Int(i) => match i {
+                    IntType::I16 => I16(c.as_type()),
+                    IntType::I32 => I32(c.as_type()),
+                    IntType::I64 => I64(c.as_type()),
+                },
+                UInt(u) => match u {
+                    UIntType::U8 => U8(c.as_type()),
+                    UIntType::U16 => U16(c.as_type()),
+                    UIntType::U32 => U32(c.as_type()),
+                    UIntType::U64 => U64(c.as_type()),
+                },
             },
             F32(f) => match dtype {
                 NumberType::Bool => ChunkData::Bool(f.as_type()),
-                Complex32 => C32(f.as_type()),
-                Complex64 => C64(f.as_type()),
-                Float32 => F32(f.as_type()),
-                Float64 => F64(f.as_type()),
-                Int16 => I16(f.as_type()),
-                Int32 => I32(f.as_type()),
-                Int64 => I64(f.as_type()),
-                UInt8 => U8(f.as_type()),
-                UInt16 => U16(f.as_type()),
-                UInt32 => U32(f.as_type()),
-                UInt64 => U64(f.as_type()),
+                Complex(c) => match c {
+                    ComplexType::C32 => C32(f.as_type()),
+                    ComplexType::C64 => C64(f.as_type()),
+                },
+                Float(ft) => match ft {
+                    FloatType::F32 => F32(f.as_type()),
+                    FloatType::F64 => F64(f.as_type()),
+                },
+                Int(i) => match i {
+                    IntType::I16 => I16(f.as_type()),
+                    IntType::I32 => I32(f.as_type()),
+                    IntType::I64 => I64(f.as_type()),
+                },
+                UInt(u) => match u {
+                    UIntType::U8 => U8(f.as_type()),
+                    UIntType::U16 => U16(f.as_type()),
+                    UIntType::U32 => U32(f.as_type()),
+                    UIntType::U64 => U64(f.as_type()),
+                },
             },
             F64(f) => match dtype {
                 NumberType::Bool => ChunkData::Bool(f.as_type()),
-                Complex32 => C32(f.as_type()),
-                Complex64 => C64(f.as_type()),
-                Float32 => F32(f.as_type()),
-                Float64 => F64(f.as_type()),
-                Int16 => I16(f.as_type()),
-                Int32 => I32(f.as_type()),
-                Int64 => I64(f.as_type()),
-                UInt8 => U8(f.as_type()),
-                UInt16 => U16(f.as_type()),
-                UInt32 => U32(f.as_type()),
-                UInt64 => U64(f.as_type()),
+                Complex(c) => match c {
+                    ComplexType::C32 => C32(f.as_type()),
+                    ComplexType::C64 => C64(f.as_type()),
+                },
+                Float(ft) => match ft {
+                    FloatType::F32 => F32(f.as_type()),
+                    FloatType::F64 => F64(f.as_type()),
+                },
+                Int(i) => match i {
+                    IntType::I16 => I16(f.as_type()),
+                    IntType::I32 => I32(f.as_type()),
+                    IntType::I64 => I64(f.as_type()),
+                },
+                UInt(u) => match u {
+                    UIntType::U8 => U8(f.as_type()),
+                    UIntType::U16 => U16(f.as_type()),
+                    UIntType::U32 => U32(f.as_type()),
+                    UIntType::U64 => U64(f.as_type()),
+                },
             },
             I16(i) => match dtype {
                 NumberType::Bool => ChunkData::Bool(i.as_type()),
-                Complex32 => C32(i.as_type()),
-                Complex64 => C64(i.as_type()),
-                Float32 => F32(i.as_type()),
-                Float64 => F64(i.as_type()),
-                Int16 => I16(i.as_type()),
-                Int32 => I32(i.as_type()),
-                Int64 => I64(i.as_type()),
-                UInt8 => U8(i.as_type()),
-                UInt16 => U16(i.as_type()),
-                UInt32 => U32(i.as_type()),
-                UInt64 => U64(i.as_type()),
+                Complex(c) => match c {
+                    ComplexType::C32 => C32(i.as_type()),
+                    ComplexType::C64 => C64(i.as_type()),
+                },
+                Float(f) => match f {
+                    FloatType::F32 => F32(i.as_type()),
+                    FloatType::F64 => F64(i.as_type()),
+                },
+                Int(it) => match it {
+                    IntType::I16 => I16(i.as_type()),
+                    IntType::I32 => I32(i.as_type()),
+                    IntType::I64 => I64(i.as_type()),
+                },
+                UInt(u) => match u {
+                    UIntType::U8 => U8(i.as_type()),
+                    UIntType::U16 => U16(i.as_type()),
+                    UIntType::U32 => U32(i.as_type()),
+                    UIntType::U64 => U64(i.as_type()),
+                },
             },
-            I32(c) => match dtype {
-                NumberType::Bool => ChunkData::Bool(c.as_type()),
-                Complex32 => C32(c.as_type()),
-                Complex64 => C64(c.as_type()),
-                Float32 => F32(c.as_type()),
-                Float64 => F64(c.as_type()),
-                Int16 => I16(c.as_type()),
-                Int32 => I32(c.as_type()),
-                Int64 => I64(c.as_type()),
-                UInt8 => U8(c.as_type()),
-                UInt16 => U16(c.as_type()),
-                UInt32 => U32(c.as_type()),
-                UInt64 => U64(c.as_type()),
+            I32(i) => match dtype {
+                NumberType::Bool => ChunkData::Bool(i.as_type()),
+                Complex(c) => match c {
+                    ComplexType::C32 => C32(i.as_type()),
+                    ComplexType::C64 => C64(i.as_type()),
+                },
+                Float(f) => match f {
+                    FloatType::F32 => F32(i.as_type()),
+                    FloatType::F64 => F64(i.as_type()),
+                },
+                Int(it) => match it {
+                    IntType::I16 => I16(i.as_type()),
+                    IntType::I32 => I32(i.as_type()),
+                    IntType::I64 => I64(i.as_type()),
+                },
+                UInt(u) => match u {
+                    UIntType::U8 => U8(i.as_type()),
+                    UIntType::U16 => U16(i.as_type()),
+                    UIntType::U32 => U32(i.as_type()),
+                    UIntType::U64 => U64(i.as_type()),
+                },
             },
-            I64(c) => match dtype {
-                NumberType::Bool => ChunkData::Bool(c.as_type()),
-                Complex32 => C32(c.as_type()),
-                Complex64 => C64(c.as_type()),
-                Float32 => F32(c.as_type()),
-                Float64 => F64(c.as_type()),
-                Int16 => I16(c.as_type()),
-                Int32 => I32(c.as_type()),
-                Int64 => I64(c.as_type()),
-                UInt8 => U8(c.as_type()),
-                UInt16 => U16(c.as_type()),
-                UInt32 => U32(c.as_type()),
-                UInt64 => U64(c.as_type()),
+            I64(i) => match dtype {
+                NumberType::Bool => ChunkData::Bool(i.as_type()),
+                Complex(c) => match c {
+                    ComplexType::C32 => C32(i.as_type()),
+                    ComplexType::C64 => C64(i.as_type()),
+                },
+                Float(f) => match f {
+                    FloatType::F32 => F32(i.as_type()),
+                    FloatType::F64 => F64(i.as_type()),
+                },
+                Int(it) => match it {
+                    IntType::I16 => I16(i.as_type()),
+                    IntType::I32 => I32(i.as_type()),
+                    IntType::I64 => I64(i.as_type()),
+                },
+                UInt(u) => match u {
+                    UIntType::U8 => U8(i.as_type()),
+                    UIntType::U16 => U16(i.as_type()),
+                    UIntType::U32 => U32(i.as_type()),
+                    UIntType::U64 => U64(i.as_type()),
+                },
             },
             U8(u) => match dtype {
                 NumberType::Bool => ChunkData::Bool(u.as_type()),
-                Complex32 => C32(u.as_type()),
-                Complex64 => C64(u.as_type()),
-                Float32 => F32(u.as_type()),
-                Float64 => F64(u.as_type()),
-                Int16 => I16(u.as_type()),
-                Int32 => I32(u.as_type()),
-                Int64 => I64(u.as_type()),
-                UInt8 => U8(u.as_type()),
-                UInt16 => U16(u.as_type()),
-                UInt32 => U32(u.as_type()),
-                UInt64 => U64(u.as_type()),
+                Complex(c) => match c {
+                    ComplexType::C32 => C32(u.as_type()),
+                    ComplexType::C64 => C64(u.as_type()),
+                },
+                Float(f) => match f {
+                    FloatType::F32 => F32(u.as_type()),
+                    FloatType::F64 => F64(u.as_type()),
+                },
+                Int(i) => match i {
+                    IntType::I16 => I16(u.as_type()),
+                    IntType::I32 => I32(u.as_type()),
+                    IntType::I64 => I64(u.as_type()),
+                },
+                UInt(ut) => match ut {
+                    UIntType::U8 => U8(u.as_type()),
+                    UIntType::U16 => U16(u.as_type()),
+                    UIntType::U32 => U32(u.as_type()),
+                    UIntType::U64 => U64(u.as_type()),
+                },
             },
             U16(u) => match dtype {
                 NumberType::Bool => ChunkData::Bool(u.as_type()),
-                Complex32 => C32(u.as_type()),
-                Complex64 => C64(u.as_type()),
-                Float32 => F32(u.as_type()),
-                Float64 => F64(u.as_type()),
-                Int16 => I16(u.as_type()),
-                Int32 => I32(u.as_type()),
-                Int64 => I64(u.as_type()),
-                UInt8 => U8(u.as_type()),
-                UInt16 => U16(u.as_type()),
-                UInt32 => U32(u.as_type()),
-                UInt64 => U64(u.as_type()),
+                Complex(c) => match c {
+                    ComplexType::C32 => C32(u.as_type()),
+                    ComplexType::C64 => C64(u.as_type()),
+                },
+                Float(f) => match f {
+                    FloatType::F32 => F32(u.as_type()),
+                    FloatType::F64 => F64(u.as_type()),
+                },
+                Int(i) => match i {
+                    IntType::I16 => I16(u.as_type()),
+                    IntType::I32 => I32(u.as_type()),
+                    IntType::I64 => I64(u.as_type()),
+                },
+                UInt(ut) => match ut {
+                    UIntType::U8 => U8(u.as_type()),
+                    UIntType::U16 => U16(u.as_type()),
+                    UIntType::U32 => U32(u.as_type()),
+                    UIntType::U64 => U64(u.as_type()),
+                },
             },
             U32(u) => match dtype {
                 NumberType::Bool => ChunkData::Bool(u.as_type()),
-                Complex32 => C32(u.as_type()),
-                Complex64 => C64(u.as_type()),
-                Float32 => F32(u.as_type()),
-                Float64 => F64(u.as_type()),
-                Int16 => I16(u.as_type()),
-                Int32 => I32(u.as_type()),
-                Int64 => I64(u.as_type()),
-                UInt8 => U8(u.as_type()),
-                UInt16 => U16(u.as_type()),
-                UInt32 => U32(u.as_type()),
-                UInt64 => U64(u.as_type()),
+                Complex(c) => match c {
+                    ComplexType::C32 => C32(u.as_type()),
+                    ComplexType::C64 => C64(u.as_type()),
+                },
+                Float(f) => match f {
+                    FloatType::F32 => F32(u.as_type()),
+                    FloatType::F64 => F64(u.as_type()),
+                },
+                Int(i) => match i {
+                    IntType::I16 => I16(u.as_type()),
+                    IntType::I32 => I32(u.as_type()),
+                    IntType::I64 => I64(u.as_type()),
+                },
+                UInt(ut) => match ut {
+                    UIntType::U8 => U8(u.as_type()),
+                    UIntType::U16 => U16(u.as_type()),
+                    UIntType::U32 => U32(u.as_type()),
+                    UIntType::U64 => U64(u.as_type()),
+                },
             },
             U64(u) => match dtype {
                 NumberType::Bool => ChunkData::Bool(u.as_type()),
-                Complex32 => C32(u.as_type()),
-                Complex64 => C64(u.as_type()),
-                Float32 => F32(u.as_type()),
-                Float64 => F64(u.as_type()),
-                Int16 => I16(u.as_type()),
-                Int32 => I32(u.as_type()),
-                Int64 => I64(u.as_type()),
-                UInt8 => U8(u.as_type()),
-                UInt16 => U16(u.as_type()),
-                UInt32 => U32(u.as_type()),
-                UInt64 => U64(u.as_type()),
+                Complex(c) => match c {
+                    ComplexType::C32 => C32(u.as_type()),
+                    ComplexType::C64 => C64(u.as_type()),
+                },
+                Float(f) => match f {
+                    FloatType::F32 => F32(u.as_type()),
+                    FloatType::F64 => F64(u.as_type()),
+                },
+                Int(i) => match i {
+                    IntType::I16 => I16(u.as_type()),
+                    IntType::I32 => I32(u.as_type()),
+                    IntType::I64 => I64(u.as_type()),
+                },
+                UInt(ut) => match ut {
+                    UIntType::U8 => U8(u.as_type()),
+                    UIntType::U16 => U16(u.as_type()),
+                    UIntType::U32 => U32(u.as_type()),
+                    UIntType::U64 => U64(u.as_type()),
+                },
             },
         };
 
@@ -664,18 +980,18 @@ impl ChunkData {
     fn get_at(&self, index: af::Indexer) -> Vec<Number> {
         use ChunkData::*;
         match self {
-            Bool(b) => b.get(index),
-            C32(c) => c.get(index),
-            C64(c) => c.get(index),
-            F32(f) => f.get(index),
-            F64(f) => f.get(index),
-            I16(i) => i.get(index),
-            I32(i) => i.get(index),
-            I64(i) => i.get(index),
-            U8(i) => i.get(index),
-            U16(i) => i.get(index),
-            U32(i) => i.get(index),
-            U64(i) => i.get(index),
+            Bool(b) => b.get(index).into(),
+            C32(c) => c.get(index).into(),
+            C64(c) => c.get(index).into(),
+            F32(f) => f.get(index).into(),
+            F64(f) => f.get(index).into(),
+            I16(i) => i.get(index).into(),
+            I32(i) => i.get(index).into(),
+            I64(i) => i.get(index).into(),
+            U8(i) => i.get(index).into(),
+            U16(i) => i.get(index).into(),
+            U32(i) => i.get(index).into(),
+            U64(i) => i.get(index).into(),
         }
     }
 
@@ -721,7 +1037,7 @@ impl From<ChunkData> for Bytes {
                 data.into()
             }
             C32(c) => {
-                let mut data: Vec<Complex<f32>> = c.into();
+                let mut data: Vec<num::Complex<f32>> = c.into();
                 let data: Vec<Vec<u8>> = data
                     .drain(..)
                     .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
@@ -729,7 +1045,7 @@ impl From<ChunkData> for Bytes {
                 data.into_iter().flatten().collect::<Vec<u8>>().into()
             }
             C64(c) => {
-                let mut data: Vec<Complex<f64>> = c.into();
+                let mut data: Vec<num::Complex<f64>> = c.into();
                 let data: Vec<Vec<u8>> = data
                     .drain(..)
                     .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
@@ -791,15 +1107,15 @@ impl From<Vec<bool>> for ChunkData {
     }
 }
 
-impl From<Vec<Complex<f32>>> for ChunkData {
-    fn from(c: Vec<Complex<f32>>) -> ChunkData {
+impl From<Vec<num::Complex<f32>>> for ChunkData {
+    fn from(c: Vec<num::Complex<f32>>) -> ChunkData {
         let data = af::Array::new(&c, dim4(c.len()));
         ChunkData::C32(data.into())
     }
 }
 
-impl From<Vec<Complex<f64>>> for ChunkData {
-    fn from(c: Vec<Complex<f64>>) -> ChunkData {
+impl From<Vec<num::Complex<f64>>> for ChunkData {
+    fn from(c: Vec<num::Complex<f64>>) -> ChunkData {
         let data = af::Array::new(&c, dim4(c.len()));
         ChunkData::C64(data.into())
     }
@@ -890,4 +1206,19 @@ impl From<ChunkData> for Vec<Number> {
 
 fn dim4(size: usize) -> af::Dim4 {
     af::Dim4::new(&[size as u64, 1, 1, 1])
+}
+
+fn vec_into<D, S: Into<D>>(mut source: Vec<S>) -> Vec<D> {
+    source.drain(..).map(|i| i.into()).collect()
+}
+
+fn vec_try_into<D: TryFrom<S, Error = error::TCError>, S>(mut source: Vec<S>) -> TCResult<Vec<D>> {
+    source.drain(..).map(|i| i.try_into()).collect()
+}
+
+fn err_corrupt<T: fmt::Display>(info: T) -> error::TCError {
+    error::internal(format!(
+        "Error! This Tensor's data has been corrupted on disk: {}",
+        info
+    ))
 }

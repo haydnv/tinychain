@@ -11,7 +11,9 @@ use itertools::Itertools;
 use crate::error;
 use crate::state::file::File;
 use crate::transaction::{Txn, TxnId};
-use crate::value::{Number, NumberType, TCResult, TCStream, TypeImpl};
+use crate::value::{
+    ComplexType, FloatType, Number, NumberDataType, NumberType, TCResult, TCStream, TypeImpl,
+};
 
 use super::base::*;
 use super::chunk::*;
@@ -64,35 +66,39 @@ impl<T: BlockTensorView> TensorUnary for T {
             NumberType,
         ) = match self.dtype() {
             Bool => (Box::pin(self.chunk_stream(txn_id)), Bool),
-            Complex32 => {
-                let source = self.chunk_stream(txn_id).map(|d| d?.abs());
-                let per_block = per_block(Float32);
-                let values = ValueStream::new(source);
-                let chunks = ValueChunkStream::new(values, Float32, per_block);
-                (Box::pin(chunks), Float32)
-            }
-            Complex64 => {
-                let source = self.chunk_stream(txn_id).map(|d| d?.abs());
-                let per_block = per_block(Float64);
-                let values = ValueStream::new(source);
-                let chunks = ValueChunkStream::new(values, Float64, per_block);
-                (Box::pin(chunks), Float64)
-            }
-            Float32 => (
+            Complex(c) => match c {
+                ComplexType::C32 => {
+                    let dtype = FloatType::F32.into();
+                    let source = self.chunk_stream(txn_id).map(|d| d?.abs());
+                    let per_block = per_block(dtype);
+                    let values = ValueStream::new(source);
+                    let chunks = ValueChunkStream::new(values, dtype, per_block);
+                    (Box::pin(chunks), dtype)
+                }
+                ComplexType::C64 => {
+                    let dtype = FloatType::F64.into();
+                    let source = self.chunk_stream(txn_id).map(|d| d?.abs());
+                    let per_block = per_block(dtype);
+                    let values = ValueStream::new(source);
+                    let chunks = ValueChunkStream::new(values, dtype, per_block);
+                    (Box::pin(chunks), dtype)
+                }
+            },
+            Float(f) => match f {
+                FloatType::F32 => (
+                    Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
+                    f.into(),
+                ),
+                FloatType::F64 => (
+                    Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
+                    f.into(),
+                ),
+            },
+            Int(i) => (
                 Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
-                Float32,
+                i.into(),
             ),
-            Float64 => (
-                Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
-                Float64,
-            ),
-            Int16 => (Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())), Int16),
-            Int32 => (Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())), Int32),
-            Int64 => (Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())), Int64),
-            UInt8 => (Box::pin(self.chunk_stream(txn_id)), UInt8),
-            UInt16 => (Box::pin(self.chunk_stream(txn_id)), UInt16),
-            UInt32 => (Box::pin(self.chunk_stream(txn_id)), UInt32),
-            UInt64 => (Box::pin(self.chunk_stream(txn_id)), UInt64),
+            UInt(u) => (Box::pin(self.chunk_stream(txn_id)), u.into()),
         };
 
         BlockTensor::from_blocks(txn, shape, dtype, chunks).await

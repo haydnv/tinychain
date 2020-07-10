@@ -1,10 +1,10 @@
+use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
 
 use bytes::Bytes;
-use num::Complex;
 use regex::Regex;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
@@ -147,19 +147,427 @@ impl From<&ValueId> for String {
 }
 
 #[derive(Clone, PartialEq)]
+pub enum Complex {
+    C32(num::Complex<f32>),
+    C64(num::Complex<f64>),
+}
+
+impl TypeImpl for Complex {
+    type DType = ComplexType;
+
+    fn dtype(&self) -> ComplexType {
+        match self {
+            Complex::C32(_) => ComplexType::C32,
+            Complex::C64(_) => ComplexType::C64,
+        }
+    }
+}
+
+impl PartialOrd for Complex {
+    fn partial_cmp(&self, other: &Complex) -> Option<Ordering> {
+        match (self, other) {
+            (Complex::C32(l), Complex::C32(r)) => l.norm_sqr().partial_cmp(&r.norm_sqr()),
+            (Complex::C64(l), Complex::C64(r)) => l.norm_sqr().partial_cmp(&r.norm_sqr()),
+            _ => None,
+        }
+    }
+}
+
+impl From<num::Complex<f32>> for Complex {
+    fn from(c: num::Complex<f32>) -> Complex {
+        Complex::C32(c)
+    }
+}
+
+impl From<num::Complex<f64>> for Complex {
+    fn from(c: num::Complex<f64>) -> Complex {
+        Complex::C64(c)
+    }
+}
+
+impl TryFrom<Complex> for num::Complex<f32> {
+    type Error = error::TCError;
+
+    fn try_from(c: Complex) -> TCResult<num::Complex<f32>> {
+        match c {
+            Complex::C32(c) => Ok(c),
+            other => Err(error::bad_request("Expected C32 but found", other)),
+        }
+    }
+}
+
+impl TryFrom<Complex> for num::Complex<f64> {
+    type Error = error::TCError;
+
+    fn try_from(c: Complex) -> TCResult<num::Complex<f64>> {
+        match c {
+            Complex::C64(c) => Ok(c),
+            other => Err(error::bad_request("Expected C32 but found", other)),
+        }
+    }
+}
+
+impl Serialize for Complex {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Complex::C32(c) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry("/sbin/value/number/complex/32", &[[c.re, c.im]])?;
+                map.end()
+            }
+            Complex::C64(c) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry("/sbin/value/number/complex/64", &[[c.re, c.im]])?;
+                map.end()
+            }
+        }
+    }
+}
+
+impl fmt::Display for Complex {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Complex::C32(c) => write!(f, "C32({})", c),
+            Complex::C64(c) => write!(f, "C64({})", c),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub enum Float {
+    F32(f32),
+    F64(f64),
+}
+
+impl TypeImpl for Float {
+    type DType = FloatType;
+
+    fn dtype(&self) -> FloatType {
+        match self {
+            Float::F32(_) => FloatType::F32,
+            Float::F64(_) => FloatType::F64,
+        }
+    }
+}
+
+impl PartialOrd for Float {
+    fn partial_cmp(&self, other: &Float) -> Option<Ordering> {
+        match (self, other) {
+            (Float::F32(l), Float::F32(r)) => l.partial_cmp(r),
+            (Float::F64(l), Float::F64(r)) => l.partial_cmp(r),
+            _ => None,
+        }
+    }
+}
+
+impl From<f32> for Float {
+    fn from(f: f32) -> Float {
+        Float::F32(f)
+    }
+}
+
+impl From<f64> for Float {
+    fn from(f: f64) -> Float {
+        Float::F64(f)
+    }
+}
+
+impl TryFrom<Float> for f32 {
+    type Error = error::TCError;
+
+    fn try_from(f: Float) -> TCResult<f32> {
+        match f {
+            Float::F32(f) => Ok(f),
+            other => Err(error::bad_request("Expected F32 but found", other)),
+        }
+    }
+}
+
+impl TryFrom<Float> for f64 {
+    type Error = error::TCError;
+
+    fn try_from(f: Float) -> TCResult<f64> {
+        match f {
+            Float::F64(f) => Ok(f),
+            other => Err(error::bad_request("Expected F64 but found", other)),
+        }
+    }
+}
+
+impl Serialize for Float {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Float::F32(f) => s.serialize_f32(*f),
+            Float::F64(f) => s.serialize_f64(*f),
+        }
+    }
+}
+
+impl fmt::Display for Float {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Float::F32(i) => write!(f, "F32({})", i),
+            Float::F64(i) => write!(f, "F64({})", i),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub enum Int {
+    I16(i16),
+    I32(i32),
+    I64(i64),
+}
+
+impl TypeImpl for Int {
+    type DType = IntType;
+
+    fn dtype(&self) -> IntType {
+        match self {
+            Int::I16(_) => IntType::I16,
+            Int::I32(_) => IntType::I32,
+            Int::I64(_) => IntType::I64,
+        }
+    }
+}
+
+impl PartialOrd for Int {
+    fn partial_cmp(&self, other: &Int) -> Option<Ordering> {
+        match (self, other) {
+            (Int::I16(l), Int::I16(r)) => l.partial_cmp(r),
+            (Int::I32(l), Int::I32(r)) => l.partial_cmp(r),
+            (Int::I64(l), Int::I64(r)) => l.partial_cmp(r),
+            _ => None,
+        }
+    }
+}
+
+impl From<i16> for Int {
+    fn from(i: i16) -> Int {
+        Int::I16(i)
+    }
+}
+
+impl From<i32> for Int {
+    fn from(i: i32) -> Int {
+        Int::I32(i)
+    }
+}
+
+impl From<i64> for Int {
+    fn from(i: i64) -> Int {
+        Int::I64(i)
+    }
+}
+
+impl TryFrom<Int> for i16 {
+    type Error = error::TCError;
+
+    fn try_from(i: Int) -> TCResult<i16> {
+        match i {
+            Int::I16(i) => Ok(i),
+            other => Err(error::bad_request("Expected I16 but found", other)),
+        }
+    }
+}
+
+impl TryFrom<Int> for i32 {
+    type Error = error::TCError;
+
+    fn try_from(i: Int) -> TCResult<i32> {
+        match i {
+            Int::I32(i) => Ok(i),
+            other => Err(error::bad_request("Expected I32 but found", other)),
+        }
+    }
+}
+
+impl TryFrom<Int> for i64 {
+    type Error = error::TCError;
+
+    fn try_from(i: Int) -> TCResult<i64> {
+        match i {
+            Int::I64(i) => Ok(i),
+            other => Err(error::bad_request("Expected I64 but found", other)),
+        }
+    }
+}
+
+impl Serialize for Int {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Int::I16(i) => s.serialize_i16(*i),
+            Int::I32(i) => s.serialize_i32(*i),
+            Int::I64(i) => s.serialize_i64(*i),
+        }
+    }
+}
+
+impl fmt::Display for Int {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Int::I16(i) => write!(f, "I16: {}", i),
+            Int::I32(i) => write!(f, "I32: {}", i),
+            Int::I64(i) => write!(f, "I64: {}", i),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub enum UInt {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+}
+
+impl TypeImpl for UInt {
+    type DType = UIntType;
+
+    fn dtype(&self) -> UIntType {
+        match self {
+            UInt::U8(_) => UIntType::U8,
+            UInt::U16(_) => UIntType::U16,
+            UInt::U32(_) => UIntType::U32,
+            UInt::U64(_) => UIntType::U64,
+        }
+    }
+}
+
+impl PartialOrd for UInt {
+    fn partial_cmp(&self, other: &UInt) -> Option<Ordering> {
+        match (self, other) {
+            (UInt::U8(l), UInt::U8(r)) => l.partial_cmp(r),
+            (UInt::U16(l), UInt::U16(r)) => l.partial_cmp(r),
+            (UInt::U32(l), UInt::U32(r)) => l.partial_cmp(r),
+            (UInt::U64(l), UInt::U64(r)) => l.partial_cmp(r),
+            _ => None,
+        }
+    }
+}
+
+impl From<u8> for UInt {
+    fn from(u: u8) -> UInt {
+        UInt::U8(u)
+    }
+}
+
+impl From<u16> for UInt {
+    fn from(u: u16) -> UInt {
+        UInt::U16(u)
+    }
+}
+
+impl From<u32> for UInt {
+    fn from(u: u32) -> UInt {
+        UInt::U32(u)
+    }
+}
+
+impl From<u64> for UInt {
+    fn from(u: u64) -> UInt {
+        UInt::U64(u)
+    }
+}
+
+impl TryFrom<UInt> for u8 {
+    type Error = error::TCError;
+
+    fn try_from(u: UInt) -> TCResult<u8> {
+        match u {
+            UInt::U8(u) => Ok(u),
+            other => Err(error::bad_request("Expected a UInt8 but found", other)),
+        }
+    }
+}
+
+impl TryFrom<UInt> for u16 {
+    type Error = error::TCError;
+
+    fn try_from(u: UInt) -> TCResult<u16> {
+        match u {
+            UInt::U16(u) => Ok(u),
+            other => Err(error::bad_request("Expected a UInt16 but found", other)),
+        }
+    }
+}
+
+impl TryFrom<UInt> for u32 {
+    type Error = error::TCError;
+
+    fn try_from(u: UInt) -> TCResult<u32> {
+        match u {
+            UInt::U32(u) => Ok(u),
+            other => Err(error::bad_request("Expected a UInt32 but found", other)),
+        }
+    }
+}
+
+impl TryFrom<UInt> for u64 {
+    type Error = error::TCError;
+
+    fn try_from(u: UInt) -> TCResult<u64> {
+        match u {
+            UInt::U64(u) => Ok(u),
+            other => Err(error::bad_request("Expected a UInt64 but found", other)),
+        }
+    }
+}
+
+impl Serialize for UInt {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            UInt::U8(u) => s.serialize_u8(*u),
+            UInt::U16(u) => s.serialize_u16(*u),
+            UInt::U32(u) => s.serialize_u32(*u),
+            UInt::U64(u) => s.serialize_u64(*u),
+        }
+    }
+}
+
+impl fmt::Display for UInt {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            UInt::U8(u) => write!(f, "U8: {}", u),
+            UInt::U16(u) => write!(f, "UInt16: {}", u),
+            UInt::U32(u) => write!(f, "UInt32: {}", u),
+            UInt::U64(u) => write!(f, "UInt64: {}", u),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub enum Number {
     Bool(bool),
-    Complex32(Complex<f32>),
-    Complex64(Complex<f64>),
-    Float32(f32),
-    Float64(f64),
-    Int16(i16),
-    Int32(i32),
-    Int64(i64),
-    UInt8(u8),
-    UInt16(u16),
-    UInt32(u32),
-    UInt64(u64),
+    Complex(Complex),
+    Float(Float),
+    Int(Int),
+    UInt(UInt),
+}
+
+impl PartialOrd for Number {
+    fn partial_cmp(&self, other: &Number) -> Option<Ordering> {
+        match (self, other) {
+            (Number::Bool(l), Number::Bool(r)) => l.partial_cmp(r),
+            (Number::Complex(l), Number::Complex(r)) => l.partial_cmp(r),
+            (Number::Float(l), Number::Float(r)) => l.partial_cmp(r),
+            (Number::Int(l), Number::Int(r)) => l.partial_cmp(r),
+            (Number::UInt(l), Number::UInt(r)) => l.partial_cmp(r),
+            _ => None,
+        }
+    }
 }
 
 impl TypeImpl for Number {
@@ -168,17 +576,10 @@ impl TypeImpl for Number {
     fn dtype(&self) -> NumberType {
         match self {
             Number::Bool(_) => NumberType::Bool,
-            Number::Complex32(_) => NumberType::Complex32,
-            Number::Complex64(_) => NumberType::Complex64,
-            Number::Float32(_) => NumberType::Float32,
-            Number::Float64(_) => NumberType::Float64,
-            Number::Int16(_) => NumberType::Int16,
-            Number::Int32(_) => NumberType::Int32,
-            Number::Int64(_) => NumberType::Int64,
-            Number::UInt8(_) => NumberType::UInt8,
-            Number::UInt16(_) => NumberType::UInt16,
-            Number::UInt32(_) => NumberType::UInt32,
-            Number::UInt64(_) => NumberType::UInt64,
+            Number::Complex(c) => NumberType::Complex(c.dtype()),
+            Number::Float(f) => NumberType::Float(f.dtype()),
+            Number::Int(i) => NumberType::Int(i.dtype()),
+            Number::UInt(u) => NumberType::UInt(u.dtype()),
         }
     }
 }
@@ -189,69 +590,29 @@ impl From<bool> for Number {
     }
 }
 
-impl From<Complex<f32>> for Number {
-    fn from(c: Complex<f32>) -> Number {
-        Number::Complex32(c)
+pub trait Numeric {}
+
+impl From<Complex> for Number {
+    fn from(c: Complex) -> Number {
+        Number::Complex(c)
     }
 }
 
-impl From<Complex<f64>> for Number {
-    fn from(c: Complex<f64>) -> Number {
-        Number::Complex64(c)
+impl From<Float> for Number {
+    fn from(f: Float) -> Number {
+        Number::Float(f)
     }
 }
 
-impl From<f32> for Number {
-    fn from(f: f32) -> Number {
-        Number::Float32(f)
+impl From<Int> for Number {
+    fn from(i: Int) -> Number {
+        Number::Int(i)
     }
 }
 
-impl From<f64> for Number {
-    fn from(f: f64) -> Number {
-        Number::Float64(f)
-    }
-}
-
-impl From<i16> for Number {
-    fn from(i: i16) -> Number {
-        Number::Int16(i)
-    }
-}
-
-impl From<i32> for Number {
-    fn from(i: i32) -> Number {
-        Number::Int32(i)
-    }
-}
-
-impl From<i64> for Number {
-    fn from(i: i64) -> Number {
-        Number::Int64(i)
-    }
-}
-
-impl From<u8> for Number {
-    fn from(i: u8) -> Number {
-        Number::UInt8(i)
-    }
-}
-
-impl From<u16> for Number {
-    fn from(i: u16) -> Number {
-        Number::UInt16(i)
-    }
-}
-
-impl From<u32> for Number {
-    fn from(i: u32) -> Number {
-        Number::UInt32(i)
-    }
-}
-
-impl From<u64> for Number {
-    fn from(i: u64) -> Number {
-        Number::UInt64(i)
+impl From<UInt> for Number {
+    fn from(u: UInt) -> Number {
+        Number::UInt(u)
     }
 }
 
@@ -266,123 +627,46 @@ impl TryFrom<Number> for bool {
     }
 }
 
-impl TryFrom<Number> for Complex<f32> {
+impl TryFrom<Number> for Complex {
     type Error = error::TCError;
 
-    fn try_from(v: Number) -> TCResult<Complex<f32>> {
-        match v {
-            Number::Complex32(c) => Ok(c),
-            other => Err(error::bad_request("Expected Complex32 but found", other)),
-        }
-    }
-}
-
-impl TryFrom<Number> for Complex<f64> {
-    type Error = error::TCError;
-
-    fn try_from(v: Number) -> TCResult<Complex<f64>> {
-        match v {
-            Number::Complex64(c) => Ok(c),
-            other => Err(error::bad_request("Expected Complex64 but found", other)),
-        }
-    }
-}
-
-impl TryFrom<Number> for f32 {
-    type Error = error::TCError;
-
-    fn try_from(n: Number) -> TCResult<f32> {
+    fn try_from(n: Number) -> TCResult<Complex> {
         match n {
-            Number::Float32(f) => Ok(f),
-            other => Err(error::bad_request("Expected Float32 but found", other)),
+            Number::Complex(c) => Ok(c),
+            other => Err(error::bad_request("Expected Complex but found", other)),
         }
     }
 }
 
-impl TryFrom<Number> for f64 {
+impl TryFrom<Number> for Float {
     type Error = error::TCError;
 
-    fn try_from(n: Number) -> TCResult<f64> {
+    fn try_from(n: Number) -> TCResult<Float> {
         match n {
-            Number::Float64(f) => Ok(f),
-            other => Err(error::bad_request("Expected Float64 but found", other)),
+            Number::Float(f) => Ok(f),
+            other => Err(error::bad_request("Expected Float but found", other)),
         }
     }
 }
 
-impl TryFrom<Number> for i16 {
+impl TryFrom<Number> for Int {
     type Error = error::TCError;
 
-    fn try_from(n: Number) -> TCResult<i16> {
+    fn try_from(n: Number) -> TCResult<Int> {
         match n {
-            Number::Int16(i) => Ok(i),
-            other => Err(error::bad_request("Expected Int16 but found", other)),
+            Number::Int(i) => Ok(i),
+            other => Err(error::bad_request("Expected Int but found", other)),
         }
     }
 }
 
-impl TryFrom<Number> for i32 {
+impl TryFrom<Number> for UInt {
     type Error = error::TCError;
 
-    fn try_from(n: Number) -> TCResult<i32> {
+    fn try_from(n: Number) -> TCResult<UInt> {
         match n {
-            Number::Int32(i) => Ok(i),
-            other => Err(error::bad_request("Expected an Int32 but found", other)),
-        }
-    }
-}
-
-impl TryFrom<Number> for i64 {
-    type Error = error::TCError;
-
-    fn try_from(n: Number) -> TCResult<i64> {
-        match n {
-            Number::Int64(i) => Ok(i),
-            other => Err(error::bad_request("Expected an Int64 but found", other)),
-        }
-    }
-}
-
-impl TryFrom<Number> for u8 {
-    type Error = error::TCError;
-
-    fn try_from(n: Number) -> TCResult<u8> {
-        match n {
-            Number::UInt8(i) => Ok(i),
-            other => Err(error::bad_request("Expected a UInt8 but found", other)),
-        }
-    }
-}
-
-impl TryFrom<Number> for u16 {
-    type Error = error::TCError;
-
-    fn try_from(n: Number) -> TCResult<u16> {
-        match n {
-            Number::UInt16(i) => Ok(i),
-            other => Err(error::bad_request("Expected a UInt16 but found", other)),
-        }
-    }
-}
-
-impl TryFrom<Number> for u32 {
-    type Error = error::TCError;
-
-    fn try_from(n: Number) -> TCResult<u32> {
-        match n {
-            Number::UInt32(i) => Ok(i),
-            other => Err(error::bad_request("Expected a UInt32 but found", other)),
-        }
-    }
-}
-
-impl TryFrom<Number> for u64 {
-    type Error = error::TCError;
-
-    fn try_from(n: Number) -> TCResult<u64> {
-        match n {
-            Number::UInt64(i) => Ok(i),
-            other => Err(error::bad_request("Expected a UInt64 but found", other)),
+            Number::UInt(u) => Ok(u),
+            other => Err(error::bad_request("Expected UInt but found", other)),
         }
     }
 }
@@ -394,25 +678,10 @@ impl Serialize for Number {
     {
         match self {
             Number::Bool(b) => s.serialize_bool(*b),
-            Number::Complex32(c) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("/sbin/value/complex/32", &[[c.re, c.im]])?;
-                map.end()
-            }
-            Number::Complex64(c) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("/sbin/value/complex/64", &[[c.re, c.im]])?;
-                map.end()
-            }
-            Number::Float32(f) => s.serialize_f32(*f),
-            Number::Float64(f) => s.serialize_f64(*f),
-            Number::Int16(i) => s.serialize_i16(*i),
-            Number::Int32(i) => s.serialize_i32(*i),
-            Number::Int64(i) => s.serialize_i64(*i),
-            Number::UInt8(i) => s.serialize_u8(*i),
-            Number::UInt16(i) => s.serialize_u16(*i),
-            Number::UInt32(i) => s.serialize_u32(*i),
-            Number::UInt64(i) => s.serialize_u64(*i),
+            Number::Complex(c) => c.serialize(s),
+            Number::Float(f) => f.serialize(s),
+            Number::Int(i) => i.serialize(s),
+            Number::UInt(u) => u.serialize(s),
         }
     }
 }
@@ -421,17 +690,10 @@ impl fmt::Display for Number {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Number::Bool(b) => write!(f, "Bool({})", b),
-            Number::Complex32(c) => write!(f, "Complex32({})", c),
-            Number::Complex64(c) => write!(f, "Complex64({})", c),
-            Number::Float32(n) => write!(f, "Float32({})", n),
-            Number::Float64(n) => write!(f, "Float64({})", n),
-            Number::Int16(i) => write!(f, "Int16: {}", i),
-            Number::Int32(i) => write!(f, "Int32: {}", i),
-            Number::Int64(i) => write!(f, "Int64: {}", i),
-            Number::UInt8(i) => write!(f, "UInt8: {}", i),
-            Number::UInt16(i) => write!(f, "UInt16: {}", i),
-            Number::UInt32(i) => write!(f, "UInt32: {}", i),
-            Number::UInt64(i) => write!(f, "UInt64: {}", i),
+            Number::Complex(c) => write!(f, "Complex({})", c),
+            Number::Float(n) => write!(f, "Float({})", n),
+            Number::Int(i) => write!(f, "Int({})", i),
+            Number::UInt(u) => write!(f, "UInt({})", u),
         }
     }
 }
@@ -679,6 +941,20 @@ impl<E: Into<error::TCError>, T: TryFrom<Value, Error = E>> TryFrom<Value> for V
 
 struct ValueVisitor;
 
+impl ValueVisitor {
+    fn visit_float<F: Into<Float>>(&self, f: F) -> TCResult<Value> {
+        self.visit_number(f.into())
+    }
+
+    fn visit_int<I: Into<Int>>(&self, i: I) -> TCResult<Value> {
+        self.visit_number(i.into())
+    }
+
+    fn visit_number<N: Into<Number>>(&self, n: N) -> TCResult<Value> {
+        Ok(Value::Number(n.into()))
+    }
+}
+
 impl<'de> de::Visitor<'de> for ValueVisitor {
     type Value = Value;
 
@@ -686,11 +962,32 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         f.write_str("a Tinychain Value, e.g. \"foo\" or 123 or {\"$object_ref: [\"slice_id\", \"$state\"]\"}")
     }
 
+    fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_float(value).map_err(de::Error::custom)
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_float(value).map_err(de::Error::custom)
+    }
+
     fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E>
     where
         E: de::Error,
     {
-        Ok(Value::Number(Number::Int32(value)))
+        self.visit_int(value).map_err(de::Error::custom)
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_int(value).map_err(de::Error::custom)
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>

@@ -1,10 +1,8 @@
 use std::cmp::Ordering::{self, *};
 use std::convert::TryInto;
 
-use num::Integer;
-
 use crate::error;
-use crate::value::{Number, NumberType, TCResult, TCType, Value};
+use crate::value::*;
 
 pub struct Collator {
     schema: Vec<TCType>,
@@ -22,14 +20,9 @@ impl Collator {
     }
 
     pub fn supports(dtype: &TCType) -> bool {
-        use NumberType::*;
         use TCType::*;
         match dtype {
-            Number(ntype) => match ntype {
-                Int32 => true,
-                UInt64 => true,
-                _ => false,
-            },
+            Number(_) => true,
             _ => false,
         }
     }
@@ -101,23 +94,13 @@ impl Collator {
     pub fn compare(&self, key1: &[Value], key2: &[Value]) -> Ordering {
         for i in 0..Ord::min(key1.len(), key2.len()) {
             match self.schema[i] {
-                TCType::Number(ntype) => {
-                    let key1: Number = key1[i].clone().try_into().unwrap();
-                    let key2: Number = key2[i].clone().try_into().unwrap();
-                    match ntype {
-                        NumberType::Int32 => {
-                            return Collator::compare_integer::<i32>(
-                                key1.try_into().unwrap(),
-                                key2.try_into().unwrap(),
-                            )
-                        }
-                        NumberType::UInt64 => {
-                            return Collator::compare_integer::<u64>(
-                                key1.try_into().unwrap(),
-                                key2.try_into().unwrap(),
-                            )
-                        }
-                        _ => panic!("Collator::compare does not support {}", self.schema[i]),
+                TCType::Number(_) => {
+                    let left: Number = key1[i].clone().try_into().unwrap();
+                    let right: Number = key2[i].clone().try_into().unwrap();
+                    if left < right {
+                        return Ordering::Less;
+                    } else if left > right {
+                        return Ordering::Greater;
                     }
                 }
                 _ => panic!("Collator::compare does not support {}", self.schema[i]),
@@ -131,9 +114,5 @@ impl Collator {
         } else {
             Ordering::Equal
         }
-    }
-
-    fn compare_integer<T: Integer>(v1: T, v2: T) -> Ordering {
-        v1.cmp(&v2)
     }
 }
