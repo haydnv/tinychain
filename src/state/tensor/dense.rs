@@ -47,8 +47,47 @@ impl<T: BlockTensorView> TensorUnary for T {
         BlockTensor::from_blocks(txn, shape, dtype, Box::pin(chunks)).await
     }
 
-    async fn abs(self: Arc<Self>) -> TCResult<Self::Base> {
+    async fn copy(self: Arc<Self>, _txn: Arc<Txn>) -> TCResult<Self::Base> {
         Err(error::not_implemented())
+    }
+
+    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Self::Base> {
+        let shape = self.shape().clone();
+        let txn_id = txn.id().clone();
+
+        use TCType::*;
+        let (chunks, dtype): (
+            Pin<Box<dyn Stream<Item = TCResult<ChunkData>> + Send>>,
+            TCType,
+        ) = match self.dtype() {
+            Bool => (Box::pin(self.chunk_stream(txn_id)), Bool),
+            Complex32 => (
+                Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
+                Float32,
+            ),
+            Complex64 => (
+                Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
+                Float64,
+            ),
+            Float32 => (
+                Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
+                Float32,
+            ),
+            Float64 => (
+                Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
+                Float64,
+            ),
+            Int16 => (Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())), Int16),
+            Int32 => (Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())), Int32),
+            Int64 => (Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())), Int64),
+            UInt8 => (Box::pin(self.chunk_stream(txn_id)), UInt8),
+            UInt16 => (Box::pin(self.chunk_stream(txn_id)), UInt16),
+            UInt32 => (Box::pin(self.chunk_stream(txn_id)), UInt32),
+            UInt64 => (Box::pin(self.chunk_stream(txn_id)), UInt64),
+            _ => return Err(error::internal("Tensor has unsupported data type")),
+        };
+
+        BlockTensor::from_blocks(txn, shape, dtype, chunks).await
     }
 
     async fn sum(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self::Base> {

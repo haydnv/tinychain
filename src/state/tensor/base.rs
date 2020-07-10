@@ -18,7 +18,9 @@ pub trait TensorUnary: TensorView {
 
     async fn as_dtype(self: Arc<Self>, txn: Arc<Txn>, dtype: TCType) -> TCResult<Self::Base>;
 
-    async fn abs(self: Arc<Self>) -> TCResult<Self::Base>;
+    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Self::Base>;
+
+    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Self::Base>;
 
     async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Self::Base>;
 

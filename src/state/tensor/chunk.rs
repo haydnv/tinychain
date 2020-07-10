@@ -127,6 +127,68 @@ impl<E: Into<error::TCError>, T: af::HasAfEnum + TryFrom<Value, Error = E>> TryF
     }
 }
 
+pub trait TensorChunkAbs: TensorChunk {
+    type AbsValue: af::HasAfEnum + Into<Value>;
+
+    fn abs(&self) -> ArrayExt<Self::AbsValue>;
+}
+
+impl TensorChunkAbs for ArrayExt<Complex<f32>> {
+    type AbsValue = f32;
+
+    fn abs(&self) -> ArrayExt<f32> {
+        ArrayExt(af::abs(self.array()))
+    }
+}
+
+impl TensorChunkAbs for ArrayExt<Complex<f64>> {
+    type AbsValue = f64;
+
+    fn abs(&self) -> ArrayExt<f64> {
+        ArrayExt(af::abs(self.array()))
+    }
+}
+
+impl TensorChunkAbs for ArrayExt<f32> {
+    type AbsValue = f32;
+
+    fn abs(&self) -> ArrayExt<f32> {
+        ArrayExt(af::abs(self.array()))
+    }
+}
+
+impl TensorChunkAbs for ArrayExt<f64> {
+    type AbsValue = f64;
+
+    fn abs(&self) -> ArrayExt<f64> {
+        ArrayExt(af::abs(self.array()))
+    }
+}
+
+impl TensorChunkAbs for ArrayExt<i16> {
+    type AbsValue = i16;
+
+    fn abs(&self) -> ArrayExt<i16> {
+        ArrayExt(af::abs(self.array()).cast())
+    }
+}
+
+impl TensorChunkAbs for ArrayExt<i32> {
+    type AbsValue = i32;
+
+    fn abs(&self) -> ArrayExt<i32> {
+        ArrayExt(af::abs(self.array()).cast())
+    }
+}
+
+impl TensorChunkAbs for ArrayExt<i64> {
+    type AbsValue = i64;
+
+    fn abs(&self) -> ArrayExt<i64> {
+        ArrayExt(af::abs(self.array()).cast())
+    }
+}
+
 pub trait TensorChunkAnyAll: TensorChunk {
     fn all(&self) -> bool {
         af::all_true_all(self.array()).0 > 0.0f64
@@ -547,6 +609,20 @@ impl ChunkData {
         };
 
         Ok(converted)
+    }
+
+    pub fn abs(&self) -> TCResult<ChunkData> {
+        use ChunkData::*;
+        match self {
+            C32(c) => Ok(F32(c.abs())),
+            C64(c) => Ok(F64(c.abs())),
+            F32(f) => Ok(F32(f.abs())),
+            F64(f) => Ok(F64(f.abs())),
+            I16(i) => Ok(I16(i.abs())),
+            I32(i) => Ok(I32(i.abs())),
+            I64(i) => Ok(I64(i.abs())),
+            other => Ok(other.clone()),
+        }
     }
 
     pub fn all(&self) -> bool {
