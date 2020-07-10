@@ -64,14 +64,20 @@ impl<T: BlockTensorView> TensorUnary for T {
             TCType,
         ) = match self.dtype() {
             Bool => (Box::pin(self.chunk_stream(txn_id)), Bool),
-            Complex32 => (
-                Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
-                Float32,
-            ),
-            Complex64 => (
-                Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
-                Float64,
-            ),
+            Complex32 => {
+                let source = self.chunk_stream(txn_id).map(|d| d?.abs());
+                let per_block = per_block(Float32)?;
+                let values = ValueStream::new(source);
+                let chunks = ValueChunkStream::new(values, Float32, per_block);
+                (Box::pin(chunks), Float32)
+            }
+            Complex64 => {
+                let source = self.chunk_stream(txn_id).map(|d| d?.abs());
+                let per_block = per_block(Float64)?;
+                let values = ValueStream::new(source);
+                let chunks = ValueChunkStream::new(values, Float64, per_block);
+                (Box::pin(chunks), Float64)
+            }
             Float32 => (
                 Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
                 Float32,
@@ -87,7 +93,7 @@ impl<T: BlockTensorView> TensorUnary for T {
             UInt16 => (Box::pin(self.chunk_stream(txn_id)), UInt16),
             UInt32 => (Box::pin(self.chunk_stream(txn_id)), UInt32),
             UInt64 => (Box::pin(self.chunk_stream(txn_id)), UInt64),
-            _ => return Err(error::internal("Tensor has unsupported data type")),
+            _ => return Err(error::internal("Tensor has unsupported data type!")),
         };
 
         BlockTensor::from_blocks(txn, shape, dtype, chunks).await
