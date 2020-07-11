@@ -1,15 +1,15 @@
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
-use std::ops::Mul;
+use std::ops::{Add, Mul};
 
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::error;
 
-use super::TCResult;
-use super::class::{NumberClass, Impl, NumberImpl};
 use super::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
+use super::class::{Impl, NumberClass, NumberImpl};
+use super::TCResult;
 
 #[derive(Clone, PartialEq)]
 pub enum Complex {
@@ -33,6 +33,22 @@ impl NumberImpl for Complex {
 }
 
 impl Eq for Complex {}
+
+impl Add for Complex {
+    type Output = Self;
+
+    fn add(self, other: Complex) -> Self {
+        match (self, other) {
+            (Self::C32(l), Self::C32(r)) => Self::C32(l + r),
+            (Self::C64(l), Self::C64(r)) => Self::C64(l + r),
+            (Self::C64(l), r) => {
+                let r: num::Complex<f64> = r.into();
+                Self::C64(l + r)
+            }
+            (l, r) => r + l,
+        }
+    }
+}
 
 impl Mul for Complex {
     type Output = Self;
@@ -184,6 +200,19 @@ impl NumberImpl for Float {
 
 impl Eq for Float {}
 
+impl Add for Float {
+    type Output = Self;
+
+    fn add(self, other: Float) -> Self {
+        match (self, other) {
+            (Self::F32(l), Self::F32(r)) => Self::F32(l + r),
+            (Self::F64(l), Self::F64(r)) => Self::F64(l + r),
+            (Self::F64(l), Self::F32(r)) => Self::F64(l + r as f64),
+            (l, r) => (r + l),
+        }
+    }
+}
+
 impl Mul for Float {
     type Output = Self;
 
@@ -315,6 +344,22 @@ impl NumberImpl for Int {
 }
 
 impl Eq for Int {}
+
+impl Add for Int {
+    type Output = Self;
+
+    fn add(self, other: Int) -> Self {
+        match (self, other) {
+            (Self::I64(l), Self::I64(r)) => Self::I64(l + r),
+            (Self::I64(l), Self::I32(r)) => Self::I64(l + r as i64),
+            (Self::I64(l), Self::I16(r)) => Self::I64(l + r as i64),
+            (Self::I32(l), Self::I32(r)) => Self::I32(l + r),
+            (Self::I32(l), Self::I16(r)) => Self::I32(l + r as i32),
+            (Self::I16(l), Self::I16(r)) => Self::I16(l + r),
+            (l, r) => r + l,
+        }
+    }
+}
 
 impl Mul for Int {
     type Output = Self;
@@ -459,6 +504,26 @@ impl Impl for UInt {
 
 impl NumberImpl for UInt {
     type Class = UIntType;
+}
+
+impl Add for UInt {
+    type Output = Self;
+
+    fn add(self, other: UInt) -> Self {
+        match (self, other) {
+            (UInt::U64(l), UInt::U64(r)) => UInt::U64(l + r),
+            (UInt::U64(l), UInt::U32(r)) => UInt::U64(l + r as u64),
+            (UInt::U64(l), UInt::U16(r)) => UInt::U64(l + r as u64),
+            (UInt::U64(l), UInt::U8(r)) => UInt::U64(l + r as u64),
+            (UInt::U32(l), UInt::U32(r)) => UInt::U32(l + r),
+            (UInt::U32(l), UInt::U16(r)) => UInt::U32(l + r as u32),
+            (UInt::U32(l), UInt::U8(r)) => UInt::U32(l + r as u32),
+            (UInt::U16(l), UInt::U16(r)) => UInt::U16(l + r),
+            (UInt::U16(l), UInt::U8(r)) => UInt::U16(l + r as u16),
+            (UInt::U8(l), UInt::U8(r)) => UInt::U8(l + r),
+            (l, r) => r + l,
+        }
+    }
 }
 
 impl Mul for UInt {
@@ -668,6 +733,67 @@ impl NumberImpl for Number {
     type Class = NumberType;
 }
 
+impl Add for Number {
+    type Output = Self;
+
+    fn add(self, other: Number) -> Self {
+        match (self, other) {
+            (Self::Bool(l), Self::Bool(r)) => match (l, r) {
+                (true, true) => Self::UInt(UInt::U8(2)),
+                (true, false) => Self::UInt(UInt::U8(1)),
+                (false, true) => Self::UInt(UInt::U8(1)),
+                (false, false) => Self::UInt(UInt::U8(0)),
+            },
+
+            (Self::Complex(l), Self::Complex(r)) => Self::Complex(l + r),
+            (Self::Complex(l), Self::Float(r)) => {
+                let r: Complex = r.into();
+                Self::Complex(l + r)
+            }
+            (Self::Complex(l), Self::Int(r)) => {
+                let r: Complex = r.into();
+                Self::Complex(l + r)
+            }
+            (Self::Complex(l), Self::UInt(r)) => {
+                let r: Complex = r.into();
+                Self::Complex(l + r)
+            }
+            (Self::Complex(l), Self::Bool(r)) => {
+                let r: Complex = r.into();
+                Self::Complex(l + r)
+            }
+            (Self::Float(l), Self::Float(r)) => Self::Float(l + r),
+            (Self::Float(l), Self::Int(r)) => {
+                let r: Float = r.into();
+                Self::Float(l + r)
+            }
+            (Self::Float(l), Self::UInt(r)) => {
+                let r: Float = r.into();
+                Self::Float(l + r)
+            }
+            (Self::Float(l), Self::Bool(r)) => {
+                let r: Float = r.into();
+                Self::Float(l + r)
+            }
+            (Self::Int(l), Self::Int(r)) => Self::Int(l + r),
+            (Self::Int(l), Self::UInt(r)) => {
+                let r: Int = r.into();
+                Self::Int(l + r)
+            }
+            (Self::Int(l), Self::Bool(r)) => {
+                let r: Int = r.into();
+                Self::Int(l + r)
+            }
+            (Self::UInt(l), Self::UInt(r)) => Self::UInt(l + r),
+            (Self::UInt(l), Self::Bool(r)) => {
+                let r: UInt = r.into();
+                Self::UInt(l + r)
+            }
+            (l, r) => r + l,
+        }
+    }
+}
+
 impl Mul for Number {
     type Output = Self;
 
@@ -677,9 +803,6 @@ impl Mul for Number {
             (Self::Bool(true), r) => r,
 
             (Self::Complex(l), Self::Complex(r)) => Self::Complex(l * r),
-            (Self::Float(l), Self::Float(r)) => Self::Float(l * r),
-            (Self::Int(l), Self::Int(r)) => Self::Int(l * r),
-            (Self::UInt(l), Self::UInt(r)) => Self::UInt(l * r),
             (Self::Complex(l), Self::Float(r)) => {
                 let r: Complex = r.into();
                 Self::Complex(l * r)
@@ -692,6 +815,7 @@ impl Mul for Number {
                 let r: Complex = r.into();
                 Self::Complex(l * r)
             }
+            (Self::Float(l), Self::Float(r)) => Self::Float(l * r),
             (Self::Float(l), Self::Int(r)) => {
                 let r: Float = r.into();
                 Self::Float(l * r)
@@ -700,10 +824,12 @@ impl Mul for Number {
                 let r: Float = r.into();
                 Self::Float(l * r)
             }
+            (Self::Int(l), Self::Int(r)) => Self::Int(l * r),
             (Self::Int(l), Self::UInt(r)) => {
                 let r: Int = r.into();
                 Self::Int(l * r)
             }
+            (Self::UInt(l), Self::UInt(r)) => Self::UInt(l * r),
             (l, r) => r * l,
         }
     }

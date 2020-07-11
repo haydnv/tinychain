@@ -1,16 +1,16 @@
 use std::fmt;
-use std::ops::Mul;
+use std::ops::{Add, Mul};
 
-use super::Value;
 use super::number::{Complex, Float, Int, Number, UInt};
 use super::string::TCString;
+use super::Value;
 
 pub trait Class: Eq {
     type Impl: Impl;
 }
 
 pub trait NumberClass: Class + Into<NumberType> {
-    type Impl: NumberImpl + Mul + PartialOrd + From<bool>;
+    type Impl: NumberImpl + Add + Mul + PartialOrd + From<bool>;
 
     fn size(&self) -> usize;
 

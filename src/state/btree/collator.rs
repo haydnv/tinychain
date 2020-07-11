@@ -2,8 +2,8 @@ use std::cmp::Ordering::{self, *};
 use std::convert::TryInto;
 
 use crate::error;
-use crate::value::{Number, Value, TCResult};
 use crate::value::class::ValueType;
+use crate::value::{Number, TCResult, Value};
 
 pub struct Collator {
     schema: Vec<ValueType>,

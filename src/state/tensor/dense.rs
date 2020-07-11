@@ -11,9 +11,9 @@ use itertools::Itertools;
 use crate::error;
 use crate::state::file::File;
 use crate::transaction::{Txn, TxnId};
-use crate::value::{Number, TCResult, TCStream};
-use crate::value::class::{Impl, NumberClass};
 use crate::value::class::{ComplexType, FloatType, NumberType};
+use crate::value::class::{Impl, NumberClass};
+use crate::value::{Number, TCResult, TCStream};
 
 use super::base::*;
 use super::chunk::*;
@@ -102,8 +102,14 @@ impl<T: BlockTensorView> TensorUnary for T {
         Err(error::not_implemented())
     }
 
-    async fn sum_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Number> {
-        Err(error::not_implemented())
+    async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
+        let mut sum = self.dtype().zero();
+        let mut chunks = self.chunk_stream(txn_id);
+        while let Some(chunk) = chunks.next().await {
+            sum = sum + chunk?.product();
+        }
+
+        Ok(sum)
     }
 
     async fn product(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self::Base> {
@@ -111,7 +117,7 @@ impl<T: BlockTensorView> TensorUnary for T {
     }
 
     async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
-        let mut product = self.dtype().zero();
+        let mut product = self.dtype().one();
         let mut chunks = self.chunk_stream(txn_id);
         while let Some(chunk) = chunks.next().await {
             product = product * chunk?.product();

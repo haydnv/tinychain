@@ -11,9 +11,9 @@ use crate::error;
 
 pub mod class;
 pub mod link;
+mod number;
 pub mod op;
 mod reference;
-mod number;
 mod string;
 mod version;
 

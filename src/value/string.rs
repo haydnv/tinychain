@@ -10,10 +10,10 @@ use uuid::Uuid;
 
 use crate::error;
 
-use super::TCResult;
-use super::link::{Link, TCPath};
 use super::class::{Impl, StringType};
+use super::link::{Link, TCPath};
 use super::reference::TCRef;
+use super::TCResult;
 
 const RESERVED_CHARS: [&str; 21] = [
     "/", "..", "~", "$", "`", "^", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":",

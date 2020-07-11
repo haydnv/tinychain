@@ -15,8 +15,8 @@ use crate::error;
 use crate::state::file::{Block, BlockId, File};
 use crate::transaction::lock::{Mutate, TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{TCResult, TCStream, Value, ValueId};
 use crate::value::class::{Impl, ValueType};
+use crate::value::{TCResult, TCStream, Value, ValueId};
 
 use super::{Collect, GetResult, State};
 

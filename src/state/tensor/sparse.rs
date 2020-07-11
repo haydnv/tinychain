@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::transaction::{Txn, TxnId};
-use crate::value::{TCResult, TCStream, Value};
 use crate::value::class::NumberType;
+use crate::value::{TCResult, TCStream, Value};
 
 use super::base::TensorView;
 use super::dense::BlockTensor;
