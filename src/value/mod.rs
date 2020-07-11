@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops::Mul;
 use std::pin::Pin;
 
 use futures::stream::Stream;
@@ -29,7 +30,17 @@ pub trait DataType: Eq {
 }
 
 pub trait NumberDataType: Eq + DataType + Into<NumberType> {
+    type Impl: NumberTypeImpl + Mul + PartialOrd + From<bool>;
+
     fn size(&self) -> usize;
+
+    fn one(&self) -> <Self as NumberDataType>::Impl {
+        true.into()
+    }
+
+    fn zero(&self) -> <Self as NumberDataType>::Impl {
+        false.into()
+    }
 }
 
 pub trait TypeImpl {
@@ -40,6 +51,10 @@ pub trait TypeImpl {
     fn is_a(&self, dtype: Self::DType) -> bool {
         self.dtype() == dtype
     }
+}
+
+pub trait NumberTypeImpl: Mul + Sized + PartialOrd {
+    type DType: NumberDataType;
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
@@ -53,6 +68,8 @@ impl DataType for ComplexType {
 }
 
 impl NumberDataType for ComplexType {
+    type Impl = Complex;
+
     fn size(&self) -> usize {
         match self {
             ComplexType::C32 => 8,
@@ -88,6 +105,8 @@ impl DataType for FloatType {
 }
 
 impl NumberDataType for FloatType {
+    type Impl = Float;
+
     fn size(&self) -> usize {
         match self {
             FloatType::F32 => 8,
@@ -120,10 +139,12 @@ pub enum IntType {
 }
 
 impl DataType for IntType {
-    type Impl = Float;
+    type Impl = Int;
 }
 
 impl NumberDataType for IntType {
+    type Impl = Int;
+
     fn size(&self) -> usize {
         match self {
             IntType::I16 => 2,
@@ -163,6 +184,8 @@ impl DataType for UIntType {
 }
 
 impl NumberDataType for UIntType {
+    type Impl = UInt;
+
     fn size(&self) -> usize {
         match self {
             UIntType::U8 => 1,
@@ -201,6 +224,8 @@ pub enum NumberType {
 }
 
 impl NumberDataType for NumberType {
+    type Impl = Number;
+
     fn size(&self) -> usize {
         use NumberType::*;
         match self {
@@ -281,7 +306,7 @@ impl TCType {
         use TCType::*;
         match self {
             None => Some(1),
-            Number(number) => Some(number.size()),
+            Number(nt) => Some(nt.size()),
             _ => Option::None,
         }
     }

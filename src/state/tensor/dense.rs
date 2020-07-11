@@ -25,7 +25,7 @@ const ERR_CORRUPT: &str = "BlockTensor corrupted! Please restart Tinychain and f
 
 #[async_trait]
 pub trait BlockTensorView: TensorView + 'static {
-    type ChunkStream: Stream<Item = TCResult<ChunkData>> + Send;
+    type ChunkStream: Stream<Item = TCResult<ChunkData>> + Send + Unpin;
     type ValueStream: Stream<Item = TCResult<Number>> + Send;
 
     fn chunk_stream(self: Arc<Self>, txn_id: TxnId) -> Self::ChunkStream;
@@ -84,16 +84,10 @@ impl<T: BlockTensorView> TensorUnary for T {
                     (Box::pin(chunks), dtype)
                 }
             },
-            Float(f) => match f {
-                FloatType::F32 => (
-                    Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
-                    f.into(),
-                ),
-                FloatType::F64 => (
-                    Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
-                    f.into(),
-                ),
-            },
+            Float(f) => (
+                Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
+                f.into(),
+            ),
             Int(i) => (
                 Box::pin(self.chunk_stream(txn_id).map(|d| d?.abs())),
                 i.into(),
@@ -116,8 +110,14 @@ impl<T: BlockTensorView> TensorUnary for T {
         Err(error::not_implemented())
     }
 
-    async fn product_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Number> {
-        Err(error::not_implemented())
+    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
+        let mut product = self.dtype().zero();
+        let mut chunks = self.chunk_stream(txn_id);
+        while let Some(chunk) = chunks.next().await {
+            product = product * chunk?.product();
+        }
+
+        Ok(product)
     }
 
     async fn not(self: Arc<Self>, _txn: &Arc<Txn>) -> TCResult<Self::Dense> {

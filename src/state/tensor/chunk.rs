@@ -529,6 +529,175 @@ impl TensorChunkAnyAll for ArrayExt<num::Complex<f64>> {
     }
 }
 
+trait TensorChunkReduce: TensorChunk {
+    type Product: af::HasAfEnum;
+    type Sum: af::HasAfEnum;
+
+    fn product(&self) -> Self::Product;
+
+    fn sum(&self) -> Self::Sum;
+}
+
+impl TensorChunkReduce for ArrayExt<bool> {
+    type Sum = u64;
+    type Product = u64;
+
+    fn sum(&self) -> u64 {
+        af::sum_all(self.array()).0 as u64
+    }
+
+    fn product(&self) -> u64 {
+        af::product_all(self.array()).0 as u64
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<num::Complex<f32>> {
+    type Sum = num::Complex<f64>;
+    type Product = num::Complex<f64>;
+
+    fn sum(&self) -> Self::Sum {
+        let sum = af::sum_all(self.array());
+        num::Complex::new(sum.0, sum.1)
+    }
+
+    fn product(&self) -> Self::Product {
+        let product = af::product_all(self.array());
+        num::Complex::new(product.0, product.1)
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<num::Complex<f64>> {
+    type Sum = num::Complex<f64>;
+    type Product = num::Complex<f64>;
+
+    fn sum(&self) -> Self::Sum {
+        let sum = af::sum_all(self.array());
+        num::Complex::new(sum.0, sum.1)
+    }
+
+    fn product(&self) -> Self::Product {
+        let product = af::product_all(self.array());
+        num::Complex::new(product.0, product.1)
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<f32> {
+    type Sum = f64;
+    type Product = f64;
+
+    fn sum(&self) -> f64 {
+        af::sum_all(self.array()).0
+    }
+
+    fn product(&self) -> f64 {
+        af::product_all(self.array()).0
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<f64> {
+    type Sum = f64;
+    type Product = f64;
+
+    fn sum(&self) -> f64 {
+        af::sum_all(self.array()).0
+    }
+
+    fn product(&self) -> f64 {
+        af::product_all(self.array()).0
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<i16> {
+    type Sum = i64;
+    type Product = i64;
+
+    fn sum(&self) -> i64 {
+        af::sum_all(self.array()).0 as i64
+    }
+
+    fn product(&self) -> i64 {
+        af::product_all(self.array()).0 as i64
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<i32> {
+    type Sum = i64;
+    type Product = i64;
+
+    fn sum(&self) -> i64 {
+        af::sum_all(self.array()).0 as i64
+    }
+
+    fn product(&self) -> i64 {
+        af::product_all(self.array()).0 as i64
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<i64> {
+    type Sum = i64;
+    type Product = i64;
+
+    fn sum(&self) -> i64 {
+        af::sum_all(self.array()).0 as i64
+    }
+
+    fn product(&self) -> i64 {
+        af::product_all(self.array()).0 as i64
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<u8> {
+    type Sum = u64;
+    type Product = u64;
+
+    fn sum(&self) -> u64 {
+        af::sum_all(self.array()).0 as u64
+    }
+
+    fn product(&self) -> u64 {
+        af::product_all(self.array()).0 as u64
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<u16> {
+    type Sum = u64;
+    type Product = u64;
+
+    fn sum(&self) -> u64 {
+        af::sum_all(self.array()).0 as u64
+    }
+
+    fn product(&self) -> u64 {
+        af::product_all(self.array()).0 as u64
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<u32> {
+    type Sum = u64;
+    type Product = u64;
+
+    fn sum(&self) -> u64 {
+        af::sum_all(self.array()).0 as u64
+    }
+
+    fn product(&self) -> u64 {
+        af::product_all(self.array()).0 as u64
+    }
+}
+
+impl TensorChunkReduce for ArrayExt<u64> {
+    type Sum = u64;
+    type Product = u64;
+
+    fn sum(&self) -> u64 {
+        af::sum_all(self.array()).0 as u64
+    }
+
+    fn product(&self) -> u64 {
+        af::product_all(self.array()).0 as u64
+    }
+}
+
 #[derive(Clone)]
 pub enum ChunkData {
     Bool(ArrayExt<bool>),
@@ -624,7 +793,7 @@ impl ChunkData {
                 match i {
                     IntType::I16 => I16(vec_try_into(values)?.into()),
                     IntType::I32 => I32(vec_try_into(values)?.into()),
-                    IntType::I64 => I64(vec_try_into(values)?.into()),
+                    IntType::I64 => I64(vec_into(values).into()),
                 }
             }
             NumberType::UInt(u) => {
@@ -961,6 +1130,24 @@ impl ChunkData {
             U16(u) => u.any(),
             U32(u) => u.any(),
             U64(u) => u.any(),
+        }
+    }
+
+    pub fn product(&self) -> Number {
+        use ChunkData::*;
+        match self {
+            Bool(b) => Number::UInt(b.product().into()),
+            C32(c) => Number::Complex(c.product().into()),
+            C64(c) => Number::Complex(c.product().into()),
+            F32(f) => Number::Float(f.product().into()),
+            F64(f) => Number::Float(f.product().into()),
+            I16(i) => Number::Int(i.product().into()),
+            I32(i) => Number::Int(i.product().into()),
+            I64(i) => Number::Int(i.product().into()),
+            U8(u) => Number::UInt(u.product().into()),
+            U16(u) => Number::UInt(u.product().into()),
+            U32(u) => Number::UInt(u.product().into()),
+            U64(u) => Number::UInt(u.product().into()),
         }
     }
 

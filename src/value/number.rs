@@ -163,12 +163,83 @@ impl TypeImpl for Complex {
     }
 }
 
+impl NumberTypeImpl for Complex {
+    type DType = ComplexType;
+}
+
+impl Eq for Complex {}
+
+impl Mul for Complex {
+    type Output = Self;
+
+    fn mul(self, other: Complex) -> Self {
+        match (self, other) {
+            (Self::C32(l), Self::C32(r)) => Self::C32(l * r),
+            (Self::C64(l), Self::C64(r)) => Self::C64(l * r),
+            (Self::C64(l), r) => {
+                let r: num::Complex<f64> = r.into();
+                Self::C64(l * r)
+            }
+            (l, r) => r * l,
+        }
+    }
+}
+
 impl PartialOrd for Complex {
     fn partial_cmp(&self, other: &Complex) -> Option<Ordering> {
         match (self, other) {
             (Complex::C32(l), Complex::C32(r)) => l.norm_sqr().partial_cmp(&r.norm_sqr()),
             (Complex::C64(l), Complex::C64(r)) => l.norm_sqr().partial_cmp(&r.norm_sqr()),
             _ => None,
+        }
+    }
+}
+
+impl From<Complex> for num::Complex<f64> {
+    fn from(c: Complex) -> Self {
+        match c {
+            Complex::C32(c) => num::Complex::new(c.re as f64, c.im as f64),
+            Complex::C64(c64) => c64,
+        }
+    }
+}
+
+impl From<Float> for Complex {
+    fn from(f: Float) -> Self {
+        match f {
+            Float::F64(f) => Self::C64(num::Complex::new(f, 0.0f64)),
+            Float::F32(f) => Self::C32(num::Complex::new(f, 0.0f32)),
+        }
+    }
+}
+
+impl From<Int> for Complex {
+    fn from(i: Int) -> Self {
+        match i {
+            Int::I64(i) => Self::C64(num::Complex::new(i as f64, 0.0f64)),
+            Int::I32(i) => Self::C32(num::Complex::new(i as f32, 0.0f32)),
+            Int::I16(i) => Self::C32(num::Complex::new(i as f32, 0.0f32)),
+        }
+    }
+}
+
+impl From<UInt> for Complex {
+    fn from(u: UInt) -> Self {
+        match u {
+            UInt::U64(u) => Self::C64(num::Complex::new(u as f64, 0.0f64)),
+            UInt::U32(u) => Self::C32(num::Complex::new(u as f32, 0.0f32)),
+            UInt::U16(u) => Self::C32(num::Complex::new(u as f32, 0.0f32)),
+            UInt::U8(u) => Self::C32(num::Complex::new(u as f32, 0.0f32)),
+        }
+    }
+}
+
+impl From<bool> for Complex {
+    fn from(b: bool) -> Self {
+        if b {
+            Self::C32(num::Complex::new(1.0f32, 0.0f32))
+        } else {
+            Self::C64(num::Complex::new(1.0f64, 0.0f64))
         }
     }
 }
@@ -191,17 +262,6 @@ impl TryFrom<Complex> for num::Complex<f32> {
     fn try_from(c: Complex) -> TCResult<num::Complex<f32>> {
         match c {
             Complex::C32(c) => Ok(c),
-            other => Err(error::bad_request("Expected C32 but found", other)),
-        }
-    }
-}
-
-impl TryFrom<Complex> for num::Complex<f64> {
-    type Error = error::TCError;
-
-    fn try_from(c: Complex) -> TCResult<num::Complex<f64>> {
-        match c {
-            Complex::C64(c) => Ok(c),
             other => Err(error::bad_request("Expected C32 but found", other)),
         }
     }
@@ -253,6 +313,25 @@ impl TypeImpl for Float {
     }
 }
 
+impl NumberTypeImpl for Float {
+    type DType = FloatType;
+}
+
+impl Eq for Float {}
+
+impl Mul for Float {
+    type Output = Self;
+
+    fn mul(self, other: Float) -> Self {
+        match (self, other) {
+            (Self::F32(l), Self::F32(r)) => Self::F32(l * r),
+            (Self::F64(l), Self::F64(r)) => Self::F64(l * r),
+            (Self::F64(l), Self::F32(r)) => Self::F64(l * r as f64),
+            (l, r) => (r * l),
+        }
+    }
+}
+
 impl PartialOrd for Float {
     fn partial_cmp(&self, other: &Float) -> Option<Ordering> {
         match (self, other) {
@@ -264,14 +343,45 @@ impl PartialOrd for Float {
 }
 
 impl From<f32> for Float {
-    fn from(f: f32) -> Float {
-        Float::F32(f)
+    fn from(f: f32) -> Self {
+        Self::F32(f)
     }
 }
 
 impl From<f64> for Float {
-    fn from(f: f64) -> Float {
-        Float::F64(f)
+    fn from(f: f64) -> Self {
+        Self::F64(f)
+    }
+}
+
+impl From<Int> for Float {
+    fn from(i: Int) -> Self {
+        match i {
+            Int::I64(i) => Self::F64(i as f64),
+            Int::I32(i) => Self::F32(i as f32),
+            Int::I16(i) => Self::F32(i as f32),
+        }
+    }
+}
+
+impl From<UInt> for Float {
+    fn from(u: UInt) -> Self {
+        match u {
+            UInt::U64(u) => Self::F64(u as f64),
+            UInt::U32(u) => Self::F32(u as f32),
+            UInt::U16(u) => Self::F32(u as f32),
+            UInt::U8(u) => Self::F32(u as f32),
+        }
+    }
+}
+
+impl From<bool> for Float {
+    fn from(b: bool) -> Self {
+        if b {
+            Self::F32(1.0f32)
+        } else {
+            Self::F32(0.0f32)
+        }
     }
 }
 
@@ -286,13 +396,11 @@ impl TryFrom<Float> for f32 {
     }
 }
 
-impl TryFrom<Float> for f64 {
-    type Error = error::TCError;
-
-    fn try_from(f: Float) -> TCResult<f64> {
+impl From<Float> for f64 {
+    fn from(f: Float) -> f64 {
         match f {
-            Float::F64(f) => Ok(f),
-            other => Err(error::bad_request("Expected F64 but found", other)),
+            Float::F32(f) => f as f64,
+            Float::F64(f) => f,
         }
     }
 }
@@ -337,6 +445,28 @@ impl TypeImpl for Int {
     }
 }
 
+impl NumberTypeImpl for Int {
+    type DType = IntType;
+}
+
+impl Eq for Int {}
+
+impl Mul for Int {
+    type Output = Self;
+
+    fn mul(self, other: Int) -> Self {
+        match (self, other) {
+            (Self::I64(l), Self::I64(r)) => Self::I64(l * r),
+            (Self::I64(l), Self::I32(r)) => Self::I64(l * r as i64),
+            (Self::I64(l), Self::I16(r)) => Self::I64(l * r as i64),
+            (Self::I32(l), Self::I32(r)) => Self::I32(l * r),
+            (Self::I32(l), Self::I16(r)) => Self::I32(l * r as i32),
+            (Self::I16(l), Self::I16(r)) => Self::I16(l * r),
+            (l, r) => r * l,
+        }
+    }
+}
+
 impl PartialOrd for Int {
     fn partial_cmp(&self, other: &Int) -> Option<Ordering> {
         match (self, other) {
@@ -366,6 +496,26 @@ impl From<i64> for Int {
     }
 }
 
+impl From<UInt> for Int {
+    fn from(u: UInt) -> Int {
+        match u {
+            UInt::U64(u) => Int::I64(u as i64),
+            UInt::U32(u) => Int::I32(u as i32),
+            UInt::U16(u) => Int::I16(u as i16),
+            UInt::U8(u) => Int::I16(u as i16),
+        }
+    }
+}
+
+impl From<bool> for Int {
+    fn from(b: bool) -> Int {
+        if b {
+            Int::I16(1)
+        } else {
+            Int::I16(0)
+        }
+    }
+}
 impl TryFrom<Int> for i16 {
     type Error = error::TCError;
 
@@ -388,13 +538,12 @@ impl TryFrom<Int> for i32 {
     }
 }
 
-impl TryFrom<Int> for i64 {
-    type Error = error::TCError;
-
-    fn try_from(i: Int) -> TCResult<i64> {
+impl From<Int> for i64 {
+    fn from(i: Int) -> i64 {
         match i {
-            Int::I64(i) => Ok(i),
-            other => Err(error::bad_request("Expected I64 but found", other)),
+            Int::I16(i) => i as i64,
+            Int::I32(i) => i as i64,
+            Int::I64(i) => i,
         }
     }
 }
@@ -443,14 +592,66 @@ impl TypeImpl for UInt {
     }
 }
 
+impl NumberTypeImpl for UInt {
+    type DType = UIntType;
+}
+
+impl Mul for UInt {
+    type Output = Self;
+
+    fn mul(self, other: UInt) -> Self {
+        match (self, other) {
+            (UInt::U64(l), UInt::U64(r)) => UInt::U64(l * r),
+            (UInt::U64(l), UInt::U32(r)) => UInt::U64(l * r as u64),
+            (UInt::U64(l), UInt::U16(r)) => UInt::U64(l * r as u64),
+            (UInt::U64(l), UInt::U8(r)) => UInt::U64(l * r as u64),
+            (UInt::U32(l), UInt::U32(r)) => UInt::U32(l * r),
+            (UInt::U32(l), UInt::U16(r)) => UInt::U32(l * r as u32),
+            (UInt::U32(l), UInt::U8(r)) => UInt::U32(l * r as u32),
+            (UInt::U16(l), UInt::U16(r)) => UInt::U16(l * r),
+            (UInt::U16(l), UInt::U8(r)) => UInt::U16(l * r as u16),
+            (UInt::U8(l), UInt::U8(r)) => UInt::U8(l * r),
+            (l, r) => r * l,
+        }
+    }
+}
+
+impl Eq for UInt {}
+
+impl Ord for UInt {
+    fn cmp(&self, other: &UInt) -> Ordering {
+        match (self, other) {
+            (UInt::U64(l), UInt::U64(r)) => l.cmp(r),
+            (UInt::U64(l), UInt::U32(r)) => l.cmp(&r.clone().into()),
+            (UInt::U64(l), UInt::U16(r)) => l.cmp(&r.clone().into()),
+            (UInt::U64(l), UInt::U8(r)) => l.cmp(&r.clone().into()),
+            (UInt::U32(l), UInt::U32(r)) => l.cmp(r),
+            (UInt::U32(l), UInt::U16(r)) => l.cmp(&r.clone().into()),
+            (UInt::U32(l), UInt::U8(r)) => l.cmp(&r.clone().into()),
+            (UInt::U16(l), UInt::U16(r)) => l.cmp(r),
+            (UInt::U16(l), UInt::U8(r)) => l.cmp(&r.clone().into()),
+            (UInt::U8(l), UInt::U8(r)) => l.cmp(r),
+            (l, r) => match r.cmp(l) {
+                Ordering::Greater => Ordering::Less,
+                Ordering::Less => Ordering::Greater,
+                Ordering::Equal => Ordering::Equal,
+            },
+        }
+    }
+}
+
 impl PartialOrd for UInt {
     fn partial_cmp(&self, other: &UInt) -> Option<Ordering> {
-        match (self, other) {
-            (UInt::U8(l), UInt::U8(r)) => l.partial_cmp(r),
-            (UInt::U16(l), UInt::U16(r)) => l.partial_cmp(r),
-            (UInt::U32(l), UInt::U32(r)) => l.partial_cmp(r),
-            (UInt::U64(l), UInt::U64(r)) => l.partial_cmp(r),
-            _ => None,
+        Some(self.cmp(other))
+    }
+}
+
+impl From<bool> for UInt {
+    fn from(b: bool) -> UInt {
+        if b {
+            UInt::U8(1)
+        } else {
+            UInt::U8(0)
         }
     }
 }
@@ -560,12 +761,25 @@ pub enum Number {
 impl PartialOrd for Number {
     fn partial_cmp(&self, other: &Number) -> Option<Ordering> {
         match (self, other) {
-            (Number::Bool(l), Number::Bool(r)) => l.partial_cmp(r),
-            (Number::Complex(l), Number::Complex(r)) => l.partial_cmp(r),
-            (Number::Float(l), Number::Float(r)) => l.partial_cmp(r),
-            (Number::Int(l), Number::Int(r)) => l.partial_cmp(r),
-            (Number::UInt(l), Number::UInt(r)) => l.partial_cmp(r),
-            _ => None,
+            (Self::Complex(l), Self::Complex(r)) => l.partial_cmp(r),
+            (Self::Complex(l), Self::Float(r)) => l.partial_cmp(&r.clone().into()),
+            (Self::Complex(l), Self::Int(r)) => l.partial_cmp(&r.clone().into()),
+            (Self::Complex(l), Self::UInt(r)) => l.partial_cmp(&r.clone().into()),
+            (Self::Complex(l), Self::Bool(r)) => l.partial_cmp(&r.clone().into()),
+            (Self::Float(l), Self::Float(r)) => l.partial_cmp(r),
+            (Self::Float(l), Self::Int(r)) => l.partial_cmp(&r.clone().into()),
+            (Self::Float(l), Self::UInt(r)) => l.partial_cmp(&r.clone().into()),
+            (Self::Float(l), Self::Bool(r)) => l.partial_cmp(&r.clone().into()),
+            (Self::Int(l), Self::Int(r)) => l.partial_cmp(r),
+            (Self::Int(l), Self::UInt(r)) => l.partial_cmp(&r.clone().into()),
+            (Self::UInt(l), Self::UInt(r)) => l.partial_cmp(r),
+            (Self::Bool(l), Self::Bool(r)) => l.partial_cmp(r),
+            (l, r) => match r.partial_cmp(l) {
+                Some(Ordering::Greater) => Some(Ordering::Less),
+                Some(Ordering::Less) => Some(Ordering::Greater),
+                Some(Ordering::Equal) => Some(Ordering::Equal),
+                None => None,
+            },
         }
     }
 }
@@ -574,12 +788,58 @@ impl TypeImpl for Number {
     type DType = NumberType;
 
     fn dtype(&self) -> NumberType {
+        use NumberType::*;
         match self {
-            Number::Bool(_) => NumberType::Bool,
-            Number::Complex(c) => NumberType::Complex(c.dtype()),
-            Number::Float(f) => NumberType::Float(f.dtype()),
-            Number::Int(i) => NumberType::Int(i.dtype()),
-            Number::UInt(u) => NumberType::UInt(u.dtype()),
+            Self::Bool(_) => Bool,
+            Self::Complex(c) => Complex(c.dtype()),
+            Self::Float(f) => Float(f.dtype()),
+            Self::Int(i) => Int(i.dtype()),
+            Self::UInt(u) => UInt(u.dtype()),
+        }
+    }
+}
+
+impl NumberTypeImpl for Number {
+    type DType = NumberType;
+}
+
+impl Mul for Number {
+    type Output = Self;
+
+    fn mul(self, other: Number) -> Self {
+        match (self, other) {
+            (Self::Bool(false), r) => r.dtype().zero(),
+            (Self::Bool(true), r) => r,
+
+            (Self::Complex(l), Self::Complex(r)) => Self::Complex(l * r),
+            (Self::Float(l), Self::Float(r)) => Self::Float(l * r),
+            (Self::Int(l), Self::Int(r)) => Self::Int(l * r),
+            (Self::UInt(l), Self::UInt(r)) => Self::UInt(l * r),
+            (Self::Complex(l), Self::Float(r)) => {
+                let r: Complex = r.into();
+                Self::Complex(l * r)
+            }
+            (Self::Complex(l), Self::Int(r)) => {
+                let r: Complex = r.into();
+                Self::Complex(l * r)
+            }
+            (Self::Complex(l), Self::UInt(r)) => {
+                let r: Complex = r.into();
+                Self::Complex(l * r)
+            }
+            (Self::Float(l), Self::Int(r)) => {
+                let r: Float = r.into();
+                Self::Float(l * r)
+            }
+            (Self::Float(l), Self::UInt(r)) => {
+                let r: Float = r.into();
+                Self::Float(l * r)
+            }
+            (Self::Int(l), Self::UInt(r)) => {
+                let r: Int = r.into();
+                Self::Int(l * r)
+            }
+            (l, r) => r * l,
         }
     }
 }
