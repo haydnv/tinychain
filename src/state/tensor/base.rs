@@ -7,7 +7,7 @@ use num::Integer;
 
 use crate::error;
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::NumberType;
+use crate::value::class::{Impl, NumberType};
 use crate::value::{Number, TCResult};
 
 use super::index::*;
@@ -17,21 +17,25 @@ pub trait TensorUnary: TensorView {
     type Base: TensorView;
     type Dense: TensorView;
 
-    async fn as_dtype(self: Arc<Self>, txn: Arc<Txn>, dtype: NumberType) -> TCResult<Self::Base>;
+    async fn as_dtype(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        dtype: NumberType,
+    ) -> TCResult<Arc<Self::Base>>;
 
-    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Self::Base>;
+    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
 
-    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Self::Base>;
+    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
 
-    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Self::Base>;
+    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<Self::Base>>;
 
     async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Self::Base>;
+    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<Self::Base>>;
 
     async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn not(self: Arc<Self>, txn: &Arc<Txn>) -> TCResult<Self::Dense>;
+    async fn not(self: Arc<Self>, txn: &Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
 }
 
 #[async_trait]

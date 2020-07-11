@@ -65,6 +65,10 @@ pub trait TensorChunk {
 
     fn array(&'_ self) -> &'_ af::Array<Self::DType>;
 
+    fn len(&self) -> usize {
+        self.array().elements()
+    }
+
     fn as_type<T: af::HasAfEnum>(&self) -> ArrayExt<T> {
         ArrayExt(self.array().cast())
     }
@@ -1146,6 +1150,24 @@ impl ChunkData {
             U16(u) => Number::UInt(u.product().into()),
             U32(u) => Number::UInt(u.product().into()),
             U64(u) => Number::UInt(u.product().into()),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        use ChunkData::*;
+        match self {
+            Bool(b) => b.len(),
+            C32(c) => c.len(),
+            C64(c) => c.len(),
+            F32(f) => f.len(),
+            F64(f) => f.len(),
+            I16(i) => i.len(),
+            I32(i) => i.len(),
+            I64(i) => i.len(),
+            U8(u) => u.len(),
+            U16(u) => u.len(),
+            U32(u) => u.len(),
+            U64(u) => u.len(),
         }
     }
 

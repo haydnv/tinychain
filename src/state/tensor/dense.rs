@@ -34,18 +34,32 @@ pub trait BlockTensorView: TensorView + 'static {
 
     async fn write<T: BlockTensorView>(
         self: Arc<Self>,
-        txn_id: TxnId,
+        txn_id: &TxnId,
         index: Index,
         value: Arc<T>,
+    ) -> TCResult<()>;
+
+    async fn write_one(
+        self: Arc<Self>,
+        txn_id: &TxnId,
+        index: Index,
+        number: Number,
     ) -> TCResult<()>;
 }
 
 #[async_trait]
-impl<T: BlockTensorView + Slice> TensorUnary for T {
+impl<T: BlockTensorView + Rebase + Slice> TensorUnary for T
+where
+    <T as Slice>::Slice: TensorUnary,
+{
     type Base = BlockTensor;
     type Dense = BlockTensor;
 
-    async fn as_dtype(self: Arc<Self>, txn: Arc<Txn>, dtype: NumberType) -> TCResult<BlockTensor> {
+    async fn as_dtype(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        dtype: NumberType,
+    ) -> TCResult<Arc<BlockTensor>> {
         let shape = self.shape().clone();
         let per_block = per_block(dtype);
         let source = self
@@ -56,14 +70,14 @@ impl<T: BlockTensorView + Slice> TensorUnary for T {
         BlockTensor::from_blocks(txn, shape, dtype, Box::pin(chunks)).await
     }
 
-    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Self::Base> {
+    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
         let shape = self.shape().clone();
         let dtype = self.dtype();
         let blocks = Box::pin(self.chunk_stream(txn.id().clone()));
         BlockTensor::from_blocks(txn, shape, dtype, blocks).await
     }
 
-    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Self::Base> {
+    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
         let shape = self.shape().clone();
         let txn_id = txn.id().clone();
 
@@ -105,16 +119,34 @@ impl<T: BlockTensorView + Slice> TensorUnary for T {
         BlockTensor::from_blocks(txn, shape, dtype, chunks).await
     }
 
-    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Self::Base> {
+    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<Self::Base>> {
         if axis >= self.ndim() {
             return Err(error::bad_request("Axis out of range", axis));
         }
 
+        let txn_id = txn.id().clone();
         let mut shape = self.shape().clone();
         shape.remove(axis);
-        let _summed = BlockTensor::constant(txn, shape, self.dtype().zero()).await?;
+        let summed = BlockTensor::constant(txn, shape, self.dtype().zero()).await?;
 
-        Err(error::not_implemented())
+        if axis == 0 {
+            let axis_index = self.shape().all()[0].clone();
+            let writes = FuturesUnordered::new();
+            for coord in summed.shape().all().affected() {
+                let source_index: Index = (axis_index.clone(), coord.clone()).into();
+                let slice = self.clone().slice(source_index)?;
+                let summed = summed.clone();
+                let txn_id = txn_id.clone();
+                writes.push(async move {
+                    let value = slice.sum_all(txn_id.clone()).await?;
+                    summed.write_one(&txn_id, coord.into(), value).await
+                });
+            }
+        } else {
+            return Err(error::not_implemented());
+        }
+
+        Ok(summed)
     }
 
     async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
@@ -127,7 +159,7 @@ impl<T: BlockTensorView + Slice> TensorUnary for T {
         Ok(sum)
     }
 
-    async fn product(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self::Base> {
+    async fn product(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Arc<Self::Base>> {
         Err(error::not_implemented())
     }
 
@@ -141,7 +173,7 @@ impl<T: BlockTensorView + Slice> TensorUnary for T {
         Ok(product)
     }
 
-    async fn not(self: Arc<Self>, _txn: &Arc<Txn>) -> TCResult<Self::Dense> {
+    async fn not(self: Arc<Self>, _txn: &Arc<Txn>) -> TCResult<Arc<Self::Dense>> {
         Err(error::not_implemented())
     }
 }
@@ -157,7 +189,7 @@ pub struct BlockTensor {
 }
 
 impl BlockTensor {
-    async fn constant(txn: Arc<Txn>, shape: Shape, value: Number) -> TCResult<BlockTensor> {
+    async fn constant(txn: Arc<Txn>, shape: Shape, value: Number) -> TCResult<Arc<BlockTensor>> {
         let per_block = BLOCK_SIZE / value.class().size();
         let size = shape.size();
 
@@ -182,7 +214,7 @@ impl BlockTensor {
         shape: Shape,
         dtype: NumberType,
         mut blocks: Pin<Box<dyn Stream<Item = TCResult<ChunkData>> + Send>>,
-    ) -> TCResult<BlockTensor> {
+    ) -> TCResult<Arc<BlockTensor>> {
         let file = txn
             .context()
             .create_file(txn.id().clone(), "block_tensor".parse()?)
@@ -202,7 +234,7 @@ impl BlockTensor {
             .map(|axis| shape[axis + 1..].iter().product())
             .collect();
 
-        Ok(BlockTensor {
+        Ok(Arc::new(BlockTensor {
             dtype,
             shape,
             size,
@@ -210,7 +242,7 @@ impl BlockTensor {
             file,
             per_block: per_block(dtype),
             coord_index,
-        })
+        }))
     }
 
     async fn get_chunk(&self, txn_id: &TxnId, chunk_id: u64) -> TCResult<Chunk> {
@@ -333,7 +365,7 @@ impl BlockTensorView for BlockTensor {
 
     async fn write<T: BlockTensorView>(
         self: Arc<Self>,
-        txn_id: TxnId,
+        txn_id: &TxnId,
         index: Index,
         value: Arc<T>,
     ) -> TCResult<()> {
@@ -358,32 +390,73 @@ impl BlockTensorView for BlockTensor {
                 coord_chunk(coords.into_iter(), &coord_index, per_block, ndim);
 
             let this = self.clone();
-            let txn_id = txn_id.clone();
 
             let write = async move {
                 let values = block?;
-                let mut i = 0.0f64;
+                let mut start = 0.0f64;
                 for chunk_id in chunk_ids {
-                    let num_to_update = af::sum_all(&af::eq(
-                        &af_indices,
-                        &af::constant(chunk_id, af_indices.dims()),
-                        false,
-                    ))
-                    .0;
-                    let block_offsets = af::index(
-                        &af_offsets,
-                        &[
-                            af::Seq::new(chunk_id as f64, chunk_id as f64, 1.0f64),
-                            af::Seq::new(i, (i + num_to_update) - 1.0f64, 1.0f64),
-                        ],
-                    );
-                    let block_offsets =
-                        af::moddims(&block_offsets, af::Dim4::new(&[num_coords as u64, 1, 1, 1]));
+                    let (block_offsets, new_start) =
+                        block_offsets(&af_indices, &af_offsets, num_coords, start, chunk_id);
 
-                    let mut chunk = this.get_chunk(&txn_id, chunk_id).await?.upgrade().await?;
+                    let mut chunk = this.get_chunk(txn_id, chunk_id).await?.upgrade().await?;
                     chunk.data().set(block_offsets, &values)?;
                     chunk.sync().await?;
-                    i += num_to_update;
+                    start = new_start;
+                }
+
+                Ok(())
+            };
+
+            writes.push(write)
+        }
+
+        writes
+            .take_while(|r| future::ready(r.is_ok()))
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
+    }
+
+    async fn write_one(
+        self: Arc<Self>,
+        txn_id: &TxnId,
+        index: Index,
+        value: Number,
+    ) -> TCResult<()> {
+        if !self.shape().contains(&index) {
+            return Err(error::bad_request("Index out of bounds", index));
+        }
+
+        let writes = FuturesUnordered::new();
+        let ndim = index.ndim();
+
+        let coord_index = af::Array::new(
+            &self.coord_index,
+            af::Dim4::new(&[self.ndim as u64, 1, 1, 1]),
+        );
+        let per_block = self.per_block as u64;
+
+        let mut blocks = stream::iter(index.affected()).chunks(self.per_block);
+        while let Some(coords) = blocks.next().await {
+            let (chunk_ids, af_indices, af_offsets, num_coords) =
+                coord_chunk(coords.into_iter(), &coord_index, per_block, ndim);
+
+            let this = self.clone();
+            let value = value.clone();
+
+            let write = async move {
+                let mut start = 0.0f64;
+                for chunk_id in chunk_ids {
+                    let value = value.clone();
+                    let (block_offsets, new_start) =
+                        block_offsets(&af_indices, &af_offsets, num_coords, start, chunk_id);
+
+                    let mut chunk = this.get_chunk(txn_id, chunk_id).await?.upgrade().await?;
+                    chunk.data().set(
+                        block_offsets,
+                        &ChunkData::constant(value, (new_start - start) as usize),
+                    )?;
+                    chunk.sync().await?;
+                    start = new_start;
                 }
 
                 Ok(())
@@ -428,12 +501,23 @@ where
 
     async fn write<O: BlockTensorView>(
         self: Arc<Self>,
-        txn_id: TxnId,
+        txn_id: &TxnId,
         index: Index,
         value: Arc<O>,
     ) -> TCResult<()> {
         self.source()
             .write(txn_id, self.invert_index(index), value)
+            .await
+    }
+
+    async fn write_one(
+        self: Arc<Self>,
+        txn_id: &TxnId,
+        index: Index,
+        value: Number,
+    ) -> TCResult<()> {
+        self.source()
+            .write_one(txn_id, self.invert_index(index), value)
             .await
     }
 }

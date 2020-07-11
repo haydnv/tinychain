@@ -176,6 +176,17 @@ impl From<Vec<u64>> for Index {
     }
 }
 
+impl From<(AxisIndex, Vec<u64>)> for Index {
+    fn from(mut tuple: (AxisIndex, Vec<u64>)) -> Index {
+        let mut axes = Vec::with_capacity(tuple.1.len() + 1);
+        axes.push(tuple.0);
+        for axis in tuple.1.drain(..) {
+            axes.push(axis.into());
+        }
+        Index { axes }
+    }
+}
+
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -190,7 +201,7 @@ impl fmt::Display for Index {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Shape(Vec<u64>);
 
 impl Shape {
