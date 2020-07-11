@@ -1,331 +1,301 @@
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::ops::Mul;
 use std::pin::Pin;
 
+use bytes::Bytes;
 use futures::stream::Stream;
+use serde::de;
+use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::error;
 
+pub mod class;
 pub mod link;
 pub mod op;
 mod reference;
-
-#[allow(clippy::module_inception)]
-mod value;
+mod number;
+mod string;
 mod version;
 
-pub type Complex = value::Complex;
-pub type Float = value::Float;
-pub type Int = value::Int;
-pub type UInt = value::UInt;
-pub type Number = value::Number;
+pub type Complex = number::Complex;
+pub type Float = number::Float;
+pub type Int = number::Int;
+pub type UInt = number::UInt;
+pub type Number = number::Number;
 pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + Unpin>>;
+pub type TCString = string::TCString;
 pub type TCRef = reference::TCRef;
 pub type TCResult<T> = Result<T, error::TCError>;
-pub type Value = value::Value;
-pub type ValueId = value::ValueId;
+pub type ValueId = string::ValueId;
 
-pub trait DataType: Eq {
-    type Impl: TypeImpl;
-}
-
-pub trait NumberDataType: Eq + DataType + Into<NumberType> {
-    type Impl: NumberTypeImpl + Mul + PartialOrd + From<bool>;
-
-    fn size(&self) -> usize;
-
-    fn one(&self) -> <Self as NumberDataType>::Impl {
-        true.into()
-    }
-
-    fn zero(&self) -> <Self as NumberDataType>::Impl {
-        false.into()
-    }
-}
-
-pub trait TypeImpl {
-    type DType: DataType;
-
-    fn dtype(&self) -> Self::DType;
-
-    fn is_a(&self, dtype: Self::DType) -> bool {
-        self.dtype() == dtype
-    }
-}
-
-pub trait NumberTypeImpl: Mul + Sized + PartialOrd {
-    type DType: NumberDataType;
-}
-
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
-pub enum ComplexType {
-    C32,
-    C64,
-}
-
-impl DataType for ComplexType {
-    type Impl = Complex;
-}
-
-impl NumberDataType for ComplexType {
-    type Impl = Complex;
-
-    fn size(&self) -> usize {
-        match self {
-            ComplexType::C32 => 8,
-            ComplexType::C64 => 16,
-        }
-    }
-}
-
-impl From<ComplexType> for NumberType {
-    fn from(ct: ComplexType) -> NumberType {
-        NumberType::Complex(ct)
-    }
-}
-
-impl fmt::Display for ComplexType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use ComplexType::*;
-        match self {
-            C32 => write!(f, "C32"),
-            C64 => write!(f, "C64"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
-pub enum FloatType {
-    F32,
-    F64,
-}
-
-impl DataType for FloatType {
-    type Impl = Float;
-}
-
-impl NumberDataType for FloatType {
-    type Impl = Float;
-
-    fn size(&self) -> usize {
-        match self {
-            FloatType::F32 => 8,
-            FloatType::F64 => 16,
-        }
-    }
-}
-
-impl From<FloatType> for NumberType {
-    fn from(ft: FloatType) -> NumberType {
-        NumberType::Float(ft)
-    }
-}
-
-impl fmt::Display for FloatType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use FloatType::*;
-        match self {
-            F32 => write!(f, "F32"),
-            F64 => write!(f, "F64"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
-pub enum IntType {
-    I16,
-    I32,
-    I64,
-}
-
-impl DataType for IntType {
-    type Impl = Int;
-}
-
-impl NumberDataType for IntType {
-    type Impl = Int;
-
-    fn size(&self) -> usize {
-        match self {
-            IntType::I16 => 2,
-            IntType::I32 => 4,
-            IntType::I64 => 8,
-        }
-    }
-}
-
-impl From<IntType> for NumberType {
-    fn from(it: IntType) -> NumberType {
-        NumberType::Int(it)
-    }
-}
-
-impl fmt::Display for IntType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use IntType::*;
-        match self {
-            I16 => write!(f, "I16"),
-            I32 => write!(f, "I32"),
-            I64 => write!(f, "I64"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
-pub enum UIntType {
-    U8,
-    U16,
-    U32,
-    U64,
-}
-
-impl DataType for UIntType {
-    type Impl = UInt;
-}
-
-impl NumberDataType for UIntType {
-    type Impl = UInt;
-
-    fn size(&self) -> usize {
-        match self {
-            UIntType::U8 => 1,
-            UIntType::U16 => 2,
-            UIntType::U32 => 4,
-            UIntType::U64 => 8,
-        }
-    }
-}
-
-impl From<UIntType> for NumberType {
-    fn from(ut: UIntType) -> NumberType {
-        NumberType::UInt(ut)
-    }
-}
-
-impl fmt::Display for UIntType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use UIntType::*;
-        match self {
-            U8 => write!(f, "U8"),
-            U16 => write!(f, "U16"),
-            U32 => write!(f, "U32"),
-            U64 => write!(f, "U64"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
-pub enum NumberType {
-    Bool,
-    Complex(ComplexType),
-    Float(FloatType),
-    Int(IntType),
-    UInt(UIntType),
-}
-
-impl NumberDataType for NumberType {
-    type Impl = Number;
-
-    fn size(&self) -> usize {
-        use NumberType::*;
-        match self {
-            Bool => 1,
-            Complex(ct) => ct.size(),
-            Float(ft) => ft.size(),
-            Int(it) => it.size(),
-            UInt(ut) => ut.size(),
-        }
-    }
-}
-
-impl DataType for NumberType {
-    type Impl = value::Number;
-}
-
-impl From<NumberType> for TCType {
-    fn from(nt: NumberType) -> TCType {
-        TCType::Number(nt)
-    }
-}
-
-impl fmt::Display for NumberType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use NumberType::*;
-        match self {
-            Bool => write!(f, "Bool"),
-            Complex(c) => write!(f, "Complex: {}", c),
-            Float(ft) => write!(f, "Float: {}", ft),
-            Int(i) => write!(f, "Int: {}", i),
-            UInt(u) => write!(f, "UInt: {}", u),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
-pub enum StringType {
-    Id,
-    Link,
-    Ref,
-    r#String,
-}
-
-impl DataType for StringType {
-    type Impl = value::TCString;
-}
-
-impl From<StringType> for TCType {
-    fn from(st: StringType) -> TCType {
-        TCType::TCString(st)
-    }
-}
-
-impl fmt::Display for StringType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use StringType::*;
-        match self {
-            Id => write!(f, "type Id"),
-            Link => write!(f, "type Link"),
-            Ref => write!(f, "type Ref"),
-            r#String => write!(f, "type String"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
-pub enum TCType {
-    Bytes,
+#[derive(Clone, PartialEq)]
+pub enum Value {
     None,
-    Number(NumberType),
-    TCString(StringType),
-    Op,
-    Vector,
+    Bytes(Bytes),
+    Number(Number),
+    TCString(TCString),
+    Op(Box<op::Op>),
+    Vector(Vec<Value>),
 }
 
-impl TCType {
-    pub fn size(&self) -> Option<usize> {
-        use TCType::*;
+impl class::Impl for Value {
+    type Class = class::ValueType;
+
+    fn class(&self) -> class::ValueType {
+        use class::ValueType;
         match self {
-            None => Some(1),
-            Number(nt) => Some(nt.size()),
-            _ => Option::None,
+            Value::None => ValueType::None,
+            Value::Bytes(_) => ValueType::Bytes,
+            Value::Number(n) => ValueType::Number(n.class()),
+            Value::TCString(s) => ValueType::TCString(s.class()),
+            Value::Op(_) => ValueType::Op,
+            Value::Vector(_) => ValueType::Vector,
         }
     }
 }
 
-impl DataType for TCType {
-    type Impl = value::Value;
+impl From<()> for Value {
+    fn from(_: ()) -> Value {
+        Value::None
+    }
 }
 
-impl fmt::Display for TCType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use TCType::*;
+impl From<&'static [u8]> for Value {
+    fn from(b: &'static [u8]) -> Value {
+        Value::Bytes(Bytes::from(b))
+    }
+}
+
+impl From<Bytes> for Value {
+    fn from(b: Bytes) -> Value {
+        Value::Bytes(b)
+    }
+}
+
+impl From<Number> for Value {
+    fn from(n: Number) -> Value {
+        Value::Number(n)
+    }
+}
+
+impl From<TCString> for Value {
+    fn from(s: TCString) -> Value {
+        Value::TCString(s)
+    }
+}
+
+impl From<op::Op> for Value {
+    fn from(op: op::Op) -> Value {
+        Value::Op(Box::new(op))
+    }
+}
+
+impl<T: Into<Value>> From<Option<T>> for Value {
+    fn from(opt: Option<T>) -> Value {
+        match opt {
+            Some(val) => val.into(),
+            None => Value::None,
+        }
+    }
+}
+
+impl<T: Into<Value>> From<Vec<T>> for Value {
+    fn from(mut v: Vec<T>) -> Value {
+        Value::Vector(v.drain(..).map(|i| i.into()).collect())
+    }
+}
+
+impl TryFrom<Value> for Bytes {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<Bytes> {
+        match v {
+            Value::Bytes(b) => Ok(b),
+            other => Err(error::bad_request("Expected Bytes but found", other)),
+        }
+    }
+}
+
+impl TryFrom<Value> for Number {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<Number> {
+        match v {
+            Value::Number(n) => Ok(n),
+            other => Err(error::bad_request("Expected Number but found", other)),
+        }
+    }
+}
+
+impl<E: Into<error::TCError>, T: TryFrom<Value, Error = E>> TryFrom<Value> for Vec<T> {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<Vec<T>> {
+        match v {
+            Value::Vector(mut v) => v
+                .drain(..)
+                .map(|i| i.try_into().map_err(|e: E| e.into()))
+                .collect(),
+            other => Err(error::bad_request("Expected a Vector but found", other)),
+        }
+    }
+}
+
+struct ValueVisitor;
+
+impl ValueVisitor {
+    fn visit_float<F: Into<Float>>(&self, f: F) -> TCResult<Value> {
+        self.visit_number(f.into())
+    }
+
+    fn visit_int<I: Into<Int>>(&self, i: I) -> TCResult<Value> {
+        self.visit_number(i.into())
+    }
+
+    fn visit_number<N: Into<Number>>(&self, n: N) -> TCResult<Value> {
+        Ok(Value::Number(n.into()))
+    }
+}
+
+impl<'de> de::Visitor<'de> for ValueVisitor {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a Tinychain Value, e.g. \"foo\" or 123 or {\"$object_ref: [\"slice_id\", \"$state\"]\"}")
+    }
+
+    fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_float(value).map_err(de::Error::custom)
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_float(value).map_err(de::Error::custom)
+    }
+
+    fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_int(value).map_err(de::Error::custom)
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_int(value).map_err(de::Error::custom)
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(Value::TCString(TCString::r#String(value.to_string())))
+    }
+
+    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+    where
+        M: de::MapAccess<'de>,
+    {
+        if let Some(key) = access.next_key::<&str>()? {
+            let mut value: Vec<Value> = access.next_value()?;
+
+            if key.starts_with('$') {
+                let subject = key.parse::<TCRef>().map_err(de::Error::custom)?;
+                match value.len() {
+                    0 => Ok(Value::TCString(TCString::Ref(subject))),
+                    1 => Ok(op::Op::Get(subject.into(), value.remove(0)).into()),
+                    2 => Ok(op::Op::Put(subject.into(), value.remove(0), value.remove(0)).into()),
+                    _ => Err(de::Error::custom(format!(
+                        "Expected a Get or Put op, found {}",
+                        Value::Vector(value)
+                    ))),
+                }
+            } else if let Ok(link) = key.parse::<link::Link>() {
+                Ok(Value::TCString(TCString::Link(link)))
+            } else {
+                panic!("NOT IMPLEMENTED")
+            }
+        } else {
+            Err(de::Error::custom("Unable to parse map entry"))
+        }
+    }
+}
+
+impl<'de> de::Deserialize<'de> for Value {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        d.deserialize_any(ValueVisitor)
+    }
+}
+
+impl Serialize for Value {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         match self {
-            None => write!(f, "type None"),
-            Bytes => write!(f, "type Bytes"),
-            Number(n) => write!(f, "type Number: {}", n),
-            TCString(s) => write!(f, "type String: {}", s),
-            Op => write!(f, "type Op"),
-            Vector => write!(f, "type Vector"),
+            Value::None => s.serialize_none(),
+            Value::Bytes(b) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry("/sbin/value/bytes", &[base64::encode(b)])?;
+                map.end()
+            }
+            Value::Number(n) => n.serialize(s),
+            Value::Op(op) => {
+                let mut map = s.serialize_map(Some(1))?;
+                match &**op {
+                    op::Op::Get(subject, selector) => {
+                        map.serialize_entry(&subject.to_string(), &[selector])?
+                    }
+                    op::Op::Put(subject, selector, value) => {
+                        map.serialize_entry(&subject.to_string(), &[selector, value])?
+                    }
+                }
+                map.end()
+            }
+            Value::TCString(tc_string) => tc_string.serialize(s),
+            Value::Vector(v) => {
+                let mut seq = s.serialize_seq(Some(v.len()))?;
+                for item in v {
+                    seq.serialize_element(item)?;
+                }
+                seq.end()
+            }
+        }
+    }
+}
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Value::None => write!(f, "None"),
+            Value::Bytes(b) => write!(f, "Bytes({})", b.len()),
+            Value::Number(n) => write!(f, "Number({})", n),
+            Value::TCString(s) => write!(f, "String({})", s),
+            Value::Op(op) => write!(f, "Op: {}", op),
+            Value::Vector(v) => write!(
+                f,
+                "[{}]",
+                v.iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
         }
     }
 }

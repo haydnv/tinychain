@@ -8,10 +8,8 @@ use crate::error;
 use crate::state::file::Block;
 use crate::transaction::lock::{TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::TxnId;
-use crate::value::{
-    Complex, ComplexType, Float, FloatType, Int, IntType, Number, NumberType, TCResult, UInt,
-    UIntType,
-};
+use crate::value::{Complex, Float, Int, Number, TCResult, UInt};
+use crate::value::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
 
 pub struct Chunk {
     block: TxnLockReadGuard<Block>,

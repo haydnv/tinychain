@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::transaction::{Txn, TxnId};
-use crate::value::{TCResult, TCStream, TCType, Value};
+use crate::value::{TCResult, TCStream, Value};
+use crate::value::class::NumberType;
 
 use super::base::TensorView;
 use super::dense::BlockTensor;
@@ -20,7 +21,7 @@ pub trait SparseTensorView: TensorView {
 }
 
 pub struct SparseTensor {
-    dtype: TCType,
+    dtype: NumberType,
     shape: Vec<u64>,
     size: u64,
 }

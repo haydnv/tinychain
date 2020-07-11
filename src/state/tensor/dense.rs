@@ -11,9 +11,9 @@ use itertools::Itertools;
 use crate::error;
 use crate::state::file::File;
 use crate::transaction::{Txn, TxnId};
-use crate::value::{
-    ComplexType, FloatType, Number, NumberDataType, NumberType, TCResult, TCStream, TypeImpl,
-};
+use crate::value::{Number, TCResult, TCStream};
+use crate::value::class::{Impl, NumberClass};
+use crate::value::class::{ComplexType, FloatType, NumberType};
 
 use super::base::*;
 use super::chunk::*;
@@ -137,7 +137,7 @@ pub struct BlockTensor {
 
 impl BlockTensor {
     async fn constant(txn: Arc<Txn>, shape: Shape, value: Number) -> TCResult<BlockTensor> {
-        let per_block = BLOCK_SIZE / value.dtype().size();
+        let per_block = BLOCK_SIZE / value.class().size();
         let size = shape.size();
 
         let value_clone = value.clone();
@@ -153,7 +153,7 @@ impl BlockTensor {
         } else {
             Box::pin(stream::iter(blocks))
         };
-        BlockTensor::from_blocks(txn, shape, value.dtype(), blocks).await
+        BlockTensor::from_blocks(txn, shape, value.class(), blocks).await
     }
 
     async fn from_blocks(

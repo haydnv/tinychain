@@ -15,7 +15,8 @@ use crate::error;
 use crate::state::file::{Block, BlockId, File};
 use crate::transaction::lock::{Mutate, TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{TCResult, TCStream, TCType, TypeImpl, Value, ValueId};
+use crate::value::{TCResult, TCStream, Value, ValueId};
+use crate::value::class::{Impl, ValueType};
 
 use super::{Collect, GetResult, State};
 
@@ -155,7 +156,7 @@ impl Mutate for BTreeRoot {
 
 pub struct Column {
     name: ValueId,
-    dtype: TCType,
+    dtype: ValueType,
     max_len: Option<usize>,
 }
 

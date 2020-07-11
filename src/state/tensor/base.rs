@@ -7,7 +7,8 @@ use num::Integer;
 
 use crate::error;
 use crate::transaction::{Txn, TxnId};
-use crate::value::{Number, NumberType, TCResult};
+use crate::value::{Number, TCResult};
+use crate::value::class::NumberType;
 
 use super::index::*;
 

@@ -7,7 +7,8 @@ use std::task::{Context, Poll};
 use futures::stream::Stream;
 use itertools::MultiProduct;
 
-use crate::value::{Number, NumberType, TCResult};
+use crate::value::{Number, TCResult};
+use crate::value::class::NumberType;
 
 use super::chunk::ChunkData;
 

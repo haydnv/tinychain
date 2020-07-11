@@ -2,14 +2,15 @@ use std::cmp::Ordering::{self, *};
 use std::convert::TryInto;
 
 use crate::error;
-use crate::value::*;
+use crate::value::{Number, Value, TCResult};
+use crate::value::class::ValueType;
 
 pub struct Collator {
-    schema: Vec<TCType>,
+    schema: Vec<ValueType>,
 }
 
 impl Collator {
-    pub fn new(schema: Vec<TCType>) -> TCResult<Collator> {
+    pub fn new(schema: Vec<ValueType>) -> TCResult<Collator> {
         for dtype in &schema {
             if !Collator::supports(dtype) {
                 return Err(error::bad_request("Collation is not supported for", dtype));
@@ -19,8 +20,8 @@ impl Collator {
         Ok(Collator { schema })
     }
 
-    pub fn supports(dtype: &TCType) -> bool {
-        use TCType::*;
+    pub fn supports(dtype: &ValueType) -> bool {
+        use ValueType::*;
         match dtype {
             Number(_) => true,
             _ => false,
@@ -94,7 +95,7 @@ impl Collator {
     pub fn compare(&self, key1: &[Value], key2: &[Value]) -> Ordering {
         for i in 0..Ord::min(key1.len(), key2.len()) {
             match self.schema[i] {
-                TCType::Number(_) => {
+                ValueType::Number(_) => {
                     let left: Number = key1[i].clone().try_into().unwrap();
                     let right: Number = key2[i].clone().try_into().unwrap();
                     if left < right {
