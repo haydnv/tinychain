@@ -54,6 +54,10 @@ impl class::Impl for Value {
     }
 }
 
+impl class::ValueImpl for Value {
+    type Class = class::ValueType;
+}
+
 impl From<()> for Value {
     fn from(_: ()) -> Value {
         Value::None

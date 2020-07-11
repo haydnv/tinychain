@@ -8,7 +8,7 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::error;
 
 use super::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
-use super::class::{Impl, NumberClass, NumberImpl};
+use super::class::{Impl, NumberClass, NumberImpl, ValueImpl};
 use super::TCResult;
 
 #[derive(Clone, PartialEq)]
@@ -26,6 +26,10 @@ impl Impl for Complex {
             Complex::C64(_) => ComplexType::C64,
         }
     }
+}
+
+impl ValueImpl for Complex {
+    type Class = ComplexType;
 }
 
 impl NumberImpl for Complex {
@@ -194,6 +198,10 @@ impl Impl for Float {
     }
 }
 
+impl ValueImpl for Float {
+    type Class = FloatType;
+}
+
 impl NumberImpl for Float {
     type Class = FloatType;
 }
@@ -337,6 +345,10 @@ impl Impl for Int {
             Int::I64(_) => IntType::I64,
         }
     }
+}
+
+impl ValueImpl for Int {
+    type Class = IntType;
 }
 
 impl NumberImpl for Int {
@@ -500,6 +512,10 @@ impl Impl for UInt {
             UInt::U64(_) => UIntType::U64,
         }
     }
+}
+
+impl ValueImpl for UInt {
+    type Class = UIntType;
 }
 
 impl NumberImpl for UInt {
@@ -727,6 +743,10 @@ impl Impl for Number {
             Self::UInt(u) => UInt(u.class()),
         }
     }
+}
+
+impl ValueImpl for Number {
+    type Class = NumberType;
 }
 
 impl NumberImpl for Number {

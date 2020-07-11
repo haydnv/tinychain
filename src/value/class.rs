@@ -1,6 +1,8 @@
 use std::fmt;
 use std::ops::{Add, Mul};
 
+use serde::ser::Serialize;
+
 use super::number::{Complex, Float, Int, Number, UInt};
 use super::string::TCString;
 use super::Value;
@@ -9,10 +11,16 @@ pub trait Class: Eq {
     type Impl: Impl;
 }
 
-pub trait NumberClass: Class + Into<NumberType> {
-    type Impl: NumberImpl + Add + Mul + PartialOrd + From<bool>;
+pub trait ValueClass: Class {
+    type Impl: ValueImpl;
 
-    fn size(&self) -> usize;
+    fn size(self) -> Option<usize>;
+}
+
+pub trait NumberClass: Class + Into<NumberType> {
+    type Impl: NumberImpl;
+
+    fn size(self) -> usize;
 
     fn one(&self) -> <Self as NumberClass>::Impl {
         true.into()
@@ -20,6 +28,14 @@ pub trait NumberClass: Class + Into<NumberType> {
 
     fn zero(&self) -> <Self as NumberClass>::Impl {
         false.into()
+    }
+}
+
+impl<T: NumberClass> ValueClass for T {
+    type Impl = <Self as NumberClass>::Impl;
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
     }
 }
 
@@ -33,7 +49,11 @@ pub trait Impl {
     }
 }
 
-pub trait NumberImpl: Mul + Sized + PartialOrd {
+pub trait ValueImpl: Impl + Serialize {
+    type Class: ValueClass;
+}
+
+pub trait NumberImpl: ValueImpl + Add + Mul + Sized + PartialOrd + From<bool> {
     type Class: NumberClass;
 }
 
@@ -50,7 +70,7 @@ impl Class for ComplexType {
 impl NumberClass for ComplexType {
     type Impl = Complex;
 
-    fn size(&self) -> usize {
+    fn size(self) -> usize {
         match self {
             Self::C32 => 8,
             Self::C64 => 16,
@@ -86,7 +106,7 @@ impl Class for FloatType {
 impl NumberClass for FloatType {
     type Impl = Float;
 
-    fn size(&self) -> usize {
+    fn size(self) -> usize {
         match self {
             FloatType::F32 => 8,
             FloatType::F64 => 16,
@@ -124,7 +144,7 @@ impl Class for IntType {
 impl NumberClass for IntType {
     type Impl = Int;
 
-    fn size(&self) -> usize {
+    fn size(self) -> usize {
         match self {
             IntType::I16 => 2,
             IntType::I32 => 4,
@@ -165,7 +185,7 @@ impl Class for UIntType {
 impl NumberClass for UIntType {
     type Impl = UInt;
 
-    fn size(&self) -> usize {
+    fn size(self) -> usize {
         match self {
             UIntType::U8 => 1,
             UIntType::U16 => 2,
@@ -209,14 +229,14 @@ impl Class for NumberType {
 impl NumberClass for NumberType {
     type Impl = Number;
 
-    fn size(&self) -> usize {
+    fn size(self) -> usize {
         use NumberType::*;
         match self {
             Bool => 1,
-            Complex(ct) => ct.size(),
-            Float(ft) => ft.size(),
-            Int(it) => it.size(),
-            UInt(ut) => ut.size(),
+            Complex(ct) => NumberClass::size(ct),
+            Float(ft) => NumberClass::size(ft),
+            Int(it) => NumberClass::size(it),
+            UInt(ut) => NumberClass::size(ut),
         }
     }
 }
@@ -280,19 +300,21 @@ pub enum ValueType {
     Vector,
 }
 
-impl ValueType {
-    pub fn size(&self) -> Option<usize> {
+impl Class for ValueType {
+    type Impl = Value;
+}
+
+impl ValueClass for ValueType {
+    type Impl = Value;
+
+    fn size(self) -> Option<usize> {
         use ValueType::*;
         match self {
             None => Some(1),
-            Number(nt) => Some(nt.size()),
+            Number(nt) => ValueClass::size(nt),
             _ => Option::None,
         }
     }
-}
-
-impl Class for ValueType {
-    type Impl = Value;
 }
 
 impl fmt::Display for ValueType {
