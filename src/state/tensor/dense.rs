@@ -5,7 +5,7 @@ use std::sync::Arc;
 use arrayfire as af;
 use async_trait::async_trait;
 use futures::future;
-use futures::stream::{self, FuturesOrdered, Stream, StreamExt};
+use futures::stream::{self, FuturesOrdered, FuturesUnordered, Stream, StreamExt};
 use itertools::Itertools;
 
 use crate::error;
@@ -31,6 +31,13 @@ pub trait BlockTensorView: TensorView + 'static {
     fn chunk_stream(self: Arc<Self>, txn_id: TxnId) -> Self::ChunkStream;
 
     fn value_stream(self: Arc<Self>, txn_id: TxnId, index: Index) -> Self::ValueStream;
+
+    async fn write<T: BlockTensorView>(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        index: Index,
+        value: Arc<T>,
+    ) -> TCResult<()>;
 }
 
 #[async_trait]
@@ -214,102 +221,6 @@ impl BlockTensor {
         }
     }
 
-    async fn assign<T: BlockTensorView>(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        index: &Index,
-        value: Arc<T>,
-    ) -> TCResult<()> {
-        if !self.shape.contains(index) {
-            return Err(error::bad_request(
-                &format!("Tensor with shape {} does not contain", self.shape),
-                index,
-            ));
-        }
-
-        if self.dtype != value.dtype() {
-            return Err(error::bad_request(
-                &format!("Cannot write to Tensor of type {} with", self.dtype),
-                value.dtype(),
-            ));
-        }
-
-        let selection_shape = self.shape.selection(index);
-        if &selection_shape != value.shape() {
-            return Err(error::bad_request(
-                &format!(
-                    "Cannot write a Tensor of shape {} to a Tensor slice of shape",
-                    value.shape()
-                ),
-                selection_shape,
-            ));
-        }
-
-        let ndim = value.ndim();
-
-        let coord_index = af::Array::new(
-            &self.coord_index,
-            af::Dim4::new(&[self.ndim as u64, 1, 1, 1]),
-        );
-        let per_block = self.per_block as u64;
-
-        value
-            .chunk_stream(txn_id.clone())
-            .zip(stream::iter(&index.affected().chunks(self.per_block)))
-            .then(|(values, coords)| {
-                let coords: Vec<u64> = coords.flatten().collect();
-                let num_coords = coords.len() / ndim;
-                let af_coords_dim = af::Dim4::new(&[num_coords as u64, ndim as u64, 1, 1]);
-                let af_coords = af::Array::new(&coords, af_coords_dim)
-                    * af::tile(&coord_index.copy(), af_coords_dim);
-                let af_coords = af::sum(&af_coords, 1);
-                let af_per_block =
-                    af::constant(per_block, af::Dim4::new(&[1, num_coords as u64, 1, 1]));
-                let af_offsets = af_coords.copy() % af_per_block.copy();
-                let af_indices = af_coords / af_per_block;
-                let af_chunk_ids = af::set_unique(&af_indices, true);
-
-                let mut chunk_ids: Vec<u64> = Vec::with_capacity(af_chunk_ids.elements());
-                af_chunk_ids.host(&mut chunk_ids);
-
-                let this = self.clone();
-                let txn_id = txn_id.clone();
-                async move {
-                    let values = values?;
-                    let mut i = 0.0f64;
-                    for chunk_id in chunk_ids {
-                        let num_to_update = af::sum_all(&af::eq(
-                            &af_indices,
-                            &af::constant(chunk_id, af_indices.dims()),
-                            false,
-                        ))
-                        .0;
-                        let block_offsets = af::index(
-                            &af_offsets,
-                            &[
-                                af::Seq::new(chunk_id as f64, chunk_id as f64, 1.0f64),
-                                af::Seq::new(i, (i + num_to_update) - 1.0f64, 1.0f64),
-                            ],
-                        );
-                        let block_offsets = af::moddims(
-                            &block_offsets,
-                            af::Dim4::new(&[num_coords as u64, 1, 1, 1]),
-                        );
-
-                        let mut chunk = this.get_chunk(&txn_id, chunk_id).await?.upgrade().await?;
-                        chunk.data().set(block_offsets, &values)?;
-                        chunk.sync().await?;
-                        i += num_to_update;
-                    }
-
-                    Ok(())
-                }
-            })
-            .take_while(|r| future::ready(r.is_ok()))
-            .fold(Ok(()), |_, last| future::ready(last))
-            .await
-    }
-
     fn blocks(self: Arc<Self>, txn_id: TxnId) -> impl Stream<Item = Chunk> {
         let mut blocks = FuturesOrdered::new();
         for chunk_id in 0..(self.size / self.per_block as u64) {
@@ -319,21 +230,6 @@ impl BlockTensor {
         }
 
         blocks
-    }
-
-    async fn at(self: Arc<Self>, txn_id: TxnId, coord: Vec<u64>) -> TCResult<Number> {
-        let index: u64 = coord
-            .iter()
-            .zip(self.shape.to_vec().iter())
-            .map(|(c, i)| c * i)
-            .sum();
-        let block_id = index / (self.per_block as u64);
-        let offset = index % (self.per_block as u64);
-        let chunk = self.get_chunk(&txn_id, block_id).await?;
-        chunk
-            .data()
-            .get_one(offset as usize)
-            .ok_or_else(|| error::internal(ERR_CORRUPT))
     }
 }
 
@@ -406,27 +302,67 @@ impl BlockTensorView for BlockTensor {
         let per_block = self.per_block as u64;
 
         for coords in &index.affected().chunks(self.per_block) {
-            let coords: Vec<u64> = coords.flatten().collect();
-            let num_coords = coords.len() / ndim;
-            let af_coords_dim = af::Dim4::new(&[num_coords as u64, ndim as u64, 1, 1]);
-            let af_coords = af::Array::new(&coords, af_coords_dim)
-                * af::tile(&coord_index.copy(), af_coords_dim);
-            let af_coords = af::sum(&af_coords, 1);
-            let af_per_block =
-                af::constant(per_block, af::Dim4::new(&[1, num_coords as u64, 1, 1]));
-            let af_offsets = af_coords.copy() % af_per_block.copy();
-            let af_indices = af_coords / af_per_block;
-            let af_chunk_ids = af::set_unique(&af_indices, true);
-
-            let mut chunk_ids: Vec<u64> = Vec::with_capacity(af_chunk_ids.elements());
-            af_chunk_ids.host(&mut chunk_ids);
+            let (chunk_ids, af_indices, af_offsets, num_coords) =
+                coord_chunk(coords, &coord_index, per_block, ndim);
 
             let this = self.clone();
             let txn_id = txn_id.clone();
 
             selected.push(async move {
-                let mut i = 0.0f64;
+                let mut start = 0.0f64;
                 let mut values = vec![];
+                for chunk_id in chunk_ids {
+                    let (block_offsets, new_start) =
+                        block_offsets(&af_indices, &af_offsets, num_coords, start, chunk_id);
+
+                    match this.get_chunk(&txn_id, chunk_id).await {
+                        Ok(chunk) => values.extend(chunk.data().get(block_offsets)),
+                        Err(cause) => return stream::iter(vec![Err(cause)]),
+                    }
+
+                    start = new_start;
+                }
+
+                let values: Vec<TCResult<Number>> = values.drain(..).map(Ok).collect();
+                stream::iter(values)
+            });
+        }
+
+        Box::pin(selected.flatten())
+    }
+
+    async fn write<T: BlockTensorView>(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        index: Index,
+        value: Arc<T>,
+    ) -> TCResult<()> {
+        if !self.shape().contains(&index) {
+            return Err(error::bad_request("Index out of bounds", index));
+        }
+
+        let writes = FuturesUnordered::new();
+        let ndim = index.ndim();
+
+        let coord_index = af::Array::new(
+            &self.coord_index,
+            af::Dim4::new(&[self.ndim as u64, 1, 1, 1]),
+        );
+        let per_block = self.per_block as u64;
+
+        let mut blocks = stream::iter(index.affected())
+            .chunks(self.per_block)
+            .zip(value.chunk_stream(txn_id.clone()));
+        while let Some((coords, block)) = blocks.next().await {
+            let (chunk_ids, af_indices, af_offsets, num_coords) =
+                coord_chunk(coords.into_iter(), &coord_index, per_block, ndim);
+
+            let this = self.clone();
+            let txn_id = txn_id.clone();
+
+            let write = async move {
+                let values = block?;
+                let mut i = 0.0f64;
                 for chunk_id in chunk_ids {
                     let num_to_update = af::sum_all(&af::eq(
                         &af_indices,
@@ -444,19 +380,22 @@ impl BlockTensorView for BlockTensor {
                     let block_offsets =
                         af::moddims(&block_offsets, af::Dim4::new(&[num_coords as u64, 1, 1, 1]));
 
-                    match this.get_chunk(&txn_id, chunk_id).await {
-                        Ok(chunk) => values.extend(chunk.data().get(block_offsets)),
-                        Err(cause) => return stream::iter(vec![Err(cause)]),
-                    }
+                    let mut chunk = this.get_chunk(&txn_id, chunk_id).await?.upgrade().await?;
+                    chunk.data().set(block_offsets, &values)?;
+                    chunk.sync().await?;
                     i += num_to_update;
                 }
 
-                let values: Vec<TCResult<Number>> = values.drain(..).map(Ok).collect();
-                stream::iter(values)
-            });
+                Ok(())
+            };
+
+            writes.push(write)
         }
 
-        Box::pin(selected.flatten())
+        writes
+            .take_while(|r| future::ready(r.is_ok()))
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
     }
 }
 
@@ -469,12 +408,12 @@ impl Slice for BlockTensor {
 }
 
 #[async_trait]
-impl<T: Rebase + 'static> BlockTensorView for T
+impl<T: Rebase + Slice + 'static> BlockTensorView for T
 where
-    <T as Rebase>::Source: BlockTensorView,
+    <Self as Rebase>::Source: BlockTensorView,
 {
     type ChunkStream = ValueChunkStream<Self::ValueStream>;
-    type ValueStream = <<T as Rebase>::Source as BlockTensorView>::ValueStream;
+    type ValueStream = <<Self as Rebase>::Source as BlockTensorView>::ValueStream;
 
     fn chunk_stream(self: Arc<Self>, txn_id: TxnId) -> Self::ChunkStream {
         let dtype = self.source().dtype();
@@ -485,6 +424,17 @@ where
     fn value_stream(self: Arc<Self>, txn_id: TxnId, index: Index) -> Self::ValueStream {
         assert!(self.shape().contains(&index));
         self.source().value_stream(txn_id, self.invert_index(index))
+    }
+
+    async fn write<O: BlockTensorView>(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        index: Index,
+        value: Arc<O>,
+    ) -> TCResult<()> {
+        self.source()
+            .write(txn_id, self.invert_index(index), value)
+            .await
     }
 }
 
@@ -515,4 +465,50 @@ impl AnyAll for TensorSlice<BlockTensor> {
 
 fn per_block(dtype: NumberType) -> usize {
     BLOCK_SIZE / dtype.size()
+}
+
+fn block_offsets(
+    af_indices: &af::Array<u64>,
+    af_offsets: &af::Array<u64>,
+    num_coords: u64,
+    start: f64,
+    chunk_id: u64,
+) -> (af::Array<u64>, f64) {
+    let num_to_update = af::sum_all(&af::eq(
+        af_indices,
+        &af::constant(chunk_id, af_indices.dims()),
+        false,
+    ))
+    .0;
+    let block_offsets = af::index(
+        af_offsets,
+        &[
+            af::Seq::new(chunk_id as f64, chunk_id as f64, 1.0f64),
+            af::Seq::new(start, (start + num_to_update) - 1.0f64, 1.0f64),
+        ],
+    );
+    let block_offsets = af::moddims(&block_offsets, af::Dim4::new(&[num_coords as u64, 1, 1, 1]));
+
+    (block_offsets, (start + num_to_update))
+}
+
+fn coord_chunk<I: Iterator<Item = Vec<u64>>>(
+    coords: I,
+    coord_index: &af::Array<u64>,
+    per_block: u64,
+    ndim: usize,
+) -> (Vec<u64>, af::Array<u64>, af::Array<u64>, u64) {
+    let coords: Vec<u64> = coords.flatten().collect();
+    let num_coords = coords.len() / ndim;
+    let af_coords_dim = af::Dim4::new(&[num_coords as u64, ndim as u64, 1, 1]);
+    let af_coords = af::Array::new(&coords, af_coords_dim) * af::tile(coord_index, af_coords_dim);
+    let af_coords = af::sum(&af_coords, 1);
+    let af_per_block = af::constant(per_block, af::Dim4::new(&[1, num_coords as u64, 1, 1]));
+    let af_offsets = af_coords.copy() % af_per_block.copy();
+    let af_indices = af_coords / af_per_block;
+    let af_chunk_ids = af::set_unique(&af_indices, true);
+
+    let mut chunk_ids: Vec<u64> = Vec::with_capacity(af_chunk_ids.elements());
+    af_chunk_ids.host(&mut chunk_ids);
+    (chunk_ids, af_indices, af_offsets, num_coords as u64)
 }
