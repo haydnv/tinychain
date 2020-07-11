@@ -34,7 +34,7 @@ pub trait BlockTensorView: TensorView + 'static {
 }
 
 #[async_trait]
-impl<T: BlockTensorView> TensorUnary for T {
+impl<T: BlockTensorView + Slice> TensorUnary for T {
     type Base = BlockTensor;
     type Dense = BlockTensor;
 
@@ -98,7 +98,15 @@ impl<T: BlockTensorView> TensorUnary for T {
         BlockTensor::from_blocks(txn, shape, dtype, chunks).await
     }
 
-    async fn sum(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self::Base> {
+    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Self::Base> {
+        if axis >= self.ndim() {
+            return Err(error::bad_request("Axis out of range", axis));
+        }
+
+        let mut shape = self.shape().clone();
+        shape.remove(axis);
+        let _summed = BlockTensor::constant(txn, shape, self.dtype().zero()).await?;
+
         Err(error::not_implemented())
     }
 
@@ -206,7 +214,7 @@ impl BlockTensor {
         }
     }
 
-    async fn write<T: BlockTensorView>(
+    async fn assign<T: BlockTensorView>(
         self: Arc<Self>,
         txn_id: TxnId,
         index: &Index,

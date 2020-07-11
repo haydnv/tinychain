@@ -258,6 +258,10 @@ impl Shape {
         self.0.len()
     }
 
+    pub fn remove(&mut self, axis: usize) {
+        self.0.remove(axis);
+    }
+
     pub fn size(&self) -> u64 {
         self.0.iter().product()
     }
