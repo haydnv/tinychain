@@ -7,15 +7,15 @@ use num::Integer;
 
 use crate::error;
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::{Impl, NumberType};
+use crate::value::class::NumberType;
 use crate::value::{Number, TCResult};
 
 use super::index::*;
 
 #[async_trait]
-pub trait TensorUnary: TensorView {
-    type Base: TensorView;
-    type Dense: TensorView;
+pub trait TensorUnary {
+    type Base: Slice;
+    type Dense: Slice;
 
     async fn as_dtype(
         self: Arc<Self>,
@@ -40,7 +40,7 @@ pub trait TensorUnary: TensorView {
 
 #[async_trait]
 pub trait TensorArithmetic {
-    type Object: TensorView + Broadcast + Slice;
+    type Object: TensorView;
     type Base: TensorView;
 
     async fn add(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
@@ -52,7 +52,7 @@ pub trait TensorArithmetic {
 
 #[async_trait]
 pub trait TensorBoolean {
-    type Object: TensorView + Broadcast + Slice;
+    type Object: TensorView;
     type Base: TensorView;
     type Dense: TensorView;
 
@@ -99,7 +99,7 @@ pub trait Slice: TensorView {
 }
 
 pub trait Rebase: TensorView {
-    type Source: TensorView + Slice;
+    type Source: TensorView;
 
     fn invert_index(&self, index: Index) -> Index;
 
@@ -166,7 +166,7 @@ impl<T: TensorView> TensorBroadcast<T> {
 }
 
 #[async_trait]
-impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
+impl<T: TensorView> TensorView for TensorBroadcast<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -185,7 +185,7 @@ impl<T: TensorView + Slice> TensorView for TensorBroadcast<T> {
 }
 
 #[async_trait]
-impl<T: TensorView + Slice + AnyAll> AnyAll for TensorBroadcast<T> {
+impl<T: TensorView + AnyAll> AnyAll for TensorBroadcast<T> {
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().all(txn_id).await
     }
@@ -195,7 +195,7 @@ impl<T: TensorView + Slice + AnyAll> AnyAll for TensorBroadcast<T> {
     }
 }
 
-impl<T: TensorView + Slice> Rebase for TensorBroadcast<T> {
+impl<T: TensorView> Rebase for TensorBroadcast<T> {
     type Source = T;
 
     fn invert_index(&self, index: Index) -> Index {
@@ -257,7 +257,7 @@ impl<T: TensorView> Expansion<T> {
     }
 }
 
-impl<T: TensorView + Slice> TensorView for Expansion<T> {
+impl<T: TensorView> TensorView for Expansion<T> {
     fn dtype(&self) -> NumberType {
         self.source().dtype()
     }
@@ -276,7 +276,7 @@ impl<T: TensorView + Slice> TensorView for Expansion<T> {
 }
 
 #[async_trait]
-impl<T: TensorView + Slice + AnyAll> AnyAll for Expansion<T> {
+impl<T: TensorView + AnyAll> AnyAll for Expansion<T> {
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().all(txn_id).await
     }
@@ -286,7 +286,7 @@ impl<T: TensorView + Slice + AnyAll> AnyAll for Expansion<T> {
     }
 }
 
-impl<T: TensorView + Slice> Rebase for Expansion<T> {
+impl<T: TensorView> Rebase for Expansion<T> {
     type Source = T;
 
     fn invert_index(&self, mut index: Index) -> Index {
@@ -310,7 +310,7 @@ impl<T: TensorView + Slice> Rebase for Expansion<T> {
     }
 }
 
-pub struct Permutation<T: TensorView + Slice> {
+pub struct Permutation<T: TensorView> {
     source: Arc<T>,
     shape: Shape,
     size: u64,
@@ -318,8 +318,8 @@ pub struct Permutation<T: TensorView + Slice> {
     permutation: Vec<usize>,
 }
 
-impl<T: TensorView + Slice> Permutation<T> {
-    fn new(source: Arc<T>, permutation: Option<Vec<usize>>) -> Permutation<T> {
+impl<T: TensorView> Permutation<T> {
+    pub fn new(source: Arc<T>, permutation: Option<Vec<usize>>) -> Permutation<T> {
         let ndim = source.ndim();
         let permutation = permutation
             .or_else(|| {
@@ -352,7 +352,7 @@ impl<T: TensorView + Slice> Permutation<T> {
     }
 }
 
-impl<T: TensorView + Slice> TensorView for Permutation<T> {
+impl<T: TensorView> TensorView for Permutation<T> {
     fn dtype(&self) -> NumberType {
         self.source().dtype()
     }
@@ -371,7 +371,7 @@ impl<T: TensorView + Slice> TensorView for Permutation<T> {
 }
 
 #[async_trait]
-impl<T: TensorView + Slice + AnyAll> AnyAll for Permutation<T> {
+impl<T: TensorView + Transpose + AnyAll> AnyAll for Permutation<T> {
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().all(txn_id).await
     }
@@ -381,7 +381,7 @@ impl<T: TensorView + Slice + AnyAll> AnyAll for Permutation<T> {
     }
 }
 
-impl<T: TensorView + Slice> Rebase for Permutation<T> {
+impl<T: TensorView> Rebase for Permutation<T> {
     type Source = T;
 
     fn invert_index(&self, index: Index) -> Index {
@@ -407,9 +407,9 @@ impl<T: TensorView + Slice> Rebase for Permutation<T> {
 
 impl<T: TensorView + Slice> Slice for Permutation<T>
 where
-    <T as Slice>::Slice: Slice + Transpose,
+    <T as Slice>::Slice: Transpose,
 {
-    type Slice = <<T as Slice>::Slice as Transpose>::Permutation;
+    type Slice = <<<Self as Rebase>::Source as Slice>::Slice as Transpose>::Permutation;
 
     fn slice(self: Arc<Self>, index: Index) -> TCResult<Arc<Self::Slice>> {
         let mut permutation: BTreeMap<usize, usize> = self
@@ -488,21 +488,22 @@ impl<T: TensorView> TensorSlice<T> {
     }
 }
 
-impl<T: TensorView + Slice> Slice for TensorSlice<T> {
-    type Slice = TensorSlice<T>;
+impl<T: TensorView> Transpose for TensorSlice<T> {
+    type Permutation = Permutation<T>;
 
-    fn slice(self: Arc<Self>, index: Index) -> TCResult<Arc<Self::Slice>> {
-        Ok(Arc::new(TensorSlice::new(
-            self.source.clone(),
-            self.invert_index(index),
-        )?))
+    fn transpose(
+        self: Arc<Self>,
+        _permutation: Option<Vec<usize>>,
+    ) -> TCResult<Arc<Self::Permutation>> {
+        // TODO
+        Err(error::not_implemented())
     }
 }
 
 #[async_trait]
-impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
+impl<T: TensorView> TensorView for TensorSlice<T> {
     fn dtype(&self) -> NumberType {
-        self.source().dtype()
+        Rebase::source(self).dtype()
     }
 
     fn ndim(&self) -> usize {
@@ -518,7 +519,18 @@ impl<T: TensorView + Slice> TensorView for TensorSlice<T> {
     }
 }
 
-impl<T: TensorView + Slice> Rebase for TensorSlice<T> {
+impl<T: TensorView> Slice for TensorSlice<T> {
+    type Slice = TensorSlice<T>;
+
+    fn slice(self: Arc<Self>, index: Index) -> TCResult<Arc<Self::Slice>> {
+        Ok(Arc::new(TensorSlice::new(
+            self.source.clone(),
+            self.invert_index(index),
+        )?))
+    }
+}
+
+impl<T: TensorView> Rebase for TensorSlice<T> {
     type Source = T;
 
     fn invert_index(&self, mut index: Index) -> Index {

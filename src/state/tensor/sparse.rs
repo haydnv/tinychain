@@ -6,7 +6,7 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::class::NumberType;
 use crate::value::{TCResult, TCStream, Value};
 
-use super::base::TensorView;
+use super::base::*;
 use super::dense::BlockTensor;
 
 #[async_trait]

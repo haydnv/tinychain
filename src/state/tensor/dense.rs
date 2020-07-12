@@ -13,7 +13,7 @@ use crate::state::file::File;
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::{ComplexType, FloatType, NumberType};
 use crate::value::class::{Impl, NumberClass};
-use crate::value::{Number, TCResult, TCStream};
+use crate::value::{Number, TCResult, TCStream, ValueId};
 
 use super::base::*;
 use super::chunk::*;
@@ -48,9 +48,10 @@ pub trait BlockTensorView: TensorView + 'static {
 }
 
 #[async_trait]
-impl<T: BlockTensorView + Rebase + Slice> TensorUnary for T
+impl<T: BlockTensorView + Slice> TensorUnary for T
 where
     <T as Slice>::Slice: TensorUnary,
+    <<T as Slice>::Slice as TensorUnary>::Base: BlockTensorView,
 {
     type Base = BlockTensor;
     type Dense = BlockTensor;
@@ -127,7 +128,7 @@ where
         let txn_id = txn.id().clone();
         let mut shape = self.shape().clone();
         shape.remove(axis);
-        let summed = BlockTensor::constant(txn, shape, self.dtype().zero()).await?;
+        let summed = BlockTensor::constant(txn.clone(), shape, self.dtype().zero()).await?;
 
         if axis == 0 {
             let axis_index = self.shape().all()[0].clone();
@@ -142,8 +143,31 @@ where
                     summed.write_one(&txn_id, coord.into(), value).await
                 });
             }
+            writes
+                .take_while(|r| future::ready(r.is_ok()))
+                .fold(Ok(()), |_, r| future::ready(r))
+                .await?;
         } else {
-            return Err(error::not_implemented());
+            let writes = FuturesUnordered::new();
+            let prefix_range: Shape = self.shape()[0..axis].to_vec().into();
+            let mut i: usize = 0;
+            for coord in prefix_range.all().affected() {
+                let index: Index = coord.into();
+                let slice = self.clone().slice(index.clone())?;
+                let subcontext: ValueId = format!("sum_slice_{}", i).parse()?;
+                let summed = summed.clone();
+                let txn_id = txn_id.clone();
+                let txn = txn.clone();
+                writes.push(async move {
+                    let value = slice.sum(txn.subcontext(subcontext).await?, 0).await?;
+                    summed.write(&txn_id, index, value).await
+                });
+                i += 1;
+            }
+            writes
+                .take_while(|r| future::ready(r.is_ok()))
+                .fold(Ok(()), |_, r| future::ready(r))
+                .await?;
         }
 
         Ok(summed)
@@ -477,6 +501,17 @@ impl Slice for BlockTensor {
 
     fn slice(self: Arc<Self>, index: Index) -> TCResult<Arc<Self::Slice>> {
         Ok(Arc::new(TensorSlice::new(self, index)?))
+    }
+}
+
+impl Transpose for BlockTensor {
+    type Permutation = Permutation<BlockTensor>;
+
+    fn transpose(
+        self: Arc<Self>,
+        permutation: Option<Vec<usize>>,
+    ) -> TCResult<Arc<Self::Permutation>> {
+        Ok(Arc::new(Permutation::new(self, permutation)))
     }
 }
 
