@@ -521,13 +521,45 @@ impl TensorChunkAnyAll for ArrayExt<num::Complex<f64>> {
     }
 }
 
-trait TensorChunkBool: TensorChunk {
+trait TensorChunkNot: TensorChunk {
     fn not(&self) -> ArrayExt<bool>;
 }
 
-impl TensorChunkBool for ArrayExt<bool> {
+impl TensorChunkNot for ArrayExt<bool> {
     fn not(&self) -> ArrayExt<bool> {
         ArrayExt(!self.array())
+    }
+}
+
+trait TensorChunkBool: TensorChunk {
+    fn and(&self, other: &Self) -> ArrayExt<bool>;
+
+    fn or(&self, other: &Self) -> ArrayExt<bool>;
+
+    fn xor(&self, other: &Self) -> ArrayExt<bool>;
+}
+
+impl<T: af::HasAfEnum> TensorChunkBool for ArrayExt<T> {
+    fn and(&self, other: &Self) -> ArrayExt<bool> {
+        let l: af::Array<bool> = self.array().cast();
+        let r: af::Array<bool> = other.array().cast();
+        ArrayExt(af::and(&l, &r, false))
+    }
+
+    fn or(&self, other: &Self) -> ArrayExt<bool> {
+        let l: af::Array<bool> = self.array().cast();
+        let r: af::Array<bool> = other.array().cast();
+        ArrayExt(af::and(&l, &r, false))
+    }
+
+    fn xor(&self, other: &Self) -> ArrayExt<bool> {
+        let l: af::Array<bool> = self.array().cast();
+        let r: af::Array<bool> = other.array().cast();
+
+        let one = af::or(&l, &r, false);
+        let not_both = !(&af::and(&l, &r, false));
+        let one_and_not_both = af::and(&one, &not_both, false);
+        ArrayExt(one_and_not_both.cast())
     }
 }
 
@@ -1169,6 +1201,28 @@ impl ChunkData {
         }
     }
 
+    pub fn and(&self, other: &ChunkData) -> TCResult<ChunkData> {
+        use ChunkData::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => Ok(Bool(l.and(r))),
+            (C32(l), C32(r)) => Ok(Bool(l.and(r))),
+            (C64(l), C64(r)) => Ok(Bool(l.and(r))),
+            (F32(l), F32(r)) => Ok(Bool(l.and(r))),
+            (F64(l), F64(r)) => Ok(Bool(l.and(r))),
+            (I16(l), I16(r)) => Ok(Bool(l.and(r))),
+            (I32(l), I32(r)) => Ok(Bool(l.and(r))),
+            (I64(l), I64(r)) => Ok(Bool(l.and(r))),
+            (U8(l), U8(r)) => Ok(Bool(l.and(r))),
+            (U16(l), U16(r)) => Ok(Bool(l.and(r))),
+            (U32(l), U32(r)) => Ok(Bool(l.and(r))),
+            (U64(l), U64(r)) => Ok(Bool(l.and(r))),
+            (l, r) => Err(error::internal(format!(
+                "Tried to compare {} with {}",
+                l, r
+            ))),
+        }
+    }
+
     pub fn equals(&self, other: &ChunkData) -> TCResult<ChunkData> {
         use ChunkData::*;
         match (self, other) {
@@ -1297,6 +1351,28 @@ impl ChunkData {
         }
     }
 
+    pub fn or(&self, other: &ChunkData) -> TCResult<ChunkData> {
+        use ChunkData::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => Ok(Bool(l.or(r))),
+            (C32(l), C32(r)) => Ok(Bool(l.or(r))),
+            (C64(l), C64(r)) => Ok(Bool(l.or(r))),
+            (F32(l), F32(r)) => Ok(Bool(l.or(r))),
+            (F64(l), F64(r)) => Ok(Bool(l.or(r))),
+            (I16(l), I16(r)) => Ok(Bool(l.or(r))),
+            (I32(l), I32(r)) => Ok(Bool(l.or(r))),
+            (I64(l), I64(r)) => Ok(Bool(l.or(r))),
+            (U8(l), U8(r)) => Ok(Bool(l.or(r))),
+            (U16(l), U16(r)) => Ok(Bool(l.or(r))),
+            (U32(l), U32(r)) => Ok(Bool(l.or(r))),
+            (U64(l), U64(r)) => Ok(Bool(l.or(r))),
+            (l, r) => Err(error::internal(format!(
+                "Tried to compare {} with {}",
+                l, r
+            ))),
+        }
+    }
+
     pub fn product(&self) -> Number {
         use ChunkData::*;
         match self {
@@ -1393,6 +1469,28 @@ impl ChunkData {
         }
 
         Ok(())
+    }
+
+    pub fn xor(&self, other: &ChunkData) -> TCResult<ChunkData> {
+        use ChunkData::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => Ok(Bool(l.xor(r))),
+            (C32(l), C32(r)) => Ok(Bool(l.xor(r))),
+            (C64(l), C64(r)) => Ok(Bool(l.xor(r))),
+            (F32(l), F32(r)) => Ok(Bool(l.xor(r))),
+            (F64(l), F64(r)) => Ok(Bool(l.xor(r))),
+            (I16(l), I16(r)) => Ok(Bool(l.xor(r))),
+            (I32(l), I32(r)) => Ok(Bool(l.xor(r))),
+            (I64(l), I64(r)) => Ok(Bool(l.xor(r))),
+            (U8(l), U8(r)) => Ok(Bool(l.xor(r))),
+            (U16(l), U16(r)) => Ok(Bool(l.xor(r))),
+            (U32(l), U32(r)) => Ok(Bool(l.xor(r))),
+            (U64(l), U64(r)) => Ok(Bool(l.xor(r))),
+            (l, r) => Err(error::internal(format!(
+                "Tried to compare {} with {}",
+                l, r
+            ))),
+        }
     }
 }
 

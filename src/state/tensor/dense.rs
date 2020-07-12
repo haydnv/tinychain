@@ -48,6 +48,108 @@ pub trait BlockTensorView: TensorView + 'static {
 }
 
 #[async_trait]
+impl<T: BlockTensorView, O: BlockTensorView> TensorBoolean<O> for T {
+    type Base = BlockTensor;
+    type Dense = BlockTensor;
+
+    async fn and(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        compatible(&self, &other)?;
+
+        let blocks = self
+            .clone()
+            .chunk_stream(txn.id().clone())
+            .zip(other.chunk_stream(txn.id().clone()))
+            .map(|(l, r)| l?.and(&r?))
+            .take_while(|r| future::ready(r.is_ok()));
+
+        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
+    }
+
+    async fn or(self: Arc<Self>, other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        compatible(&self, &other)?;
+
+        Err(error::not_implemented())
+    }
+
+    async fn xor(self: Arc<Self>, other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>> {
+        compatible(&self, &other)?;
+
+        Err(error::not_implemented())
+    }
+}
+
+#[async_trait]
+impl<T: BlockTensorView + Slice, O: BlockTensorView> TensorCompare<O> for T {
+    type Base = BlockTensor;
+    type Dense = BlockTensor;
+
+    async fn equals(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        compatible(&self, &other)?;
+
+        let blocks = self
+            .clone()
+            .chunk_stream(txn.id().clone())
+            .zip(other.chunk_stream(txn.id().clone()))
+            .map(|(l, r)| l?.equals(&r?))
+            .take_while(|r| future::ready(r.is_ok()));
+
+        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
+    }
+
+    async fn gt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        compatible(&self, &other)?;
+
+        let blocks = self
+            .clone()
+            .chunk_stream(txn.id().clone())
+            .zip(other.chunk_stream(txn.id().clone()))
+            .map(|(l, r)| l?.gt(&r?))
+            .take_while(|r| future::ready(r.is_ok()));
+
+        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
+    }
+
+    async fn gte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        compatible(&self, &other)?;
+
+        let blocks = self
+            .clone()
+            .chunk_stream(txn.id().clone())
+            .zip(other.chunk_stream(txn.id().clone()))
+            .map(|(l, r)| l?.gte(&r?))
+            .take_while(|r| future::ready(r.is_ok()));
+
+        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
+    }
+
+    async fn lt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        compatible(&self, &other)?;
+
+        let blocks = self
+            .clone()
+            .chunk_stream(txn.id().clone())
+            .zip(other.chunk_stream(txn.id().clone()))
+            .map(|(l, r)| l?.lt(&r?))
+            .take_while(|r| future::ready(r.is_ok()));
+
+        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
+    }
+
+    async fn lte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        compatible(&self, &other)?;
+
+        let blocks = self
+            .clone()
+            .chunk_stream(txn.id().clone())
+            .zip(other.chunk_stream(txn.id().clone()))
+            .map(|(l, r)| l?.lte(&r?))
+            .take_while(|r| future::ready(r.is_ok()));
+
+        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
+    }
+}
+
+#[async_trait]
 impl<T: BlockTensorView + Slice> TensorUnary for T
 where
     <T as Slice>::Slice: TensorUnary,
@@ -224,77 +326,6 @@ where
             Box::pin(blocks),
         )
         .await
-    }
-}
-
-#[async_trait]
-impl<T: BlockTensorView + Slice, O: BlockTensorView> TensorCompare<O> for T {
-    type Base = BlockTensor;
-    type Dense = BlockTensor;
-
-    async fn equals(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.equals(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
-    }
-
-    async fn gt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.gt(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
-    }
-
-    async fn gte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.gte(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
-    }
-
-    async fn lt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.lt(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
-    }
-
-    async fn lte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.lte(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), Box::pin(blocks)).await
     }
 }
 
