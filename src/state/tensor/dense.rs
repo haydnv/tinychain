@@ -435,6 +435,13 @@ impl TensorView for BlockTensor {
 }
 
 #[async_trait]
+impl TensorBase for BlockTensor {
+    async fn zeros(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<Arc<Self>> {
+        Self::constant(txn, shape, dtype.zero()).await
+    }
+}
+
+#[async_trait]
 impl AnyAll for BlockTensor {
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
         let mut chunks = self.chunk_stream(txn_id);

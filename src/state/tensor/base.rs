@@ -14,9 +14,7 @@ use super::index::*;
 
 #[async_trait]
 pub trait TensorBase {
-    async fn ones(txn: Arc<Txn>) -> TCResult<Arc<Self>>;
-
-    async fn zeros(txn: Arc<Txn>) -> TCResult<Arc<Self>>;
+    async fn zeros(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<Arc<Self>>;
 }
 
 #[async_trait]
