@@ -531,6 +531,40 @@ impl TensorChunkBool for ArrayExt<bool> {
     }
 }
 
+trait TensorChunkCompare {
+    fn equals(&self, other: &Self) -> ArrayExt<bool>;
+
+    fn gt(&self, other: &Self) -> ArrayExt<bool>;
+
+    fn gte(&self, other: &Self) -> ArrayExt<bool>;
+
+    fn lt(&self, other: &Self) -> ArrayExt<bool>;
+
+    fn lte(&self, other: &Self) -> ArrayExt<bool>;
+}
+
+impl<T: af::HasAfEnum + af::ImplicitPromote<T>> TensorChunkCompare for ArrayExt<T> {
+    fn equals(&self, other: &Self) -> ArrayExt<bool> {
+        af::eq(self.array(), other.array(), false).into()
+    }
+
+    fn gt(&self, other: &Self) -> ArrayExt<bool> {
+        af::gt(self.array(), other.array(), false).into()
+    }
+
+    fn gte(&self, other: &Self) -> ArrayExt<bool> {
+        af::ge(self.array(), other.array(), false).into()
+    }
+
+    fn lt(&self, other: &Self) -> ArrayExt<bool> {
+        af::lt(self.array(), other.array(), false).into()
+    }
+
+    fn lte(&self, other: &Self) -> ArrayExt<bool> {
+        af::le(self.array(), other.array(), false).into()
+    }
+}
+
 trait TensorChunkReduce: TensorChunk {
     type Product: af::HasAfEnum;
     type Sum: af::HasAfEnum;
@@ -1135,6 +1169,116 @@ impl ChunkData {
         }
     }
 
+    pub fn equals(&self, other: &ChunkData) -> TCResult<ChunkData> {
+        use ChunkData::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => Ok(Bool(l.equals(r))),
+            (C32(l), C32(r)) => Ok(Bool(l.equals(r))),
+            (C64(l), C64(r)) => Ok(Bool(l.equals(r))),
+            (F32(l), F32(r)) => Ok(Bool(l.equals(r))),
+            (F64(l), F64(r)) => Ok(Bool(l.equals(r))),
+            (I16(l), I16(r)) => Ok(Bool(l.equals(r))),
+            (I32(l), I32(r)) => Ok(Bool(l.equals(r))),
+            (I64(l), I64(r)) => Ok(Bool(l.equals(r))),
+            (U8(l), U8(r)) => Ok(Bool(l.equals(r))),
+            (U16(l), U16(r)) => Ok(Bool(l.equals(r))),
+            (U32(l), U32(r)) => Ok(Bool(l.equals(r))),
+            (U64(l), U64(r)) => Ok(Bool(l.equals(r))),
+            (l, r) => Err(error::internal(format!(
+                "Tried to compare {} with {}",
+                l, r
+            ))),
+        }
+    }
+
+    pub fn gt(&self, other: &ChunkData) -> TCResult<ChunkData> {
+        use ChunkData::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => Ok(Bool(l.gt(r))),
+            (C32(l), C32(r)) => Ok(Bool(l.gt(r))),
+            (C64(l), C64(r)) => Ok(Bool(l.gt(r))),
+            (F32(l), F32(r)) => Ok(Bool(l.gt(r))),
+            (F64(l), F64(r)) => Ok(Bool(l.gt(r))),
+            (I16(l), I16(r)) => Ok(Bool(l.gt(r))),
+            (I32(l), I32(r)) => Ok(Bool(l.gt(r))),
+            (I64(l), I64(r)) => Ok(Bool(l.gt(r))),
+            (U8(l), U8(r)) => Ok(Bool(l.gt(r))),
+            (U16(l), U16(r)) => Ok(Bool(l.gt(r))),
+            (U32(l), U32(r)) => Ok(Bool(l.gt(r))),
+            (U64(l), U64(r)) => Ok(Bool(l.gt(r))),
+            (l, r) => Err(error::internal(format!(
+                "Tried to compare {} with {}",
+                l, r
+            ))),
+        }
+    }
+
+    pub fn gte(&self, other: &ChunkData) -> TCResult<ChunkData> {
+        use ChunkData::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => Ok(Bool(l.gte(r))),
+            (C32(l), C32(r)) => Ok(Bool(l.gte(r))),
+            (C64(l), C64(r)) => Ok(Bool(l.gte(r))),
+            (F32(l), F32(r)) => Ok(Bool(l.gte(r))),
+            (F64(l), F64(r)) => Ok(Bool(l.gte(r))),
+            (I16(l), I16(r)) => Ok(Bool(l.gte(r))),
+            (I32(l), I32(r)) => Ok(Bool(l.gte(r))),
+            (I64(l), I64(r)) => Ok(Bool(l.gte(r))),
+            (U8(l), U8(r)) => Ok(Bool(l.gte(r))),
+            (U16(l), U16(r)) => Ok(Bool(l.gte(r))),
+            (U32(l), U32(r)) => Ok(Bool(l.gte(r))),
+            (U64(l), U64(r)) => Ok(Bool(l.gte(r))),
+            (l, r) => Err(error::internal(format!(
+                "Tried to compare {} with {}",
+                l, r
+            ))),
+        }
+    }
+
+    pub fn lt(&self, other: &ChunkData) -> TCResult<ChunkData> {
+        use ChunkData::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => Ok(Bool(l.lt(r))),
+            (C32(l), C32(r)) => Ok(Bool(l.lt(r))),
+            (C64(l), C64(r)) => Ok(Bool(l.lt(r))),
+            (F32(l), F32(r)) => Ok(Bool(l.lt(r))),
+            (F64(l), F64(r)) => Ok(Bool(l.lt(r))),
+            (I16(l), I16(r)) => Ok(Bool(l.lt(r))),
+            (I32(l), I32(r)) => Ok(Bool(l.lt(r))),
+            (I64(l), I64(r)) => Ok(Bool(l.lt(r))),
+            (U8(l), U8(r)) => Ok(Bool(l.lt(r))),
+            (U16(l), U16(r)) => Ok(Bool(l.lt(r))),
+            (U32(l), U32(r)) => Ok(Bool(l.lt(r))),
+            (U64(l), U64(r)) => Ok(Bool(l.lt(r))),
+            (l, r) => Err(error::internal(format!(
+                "Tried to compare {} with {}",
+                l, r
+            ))),
+        }
+    }
+
+    pub fn lte(&self, other: &ChunkData) -> TCResult<ChunkData> {
+        use ChunkData::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => Ok(Bool(l.lte(r))),
+            (C32(l), C32(r)) => Ok(Bool(l.lte(r))),
+            (C64(l), C64(r)) => Ok(Bool(l.lte(r))),
+            (F32(l), F32(r)) => Ok(Bool(l.lte(r))),
+            (F64(l), F64(r)) => Ok(Bool(l.lte(r))),
+            (I16(l), I16(r)) => Ok(Bool(l.lte(r))),
+            (I32(l), I32(r)) => Ok(Bool(l.lte(r))),
+            (I64(l), I64(r)) => Ok(Bool(l.lte(r))),
+            (U8(l), U8(r)) => Ok(Bool(l.lte(r))),
+            (U16(l), U16(r)) => Ok(Bool(l.lte(r))),
+            (U32(l), U32(r)) => Ok(Bool(l.lte(r))),
+            (U64(l), U64(r)) => Ok(Bool(l.lte(r))),
+            (l, r) => Err(error::internal(format!(
+                "Tried to compare {} with {}",
+                l, r
+            ))),
+        }
+    }
+
     pub fn not(&self) -> ChunkData {
         use ChunkData::*;
         match self {
@@ -1426,6 +1570,27 @@ impl From<ChunkData> for Vec<Number> {
             U32(u) => u.into(),
             U64(u) => u.into(),
         }
+    }
+}
+
+impl fmt::Display for ChunkData {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let dtype = match self {
+            Self::Bool(_) => "Bool",
+            Self::C32(_) => "Complex::C32",
+            Self::C64(_) => "Complex::C64",
+            Self::F32(_) => "Float::F32",
+            Self::F64(_) => "Float::F64",
+            Self::I16(_) => "Int::I16",
+            Self::I32(_) => "Int::I32",
+            Self::I64(_) => "Int::I64",
+            Self::U8(_) => "UInt::U8",
+            Self::U16(_) => "UInt::U16",
+            Self::U32(_) => "UInt::U32",
+            Self::U64(_) => "UInt::U64",
+        };
+
+        write!(f, "TensorChunk<{}>", dtype)
     }
 }
 

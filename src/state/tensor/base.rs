@@ -13,6 +13,13 @@ use crate::value::{Number, TCResult};
 use super::index::*;
 
 #[async_trait]
+pub trait TensorBase {
+    async fn ones(txn: Arc<Txn>) -> TCResult<Arc<Self>>;
+
+    async fn zeros(txn: Arc<Txn>) -> TCResult<Arc<Self>>;
+}
+
+#[async_trait]
 pub trait TensorUnary {
     type Base: Slice;
     type Dense: Slice;
@@ -54,17 +61,31 @@ pub trait TensorBoolean<Object: TensorView> {
     type Base: TensorView;
     type Dense: TensorView;
 
+    async fn and(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
+
+    async fn or(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
+
+    async fn xor(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
+}
+
+#[async_trait]
+pub trait TensorCompare<Object: TensorView> {
+    type Base: TensorView;
+    type Dense: TensorView;
+
     async fn equals(
         self: Arc<Self>,
         other: Arc<Object>,
         txn: Arc<Txn>,
     ) -> TCResult<Arc<Self::Base>>;
 
-    async fn and(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
+    async fn gt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
 
-    async fn or(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
+    async fn gte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
 
-    async fn xor(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
+    async fn lt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
+
+    async fn lte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
 }
 
 pub trait TensorView: Sized + Send + Sync {
