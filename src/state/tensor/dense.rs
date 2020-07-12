@@ -208,8 +208,22 @@ where
         Ok(product)
     }
 
-    async fn not(self: Arc<Self>, _txn: &Arc<Txn>) -> TCResult<Arc<Self::Dense>> {
-        Err(error::not_implemented())
+    async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>> {
+        let blocks = self
+            .clone()
+            .as_dtype(txn.clone(), NumberType::Bool)
+            .await?
+            .chunk_stream(txn.id().clone())
+            .map(|c| Ok(c?.not()))
+            .take_while(|r| future::ready(r.is_ok()));
+
+        BlockTensor::from_blocks(
+            txn,
+            self.shape().clone(),
+            NumberType::Bool,
+            Box::pin(blocks),
+        )
+        .await
     }
 }
 

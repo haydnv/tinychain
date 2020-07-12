@@ -35,7 +35,7 @@ pub trait TensorUnary {
 
     async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn not(self: Arc<Self>, txn: &Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
+    async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
 }
 
 #[async_trait]

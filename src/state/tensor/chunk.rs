@@ -7,7 +7,6 @@ use bytes::Bytes;
 use crate::error;
 use crate::state::file::Block;
 use crate::transaction::lock::{TxnLockReadGuard, TxnLockWriteGuard};
-use crate::transaction::TxnId;
 use crate::value::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
 use crate::value::{Complex, Float, Int, Number, TCResult, UInt};
 
@@ -48,15 +47,6 @@ impl ChunkMut {
         self.block.rewrite(self.data.into()).await;
 
         Ok(())
-    }
-
-    pub async fn sync_and_downgrade(self, txn_id: &TxnId) -> TCResult<Chunk> {
-        self.block.rewrite(self.data.clone().into()).await;
-
-        Ok(Chunk {
-            block: self.block.downgrade(txn_id).await?,
-            data: self.data,
-        })
     }
 }
 
@@ -528,6 +518,16 @@ impl TensorChunkAnyAll for ArrayExt<num::Complex<f64>> {
     fn any(&self) -> bool {
         let any = af::any_true_all(self.array());
         any.0 > 0.0f64 || any.1 > 0.0f64
+    }
+}
+
+trait TensorChunkBool: TensorChunk {
+    fn not(&self) -> ArrayExt<bool>;
+}
+
+impl TensorChunkBool for ArrayExt<bool> {
+    fn not(&self) -> ArrayExt<bool> {
+        ArrayExt(!self.array())
     }
 }
 
@@ -1132,6 +1132,24 @@ impl ChunkData {
             U16(u) => u.any(),
             U32(u) => u.any(),
             U64(u) => u.any(),
+        }
+    }
+
+    pub fn not(&self) -> ChunkData {
+        use ChunkData::*;
+        match self {
+            Bool(b) => Bool(b.not()),
+            C32(c) => Bool(c.as_type().not()),
+            C64(c) => Bool(c.as_type().not()),
+            F32(c) => Bool(c.as_type().not()),
+            F64(c) => Bool(c.as_type().not()),
+            I16(c) => Bool(c.as_type().not()),
+            I32(c) => Bool(c.as_type().not()),
+            I64(c) => Bool(c.as_type().not()),
+            U8(c) => Bool(c.as_type().not()),
+            U16(c) => Bool(c.as_type().not()),
+            U32(c) => Bool(c.as_type().not()),
+            U64(c) => Bool(c.as_type().not()),
         }
     }
 
