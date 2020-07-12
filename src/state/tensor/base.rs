@@ -39,30 +39,32 @@ pub trait TensorUnary {
 }
 
 #[async_trait]
-pub trait TensorArithmetic {
-    type Object: TensorView;
+pub trait TensorArithmetic<Object: TensorView> {
     type Base: TensorView;
 
-    async fn add(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+    async fn add(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Self::Base>;
 
-    async fn multiply(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+    async fn multiply(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Self::Base>;
 
-    async fn subtract(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+    async fn subtract(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Self::Base>;
 }
 
 #[async_trait]
-pub trait TensorBoolean {
-    type Object: TensorView;
+pub trait TensorBoolean<Object: TensorView> {
     type Base: TensorView;
     type Dense: TensorView;
 
-    async fn equals(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+    async fn equals(
+        self: Arc<Self>,
+        other: Arc<Object>,
+        txn: Arc<Txn>,
+    ) -> TCResult<Arc<Self::Base>>;
 
-    async fn and(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+    async fn and(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
 
-    async fn or(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Base>;
+    async fn or(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
 
-    async fn xor(self: Arc<Self>, txn: Arc<Txn>, other: Self::Object) -> TCResult<Self::Dense>;
+    async fn xor(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
 }
 
 pub trait TensorView: Sized + Send + Sync {

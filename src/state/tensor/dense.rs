@@ -227,6 +227,28 @@ where
     }
 }
 
+#[async_trait]
+impl<T: BlockTensorView + Slice, O: BlockTensorView> TensorBoolean<O> for T {
+    type Base = BlockTensor;
+    type Dense = BlockTensor;
+
+    async fn equals(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        Err(error::not_implemented())
+    }
+
+    async fn and(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        Err(error::not_implemented())
+    }
+
+    async fn or(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        Err(error::not_implemented())
+    }
+
+    async fn xor(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>> {
+        Err(error::not_implemented())
+    }
+}
+
 pub struct BlockTensor {
     dtype: NumberType,
     shape: Shape,
