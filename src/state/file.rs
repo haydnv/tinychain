@@ -9,6 +9,7 @@ use futures::executor::block_on;
 use futures::future::{join_all, FutureExt};
 use futures::join;
 use futures::lock::Mutex;
+use uuid::Uuid;
 
 use crate::error;
 use crate::internal::cache;
@@ -123,7 +124,17 @@ impl File {
         }))
     }
 
-    pub async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>> {
+    pub async fn unique_id(&self, txn_id: &TxnId) -> TCResult<BlockId> {
+        let existing_ids = self.block_ids(txn_id).await?;
+        loop {
+            let id: PathSegment = Uuid::new_v4().into();
+            if !existing_ids.contains(&id) {
+                return Ok(id);
+            }
+        }
+    }
+
+    async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>> {
         Ok(self
             .contents
             .read(txn_id)

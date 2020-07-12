@@ -18,8 +18,6 @@ pub mod graph;
 pub mod tensor;
 
 pub type Dir = dir::Dir;
-
-// TODO: can this `Box<dyn...>` be replaced by `impl Stream<...>`?
 pub type GetResult = TCResult<TCStream<State>>;
 
 #[async_trait]

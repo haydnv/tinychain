@@ -105,6 +105,18 @@ impl Txn {
         }))
     }
 
+    pub async fn subcontext_tmp(self: Arc<Self>) -> TCResult<Arc<Txn>> {
+        let id = self.context.unique_id(self.id()).await?;
+        let subcontext: Arc<Dir> = self.context.create_dir(&self.id, &id.into()).await?;
+
+        Ok(Arc::new(Txn {
+            id: self.id.clone(),
+            context: subcontext,
+            gateway: self.gateway.clone(),
+            mutated: self.mutated.clone(),
+        }))
+    }
+
     pub fn id(&'_ self) -> &'_ TxnId {
         &self.id
     }

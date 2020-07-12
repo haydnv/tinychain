@@ -13,7 +13,7 @@ use crate::state::file::File;
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::{ComplexType, FloatType, NumberType};
 use crate::value::class::{Impl, NumberClass};
-use crate::value::{Number, TCResult, TCStream, ValueId};
+use crate::value::{Number, TCResult, TCStream};
 
 use super::base::*;
 use super::chunk::*;
@@ -131,41 +131,21 @@ where
         let summed = BlockTensor::constant(txn.clone(), shape, self.dtype().zero()).await?;
 
         if axis == 0 {
-            let axis_index = self.shape().all()[0].clone();
-            let writes = FuturesUnordered::new();
-            for coord in summed.shape().all().affected() {
-                let source_index: Index = (axis_index.clone(), coord.clone()).into();
-                let slice = self.clone().slice(source_index)?;
-                let summed = summed.clone();
-                let txn_id = txn_id.clone();
-                writes.push(async move {
+            reduce_axis0(self)
+                .then(|r| async {
+                    let (index, slice) = r?;
                     let value = slice.sum_all(txn_id.clone()).await?;
-                    summed.write_one(&txn_id, coord.into(), value).await
-                });
-            }
-            writes
-                .take_while(|r| future::ready(r.is_ok()))
+                    summed.clone().write_one(&txn_id, index, value).await
+                })
                 .fold(Ok(()), |_, r| future::ready(r))
                 .await?;
         } else {
-            let writes = FuturesUnordered::new();
-            let prefix_range: Shape = self.shape()[0..axis].to_vec().into();
-            let mut i: usize = 0;
-            for coord in prefix_range.all().affected() {
-                let index: Index = coord.into();
-                let slice = self.clone().slice(index.clone())?;
-                let subcontext: ValueId = format!("sum_slice_{}", i).parse()?;
-                let summed = summed.clone();
-                let txn_id = txn_id.clone();
-                let txn = txn.clone();
-                writes.push(async move {
-                    let value = slice.sum(txn.subcontext(subcontext).await?, 0).await?;
-                    summed.write(&txn_id, index, value).await
-                });
-                i += 1;
-            }
-            writes
-                .take_while(|r| future::ready(r.is_ok()))
+            reduce_axis(self, axis)
+                .then(|r| async {
+                    let (index, slice) = r?;
+                    let value = slice.sum(txn.clone().subcontext_tmp().await?, 0).await?;
+                    summed.clone().write(&txn_id, index, value).await
+                })
                 .fold(Ok(()), |_, r| future::ready(r))
                 .await?;
         }
@@ -183,8 +163,39 @@ where
         Ok(sum)
     }
 
-    async fn product(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Arc<Self::Base>> {
-        Err(error::not_implemented())
+    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<Self::Base>> {
+        if axis >= self.ndim() {
+            return Err(error::bad_request("Axis out of range", axis));
+        }
+
+        let txn_id = txn.id().clone();
+        let mut shape = self.shape().clone();
+        shape.remove(axis);
+        let product = BlockTensor::constant(txn.clone(), shape, self.dtype().zero()).await?;
+
+        if axis == 0 {
+            reduce_axis0(self)
+                .then(|r| async {
+                    let (index, slice) = r?;
+                    let value = slice.product_all(txn_id.clone()).await?;
+                    product.clone().write_one(&txn_id, index, value).await
+                })
+                .fold(Ok(()), |_, r| future::ready(r))
+                .await?;
+        } else {
+            reduce_axis(self, axis)
+                .then(|r| async {
+                    let (index, slice) = r?;
+                    let value = slice
+                        .product(txn.clone().subcontext_tmp().await?, 0)
+                        .await?;
+                    product.clone().write(&txn_id, index, value).await
+                })
+                .fold(Ok(()), |_, r| future::ready(r))
+                .await?;
+        }
+
+        Ok(product)
     }
 
     async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
@@ -630,4 +641,33 @@ fn coord_chunk<I: Iterator<Item = Vec<u64>>>(
     let mut chunk_ids: Vec<u64> = Vec::with_capacity(af_chunk_ids.elements());
     af_chunk_ids.host(&mut chunk_ids);
     (chunk_ids, af_indices, af_offsets, num_coords as u64)
+}
+
+fn reduce_axis0<T: BlockTensorView + Slice>(
+    source: Arc<T>,
+) -> impl Stream<Item = TCResult<(Index, Arc<<T as Slice>::Slice>)>> {
+    assert!(source.shape().len() > 1);
+    let shape: Shape = source.shape()[1..].to_vec().into();
+    let axis_index = source.shape().all()[0].clone();
+    stream::iter(shape.all().affected())
+        .map(move |coord| {
+            let source_index: Index = (axis_index.clone(), coord.clone()).into();
+            let slice = source.clone().slice(source_index)?;
+            Ok((coord.into(), slice))
+        })
+        .take_while(|r| future::ready(r.is_ok()))
+}
+
+fn reduce_axis<T: BlockTensorView + Slice>(
+    source: Arc<T>,
+    axis: usize,
+) -> impl Stream<Item = TCResult<(Index, Arc<<T as Slice>::Slice>)>> {
+    let prefix_range: Shape = source.shape()[0..axis].to_vec().into();
+    stream::iter(prefix_range.all().affected())
+        .map(move |coord| {
+            let index: Index = coord.into();
+            let slice = source.clone().slice(index.clone())?;
+            Ok((index, slice))
+        })
+        .take_while(|r| future::ready(r.is_ok()))
 }

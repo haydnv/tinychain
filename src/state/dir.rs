@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use uuid::Uuid;
 
 use crate::error;
 use crate::internal::cache;
@@ -66,6 +67,27 @@ impl Dir {
             temporary,
             contents: TxnLock::new(txn_id, DirContents(HashMap::new())),
         })
+    }
+
+    pub async fn unique_id(&self, txn_id: &TxnId) -> TCResult<PathSegment> {
+        let existing_ids = self.entry_ids(txn_id).await?;
+        loop {
+            let id: PathSegment = Uuid::new_v4().into();
+            if !existing_ids.contains(&id) {
+                return Ok(id);
+            }
+        }
+    }
+
+    async fn entry_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<PathSegment>> {
+        Ok(self
+            .contents
+            .read(txn_id)
+            .await?
+            .0
+            .keys()
+            .cloned()
+            .collect())
     }
 
     pub fn get_dir<'a>(

@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -221,7 +220,7 @@ impl BTree {
             )
             .await?;
 
-        let collator = collator::Collator::new(schema.iter().map(|c| c.dtype.clone()).collect())?;
+        let collator = collator::Collator::new(schema.iter().map(|c| c.dtype).collect())?;
         Ok(BTree {
             file,
             schema,
@@ -422,7 +421,7 @@ impl BTree {
         i: usize,
     ) -> TCResult<Node> {
         let mut child = self.get_node(txn_id, &node.data.children[i]).await?;
-        let new_node_id = new_node_id(self.file.block_ids(txn_id).await?);
+        let new_node_id = self.file.unique_id(txn_id).await?;
 
         node.data.children.insert(i + 1, new_node_id.clone());
         node.data
@@ -531,7 +530,7 @@ impl Collect for BTree {
                 let old_root_id = root_id.0.clone();
                 let old_root = root;
 
-                root_id.0 = new_node_id(self.file.block_ids(txn.id()).await?);
+                root_id.0 = self.file.unique_id(txn.id()).await?;
                 let mut new_root =
                     Node::create(self.file.clone(), txn.id(), root_id.0.clone(), false, None)
                         .await?
@@ -569,13 +568,4 @@ fn schema_to_string(schema: &[Column]) -> String {
         .map(|c| c.dtype.to_string())
         .collect::<Vec<String>>()
         .join(",")
-}
-
-fn new_node_id(existing_ids: HashSet<NodeId>) -> NodeId {
-    loop {
-        let id: ValueId = Uuid::new_v4().into();
-        if !existing_ids.contains(&id) {
-            return id;
-        }
-    }
 }
