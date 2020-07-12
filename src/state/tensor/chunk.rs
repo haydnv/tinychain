@@ -98,11 +98,30 @@ impl From<ArrayExt<bool>> for Vec<Number> {
     }
 }
 
+impl From<ArrayExt<bool>> for Bytes {
+    fn from(array: ArrayExt<bool>) -> Bytes {
+        let mut data: Vec<bool> = array.into();
+        let data: Vec<u8> = data.drain(..).map(|i| if i { 1u8 } else { 0u8 }).collect();
+        data.into()
+    }
+}
+
 impl From<ArrayExt<num::Complex<f32>>> for Vec<Number> {
     fn from(array: ArrayExt<num::Complex<f32>>) -> Vec<Number> {
         let array: Vec<num::Complex<f32>> = array.into();
         let array: Vec<Complex> = vec_into(array);
         vec_into(array)
+    }
+}
+
+impl From<ArrayExt<num::Complex<f32>>> for Bytes {
+    fn from(array: ArrayExt<num::Complex<f32>>) -> Bytes {
+        let mut data: Vec<num::Complex<f32>> = array.into();
+        let data: Vec<Vec<u8>> = data
+            .drain(..)
+            .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
+            .collect();
+        data.into_iter().flatten().collect::<Vec<u8>>().into()
     }
 }
 
@@ -114,11 +133,30 @@ impl From<ArrayExt<num::Complex<f64>>> for Vec<Number> {
     }
 }
 
+impl From<ArrayExt<num::Complex<f64>>> for Bytes {
+    fn from(array: ArrayExt<num::Complex<f64>>) -> Bytes {
+        let mut data: Vec<num::Complex<f64>> = array.into();
+        let data: Vec<Vec<u8>> = data
+            .drain(..)
+            .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
+            .collect();
+        data.into_iter().flatten().collect::<Vec<u8>>().into()
+    }
+}
+
 impl From<ArrayExt<f32>> for Vec<Number> {
     fn from(array: ArrayExt<f32>) -> Vec<Number> {
         let array: Vec<f32> = array.into();
         let array: Vec<Float> = vec_into(array);
         vec_into(array)
+    }
+}
+
+impl From<ArrayExt<f32>> for Bytes {
+    fn from(array: ArrayExt<f32>) -> Bytes {
+        let mut data: Vec<f32> = array.into();
+        let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        data[..].concat().into()
     }
 }
 
@@ -130,11 +168,27 @@ impl From<ArrayExt<f64>> for Vec<Number> {
     }
 }
 
+impl From<ArrayExt<f64>> for Bytes {
+    fn from(array: ArrayExt<f64>) -> Bytes {
+        let mut data: Vec<f64> = array.into();
+        let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        data[..].concat().into()
+    }
+}
+
 impl From<ArrayExt<i16>> for Vec<Number> {
     fn from(array: ArrayExt<i16>) -> Vec<Number> {
         let array: Vec<i16> = array.into();
         let array: Vec<Int> = vec_into(array);
         vec_into(array)
+    }
+}
+
+impl From<ArrayExt<i16>> for Bytes {
+    fn from(array: ArrayExt<i16>) -> Bytes {
+        let mut data: Vec<i16> = array.into();
+        let data: Vec<[u8; 2]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        data[..].concat().into()
     }
 }
 
@@ -146,11 +200,27 @@ impl From<ArrayExt<i32>> for Vec<Number> {
     }
 }
 
+impl From<ArrayExt<i32>> for Bytes {
+    fn from(array: ArrayExt<i32>) -> Bytes {
+        let mut data: Vec<i32> = array.into();
+        let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        data[..].concat().into()
+    }
+}
+
 impl From<ArrayExt<i64>> for Vec<Number> {
     fn from(array: ArrayExt<i64>) -> Vec<Number> {
         let array: Vec<i64> = array.into();
         let array: Vec<Int> = vec_into(array);
         vec_into(array)
+    }
+}
+
+impl From<ArrayExt<i64>> for Bytes {
+    fn from(array: ArrayExt<i64>) -> Bytes {
+        let mut data: Vec<i64> = array.into();
+        let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        data[..].concat().into()
     }
 }
 
@@ -162,11 +232,26 @@ impl From<ArrayExt<u8>> for Vec<Number> {
     }
 }
 
+impl From<ArrayExt<u8>> for Bytes {
+    fn from(array: ArrayExt<u8>) -> Bytes {
+        let data: Vec<u8> = array.into();
+        data.into()
+    }
+}
+
 impl From<ArrayExt<u16>> for Vec<Number> {
     fn from(array: ArrayExt<u16>) -> Vec<Number> {
         let array: Vec<u16> = array.into();
         let array: Vec<UInt> = vec_into(array);
         vec_into(array)
+    }
+}
+
+impl From<ArrayExt<u16>> for Bytes {
+    fn from(array: ArrayExt<u16>) -> Bytes {
+        let mut data: Vec<u16> = array.into();
+        let data: Vec<[u8; 2]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        data[..].concat().into()
     }
 }
 
@@ -178,11 +263,27 @@ impl From<ArrayExt<u32>> for Vec<Number> {
     }
 }
 
+impl From<ArrayExt<u32>> for Bytes {
+    fn from(array: ArrayExt<u32>) -> Bytes {
+        let mut data: Vec<u32> = array.into();
+        let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        data[..].concat().into()
+    }
+}
+
 impl From<ArrayExt<u64>> for Vec<Number> {
     fn from(array: ArrayExt<u64>) -> Vec<Number> {
         let array: Vec<u64> = array.into();
         let array: Vec<UInt> = vec_into(array);
         vec_into(array)
+    }
+}
+
+impl From<ArrayExt<u64>> for Bytes {
+    fn from(array: ArrayExt<u64>) -> Bytes {
+        let mut data: Vec<u64> = array.into();
+        let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        data[..].concat().into()
     }
 }
 
@@ -1498,71 +1599,18 @@ impl From<ChunkData> for Bytes {
     fn from(chunk: ChunkData) -> Bytes {
         use ChunkData::*;
         match chunk {
-            Bool(b) => {
-                let mut data: Vec<bool> = b.into();
-                let data: Vec<u8> = data.drain(..).map(|i| if i { 1u8 } else { 0u8 }).collect();
-                data.into()
-            }
-            C32(c) => {
-                let mut data: Vec<num::Complex<f32>> = c.into();
-                let data: Vec<Vec<u8>> = data
-                    .drain(..)
-                    .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
-                    .collect();
-                data.into_iter().flatten().collect::<Vec<u8>>().into()
-            }
-            C64(c) => {
-                let mut data: Vec<num::Complex<f64>> = c.into();
-                let data: Vec<Vec<u8>> = data
-                    .drain(..)
-                    .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
-                    .collect();
-                data.into_iter().flatten().collect::<Vec<u8>>().into()
-            }
-            F32(f) => {
-                let mut data: Vec<f32> = f.into();
-                let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
-                data[..].concat().into()
-            }
-            F64(f) => {
-                let mut data: Vec<f64> = f.into();
-                let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
-                data[..].concat().into()
-            }
-            I16(i) => {
-                let mut data: Vec<i16> = i.into();
-                let data: Vec<[u8; 2]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
-                data[..].concat().into()
-            }
-            I32(i) => {
-                let mut data: Vec<i32> = i.into();
-                let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
-                data[..].concat().into()
-            }
-            I64(i) => {
-                let mut data: Vec<i64> = i.into();
-                let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
-                data[..].concat().into()
-            }
-            U8(b) => {
-                let data: Vec<u8> = b.into();
-                data.into()
-            }
-            U16(u) => {
-                let mut data: Vec<u16> = u.into();
-                let data: Vec<[u8; 2]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
-                data[..].concat().into()
-            }
-            U32(u) => {
-                let mut data: Vec<u32> = u.into();
-                let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
-                data[..].concat().into()
-            }
-            U64(u) => {
-                let mut data: Vec<u64> = u.into();
-                let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
-                data[..].concat().into()
-            }
+            Bool(b) => b.into(),
+            C32(c) => c.into(),
+            C64(c) => c.into(),
+            F32(f) => f.into(),
+            F64(f) => f.into(),
+            I16(i) => i.into(),
+            I32(i) => i.into(),
+            I64(i) => i.into(),
+            U8(u) => u.into(),
+            U16(u) => u.into(),
+            U32(u) => u.into(),
+            U64(u) => u.into(),
         }
     }
 }
