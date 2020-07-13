@@ -269,6 +269,20 @@ impl BTree {
         }
     }
 
+    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+        let root_id = self.root.read(txn_id).await?;
+        let root = self.get_node(txn_id, &root_id.0).await?;
+        Ok(root.data.keys.is_empty())
+    }
+
+    pub async fn len(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> TCResult<u64> {
+        let root_id = self.root.read(&txn_id).await?;
+        let root = self.get_node(&txn_id, &root_id.0).await?;
+
+        // TODO: stream nodes directly rather than counting each key
+        Ok(self.slice(txn_id, root, bounds).fold(0u64, |len, _| future::ready(len + 1)).await)
+    }
+
     fn slice(self: Arc<Self>, txn_id: TxnId, node: Node, bounds: Bounds) -> TCStream<Key> {
         let keys = node.data.values();
         let (l, r) = bounds.bisect(&keys, &self.collator);
