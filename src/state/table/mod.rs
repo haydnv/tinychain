@@ -6,8 +6,10 @@ use async_trait::async_trait;
 
 use crate::error;
 use crate::transaction::TxnId;
-use crate::value::{TCResult, Value, ValueId};
 use crate::value::class::ValueType;
+use crate::value::{TCResult, Value, ValueId};
+
+mod index;
 
 type Row = HashMap<ValueId, Value>;
 
@@ -24,7 +26,10 @@ struct Schema {
 
 impl Schema {
     fn columns(&self) -> Vec<Column> {
-        [&self.key[..], &self.value[..]].concat().into_iter().collect()
+        [&self.key[..], &self.value[..]]
+            .concat()
+            .into_iter()
+            .collect()
     }
 
     fn len(&self) -> usize {
@@ -47,15 +52,25 @@ trait Selection: Sized + Send + Sync {
     async fn delete(self: Arc<Self>, txn_id: &TxnId) -> TCResult<()>;
 
     fn derive<M: Fn(Row) -> Value>(self: Arc<Self>, name: ValueId, map: M) -> Derived<Self, M> {
-        Derived { source: self, name, map }
+        Derived {
+            source: self,
+            name,
+            map,
+        }
     }
 
     fn filter<F: Fn(Row) -> bool>(self: Arc<Self>, filter: F) -> Filtered<Self, F> {
-        Filtered { source: self, filter }
+        Filtered {
+            source: self,
+            filter,
+        }
     }
 
     fn group_by(self: Arc<Self>, columns: Vec<ValueId>) -> Aggregate<Self> {
-        Aggregate { source: self, columns }
+        Aggregate {
+            source: self,
+            columns,
+        }
     }
 
     async fn index(self: Arc<Self>, _columns: Option<Vec<ValueId>>) -> TCResult<ReadOnlyIndex> {
@@ -63,18 +78,35 @@ trait Selection: Sized + Send + Sync {
     }
 
     fn limit(self: Arc<Self>, limit: u64) -> Limit<Self> {
-        Limit { source: self, limit }
+        Limit {
+            source: self,
+            limit,
+        }
     }
 
     fn order_by(self: Arc<Self>, columns: Vec<ValueId>, reverse: bool) -> Sorted<Self> {
-        Sorted { source: self, columns, reverse }
+        Sorted {
+            source: self,
+            columns,
+            reverse,
+        }
     }
 
-    fn schema(&self) -> Schema;
+    fn select(self: Arc<Self>, columns: Vec<ValueId>) -> ColumnSelection<Self> {
+        ColumnSelection {
+            source: self,
+            columns,
+        }
+    }
+
+    fn schema(&'_ self) -> &'_ Schema;
 
     fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Slice<Self>> {
         if self.supports(&bounds) {
-            Ok(Slice { source: self, bounds })
+            Ok(Slice {
+                source: self,
+                bounds,
+            })
         } else {
             Err(error::bad_request("Invalid bounds", bounds))
         }
@@ -86,6 +118,11 @@ trait Selection: Sized + Send + Sync {
 }
 
 struct Aggregate<T: Selection> {
+    source: Arc<T>,
+    columns: Vec<ValueId>,
+}
+
+struct ColumnSelection<T: Selection> {
     source: Arc<T>,
     columns: Vec<ValueId>,
 }
@@ -103,7 +140,7 @@ struct Filtered<T: Selection, F: Fn(Row) -> bool> {
 
 struct Limit<T: Selection> {
     source: Arc<T>,
-    limit: u64
+    limit: u64,
 }
 
 struct ReadOnlyIndex {}
@@ -116,5 +153,5 @@ struct Slice<T: Selection> {
 struct Sorted<T: Selection> {
     source: Arc<T>,
     columns: Vec<ValueId>,
-    reverse: bool
+    reverse: bool,
 }
