@@ -23,13 +23,7 @@ pub type GetResult = TCResult<TCStream<State>>;
 
 #[async_trait]
 pub trait Collect: Transact + Send + Sync {
-    type Selector: Clone
-        + DeserializeOwned
-        + Serialize
-        + TryFrom<Value, Error = error::TCError>
-        + Send
-        + Sync
-        + 'static;
+    type Selector: Clone + TryFrom<Value, Error = error::TCError> + Send + Sync + 'static;
 
     type Item: Clone
         + DeserializeOwned
