@@ -1,7 +1,7 @@
 mod base;
+mod bounds;
 mod chunk;
 mod dense;
-mod index;
 mod sparse;
 mod stream;
 

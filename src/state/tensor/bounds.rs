@@ -8,21 +8,21 @@ use num::integer::Integer;
 use super::stream::{AxisIter, Coords};
 
 #[derive(Clone)]
-pub enum AxisIndex {
+pub enum AxisBounds {
     At(u64),
     In(ops::Range<u64>, u64),
     Of(Vec<u64>),
 }
 
-impl AxisIndex {
-    pub fn all(dim: u64) -> AxisIndex {
-        AxisIndex::In(0..dim, 1)
+impl AxisBounds {
+    pub fn all(dim: u64) -> AxisBounds {
+        AxisBounds::In(0..dim, 1)
     }
 }
 
-impl PartialEq for AxisIndex {
-    fn eq(&self, other: &AxisIndex) -> bool {
-        use AxisIndex::*;
+impl PartialEq for AxisBounds {
+    fn eq(&self, other: &AxisBounds) -> bool {
+        use AxisBounds::*;
         match (self, other) {
             (At(l), At(r)) if l == r => true,
             (In(lr, ls), In(rr, rs)) if lr == rr && ls == rs => true,
@@ -32,27 +32,27 @@ impl PartialEq for AxisIndex {
     }
 }
 
-impl From<u64> for AxisIndex {
-    fn from(at: u64) -> AxisIndex {
-        AxisIndex::At(at)
+impl From<u64> for AxisBounds {
+    fn from(at: u64) -> AxisBounds {
+        AxisBounds::At(at)
     }
 }
 
-impl From<Vec<u64>> for AxisIndex {
-    fn from(of: Vec<u64>) -> AxisIndex {
-        AxisIndex::Of(of)
+impl From<Vec<u64>> for AxisBounds {
+    fn from(of: Vec<u64>) -> AxisBounds {
+        AxisBounds::Of(of)
     }
 }
 
-impl From<(ops::Range<u64>, u64)> for AxisIndex {
-    fn from(slice: (ops::Range<u64>, u64)) -> AxisIndex {
-        AxisIndex::In(slice.0, slice.1)
+impl From<(ops::Range<u64>, u64)> for AxisBounds {
+    fn from(slice: (ops::Range<u64>, u64)) -> AxisBounds {
+        AxisBounds::In(slice.0, slice.1)
     }
 }
 
-impl fmt::Display for AxisIndex {
+impl fmt::Display for AxisBounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use AxisIndex::*;
+        use AxisBounds::*;
         match self {
             At(at) => write!(f, "{}", at),
             In(range, 1) => write!(f, "[{}, {})", range.start, range.end),
@@ -71,22 +71,22 @@ impl fmt::Display for AxisIndex {
 }
 
 #[derive(Clone)]
-pub struct Index {
-    pub axes: Vec<AxisIndex>,
+pub struct Bounds {
+    pub axes: Vec<AxisBounds>,
 }
 
-impl Index {
-    pub fn all(shape: &Shape) -> Index {
+impl Bounds {
+    pub fn all(shape: &Shape) -> Bounds {
         shape
             .0
             .iter()
-            .map(|dim| AxisIndex::In(0..*dim, 1))
-            .collect::<Vec<AxisIndex>>()
+            .map(|dim| AxisBounds::In(0..*dim, 1))
+            .collect::<Vec<AxisBounds>>()
             .into()
     }
 
     pub fn affected(&self) -> Coords {
-        use AxisIndex::*;
+        use AxisBounds::*;
         let mut axes = Vec::with_capacity(self.len());
         for axis in 0..self.len() {
             axes.push(match &self[axis] {
@@ -105,7 +105,7 @@ impl Index {
 
     pub fn ndim(&self) -> usize {
         let mut ndim = 0;
-        use AxisIndex::*;
+        use AxisBounds::*;
         for axis in &self.axes {
             match axis {
                 At(_) => {}
@@ -119,13 +119,13 @@ impl Index {
         assert!(self.len() <= shape.len());
 
         for axis in self.axes.len()..shape.len() {
-            self.axes.push(AxisIndex::all(shape[axis]))
+            self.axes.push(AxisBounds::all(shape[axis]))
         }
     }
 }
 
-impl PartialEq for Index {
-    fn eq(&self, other: &Index) -> bool {
+impl PartialEq for Bounds {
+    fn eq(&self, other: &Bounds) -> bool {
         if self.len() != other.len() {
             return false;
         }
@@ -140,54 +140,54 @@ impl PartialEq for Index {
     }
 }
 
-impl Eq for Index {}
+impl Eq for Bounds {}
 
-impl<Idx: std::slice::SliceIndex<[AxisIndex]>> ops::Index<Idx> for Index {
+impl<Idx: std::slice::SliceIndex<[AxisBounds]>> ops::Index<Idx> for Bounds {
     type Output = Idx::Output;
 
-    fn index(&self, index: Idx) -> &Self::Output {
-        &self.axes[index]
+    fn index(&self, i: Idx) -> &Self::Output {
+        &self.axes[i]
     }
 }
 
-impl<Idx: std::slice::SliceIndex<[AxisIndex]>> ops::IndexMut<Idx> for Index {
-    fn index_mut(&mut self, index: Idx) -> &mut Self::Output {
-        &mut self.axes[index]
+impl<Idx: std::slice::SliceIndex<[AxisBounds]>> ops::IndexMut<Idx> for Bounds {
+    fn index_mut(&mut self, i: Idx) -> &mut Self::Output {
+        &mut self.axes[i]
     }
 }
 
-impl From<Vec<AxisIndex>> for Index {
-    fn from(axes: Vec<AxisIndex>) -> Index {
-        Index { axes }
+impl From<Vec<AxisBounds>> for Bounds {
+    fn from(axes: Vec<AxisBounds>) -> Bounds {
+        Bounds { axes }
     }
 }
 
-impl From<&[u64]> for Index {
-    fn from(coord: &[u64]) -> Index {
-        let axes = coord.iter().map(|i| AxisIndex::At(*i)).collect();
-        Index { axes }
+impl From<&[u64]> for Bounds {
+    fn from(coord: &[u64]) -> Bounds {
+        let axes = coord.iter().map(|i| AxisBounds::At(*i)).collect();
+        Bounds { axes }
     }
 }
 
-impl From<Vec<u64>> for Index {
-    fn from(coord: Vec<u64>) -> Index {
-        let axes = coord.iter().map(|i| AxisIndex::At(*i)).collect();
-        Index { axes }
+impl From<Vec<u64>> for Bounds {
+    fn from(coord: Vec<u64>) -> Bounds {
+        let axes = coord.iter().map(|i| AxisBounds::At(*i)).collect();
+        Bounds { axes }
     }
 }
 
-impl From<(AxisIndex, Vec<u64>)> for Index {
-    fn from(mut tuple: (AxisIndex, Vec<u64>)) -> Index {
+impl From<(AxisBounds, Vec<u64>)> for Bounds {
+    fn from(mut tuple: (AxisBounds, Vec<u64>)) -> Bounds {
         let mut axes = Vec::with_capacity(tuple.1.len() + 1);
         axes.push(tuple.0);
         for axis in tuple.1.drain(..) {
             axes.push(axis.into());
         }
-        Index { axes }
+        Bounds { axes }
     }
 }
 
-impl fmt::Display for Index {
+impl fmt::Display for Bounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -205,15 +205,15 @@ impl fmt::Display for Index {
 pub struct Shape(Vec<u64>);
 
 impl Shape {
-    pub fn all(&self) -> Index {
+    pub fn all(&self) -> Bounds {
         let mut axes = Vec::with_capacity(self.len());
         for dim in &self.0 {
-            axes.push(AxisIndex::In(0..*dim, 1));
+            axes.push(AxisBounds::In(0..*dim, 1));
         }
         axes.into()
     }
 
-    pub fn contains(&self, coord: &Index) -> bool {
+    pub fn contains(&self, coord: &Bounds) -> bool {
         if coord.len() > self.len() {
             return false;
         }
@@ -221,17 +221,17 @@ impl Shape {
         for axis in 0..coord.len() {
             let size = &self[axis];
             match &coord[axis] {
-                AxisIndex::At(i) => {
+                AxisBounds::At(i) => {
                     if i > size {
                         return false;
                     }
                 }
-                AxisIndex::In(range, _) => {
+                AxisBounds::In(range, _) => {
                     if range.start > *size || range.end > *size {
                         return false;
                     }
                 }
-                AxisIndex::Of(indices) => {
+                AxisBounds::Of(indices) => {
                     for i in indices {
                         if i > size {
                             return false;
@@ -244,18 +244,18 @@ impl Shape {
         true
     }
 
-    pub fn selection(&self, coord: &Index) -> Shape {
+    pub fn selection(&self, coord: &Bounds) -> Shape {
         assert!(self.contains(coord));
 
         let mut shape = Vec::with_capacity(self.len());
         for axis in 0..coord.len() {
             match &coord[axis] {
-                AxisIndex::At(_) => {}
-                AxisIndex::In(range, step) => {
+                AxisBounds::At(_) => {}
+                AxisBounds::In(range, step) => {
                     let dim = (range.end - range.start).div_ceil(&step);
                     shape.push(dim)
                 }
-                AxisIndex::Of(indices) => shape.push(indices.len() as u64),
+                AxisBounds::Of(indices) => shape.push(indices.len() as u64),
             }
         }
         shape.into()
@@ -293,8 +293,8 @@ impl Eq for Shape {}
 impl<Idx: std::slice::SliceIndex<[u64]>> ops::Index<Idx> for Shape {
     type Output = Idx::Output;
 
-    fn index(&self, index: Idx) -> &Self::Output {
-        &self.0[index]
+    fn index(&self, i: Idx) -> &Self::Output {
+        &self.0[i]
     }
 }
 

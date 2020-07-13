@@ -10,7 +10,7 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::class::NumberType;
 use crate::value::{Number, TCResult};
 
-use super::index::*;
+use super::bounds::*;
 
 #[async_trait]
 pub trait TensorBase {
@@ -116,15 +116,15 @@ pub trait Expand: TensorView {
 pub trait Slice: TensorView {
     type Slice: TensorView;
 
-    fn slice(self: Arc<Self>, coord: Index) -> TCResult<Arc<Self::Slice>>;
+    fn slice(self: Arc<Self>, coord: Bounds) -> TCResult<Arc<Self::Slice>>;
 }
 
 pub trait Rebase: TensorView {
     type Source: TensorView;
 
-    fn invert_index(&self, index: Index) -> Index;
+    fn invert_bounds(&self, bounds: Bounds) -> Bounds;
 
-    fn map_index(&self, source_index: Index) -> Index;
+    fn map_bounds(&self, source_bounds: Bounds) -> Bounds;
 
     fn source(&self) -> Arc<Self::Source>;
 }
@@ -219,30 +219,30 @@ impl<T: TensorView + AnyAll> AnyAll for TensorBroadcast<T> {
 impl<T: TensorView> Rebase for TensorBroadcast<T> {
     type Source = T;
 
-    fn invert_index(&self, index: Index) -> Index {
+    fn invert_bounds(&self, bounds: Bounds) -> Bounds {
         let source_ndim = self.source.ndim();
-        let mut source_index = Vec::with_capacity(source_ndim);
+        let mut source_bounds = Vec::with_capacity(source_ndim);
         for axis in 0..source_ndim {
             if self.broadcast[axis + self.offset] {
-                source_index.push(AxisIndex::from(0))
+                source_bounds.push(AxisBounds::from(0))
             } else {
-                source_index.push(index[axis + self.offset].clone())
+                source_bounds.push(bounds[axis + self.offset].clone())
             }
         }
 
-        source_index.into()
+        source_bounds.into()
     }
 
-    fn map_index(&self, source_index: Index) -> Index {
-        let mut index = Index::all(&self.shape);
+    fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
+        let mut bounds = Bounds::all(&self.shape);
 
         for axis in 0..self.ndim {
             if !self.broadcast[axis + self.offset] {
-                index[axis + self.offset] = source_index[axis].clone();
+                bounds[axis + self.offset] = source_bounds[axis].clone();
             }
         }
 
-        index
+        bounds
     }
 
     fn source(&self) -> Arc<Self::Source> {
@@ -310,20 +310,20 @@ impl<T: TensorView + AnyAll> AnyAll for Expansion<T> {
 impl<T: TensorView> Rebase for Expansion<T> {
     type Source = T;
 
-    fn invert_index(&self, mut index: Index) -> Index {
-        if index.len() >= self.expand {
-            index.axes.remove(self.expand);
+    fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+        if bounds.len() >= self.expand {
+            bounds.axes.remove(self.expand);
         }
 
-        index
+        bounds
     }
 
-    fn map_index(&self, mut index: Index) -> Index {
-        if index.len() >= self.expand {
-            index.axes.insert(self.expand, 0.into());
+    fn map_bounds(&self, mut bounds: Bounds) -> Bounds {
+        if bounds.len() >= self.expand {
+            bounds.axes.insert(self.expand, 0.into());
         }
 
-        index
+        bounds
     }
 
     fn source(&self) -> Arc<Self::Source> {
@@ -405,20 +405,20 @@ impl<T: TensorView + Transpose + AnyAll> AnyAll for Permutation<T> {
 impl<T: TensorView> Rebase for Permutation<T> {
     type Source = T;
 
-    fn invert_index(&self, index: Index) -> Index {
-        let mut source_index = Index::all(self.source.shape());
-        for axis in 0..index.len() {
-            source_index[self.permutation[axis]] = index[axis].clone();
+    fn invert_bounds(&self, bounds: Bounds) -> Bounds {
+        let mut source_bounds = Bounds::all(self.source.shape());
+        for axis in 0..bounds.len() {
+            source_bounds[self.permutation[axis]] = bounds[axis].clone();
         }
-        source_index
+        source_bounds
     }
 
-    fn map_index(&self, source_index: Index) -> Index {
-        let mut index = Index::all(&self.shape);
-        for axis in 0..source_index.len() {
-            index[self.permutation[axis]] = source_index[axis].clone();
+    fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
+        let mut bounds = Bounds::all(&self.shape);
+        for axis in 0..source_bounds.len() {
+            bounds[self.permutation[axis]] = source_bounds[axis].clone();
         }
-        index
+        bounds
     }
 
     fn source(&self) -> Arc<Self::Source> {
@@ -432,7 +432,7 @@ where
 {
     type Slice = <<<Self as Rebase>::Source as Slice>::Slice as Transpose>::Permutation;
 
-    fn slice(self: Arc<Self>, index: Index) -> TCResult<Arc<Self::Slice>> {
+    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
         let mut permutation: BTreeMap<usize, usize> = self
             .permutation()
             .to_vec()
@@ -441,8 +441,8 @@ where
             .collect();
 
         let mut elided = HashSet::new();
-        for axis in 0..index.len() {
-            if let AxisIndex::At(_) = index[axis] {
+        for axis in 0..bounds.len() {
+            if let AxisBounds::At(_) = bounds[axis] {
                 elided.insert(axis);
                 permutation.remove(&axis);
             }
@@ -456,9 +456,9 @@ where
         }
 
         let permutation: Vec<usize> = permutation.values().cloned().collect();
-        let source_index = self.invert_index(index);
+        let source_bounds = self.invert_bounds(bounds);
         let source = self.source();
-        let slice = source.slice(source_index)?;
+        let slice = source.slice(source_bounds)?;
         slice.transpose(Some(permutation))
     }
 }
@@ -468,28 +468,28 @@ pub struct TensorSlice<T: TensorView> {
     shape: Shape,
     size: u64,
     ndim: usize,
-    slice: Index,
+    slice: Bounds,
     offset: HashMap<usize, u64>,
     elided: HashSet<usize>,
 }
 
 impl<T: TensorView> TensorSlice<T> {
-    pub fn new(source: Arc<T>, slice: Index) -> TCResult<TensorSlice<T>> {
+    pub fn new(source: Arc<T>, slice: Bounds) -> TCResult<TensorSlice<T>> {
         let mut shape: Vec<u64> = Vec::with_capacity(slice.len());
         let mut offset = HashMap::new();
         let mut elided = HashSet::new();
 
         for axis in 0..slice.len() {
             match &slice[axis] {
-                AxisIndex::At(_) => {
+                AxisBounds::At(_) => {
                     elided.insert(axis);
                 }
-                AxisIndex::In(range, step) => {
+                AxisBounds::In(range, step) => {
                     let dim = (range.end - range.start).div_ceil(step);
                     shape.push(dim);
                     offset.insert(axis, range.start);
                 }
-                AxisIndex::Of(indices) => shape.push(indices.len() as u64),
+                AxisBounds::Of(indices) => shape.push(indices.len() as u64),
             }
         }
 
@@ -543,10 +543,10 @@ impl<T: TensorView> TensorView for TensorSlice<T> {
 impl<T: TensorView> Slice for TensorSlice<T> {
     type Slice = TensorSlice<T>;
 
-    fn slice(self: Arc<Self>, index: Index) -> TCResult<Arc<Self::Slice>> {
+    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
         Ok(Arc::new(TensorSlice::new(
             self.source.clone(),
-            self.invert_index(index),
+            self.invert_bounds(bounds),
         )?))
     }
 }
@@ -554,33 +554,33 @@ impl<T: TensorView> Slice for TensorSlice<T> {
 impl<T: TensorView> Rebase for TensorSlice<T> {
     type Source = T;
 
-    fn invert_index(&self, mut index: Index) -> Index {
-        index.normalize(&self.shape);
+    fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+        bounds.normalize(&self.shape);
 
-        let mut source_index = Vec::with_capacity(self.source.ndim());
+        let mut source_bounds = Vec::with_capacity(self.source.ndim());
         let mut source_axis = 0;
         for axis in 0..self.ndim {
             if self.elided.contains(&axis) {
-                source_index.push(self.slice[axis].clone());
+                source_bounds.push(self.slice[axis].clone());
                 continue;
             }
 
-            use AxisIndex::*;
-            match &index[source_axis] {
+            use AxisBounds::*;
+            match &bounds[source_axis] {
                 In(range, this_step) => {
                     if let In(source_range, source_step) = &self.slice[axis] {
                         let start = range.start + source_range.start;
                         let end = start + (source_step * (range.end - range.start));
                         let step = source_step * this_step;
-                        source_index.push((start..end, step).into());
+                        source_bounds.push((start..end, step).into());
                     } else {
                         assert!(range.start == 0);
-                        source_index.push(self.slice[axis].clone());
+                        source_bounds.push(self.slice[axis].clone());
                     }
                 }
                 Of(indices) => {
                     let offset = self.offset.get(&axis).unwrap_or(&0);
-                    source_index.push(
+                    source_bounds.push(
                         indices
                             .iter()
                             .map(|i| i + offset)
@@ -590,17 +590,17 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
                 }
                 At(i) => {
                     let offset = self.offset.get(&axis).unwrap_or(&0);
-                    source_index.push((i + offset).into())
+                    source_bounds.push((i + offset).into())
                 }
             }
             source_axis += 1;
         }
 
-        source_index.into()
+        source_bounds.into()
     }
 
-    fn map_index(&self, source_index: Index) -> Index {
-        assert!(source_index.len() == self.ndim);
+    fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
+        assert!(source_bounds.len() == self.ndim);
 
         let mut coord = Vec::with_capacity(self.ndim);
 
@@ -609,8 +609,8 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
                 continue;
             }
 
-            use AxisIndex::*;
-            match &source_index[axis] {
+            use AxisBounds::*;
+            match &source_bounds[axis] {
                 In(_, _) => panic!("NOT IMPLEMENTED"),
                 Of(indices) => {
                     let offset = self.offset.get(&axis).unwrap_or(&0);
@@ -629,9 +629,9 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
             }
         }
 
-        for axis in source_index.len()..self.ndim {
+        for axis in source_bounds.len()..self.ndim {
             if !self.elided.contains(&axis) {
-                coord.push(AxisIndex::all(self.shape[axis]))
+                coord.push(AxisBounds::all(self.shape[axis]))
             }
         }
 
