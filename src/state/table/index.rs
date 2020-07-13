@@ -6,7 +6,7 @@ use crate::error;
 use crate::state::btree::{self, BTree, BTreeRange, Key};
 use crate::transaction::TxnId;
 use crate::value::class::Impl;
-use crate::value::{TCResult, TCStream, Value};
+use crate::value::{TCResult, TCStream, Value, ValueId};
 
 use super::{Bounds, Row, Schema, Selection};
 
@@ -113,5 +113,36 @@ impl Selection for Index {
 }
 
 pub struct ReadOnly {
-    source: Index,
+    index: Arc<Index>,
+}
+
+#[async_trait]
+impl Selection for ReadOnly {
+    async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
+        self.index.clone().count(txn_id).await
+    }
+
+    async fn delete(self: Arc<Self>, txn_id: TxnId) -> TCResult<()> {
+        Err(error::method_not_allowed(
+            "this is a transitive (read-only) index",
+        ))
+    }
+
+    async fn index(self: Arc<Self>, columns: Option<Vec<ValueId>>) -> TCResult<ReadOnly> {
+        Err(error::not_implemented())
+    }
+
+    fn schema(&'_ self) -> &'_ Schema {
+        self.index.schema()
+    }
+
+    fn validate(&self, bounds: &Bounds) -> TCResult<()> {
+        self.index.validate(bounds)
+    }
+
+    async fn update(self: Arc<Self>, txn_id: TxnId, value: Row) -> TCResult<()> {
+        Err(error::method_not_allowed(
+            "this is a transitive (read-only) index",
+        ))
+    }
 }
