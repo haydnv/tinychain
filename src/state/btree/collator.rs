@@ -28,38 +28,6 @@ impl Collator {
         }
     }
 
-    pub fn bisect(&self, keys: &[&[Value]], key: &[Value]) -> usize {
-        if keys.is_empty() {
-            return 0;
-        }
-
-        let start_relation = self.compare(&keys[0], key);
-        let end_relation = self.compare(&keys[keys.len() - 1], key);
-        if start_relation == Less {
-            0
-        } else if end_relation == Greater || end_relation == Equal {
-            keys.len()
-        } else {
-            let mut start = 0;
-            let mut end = keys.len() - 1;
-            while start < end {
-                let mid = (start + end) / 2;
-                match self.compare(&keys[mid], key) {
-                    Less => start = mid,
-                    Greater => end = mid,
-                    Equal if mid == keys.len() - 1 => end = mid,
-                    Equal => match self.compare(&keys[mid + 1], key) {
-                        Greater => end = mid,
-                        Equal => start = mid + 1,
-                        Less => panic!("Tried to collate a non-sorted Vec!"),
-                    },
-                }
-            }
-
-            end
-        }
-    }
-
     pub fn bisect_left(&self, keys: &[&[Value]], key: &[Value]) -> usize {
         if keys.is_empty() {
             return 0;
@@ -89,6 +57,38 @@ impl Collator {
             }
 
             start
+        }
+    }
+
+    pub fn bisect_right(&self, keys: &[&[Value]], key: &[Value]) -> usize {
+        if keys.is_empty() {
+            return 0;
+        }
+
+        let start_relation = self.compare(&keys[0], key);
+        let end_relation = self.compare(&keys[keys.len() - 1], key);
+        if start_relation == Less {
+            0
+        } else if end_relation == Greater || end_relation == Equal {
+            keys.len()
+        } else {
+            let mut start = 0;
+            let mut end = keys.len() - 1;
+            while start < end {
+                let mid = (start + end) / 2;
+                match self.compare(&keys[mid], key) {
+                    Less => start = mid,
+                    Greater => end = mid,
+                    Equal if mid == keys.len() - 1 => end = mid,
+                    Equal => match self.compare(&keys[mid + 1], key) {
+                        Greater => end = mid,
+                        Equal => start = mid + 1,
+                        Less => panic!("Tried to collate a non-sorted Vec!"),
+                    },
+                }
+            }
+
+            end
         }
     }
 
