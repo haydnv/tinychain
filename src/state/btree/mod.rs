@@ -275,7 +275,7 @@ impl BTree {
         Ok(root.data.keys.is_empty())
     }
 
-    pub async fn len(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> TCResult<u64> {
+    pub async fn len(self: Arc<Self>, txn_id: TxnId, bounds: Selector) -> TCResult<u64> {
         // TODO: stream nodes directly rather than counting each key
         Ok(self
             .slice(txn_id, bounds)
@@ -284,17 +284,26 @@ impl BTree {
             .await)
     }
 
-    pub async fn slice(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> TCResult<TCStream<Key>> {
+    pub async fn slice(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        bounds: Selector,
+    ) -> TCResult<TCStream<Key>> {
         bounds.validate(&self.schema)?;
 
         let root_id = self.root.read(&txn_id).await?;
         let root = self.get_node(&txn_id, &root_id.0).await?;
-        Ok(self._slice(txn_id, root, bounds))
+
+        Ok(match bounds {
+            Selector::Key(key) => self._slice(txn_id, root, key.into()),
+            Selector::Range(range, false) => self._slice(txn_id, root, range),
+            Selector::Range(range, true) => self._slice_reverse(txn_id, root, range),
+        })
     }
 
-    fn _slice(self: Arc<Self>, txn_id: TxnId, node: Node, bounds: Bounds) -> TCStream<Key> {
+    fn _slice(self: Arc<Self>, txn_id: TxnId, node: Node, range: BTreeRange) -> TCStream<Key> {
         let keys = node.data.values();
-        let (l, r) = bounds.bisect(&keys, &self.collator);
+        let (l, r) = range.bisect(&keys, &self.collator);
 
         if node.data.leaf {
             let keys: Vec<Key> = node.data.keys[l..r]
@@ -309,7 +318,7 @@ impl BTree {
                 let this = self.clone();
                 let child = node.data.children[i].clone();
                 let txn_id = txn_id.clone();
-                let bounds = bounds.clone();
+                let bounds = range.clone();
 
                 let selection = Box::pin(async move {
                     let node = this.get_node(&txn_id, &child).await.unwrap();
@@ -327,9 +336,62 @@ impl BTree {
             let last_child = node.data.children[r].clone();
             let selection = Box::pin(async move {
                 let node = self.get_node(&txn_id, &last_child).await.unwrap();
-                self._slice(txn_id, node, bounds)
+                self._slice(txn_id, node, range)
             });
             selected.push(Box::pin(selection));
+
+            Box::pin(selected.flatten())
+        }
+    }
+
+    fn _slice_reverse(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        node: Node,
+        range: BTreeRange,
+    ) -> TCStream<Key> {
+        let keys = node.data.values();
+        let (l, r) = range.bisect(&keys, &self.collator);
+
+        if node.data.leaf {
+            let keys: Vec<Key> = node.data.keys[l..r]
+                .iter()
+                .filter(|k| !k.deleted)
+                .map(|k| k.value.to_vec())
+                .rev()
+                .collect();
+            Box::pin(stream::iter(keys))
+        } else {
+            let mut selected: Selection = FuturesOrdered::new();
+
+            let last_child = node.data.children[r].clone();
+            let this = self.clone();
+            let txn_id_clone = txn_id.clone();
+            let range_clone = range.clone();
+            let selection = Box::pin(async move {
+                let node = this.get_node(&txn_id_clone, &last_child).await.unwrap();
+                this._slice_reverse(txn_id_clone, node, range_clone)
+            });
+            selected.push(Box::pin(selection));
+
+            for i in (r..l).rev() {
+                let this = self.clone();
+                let child = node.data.children[i].clone();
+                let txn_id = txn_id.clone();
+                let bounds = range.clone();
+
+                let selection = Box::pin(async move {
+                    let node = this.get_node(&txn_id, &child).await.unwrap();
+                    this._slice_reverse(txn_id.clone(), node, bounds)
+                });
+                selected.push(Box::pin(selection));
+
+                if !node.data.keys[i].deleted {
+                    let key_at_i = node.data.keys[i].value.to_vec();
+                    let key_at_i: TCStream<Key> = Box::pin(stream::once(future::ready(key_at_i)));
+                    selected.push(Box::pin(future::ready(key_at_i)));
+                }
+            }
 
             Box::pin(selected.flatten())
         }
@@ -339,7 +401,7 @@ impl BTree {
         &'a self,
         txn_id: &'a TxnId,
         node_id: &'a NodeId,
-        bounds: &'a Bounds,
+        bounds: &'a Selector,
         value: &'a [Value],
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
@@ -459,7 +521,7 @@ impl BTree {
         &'a self,
         txn_id: &'a TxnId,
         node_id: &'a NodeId,
-        bounds: &'a Bounds,
+        bounds: &'a Selector,
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
             let node = self.get_node(txn_id, node_id).await?;
@@ -507,6 +569,23 @@ pub struct BTreeRange(Bound<Vec<Value>>, Bound<Vec<Value>>);
 impl BTreeRange {
     fn all() -> BTreeRange {
         BTreeRange(Bound::Unbounded, Bound::Unbounded)
+    }
+
+    fn bisect(&self, keys: &[&[Value]], collator: &collator::Collator) -> (usize, usize) {
+        use Bound::*;
+        let l = match &self.0 {
+            Unbounded => 0,
+            Included(start) => collator.bisect_left(keys, &start),
+            Excluded(start) => collator.bisect_right(keys, &start),
+        };
+
+        let r = match &self.1 {
+            Unbounded => keys.len(),
+            Included(end) => collator.bisect_right(keys, &end),
+            Excluded(end) => collator.bisect_left(keys, &end),
+        };
+
+        (l, r)
     }
 
     fn validate(&self, schema: &Schema) -> TCResult<()> {
@@ -560,47 +639,42 @@ impl BTreeRange {
     }
 }
 
-#[derive(Clone)]
-pub enum Bounds {
-    Key(Key),
-    Range(BTreeRange),
+impl From<Key> for BTreeRange {
+    fn from(key: Key) -> BTreeRange {
+        BTreeRange(Bound::Included(key.clone()), Bound::Included(key))
+    }
 }
 
-impl Bounds {
-    pub fn none() -> Bounds {
-        Bounds::Range(BTreeRange::all())
+#[derive(Clone)]
+pub enum Selector {
+    Key(Key),
+    Range(BTreeRange, bool),
+}
+
+impl Selector {
+    pub fn all() -> Selector {
+        Selector::Range(BTreeRange::all(), false)
+    }
+
+    pub fn reverse(range: BTreeRange) -> Selector {
+        Selector::Range(range, true)
     }
 
     fn bisect(&self, keys: &[&[Value]], collator: &collator::Collator) -> (usize, usize) {
-        use Bound::*;
         match self {
-            Bounds::Key(key) => {
+            Selector::Key(key) => {
                 let l = collator.bisect_left(keys, &key);
                 let r = collator.bisect_right(keys, &key);
                 (l, r)
             }
-            Bounds::Range(range) => {
-                let l = match &range.0 {
-                    Unbounded => 0,
-                    Included(start) => collator.bisect_left(keys, &start),
-                    Excluded(start) => collator.bisect_right(keys, &start),
-                };
-
-                let r = match &range.1 {
-                    Unbounded => keys.len(),
-                    Included(end) => collator.bisect_right(keys, &end),
-                    Excluded(end) => collator.bisect_left(keys, &end),
-                };
-
-                (l, r)
-            }
+            Selector::Range(range, _) => range.bisect(keys, collator),
         }
     }
 
     fn validate(&self, schema: &Schema) -> TCResult<()> {
         match self {
-            Self::Key(key) => Bounds::validate_key(key, schema),
-            Self::Range(range) => range.validate(schema),
+            Self::Key(key) => Selector::validate_key(key, schema),
+            Self::Range(range, _) => range.validate(schema),
         }
     }
 
@@ -612,7 +686,7 @@ impl Bounds {
             ));
         }
 
-        Bounds::validate_selector(key, schema)
+        Selector::validate_selector(key, schema)
     }
 
     fn validate_selector(selector: &[Value], schema: &Schema) -> TCResult<()> {
@@ -649,20 +723,32 @@ impl Bounds {
     }
 }
 
-impl TryFrom<Value> for Bounds {
+impl From<BTreeRange> for Selector {
+    fn from(range: BTreeRange) -> Selector {
+        Selector::Range(range, false)
+    }
+}
+
+impl From<Key> for Selector {
+    fn from(key: Key) -> Selector {
+        Selector::Key(key)
+    }
+}
+
+impl TryFrom<Value> for Selector {
     type Error = error::TCError;
 
-    fn try_from(_value: Value) -> TCResult<Bounds> {
+    fn try_from(_value: Value) -> TCResult<Selector> {
         Err(error::not_implemented())
     }
 }
 
 #[async_trait]
 impl Collect for BTree {
-    type Selector = Bounds;
+    type Selector = Selector;
     type Item = Key;
 
-    async fn get(self: Arc<Self>, txn: Arc<Txn>, bounds: Bounds) -> GetResult {
+    async fn get(self: Arc<Self>, txn: Arc<Txn>, bounds: Selector) -> GetResult {
         Ok(Box::pin(
             self.slice(txn.id().clone(), bounds)
                 .await?
@@ -677,12 +763,12 @@ impl Collect for BTree {
         key: Self::Item,
     ) -> TCResult<()> {
         selector.validate(&self.schema)?;
-        Bounds::validate_key(&key, &self.schema)?;
+        Selector::validate_key(&key, &self.schema)?;
 
         let root_id = self.root.read(txn.id()).await?;
 
         match selector {
-            Bounds::Key(selector) if self.collator.compare(selector, &key) == Ordering::Equal => {
+            Selector::Key(selector) if self.collator.compare(selector, &key) == Ordering::Equal => {
                 let root = self.get_node(txn.id(), &root_id.0).await?;
 
                 if root.data.keys.len() == (2 * self.order) - 1 {
