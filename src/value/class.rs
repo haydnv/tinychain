@@ -3,11 +3,13 @@ use std::ops::{Add, Mul};
 
 use serde::ser::Serialize;
 
+use crate::error;
+
 use super::number::{Complex, Float, Int, Number, UInt};
 use super::string::TCString;
-use super::Value;
+use super::{TCResult, Value};
 
-pub trait Class: Eq {
+pub trait Class: Clone + Eq + fmt::Display {
     type Impl: Impl;
 }
 
@@ -46,6 +48,22 @@ pub trait Impl {
 
     fn is_a(&self, dtype: Self::Class) -> bool {
         self.class() == dtype
+    }
+
+    fn expect<M: fmt::Display>(&self, dtype: Self::Class, context_msg: M) -> TCResult<()> {
+        if self.is_a(dtype.clone()) {
+            Ok(())
+        } else {
+            Err(error::TCError::of(
+                error::Code::BadRequest,
+                format!(
+                    "Expected {} but found {} {}",
+                    self.class(),
+                    dtype,
+                    context_msg
+                ),
+            ))
+        }
     }
 }
 

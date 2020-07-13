@@ -269,10 +269,13 @@ impl BTree {
         }
     }
 
-    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+    async fn get_root(&self, txn_id: &TxnId) -> TCResult<Node> {
         let root_id = self.root.read(txn_id).await?;
-        let root = self.get_node(txn_id, &root_id.0).await?;
-        Ok(root.data.keys.is_empty())
+        self.get_node(txn_id, &root_id.0).await
+    }
+
+    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+        Ok(self.get_root(txn_id).await?.data.keys.is_empty())
     }
 
     pub async fn len(self: Arc<Self>, txn_id: TxnId, bounds: Selector) -> TCResult<u64> {
@@ -291,8 +294,7 @@ impl BTree {
     ) -> TCResult<TCStream<Key>> {
         bounds.validate(&self.schema)?;
 
-        let root_id = self.root.read(&txn_id).await?;
-        let root = self.get_node(&txn_id, &root_id.0).await?;
+        let root = self.get_root(&txn_id).await?;
 
         Ok(match bounds {
             Selector::Key(key) => self._slice(txn_id, root, key.into()),
@@ -397,7 +399,17 @@ impl BTree {
         }
     }
 
-    fn update<'a>(
+    pub async fn update<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        bounds: &'a Selector,
+        value: &'a [Value],
+    ) -> TCResult<()> {
+        let root_id = self.root.read(txn_id).await?;
+        self._update(txn_id, &root_id.0, bounds, value).await
+    }
+
+    fn _update<'a>(
         &'a self,
         txn_id: &'a TxnId,
         node_id: &'a NodeId,
@@ -427,15 +439,15 @@ impl BTree {
                     let mut node = node.upgrade().await?;
                     for (i, child) in children.iter().enumerate().take(r).skip(l) {
                         node.data.keys[i] = value.into();
-                        updates.push(self.update(txn_id, &child, bounds, value));
+                        updates.push(self._update(txn_id, &child, bounds, value));
                     }
                     node.sync().await?;
 
-                    let last_update = self.update(txn_id, &children[r], bounds, value);
+                    let last_update = self._update(txn_id, &children[r], bounds, value);
                     try_join(try_join_all(updates), last_update).await?;
                     Ok(())
                 } else {
-                    self.update(txn_id, &children[r], bounds, value).await
+                    self._update(txn_id, &children[r], bounds, value).await
                 }
             }
         })
@@ -517,7 +529,12 @@ impl BTree {
         Ok(node)
     }
 
-    fn delete<'a>(
+    pub async fn delete(&self, txn_id: TxnId, bounds: Selector) -> TCResult<()> {
+        let root_id = self.root.read(&txn_id).await?;
+        self._delete(&txn_id, &root_id.0, &bounds).await
+    }
+
+    fn _delete<'a>(
         &'a self,
         txn_id: &'a TxnId,
         node_id: &'a NodeId,
@@ -547,16 +564,16 @@ impl BTree {
                     let mut node = node.upgrade().await?;
                     for i in l..r {
                         node.data.keys[i].deleted = true;
-                        deletes.push(self.delete(txn_id, &children[i], bounds));
+                        deletes.push(self._delete(txn_id, &children[i], bounds));
                     }
                     node.data.rebalance = true;
                     node.sync().await?;
 
-                    let last_delete = self.delete(txn_id, &children[r], bounds);
+                    let last_delete = self._delete(txn_id, &children[r], bounds);
                     try_join(try_join_all(deletes), last_delete).await?;
                     Ok(())
                 } else {
-                    self.delete(txn_id, &children[r], bounds).await
+                    self._delete(txn_id, &children[r], bounds).await
                 }
             }
         })
@@ -765,10 +782,9 @@ impl Collect for BTree {
         selector.validate(&self.schema)?;
         Selector::validate_key(&key, &self.schema)?;
 
-        let root_id = self.root.read(txn.id()).await?;
-
         match selector {
             Selector::Key(selector) if self.collator.compare(selector, &key) == Ordering::Equal => {
+                let root_id = self.root.read(txn.id()).await?;
                 let root = self.get_node(txn.id(), &root_id.0).await?;
 
                 if root.data.keys.len() == (2 * self.order) - 1 {
@@ -792,7 +808,7 @@ impl Collect for BTree {
                     self.insert(txn.id(), root, key).await
                 }
             }
-            selector => self.update(txn.id(), &root_id.0, selector, &key).await,
+            selector => self.update(txn.id(), selector, &key).await,
         }
     }
 }
