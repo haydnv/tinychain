@@ -8,7 +8,6 @@ use futures::stream::{StreamExt, TryStreamExt};
 use crate::error;
 use crate::state::btree::{self, BTree, BTreeRange, Key};
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::Impl;
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
 use super::{Bounds, Row, Schema, Selection};
@@ -19,33 +18,6 @@ pub struct Index {
 }
 
 impl Index {
-    fn key_from_row(&self, mut row: Row) -> TCResult<Key> {
-        let mut key = Vec::with_capacity(row.len());
-        for column in &self.schema.columns()[0..row.len()] {
-            if let Some(value) = row.remove(&column.name) {
-                value.expect(column.dtype, &format!("for column {}", column.name))?;
-                key.push(value)
-            } else {
-                return Err(error::bad_request(
-                    "Update is missing a value for column",
-                    &column.name,
-                ));
-            }
-        }
-
-        if !row.is_empty() {
-            return Err(error::bad_request(
-                "Tried to update unknown columns",
-                row.keys()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
-            ));
-        }
-
-        Ok(key)
-    }
-
     pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.btree.is_empty(txn_id).await
     }
@@ -73,8 +45,8 @@ impl Index {
         self.btree.delete(txn_id, btree::Selector::Key(key)).await
     }
 
-    async fn insert(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
-        let key = self.schema().into_key(row)?;
+    async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
+        let key = self.schema().row_into_values(row, reject_extra_columns)?;
         self.btree.insert(txn_id, key).await
     }
 }
@@ -126,9 +98,9 @@ impl Selection for Index {
     }
 
     async fn update(self: Arc<Self>, txn: Arc<Txn>, row: Row) -> TCResult<()> {
-        let value = self.key_from_row(row)?;
+        let key: btree::Key = self.schema().row_into_values(row, false)?;
         self.btree
-            .update(txn.id(), &btree::Selector::all(), &value)
+            .update(txn.id(), &btree::Selector::all(), &key)
             .await
     }
 }
@@ -233,15 +205,9 @@ impl IndexTable {
 
         let mut inserts = Vec::with_capacity(self.auxiliary.len() + 1);
         for index in self.auxiliary.values() {
-            let columns = index.schema().column_names();
-            let index_row: Row = row
-                .clone()
-                .into_iter()
-                .filter(|(c, _)| columns.contains(c))
-                .collect();
-            inserts.push(index.insert(&txn_id, index_row));
+            inserts.push(index.insert(&txn_id, row.clone(), false));
         }
-        inserts.push(self.index.insert(&txn_id, row));
+        inserts.push(self.index.insert(&txn_id, row, true));
 
         try_join_all(inserts).await?;
         Ok(())
@@ -302,7 +268,7 @@ impl Selection for IndexTable {
             .await?
             .stream(txn_id.clone())
             .await?
-            .map(|row| schema.into_row(row))
+            .map(|row| schema.values_into_row(row))
             .map_ok(move |row| self.clone().upsert(txn_id.clone(), row))
             .try_buffer_unordered(2)
             .fold(Ok(()), |_, r| future::ready(r))

@@ -194,7 +194,7 @@ impl Schema {
 
     pub fn validate_row(&self, row: &Row) -> TCResult<()> {
         let expected: HashSet<&ValueId> = self.column_names().into_iter().collect();
-        let actual: HashSet<&ValueId> = row.keys().into_iter().collect();
+        let actual: HashSet<&ValueId> = row.keys().collect();
         let mut missing: Vec<&&ValueId> = expected.difference(&actual).collect();
         let mut extra: Vec<&&ValueId> = actual.difference(&expected).collect();
 
@@ -223,7 +223,7 @@ impl Schema {
         self.validate_row_partial(row)
     }
 
-    pub fn into_row(&self, mut values: Vec<Value>) -> TCResult<Row> {
+    pub fn values_into_row(&self, mut values: Vec<Value>) -> TCResult<Row> {
         if values.len() > self.len() {
             return Err(error::bad_request(
                 "Too many values provided for a row with schema",
@@ -240,7 +240,7 @@ impl Schema {
         Ok(row)
     }
 
-    pub fn into_key(&self, mut row: Row) -> TCResult<btree::Key> {
+    pub fn row_into_values(&self, mut row: Row, reject_extras: bool) -> TCResult<Vec<Value>> {
         let mut key = Vec::with_capacity(self.len());
         for column in self.columns() {
             let value = row
@@ -250,7 +250,7 @@ impl Schema {
             key.push(value);
         }
 
-        if !row.is_empty() {
+        if reject_extras && !row.is_empty() {
             return Err(error::bad_request(
                 &format!(
                     "Unrecognized columns (`{}`) for schema",
