@@ -53,27 +53,15 @@ impl<T: BlockTensorView, O: BlockTensorView> TensorBoolean<O> for T {
     type Dense = BlockTensor;
 
     async fn and(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.and(&r?));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
+        BlockTensor::combine(txn, self, other, |(l, r)| l?.and(&r?)).await
     }
 
-    async fn or(self: Arc<Self>, other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        Err(error::not_implemented())
+    async fn or(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
+        BlockTensor::combine(txn, self, other, |(l, r)| l?.or(&r?)).await
     }
 
-    async fn xor(self: Arc<Self>, other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>> {
-        compatible(&self, &other)?;
-
-        Err(error::not_implemented())
+    async fn xor(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>> {
+        BlockTensor::combine(txn, self, other, |(l, r)| l?.xor(&r?)).await
     }
 }
 
@@ -83,63 +71,23 @@ impl<T: BlockTensorView + Slice, O: BlockTensorView> TensorCompare<O> for T {
     type Dense = BlockTensor;
 
     async fn equals(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.equals(&r?));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
+        BlockTensor::combine(txn, self, other, |(l, r)| l?.equals(&r?)).await
     }
 
     async fn gt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.gt(&r?));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
+        BlockTensor::combine(txn, self, other, |(l, r)| l?.gt(&r?)).await
     }
 
     async fn gte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.gte(&r?));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
+        BlockTensor::combine(txn, self, other, |(l, r)| l?.gte(&r?)).await
     }
 
     async fn lt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.lt(&r?));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
+        BlockTensor::combine(txn, self, other, |(l, r)| l?.lt(&r?)).await
     }
 
     async fn lte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>> {
-        compatible(&self, &other)?;
-
-        let blocks = self
-            .clone()
-            .chunk_stream(txn.id().clone())
-            .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.lte(&r?));
-
-        BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
+        BlockTensor::combine(txn, self, other, |(l, r)| l?.lte(&r?)).await
     }
 }
 
@@ -326,6 +274,28 @@ pub struct BlockTensor {
 }
 
 impl BlockTensor {
+    async fn combine<
+        L: BlockTensorView,
+        R: BlockTensorView,
+        C: FnMut((TCResult<ChunkData>, TCResult<ChunkData>)) -> TCResult<ChunkData> + Send,
+    >(
+        txn: Arc<Txn>,
+        left: Arc<L>,
+        right: Arc<R>,
+        combinator: C,
+    ) -> TCResult<Arc<BlockTensor>> {
+        compatible(&left, &right)?;
+
+        let shape = left.shape().clone();
+        let dtype = left.dtype();
+        let blocks = left
+            .chunk_stream(txn.id().clone())
+            .zip(right.chunk_stream(txn.id().clone()))
+            .map(combinator);
+
+        BlockTensor::from_blocks(txn, shape, dtype, blocks).await
+    }
+
     async fn constant(txn: Arc<Txn>, shape: Shape, value: Number) -> TCResult<Arc<BlockTensor>> {
         let per_block = BLOCK_SIZE / value.class().size();
         let size = shape.size();
