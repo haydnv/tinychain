@@ -92,7 +92,7 @@ impl Selection for Index {
     }
 
     fn validate(&self, bounds: &Bounds) -> TCResult<()> {
-        self.schema.validate(bounds)?;
+        self.schema.validate_bounds(bounds)?;
 
         for (column, (bound_column, bound_range)) in self.schema.columns()[0..bounds.len()]
             .iter()
