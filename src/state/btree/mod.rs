@@ -8,7 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{self, join, try_join, try_join_all, BoxFuture, Future};
-use futures::stream::{self, FuturesOrdered, StreamExt};
+use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -162,7 +162,17 @@ pub struct Column {
     max_len: Option<usize>,
 }
 
-struct Schema(Vec<Column>);
+impl From<(ValueId, ValueType, Option<usize>)> for Column {
+    fn from(column: (ValueId, ValueType, Option<usize>)) -> Column {
+        Column {
+            name: column.0,
+            dtype: column.1,
+            max_len: column.2,
+        }
+    }
+}
+
+pub struct Schema(Vec<Column>);
 
 impl Schema {
     fn columns(&'_ self) -> &'_ [Column] {
@@ -175,6 +185,113 @@ impl Schema {
 
     fn len(&self) -> usize {
         self.0.len()
+    }
+
+    fn validate(&self, selector: &Selector) -> TCResult<()> {
+        match selector {
+            Selector::Key(key) => self.validate_prefix(key),
+            Selector::Range(range, _) => self.validate_range(range),
+        }
+    }
+
+    fn validate_key(&self, key: &[Value]) -> TCResult<()> {
+        if self.len() != key.len() {
+            return Err(error::bad_request(
+                &format!("Invalid key {} for schema", Value::Vector(key.to_vec())),
+                self,
+            ));
+        }
+
+        self.validate_prefix(key)
+    }
+
+    fn validate_prefix(&self, prefix: &[Value]) -> TCResult<()> {
+        if prefix.len() > self.len() {
+            return Err(error::bad_request(
+                &format!(
+                    "Invalid selector {} for schema",
+                    Value::Vector(prefix.to_vec())
+                ),
+                self,
+            ));
+        }
+
+        for (val, col) in prefix.iter().zip(&self.columns()[0..prefix.len()]) {
+            if !val.is_a(col.dtype) {
+                return Err(error::bad_request(
+                    &format!("Expected {} for", col.dtype),
+                    &col.name,
+                ));
+            }
+
+            let key_size = bincode::serialized_size(&val)?;
+            if let Some(size) = col.max_len {
+                if key_size as usize > size {
+                    return Err(error::bad_request(
+                        "Column value exceeds the maximum length",
+                        &col.name,
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_range(&self, range: &BTreeRange) -> TCResult<()> {
+        use Bound::*;
+        match (&range.0, &range.1) {
+            (Unbounded, Unbounded) => Ok(()),
+            (Included(start), Included(end)) if start.len() == end.len() => {
+                self.validate_dtypes(&start, &end)
+            }
+            (Included(start), Excluded(end)) if start.len() == end.len() => {
+                self.validate_dtypes(&start, &end)
+            }
+            (Excluded(start), Included(end)) if start.len() == end.len() => {
+                self.validate_dtypes(&start, &end)
+            }
+            (Excluded(start), Excluded(end)) if start.len() == end.len() => {
+                self.validate_dtypes(&start, &end)
+            }
+            _ => Err(error::bad_request(
+                "BTree received invalid range",
+                "start and end bounds must be the same length",
+            )),
+        }
+    }
+
+    fn validate_dtypes(&self, start: &[Value], end: &[Value]) -> TCResult<()> {
+        assert!(start.len() == end.len());
+
+        for ((start_val, end_val), column) in
+            start.iter().zip(end).zip(&self.columns()[0..start.len()])
+        {
+            if start_val.class() != end_val.class() {
+                return Err(error::bad_request(
+                    &format!(
+                        "BTreeRange expected [{}, {}] but found",
+                        column.dtype, column.dtype
+                    ),
+                    format!("[{}, {}]", start_val.class(), end_val.class()),
+                ));
+            }
+
+            if start_val.class() != column.dtype {
+                return Err(error::bad_request(
+                    &format!("BTreeRange expected {} but found", column.dtype),
+                    start_val.class(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl From<Vec<Column>> for Schema {
+    fn from(columns: Vec<Column>) -> Schema {
+        Schema(columns)
     }
 }
 
@@ -201,7 +318,7 @@ pub struct BTree {
 }
 
 impl BTree {
-    async fn create(txn_id: TxnId, schema: Schema, file: Arc<File>) -> TCResult<BTree> {
+    pub async fn create(txn_id: TxnId, schema: Schema, file: Arc<File>) -> TCResult<BTree> {
         if !file.is_empty(&txn_id).await? {
             return Err(error::bad_request(
                 "Tried to create a new BTree without a new File",
@@ -292,7 +409,7 @@ impl BTree {
         txn_id: TxnId,
         bounds: Selector,
     ) -> TCResult<TCStream<Key>> {
-        bounds.validate(&self.schema)?;
+        self.schema.validate(&bounds)?;
 
         let root = self.get_root(&txn_id).await?;
 
@@ -453,7 +570,47 @@ impl BTree {
         })
     }
 
-    fn insert<'a>(
+    pub async fn insert_from<S: Stream<Item = Key>>(
+        &self,
+        txn_id: &TxnId,
+        source: S,
+    ) -> TCResult<()> {
+        source
+            .map(|k| self.schema.validate_key(&k).map(|()| k))
+            .and_then(|key| self.insert(&txn_id, key))
+            .map_ok(|r| future::ready(Ok(r)))
+            .try_buffer_unordered(2 * self.order)
+            .try_fold((), |(), ()| future::ready(Ok(())))
+            .await
+    }
+
+    pub async fn insert(&self, txn_id: &TxnId, key: Key) -> TCResult<()> {
+        let root_id = self.root.read(&txn_id).await?;
+        let root = self.get_node(&txn_id, &root_id.0).await?;
+
+        if root.data.keys.len() == (2 * self.order) - 1 {
+            let mut root_id = root_id.upgrade().await?;
+            let old_root_id = root_id.0.clone();
+            let old_root = root;
+
+            root_id.0 = self.file.unique_id(&txn_id).await?;
+            let mut new_root =
+                Node::create(self.file.clone(), &txn_id, root_id.0.clone(), false, None)
+                    .await?
+                    .upgrade()
+                    .await?;
+            new_root.data.children.push(old_root_id.clone());
+            self.split_child(&txn_id, old_root_id, old_root.upgrade().await?, 0)
+                .await?;
+
+            self._insert(&txn_id, new_root.sync_and_downgrade(&txn_id).await?, key)
+                .await
+        } else {
+            self._insert(&txn_id, root, key).await
+        }
+    }
+
+    fn _insert<'a>(
         &'a self,
         txn_id: &'a TxnId,
         mut node: Node,
@@ -489,7 +646,7 @@ impl BTree {
                     }
                 }
 
-                self.insert(txn_id, child, key).await
+                self._insert(txn_id, child, key).await
             }
         })
     }
@@ -604,56 +761,6 @@ impl BTreeRange {
 
         (l, r)
     }
-
-    fn validate(&self, schema: &Schema) -> TCResult<()> {
-        use Bound::*;
-        match (&self.0, &self.1) {
-            (Unbounded, Unbounded) => Ok(()),
-            (Included(start), Included(end)) if start.len() == end.len() => {
-                Self::validate_dtypes(schema, &start, &end)
-            }
-            (Included(start), Excluded(end)) if start.len() == end.len() => {
-                Self::validate_dtypes(schema, &start, &end)
-            }
-            (Excluded(start), Included(end)) if start.len() == end.len() => {
-                Self::validate_dtypes(schema, &start, &end)
-            }
-            (Excluded(start), Excluded(end)) if start.len() == end.len() => {
-                Self::validate_dtypes(schema, &start, &end)
-            }
-            _ => Err(error::bad_request(
-                "BTree received invalid range",
-                "start and end bounds must be the same length",
-            )),
-        }
-    }
-
-    fn validate_dtypes(schema: &Schema, start: &[Value], end: &[Value]) -> TCResult<()> {
-        assert!(start.len() == end.len());
-
-        for ((start_val, end_val), column) in
-            start.iter().zip(end).zip(&schema.columns()[0..start.len()])
-        {
-            if start_val.class() != end_val.class() {
-                return Err(error::bad_request(
-                    &format!(
-                        "BTreeRange expected [{}, {}] but found",
-                        column.dtype, column.dtype
-                    ),
-                    format!("[{}, {}]", start_val.class(), end_val.class()),
-                ));
-            }
-
-            if start_val.class() != column.dtype {
-                return Err(error::bad_request(
-                    &format!("BTreeRange expected {} but found", column.dtype),
-                    start_val.class(),
-                ));
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl From<Key> for BTreeRange {
@@ -686,57 +793,6 @@ impl Selector {
             }
             Selector::Range(range, _) => range.bisect(keys, collator),
         }
-    }
-
-    fn validate(&self, schema: &Schema) -> TCResult<()> {
-        match self {
-            Self::Key(key) => Selector::validate_key(key, schema),
-            Self::Range(range, _) => range.validate(schema),
-        }
-    }
-
-    fn validate_key(key: &[Value], schema: &Schema) -> TCResult<()> {
-        if schema.len() != key.len() {
-            return Err(error::bad_request(
-                &format!("Invalid key {}, expected", Value::Vector(key.to_vec())),
-                schema,
-            ));
-        }
-
-        Selector::validate_selector(key, schema)
-    }
-
-    fn validate_selector(selector: &[Value], schema: &Schema) -> TCResult<()> {
-        if selector.len() > schema.len() {
-            return Err(error::bad_request(
-                &format!(
-                    "Invalid selector {}, expected",
-                    Value::Vector(selector.to_vec())
-                ),
-                schema,
-            ));
-        }
-
-        for (val, col) in selector.iter().zip(&schema.columns()[0..selector.len()]) {
-            if !val.is_a(col.dtype) {
-                return Err(error::bad_request(
-                    &format!("Expected {} for", col.dtype),
-                    &col.name,
-                ));
-            }
-
-            let key_size = bincode::serialized_size(&val)?;
-            if let Some(size) = col.max_len {
-                if key_size as usize > size {
-                    return Err(error::bad_request(
-                        "Column value exceeds the maximum length",
-                        &col.name,
-                    ));
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -779,34 +835,12 @@ impl Collect for BTree {
         selector: &Self::Selector,
         key: Self::Item,
     ) -> TCResult<()> {
-        selector.validate(&self.schema)?;
-        Selector::validate_key(&key, &self.schema)?;
+        self.schema.validate(selector)?;
+        self.schema.validate_key(&key)?;
 
         match selector {
             Selector::Key(selector) if self.collator.compare(selector, &key) == Ordering::Equal => {
-                let root_id = self.root.read(txn.id()).await?;
-                let root = self.get_node(txn.id(), &root_id.0).await?;
-
-                if root.data.keys.len() == (2 * self.order) - 1 {
-                    let mut root_id = root_id.upgrade().await?;
-                    let old_root_id = root_id.0.clone();
-                    let old_root = root;
-
-                    root_id.0 = self.file.unique_id(txn.id()).await?;
-                    let mut new_root =
-                        Node::create(self.file.clone(), txn.id(), root_id.0.clone(), false, None)
-                            .await?
-                            .upgrade()
-                            .await?;
-                    new_root.data.children.push(old_root_id.clone());
-                    self.split_child(txn.id(), old_root_id, old_root.upgrade().await?, 0)
-                        .await?;
-
-                    self.insert(txn.id(), new_root.sync_and_downgrade(txn.id()).await?, key)
-                        .await
-                } else {
-                    self.insert(txn.id(), root, key).await
-                }
+                self.insert(txn.id(), key).await
             }
             selector => self.update(txn.id(), selector, &key).await,
         }
