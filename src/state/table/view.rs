@@ -9,20 +9,6 @@ use crate::value::{TCResult, TCStream, Value, ValueId};
 
 use super::{Bounds, Row, Schema, Selection};
 
-pub struct Aggregate<T: Selection> {
-    source: Arc<T>,
-    columns: Vec<ValueId>,
-}
-
-impl<T: Selection> From<(Arc<T>, Vec<ValueId>)> for Aggregate<T> {
-    fn from(params: (Arc<T>, Vec<ValueId>)) -> Aggregate<T> {
-        Aggregate {
-            source: params.0,
-            columns: params.1,
-        }
-    }
-}
-
 pub struct ColumnSelection<T: Selection> {
     source: Arc<T>,
     columns: Vec<ValueId>,

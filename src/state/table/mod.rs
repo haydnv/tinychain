@@ -12,6 +12,7 @@ mod index;
 mod view;
 
 pub type Bounds = base::Bounds;
+pub type Column = base::Column;
 pub type Row = base::Row;
 pub type Schema = base::Schema;
 
@@ -33,10 +34,6 @@ pub trait Selection: Sized + Send + Sync {
 
     fn filter<F: Fn(Row) -> bool>(self: Arc<Self>, filter: F) -> Arc<view::Filtered<Self, F>> {
         Arc::new((self, filter).into())
-    }
-
-    fn group_by(self: Arc<Self>, columns: Vec<ValueId>) -> Arc<view::Aggregate<Self>> {
-        Arc::new((self, columns).into())
     }
 
     async fn index(
