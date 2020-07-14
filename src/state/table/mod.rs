@@ -24,18 +24,6 @@ pub trait Selection: Sized + Send + Sync + 'static {
 
     async fn delete(self: Arc<Self>, txn_id: TxnId) -> TCResult<()>;
 
-    fn derive<M: Fn(Row) -> Value>(
-        self: Arc<Self>,
-        name: ValueId,
-        map: M,
-    ) -> Arc<view::Derived<Self, M>> {
-        Arc::new((self, name, map).into())
-    }
-
-    fn filter<F: Fn(Row) -> bool>(self: Arc<Self>, filter: F) -> Arc<view::Filtered<Self, F>> {
-        Arc::new((self, filter).into())
-    }
-
     async fn index(
         self: Arc<Self>,
         txn: Arc<Txn>,
@@ -46,7 +34,7 @@ pub trait Selection: Sized + Send + Sync + 'static {
             .map(Arc::new)
     }
 
-    fn limit(self: Arc<Self>, limit: u64) -> Arc<view::Limit<Self>> {
+    fn limit(self: Arc<Self>, limit: u64) -> Arc<view::Limited<Self>> {
         Arc::new((self, limit).into())
     }
 
@@ -69,7 +57,7 @@ pub trait Selection: Sized + Send + Sync + 'static {
 
     fn schema(&'_ self) -> &'_ Schema;
 
-    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<view::Slice<Self>>> {
+    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<view::Sliced<Self>>> {
         let slice = (self, bounds).try_into()?;
         Ok(Arc::new(slice))
     }
