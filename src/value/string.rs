@@ -73,6 +73,12 @@ impl From<Uuid> for ValueId {
     }
 }
 
+impl From<usize> for ValueId {
+    fn from(u: usize) -> ValueId {
+        u.to_string().parse().unwrap()
+    }
+}
+
 impl From<u64> for ValueId {
     fn from(i: u64) -> ValueId {
         i.to_string().parse().unwrap()

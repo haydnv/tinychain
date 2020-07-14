@@ -5,7 +5,7 @@ use std::sync::Arc;
 use arrayfire as af;
 use async_trait::async_trait;
 use futures::future;
-use futures::stream::{self, FuturesOrdered, FuturesUnordered, Stream, StreamExt};
+use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 
 use crate::error;
@@ -59,8 +59,7 @@ impl<T: BlockTensorView, O: BlockTensorView> TensorBoolean<O> for T {
             .clone()
             .chunk_stream(txn.id().clone())
             .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.and(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
+            .map(|(l, r)| l?.and(&r?));
 
         BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
     }
@@ -90,8 +89,7 @@ impl<T: BlockTensorView + Slice, O: BlockTensorView> TensorCompare<O> for T {
             .clone()
             .chunk_stream(txn.id().clone())
             .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.equals(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
+            .map(|(l, r)| l?.equals(&r?));
 
         BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
     }
@@ -103,8 +101,7 @@ impl<T: BlockTensorView + Slice, O: BlockTensorView> TensorCompare<O> for T {
             .clone()
             .chunk_stream(txn.id().clone())
             .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.gt(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
+            .map(|(l, r)| l?.gt(&r?));
 
         BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
     }
@@ -116,8 +113,7 @@ impl<T: BlockTensorView + Slice, O: BlockTensorView> TensorCompare<O> for T {
             .clone()
             .chunk_stream(txn.id().clone())
             .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.gte(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
+            .map(|(l, r)| l?.gte(&r?));
 
         BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
     }
@@ -129,8 +125,7 @@ impl<T: BlockTensorView + Slice, O: BlockTensorView> TensorCompare<O> for T {
             .clone()
             .chunk_stream(txn.id().clone())
             .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.lt(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
+            .map(|(l, r)| l?.lt(&r?));
 
         BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
     }
@@ -142,8 +137,7 @@ impl<T: BlockTensorView + Slice, O: BlockTensorView> TensorCompare<O> for T {
             .clone()
             .chunk_stream(txn.id().clone())
             .zip(other.chunk_stream(txn.id().clone()))
-            .map(|(l, r)| l?.lte(&r?))
-            .take_while(|r| future::ready(r.is_ok()));
+            .map(|(l, r)| l?.lte(&r?));
 
         BlockTensor::from_blocks(txn, self.shape().clone(), self.dtype(), blocks).await
     }
@@ -315,8 +309,7 @@ where
             .as_dtype(txn.clone(), NumberType::Bool)
             .await?
             .chunk_stream(txn.id().clone())
-            .map(|c| Ok(c?.not()))
-            .take_while(|r| future::ready(r.is_ok()));
+            .map(|c| Ok(c?.not()));
 
         BlockTensor::from_blocks(txn, self.shape().clone(), NumberType::Bool, blocks).await
     }
@@ -356,7 +349,7 @@ impl BlockTensor {
         txn: Arc<Txn>,
         shape: Shape,
         dtype: NumberType,
-        mut blocks: S,
+        blocks: S,
     ) -> TCResult<Arc<BlockTensor>> {
         let file = txn
             .context()
@@ -365,13 +358,14 @@ impl BlockTensor {
 
         let size = shape.size();
         let ndim = shape.len();
-        let mut i: u64 = 0;
-        while let Some(block) = blocks.next().await {
-            file.clone()
-                .create_block(txn.id(), i.into(), block?.into())
-                .await?;
-            i += 1;
-        }
+
+        blocks
+            .enumerate()
+            .map(|(i, r)| r.map(|block| (i, block)))
+            .map_ok(|(i, block)| file.clone().create_block(txn.id(), i.into(), block.into()))
+            .try_buffer_unordered(2)
+            .fold(Ok(()), |_, r| future::ready(r.map(|_lock| ())))
+            .await?;
 
         let coord_bounds = (0..ndim)
             .map(|axis| shape[axis + 1..].iter().product())
@@ -520,7 +514,6 @@ impl BlockTensorView for BlockTensor {
             return Err(error::bad_request("Bounds out of bounds", bounds));
         }
 
-        let writes = FuturesUnordered::new();
         let ndim = bounds.ndim();
 
         let coord_bounds = af::Array::new(
@@ -529,42 +522,38 @@ impl BlockTensorView for BlockTensor {
         );
         let per_block = self.per_block as u64;
 
-        let mut blocks = stream::iter(bounds.affected())
+        stream::iter(bounds.affected())
             .chunks(self.per_block)
-            .zip(value.chunk_stream(txn_id.clone()));
-        while let Some((coords, block)) = blocks.next().await {
-            let (chunk_ids, af_indices, af_offsets, num_coords) =
-                coord_chunk(coords.into_iter(), &coord_bounds, per_block, ndim);
+            .zip(value.chunk_stream(txn_id.clone()))
+            .map(|(coords, block)| {
+                let (chunk_ids, af_indices, af_offsets, num_coords) =
+                    coord_chunk(coords.into_iter(), &coord_bounds, per_block, ndim);
 
-            let this = self.clone();
-            let txn_id = txn_id.clone();
+                let this = self.clone();
+                let txn_id = txn_id.clone();
 
-            let write = async move {
-                let values = block?;
-                let mut start = 0.0f64;
-                for chunk_id in chunk_ids {
-                    let (block_offsets, new_start) =
-                        block_offsets(&af_indices, &af_offsets, num_coords, start, chunk_id);
+                Ok(async move {
+                    let values = block?;
+                    let mut start = 0.0f64;
+                    for chunk_id in chunk_ids {
+                        let (block_offsets, new_start) =
+                            block_offsets(&af_indices, &af_offsets, num_coords, start, chunk_id);
 
-                    let mut chunk = this
-                        .clone()
-                        .get_chunk(txn_id.clone(), chunk_id)
-                        .await?
-                        .upgrade()
-                        .await?;
-                    chunk.data().set(block_offsets, &values)?;
-                    chunk.sync().await?;
-                    start = new_start;
-                }
+                        let mut chunk = this
+                            .clone()
+                            .get_chunk(txn_id.clone(), chunk_id)
+                            .await?
+                            .upgrade()
+                            .await?;
+                        chunk.data().set(block_offsets, &values)?;
+                        chunk.sync().await?;
+                        start = new_start;
+                    }
 
-                Ok(())
-            };
-
-            writes.push(write)
-        }
-
-        writes
-            .take_while(|r| future::ready(r.is_ok()))
+                    Ok(())
+                })
+            })
+            .try_buffer_unordered(2)
             .fold(Ok(()), |_, r| future::ready(r))
             .await
     }
@@ -579,7 +568,6 @@ impl BlockTensorView for BlockTensor {
             return Err(error::bad_request("Bounds out of bounds", bounds));
         }
 
-        let writes = FuturesUnordered::new();
         let ndim = bounds.ndim();
 
         let coord_bounds = af::Array::new(
@@ -588,44 +576,41 @@ impl BlockTensorView for BlockTensor {
         );
         let per_block = self.per_block as u64;
 
-        let mut blocks = stream::iter(bounds.affected()).chunks(self.per_block);
-        while let Some(coords) = blocks.next().await {
-            let (chunk_ids, af_indices, af_offsets, num_coords) =
-                coord_chunk(coords.into_iter(), &coord_bounds, per_block, ndim);
+        stream::iter(bounds.affected())
+            .chunks(self.per_block)
+            .map(|coords| {
+                let (chunk_ids, af_indices, af_offsets, num_coords) =
+                    coord_chunk(coords.into_iter(), &coord_bounds, per_block, ndim);
 
-            let this = self.clone();
-            let value = value.clone();
-            let txn_id = txn_id.clone();
+                let this = self.clone();
+                let value = value.clone();
+                let txn_id = txn_id.clone();
 
-            let write = async move {
-                let mut start = 0.0f64;
-                for chunk_id in chunk_ids {
-                    let value = value.clone();
-                    let (block_offsets, new_start) =
-                        block_offsets(&af_indices, &af_offsets, num_coords, start, chunk_id);
+                Ok(async move {
+                    let mut start = 0.0f64;
+                    for chunk_id in chunk_ids {
+                        let value = value.clone();
+                        let (block_offsets, new_start) =
+                            block_offsets(&af_indices, &af_offsets, num_coords, start, chunk_id);
 
-                    let mut chunk = this
-                        .clone()
-                        .get_chunk(txn_id.clone(), chunk_id)
-                        .await?
-                        .upgrade()
-                        .await?;
-                    chunk.data().set(
-                        block_offsets,
-                        &ChunkData::constant(value, (new_start - start) as usize),
-                    )?;
-                    chunk.sync().await?;
-                    start = new_start;
-                }
+                        let mut chunk = this
+                            .clone()
+                            .get_chunk(txn_id.clone(), chunk_id)
+                            .await?
+                            .upgrade()
+                            .await?;
+                        chunk.data().set(
+                            block_offsets,
+                            &ChunkData::constant(value, (new_start - start) as usize),
+                        )?;
+                        chunk.sync().await?;
+                        start = new_start;
+                    }
 
-                Ok(())
-            };
-
-            writes.push(write)
-        }
-
-        writes
-            .take_while(|r| future::ready(r.is_ok()))
+                    Ok(())
+                })
+            })
+            .try_buffer_unordered(2)
             .fold(Ok(()), |_, r| future::ready(r))
             .await
     }
@@ -790,13 +775,11 @@ fn reduce_axis0<T: BlockTensorView + Slice>(
     assert!(source.shape().len() > 1);
     let shape: Shape = source.shape()[1..].to_vec().into();
     let axis_bounds = source.shape().all()[0].clone();
-    stream::iter(shape.all().affected())
-        .map(move |coord| {
-            let source_bounds: Bounds = (axis_bounds.clone(), coord.clone()).into();
-            let slice = source.clone().slice(source_bounds)?;
-            Ok((coord.into(), slice))
-        })
-        .take_while(|r| future::ready(r.is_ok()))
+    stream::iter(shape.all().affected()).map(move |coord| {
+        let source_bounds: Bounds = (axis_bounds.clone(), coord.clone()).into();
+        let slice = source.clone().slice(source_bounds)?;
+        Ok((coord.into(), slice))
+    })
 }
 
 fn reduce_axis<T: BlockTensorView + Slice>(
@@ -804,11 +787,9 @@ fn reduce_axis<T: BlockTensorView + Slice>(
     axis: usize,
 ) -> impl Stream<Item = TCResult<(Bounds, Arc<<T as Slice>::Slice>)>> {
     let prefix_range: Shape = source.shape()[0..axis].to_vec().into();
-    stream::iter(prefix_range.all().affected())
-        .map(move |coord| {
-            let bounds: Bounds = coord.into();
-            let slice = source.clone().slice(bounds.clone())?;
-            Ok((bounds, slice))
-        })
-        .take_while(|r| future::ready(r.is_ok()))
+    stream::iter(prefix_range.all().affected()).map(move |coord| {
+        let bounds: Bounds = coord.into();
+        let slice = source.clone().slice(bounds.clone())?;
+        Ok((bounds, slice))
+    })
 }
