@@ -685,9 +685,9 @@ impl BTree {
         Ok(node)
     }
 
-    pub async fn delete(&self, txn_id: TxnId, bounds: Selector) -> TCResult<()> {
-        let root_id = self.root.read(&txn_id).await?;
-        self._delete(&txn_id, &root_id.0, &bounds).await
+    pub async fn delete(&self, txn_id: &TxnId, bounds: Selector) -> TCResult<()> {
+        let root_id = self.root.read(txn_id).await?;
+        self._delete(txn_id, &root_id.0, &bounds).await
     }
 
     fn _delete<'a>(

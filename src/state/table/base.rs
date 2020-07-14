@@ -114,6 +114,23 @@ impl Schema {
             .collect()
     }
 
+    pub fn key(&self, row: &Row) -> TCResult<Vec<Value>> {
+        let mut key = Vec::with_capacity(self.key.len());
+        for column in &self.key {
+            if let Some(value) = row.get(&column.name) {
+                value.expect(column.dtype, format!("for table schema {}", self))?;
+                key.push(value.clone())
+            } else {
+                return Err(error::bad_request(
+                    "Row has no value for key column",
+                    &column.name,
+                ));
+            }
+        }
+
+        Ok(key)
+    }
+
     pub fn len(&self) -> usize {
         self.key.len() + self.value.len()
     }
@@ -125,12 +142,14 @@ impl Schema {
             .filter(|c| key_columns.contains(&c.name))
             .cloned()
             .collect();
+
         let value: Vec<Column> = self
             .columns()
             .iter()
             .filter(|c| !key_columns.contains(&c.name))
             .cloned()
             .collect();
+
         Ok((key, value).into())
     }
 
@@ -156,6 +175,54 @@ impl Schema {
         Ok(())
     }
 
+    pub fn validate_row_partial(&self, row: &Row) -> TCResult<()> {
+        let columns: HashMap<ValueId, ValueType> = self
+            .columns()
+            .drain(..)
+            .map(|c| (c.name, c.dtype))
+            .collect();
+        for (col_name, value) in row {
+            if let Some(dtype) = columns.get(col_name) {
+                value.expect(*dtype, format!("for table with schema {}", self))?;
+            } else {
+                return Err(error::bad_request("No such column", col_name));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn validate_row(&self, row: &Row) -> TCResult<()> {
+        let expected: HashSet<&ValueId> = self.column_names().into_iter().collect();
+        let actual: HashSet<&ValueId> = row.keys().into_iter().collect();
+        let mut missing: Vec<&&ValueId> = expected.difference(&actual).collect();
+        let mut extra: Vec<&&ValueId> = actual.difference(&expected).collect();
+
+        if !missing.is_empty() {
+            return Err(error::bad_request(
+                "Row is missing columns",
+                missing
+                    .drain(..)
+                    .map(|c| (*c).to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "),
+            ));
+        }
+
+        if !extra.is_empty() {
+            return Err(error::bad_request(
+                "Row contains unrecognized columns",
+                extra
+                    .drain(..)
+                    .map(|c| (*c).to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "),
+            ));
+        }
+
+        self.validate_row_partial(row)
+    }
+
     pub fn into_row(&self, mut values: Vec<Value>) -> TCResult<Row> {
         if values.len() > self.len() {
             return Err(error::bad_request(
@@ -166,9 +233,37 @@ impl Schema {
 
         let mut row = HashMap::new();
         for (column, value) in self.columns()[0..values.len()].iter().zip(values.drain(..)) {
+            value.expect(column.dtype, format!("for table with schema {}", self))?;
             row.insert(column.name.clone(), value);
         }
+
         Ok(row)
+    }
+
+    pub fn into_key(&self, mut row: Row) -> TCResult<btree::Key> {
+        let mut key = Vec::with_capacity(self.len());
+        for column in self.columns() {
+            let value = row
+                .remove(&column.name)
+                .ok_or(error::bad_request("Missing value for column", column.name))?;
+            value.expect(column.dtype, format!("for table with schema {}", self))?;
+            key.push(value);
+        }
+
+        if !row.is_empty() {
+            return Err(error::bad_request(
+                &format!(
+                    "Unrecognized columns (`{}`) for schema",
+                    row.keys()
+                        .map(|c| c.to_string())
+                        .collect::<Vec<String>>()
+                        .join("`, `")
+                ),
+                self,
+            ));
+        }
+
+        Ok(key)
     }
 }
 

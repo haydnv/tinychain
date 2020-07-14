@@ -81,5 +81,5 @@ pub trait Selection: Sized + Send + Sync {
 
     fn validate(&self, bounds: &Bounds) -> TCResult<()>;
 
-    async fn update(self: Arc<Self>, txn_id: TxnId, value: Row) -> TCResult<()>;
+    async fn update(self: Arc<Self>, txn: Arc<Txn>, value: Row) -> TCResult<()>;
 }

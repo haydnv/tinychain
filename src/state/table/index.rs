@@ -1,7 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::future::{self, try_join_all};
+use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
 use crate::state::btree::{self, BTree, BTreeRange, Key};
@@ -11,7 +13,7 @@ use crate::value::{TCResult, TCStream, Value, ValueId};
 
 use super::{Bounds, Row, Schema, Selection};
 
-struct Index {
+pub struct Index {
     btree: Arc<BTree>,
     schema: Schema,
 }
@@ -66,6 +68,15 @@ impl Index {
             .slice(txn_id, btree::Selector::reverse(range))
             .await
     }
+
+    async fn delete_row(&self, txn_id: &TxnId, key: Key) -> TCResult<()> {
+        self.btree.delete(txn_id, btree::Selector::Key(key)).await
+    }
+
+    async fn insert(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+        let key = self.schema().into_key(row)?;
+        self.btree.insert(txn_id, key).await
+    }
 }
 
 #[async_trait]
@@ -77,7 +88,7 @@ impl Selection for Index {
     }
 
     async fn delete(self: Arc<Self>, txn_id: TxnId) -> TCResult<()> {
-        self.btree.delete(txn_id, btree::Selector::all()).await
+        self.btree.delete(&txn_id, btree::Selector::all()).await
     }
 
     fn schema(&'_ self) -> &'_ Schema {
@@ -114,10 +125,10 @@ impl Selection for Index {
         Ok(())
     }
 
-    async fn update(self: Arc<Self>, txn_id: TxnId, row: Row) -> TCResult<()> {
+    async fn update(self: Arc<Self>, txn: Arc<Txn>, row: Row) -> TCResult<()> {
         let value = self.key_from_row(row)?;
         self.btree
-            .update(&txn_id, &btree::Selector::all(), &value)
+            .update(txn.id(), &btree::Selector::all(), &value)
             .await
     }
 }
@@ -191,9 +202,110 @@ impl Selection for ReadOnly {
         self.index.validate(bounds)
     }
 
-    async fn update(self: Arc<Self>, _txn_id: TxnId, _value: Row) -> TCResult<()> {
+    async fn update(self: Arc<Self>, _txn: Arc<Txn>, _value: Row) -> TCResult<()> {
         Err(error::method_not_allowed(
             "this is a transitive (read-only) index",
         ))
+    }
+}
+
+pub struct IndexTable {
+    index: Arc<Index>,
+    auxiliary: BTreeMap<ValueId, Arc<Index>>,
+}
+
+impl IndexTable {
+    async fn delete_row(&self, txn_id: &TxnId, row: &Row) -> TCResult<()> {
+        self.schema().validate_row(row)?;
+
+        let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
+        deletes.push(self.index.delete_row(txn_id, self.schema().key(row)?));
+        for index in self.auxiliary.values() {
+            deletes.push(index.delete_row(txn_id, index.schema().key(row)?));
+        }
+        try_join_all(deletes).await?;
+
+        Ok(())
+    }
+
+    async fn upsert(self: Arc<Self>, txn_id: TxnId, row: Row) -> TCResult<()> {
+        self.delete_row(&txn_id, &row).await?;
+
+        let mut inserts = Vec::with_capacity(self.auxiliary.len() + 1);
+        for index in self.auxiliary.values() {
+            let columns = index.schema().column_names();
+            let index_row: Row = row
+                .clone()
+                .into_iter()
+                .filter(|(c, _)| columns.contains(c))
+                .collect();
+            inserts.push(index.insert(&txn_id, index_row));
+        }
+        inserts.push(self.index.insert(&txn_id, row));
+
+        try_join_all(inserts).await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Selection for IndexTable {
+    type Stream = <Index as Selection>::Stream;
+
+    async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
+        self.index.clone().count(txn_id).await
+    }
+
+    async fn delete(self: Arc<Self>, txn_id: TxnId) -> TCResult<()> {
+        let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
+        for index in self.auxiliary.values() {
+            deletes.push(index.clone().delete(txn_id.clone()));
+        }
+        deletes.push(self.index.clone().delete(txn_id));
+
+        try_join_all(deletes).await?;
+        Ok(())
+    }
+
+    fn schema(&'_ self) -> &'_ Schema {
+        self.index.schema()
+    }
+
+    async fn stream(self: Arc<Self>, txn_id: TxnId) -> TCResult<Self::Stream> {
+        self.index.clone().stream(txn_id).await
+    }
+
+    fn validate(&self, bounds: &Bounds) -> TCResult<()> {
+        if self.index.validate(bounds).is_ok() {
+            return Ok(());
+        }
+
+        for index in self.auxiliary.values() {
+            if index.validate(bounds).is_ok() {
+                return Ok(());
+            }
+        }
+
+        Err(error::bad_request(
+            "This Table has no index which supports these bounds",
+            bounds,
+        ))
+    }
+
+    async fn update(self: Arc<Self>, txn: Arc<Txn>, value: Row) -> TCResult<()> {
+        let schema = self.schema().clone();
+        schema.validate_row_partial(&value)?;
+
+        let txn_id = txn.id().clone();
+        self.clone()
+            .index(txn, None)
+            .await?
+            .stream(txn_id.clone())
+            .await?
+            .map(|row| schema.into_row(row))
+            .map_ok(move |row| self.clone().upsert(txn_id.clone(), row))
+            .try_buffer_unordered(2)
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
     }
 }

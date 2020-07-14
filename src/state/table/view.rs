@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::error;
-use crate::transaction::TxnId;
+use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
 use super::{Bounds, Row, Schema, Selection};
@@ -76,8 +76,8 @@ impl<T: Selection> Selection for ColumnSelection<T> {
         self.source.validate(bounds)
     }
 
-    async fn update(self: Arc<Self>, txn_id: TxnId, value: Row) -> TCResult<()> {
-        self.source.clone().update(txn_id, value).await
+    async fn update(self: Arc<Self>, txn: Arc<Txn>, value: Row) -> TCResult<()> {
+        self.source.clone().update(txn, value).await
     }
 }
 
