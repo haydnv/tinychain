@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -41,10 +42,6 @@ impl Index {
             .await
     }
 
-    async fn delete_row(&self, txn_id: &TxnId, key: Key) -> TCResult<()> {
-        self.btree.delete(txn_id, btree::Selector::Key(key)).await
-    }
-
     async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
         let key = self.schema().row_into_values(row, reject_extra_columns)?;
         self.btree.insert(txn_id, key).await
@@ -61,6 +58,11 @@ impl Selection for Index {
 
     async fn delete(self: Arc<Self>, txn_id: TxnId) -> TCResult<()> {
         self.btree.delete(&txn_id, btree::Selector::all()).await
+    }
+
+    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+        let key = self.schema.row_into_values(row, false)?;
+        self.btree.delete(txn_id, btree::Selector::Key(key)).await
     }
 
     fn schema(&'_ self) -> &'_ Schema {
@@ -102,6 +104,12 @@ impl Selection for Index {
         self.btree
             .update(txn.id(), &btree::Selector::all(), &key)
             .await
+    }
+}
+
+impl fmt::Display for Index {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "table::index::Index")
     }
 }
 
@@ -150,34 +158,28 @@ impl ReadOnly {
 
 #[async_trait]
 impl Selection for ReadOnly {
-    type Stream = TCStream<Vec<Value>>;
+    type Stream = <Index as Selection>::Stream;
 
     async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
         self.index.clone().count(txn_id).await
-    }
-
-    async fn delete(self: Arc<Self>, _txn_id: TxnId) -> TCResult<()> {
-        Err(error::method_not_allowed(
-            "this is a transitive (read-only) index",
-        ))
     }
 
     fn schema(&'_ self) -> &'_ Schema {
         self.index.schema()
     }
 
-    async fn stream(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Self::Stream> {
-        Err(error::not_implemented())
+    async fn stream(self: Arc<Self>, txn_id: TxnId) -> TCResult<Self::Stream> {
+        self.index.clone().stream(txn_id).await
     }
 
     fn validate(&self, bounds: &Bounds) -> TCResult<()> {
         self.index.validate(bounds)
     }
+}
 
-    async fn update(self: Arc<Self>, _txn: Arc<Txn>, _value: Row) -> TCResult<()> {
-        Err(error::method_not_allowed(
-            "this is a transitive (read-only) index",
-        ))
+impl fmt::Display for ReadOnly {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "table/index/read_only")
     }
 }
 
@@ -187,21 +189,8 @@ pub struct IndexTable {
 }
 
 impl IndexTable {
-    async fn delete_row(&self, txn_id: &TxnId, row: &Row) -> TCResult<()> {
-        self.schema().validate_row(row)?;
-
-        let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
-        deletes.push(self.index.delete_row(txn_id, self.schema().key(row)?));
-        for index in self.auxiliary.values() {
-            deletes.push(index.delete_row(txn_id, index.schema().key(row)?));
-        }
-        try_join_all(deletes).await?;
-
-        Ok(())
-    }
-
     async fn upsert(self: Arc<Self>, txn_id: TxnId, row: Row) -> TCResult<()> {
-        self.delete_row(&txn_id, &row).await?;
+        self.delete_row(&txn_id, row.clone()).await?;
 
         let mut inserts = Vec::with_capacity(self.auxiliary.len() + 1);
         for index in self.auxiliary.values() {
@@ -230,6 +219,19 @@ impl Selection for IndexTable {
         deletes.push(self.index.clone().delete(txn_id));
 
         try_join_all(deletes).await?;
+        Ok(())
+    }
+
+    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+        self.schema().validate_row(&row)?;
+
+        let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
+        for index in self.auxiliary.values() {
+            deletes.push(index.delete_row(txn_id, row.clone()));
+        }
+        deletes.push(self.index.delete_row(txn_id, row));
+        try_join_all(deletes).await?;
+
         Ok(())
     }
 
@@ -273,5 +275,11 @@ impl Selection for IndexTable {
             .try_buffer_unordered(2)
             .fold(Ok(()), |_, r| future::ready(r))
             .await
+    }
+}
+
+impl fmt::Display for IndexTable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "table/index/index_table")
     }
 }

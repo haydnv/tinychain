@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream::StreamExt;
+use futures::future;
+use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
 use crate::transaction::{Txn, TxnId};
@@ -68,12 +70,6 @@ impl<T: Selection + 'static> Selection for ColumnSelection<T> {
         self.source.clone().count(txn_id).await
     }
 
-    async fn delete(self: Arc<Self>, _txn_id: TxnId) -> TCResult<()> {
-        Err(error::method_not_allowed(
-            "ColumnSelection does not support deletion, try deleting from the source table",
-        ))
-    }
-
     fn schema(&'_ self) -> &'_ Schema {
         &self.schema
     }
@@ -105,23 +101,88 @@ impl<T: Selection + 'static> Selection for ColumnSelection<T> {
 
         self.source.validate(bounds)
     }
+}
 
-    async fn update(self: Arc<Self>, txn: Arc<Txn>, value: Row) -> TCResult<()> {
-        self.source.clone().update(txn, value).await
+impl<T: Selection> fmt::Display for ColumnSelection<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "table/view/column_selection")
     }
 }
 
 pub struct Limited<T: Selection> {
     source: Arc<T>,
-    limit: u64,
+    limit: usize,
 }
 
-impl<T: Selection> From<(Arc<T>, u64)> for Limited<T> {
-    fn from(params: (Arc<T>, u64)) -> Limited<T> {
-        Limited {
-            source: params.0,
-            limit: params.1,
-        }
+impl<T: Selection> TryFrom<(Arc<T>, u64)> for Limited<T> {
+    type Error = error::TCError;
+
+    fn try_from(params: (Arc<T>, u64)) -> TCResult<Limited<T>> {
+        let (source, limit) = params;
+        let limit: usize = limit.try_into().map_err(|_| {
+            error::internal("This host architecture does not support a 64-bit stream limit")
+        })?;
+
+        Ok(Limited { source, limit })
+    }
+}
+
+#[async_trait]
+impl<T: Selection> Selection for Limited<T> {
+    type Stream = TCStream<Vec<Value>>;
+
+    async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
+        let source_count = self.source.clone().count(txn_id).await?;
+        Ok(u64::min(source_count, self.limit as u64))
+    }
+
+    async fn delete(self: Arc<Self>, txn_id: TxnId) -> TCResult<()> {
+        let source = self.source.clone();
+        let schema = source.schema().clone();
+        self.stream(txn_id.clone())
+            .await?
+            .map(|row| Ok(source.delete_row(&txn_id, schema.values_into_row(row)?)))
+            .try_buffer_unordered(2)
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
+    }
+
+    fn schema(&'_ self) -> &'_ Schema {
+        self.source.schema()
+    }
+
+    async fn stream(self: Arc<Self>, txn_id: TxnId) -> TCResult<Self::Stream> {
+        let rows = self.source.clone().stream(txn_id).await?;
+
+        Ok(Box::pin(rows.take(self.limit)))
+    }
+
+    fn validate(&self, bounds: &Bounds) -> TCResult<()> {
+        self.source.validate(bounds)
+    }
+
+    async fn update(self: Arc<Self>, txn: Arc<Txn>, value: Row) -> TCResult<()> {
+        let source = self.source.clone();
+        let schema = source.schema().clone();
+        let txn_id = txn.id().clone();
+        self.stream(txn_id.clone())
+            .await?
+            .map(|row| {
+                Ok(source.clone().update_row(
+                    txn_id.clone(),
+                    schema.values_into_row(row)?,
+                    value.clone(),
+                ))
+            })
+            .try_buffer_unordered(2)
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
+    }
+}
+
+impl<T: Selection> fmt::Display for Limited<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "table/view/limited")
     }
 }
 
@@ -137,6 +198,12 @@ impl<T: Selection> TryFrom<(Arc<T>, Bounds)> for Sliced<T> {
         let (source, bounds) = params;
         source.validate(&bounds)?;
         Ok(Sliced { source, bounds })
+    }
+}
+
+impl<T: Selection> fmt::Display for Sliced<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "table/view/sliced")
     }
 }
 
@@ -157,5 +224,11 @@ impl<T: Selection> TryFrom<(Arc<T>, Vec<ValueId>, bool)> for Sorted<T> {
             columns,
             reverse,
         })
+    }
+}
+
+impl<T: Selection> fmt::Display for Sorted<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "table/view/sorted")
     }
 }

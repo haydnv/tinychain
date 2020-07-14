@@ -1,9 +1,11 @@
 use std::convert::TryInto;
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::Stream;
 
+use crate::error;
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, Value, ValueId};
 
@@ -17,12 +19,18 @@ pub type Row = base::Row;
 pub type Schema = base::Schema;
 
 #[async_trait]
-pub trait Selection: Sized + Send + Sync + 'static {
+pub trait Selection: fmt::Display + Sized + Send + Sync + 'static {
     type Stream: Stream<Item = Vec<Value>> + Send + Sync + Unpin;
 
     async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64>;
 
-    async fn delete(self: Arc<Self>, txn_id: TxnId) -> TCResult<()>;
+    async fn delete(self: Arc<Self>, _txn_id: TxnId) -> TCResult<()> {
+        Err(error::method_not_allowed(self))
+    }
+
+    async fn delete_row(&self, _txn_id: &TxnId, _row: Row) -> TCResult<()> {
+        Err(error::method_not_allowed(self))
+    }
 
     async fn index(
         self: Arc<Self>,
@@ -34,8 +42,9 @@ pub trait Selection: Sized + Send + Sync + 'static {
             .map(Arc::new)
     }
 
-    fn limit(self: Arc<Self>, limit: u64) -> Arc<view::Limited<Self>> {
-        Arc::new((self, limit).into())
+    fn limit(self: Arc<Self>, limit: u64) -> TCResult<Arc<view::Limited<Self>>> {
+        let limited = (self, limit).try_into()?;
+        Ok(Arc::new(limited))
     }
 
     fn order_by(
@@ -66,5 +75,11 @@ pub trait Selection: Sized + Send + Sync + 'static {
 
     fn validate(&self, bounds: &Bounds) -> TCResult<()>;
 
-    async fn update(self: Arc<Self>, txn: Arc<Txn>, value: Row) -> TCResult<()>;
+    async fn update(self: Arc<Self>, _txn: Arc<Txn>, _value: Row) -> TCResult<()> {
+        Err(error::method_not_allowed(self))
+    }
+
+    async fn update_row(self: Arc<Self>, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
+        Err(error::method_not_allowed(self))
+    }
 }
