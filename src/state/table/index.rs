@@ -1,10 +1,11 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::error;
 use crate::state::btree::{self, BTree, BTreeRange, Key};
-use crate::transaction::TxnId;
+use crate::transaction::{Txn, TxnId};
 use crate::value::class::Impl;
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
@@ -69,6 +70,8 @@ impl Index {
 
 #[async_trait]
 impl Selection for Index {
+    type Stream = TCStream<Vec<Value>>;
+
     async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
         self.len(txn_id).await
     }
@@ -79,6 +82,13 @@ impl Selection for Index {
 
     fn schema(&'_ self) -> &'_ Schema {
         &self.schema
+    }
+
+    async fn stream(self: Arc<Self>, txn_id: TxnId) -> TCResult<Self::Stream> {
+        self.btree
+            .clone()
+            .slice(txn_id, btree::Selector::all())
+            .await
     }
 
     fn validate(&self, bounds: &Bounds) -> TCResult<()> {
@@ -116,31 +126,72 @@ pub struct ReadOnly {
     index: Arc<Index>,
 }
 
+impl ReadOnly {
+    pub async fn copy_from<S: Selection>(
+        source: Arc<S>,
+        txn: Arc<Txn>,
+        key_columns: Option<Vec<ValueId>>,
+    ) -> TCResult<ReadOnly> {
+        let btree_file = txn
+            .clone()
+            .subcontext_tmp()
+            .await?
+            .context()
+            .create_file(txn.id().clone(), "index".parse()?)
+            .await?;
+
+        let (schema, btree) = if let Some(columns) = key_columns {
+            let column_names: HashSet<&ValueId> = columns.iter().collect();
+            let schema = source.schema().subset(column_names)?;
+            let btree = BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
+
+            let rows = source.select(columns)?.stream(txn.id().clone()).await?;
+            btree.insert_from(txn.id(), rows).await?;
+            (schema, btree)
+        } else {
+            let schema = source.schema().clone();
+            let btree = BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
+            let rows = source.stream(txn.id().clone()).await?;
+            btree.insert_from(txn.id(), rows).await?;
+            (schema, btree)
+        };
+
+        let index = Arc::new(Index {
+            schema,
+            btree: Arc::new(btree),
+        });
+
+        Ok(ReadOnly { index })
+    }
+}
+
 #[async_trait]
 impl Selection for ReadOnly {
+    type Stream = TCStream<Vec<Value>>;
+
     async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
         self.index.clone().count(txn_id).await
     }
 
-    async fn delete(self: Arc<Self>, txn_id: TxnId) -> TCResult<()> {
+    async fn delete(self: Arc<Self>, _txn_id: TxnId) -> TCResult<()> {
         Err(error::method_not_allowed(
             "this is a transitive (read-only) index",
         ))
-    }
-
-    async fn index(self: Arc<Self>, columns: Option<Vec<ValueId>>) -> TCResult<ReadOnly> {
-        Err(error::not_implemented())
     }
 
     fn schema(&'_ self) -> &'_ Schema {
         self.index.schema()
     }
 
+    async fn stream(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Self::Stream> {
+        Err(error::not_implemented())
+    }
+
     fn validate(&self, bounds: &Bounds) -> TCResult<()> {
         self.index.validate(bounds)
     }
 
-    async fn update(self: Arc<Self>, txn_id: TxnId, value: Row) -> TCResult<()> {
+    async fn update(self: Arc<Self>, _txn_id: TxnId, _value: Row) -> TCResult<()> {
         Err(error::method_not_allowed(
             "this is a transitive (read-only) index",
         ))

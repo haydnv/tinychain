@@ -577,10 +577,9 @@ impl BTree {
     ) -> TCResult<()> {
         source
             .map(|k| self.schema.validate_key(&k).map(|()| k))
-            .and_then(|key| self.insert(&txn_id, key))
-            .map_ok(|r| future::ready(Ok(r)))
+            .map_ok(|key| self.insert(txn_id, key))
             .try_buffer_unordered(2 * self.order)
-            .try_fold((), |(), ()| future::ready(Ok(())))
+            .fold(Ok(()), |_, r| future::ready(r))
             .await
     }
 
