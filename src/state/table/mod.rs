@@ -17,8 +17,8 @@ pub type Row = base::Row;
 pub type Schema = base::Schema;
 
 #[async_trait]
-pub trait Selection: Sized + Send + Sync {
-    type Stream: Stream<Item = Vec<Value>> + Send + Sync;
+pub trait Selection: Sized + Send + Sync + 'static {
+    type Stream: Stream<Item = Vec<Value>> + Send + Sync + Unpin;
 
     async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64>;
 

@@ -73,6 +73,10 @@ impl Bounds {
         self.0.iter()
     }
 
+    pub fn keys(&self) -> hash_map::Keys<ValueId, ColumnBound> {
+        self.0.keys()
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
