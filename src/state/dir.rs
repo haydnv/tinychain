@@ -41,7 +41,7 @@ impl Mutate for DirContents {
         self.clone()
     }
 
-    async fn converge(&mut self, mut new_value: DirContents) {
+    async fn converge(&mut self, mut new_value: DirContents, _txn_id: &TxnId) {
         let existing: HashSet<PathSegment> = self.0.keys().cloned().collect();
         let new: HashSet<PathSegment> = new_value.0.keys().cloned().collect();
         let deleted = existing.difference(&new);
@@ -88,6 +88,11 @@ impl Dir {
             .keys()
             .cloned()
             .collect())
+    }
+
+    pub async fn delete_file(self: Arc<Self>, txn_id: TxnId, name: PathSegment) -> TCResult<()> {
+        self.contents.write(txn_id).await?.0.remove(&name);
+        Ok(())
     }
 
     pub fn get_dir<'a>(

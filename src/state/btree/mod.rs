@@ -151,7 +151,7 @@ impl Mutate for BTreeRoot {
         self.clone()
     }
 
-    async fn converge(&mut self, new_value: BTreeRoot) {
+    async fn converge(&mut self, new_value: BTreeRoot, _txn_id: &TxnId) {
         self.0 = new_value.0
     }
 }

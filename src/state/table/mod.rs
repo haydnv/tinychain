@@ -69,7 +69,7 @@ pub trait Selection: Sized + Send + Sync + 'static {
 
     async fn stream(self: Arc<Self>, txn_id: TxnId) -> TCResult<Self::Stream>;
 
-    fn validate(&self, bounds: &Bounds) -> TCResult<()>;
+    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()>;
 
     async fn update(self: Arc<Self>, _txn: Arc<Txn>, _value: Row) -> TCResult<()> {
         Err(error::unsupported(

@@ -40,12 +40,7 @@ impl<T: Selection> TryFrom<(Arc<T>, Vec<ValueId>)> for ColumnSelection<T> {
 
         let mut indices: Vec<usize> = Vec::with_capacity(columns.len());
         let mut schema: Vec<Column> = Vec::with_capacity(columns.len());
-        let mut source_columns: HashMap<ValueId, Column> = source
-            .schema()
-            .columns()
-            .into_iter()
-            .map(|c| (c.name.clone(), c))
-            .collect();
+        let mut source_columns: HashMap<ValueId, Column> = source.schema().clone().into();
 
         for (i, name) in columns.iter().enumerate() {
             let column = source_columns
@@ -85,9 +80,9 @@ impl<T: Selection + 'static> Selection for ColumnSelection<T> {
         Ok(Box::pin(selected))
     }
 
-    fn validate(&self, bounds: &Bounds) -> TCResult<()> {
+    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
         let bounds_columns: HashSet<&ValueId> = bounds.keys().collect();
-        let selected: HashSet<&ValueId> = self.schema.column_names().into_iter().collect();
+        let selected: HashSet<&ValueId> = self.schema.column_names();
         let mut unknown: HashSet<&&ValueId> = selected.difference(&bounds_columns).collect();
         if !unknown.is_empty() {
             return Err(error::bad_request(
@@ -100,7 +95,7 @@ impl<T: Selection + 'static> Selection for ColumnSelection<T> {
             ));
         }
 
-        self.source.validate(bounds)
+        self.source.validate(txn_id, bounds).await
     }
 }
 
@@ -158,8 +153,8 @@ impl<T: Selection> Selection for Limited<T> {
         Ok(Box::pin(rows.take(self.limit)))
     }
 
-    fn validate(&self, bounds: &Bounds) -> TCResult<()> {
-        self.source.validate(bounds)
+    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+        self.source.validate(txn_id, bounds).await
     }
 
     async fn update(self: Arc<Self>, txn: Arc<Txn>, value: Row) -> TCResult<()> {
@@ -194,7 +189,6 @@ pub struct Sliced {
 
 impl Sliced {
     pub fn new(table: Arc<IndexTable>, bounds: Bounds) -> TCResult<Sliced> {
-        table.validate(&bounds)?;
         Ok(Sliced { table, bounds })
     }
 }
@@ -234,7 +228,7 @@ impl Selection for Sliced {
             .await
     }
 
-    fn validate(&self, _bounds: &Bounds) -> TCResult<()> {
+    async fn validate(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
         Err(error::unsupported(
             "Table slice does not support slicing (try slicing the source table itself)",
         ))

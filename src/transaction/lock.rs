@@ -17,7 +17,7 @@ use super::{Transact, TxnId};
 pub trait Mutate: Send + Sync {
     fn diverge(&self, txn_id: &TxnId) -> Self;
 
-    async fn converge(&mut self, new_value: Self);
+    async fn converge(&mut self, new_value: Self, txn_id: &TxnId);
 }
 
 pub struct TxnLockReadGuard<T: Mutate> {
@@ -265,7 +265,7 @@ impl<T: Mutate> Transact for TxnLock<T> {
 
             if let Some(new_value) = lock.value_at.remove(txn_id) {
                 let value = unsafe { &mut *lock.value.get() };
-                value.converge(new_value.into_inner())
+                value.converge(new_value.into_inner(), txn_id)
             } else {
                 Box::pin(future::ready(()))
             }

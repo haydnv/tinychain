@@ -1,5 +1,6 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::fmt;
+use std::iter::FromIterator;
 use std::ops::Bound;
 
 use crate::error;
@@ -112,7 +113,11 @@ impl Schema {
             .collect()
     }
 
-    pub fn column_names(&'_ self) -> HashSet<&'_ ValueId> {
+    pub fn key_columns(&'_ self) -> &'_ [Column] {
+        &self.key
+    }
+
+    pub fn column_names<'a, F: FromIterator<&'a ValueId>>(&'a self) -> F {
         self.key
             .iter()
             .map(|c| &c.name)
@@ -160,7 +165,7 @@ impl Schema {
     }
 
     pub fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        let column_names = self.column_names();
+        let column_names: HashSet<&ValueId> = self.column_names();
         for name in bounds.0.keys() {
             if !column_names.contains(name) {
                 return Err(error::bad_request("No such column", name));
@@ -171,7 +176,7 @@ impl Schema {
     }
 
     pub fn validate_columns(&self, columns: &[ValueId]) -> TCResult<()> {
-        let valid_columns = self.column_names();
+        let valid_columns: HashSet<&ValueId> = self.column_names();
         for column in columns {
             if !valid_columns.contains(column) {
                 return Err(error::bad_request("No such column", column));
@@ -199,7 +204,7 @@ impl Schema {
     }
 
     pub fn validate_row(&self, row: &Row) -> TCResult<()> {
-        let expected: HashSet<&ValueId> = self.column_names().into_iter().collect();
+        let expected: HashSet<&ValueId> = self.column_names();
         let actual: HashSet<&ValueId> = row.keys().collect();
         let mut missing: Vec<&&ValueId> = expected.difference(&actual).collect();
         let mut extra: Vec<&&ValueId> = actual.difference(&expected).collect();
@@ -279,6 +284,28 @@ impl From<(Vec<Column>, Vec<Column>)> for Schema {
             key: kv.0,
             value: kv.1,
         }
+    }
+}
+
+impl From<Schema> for HashMap<ValueId, Column> {
+    fn from(mut schema: Schema) -> HashMap<ValueId, Column> {
+        schema
+            .key
+            .drain(..)
+            .chain(schema.value.drain(..))
+            .map(|c| (c.name.clone(), c))
+            .collect()
+    }
+}
+
+impl From<Schema> for Vec<ValueId> {
+    fn from(mut schema: Schema) -> Vec<ValueId> {
+        schema
+            .key
+            .drain(..)
+            .chain(schema.value.drain(..))
+            .map(|c| c.name)
+            .collect()
     }
 }
 

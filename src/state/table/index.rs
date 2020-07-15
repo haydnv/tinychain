@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,11 +7,13 @@ use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
 use crate::state::btree::{self, BTree, BTreeRange, Key};
+use crate::state::dir::Dir;
+use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
 use super::view::Sliced;
-use super::{Bounds, Row, Schema, Selection};
+use super::{Bounds, Column, Row, Schema, Selection};
 
 pub struct Index {
     btree: Arc<BTree>,
@@ -76,7 +78,7 @@ impl Selection for Index {
             .await
     }
 
-    fn validate(&self, bounds: &Bounds) -> TCResult<()> {
+    async fn validate(&self, _txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
         self.schema.validate_bounds(bounds)?;
 
         for (column, (bound_column, bound_range)) in self.schema.columns()[0..bounds.len()]
@@ -166,17 +168,139 @@ impl Selection for ReadOnly {
         self.index.clone().stream(txn_id).await
     }
 
-    fn validate(&self, bounds: &Bounds) -> TCResult<()> {
-        self.index.validate(bounds)
+    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+        self.index.validate(txn_id, bounds).await
+    }
+}
+
+#[derive(Clone)]
+struct Indices {
+    dir: Arc<Dir>,
+    primary: Arc<Index>,
+    auxiliary: BTreeMap<ValueId, Arc<Index>>,
+}
+
+impl Indices {
+    fn len(&self) -> usize {
+        self.auxiliary.len() + 1
+    }
+}
+
+#[async_trait]
+impl Mutate for Indices {
+    fn diverge(&self, _txn_id: &TxnId) -> Self {
+        self.clone()
+    }
+
+    async fn converge(&mut self, mut new_value: Indices, txn_id: &TxnId) {
+        let existing: HashSet<ValueId> = self.auxiliary.keys().cloned().collect();
+        let new: HashSet<ValueId> = new_value.auxiliary.keys().cloned().collect();
+
+        let dir = self.dir.clone();
+        let delete_ops = existing
+            .difference(&new)
+            .map(move |name| dir.clone().delete_file(txn_id.clone(), name.clone()));
+        for name in new.iter() {
+            let index = new_value.auxiliary.remove(&name).unwrap();
+            self.auxiliary.insert(name.clone(), index);
+        }
+
+        try_join_all(delete_ops).await.unwrap();
     }
 }
 
 pub struct IndexTable {
-    index: Arc<Index>,
-    auxiliary: BTreeMap<ValueId, Arc<Index>>,
+    indices: TxnLock<Indices>,
+    schema: Schema,
 }
 
 impl IndexTable {
+    pub async fn add_index(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        name: ValueId,
+        key: Vec<ValueId>,
+    ) -> TCResult<()> {
+        let index_key_set: HashSet<&ValueId> = key.iter().collect();
+        if index_key_set.len() != key.len() {
+            return Err(error::bad_request(
+                &format!("Duplicate column in index {}", name),
+                key.iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "),
+            ));
+        }
+
+        let indices = self.indices.read(txn.id()).await?;
+
+        let columns: HashMap<ValueId, Column> = self.schema().clone().into();
+        let key: Vec<Column> = key
+            .iter()
+            .map(|c| {
+                columns
+                    .get(&c)
+                    .cloned()
+                    .ok_or(error::bad_request("No such column", c))
+            })
+            .collect::<TCResult<Vec<Column>>>()?;
+        let values: Vec<Column> = self
+            .schema()
+            .key_columns()
+            .iter()
+            .filter(|c| !index_key_set.contains(&c.name))
+            .cloned()
+            .collect();
+        let schema: Schema = (key, values).into();
+        let btree_file = indices
+            .dir
+            .create_file(txn.id().clone(), name.clone())
+            .await?;
+        let btree = Arc::new(
+            btree::BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?,
+        );
+        btree
+            .insert_from(
+                txn.id(),
+                self.clone()
+                    .select(schema.clone().into())?
+                    .stream(txn.id().clone())
+                    .await?,
+            )
+            .await?;
+        let index = Index { btree, schema };
+
+        if let Ok(mut indices) = indices.upgrade().await {
+            if indices.auxiliary.contains_key(&name) {
+                indices
+                    .dir
+                    .clone()
+                    .delete_file(txn.id().clone(), name.clone())
+                    .await?;
+                Err(error::bad_request(
+                    "This table already has an index named",
+                    name,
+                ))
+            } else {
+                indices.auxiliary.insert(name, Arc::new(index));
+                Ok(())
+            }
+        } else {
+            self.indices
+                .read(txn.id())
+                .await?
+                .dir
+                .clone()
+                .delete_file(txn.id().clone(), name)
+                .await?;
+            Err(error::conflict())
+        }
+    }
+
+    pub fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Sliced> {
+        Sliced::new(self, bounds)
+    }
+
     pub async fn stream_slice(
         self: Arc<Self>,
         _txn_id: TxnId,
@@ -185,18 +309,16 @@ impl IndexTable {
         Err(error::not_implemented())
     }
 
-    pub fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Sliced> {
-        Sliced::new(self.clone(), bounds)
-    }
-
     async fn upsert(self: Arc<Self>, txn_id: TxnId, row: Row) -> TCResult<()> {
         self.delete_row(&txn_id, row.clone()).await?;
 
-        let mut inserts = Vec::with_capacity(self.auxiliary.len() + 1);
-        for index in self.auxiliary.values() {
+        let indices = self.indices.read(&txn_id).await?;
+
+        let mut inserts = Vec::with_capacity(indices.len());
+        for index in indices.auxiliary.values() {
             inserts.push(index.insert(&txn_id, row.clone(), false));
         }
-        inserts.push(self.index.insert(&txn_id, row, true));
+        inserts.push(indices.primary.insert(&txn_id, row, true));
 
         try_join_all(inserts).await?;
         Ok(())
@@ -208,15 +330,22 @@ impl Selection for IndexTable {
     type Stream = <Index as Selection>::Stream;
 
     async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
-        self.index.clone().count(txn_id).await
+        self.indices
+            .read(&txn_id)
+            .await?
+            .primary
+            .clone()
+            .count(txn_id)
+            .await
     }
 
     async fn delete(self: Arc<Self>, txn_id: TxnId) -> TCResult<()> {
-        let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
-        for index in self.auxiliary.values() {
+        let indices = self.indices.read(&txn_id).await?;
+        let mut deletes = Vec::with_capacity(indices.len());
+        for index in indices.auxiliary.values() {
             deletes.push(index.clone().delete(txn_id.clone()));
         }
-        deletes.push(self.index.clone().delete(txn_id));
+        deletes.push(indices.primary.clone().delete(txn_id));
 
         try_join_all(deletes).await?;
         Ok(())
@@ -225,31 +354,40 @@ impl Selection for IndexTable {
     async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
         self.schema().validate_row(&row)?;
 
-        let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
-        for index in self.auxiliary.values() {
+        let indices = self.indices.read(txn_id).await?;
+        let mut deletes = Vec::with_capacity(indices.len());
+        for index in indices.auxiliary.values() {
             deletes.push(index.delete_row(txn_id, row.clone()));
         }
-        deletes.push(self.index.delete_row(txn_id, row));
+        deletes.push(indices.primary.delete_row(txn_id, row));
         try_join_all(deletes).await?;
 
         Ok(())
     }
 
     fn schema(&'_ self) -> &'_ Schema {
-        self.index.schema()
+        &self.schema
     }
 
     async fn stream(self: Arc<Self>, txn_id: TxnId) -> TCResult<Self::Stream> {
-        self.index.clone().stream(txn_id).await
+        self.indices
+            .read(&txn_id)
+            .await?
+            .primary
+            .clone()
+            .stream(txn_id)
+            .await
     }
 
-    fn validate(&self, bounds: &Bounds) -> TCResult<()> {
-        if self.index.validate(bounds).is_ok() {
+    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+        let indices = self.indices.read(txn_id).await?;
+
+        if indices.primary.validate(txn_id, bounds).await.is_ok() {
             return Ok(());
         }
 
-        for index in self.auxiliary.values() {
-            if index.validate(bounds).is_ok() {
+        for index in indices.auxiliary.values() {
+            if index.validate(txn_id, bounds).await.is_ok() {
                 return Ok(());
             }
         }
