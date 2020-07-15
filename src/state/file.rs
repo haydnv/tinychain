@@ -49,7 +49,7 @@ impl Mutate for Block {
         )
     }
 
-    async fn converge(&mut self, other: Block, _txn_id: &TxnId) {
+    async fn converge(&mut self, other: Block) {
         let (mut this, that) = join!(self.cached.write(), other.cached.read());
         this.copy_from(&that).await;
     }
@@ -64,7 +64,7 @@ impl<'a> Mutate for FileContents {
         self.clone()
     }
 
-    async fn converge(&mut self, mut new_value: FileContents, _txn_id: &TxnId) {
+    async fn converge(&mut self, mut new_value: FileContents) {
         let existing: HashSet<BlockId> = self.0.keys().cloned().collect();
         let new: HashSet<BlockId> = new_value.0.keys().cloned().collect();
         let deleted = existing.difference(&new);

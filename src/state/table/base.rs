@@ -168,7 +168,7 @@ impl Schema {
         let column_names: HashSet<&ValueId> = self.column_names();
         for name in bounds.0.keys() {
             if !column_names.contains(name) {
-                return Err(error::bad_request("No such column", name));
+                return Err(error::not_found(name));
             }
         }
 
@@ -179,7 +179,7 @@ impl Schema {
         let valid_columns: HashSet<&ValueId> = self.column_names();
         for column in columns {
             if !valid_columns.contains(column) {
-                return Err(error::bad_request("No such column", column));
+                return Err(error::not_found(column));
             }
         }
 
@@ -196,7 +196,7 @@ impl Schema {
             if let Some(dtype) = columns.get(col_name) {
                 value.expect(*dtype, format!("for table with schema {}", self))?;
             } else {
-                return Err(error::bad_request("No such column", col_name));
+                return Err(error::not_found(col_name));
             }
         }
 

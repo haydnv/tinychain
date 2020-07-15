@@ -45,7 +45,7 @@ impl<T: Selection> TryFrom<(Arc<T>, Vec<ValueId>)> for ColumnSelection<T> {
         for (i, name) in columns.iter().enumerate() {
             let column = source_columns
                 .remove(name)
-                .ok_or_else(|| error::bad_request("No such column", name))?;
+                .ok_or_else(|| error::not_found(name))?;
             indices.push(i);
             schema.push(column);
         }

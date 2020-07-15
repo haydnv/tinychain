@@ -192,20 +192,8 @@ impl Mutate for Indices {
         self.clone()
     }
 
-    async fn converge(&mut self, mut new_value: Indices, txn_id: &TxnId) {
-        let existing: HashSet<ValueId> = self.auxiliary.keys().cloned().collect();
-        let new: HashSet<ValueId> = new_value.auxiliary.keys().cloned().collect();
-
-        let dir = self.dir.clone();
-        let delete_ops = existing
-            .difference(&new)
-            .map(move |name| dir.clone().delete_file(txn_id.clone(), name.clone()));
-        for name in new.iter() {
-            let index = new_value.auxiliary.remove(&name).unwrap();
-            self.auxiliary.insert(name.clone(), index);
-        }
-
-        try_join_all(delete_ops).await.unwrap();
+    async fn converge(&mut self, new: Indices) {
+        self.auxiliary = new.auxiliary;
     }
 }
 
@@ -237,12 +225,7 @@ impl IndexTable {
         let columns: HashMap<ValueId, Column> = self.schema().clone().into();
         let key: Vec<Column> = key
             .iter()
-            .map(|c| {
-                columns
-                    .get(&c)
-                    .cloned()
-                    .ok_or(error::bad_request("No such column", c))
-            })
+            .map(|c| columns.get(&c).cloned().ok_or(error::not_found(c)))
             .collect::<TCResult<Vec<Column>>>()?;
         let values: Vec<Column> = self
             .schema()
@@ -252,6 +235,7 @@ impl IndexTable {
             .cloned()
             .collect();
         let schema: Schema = (key, values).into();
+
         let btree_file = indices
             .dir
             .create_file(txn.id().clone(), name.clone())
@@ -268,8 +252,8 @@ impl IndexTable {
                     .await?,
             )
             .await?;
-        let index = Index { btree, schema };
 
+        let index = Index { btree, schema };
         if let Ok(mut indices) = indices.upgrade().await {
             if indices.auxiliary.contains_key(&name) {
                 indices
@@ -294,6 +278,14 @@ impl IndexTable {
                 .delete_file(txn.id().clone(), name)
                 .await?;
             Err(error::conflict())
+        }
+    }
+
+    pub async fn remove_index(self: Arc<Self>, txn_id: TxnId, name: ValueId) -> TCResult<()> {
+        let mut indices = self.indices.write(txn_id.clone()).await?;
+        match indices.auxiliary.remove(&name) {
+            Some(_index) => indices.dir.clone().delete_file(txn_id, name).await,
+            None => Err(error::not_found(name)),
         }
     }
 
