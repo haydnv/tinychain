@@ -113,10 +113,6 @@ impl Schema {
             .collect()
     }
 
-    pub fn key_columns(&'_ self) -> &'_ [Column] {
-        &self.key
-    }
-
     pub fn column_names<'a, F: FromIterator<&'a ValueId>>(&'a self) -> F {
         self.key
             .iter()
@@ -140,6 +136,14 @@ impl Schema {
         }
 
         Ok(key)
+    }
+
+    pub fn key_columns(&'_ self) -> &'_ [Column] {
+        &self.key
+    }
+
+    pub fn key_names(&self) -> Vec<ValueId> {
+        self.key.iter().map(|c| &c.name).cloned().collect()
     }
 
     pub fn len(&self) -> usize {
@@ -234,29 +238,12 @@ impl Schema {
         self.validate_row_partial(row)
     }
 
-    pub fn values_into_row(&self, mut values: Vec<Value>) -> TCResult<Row> {
-        if values.len() > self.len() {
-            return Err(error::bad_request(
-                "Too many values provided for a row with schema",
-                self,
-            ));
-        }
-
-        let mut row = HashMap::new();
-        for (column, value) in self.columns()[0..values.len()].iter().zip(values.drain(..)) {
-            value.expect(column.dtype, format!("for table with schema {}", self))?;
-            row.insert(column.name.clone(), value);
-        }
-
-        Ok(row)
-    }
-
     pub fn row_into_values(&self, mut row: Row, reject_extras: bool) -> TCResult<Vec<Value>> {
         let mut key = Vec::with_capacity(self.len());
         for column in self.columns() {
             let value = row
                 .remove(&column.name)
-                .ok_or(error::bad_request("Missing value for column", column.name))?;
+                .ok_or_else(|| error::bad_request("Missing value for column", &column.name))?;
             value.expect(column.dtype, format!("for table with schema {}", self))?;
             key.push(value);
         }
@@ -275,6 +262,23 @@ impl Schema {
         }
 
         Ok(key)
+    }
+
+    pub fn values_into_row(&self, mut values: Vec<Value>) -> TCResult<Row> {
+        if values.len() > self.len() {
+            return Err(error::bad_request(
+                "Too many values provided for a row with schema",
+                self,
+            ));
+        }
+
+        let mut row = HashMap::new();
+        for (column, value) in self.columns()[0..values.len()].iter().zip(values.drain(..)) {
+            value.expect(column.dtype, format!("for table with schema {}", self))?;
+            row.insert(column.name.clone(), value);
+        }
+
+        Ok(row)
     }
 }
 
