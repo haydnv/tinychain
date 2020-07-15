@@ -1,5 +1,4 @@
 use std::convert::TryInto;
-use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -19,17 +18,19 @@ pub type Row = base::Row;
 pub type Schema = base::Schema;
 
 #[async_trait]
-pub trait Selection: fmt::Display + Sized + Send + Sync + 'static {
+pub trait Selection: Sized + Send + Sync + 'static {
     type Stream: Stream<Item = Vec<Value>> + Send + Sync + Unpin;
 
     async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64>;
 
     async fn delete(self: Arc<Self>, _txn_id: TxnId) -> TCResult<()> {
-        Err(error::method_not_allowed(self))
+        Err(error::unsupported(
+            "This table view does not support deletion (try deleting a slice of the source table)",
+        ))
     }
 
     async fn delete_row(&self, _txn_id: &TxnId, _row: Row) -> TCResult<()> {
-        Err(error::method_not_allowed(self))
+        Err(error::unsupported("This table view does not support row deletion (try deleting from the source table directly)"))
     }
 
     async fn index(
@@ -66,20 +67,17 @@ pub trait Selection: fmt::Display + Sized + Send + Sync + 'static {
 
     fn schema(&'_ self) -> &'_ Schema;
 
-    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<view::Sliced<Self>>> {
-        let slice = (self, bounds).try_into()?;
-        Ok(Arc::new(slice))
-    }
-
     async fn stream(self: Arc<Self>, txn_id: TxnId) -> TCResult<Self::Stream>;
 
     fn validate(&self, bounds: &Bounds) -> TCResult<()>;
 
     async fn update(self: Arc<Self>, _txn: Arc<Txn>, _value: Row) -> TCResult<()> {
-        Err(error::method_not_allowed(self))
+        Err(error::unsupported(
+            "This table view does not support updates (try updating a slice of the source table)",
+        ))
     }
 
     async fn update_row(self: Arc<Self>, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
-        Err(error::method_not_allowed(self))
+        Err(error::unsupported("This table view does not support updates (try updating a row in the source table directly)"))
     }
 }

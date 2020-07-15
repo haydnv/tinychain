@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashSet};
-use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -11,6 +10,7 @@ use crate::state::btree::{self, BTree, BTreeRange, Key};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
+use super::view::Sliced;
 use super::{Bounds, Row, Schema, Selection};
 
 pub struct Index {
@@ -107,12 +107,6 @@ impl Selection for Index {
     }
 }
 
-impl fmt::Display for Index {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "table::index::Index")
-    }
-}
-
 pub struct ReadOnly {
     index: Arc<Index>,
 }
@@ -177,18 +171,24 @@ impl Selection for ReadOnly {
     }
 }
 
-impl fmt::Display for ReadOnly {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "table/index/read_only")
-    }
-}
-
 pub struct IndexTable {
     index: Arc<Index>,
     auxiliary: BTreeMap<ValueId, Arc<Index>>,
 }
 
 impl IndexTable {
+    pub async fn stream_slice(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _bounds: Bounds,
+    ) -> TCResult<TCStream<Vec<Value>>> {
+        Err(error::not_implemented())
+    }
+
+    pub fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Sliced> {
+        Sliced::new(self.clone(), bounds)
+    }
+
     async fn upsert(self: Arc<Self>, txn_id: TxnId, row: Row) -> TCResult<()> {
         self.delete_row(&txn_id, row.clone()).await?;
 
@@ -275,11 +275,5 @@ impl Selection for IndexTable {
             .try_buffer_unordered(2)
             .fold(Ok(()), |_, r| future::ready(r))
             .await
-    }
-}
-
-impl fmt::Display for IndexTable {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "table/index/index_table")
     }
 }

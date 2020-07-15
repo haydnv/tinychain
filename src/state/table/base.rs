@@ -22,6 +22,7 @@ impl From<Column> for btree::Column {
     }
 }
 
+#[derive(Clone)]
 pub enum ColumnBound {
     Is(Value),
     In(Bound<Value>, Bound<Value>),
@@ -66,6 +67,7 @@ impl fmt::Display for ColumnBound {
     }
 }
 
+#[derive(Clone)]
 pub struct Bounds(HashMap<ValueId, ColumnBound>);
 
 impl Bounds {

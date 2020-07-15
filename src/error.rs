@@ -146,6 +146,10 @@ pub fn not_implemented() -> TCError {
     )
 }
 
+pub fn unsupported<I: fmt::Display>(hint: I) -> TCError {
+    TCError::of(Code::BadRequest, hint.to_string())
+}
+
 pub fn request_too_large(max_size: usize) -> TCError {
     TCError::of(
         Code::RequestTooLarge,

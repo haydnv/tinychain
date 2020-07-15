@@ -11,6 +11,7 @@ use crate::error;
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
+use super::index::IndexTable;
 use super::{Bounds, Column, Row, Schema, Selection};
 
 pub struct ColumnSelection<T: Selection> {
@@ -186,22 +187,79 @@ impl<T: Selection> fmt::Display for Limited<T> {
     }
 }
 
-pub struct Sliced<T: Selection> {
-    source: Arc<T>,
+pub struct Sliced {
+    table: Arc<IndexTable>,
     bounds: Bounds,
 }
 
-impl<T: Selection> TryFrom<(Arc<T>, Bounds)> for Sliced<T> {
-    type Error = error::TCError;
-
-    fn try_from(params: (Arc<T>, Bounds)) -> TCResult<Sliced<T>> {
-        let (source, bounds) = params;
-        source.validate(&bounds)?;
-        Ok(Sliced { source, bounds })
+impl Sliced {
+    pub fn new(table: Arc<IndexTable>, bounds: Bounds) -> TCResult<Sliced> {
+        table.validate(&bounds)?;
+        Ok(Sliced { table, bounds })
     }
 }
 
-impl<T: Selection> fmt::Display for Sliced<T> {
+#[async_trait]
+impl Selection for Sliced {
+    type Stream = <IndexTable as Selection>::Stream;
+
+    async fn count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
+        let count = self
+            .stream(txn_id)
+            .await?
+            .fold(0, |count, _| future::ready(count + 1))
+            .await;
+        Ok(count)
+    }
+
+    async fn delete(self: Arc<Self>, txn_id: TxnId) -> TCResult<()> {
+        let source = self.table.clone();
+        let schema = source.schema().clone();
+        self.stream(txn_id.clone())
+            .await?
+            .map(|row| Ok(source.delete_row(&txn_id, schema.values_into_row(row)?)))
+            .try_buffer_unordered(2)
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
+    }
+
+    fn schema(&'_ self) -> &'_ Schema {
+        self.table.schema()
+    }
+
+    async fn stream(self: Arc<Self>, txn_id: TxnId) -> TCResult<Self::Stream> {
+        self.table
+            .clone()
+            .stream_slice(txn_id, self.bounds.clone())
+            .await
+    }
+
+    fn validate(&self, _bounds: &Bounds) -> TCResult<()> {
+        Err(error::unsupported(
+            "Table slice does not support slicing (try slicing the source table itself)",
+        ))
+    }
+
+    async fn update(self: Arc<Self>, txn: Arc<Txn>, value: Row) -> TCResult<()> {
+        let source = self.table.clone();
+        let schema = source.schema().clone();
+        let txn_id = txn.id().clone();
+        self.stream(txn_id.clone())
+            .await?
+            .map(|row| {
+                Ok(source.clone().update_row(
+                    txn_id.clone(),
+                    schema.values_into_row(row)?,
+                    value.clone(),
+                ))
+            })
+            .try_buffer_unordered(2)
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
+    }
+}
+
+impl fmt::Display for Sliced {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "table/view/sliced")
     }
