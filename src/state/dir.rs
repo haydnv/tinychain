@@ -90,7 +90,7 @@ impl Dir {
             .collect())
     }
 
-    pub async fn delete_file(self: Arc<Self>, txn_id: TxnId, name: PathSegment) -> TCResult<()> {
+    pub async fn delete_file<'a>(&'a self, txn_id: TxnId, name: &'a PathSegment) -> TCResult<()> {
         self.contents.write(txn_id).await?.0.remove(&name);
         Ok(())
     }

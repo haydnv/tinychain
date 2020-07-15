@@ -258,8 +258,7 @@ impl IndexTable {
             if indices.auxiliary.contains_key(&name) {
                 indices
                     .dir
-                    .clone()
-                    .delete_file(txn.id().clone(), name.clone())
+                    .delete_file(txn.id().clone(), &name)
                     .await?;
                 Err(error::bad_request(
                     "This table already has an index named",
@@ -274,16 +273,15 @@ impl IndexTable {
                 .read(txn.id())
                 .await?
                 .dir
-                .clone()
-                .delete_file(txn.id().clone(), name)
+                .delete_file(txn.id().clone(), &name)
                 .await?;
             Err(error::conflict())
         }
     }
 
-    pub async fn remove_index(self: Arc<Self>, txn_id: TxnId, name: ValueId) -> TCResult<()> {
+    pub async fn remove_index(self: Arc<Self>, txn_id: TxnId, name: &ValueId) -> TCResult<()> {
         let mut indices = self.indices.write(txn_id.clone()).await?;
-        match indices.auxiliary.remove(&name) {
+        match indices.auxiliary.remove(name) {
             Some(_index) => indices.dir.clone().delete_file(txn_id, name).await,
             None => Err(error::not_found(name)),
         }
