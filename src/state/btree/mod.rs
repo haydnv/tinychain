@@ -156,6 +156,7 @@ impl Mutate for BTreeRoot {
     }
 }
 
+#[derive(Eq, PartialEq)]
 pub struct Column {
     name: ValueId,
     dtype: ValueType,
@@ -172,6 +173,7 @@ impl From<(ValueId, ValueType, Option<usize>)> for Column {
     }
 }
 
+#[derive(Eq, PartialEq)]
 pub struct Schema(Vec<Column>);
 
 impl Schema {
@@ -240,48 +242,33 @@ impl Schema {
 
     fn validate_range(&self, range: &BTreeRange) -> TCResult<()> {
         use Bound::*;
-        match (&range.0, &range.1) {
-            (Unbounded, Unbounded) => Ok(()),
-            (Included(start), Included(end)) if start.len() == end.len() => {
-                self.validate_dtypes(&start, &end)
-            }
-            (Included(start), Excluded(end)) if start.len() == end.len() => {
-                self.validate_dtypes(&start, &end)
-            }
-            (Excluded(start), Included(end)) if start.len() == end.len() => {
-                self.validate_dtypes(&start, &end)
-            }
-            (Excluded(start), Excluded(end)) if start.len() == end.len() => {
-                self.validate_dtypes(&start, &end)
-            }
-            _ => Err(error::bad_request(
-                "BTree received invalid range",
-                "start and end bounds must be the same length",
-            )),
-        }
-    }
-
-    fn validate_dtypes(&self, start: &[Value], end: &[Value]) -> TCResult<()> {
-        assert!(start.len() == end.len());
-
-        for ((start_val, end_val), column) in
-            start.iter().zip(end).zip(&self.columns()[0..start.len()])
-        {
-            if start_val.class() != end_val.class() {
-                return Err(error::bad_request(
-                    &format!(
-                        "BTreeRange expected [{}, {}] but found",
-                        column.dtype, column.dtype
-                    ),
-                    format!("[{}, {}]", start_val.class(), end_val.class()),
-                ));
+        for (i, column) in self.columns().iter().enumerate() {
+            if i < range.0.len() {
+                match &range.0[i] {
+                    Unbounded => {}
+                    Included(value) => value.expect(
+                        column.dtype,
+                        format!("for column {} in BTreeRange", column.name),
+                    )?,
+                    Excluded(value) => value.expect(
+                        column.dtype,
+                        format!("for column {} in BTreeRange", column.name),
+                    )?,
+                }
             }
 
-            if start_val.class() != column.dtype {
-                return Err(error::bad_request(
-                    &format!("BTreeRange expected {} but found", column.dtype),
-                    start_val.class(),
-                ));
+            if i < range.1.len() {
+                match &range.1[i] {
+                    Unbounded => {}
+                    Included(value) => value.expect(
+                        column.dtype,
+                        format!("for column {} in BTreeRange", column.name),
+                    )?,
+                    Excluded(value) => value.expect(
+                        column.dtype,
+                        format!("for column {} in BTreeRange", column.name),
+                    )?,
+                }
             }
         }
 
@@ -378,6 +365,10 @@ impl BTree {
         })
     }
 
+    pub fn schema(&'_ self) -> &'_ Schema {
+        &self.schema
+    }
+
     async fn get_node(&self, txn_id: &TxnId, node_id: &NodeId) -> TCResult<Node> {
         if let Some(block) = self.file.get_block(txn_id, node_id).await? {
             Node::try_from(block).await
@@ -407,13 +398,13 @@ impl BTree {
     pub async fn slice(
         self: Arc<Self>,
         txn_id: TxnId,
-        bounds: Selector,
+        selector: Selector,
     ) -> TCResult<TCStream<Key>> {
-        self.schema.validate(&bounds)?;
+        self.schema.validate(&selector)?;
 
         let root = self.get_root(&txn_id).await?;
 
-        Ok(match bounds {
+        Ok(match selector {
             Selector::Key(key) => self._slice(txn_id, root, key.into()),
             Selector::Range(range, false) => self._slice(txn_id, root, range),
             Selector::Range(range, true) => self._slice_reverse(txn_id, root, range),
@@ -737,34 +728,32 @@ impl BTree {
 }
 
 #[derive(Clone)]
-pub struct BTreeRange(Bound<Vec<Value>>, Bound<Vec<Value>>);
+pub struct BTreeRange(Vec<Bound<Value>>, Vec<Bound<Value>>);
 
 impl BTreeRange {
     fn all() -> BTreeRange {
-        BTreeRange(Bound::Unbounded, Bound::Unbounded)
+        BTreeRange(vec![], vec![])
     }
 
     fn bisect(&self, keys: &[&[Value]], collator: &collator::Collator) -> (usize, usize) {
-        use Bound::*;
-        let l = match &self.0 {
-            Unbounded => 0,
-            Included(start) => collator.bisect_left(keys, &start),
-            Excluded(start) => collator.bisect_right(keys, &start),
-        };
-
-        let r = match &self.1 {
-            Unbounded => keys.len(),
-            Included(end) => collator.bisect_right(keys, &end),
-            Excluded(end) => collator.bisect_left(keys, &end),
-        };
-
-        (l, r)
+        (
+            collator.bisect_left_range(keys, &self.0),
+            collator.bisect_right_range(keys, &self.1),
+        )
     }
 }
 
 impl From<Key> for BTreeRange {
-    fn from(key: Key) -> BTreeRange {
-        BTreeRange(Bound::Included(key.clone()), Bound::Included(key))
+    fn from(mut key: Key) -> BTreeRange {
+        let start = key.iter().cloned().map(|v| Bound::Included(v)).collect();
+        let end = key.drain(..).map(|v| Bound::Included(v)).collect();
+        BTreeRange(start, end)
+    }
+}
+
+impl From<(Vec<Bound<Value>>, Vec<Bound<Value>>)> for BTreeRange {
+    fn from(params: (Vec<Bound<Value>>, Vec<Bound<Value>>)) -> BTreeRange {
+        BTreeRange(params.0, params.1)
     }
 }
 

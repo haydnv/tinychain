@@ -1,5 +1,6 @@
 use std::cmp::Ordering::{self, *};
 use std::convert::TryInto;
+use std::ops::Bound;
 
 use crate::error;
 use crate::value::class::ValueType;
@@ -29,12 +30,24 @@ impl Collator {
     }
 
     pub fn bisect_left(&self, keys: &[&[Value]], key: &[Value]) -> usize {
-        if keys.is_empty() {
+        if keys.is_empty() || key.is_empty() {
             return 0;
         }
 
-        let start_relation = self.compare(&keys[0], key);
-        let end_relation = self.compare(&keys[keys.len() - 1], key);
+        Self::_bisect_left(keys, |at| self.compare(at, key))
+    }
+
+    pub fn bisect_left_range(&self, keys: &[&[Value]], range: &[Bound<Value>]) -> usize {
+        if keys.is_empty() || range.is_empty() {
+            return 0;
+        }
+
+        Self::_bisect_left(keys, |key| self.compare_bound(key, range, Less))
+    }
+
+    fn _bisect_left<'a, F: Fn(&'a [Value]) -> Ordering>(keys: &'a [&'a [Value]], cmp: F) -> usize {
+        let start_relation = cmp(&keys[0]);
+        let end_relation = cmp(&keys[keys.len() - 1]);
         if start_relation == Greater || start_relation == Equal {
             0
         } else if end_relation == Less {
@@ -44,11 +57,11 @@ impl Collator {
             let mut end = keys.len() - 1;
             while start < end {
                 let mid = (start + end) / 2;
-                match self.compare(&keys[mid], key) {
+                match cmp(&keys[mid]) {
                     Less => start = mid,
                     Greater => end = mid,
                     Equal if mid == 0 => return 0,
-                    Equal => match self.compare(&keys[mid - 1], key) {
+                    Equal => match cmp(&keys[mid - 1]) {
                         Equal => end = mid - 1,
                         Less => start = mid,
                         Greater => panic!("Tried to collate a non-sorted Vec!"),
@@ -65,8 +78,20 @@ impl Collator {
             return 0;
         }
 
-        let start_relation = self.compare(&keys[0], key);
-        let end_relation = self.compare(&keys[keys.len() - 1], key);
+        Self::_bisect_right(keys, |at| self.compare(at, key))
+    }
+
+    pub fn bisect_right_range(&self, keys: &[&[Value]], range: &[Bound<Value>]) -> usize {
+        if keys.is_empty() || range.is_empty() {
+            return 0;
+        }
+
+        Self::_bisect_right(keys, |key| self.compare_bound(key, range, Greater))
+    }
+
+    fn _bisect_right<'a, F: Fn(&'a [Value]) -> Ordering>(keys: &'a [&'a [Value]], cmp: F) -> usize {
+        let start_relation = cmp(&keys[0]);
+        let end_relation = cmp(&keys[keys.len() - 1]);
         if start_relation == Less {
             0
         } else if end_relation == Greater || end_relation == Equal {
@@ -76,11 +101,11 @@ impl Collator {
             let mut end = keys.len() - 1;
             while start < end {
                 let mid = (start + end) / 2;
-                match self.compare(&keys[mid], key) {
+                match cmp(&keys[mid]) {
                     Less => start = mid,
                     Greater => end = mid,
                     Equal if mid == keys.len() - 1 => end = mid,
-                    Equal => match self.compare(&keys[mid + 1], key) {
+                    Equal => match cmp(&keys[mid + 1]) {
                         Greater => end = mid,
                         Equal => start = mid + 1,
                         Less => panic!("Tried to collate a non-sorted Vec!"),
@@ -99,9 +124,9 @@ impl Collator {
                     let left: Number = key1[i].clone().try_into().unwrap();
                     let right: Number = key2[i].clone().try_into().unwrap();
                     if left < right {
-                        return Ordering::Less;
+                        return Less;
                     } else if left > right {
-                        return Ordering::Greater;
+                        return Greater;
                     }
                 }
                 _ => panic!("Collator::compare does not support {}", self.schema[i]),
@@ -109,11 +134,55 @@ impl Collator {
         }
 
         if key1.is_empty() && !key2.is_empty() {
-            Ordering::Less
+            Less
         } else if !key1.is_empty() && key2.is_empty() {
-            Ordering::Greater
+            Greater
         } else {
-            Ordering::Equal
+            Equal
+        }
+    }
+
+    pub fn compare_bound(
+        &self,
+        key: &[Value],
+        range: &[Bound<Value>],
+        excluded_ordering: Ordering,
+    ) -> Ordering {
+        use Bound::*;
+
+        for i in 0..Ord::min(key.len(), range.len()) {
+            match self.schema[i] {
+                ValueType::Number(_) => match &range[i] {
+                    Unbounded => {}
+                    Included(value) => {
+                        let left: Number = key[i].clone().try_into().unwrap();
+                        let right = value.clone().try_into().unwrap();
+                        if left < right {
+                            return Less;
+                        } else if left > right {
+                            return Greater;
+                        }
+                    }
+                    Excluded(value) => {
+                        let left: Number = key[i].clone().try_into().unwrap();
+                        let right = value.clone().try_into().unwrap();
+                        if left < right {
+                            return Less;
+                        } else if left > right {
+                            return Greater;
+                        } else {
+                            return excluded_ordering;
+                        }
+                    }
+                },
+                _ => panic!("Collator::compare does not support {}", self.schema[i]),
+            }
+        }
+
+        if key.is_empty() && range.iter().filter(|b| *b != &Bound::Unbounded).count() > 0 {
+            excluded_ordering
+        } else {
+            Equal
         }
     }
 }

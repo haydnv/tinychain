@@ -12,7 +12,7 @@ use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
-use super::view::Merged;
+use super::view::{IndexSlice, Merged};
 use super::{Bounds, Column, Row, Schema, Selection, Table};
 
 #[derive(Clone)]
@@ -70,6 +70,12 @@ impl Selection for Index {
 
     fn schema(&'_ self) -> &'_ Schema {
         &self.schema
+    }
+
+    async fn slice(&self, _txn_id: TxnId, bounds: Bounds) -> TCResult<Table> {
+        self.schema.validate_bounds(&bounds)?;
+
+        Ok(IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)?.into())
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {

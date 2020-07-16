@@ -72,6 +72,10 @@ impl fmt::Display for ColumnBound {
 pub struct Bounds(HashMap<ValueId, ColumnBound>);
 
 impl Bounds {
+    pub fn get(&'_ self, name: &'_ ValueId) -> Option<&'_ ColumnBound> {
+        self.0.get(name)
+    }
+
     pub fn iter(&self) -> hash_map::Iter<ValueId, ColumnBound> {
         self.0.iter()
     }
@@ -82,6 +86,10 @@ impl Bounds {
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn remove(&mut self, name: &ValueId) -> Option<ColumnBound> {
+        self.0.remove(name)
     }
 }
 

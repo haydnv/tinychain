@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
+use std::ops::Bound;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,10 +8,11 @@ use futures::future;
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
+use crate::state::btree::{BTree, BTreeRange};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
-use super::{Bounds, Column, Row, Schema, Selection, Table};
+use super::{Bounds, Column, ColumnBound, Row, Schema, Selection, Table};
 
 #[derive(Clone)]
 pub struct ColumnSelection {
@@ -100,6 +102,90 @@ impl Selection for ColumnSelection {
 }
 
 #[derive(Clone)]
+pub struct IndexSlice {
+    source: Arc<BTree>,
+    schema: Schema,
+    bounds: Bounds,
+    range: BTreeRange,
+    reverse: bool,
+}
+
+impl IndexSlice {
+    pub fn new(source: Arc<BTree>, schema: Schema, mut bounds: Bounds) -> TCResult<IndexSlice> {
+        use Bound::*;
+        assert!(source.schema() == &schema.clone().into());
+        schema.validate_bounds(&bounds)?;
+
+        let mut start = Vec::with_capacity(bounds.len());
+        let mut end = Vec::with_capacity(bounds.len());
+        let column_names: Vec<&ValueId> = schema.column_names();
+        for name in &column_names[0..bounds.len()] {
+            let bound = bounds.remove(&name).ok_or_else(|| error::not_found(name))?;
+            match bound {
+                ColumnBound::Is(value) => {
+                    start.push(Included(value.clone()));
+                    end.push(Included(value));
+                }
+                ColumnBound::In(s, e) => {
+                    start.push(s);
+                    end.push(e);
+                }
+            }
+        }
+        let range = (start, end).into();
+
+        Ok(IndexSlice {
+            source,
+            schema,
+            bounds,
+            range,
+            reverse: false,
+        })
+    }
+}
+
+#[async_trait]
+impl Selection for IndexSlice {
+    type Stream = TCStream<Vec<Value>>;
+
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.source
+            .clone()
+            .len(txn_id, self.range.clone().into())
+            .await
+    }
+
+    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+        self.source.delete(&txn_id, self.range.into()).await
+    }
+
+    fn schema(&'_ self) -> &'_ Schema {
+        &self.schema
+    }
+
+    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
+        self.source
+            .clone()
+            .slice(txn_id, self.range.clone().into())
+            .await
+    }
+
+    async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
+        self.source
+            .update(
+                txn.id(),
+                &self.range.into(),
+                &self.schema.row_into_values(value, true)?,
+            )
+            .await
+    }
+
+    async fn validate(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
+        Err(error::not_implemented())
+    }
+}
+
+#[derive(Clone)]
 pub struct Limited {
     source: Box<Table>,
     limit: usize,
@@ -146,7 +232,7 @@ impl Selection for Limited {
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let rows = self.source.stream(txn_id).await?;
+        let rows = self.source.clone().stream(txn_id).await?;
 
         Ok(Box::pin(rows.take(self.limit)))
     }
