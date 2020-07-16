@@ -56,9 +56,29 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         Ok(Arc::new(limited))
     }
 
-    fn order_by(&self, _columns: Vec<ValueId>, _reverse: bool) -> TCResult<Table> {
-        Err(error::not_implemented())
+    async fn order_by(
+        &self,
+        txn: Arc<Txn>,
+        columns: Vec<ValueId>,
+        reverse: bool,
+    ) -> TCResult<Table> {
+        if self.schema().starts_with(&columns) {
+            if reverse {
+                self.reversed()
+            } else {
+                Ok(self.clone().into())
+            }
+        } else {
+            let index = self.index(txn, Some(columns)).await?;
+            if reverse {
+                index.reversed()
+            } else {
+                Ok(index.into())
+            }
+        }
     }
+
+    fn reversed(&self) -> TCResult<Table>;
 
     fn select(&self, columns: Vec<ValueId>) -> TCResult<view::ColumnSelection> {
         let selection = (self.clone().into(), columns).try_into()?;
@@ -136,6 +156,18 @@ impl Selection for Table {
             Self::IndexSlice(index_slice) => index_slice.delete_row(txn_id, row).await,
             Self::Merge(merged) => merged.delete_row(txn_id, row).await,
             Self::ROIndex(ro_index) => ro_index.delete_row(txn_id, row).await,
+        }
+    }
+
+    fn reversed(&self) -> TCResult<Table> {
+        match self {
+            Self::Columns(columns) => columns.reversed(),
+            Self::Limit(limited) => limited.reversed(),
+            Self::Table(table) => table.reversed(),
+            Self::Index(index) => index.reversed(),
+            Self::IndexSlice(index_slice) => index_slice.reversed(),
+            Self::Merge(merged) => merged.reversed(),
+            Self::ROIndex(ro_index) => ro_index.reversed(),
         }
     }
 

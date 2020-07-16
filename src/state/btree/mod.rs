@@ -727,7 +727,7 @@ impl BTree {
 pub struct BTreeRange(Vec<Bound<Value>>, Vec<Bound<Value>>);
 
 impl BTreeRange {
-    fn all() -> BTreeRange {
+    pub fn all() -> BTreeRange {
         BTreeRange(vec![], vec![])
     }
 

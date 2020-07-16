@@ -34,7 +34,7 @@ impl Index {
         Ok(self.btree.clone().len(txn_id, key.into()).await? > 0)
     }
 
-    pub async fn reversed(
+    pub async fn slice_reversed(
         &self,
         txn_id: TxnId,
         range: BTreeRange,
@@ -70,6 +70,10 @@ impl Selection for Index {
 
     fn schema(&'_ self) -> &'_ Schema {
         &self.schema
+    }
+
+    fn reversed(&self) -> TCResult<Table> {
+        Ok(IndexSlice::all(self.btree.clone(), self.schema.clone(), true).into())
     }
 
     async fn slice(&self, _txn_id: TxnId, bounds: Bounds) -> TCResult<Table> {
@@ -119,6 +123,7 @@ impl Selection for Index {
 #[derive(Clone)]
 pub struct ReadOnly {
     index: Index,
+    reverse: bool,
 }
 
 impl ReadOnly {
@@ -156,7 +161,10 @@ impl ReadOnly {
             btree: Arc::new(btree),
         };
 
-        Ok(ReadOnly { index })
+        Ok(ReadOnly {
+            index,
+            reverse: false,
+        })
     }
 }
 
@@ -168,6 +176,14 @@ impl Selection for ReadOnly {
         self.index.clone().count(txn_id).await
     }
 
+    fn reversed(&self) -> TCResult<Table> {
+        Ok(ReadOnly {
+            index: self.index.clone(),
+            reverse: true,
+        }
+        .into())
+    }
+
     fn schema(&'_ self) -> &'_ Schema {
         self.index.schema()
     }
@@ -177,7 +193,13 @@ impl Selection for ReadOnly {
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        self.index.clone().stream(txn_id).await
+        if self.reverse {
+            self.index.clone().stream(txn_id).await
+        } else {
+            self.index
+                .slice_reversed(txn_id, btree::BTreeRange::all())
+                .await
+        }
     }
 
     async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
@@ -358,6 +380,12 @@ impl Selection for IndexTable {
 
     fn schema(&'_ self) -> &'_ Schema {
         &self.schema
+    }
+
+    fn reversed(&self) -> TCResult<Table> {
+        Err(error::unsupported(
+            "Cannot reverse an IndexTable, consider reversing a slice of the table instead",
+        ))
     }
 
     async fn slice(&self, txn_id: TxnId, bounds: Bounds) -> TCResult<Table> {

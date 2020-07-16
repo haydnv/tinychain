@@ -72,6 +72,10 @@ impl fmt::Display for ColumnBound {
 pub struct Bounds(HashMap<ValueId, ColumnBound>);
 
 impl Bounds {
+    pub fn all() -> Bounds {
+        Bounds(HashMap::new())
+    }
+
     pub fn get(&'_ self, name: &'_ ValueId) -> Option<&'_ ColumnBound> {
         self.0.get(name)
     }
@@ -156,6 +160,17 @@ impl Schema {
 
     pub fn len(&self) -> usize {
         self.key.len() + self.value.len()
+    }
+
+    pub fn starts_with(&self, expected: &[ValueId]) -> bool {
+        let actual: Vec<&ValueId> = self.column_names();
+        for (a, e) in actual[0..expected.len()].iter().zip(expected.iter()) {
+            if a != &e {
+                return false;
+            }
+        }
+
+        true
     }
 
     pub fn subset(&self, key_columns: HashSet<&ValueId>) -> TCResult<Schema> {

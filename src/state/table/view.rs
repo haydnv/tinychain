@@ -18,6 +18,7 @@ use super::{Bounds, Column, ColumnBound, Row, Schema, Selection, Table};
 pub struct ColumnSelection {
     source: Box<Table>,
     schema: Schema,
+    columns: Vec<ValueId>,
     indices: Vec<usize>,
 }
 
@@ -55,6 +56,7 @@ impl<T: Into<Table>> TryFrom<(T, Vec<ValueId>)> for ColumnSelection {
         Ok(ColumnSelection {
             source: Box::new(source),
             schema: (vec![], schema).into(),
+            columns,
             indices,
         })
     }
@@ -66,6 +68,13 @@ impl Selection for ColumnSelection {
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.source.clone().count(txn_id).await
+    }
+
+    fn reversed(&self) -> TCResult<Table> {
+        self.source
+            .reversed()?
+            .select(self.columns.to_vec())
+            .map(|s| s.into())
     }
 
     fn schema(&'_ self) -> &'_ Schema {
@@ -111,6 +120,16 @@ pub struct IndexSlice {
 }
 
 impl IndexSlice {
+    pub fn all(source: Arc<BTree>, schema: Schema, reverse: bool) -> IndexSlice {
+        IndexSlice {
+            source,
+            schema,
+            bounds: Bounds::all(),
+            range: BTreeRange::all(),
+            reverse,
+        }
+    }
+
     pub fn new(source: Arc<BTree>, schema: Schema, mut bounds: Bounds) -> TCResult<IndexSlice> {
         use Bound::*;
         assert!(source.schema() == &schema.clone().into());
@@ -157,6 +176,12 @@ impl Selection for IndexSlice {
 
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         self.source.delete(&txn_id, self.range.into()).await
+    }
+
+    fn reversed(&self) -> TCResult<Table> {
+        let mut slice = self.clone();
+        slice.reverse = true;
+        Ok(slice.into())
     }
 
     fn schema(&'_ self) -> &'_ Schema {
@@ -227,6 +252,12 @@ impl Selection for Limited {
             .await
     }
 
+    fn reversed(&self) -> TCResult<Table> {
+        Err(error::unsupported(
+            "Cannot reverse a limited selection, consider reversing a slice before limiting",
+        ))
+    }
+
     fn schema(&'_ self) -> &'_ Schema {
         self.source.schema()
     }
@@ -265,6 +296,12 @@ pub struct Merged {
 #[async_trait]
 impl Selection for Merged {
     type Stream = TCStream<Vec<Value>>;
+
+    fn reversed(&self) -> TCResult<Table> {
+        let left = Box::new(self.left.reversed()?);
+        let right = Box::new(self.right.reversed()?);
+        Ok(Merged { left, right }.into())
+    }
 
     fn schema(&'_ self) -> &'_ Schema {
         self.left.schema()
