@@ -242,32 +242,28 @@ impl Schema {
 
     fn validate_range(&self, range: &BTreeRange) -> TCResult<()> {
         use Bound::*;
+
+        let expect = |column: &Column, value: &Value| {
+            value.expect(
+                column.dtype,
+                format!("for column {} in BTreeRange", column.name),
+            )
+        };
+
         for (i, column) in self.columns().iter().enumerate() {
             if i < range.0.len() {
                 match &range.0[i] {
                     Unbounded => {}
-                    Included(value) => value.expect(
-                        column.dtype,
-                        format!("for column {} in BTreeRange", column.name),
-                    )?,
-                    Excluded(value) => value.expect(
-                        column.dtype,
-                        format!("for column {} in BTreeRange", column.name),
-                    )?,
+                    Included(value) => expect(column, value)?,
+                    Excluded(value) => expect(column, value)?,
                 }
             }
 
             if i < range.1.len() {
                 match &range.1[i] {
                     Unbounded => {}
-                    Included(value) => value.expect(
-                        column.dtype,
-                        format!("for column {} in BTreeRange", column.name),
-                    )?,
-                    Excluded(value) => value.expect(
-                        column.dtype,
-                        format!("for column {} in BTreeRange", column.name),
-                    )?,
+                    Included(value) => expect(column, value)?,
+                    Excluded(value) => expect(column, value)?,
                 }
             }
         }
@@ -745,8 +741,8 @@ impl BTreeRange {
 
 impl From<Key> for BTreeRange {
     fn from(mut key: Key) -> BTreeRange {
-        let start = key.iter().cloned().map(|v| Bound::Included(v)).collect();
-        let end = key.drain(..).map(|v| Bound::Included(v)).collect();
+        let start = key.iter().cloned().map(Bound::Included).collect();
+        let end = key.drain(..).map(Bound::Included).collect();
         BTreeRange(start, end)
     }
 }
