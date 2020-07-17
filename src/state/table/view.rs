@@ -12,7 +12,8 @@ use crate::state::btree::{BTree, BTreeRange};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
-use super::{Bounds, Column, ColumnBound, Row, Schema, Selection, Table};
+use super::schema::{Bounds, Column, ColumnBound, Row, Schema};
+use super::{Selection, Table};
 
 #[derive(Clone)]
 pub struct ColumnSelection {

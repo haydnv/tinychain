@@ -9,15 +9,9 @@ use crate::error;
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
-mod base;
 mod index;
+mod schema;
 mod view;
-
-pub type Bounds = base::Bounds;
-pub type Column = base::Column;
-pub type ColumnBound = base::ColumnBound;
-pub type Row = base::Row;
-pub type Schema = base::Schema;
 
 #[async_trait]
 pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
@@ -39,7 +33,7 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         ))
     }
 
-    async fn delete_row(&self, _txn_id: &TxnId, _row: Row) -> TCResult<()> {
+    async fn delete_row(&self, _txn_id: &TxnId, _row: schema::Row) -> TCResult<()> {
         Err(error::unsupported("This table view does not support row deletion (try deleting from the source table directly)"))
     }
 
@@ -85,9 +79,9 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         Ok(selection)
     }
 
-    fn schema(&'_ self) -> &'_ Schema;
+    fn schema(&'_ self) -> &'_ schema::Schema;
 
-    async fn slice(&self, _txn_id: TxnId, _bounds: Bounds) -> TCResult<Table> {
+    async fn slice(&self, _txn_id: TxnId, _bounds: schema::Bounds) -> TCResult<Table> {
         Err(error::unsupported(
             "This table view does not support slicing (consider slicing the source table directly)",
         ))
@@ -95,15 +89,20 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream>;
 
-    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()>;
+    async fn validate(&self, txn_id: &TxnId, bounds: &schema::Bounds) -> TCResult<()>;
 
-    async fn update(self, _txn: Arc<Txn>, _value: Row) -> TCResult<()> {
+    async fn update(self, _txn: Arc<Txn>, _value: schema::Row) -> TCResult<()> {
         Err(error::unsupported(
             "This table view does not support updates (consider updating a slice of the source table)",
         ))
     }
 
-    async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
+    async fn update_row(
+        &self,
+        _txn_id: TxnId,
+        _row: schema::Row,
+        _value: schema::Row,
+    ) -> TCResult<()> {
         Err(error::unsupported("This table view does not support updates (consider updating a row in the source table directly)"))
     }
 }
@@ -112,7 +111,7 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
 pub enum Table {
     Columns(view::ColumnSelection),
     Limit(view::Limited),
-    Table(index::IndexTable),
+    Table(index::TableBase),
     Index(index::Index),
     IndexSlice(view::IndexSlice),
     Merge(view::Merged),
@@ -147,7 +146,7 @@ impl Selection for Table {
         }
     }
 
-    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+    async fn delete_row(&self, txn_id: &TxnId, row: schema::Row) -> TCResult<()> {
         match self {
             Self::Columns(columns) => columns.delete_row(txn_id, row).await,
             Self::Limit(limited) => limited.delete_row(txn_id, row).await,
@@ -171,7 +170,7 @@ impl Selection for Table {
         }
     }
 
-    fn schema(&'_ self) -> &'_ Schema {
+    fn schema(&'_ self) -> &'_ schema::Schema {
         match self {
             Self::Columns(columns) => columns.schema(),
             Self::Limit(limited) => limited.schema(),
@@ -183,7 +182,7 @@ impl Selection for Table {
         }
     }
 
-    async fn slice(&self, txn_id: TxnId, bounds: Bounds) -> TCResult<Table> {
+    async fn slice(&self, txn_id: TxnId, bounds: schema::Bounds) -> TCResult<Table> {
         match self {
             Self::Columns(columns) => columns.slice(txn_id, bounds).await,
             Self::Limit(limited) => limited.slice(txn_id, bounds).await,
@@ -207,7 +206,7 @@ impl Selection for Table {
         }
     }
 
-    async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
+    async fn update(self, txn: Arc<Txn>, value: schema::Row) -> TCResult<()> {
         match self {
             Self::Columns(columns) => columns.clone().update(txn, value).await,
             Self::Limit(limited) => limited.clone().update(txn, value).await,
@@ -219,7 +218,12 @@ impl Selection for Table {
         }
     }
 
-    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
+    async fn update_row(
+        &self,
+        txn_id: TxnId,
+        row: schema::Row,
+        value: schema::Row,
+    ) -> TCResult<()> {
         match self {
             Self::Columns(columns) => columns.update_row(txn_id, row, value).await,
             Self::Limit(limited) => limited.update_row(txn_id, row, value).await,
@@ -231,7 +235,7 @@ impl Selection for Table {
         }
     }
 
-    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+    async fn validate(&self, txn_id: &TxnId, bounds: &schema::Bounds) -> TCResult<()> {
         match self {
             Self::Columns(columns) => columns.validate(txn_id, bounds).await,
             Self::Limit(limited) => limited.validate(txn_id, bounds).await,
@@ -268,8 +272,8 @@ impl From<view::IndexSlice> for Table {
     }
 }
 
-impl From<index::IndexTable> for Table {
-    fn from(table: index::IndexTable) -> Table {
+impl From<index::TableBase> for Table {
+    fn from(table: index::TableBase) -> Table {
         Table::Table(table)
     }
 }

@@ -12,8 +12,9 @@ use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
+use super::schema::{Bounds, Column, Row, Schema};
 use super::view::{IndexSlice, Merged};
-use super::{Bounds, Column, Row, Schema, Selection, Table};
+use super::{Selection, Table};
 
 #[derive(Clone)]
 pub struct Index {
@@ -232,12 +233,12 @@ impl Mutate for Indices {
 }
 
 #[derive(Clone)]
-pub struct IndexTable {
+pub struct TableBase {
     indices: TxnLock<Indices>,
     schema: Schema,
 }
 
-impl IndexTable {
+impl TableBase {
     pub async fn add_index(&self, txn: Arc<Txn>, name: ValueId, key: Vec<ValueId>) -> TCResult<()> {
         let index_key_set: HashSet<&ValueId> = key.iter().collect();
         if index_key_set.len() != key.len() {
@@ -339,7 +340,7 @@ impl IndexTable {
 }
 
 #[async_trait]
-impl Selection for IndexTable {
+impl Selection for TableBase {
     type Stream = <Index as Selection>::Stream;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
@@ -384,7 +385,7 @@ impl Selection for IndexTable {
 
     fn reversed(&self) -> TCResult<Table> {
         Err(error::unsupported(
-            "Cannot reverse an IndexTable, consider reversing a slice of the table instead",
+            "Cannot reverse a Table itself, consider reversing a slice of the table instead",
         ))
     }
 
