@@ -35,6 +35,11 @@ impl Index {
         Ok(self.btree.clone().len(txn_id, key.into()).await? > 0)
     }
 
+    pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
+        self.schema.validate_bounds(&bounds)?;
+        IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)
+    }
+
     pub async fn slice_reversed(
         &self,
         txn_id: TxnId,
@@ -113,9 +118,7 @@ impl Selection for Index {
     }
 
     async fn slice(&self, _txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
-        self.schema.validate_bounds(&bounds)?;
-
-        Ok(IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)?.into())
+        self.index_slice(bounds).map(|is| is.into())
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
@@ -158,8 +161,7 @@ impl Selection for Index {
 
 #[derive(Clone)]
 pub struct ReadOnly {
-    index: Index,
-    reverse: bool,
+    index: IndexSlice,
 }
 
 impl ReadOnly {
@@ -197,10 +199,9 @@ impl ReadOnly {
             btree: Arc::new(btree),
         };
 
-        Ok(ReadOnly {
-            index,
-            reverse: false,
-        })
+        index
+            .index_slice(Bounds::all())
+            .map(|index| ReadOnly { index })
     }
 }
 
@@ -214,8 +215,7 @@ impl Selection for ReadOnly {
 
     fn reversed(&self) -> TCResult<Table> {
         Ok(ReadOnly {
-            index: self.index.clone(),
-            reverse: true,
+            index: self.index.clone().into_reversed(),
         }
         .into())
     }
@@ -224,18 +224,15 @@ impl Selection for ReadOnly {
         self.index.schema()
     }
 
-    async fn slice(&self, _txn_id: &TxnId, _bounds: Bounds) -> TCResult<Table> {
-        Err(error::not_implemented())
+    async fn slice(&self, txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
+        self.validate(txn_id, &bounds).await?;
+        self.index
+            .slice_index(bounds)
+            .map(|index| ReadOnly { index }.into())
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        if self.reverse {
-            self.index.clone().stream(txn_id).await
-        } else {
-            self.index
-                .slice_reversed(txn_id, btree::BTreeRange::all())
-                .await
-        }
+        self.index.stream(txn_id).await
     }
 
     async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {

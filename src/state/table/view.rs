@@ -146,6 +146,27 @@ impl IndexSlice {
             reverse: false,
         })
     }
+
+    pub fn into_reversed(mut self) -> IndexSlice {
+        self.reverse = !self.reverse;
+        self
+    }
+
+    pub fn slice_index(&self, bounds: Bounds) -> TCResult<IndexSlice> {
+        let schema = self.schema();
+        let outer = self.bounds.clone().try_into_btree_range(schema)?;
+        let inner = bounds.clone().try_into_btree_range(schema)?;
+        if outer.contains(&inner, schema.data_types())? {
+            let mut slice = self.clone();
+            slice.bounds = bounds;
+            Ok(slice)
+        } else {
+            Err(error::bad_request(
+                &format!("IndexSlice with bounds {} does not contain", &self.bounds),
+                bounds,
+            ))
+        }
+    }
 }
 
 #[async_trait]
@@ -164,9 +185,7 @@ impl Selection for IndexSlice {
     }
 
     fn reversed(&self) -> TCResult<Table> {
-        let mut slice = self.clone();
-        slice.reverse = true;
-        Ok(slice.into())
+        Ok(self.clone().into_reversed().into())
     }
 
     fn schema(&'_ self) -> &'_ Schema {
@@ -190,8 +209,11 @@ impl Selection for IndexSlice {
             .await
     }
 
-    async fn validate(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn validate(&self, _txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+        let schema = self.schema();
+        let outer = self.bounds.clone().try_into_btree_range(schema)?;
+        let inner = bounds.clone().try_into_btree_range(schema)?;
+        outer.contains(&inner, schema.data_types()).map(|_| ())
     }
 }
 
@@ -334,7 +356,7 @@ impl Selection for TableSlice {
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let left = Arc::new(self.table.primary(&txn_id).await?.clone());
+        let left = Arc::new(self.table.primary(&txn_id).await?);
         let right = self.table.supporting_index(&txn_id, &self.bounds).await?;
         right.validate(&txn_id, &self.bounds).await?;
 
