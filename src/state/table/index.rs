@@ -373,14 +373,6 @@ impl TableBase {
         }
     }
 
-    pub async fn stream_slice(
-        &self,
-        _txn_id: TxnId,
-        _bounds: Bounds,
-    ) -> TCResult<TCStream<Vec<Value>>> {
-        Err(error::not_implemented())
-    }
-
     async fn upsert(self, txn_id: TxnId, row: Row) -> TCResult<()> {
         self.delete_row(&txn_id, row.clone()).await?;
 
