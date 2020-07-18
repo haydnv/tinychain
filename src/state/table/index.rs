@@ -47,7 +47,7 @@ impl Index {
     }
 
     pub fn get_by_key(
-        self,
+        self: Arc<Self>,
         txn_id: TxnId,
         key: Vec<Value>,
     ) -> impl Future<Output = Option<Vec<Value>>> {
