@@ -13,7 +13,7 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
 use super::schema::{Bounds, Column, Row, Schema};
-use super::view::{IndexSlice, Merged};
+use super::view::{IndexSlice, TableSlice};
 use super::{Selection, Table};
 
 #[derive(Clone)]
@@ -77,7 +77,7 @@ impl Selection for Index {
         Ok(IndexSlice::all(self.btree.clone(), self.schema.clone(), true).into())
     }
 
-    async fn slice(&self, _txn_id: TxnId, bounds: Bounds) -> TCResult<Table> {
+    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
         self.schema.validate_bounds(&bounds)?;
 
         Ok(IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)?.into())
@@ -189,7 +189,7 @@ impl Selection for ReadOnly {
         self.index.schema()
     }
 
-    async fn slice(&self, _txn_id: TxnId, _bounds: Bounds) -> TCResult<Table> {
+    fn slice(&self, _bounds: Bounds) -> TCResult<Table> {
         Err(error::not_implemented())
     }
 
@@ -239,6 +239,32 @@ pub struct TableBase {
 }
 
 impl TableBase {
+    pub async fn primary<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<Index> {
+        self.indices.read(txn_id).await.map(|i| i.primary.clone())
+    }
+
+    pub async fn supporting_index<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        bounds: &'a Bounds,
+    ) -> TCResult<Index> {
+        let indices = self.indices.read(txn_id).await?;
+        if indices.primary.validate(txn_id, bounds).await.is_ok() {
+            return Ok(indices.primary.clone());
+        }
+
+        for index in indices.auxiliary.values() {
+            if index.validate(txn_id, bounds).await.is_ok() {
+                return Ok(index.clone());
+            }
+        }
+
+        Err(error::bad_request(
+            "This table has no index which supports bounds",
+            bounds,
+        ))
+    }
+
     pub async fn add_index(&self, txn: Arc<Txn>, name: ValueId, key: Vec<ValueId>) -> TCResult<()> {
         let index_key_set: HashSet<&ValueId> = key.iter().collect();
         if index_key_set.len() != key.len() {
@@ -389,23 +415,8 @@ impl Selection for TableBase {
         ))
     }
 
-    async fn slice(&self, txn_id: TxnId, bounds: Bounds) -> TCResult<Table> {
-        let indices = self.indices.read(&txn_id).await?;
-        if indices.primary.validate(&txn_id, &bounds).await.is_ok() {
-            return indices.primary.clone().slice(txn_id, bounds).await;
-        }
-
-        for index in indices.auxiliary.values() {
-            if index.validate(&txn_id, &bounds).await.is_ok() {
-                let index_slice = index.clone().slice(txn_id, bounds).await?;
-                return Ok(Merged::from((self.clone().into(), index_slice)).into());
-            }
-        }
-
-        Err(error::bad_request(
-            "This table has no index which supports these bounds",
-            bounds,
-        ))
+    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+        TableSlice::new(self.clone(), bounds).map(|t| t.into())
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {

@@ -12,6 +12,7 @@ use crate::state::btree::{BTree, BTreeRange};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
+use super::index::TableBase;
 use super::schema::{Bounds, Column, ColumnBound, Row, Schema};
 use super::{Selection, Table};
 
@@ -289,54 +290,81 @@ impl Selection for Limited {
 }
 
 #[derive(Clone)]
-pub struct Merged {
-    left: Box<Table>,
-    right: Box<Table>,
+pub struct TableSlice {
+    table: TableBase,
+    bounds: Bounds,
+    reversed: bool,
+}
+
+impl TableSlice {
+    pub fn new(table: TableBase, bounds: Bounds) -> TCResult<TableSlice> {
+        Ok(TableSlice {
+            table,
+            bounds,
+            reversed: false,
+        })
+    }
 }
 
 #[async_trait]
-impl Selection for Merged {
-    type Stream = TCStream<Vec<Value>>;
+impl Selection for TableSlice {
+    type Stream = <Table as Selection>::Stream;
+
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        let index = self.table.supporting_index(&txn_id, &self.bounds).await?;
+        index.slice(self.bounds.clone())?.count(txn_id).await
+    }
+
+    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+        let schema = self.schema().clone();
+        self.stream(txn_id.clone())
+            .await?
+            .map(|row| schema.values_into_row(row))
+            .map_ok(|row| self.delete_row(&txn_id, row))
+            .try_buffer_unordered(2)
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
+    }
+
+    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+        self.table.delete_row(txn_id, row).await
+    }
 
     fn reversed(&self) -> TCResult<Table> {
-        let left = Box::new(self.left.reversed()?);
-        let right = Box::new(self.right.reversed()?);
-        Ok(Merged { left, right }.into())
+        let mut selection = self.clone();
+        selection.reversed = true;
+        Ok(selection.into())
     }
 
     fn schema(&'_ self) -> &'_ Schema {
-        self.left.schema()
+        self.table.schema()
+    }
+
+    fn slice(&self, _bounds: Bounds) -> TCResult<Table> {
+        Err(error::not_implemented())
     }
 
     async fn stream(&self, _txn_id: TxnId) -> TCResult<Self::Stream> {
         Err(error::not_implemented())
     }
 
-    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        self.left.validate(txn_id, bounds).await
+    async fn validate(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
+        Err(error::not_implemented())
     }
 
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
-        let source = self.left.clone();
-        let schema = source.schema().clone();
         let txn_id = txn.id().clone();
+        let schema = self.schema().clone();
         self.stream(txn_id.clone())
             .await?
-            .map(|row| {
-                Ok(source.update_row(txn_id.clone(), schema.values_into_row(row)?, value.clone()))
-            })
-            .try_buffer_unordered(2u32 as usize)
+            .map(|row| schema.values_into_row(row))
+            .map_ok(|row| self.update_row(txn_id.clone(), row, value.clone()))
+            .try_buffer_unordered(2)
             .fold(Ok(()), |_, r| future::ready(r))
             .await
     }
-}
 
-impl From<(Table, Table)> for Merged {
-    fn from(tables: (Table, Table)) -> Merged {
-        let (left, right) = tables;
-        Merged {
-            left: Box::new(left),
-            right: Box::new(right),
-        }
+    async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
+        Err(error::not_implemented())
     }
 }

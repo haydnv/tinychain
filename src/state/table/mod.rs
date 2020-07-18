@@ -81,7 +81,7 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
 
     fn schema(&'_ self) -> &'_ schema::Schema;
 
-    async fn slice(&self, _txn_id: TxnId, _bounds: schema::Bounds) -> TCResult<Table> {
+    fn slice(&self, _bounds: schema::Bounds) -> TCResult<Table> {
         Err(error::unsupported(
             "This table view does not support slicing (consider slicing the source table directly)",
         ))
@@ -114,8 +114,8 @@ pub enum Table {
     Table(index::TableBase),
     Index(index::Index),
     IndexSlice(view::IndexSlice),
-    Merge(view::Merged),
     ROIndex(index::ReadOnly),
+    TableSlice(view::TableSlice),
 }
 
 #[async_trait]
@@ -129,8 +129,8 @@ impl Selection for Table {
             Self::Table(table) => table.count(txn_id).await,
             Self::Index(index) => index.count(txn_id).await,
             Self::IndexSlice(index_slice) => index_slice.count(txn_id).await,
-            Self::Merge(merged) => merged.count(txn_id).await,
             Self::ROIndex(ro_index) => ro_index.count(txn_id).await,
+            Self::TableSlice(table_slice) => table_slice.count(txn_id).await,
         }
     }
 
@@ -141,8 +141,8 @@ impl Selection for Table {
             Self::Table(table) => table.clone().delete(txn_id).await,
             Self::Index(index) => index.clone().delete(txn_id).await,
             Self::IndexSlice(index_slice) => index_slice.clone().delete(txn_id).await,
-            Self::Merge(merged) => merged.clone().delete(txn_id).await,
             Self::ROIndex(ro_index) => ro_index.clone().delete(txn_id).await,
+            Self::TableSlice(table_slice) => table_slice.clone().delete(txn_id).await,
         }
     }
 
@@ -153,8 +153,8 @@ impl Selection for Table {
             Self::Table(table) => table.delete_row(txn_id, row).await,
             Self::Index(index) => index.delete_row(txn_id, row).await,
             Self::IndexSlice(index_slice) => index_slice.delete_row(txn_id, row).await,
-            Self::Merge(merged) => merged.delete_row(txn_id, row).await,
             Self::ROIndex(ro_index) => ro_index.delete_row(txn_id, row).await,
+            Self::TableSlice(table_slice) => table_slice.delete_row(txn_id, row).await,
         }
     }
 
@@ -165,8 +165,8 @@ impl Selection for Table {
             Self::Table(table) => table.reversed(),
             Self::Index(index) => index.reversed(),
             Self::IndexSlice(index_slice) => index_slice.reversed(),
-            Self::Merge(merged) => merged.reversed(),
             Self::ROIndex(ro_index) => ro_index.reversed(),
+            Self::TableSlice(table_slice) => table_slice.reversed(),
         }
     }
 
@@ -177,20 +177,20 @@ impl Selection for Table {
             Self::Table(table) => table.schema(),
             Self::Index(index) => index.schema(),
             Self::IndexSlice(index_slice) => index_slice.schema(),
-            Self::Merge(merged) => merged.schema(),
             Self::ROIndex(ro_index) => ro_index.schema(),
+            Self::TableSlice(table_slice) => table_slice.schema(),
         }
     }
 
-    async fn slice(&self, txn_id: TxnId, bounds: schema::Bounds) -> TCResult<Table> {
+    fn slice(&self, bounds: schema::Bounds) -> TCResult<Table> {
         match self {
-            Self::Columns(columns) => columns.slice(txn_id, bounds).await,
-            Self::Limit(limited) => limited.slice(txn_id, bounds).await,
-            Self::Table(table) => table.slice(txn_id, bounds).await,
-            Self::Index(index) => index.slice(txn_id, bounds).await,
-            Self::IndexSlice(index_slice) => index_slice.slice(txn_id, bounds).await,
-            Self::Merge(merged) => merged.slice(txn_id, bounds).await,
-            Self::ROIndex(ro_index) => ro_index.slice(txn_id, bounds).await,
+            Self::Columns(columns) => columns.slice(bounds),
+            Self::Limit(limited) => limited.slice(bounds),
+            Self::Table(table) => table.slice(bounds),
+            Self::Index(index) => index.slice(bounds),
+            Self::IndexSlice(index_slice) => index_slice.slice(bounds),
+            Self::ROIndex(ro_index) => ro_index.slice(bounds),
+            Self::TableSlice(table_slice) => table_slice.slice(bounds),
         }
     }
 
@@ -201,8 +201,8 @@ impl Selection for Table {
             Self::Table(table) => table.clone().stream(txn_id).await,
             Self::Index(index) => index.clone().stream(txn_id).await,
             Self::IndexSlice(index_slice) => index_slice.clone().stream(txn_id).await,
-            Self::Merge(merged) => merged.clone().stream(txn_id).await,
             Self::ROIndex(ro_index) => ro_index.clone().stream(txn_id).await,
+            Self::TableSlice(table_slice) => table_slice.clone().stream(txn_id).await,
         }
     }
 
@@ -213,8 +213,8 @@ impl Selection for Table {
             Self::Table(table) => table.clone().update(txn, value).await,
             Self::Index(index) => index.clone().update(txn, value).await,
             Self::IndexSlice(index_slice) => index_slice.clone().update(txn, value).await,
-            Self::Merge(merged) => merged.clone().update(txn, value).await,
             Self::ROIndex(ro_index) => ro_index.update(txn, value).await,
+            Self::TableSlice(table_slice) => table_slice.update(txn, value).await,
         }
     }
 
@@ -230,8 +230,8 @@ impl Selection for Table {
             Self::Table(table) => table.update_row(txn_id, row, value).await,
             Self::Index(index) => index.update_row(txn_id, row, value).await,
             Self::IndexSlice(index_slice) => index_slice.update_row(txn_id, row, value).await,
-            Self::Merge(merged) => merged.update_row(txn_id, row, value).await,
             Self::ROIndex(ro_index) => ro_index.update_row(txn_id, row, value).await,
+            Self::TableSlice(table_slice) => table_slice.update_row(txn_id, row, value).await,
         }
     }
 
@@ -242,8 +242,8 @@ impl Selection for Table {
             Self::Table(table) => table.validate(txn_id, bounds).await,
             Self::Index(index) => index.validate(txn_id, bounds).await,
             Self::IndexSlice(index_slice) => index_slice.validate(txn_id, bounds).await,
-            Self::Merge(merged) => merged.validate(txn_id, bounds).await,
             Self::ROIndex(ro_index) => ro_index.validate(txn_id, bounds).await,
+            Self::TableSlice(table_slice) => table_slice.validate(txn_id, bounds).await,
         }
     }
 }
@@ -278,14 +278,14 @@ impl From<index::TableBase> for Table {
     }
 }
 
-impl From<view::Merged> for Table {
-    fn from(merged: view::Merged) -> Table {
-        Table::Merge(merged)
-    }
-}
-
 impl From<index::ReadOnly> for Table {
     fn from(ro_index: index::ReadOnly) -> Table {
         Table::ROIndex(ro_index)
+    }
+}
+
+impl From<view::TableSlice> for Table {
+    fn from(table_slice: view::TableSlice) -> Table {
+        Table::TableSlice(table_slice)
     }
 }
