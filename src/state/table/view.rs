@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future;
-use futures::stream::{StreamExt, TryStreamExt};
+use futures::stream::{Stream, StreamExt, TryStreamExt};
 
 use crate::error;
 use crate::state::btree::{BTree, BTreeRange};
@@ -175,7 +176,7 @@ impl Selection for IndexSlice {
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
         self.source
             .clone()
-            .slice(txn_id, self.range.clone().into())
+            .slice(txn_id.clone(), self.range.clone().into())
             .await
     }
 
@@ -291,7 +292,7 @@ impl TableSlice {
 
 #[async_trait]
 impl Selection for TableSlice {
-    type Stream = <Table as Selection>::Stream;
+    type Stream = Pin<Box<dyn Stream<Item = Vec<Value>> + Send + Sync + Unpin>>;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         let index = self.table.supporting_index(&txn_id, &self.bounds).await?;
@@ -332,8 +333,19 @@ impl Selection for TableSlice {
         self.table.slice(txn_id, bounds).await
     }
 
-    async fn stream(&self, _txn_id: TxnId) -> TCResult<Self::Stream> {
-        Err(error::not_implemented())
+    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
+        let left = self.table.primary(&txn_id).await?;
+        let right = self.table.supporting_index(&txn_id, &self.bounds).await?;
+        right.validate(&txn_id, &self.bounds).await?;
+
+        let rows = right
+            .stream(txn_id.clone())
+            .await?
+            .then(move |key| left.clone().get_by_key(txn_id.clone(), key))
+            .filter(|row| future::ready(row.is_some()))
+            .map(|row| row.unwrap());
+
+        Ok(Box::pin(rows))
     }
 
     async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
@@ -355,7 +367,7 @@ impl Selection for TableSlice {
             .await
     }
 
-    async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
+        self.table.update_row(txn_id, row, value).await
     }
 }

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{self, try_join_all};
+use futures::future::{self, try_join_all, Future};
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
@@ -44,6 +44,24 @@ impl Index {
             .clone()
             .slice(txn_id, btree::Selector::reverse(range))
             .await
+    }
+
+    pub fn get_by_key(
+        self,
+        txn_id: TxnId,
+        key: Vec<Value>,
+    ) -> impl Future<Output = Option<Vec<Value>>> {
+        Box::pin(async move {
+            match self
+                .btree
+                .clone()
+                .slice(txn_id, btree::Selector::Key(key))
+                .await
+            {
+                Ok(mut rows) => rows.next().await,
+                Err(_) => None,
+            }
+        })
     }
 
     async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
