@@ -131,6 +131,17 @@ impl TryFrom<Value> for Number {
     }
 }
 
+impl<'a> TryFrom<&'a Value> for &'a Number {
+    type Error = error::TCError;
+
+    fn try_from(v: &'a Value) -> TCResult<&'a Number> {
+        match v {
+            Value::Number(n) => Ok(n),
+            other => Err(error::bad_request("Expected Number but found", other)),
+        }
+    }
+}
+
 impl<E: Into<error::TCError>, T: TryFrom<Value, Error = E>> TryFrom<Value> for Vec<T> {
     type Error = error::TCError;
 

@@ -80,6 +80,29 @@ impl Bounds {
         self.0.get(name)
     }
 
+    pub fn try_into_btree_range(mut self, schema: &Schema) -> TCResult<btree::BTreeRange> {
+        let mut start = Vec::with_capacity(self.len());
+        let mut end = Vec::with_capacity(self.len());
+        let column_names: Vec<&ValueId> = schema.column_names();
+
+        use Bound::*;
+        for name in &column_names[0..self.len()] {
+            let bound = self.remove(&name).ok_or_else(|| error::not_found(name))?;
+            match bound {
+                ColumnBound::Is(value) => {
+                    start.push(Included(value.clone()));
+                    end.push(Included(value));
+                }
+                ColumnBound::In(s, e) => {
+                    start.push(s);
+                    end.push(e);
+                }
+            }
+        }
+
+        Ok((start, end).into())
+    }
+
     pub fn iter(&self) -> hash_map::Iter<ValueId, ColumnBound> {
         self.0.iter()
     }
@@ -130,6 +153,14 @@ impl Schema {
             .iter()
             .map(|c| &c.name)
             .chain(self.value.iter().map(|c| &c.name))
+            .collect()
+    }
+
+    pub fn data_types(&self) -> Vec<ValueType> {
+        self.key
+            .iter()
+            .map(|c| c.dtype)
+            .chain(self.value.iter().map(|c| c.dtype))
             .collect()
     }
 

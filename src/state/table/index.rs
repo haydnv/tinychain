@@ -50,6 +50,23 @@ impl Index {
         let key = self.schema().row_into_values(row, reject_extra_columns)?;
         self.btree.insert(txn_id, key).await
     }
+
+    pub fn validate_bounds(&self, outer: Bounds, inner: Bounds) -> TCResult<()> {
+        self.schema.validate_bounds(&outer)?;
+        self.schema.validate_bounds(&inner)?;
+
+        let outer = outer.try_into_btree_range(self.schema())?;
+        let inner = inner.try_into_btree_range(self.schema())?;
+        let dtypes = self.schema.data_types();
+        if outer.contains(&inner, dtypes)? {
+            Ok(())
+        } else {
+            Err(error::bad_request(
+                "Slice does not contain requested bounds",
+                "",
+            ))
+        }
+    }
 }
 
 #[async_trait]
@@ -77,7 +94,7 @@ impl Selection for Index {
         Ok(IndexSlice::all(self.btree.clone(), self.schema.clone(), true).into())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+    async fn slice(&self, _txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
         self.schema.validate_bounds(&bounds)?;
 
         Ok(IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)?.into())
@@ -189,7 +206,7 @@ impl Selection for ReadOnly {
         self.index.schema()
     }
 
-    fn slice(&self, _bounds: Bounds) -> TCResult<Table> {
+    async fn slice(&self, _txn_id: &TxnId, _bounds: Bounds) -> TCResult<Table> {
         Err(error::not_implemented())
     }
 
@@ -415,8 +432,10 @@ impl Selection for TableBase {
         ))
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
-        TableSlice::new(self.clone(), bounds).map(|t| t.into())
+    async fn slice(&self, txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
+        TableSlice::new(self.clone(), txn_id, bounds)
+            .await
+            .map(|t| t.into())
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {

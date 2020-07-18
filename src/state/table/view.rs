@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
-use std::ops::Bound;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,7 +12,7 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
 use super::index::TableBase;
-use super::schema::{Bounds, Column, ColumnBound, Row, Schema};
+use super::schema::{Bounds, Column, Row, Schema};
 use super::{Selection, Table};
 
 #[derive(Clone)]
@@ -132,28 +131,11 @@ impl IndexSlice {
         }
     }
 
-    pub fn new(source: Arc<BTree>, schema: Schema, mut bounds: Bounds) -> TCResult<IndexSlice> {
-        use Bound::*;
+    pub fn new(source: Arc<BTree>, schema: Schema, bounds: Bounds) -> TCResult<IndexSlice> {
         assert!(source.schema() == &schema.clone().into());
         schema.validate_bounds(&bounds)?;
 
-        let mut start = Vec::with_capacity(bounds.len());
-        let mut end = Vec::with_capacity(bounds.len());
-        let column_names: Vec<&ValueId> = schema.column_names();
-        for name in &column_names[0..bounds.len()] {
-            let bound = bounds.remove(&name).ok_or_else(|| error::not_found(name))?;
-            match bound {
-                ColumnBound::Is(value) => {
-                    start.push(Included(value.clone()));
-                    end.push(Included(value));
-                }
-                ColumnBound::In(s, e) => {
-                    start.push(s);
-                    end.push(e);
-                }
-            }
-        }
-        let range = (start, end).into();
+        let range: BTreeRange = bounds.clone().try_into_btree_range(&schema)?;
 
         Ok(IndexSlice {
             source,
@@ -297,7 +279,8 @@ pub struct TableSlice {
 }
 
 impl TableSlice {
-    pub fn new(table: TableBase, bounds: Bounds) -> TCResult<TableSlice> {
+    pub async fn new(table: TableBase, txn_id: &TxnId, bounds: Bounds) -> TCResult<TableSlice> {
+        table.validate(txn_id, &bounds).await?;
         Ok(TableSlice {
             table,
             bounds,
@@ -312,7 +295,11 @@ impl Selection for TableSlice {
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         let index = self.table.supporting_index(&txn_id, &self.bounds).await?;
-        index.slice(self.bounds.clone())?.count(txn_id).await
+        index
+            .slice(&txn_id, self.bounds.clone())
+            .await?
+            .count(txn_id)
+            .await
     }
 
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
@@ -340,16 +327,20 @@ impl Selection for TableSlice {
         self.table.schema()
     }
 
-    fn slice(&self, _bounds: Bounds) -> TCResult<Table> {
-        Err(error::not_implemented())
+    async fn slice(&self, txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
+        self.validate(txn_id, &bounds).await?;
+        self.table.slice(txn_id, bounds).await
     }
 
     async fn stream(&self, _txn_id: TxnId) -> TCResult<Self::Stream> {
         Err(error::not_implemented())
     }
 
-    async fn validate(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+        let index = self.table.supporting_index(txn_id, &self.bounds).await?;
+        index
+            .validate_bounds(self.bounds.clone(), bounds.clone())
+            .map(|_| ())
     }
 
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {

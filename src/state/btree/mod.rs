@@ -361,6 +361,10 @@ impl BTree {
         })
     }
 
+    pub fn collator(&'_ self) -> &'_ collator::Collator {
+        &self.collator
+    }
+
     pub fn schema(&'_ self) -> &'_ Schema {
         &self.schema
     }
@@ -736,6 +740,68 @@ impl BTreeRange {
             collator.bisect_left_range(keys, &self.0),
             collator.bisect_right_range(keys, &self.1),
         )
+    }
+
+    pub fn contains(&self, other: &BTreeRange, schema: Vec<ValueType>) -> TCResult<bool> {
+        if other.0.len() < self.0.len() {
+            return Ok(false);
+        }
+
+        if other.1.len() < self.1.len() {
+            return Ok(false);
+        }
+
+        use collator::compare_value;
+        use Bound::*;
+        use Ordering::*;
+
+        for (dtype, (outer, inner)) in schema[0..self.0.len()]
+            .iter()
+            .zip(self.0.iter().zip(other.0[0..self.0.len()].iter()))
+        {
+            match (outer, inner) {
+                (Unbounded, _) => {}
+                (_, Unbounded) => return Ok(false),
+                (Excluded(o), Excluded(i)) if compare_value(&o, &i, *dtype)? == Greater => {
+                    return Ok(false)
+                }
+                (Included(o), Included(i)) if compare_value(&o, &i, *dtype)? == Greater => {
+                    return Ok(false)
+                }
+                (Included(o), Excluded(i)) if compare_value(&o, &i, *dtype)? == Greater => {
+                    return Ok(false)
+                }
+                (Excluded(o), Included(i)) if compare_value(&o, &i, *dtype)? != Less => {
+                    return Ok(false)
+                }
+                _ => {}
+            }
+        }
+
+        for (dtype, (outer, inner)) in schema[0..self.1.len()]
+            .iter()
+            .zip(self.1.iter().zip(other.1[0..self.1.len()].iter()))
+        {
+            match (outer, inner) {
+                (Unbounded, _) => {}
+                (_, Unbounded) => return Ok(false),
+                (Excluded(o), Excluded(i)) if compare_value(&o, &i, *dtype)? == Less => {
+                    return Ok(false)
+                }
+                (Included(o), Included(i)) if compare_value(&o, &i, *dtype)? == Less => {
+                    return Ok(false)
+                }
+                (Included(o), Excluded(i)) if compare_value(&o, &i, *dtype)? == Less => {
+                    return Ok(false)
+                }
+                (Excluded(o), Included(i)) if compare_value(&o, &i, *dtype)? != Greater => {
+                    return Ok(false)
+                }
+                _ => {}
+            }
+        }
+
+        Ok(true)
     }
 }
 

@@ -81,7 +81,7 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
 
     fn schema(&'_ self) -> &'_ schema::Schema;
 
-    fn slice(&self, _bounds: schema::Bounds) -> TCResult<Table> {
+    async fn slice(&self, _txn_id: &TxnId, _bounds: schema::Bounds) -> TCResult<Table> {
         Err(error::unsupported(
             "This table view does not support slicing (consider slicing the source table directly)",
         ))
@@ -182,15 +182,15 @@ impl Selection for Table {
         }
     }
 
-    fn slice(&self, bounds: schema::Bounds) -> TCResult<Table> {
+    async fn slice(&self, txn_id: &TxnId, bounds: schema::Bounds) -> TCResult<Table> {
         match self {
-            Self::Columns(columns) => columns.slice(bounds),
-            Self::Limit(limited) => limited.slice(bounds),
-            Self::Table(table) => table.slice(bounds),
-            Self::Index(index) => index.slice(bounds),
-            Self::IndexSlice(index_slice) => index_slice.slice(bounds),
-            Self::ROIndex(ro_index) => ro_index.slice(bounds),
-            Self::TableSlice(table_slice) => table_slice.slice(bounds),
+            Self::Columns(columns) => columns.slice(txn_id, bounds).await,
+            Self::Limit(limited) => limited.slice(txn_id, bounds).await,
+            Self::Table(table) => table.slice(txn_id, bounds).await,
+            Self::Index(index) => index.slice(txn_id, bounds).await,
+            Self::IndexSlice(index_slice) => index_slice.slice(txn_id, bounds).await,
+            Self::ROIndex(ro_index) => ro_index.slice(txn_id, bounds).await,
+            Self::TableSlice(table_slice) => table_slice.slice(txn_id, bounds).await,
         }
     }
 

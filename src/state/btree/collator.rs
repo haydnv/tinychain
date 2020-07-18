@@ -3,8 +3,27 @@ use std::convert::TryInto;
 use std::ops::Bound;
 
 use crate::error;
-use crate::value::class::ValueType;
+use crate::value::class::{Impl, ValueType};
 use crate::value::{Number, TCResult, Value};
+
+pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {
+    left.expect(dtype, "for collation")?;
+    right.expect(dtype, "for collation")?;
+    match dtype {
+        ValueType::Number(_) => {
+            let left: &Number = left.try_into()?;
+            let right: &Number = right.try_into()?;
+            if left > right {
+                Ok(Greater)
+            } else if left < right {
+                Ok(Less)
+            } else {
+                Ok(Equal)
+            }
+        }
+        other => Err(error::bad_request("Collator does not support", other)),
+    }
+}
 
 pub struct Collator {
     schema: Vec<ValueType>,
