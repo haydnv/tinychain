@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::error;
 use crate::internal::hostfs;
 use crate::internal::lock::RwLock;
-use crate::transaction::lock::{Mutate, TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
+use crate::transaction::lock::{Mutable, Mutate, TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
@@ -107,27 +107,12 @@ impl<T: BlockData> Mutate for T {
     }
 }
 
-struct BlockList(HashSet<BlockId>);
-
-#[async_trait]
-impl Mutate for BlockList {
-    type Pending = HashSet<BlockId>;
-
-    fn diverge(&self, _txn_id: &TxnId) -> HashSet<BlockId> {
-        self.0.clone()
-    }
-
-    async fn converge(&mut self, other: HashSet<BlockId>) {
-        self.0 = other
-    }
-}
-
 pub struct File<T: BlockData> {
     dir: RwLock<hostfs::Dir>,
     pending: RwLock<hostfs::Dir>,
-    listing: TxnLock<BlockList>,
+    listing: TxnLock<Mutable<HashSet<BlockId>>>,
     cache: RwLock<HashMap<BlockId, TxnLock<T>>>,
-    mutated: TxnLock<BlockList>,
+    mutated: TxnLock<Mutable<HashSet<BlockId>>>,
 }
 
 impl<T: BlockData> File<T> {
@@ -143,9 +128,9 @@ impl<T: BlockData> File<T> {
         Ok(Arc::new(File {
             dir,
             pending: lock.create_dir(TXN_CACHE.parse()?)?,
-            listing: TxnLock::new(txn_id.clone(), BlockList(HashSet::new())),
+            listing: TxnLock::new(txn_id.clone(), HashSet::new().into()),
             cache: RwLock::new(HashMap::new()),
-            mutated: TxnLock::new(txn_id, BlockList(HashSet::new())),
+            mutated: TxnLock::new(txn_id, HashSet::new().into()),
         }))
     }
 
@@ -270,7 +255,7 @@ impl<T: BlockData> File<T> {
 impl<T: BlockData> Transact for File<T> {
     async fn commit(&self, txn_id: &TxnId) {
         let new_listing = self.listing.read(txn_id).await.unwrap();
-        let old_listing = &self.listing.canonical().0;
+        let old_listing = self.listing.canonical().value();
 
         let mut dir = self.dir.write().await;
         for block_id in old_listing.difference(&new_listing) {

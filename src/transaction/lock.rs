@@ -22,6 +22,35 @@ pub trait Mutate: Send + Sync {
     async fn converge(&mut self, new_value: Self::Pending);
 }
 
+pub struct Mutable<T: Clone + Send + Sync> {
+    value: T,
+}
+
+impl<T: Clone + Send + Sync> Mutable<T> {
+    pub fn value(&'_ self) -> &'_ T {
+        &self.value
+    }
+}
+
+#[async_trait]
+impl<T: Clone + Send + Sync> Mutate for Mutable<T> {
+    type Pending = T;
+
+    fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
+        self.value.clone()
+    }
+
+    async fn converge(&mut self, new_value: Self::Pending) {
+        self.value = new_value;
+    }
+}
+
+impl<T: Clone + Send + Sync> From<T> for Mutable<T> {
+    fn from(value: T) -> Mutable<T> {
+        Mutable { value }
+    }
+}
+
 pub struct TxnLockReadGuard<T: Mutate> {
     txn_id: TxnId,
     lock: TxnLock<T>,

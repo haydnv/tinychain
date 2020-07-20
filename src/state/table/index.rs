@@ -8,7 +8,7 @@ use futures::stream::{StreamExt, TryStreamExt};
 use crate::error;
 use crate::state::btree::{self, BTree, BTreeRange, Key};
 use crate::state::dir::Dir;
-use crate::transaction::lock::{Mutate, TxnLock};
+use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
@@ -240,26 +240,11 @@ impl Selection for ReadOnly {
     }
 }
 
-struct Indices(BTreeMap<ValueId, Index>);
-
-#[async_trait]
-impl Mutate for Indices {
-    type Pending = BTreeMap<ValueId, Index>;
-
-    fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
-        self.0.clone()
-    }
-
-    async fn converge(&mut self, other: Self::Pending) {
-        self.0 = other
-    }
-}
-
 #[derive(Clone)]
 pub struct TableBase {
     dir: Arc<Dir>,
     primary: Index,
-    auxiliary: TxnLock<Indices>,
+    auxiliary: TxnLock<Mutable<BTreeMap<ValueId, Index>>>,
     schema: Schema,
 }
 

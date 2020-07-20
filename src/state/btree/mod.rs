@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::error;
 use crate::state::file::{Block, BlockData, BlockId, BlockMut, BlockOwned, File};
-use crate::transaction::lock::{Mutate, TxnLock};
+use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::{Impl, ValueClass, ValueType};
 use crate::value::{TCResult, TCStream, Value, ValueId};
@@ -98,22 +98,6 @@ impl fmt::Display for Node {
 
 pub type Key = Vec<Value>;
 type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Sync + Unpin>>>;
-
-#[derive(Clone)]
-struct BTreeRoot(NodeId);
-
-#[async_trait]
-impl Mutate for BTreeRoot {
-    type Pending = NodeId;
-
-    fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
-        self.0.clone()
-    }
-
-    async fn converge(&mut self, new_value: Self::Pending) {
-        self.0 = new_value;
-    }
-}
 
 #[derive(Eq, PartialEq)]
 pub struct Column {
@@ -256,7 +240,7 @@ pub struct BTree {
     schema: Schema,
     order: usize,
     collator: collator::Collator,
-    root: TxnLock<BTreeRoot>,
+    root: TxnLock<Mutable<NodeId>>,
 }
 
 impl BTree {
@@ -311,7 +295,7 @@ impl BTree {
             schema,
             order,
             collator,
-            root: TxnLock::new(txn_id, BTreeRoot(root)),
+            root: TxnLock::new(txn_id, root.into()),
         })
     }
 
