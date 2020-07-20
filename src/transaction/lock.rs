@@ -28,6 +28,10 @@ pub struct TxnLockReadGuard<T: Mutate> {
 }
 
 impl<T: Mutate> TxnLockReadGuard<T> {
+    pub fn txn_id(&'_ self) -> &'_ TxnId {
+        &self.txn_id
+    }
+
     pub fn upgrade(self) -> TxnLockWriteFuture<T> {
         TxnLockWriteFuture {
             txn_id: self.txn_id.clone(),

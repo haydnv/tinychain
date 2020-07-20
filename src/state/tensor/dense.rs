@@ -446,7 +446,7 @@ impl BlockTensorView for BlockTensor {
                     let (block_offsets, new_start) =
                         block_offsets(&af_indices, &af_offsets, num_coords, start, block_id);
 
-                    match this.file.clone().get_block(&txn_id, &block_id.into()).await {
+                    match this.file.clone().get_block(&txn_id, block_id.into()).await {
                         Ok(block) => {
                             let array: &Array = block.deref().try_into().unwrap();
                             values.extend(array.get(block_offsets));
@@ -500,10 +500,9 @@ impl BlockTensorView for BlockTensor {
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, num_coords, start, block_id);
 
-                        let block_id: BlockId = block_id.into();
                         let mut block = this
                             .file
-                            .get_block(&txn_id, &block_id)
+                            .get_block(&txn_id, block_id.into())
                             .await?
                             .upgrade()
                             .await?;
@@ -554,10 +553,9 @@ impl BlockTensorView for BlockTensor {
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, num_coords, start, block_id);
 
-                        let block_id: BlockId = block_id.into();
                         let mut block = this
                             .file
-                            .get_block(&txn_id, &block_id)
+                            .get_block(&txn_id, block_id.into())
                             .await?
                             .upgrade()
                             .await?;

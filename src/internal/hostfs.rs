@@ -1,4 +1,5 @@
 use std::collections::hash_map::{Entry, HashMap};
+use std::ops::DerefMut;
 use std::path::PathBuf;
 
 use bytes::Bytes;
@@ -53,6 +54,21 @@ impl Dir {
                 entry.insert(DirEntry::Block(block.clone()));
                 Ok(block)
             }
+        }
+    }
+
+    pub async fn create_or_get_block(
+        &mut self,
+        name: &PathSegment,
+        data: Bytes,
+    ) -> TCResult<RwLock<Bytes>> {
+        match self.get_block(name) {
+            Ok(Some(block)) => {
+                *(block.write().await.deref_mut()) = data;
+                Ok(block)
+            }
+            Err(cause) => Err(cause),
+            Ok(None) => self.create_block(name.clone(), data),
         }
     }
 

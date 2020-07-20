@@ -22,13 +22,18 @@ pub type BlockId = PathSegment;
 
 pub struct Block<'a, T: BlockData> {
     file: &'a File<T>,
+    block_id: BlockId,
     lock: TxnLockReadGuard<T>,
 }
 
 impl<'a, T: BlockData> Block<'a, T> {
     pub async fn upgrade(self) -> TCResult<BlockMut<'a, T>> {
+        self.file
+            .mutate(self.lock.txn_id().clone(), self.block_id.clone())
+            .await?;
         Ok(BlockMut {
             file: self.file,
+            block_id: self.block_id,
             lock: self.lock.upgrade().await?,
         })
     }
@@ -44,6 +49,7 @@ impl<'a, T: BlockData> Deref for Block<'a, T> {
 
 pub struct BlockMut<'a, T: BlockData> {
     file: &'a File<T>,
+    block_id: BlockId,
     lock: TxnLockWriteGuard<T>,
 }
 
@@ -51,6 +57,7 @@ impl<'a, T: BlockData> BlockMut<'a, T> {
     pub async fn downgrade(self, txn_id: &'a TxnId) -> TCResult<Block<'a, T>> {
         Ok(Block {
             file: self.file,
+            block_id: self.block_id,
             lock: self.lock.downgrade(txn_id).await?,
         })
     }
@@ -71,7 +78,6 @@ impl<'a, T: BlockData> DerefMut for BlockMut<'a, T> {
 }
 
 pub struct BlockOwned<T: BlockData> {
-    file: Arc<File<T>>,
     lock: TxnLockReadGuard<T>,
 }
 
@@ -121,6 +127,7 @@ pub struct File<T: BlockData> {
     pending: RwLock<hostfs::Dir>,
     listing: TxnLock<BlockList>,
     cache: RwLock<HashMap<BlockId, TxnLock<T>>>,
+    mutated: TxnLock<BlockList>,
 }
 
 impl<T: BlockData> File<T> {
@@ -136,8 +143,9 @@ impl<T: BlockData> File<T> {
         Ok(Arc::new(File {
             dir,
             pending: lock.create_dir(TXN_CACHE.parse()?)?,
-            listing: TxnLock::new(txn_id, BlockList(HashSet::new())),
+            listing: TxnLock::new(txn_id.clone(), BlockList(HashSet::new())),
             cache: RwLock::new(HashMap::new()),
+            mutated: TxnLock::new(txn_id, BlockList(HashSet::new())),
         }))
     }
 
@@ -158,12 +166,17 @@ impl<T: BlockData> File<T> {
             .map(|block_ids| block_ids.clone())
     }
 
-    pub async fn create_block<'a>(
-        &'a self,
+    async fn mutate(&self, txn_id: TxnId, block_id: BlockId) -> TCResult<()> {
+        self.mutated.write(txn_id).await?.insert(block_id);
+        Ok(())
+    }
+
+    pub async fn create_block(
+        &self,
         txn_id: TxnId,
         block_id: BlockId,
         data: T,
-    ) -> TCResult<Block<'a, T>> {
+    ) -> TCResult<Block<'_, T>> {
         if block_id.to_string() == TXN_CACHE {
             return Err(error::bad_request("This name is reserved", block_id));
         }
@@ -182,25 +195,24 @@ impl<T: BlockData> File<T> {
             .await
             .insert(block_id.clone(), txn_lock.clone());
         let lock = txn_lock.read(&txn_id).await?;
-        Ok(Block { file: self, lock })
+        Ok(Block {
+            file: self,
+            block_id,
+            lock,
+        })
     }
 
     pub async fn get_block<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        block_id: &'a BlockId,
-    ) -> TCResult<Block<'a, T>> {
-        let lock = self.lock_block(txn_id, block_id).await?;
-        Ok(Block { file: self, lock })
-    }
-
-    pub async fn get_block_with_id<'a>(
-        &'a self,
-        txn_id: TxnId,
         block_id: BlockId,
     ) -> TCResult<Block<'a, T>> {
-        let lock = self.lock_block(&txn_id, &block_id).await?;
-        Ok(Block { file: self, lock })
+        let lock = self.lock_block(txn_id, &block_id).await?;
+        Ok(Block {
+            file: self,
+            block_id,
+            lock,
+        })
     }
 
     pub async fn get_block_owned(
@@ -209,7 +221,7 @@ impl<T: BlockData> File<T> {
         block_id: BlockId,
     ) -> TCResult<BlockOwned<T>> {
         let lock = self.lock_block(&txn_id, &block_id).await?;
-        Ok(BlockOwned { file: self, lock })
+        Ok(BlockOwned { lock })
     }
 
     async fn lock_block(
@@ -265,16 +277,47 @@ impl<T: BlockData> Transact for File<T> {
             dir.delete_block(block_id).unwrap();
         }
 
-        // TODO: sync cache to pending dir
+        self.listing.commit(txn_id).await;
+
+        let mut mutated: Vec<BlockId> = self
+            .mutated
+            .write(txn_id.clone())
+            .await
+            .unwrap()
+            .drain()
+            .collect();
+        self.mutated.commit(txn_id).await;
 
         let mut pending = self.pending.write().await;
         let txn_dir_id: PathSegment = txn_id.clone().into();
-        if let Some(txn_dir) = pending.get_dir(&txn_dir_id).unwrap() {
-            dir.move_all(txn_dir.write().await.deref_mut()).unwrap();
+        if mutated.is_empty() {
             pending.delete_dir(&txn_dir_id).unwrap();
-        };
+            return;
+        }
 
-        self.listing.commit(txn_id).await;
+        let cache = self.cache.read().await;
+        let mut txn_dir = pending
+            .create_or_get_dir(&txn_dir_id)
+            .unwrap()
+            .write()
+            .await;
+
+        // TODO: run these copy ops in parallel
+        for block_id in mutated.drain(..) {
+            if let Some(lock) = cache.get(&block_id) {
+                txn_dir
+                    .create_or_get_block(
+                        &block_id,
+                        lock.read(txn_id).await.unwrap().deref().clone().into(),
+                    )
+                    .await
+                    .unwrap();
+                lock.commit(txn_id).await;
+            }
+        }
+
+        dir.move_all(txn_dir.deref_mut()).unwrap();
+        pending.delete_dir(&txn_dir_id).unwrap();
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
