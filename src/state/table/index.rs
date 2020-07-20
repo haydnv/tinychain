@@ -23,7 +23,7 @@ pub struct Index {
 }
 
 impl Index {
-    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+    pub async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
         self.btree.is_empty(txn_id).await
     }
 
@@ -69,7 +69,7 @@ impl Index {
         })
     }
 
-    async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
+    async fn insert(&self, txn_id: TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
         let key = self.schema().row_into_values(row, reject_extra_columns)?;
         self.btree.insert(txn_id, key).await
     }
@@ -175,7 +175,7 @@ impl ReadOnly {
             .subcontext_tmp()
             .await?
             .context()
-            .create_file(txn.id().clone(), "index".parse()?)
+            .create_btree(txn.id().clone(), "index".parse()?)
             .await?;
 
         let (schema, btree) = if let Some(columns) = key_columns {
@@ -184,13 +184,13 @@ impl ReadOnly {
             let btree = BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
 
             let rows = source.select(columns)?.stream(txn.id().clone()).await?;
-            btree.insert_from(txn.id(), rows).await?;
+            btree.insert_from(txn.id().clone(), rows).await?;
             (schema, btree)
         } else {
             let schema = source.schema().clone();
             let btree = BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
             let rows = source.stream(txn.id().clone()).await?;
-            btree.insert_from(txn.id(), rows).await?;
+            btree.insert_from(txn.id().clone(), rows).await?;
             (schema, btree)
         };
 
@@ -240,39 +240,32 @@ impl Selection for ReadOnly {
     }
 }
 
-#[derive(Clone)]
-struct Indices {
-    dir: Arc<Dir>,
-    primary: Index,
-    auxiliary: BTreeMap<ValueId, Index>,
-}
-
-impl Indices {
-    fn len(&self) -> usize {
-        self.auxiliary.len() + 1
-    }
-}
+struct Indices(BTreeMap<ValueId, Index>);
 
 #[async_trait]
 impl Mutate for Indices {
-    fn diverge(&self, _txn_id: &TxnId) -> Self {
-        self.clone()
+    type Pending = BTreeMap<ValueId, Index>;
+
+    fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
+        self.0.clone()
     }
 
-    async fn converge(&mut self, new: Indices) {
-        self.auxiliary = new.auxiliary;
+    async fn converge(&mut self, other: Self::Pending) {
+        self.0 = other
     }
 }
 
 #[derive(Clone)]
 pub struct TableBase {
-    indices: TxnLock<Indices>,
+    dir: Arc<Dir>,
+    primary: Index,
+    auxiliary: TxnLock<Indices>,
     schema: Schema,
 }
 
 impl TableBase {
-    pub async fn primary<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<Index> {
-        self.indices.read(txn_id).await.map(|i| i.primary.clone())
+    pub fn primary(&'_ self) -> &'_ Index {
+        &self.primary
     }
 
     pub async fn supporting_index<'a>(
@@ -280,12 +273,11 @@ impl TableBase {
         txn_id: &'a TxnId,
         bounds: &'a Bounds,
     ) -> TCResult<Index> {
-        let indices = self.indices.read(txn_id).await?;
-        if indices.primary.validate(txn_id, bounds).await.is_ok() {
-            return Ok(indices.primary.clone());
+        if self.primary.validate(txn_id, bounds).await.is_ok() {
+            return Ok(self.primary.clone());
         }
 
-        for index in indices.auxiliary.values() {
+        for index in self.auxiliary.read(txn_id).await?.values() {
             if index.validate(txn_id, bounds).await.is_ok() {
                 return Ok(index.clone());
             }
@@ -309,7 +301,7 @@ impl TableBase {
             ));
         }
 
-        let indices = self.indices.read(txn.id()).await?;
+        let mut auxiliary = self.auxiliary.write(txn.id().clone()).await?;
 
         let columns: HashMap<ValueId, Column> = self.schema().clone().into();
         let key: Vec<Column> = key
@@ -325,16 +317,16 @@ impl TableBase {
             .collect();
         let schema: Schema = (key, values).into();
 
-        let btree_file = indices
+        let btree_file = self
             .dir
-            .create_file(txn.id().clone(), name.clone())
+            .create_btree(txn.id().clone(), name.clone())
             .await?;
         let btree = Arc::new(
             btree::BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?,
         );
         btree
             .insert_from(
-                txn.id(),
+                txn.id().clone(),
                 self.clone()
                     .select(schema.clone().into())?
                     .stream(txn.id().clone())
@@ -343,32 +335,22 @@ impl TableBase {
             .await?;
 
         let index = Index { btree, schema };
-        if let Ok(mut indices) = indices.upgrade().await {
-            if indices.auxiliary.contains_key(&name) {
-                indices.dir.delete_file(txn.id().clone(), &name).await?;
-                Err(error::bad_request(
-                    "This table already has an index named",
-                    name,
-                ))
-            } else {
-                indices.auxiliary.insert(name, index);
-                Ok(())
-            }
+        if auxiliary.contains_key(&name) {
+            self.dir.delete_file(txn.id().clone(), &name).await?;
+            Err(error::bad_request(
+                "This table already has an index named",
+                name,
+            ))
         } else {
-            self.indices
-                .read(txn.id())
-                .await?
-                .dir
-                .delete_file(txn.id().clone(), &name)
-                .await?;
-            Err(error::conflict())
+            auxiliary.insert(name, index);
+            Ok(())
         }
     }
 
     pub async fn remove_index(&self, txn_id: TxnId, name: &ValueId) -> TCResult<()> {
-        let mut indices = self.indices.write(txn_id.clone()).await?;
-        match indices.auxiliary.remove(name) {
-            Some(_index) => indices.dir.clone().delete_file(txn_id, name).await,
+        let mut auxiliary = self.auxiliary.write(txn_id.clone()).await?;
+        match auxiliary.remove(name) {
+            Some(_index) => self.dir.clone().delete_file(txn_id, name).await,
             None => Err(error::not_found(name)),
         }
     }
@@ -376,13 +358,13 @@ impl TableBase {
     async fn upsert(self, txn_id: TxnId, row: Row) -> TCResult<()> {
         self.delete_row(&txn_id, row.clone()).await?;
 
-        let indices = self.indices.read(&txn_id).await?;
+        let auxiliary = self.auxiliary.read(&txn_id).await?;
 
-        let mut inserts = Vec::with_capacity(indices.len());
-        for index in indices.auxiliary.values() {
-            inserts.push(index.insert(&txn_id, row.clone(), false));
+        let mut inserts = Vec::with_capacity(auxiliary.len() + 1);
+        for index in auxiliary.values() {
+            inserts.push(index.insert(txn_id.clone(), row.clone(), false));
         }
-        inserts.push(indices.primary.insert(&txn_id, row, true));
+        inserts.push(self.primary.insert(txn_id, row, true));
 
         try_join_all(inserts).await?;
         Ok(())
@@ -394,22 +376,16 @@ impl Selection for TableBase {
     type Stream = <Index as Selection>::Stream;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.indices
-            .read(&txn_id)
-            .await?
-            .primary
-            .clone()
-            .count(txn_id)
-            .await
+        self.primary.count(txn_id).await
     }
 
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
-        let indices = self.indices.read(&txn_id).await?;
-        let mut deletes = Vec::with_capacity(indices.len());
-        for index in indices.auxiliary.values() {
+        let auxiliary = self.auxiliary.read(&txn_id).await?;
+        let mut deletes = Vec::with_capacity(auxiliary.len() + 1);
+        for index in auxiliary.values() {
             deletes.push(index.clone().delete(txn_id.clone()));
         }
-        deletes.push(indices.primary.clone().delete(txn_id));
+        deletes.push(self.primary.delete(txn_id));
 
         try_join_all(deletes).await?;
         Ok(())
@@ -418,12 +394,12 @@ impl Selection for TableBase {
     async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
         self.schema().validate_row(&row)?;
 
-        let indices = self.indices.read(txn_id).await?;
-        let mut deletes = Vec::with_capacity(indices.len());
-        for index in indices.auxiliary.values() {
+        let auxiliary = self.auxiliary.read(txn_id).await?;
+        let mut deletes = Vec::with_capacity(auxiliary.len() + 1);
+        for index in auxiliary.values() {
             deletes.push(index.delete_row(txn_id, row.clone()));
         }
-        deletes.push(indices.primary.delete_row(txn_id, row));
+        deletes.push(self.primary.delete_row(txn_id, row));
         try_join_all(deletes).await?;
 
         Ok(())
@@ -446,23 +422,16 @@ impl Selection for TableBase {
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        self.indices
-            .read(&txn_id)
-            .await?
-            .primary
-            .clone()
-            .stream(txn_id)
-            .await
+        self.primary.stream(txn_id).await
     }
 
     async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        let indices = self.indices.read(txn_id).await?;
-
-        if indices.primary.validate(txn_id, bounds).await.is_ok() {
+        if self.primary.validate(txn_id, bounds).await.is_ok() {
             return Ok(());
         }
 
-        for index in indices.auxiliary.values() {
+        let auxiliary = self.auxiliary.read(txn_id).await?;
+        for index in auxiliary.values() {
             if index.validate(txn_id, bounds).await.is_ok() {
                 return Ok(());
             }

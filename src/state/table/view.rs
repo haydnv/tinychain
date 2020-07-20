@@ -356,7 +356,7 @@ impl Selection for TableSlice {
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let left = Arc::new(self.table.primary(&txn_id).await?);
+        let left = Arc::new(self.table.primary().clone());
         let right = self.table.supporting_index(&txn_id, &self.bounds).await?;
         right.validate(&txn_id, &self.bounds).await?;
 

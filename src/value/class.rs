@@ -1,7 +1,7 @@
 use std::fmt;
 use std::ops::{Add, Mul};
 
-use serde::ser::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error;
 
@@ -75,7 +75,7 @@ pub trait NumberImpl: ValueImpl + Add + Mul + Sized + PartialOrd + From<bool> {
     type Class: NumberClass;
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Deserialize, Serialize)]
 pub enum ComplexType {
     C32,
     C64,
@@ -111,7 +111,7 @@ impl fmt::Display for ComplexType {
     }
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Deserialize, Serialize)]
 pub enum FloatType {
     F32,
     F64,
@@ -148,7 +148,7 @@ impl fmt::Display for FloatType {
     }
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Deserialize, Serialize)]
 pub enum IntType {
     I16,
     I32,
@@ -188,7 +188,7 @@ impl fmt::Display for IntType {
     }
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Deserialize, Serialize)]
 pub enum UIntType {
     U8,
     U16,
@@ -231,7 +231,7 @@ impl fmt::Display for UIntType {
     }
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Deserialize, Serialize)]
 pub enum NumberType {
     Bool,
     Complex(ComplexType),

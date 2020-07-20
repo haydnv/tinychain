@@ -15,9 +15,11 @@ use super::{Transact, TxnId};
 
 #[async_trait]
 pub trait Mutate: Send + Sync {
-    fn diverge(&self, txn_id: &TxnId) -> Self;
+    type Pending: Send + Sync;
 
-    async fn converge(&mut self, new_value: Self);
+    fn diverge(&self, txn_id: &TxnId) -> Self::Pending;
+
+    async fn converge(&mut self, new_value: Self::Pending);
 }
 
 pub struct TxnLockReadGuard<T: Mutate> {
@@ -35,9 +37,9 @@ impl<T: Mutate> TxnLockReadGuard<T> {
 }
 
 impl<T: Mutate> Deref for TxnLockReadGuard<T> {
-    type Target = T;
+    type Target = <T as Mutate>::Pending;
 
-    fn deref(&self) -> &T {
+    fn deref(&self) -> &<T as Mutate>::Pending {
         unsafe {
             &*self
                 .lock
@@ -87,9 +89,9 @@ impl<T: Mutate> TxnLockWriteGuard<T> {
 }
 
 impl<T: Mutate> Deref for TxnLockWriteGuard<T> {
-    type Target = T;
+    type Target = <T as Mutate>::Pending;
 
-    fn deref(&self) -> &T {
+    fn deref(&self) -> &<T as Mutate>::Pending {
         unsafe {
             &*self
                 .lock
@@ -105,7 +107,7 @@ impl<T: Mutate> Deref for TxnLockWriteGuard<T> {
 }
 
 impl<T: Mutate> DerefMut for TxnLockWriteGuard<T> {
-    fn deref_mut(&mut self) -> &mut T {
+    fn deref_mut(&mut self) -> &mut <T as Mutate>::Pending {
         unsafe {
             &mut *self
                 .lock
@@ -144,7 +146,7 @@ struct LockState {
 struct Inner<T: Mutate> {
     state: LockState,
     value: UnsafeCell<T>,
-    value_at: BTreeMap<TxnId, UnsafeCell<T>>,
+    value_at: BTreeMap<TxnId, UnsafeCell<<T as Mutate>::Pending>>,
 }
 
 pub struct TxnLock<T: Mutate> {
@@ -178,6 +180,10 @@ impl<T: Mutate> TxnLock<T> {
         TxnLock {
             inner: Arc::new(Mutex::new(inner)),
         }
+    }
+
+    pub fn canonical(&'_ self) -> &'_ T {
+        unsafe { self.inner.lock().unwrap().value.get().as_ref().unwrap() }
     }
 
     pub fn try_read(&self, txn_id: &TxnId) -> TCResult<Option<TxnLockReadGuard<T>>> {

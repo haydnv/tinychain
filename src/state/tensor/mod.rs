@@ -1,9 +1,11 @@
+mod array;
 mod base;
 mod bounds;
-mod chunk;
 mod dense;
 mod sparse;
 mod stream;
+
+pub type Array = array::Array;
 
 pub enum Tensor {
     Dense(dense::BlockTensor),

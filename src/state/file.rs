@@ -1,126 +1,80 @@
-use std::collections::hash_map::{Entry, HashMap};
-use std::collections::HashSet;
-use std::fmt;
+use std::collections::{HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::executor::block_on;
-use futures::future::{join_all, FutureExt};
-use futures::join;
-use futures::lock::Mutex;
 use uuid::Uuid;
 
 use crate::error;
-use crate::internal::cache;
+use crate::internal::hostfs;
 use crate::internal::lock::RwLock;
-use crate::transaction::lock::{Mutate, TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
+use crate::transaction::lock::{Mutate, TxnLock, TxnLockReadGuard};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
-const TXN_CACHE: &str = ".txn_cache";
+const ERR_CORRUPT: &str = "Data corruption error detected! Please file a bug report.";
+const TXN_CACHE: &str = ".pending";
 
 pub type BlockId = PathSegment;
 
-pub struct Block {
-    file: Arc<File>,
-    cached: RwLock<cache::Block>,
-}
-
-impl Block {
-    pub async fn as_bytes(&self) -> Bytes {
-        Bytes::copy_from_slice(self.cached.read().await.as_bytes().await)
-    }
-
-    pub async fn rewrite(&self, new_contents: Bytes) {
-        self.cached.write().await.rewrite(new_contents).await
-    }
+pub trait Block:
+    Clone + Send + Sync + TryFrom<Bytes, Error = error::TCError> + Into<Bytes>
+{
 }
 
 #[async_trait]
-impl Mutate for Block {
-    fn diverge(&self, txn_id: &TxnId) -> Self {
-        let cached = block_on(self.cached.read());
-        block_on(
-            self.file
-                .clone()
-                .version(cached.name().clone(), txn_id.clone()),
-        )
-    }
+impl<T: Block> Mutate for T {
+    type Pending = Self;
 
-    async fn converge(&mut self, other: Block) {
-        let (mut this, that) = join!(self.cached.write(), other.cached.read());
-        this.copy_from(&that).await;
-    }
-}
-
-#[derive(Clone)]
-struct FileContents(HashMap<BlockId, TxnLock<Block>>);
-
-#[async_trait]
-impl<'a> Mutate for FileContents {
     fn diverge(&self, _txn_id: &TxnId) -> Self {
         self.clone()
     }
 
-    async fn converge(&mut self, mut new_value: FileContents) {
-        let existing: HashSet<BlockId> = self.0.keys().cloned().collect();
-        let new: HashSet<BlockId> = new_value.0.keys().cloned().collect();
-        let deleted = existing.difference(&new);
-
-        self.0.extend(new_value.0.drain());
-
-        for name in deleted {
-            self.0.remove(name);
-        }
+    async fn converge(&mut self, other: Self) {
+        *self = other;
     }
 }
 
-pub struct File {
-    cache: RwLock<cache::Dir>,
-    txn_cache: RwLock<cache::Dir>,
-    contents: TxnLock<FileContents>,
-    mutated: Mutex<HashMap<TxnId, HashSet<BlockId>>>,
-}
+struct BlockList(HashSet<BlockId>);
 
-impl File {
-    async fn version(self: Arc<Self>, name: BlockId, txn_id: TxnId) -> Block {
-        let cache = self.cache.read();
-        let txn_cache = self
-            .txn_cache
-            .write()
-            .then(|mut lock| lock.create_or_get_dir(&txn_id.into()).unwrap().write());
-        let (cache, mut txn_cache) = join!(cache, txn_cache);
+#[async_trait]
+impl Mutate for BlockList {
+    type Pending = HashSet<BlockId>;
 
-        let block_to_cache = cache.get_block(&name).unwrap().unwrap();
-        let cached_block = txn_cache.create_block(name, Bytes::new()).unwrap();
-        let (block_to_cache_reader, mut cached_block_writer) =
-            join!(block_to_cache.read(), cached_block.write());
-        cached_block_writer.copy_from(&*block_to_cache_reader).await;
-
-        Block {
-            file: self,
-            cached: cached_block,
-        }
+    fn diverge(&self, _txn_id: &TxnId) -> HashSet<BlockId> {
+        self.0.clone()
     }
 
-    pub async fn create(txn_id: TxnId, cache: RwLock<cache::Dir>) -> TCResult<Arc<File>> {
-        let mut cache_lock = cache.write().await;
-        if !cache_lock.is_empty() {
+    async fn converge(&mut self, other: HashSet<BlockId>) {
+        self.0 = other
+    }
+}
+
+pub struct File<T: Block> {
+    dir: RwLock<hostfs::Dir>,
+    pending: RwLock<hostfs::Dir>,
+    listing: TxnLock<BlockList>,
+    cache: RwLock<HashMap<BlockId, TxnLock<T>>>,
+}
+
+impl<T: Block> File<T> {
+    pub async fn create(txn_id: TxnId, dir: RwLock<hostfs::Dir>) -> TCResult<Arc<File<T>>> {
+        let mut lock = dir.write().await;
+        if !lock.is_empty() {
             return Err(error::bad_request(
                 "Tried to create a new File but there is already data in the cache!",
                 "(filesystem cache)",
             ));
         }
 
-        let txn_cache = cache_lock.create_dir(TXN_CACHE.parse()?)?;
-
         Ok(Arc::new(File {
-            cache,
-            txn_cache,
-            contents: TxnLock::new(txn_id, FileContents(HashMap::new())),
-            mutated: Mutex::new(HashMap::new()),
+            dir,
+            pending: lock.create_dir(TXN_CACHE.parse()?)?,
+            listing: TxnLock::new(txn_id, BlockList(HashSet::new())),
+            cache: RwLock::new(HashMap::new()),
         }))
     }
 
@@ -134,122 +88,110 @@ impl File {
         }
     }
 
-    async fn block_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<BlockId>> {
-        Ok(self
-            .contents
+    async fn block_ids(&'_ self, txn_id: &'_ TxnId) -> TCResult<HashSet<BlockId>> {
+        self.listing
             .read(txn_id)
-            .await?
-            .0
-            .keys()
-            .cloned()
-            .collect())
-    }
-
-    pub async fn contains_block(&self, txn_id: &TxnId, block_id: &BlockId) -> TCResult<bool> {
-        Ok(self.contents.read(txn_id).await?.0.contains_key(block_id))
+            .await
+            .map(|block_ids| block_ids.clone())
     }
 
     pub async fn create_block(
-        self: Arc<Self>,
-        txn_id: &TxnId,
+        &self,
+        txn_id: TxnId,
         block_id: BlockId,
-        initial_value: Bytes,
-    ) -> TCResult<TxnLockReadGuard<Block>> {
+        data: T,
+    ) -> TCResult<TxnLockReadGuard<T>> {
         if block_id.to_string() == TXN_CACHE {
             return Err(error::bad_request("This name is reserved", block_id));
         }
 
-        let contents = &mut self.contents.write(txn_id.clone()).await?.0;
-        match contents.entry(block_id) {
-            Entry::Occupied(entry) => Err(error::bad_request(
-                "This file already has a block at",
-                entry.key(),
-            )),
-            Entry::Vacant(entry) => {
-                let block = self
-                    .cache
-                    .write()
-                    .await
-                    .create_block(entry.key().clone(), initial_value)?;
-                let block = Block {
-                    file: self,
-                    cached: block,
-                };
-                entry
-                    .insert(TxnLock::new(txn_id.clone(), block))
-                    .read(txn_id)
-                    .await
-            }
+        let mut listing = self.listing.write(txn_id.clone()).await?;
+        if listing.contains(&block_id) {
+            return Err(error::bad_request(
+                "There is already a block called",
+                block_id,
+            ));
         }
+        listing.insert(block_id.clone());
+        let txn_lock = TxnLock::new(txn_id.clone(), data);
+        self.cache
+            .write()
+            .await
+            .insert(block_id.clone(), txn_lock.clone());
+        txn_lock.read(&txn_id).await
     }
 
     pub async fn get_block(
-        &self,
-        txn_id: &TxnId,
-        block_id: &BlockId,
-    ) -> TCResult<Option<TxnLockReadGuard<Block>>> {
-        let contents = &self.contents.read(txn_id).await?.0;
-        match contents.get(block_id) {
-            Some(block) => Ok(Some(block.read(txn_id).await?)),
-            None => Ok(None),
-        }
-    }
-
-    pub async fn get_block_mut(
-        &self,
-        txn_id: &TxnId,
+        self: Arc<Self>,
+        txn_id: TxnId,
         block_id: BlockId,
-    ) -> TCResult<Option<TxnLockWriteGuard<Block>>> {
-        let contents = &self.contents.read(txn_id).await?.0;
-        match contents.get(&block_id) {
-            Some(block) => {
-                self.mutated
-                    .lock()
-                    .await
-                    .entry(txn_id.clone())
-                    .or_insert_with(HashSet::new)
-                    .insert(block_id);
+    ) -> TCResult<TxnLockReadGuard<T>> {
+        if let Some(block) = self.cache.read().await.get(&block_id) {
+            block.read(&txn_id).await
+        } else if self.listing.read(&txn_id).await?.contains(&block_id) {
+            let block =
+                if let Some(txn_dir) = self.pending.read().await.get_dir(&txn_id.clone().into())? {
+                    if let Some(block) = txn_dir.read().await.get_block(&block_id)? {
+                        block
+                    } else {
+                        self.dir
+                            .read()
+                            .await
+                            .get_block(&block_id)?
+                            .ok_or_else(|| error::internal(ERR_CORRUPT))?
+                    }
+                } else {
+                    self.dir
+                        .read()
+                        .await
+                        .get_block(&block_id)?
+                        .ok_or_else(|| error::internal(ERR_CORRUPT))?
+                };
 
-                Ok(Some(block.write(txn_id.clone()).await?))
-            }
-            None => Ok(None),
+            let block = block.read().await;
+            let txn_lock = TxnLock::new(txn_id.clone(), (*block).clone().try_into()?);
+            let block = txn_lock.read(&txn_id).await?;
+            self.cache.write().await.insert(block_id, txn_lock);
+            Ok(block)
+        } else {
+            Err(error::not_found(block_id))
         }
     }
 
     pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
-        Ok(self.contents.read(txn_id).await?.0.is_empty())
+        Ok(self.listing.read(txn_id).await?.is_empty())
     }
 }
 
 #[async_trait]
-impl Transact for File {
+impl<T: Block> Transact for File<T> {
     async fn commit(&self, txn_id: &TxnId) {
-        let contents = &self.contents.read(txn_id).await.unwrap().0;
-        if let Some(mut mutated) = self.mutated.lock().await.remove(txn_id) {
-            let mut commits = Vec::with_capacity(mutated.len());
-            for block_id in mutated.drain() {
-                commits.push(contents.get(&block_id).unwrap().commit(txn_id));
-            }
+        let new_listing = self.listing.read(txn_id).await.unwrap();
+        let old_listing = &self.listing.canonical().0;
 
-            join_all(commits).await;
+        let mut dir = self.dir.write().await;
+        for block_id in old_listing.difference(&new_listing) {
+            dir.delete_block(block_id).unwrap();
         }
+
+        // TODO: sync cache to pending dir
+
+        let mut pending = self.pending.write().await;
+        let txn_dir_id: PathSegment = txn_id.clone().into();
+        if let Some(txn_dir) = pending.get_dir(&txn_dir_id).unwrap() {
+            dir.move_all(txn_dir.write().await.deref_mut()).unwrap();
+            pending.delete_dir(&txn_dir_id).unwrap();
+        };
+
+        self.listing.commit(txn_id).await;
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        let contents = &self.contents.read(txn_id).await.unwrap().0;
-        if let Some(mut mutated) = self.mutated.lock().await.remove(txn_id) {
-            let mut rollbacks = Vec::with_capacity(mutated.len());
-            for block_id in mutated.drain() {
-                rollbacks.push(contents.get(&block_id).unwrap().rollback(txn_id));
-            }
-
-            join_all(rollbacks).await;
-        }
-    }
-}
-
-impl fmt::Display for File {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "(file)")
+        self.pending
+            .write()
+            .await
+            .delete_dir(&txn_id.clone().into())
+            .unwrap();
+        self.listing.rollback(txn_id).await;
     }
 }

@@ -1,6 +1,7 @@
 use std::collections::hash_map::{Entry, HashMap};
 use std::collections::HashSet;
 use std::fmt;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -8,8 +9,10 @@ use futures::future::BoxFuture;
 use uuid::Uuid;
 
 use crate::error;
-use crate::internal::cache;
+use crate::internal::hostfs;
 use crate::internal::lock::RwLock;
+use crate::state::btree;
+use crate::state::tensor;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
@@ -20,48 +23,43 @@ use super::file::File;
 #[derive(Clone)]
 enum DirEntry {
     Dir(Arc<Dir>),
-    File(Arc<File>),
+    BTree(Arc<File<btree::Node>>),
+    Tensor(Arc<File<tensor::Array>>),
 }
 
 impl fmt::Display for DirEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             DirEntry::Dir(_) => write!(f, "(directory)"),
-            DirEntry::File(_) => write!(f, "(file)"),
+            DirEntry::BTree(_) => write!(f, "(BTree file)"),
+            DirEntry::Tensor(_) => write!(f, "(Tensor file)"),
         }
     }
 }
 
-#[derive(Clone)]
 struct DirContents(HashMap<PathSegment, DirEntry>);
 
 #[async_trait]
 impl Mutate for DirContents {
-    fn diverge(&self, _txn_id: &TxnId) -> Self {
-        self.clone()
+    type Pending = HashMap<PathSegment, DirEntry>;
+
+    fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
+        self.0.clone()
     }
 
-    async fn converge(&mut self, mut new_value: DirContents) {
-        let existing: HashSet<PathSegment> = self.0.keys().cloned().collect();
-        let new: HashSet<PathSegment> = new_value.0.keys().cloned().collect();
-        let deleted = existing.difference(&new);
-
-        self.0.extend(new_value.0.drain());
-
-        for name in deleted {
-            self.0.remove(name);
-        }
+    async fn converge(&mut self, other: Self::Pending) {
+        self.0 = other;
     }
 }
 
 pub struct Dir {
-    cache: RwLock<cache::Dir>,
+    cache: RwLock<hostfs::Dir>,
     temporary: bool,
     contents: TxnLock<DirContents>,
 }
 
 impl Dir {
-    pub fn create(txn_id: TxnId, cache: RwLock<cache::Dir>, temporary: bool) -> Arc<Dir> {
+    pub fn create(txn_id: TxnId, cache: RwLock<hostfs::Dir>, temporary: bool) -> Arc<Dir> {
         Arc::new(Dir {
             cache,
             temporary,
@@ -84,14 +82,14 @@ impl Dir {
             .contents
             .read(txn_id)
             .await?
-            .0
+            .deref()
             .keys()
             .cloned()
             .collect())
     }
 
     pub async fn delete_file<'a>(&'a self, txn_id: TxnId, name: &'a PathSegment) -> TCResult<()> {
-        self.contents.write(txn_id).await?.0.remove(&name);
+        self.contents.write(txn_id).await?.deref_mut().remove(&name);
         Ok(())
     }
 
@@ -104,7 +102,7 @@ impl Dir {
             if path.is_empty() {
                 Err(error::bad_request("Cannot get Dir at empty path", path))
             } else if path.len() == 1 {
-                if let Some(entry) = self.contents.read(txn_id).await?.0.get(&path[0]) {
+                if let Some(entry) = self.contents.read(txn_id).await?.deref().get(&path[0]) {
                     match entry {
                         DirEntry::Dir(dir) => Ok(Some(dir.clone())),
                         other => Err(error::bad_request("Not a Dir", other)),
@@ -120,14 +118,29 @@ impl Dir {
         })
     }
 
-    pub async fn get_file(
+    pub async fn get_btree(
         &self,
         txn_id: &TxnId,
         name: &PathSegment,
-    ) -> TCResult<Option<Arc<File>>> {
-        if let Some(entry) = self.contents.read(txn_id).await?.0.get(name) {
+    ) -> TCResult<Option<Arc<File<btree::Node>>>> {
+        if let Some(entry) = self.contents.read(txn_id).await?.deref().get(name) {
             match entry {
-                DirEntry::File(file) => Ok(Some(file.clone())),
+                DirEntry::BTree(file) => Ok(Some(file.clone())),
+                other => Err(error::bad_request("Not a File", other)),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn get_tensor(
+        &self,
+        txn_id: &TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<Arc<File<tensor::Array>>>> {
+        if let Some(entry) = self.contents.read(txn_id).await?.deref().get(name) {
+            match entry {
+                DirEntry::Tensor(file) => Ok(Some(file.clone())),
                 other => Err(error::bad_request("Not a File", other)),
             }
         } else {
@@ -145,7 +158,7 @@ impl Dir {
                 Err(error::bad_request("Not a valid directory name", path))
             } else if path.len() == 1 {
                 let mut contents = self.contents.write(txn_id.clone()).await?;
-                match contents.0.entry(path[0].clone()) {
+                match contents.entry(path[0].clone()) {
                     Entry::Vacant(entry) => {
                         let fs_dir = self.cache.write().await.create_dir(path[0].clone())?;
                         let new_dir = Dir::create(txn_id.clone(), fs_dir, self.temporary);
@@ -166,13 +179,37 @@ impl Dir {
         })
     }
 
-    pub async fn create_file(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Arc<File>> {
+    pub async fn create_btree(
+        &self,
+        txn_id: TxnId,
+        name: PathSegment,
+    ) -> TCResult<Arc<File<btree::Node>>> {
         let mut contents = self.contents.write(txn_id.clone()).await?;
-        match contents.0.entry(name) {
+        match contents.entry(name) {
             Entry::Vacant(entry) => {
                 let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
                 let file = File::create(txn_id, fs_cache).await?;
-                entry.insert(DirEntry::File(file.clone()));
+                entry.insert(DirEntry::BTree(file.clone()));
+                Ok(file)
+            }
+            Entry::Occupied(entry) => Err(error::bad_request(
+                "Tried to create a new File but there is already an entry at",
+                entry.key(),
+            )),
+        }
+    }
+
+    pub async fn create_tensor(
+        &self,
+        txn_id: TxnId,
+        name: PathSegment,
+    ) -> TCResult<Arc<File<tensor::Array>>> {
+        let mut contents = self.contents.write(txn_id.clone()).await?;
+        match contents.entry(name) {
+            Entry::Vacant(entry) => {
+                let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
+                let file = File::create(txn_id, fs_cache).await?;
+                entry.insert(DirEntry::Tensor(file.clone()));
                 Ok(file)
             }
             Entry::Occupied(entry) => Err(error::bad_request(
@@ -197,7 +234,7 @@ impl Dir {
     }
 
     pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
-        Ok(self.contents.read(txn_id).await?.0.is_empty())
+        Ok(self.contents.read(txn_id).await?.deref().is_empty())
     }
 }
 

@@ -6,79 +6,38 @@ use bytes::Bytes;
 
 use crate::error;
 use crate::state::file::Block;
-use crate::transaction::lock::{TxnLockReadGuard, TxnLockWriteGuard};
 use crate::value::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
 use crate::value::{Complex, Float, Int, Number, TCResult, UInt};
 
-pub struct Chunk {
-    block: TxnLockReadGuard<Block>,
-    data: ChunkData,
-}
-
-impl Chunk {
-    pub fn data(&'_ self) -> &'_ ChunkData {
-        &self.data
-    }
-
-    pub async fn try_from(block: TxnLockReadGuard<Block>, dtype: NumberType) -> TCResult<Chunk> {
-        let data = ChunkData::try_from_bytes(block.as_bytes().await, dtype)?;
-        Ok(Chunk { block, data })
-    }
-
-    pub async fn upgrade(self) -> TCResult<ChunkMut> {
-        Ok(ChunkMut {
-            block: self.block.upgrade().await?,
-            data: self.data,
-        })
-    }
-}
-
-pub struct ChunkMut {
-    block: TxnLockWriteGuard<Block>,
-    data: ChunkData,
-}
-
-impl ChunkMut {
-    pub fn data(&'_ mut self) -> &'_ mut ChunkData {
-        &mut self.data
-    }
-
-    pub async fn sync(self) -> TCResult<()> {
-        self.block.rewrite(self.data.into()).await;
-
-        Ok(())
-    }
-}
-
-pub trait TensorChunk {
+pub trait ArrayImpl {
     type DType: af::HasAfEnum;
 
-    fn array(&'_ self) -> &'_ af::Array<Self::DType>;
+    fn af(&'_ self) -> &'_ af::Array<Self::DType>;
 
     fn len(&self) -> usize {
-        self.array().elements()
+        self.af().elements()
     }
 
     fn as_type<T: af::HasAfEnum>(&self) -> ArrayExt<T> {
-        ArrayExt(self.array().cast())
+        ArrayExt(self.af().cast())
     }
 
     fn get(&self, index: af::Indexer) -> ArrayExt<Self::DType> {
-        ArrayExt(af::index_gen(self.array(), index))
+        ArrayExt(af::index_gen(self.af(), index))
     }
 
-    fn set<T: TensorChunk<DType = Self::DType>>(&self, index: &af::Indexer, other: &T) {
-        af::assign_gen(self.array(), index, other.array());
+    fn set<T: ArrayImpl<DType = Self::DType>>(&self, index: &af::Indexer, other: &T) {
+        af::assign_gen(self.af(), index, other.af());
     }
 }
 
 #[derive(Clone)]
 pub struct ArrayExt<T: af::HasAfEnum>(af::Array<T>);
 
-impl<T: af::HasAfEnum> TensorChunk for ArrayExt<T> {
+impl<T: af::HasAfEnum> ArrayImpl for ArrayExt<T> {
     type DType = T;
 
-    fn array(&'_ self) -> &'_ af::Array<T> {
+    fn af(&'_ self) -> &'_ af::Array<T> {
         &self.0
     }
 }
@@ -515,124 +474,124 @@ impl TryFrom<Bytes> for ArrayExt<u64> {
     }
 }
 
-pub trait TensorChunkAbs: TensorChunk {
+pub trait ArrayImplAbs: ArrayImpl {
     type AbsValue: af::HasAfEnum;
 
     fn abs(&self) -> ArrayExt<Self::AbsValue>;
 }
 
-impl TensorChunkAbs for ArrayExt<num::Complex<f32>> {
+impl ArrayImplAbs for ArrayExt<num::Complex<f32>> {
     type AbsValue = f32;
 
     fn abs(&self) -> ArrayExt<f32> {
-        ArrayExt(af::abs(self.array()))
+        ArrayExt(af::abs(self.af()))
     }
 }
 
-impl TensorChunkAbs for ArrayExt<num::Complex<f64>> {
+impl ArrayImplAbs for ArrayExt<num::Complex<f64>> {
     type AbsValue = f64;
 
     fn abs(&self) -> ArrayExt<f64> {
-        ArrayExt(af::abs(self.array()))
+        ArrayExt(af::abs(self.af()))
     }
 }
 
-impl TensorChunkAbs for ArrayExt<f32> {
+impl ArrayImplAbs for ArrayExt<f32> {
     type AbsValue = f32;
 
     fn abs(&self) -> ArrayExt<f32> {
-        ArrayExt(af::abs(self.array()))
+        ArrayExt(af::abs(self.af()))
     }
 }
 
-impl TensorChunkAbs for ArrayExt<f64> {
+impl ArrayImplAbs for ArrayExt<f64> {
     type AbsValue = f64;
 
     fn abs(&self) -> ArrayExt<f64> {
-        ArrayExt(af::abs(self.array()))
+        ArrayExt(af::abs(self.af()))
     }
 }
 
-impl TensorChunkAbs for ArrayExt<i16> {
+impl ArrayImplAbs for ArrayExt<i16> {
     type AbsValue = i16;
 
     fn abs(&self) -> ArrayExt<i16> {
-        ArrayExt(af::abs(self.array()).cast())
+        ArrayExt(af::abs(self.af()).cast())
     }
 }
 
-impl TensorChunkAbs for ArrayExt<i32> {
+impl ArrayImplAbs for ArrayExt<i32> {
     type AbsValue = i32;
 
     fn abs(&self) -> ArrayExt<i32> {
-        ArrayExt(af::abs(self.array()).cast())
+        ArrayExt(af::abs(self.af()).cast())
     }
 }
 
-impl TensorChunkAbs for ArrayExt<i64> {
+impl ArrayImplAbs for ArrayExt<i64> {
     type AbsValue = i64;
 
     fn abs(&self) -> ArrayExt<i64> {
-        ArrayExt(af::abs(self.array()).cast())
+        ArrayExt(af::abs(self.af()).cast())
     }
 }
 
-pub trait TensorChunkAnyAll: TensorChunk {
+pub trait ArrayImplAnyAll: ArrayImpl {
     fn all(&self) -> bool {
-        af::all_true_all(self.array()).0 > 0.0f64
+        af::all_true_all(self.af()).0 > 0.0f64
     }
 
     fn any(&self) -> bool {
-        af::any_true_all(self.array()).0 > 0.0f64
+        af::any_true_all(self.af()).0 > 0.0f64
     }
 }
 
-impl TensorChunkAnyAll for ArrayExt<bool> {}
-impl TensorChunkAnyAll for ArrayExt<f32> {}
-impl TensorChunkAnyAll for ArrayExt<f64> {}
-impl TensorChunkAnyAll for ArrayExt<i16> {}
-impl TensorChunkAnyAll for ArrayExt<i32> {}
-impl TensorChunkAnyAll for ArrayExt<i64> {}
-impl TensorChunkAnyAll for ArrayExt<u8> {}
-impl TensorChunkAnyAll for ArrayExt<u16> {}
-impl TensorChunkAnyAll for ArrayExt<u32> {}
-impl TensorChunkAnyAll for ArrayExt<u64> {}
+impl ArrayImplAnyAll for ArrayExt<bool> {}
+impl ArrayImplAnyAll for ArrayExt<f32> {}
+impl ArrayImplAnyAll for ArrayExt<f64> {}
+impl ArrayImplAnyAll for ArrayExt<i16> {}
+impl ArrayImplAnyAll for ArrayExt<i32> {}
+impl ArrayImplAnyAll for ArrayExt<i64> {}
+impl ArrayImplAnyAll for ArrayExt<u8> {}
+impl ArrayImplAnyAll for ArrayExt<u16> {}
+impl ArrayImplAnyAll for ArrayExt<u32> {}
+impl ArrayImplAnyAll for ArrayExt<u64> {}
 
-impl TensorChunkAnyAll for ArrayExt<num::Complex<f32>> {
+impl ArrayImplAnyAll for ArrayExt<num::Complex<f32>> {
     fn all(&self) -> bool {
-        let all = af::all_true_all(self.array());
+        let all = af::all_true_all(self.af());
         all.0 > 0.0f64 && all.1 > 0.0f64
     }
 
     fn any(&self) -> bool {
-        let any = af::any_true_all(self.array());
+        let any = af::any_true_all(self.af());
         any.0 > 0.0f64 || any.1 > 0.0f64
     }
 }
 
-impl TensorChunkAnyAll for ArrayExt<num::Complex<f64>> {
+impl ArrayImplAnyAll for ArrayExt<num::Complex<f64>> {
     fn all(&self) -> bool {
-        let all = af::all_true_all(self.array());
+        let all = af::all_true_all(self.af());
         all.0 > 0.0f64 && all.1 > 0.0f64
     }
 
     fn any(&self) -> bool {
-        let any = af::any_true_all(self.array());
+        let any = af::any_true_all(self.af());
         any.0 > 0.0f64 || any.1 > 0.0f64
     }
 }
 
-trait TensorChunkNot: TensorChunk {
+trait ArrayImplNot: ArrayImpl {
     fn not(&self) -> ArrayExt<bool>;
 }
 
-impl TensorChunkNot for ArrayExt<bool> {
+impl ArrayImplNot for ArrayExt<bool> {
     fn not(&self) -> ArrayExt<bool> {
-        ArrayExt(!self.array())
+        ArrayExt(!self.af())
     }
 }
 
-trait TensorChunkBool: TensorChunk {
+trait ArrayImplBool: ArrayImpl {
     fn and(&self, other: &Self) -> ArrayExt<bool>;
 
     fn or(&self, other: &Self) -> ArrayExt<bool>;
@@ -640,22 +599,22 @@ trait TensorChunkBool: TensorChunk {
     fn xor(&self, other: &Self) -> ArrayExt<bool>;
 }
 
-impl<T: af::HasAfEnum> TensorChunkBool for ArrayExt<T> {
+impl<T: af::HasAfEnum> ArrayImplBool for ArrayExt<T> {
     fn and(&self, other: &Self) -> ArrayExt<bool> {
-        let l: af::Array<bool> = self.array().cast();
-        let r: af::Array<bool> = other.array().cast();
+        let l: af::Array<bool> = self.af().cast();
+        let r: af::Array<bool> = other.af().cast();
         ArrayExt(af::and(&l, &r, false))
     }
 
     fn or(&self, other: &Self) -> ArrayExt<bool> {
-        let l: af::Array<bool> = self.array().cast();
-        let r: af::Array<bool> = other.array().cast();
+        let l: af::Array<bool> = self.af().cast();
+        let r: af::Array<bool> = other.af().cast();
         ArrayExt(af::and(&l, &r, false))
     }
 
     fn xor(&self, other: &Self) -> ArrayExt<bool> {
-        let l: af::Array<bool> = self.array().cast();
-        let r: af::Array<bool> = other.array().cast();
+        let l: af::Array<bool> = self.af().cast();
+        let r: af::Array<bool> = other.af().cast();
 
         let one = af::or(&l, &r, false);
         let not_both = !(&af::and(&l, &r, false));
@@ -664,7 +623,7 @@ impl<T: af::HasAfEnum> TensorChunkBool for ArrayExt<T> {
     }
 }
 
-trait TensorChunkCompare {
+trait ArrayImplCompare {
     fn equals(&self, other: &Self) -> ArrayExt<bool>;
 
     fn gt(&self, other: &Self) -> ArrayExt<bool>;
@@ -676,29 +635,29 @@ trait TensorChunkCompare {
     fn lte(&self, other: &Self) -> ArrayExt<bool>;
 }
 
-impl<T: af::HasAfEnum + af::ImplicitPromote<T>> TensorChunkCompare for ArrayExt<T> {
+impl<T: af::HasAfEnum + af::ImplicitPromote<T>> ArrayImplCompare for ArrayExt<T> {
     fn equals(&self, other: &Self) -> ArrayExt<bool> {
-        af::eq(self.array(), other.array(), false).into()
+        af::eq(self.af(), other.af(), false).into()
     }
 
     fn gt(&self, other: &Self) -> ArrayExt<bool> {
-        af::gt(self.array(), other.array(), false).into()
+        af::gt(self.af(), other.af(), false).into()
     }
 
     fn gte(&self, other: &Self) -> ArrayExt<bool> {
-        af::ge(self.array(), other.array(), false).into()
+        af::ge(self.af(), other.af(), false).into()
     }
 
     fn lt(&self, other: &Self) -> ArrayExt<bool> {
-        af::lt(self.array(), other.array(), false).into()
+        af::lt(self.af(), other.af(), false).into()
     }
 
     fn lte(&self, other: &Self) -> ArrayExt<bool> {
-        af::le(self.array(), other.array(), false).into()
+        af::le(self.af(), other.af(), false).into()
     }
 }
 
-trait TensorChunkReduce: TensorChunk {
+trait ArrayImplReduce: ArrayImpl {
     type Product: af::HasAfEnum;
     type Sum: af::HasAfEnum;
 
@@ -707,168 +666,168 @@ trait TensorChunkReduce: TensorChunk {
     fn sum(&self) -> Self::Sum;
 }
 
-impl TensorChunkReduce for ArrayExt<bool> {
+impl ArrayImplReduce for ArrayExt<bool> {
     type Sum = u64;
     type Product = u64;
 
     fn sum(&self) -> u64 {
-        af::sum_all(self.array()).0 as u64
+        af::sum_all(self.af()).0 as u64
     }
 
     fn product(&self) -> u64 {
-        af::product_all(self.array()).0 as u64
+        af::product_all(self.af()).0 as u64
     }
 }
 
-impl TensorChunkReduce for ArrayExt<num::Complex<f32>> {
+impl ArrayImplReduce for ArrayExt<num::Complex<f32>> {
     type Sum = num::Complex<f64>;
     type Product = num::Complex<f64>;
 
     fn sum(&self) -> Self::Sum {
-        let sum = af::sum_all(self.array());
+        let sum = af::sum_all(self.af());
         num::Complex::new(sum.0, sum.1)
     }
 
     fn product(&self) -> Self::Product {
-        let product = af::product_all(self.array());
+        let product = af::product_all(self.af());
         num::Complex::new(product.0, product.1)
     }
 }
 
-impl TensorChunkReduce for ArrayExt<num::Complex<f64>> {
+impl ArrayImplReduce for ArrayExt<num::Complex<f64>> {
     type Sum = num::Complex<f64>;
     type Product = num::Complex<f64>;
 
     fn sum(&self) -> Self::Sum {
-        let sum = af::sum_all(self.array());
+        let sum = af::sum_all(self.af());
         num::Complex::new(sum.0, sum.1)
     }
 
     fn product(&self) -> Self::Product {
-        let product = af::product_all(self.array());
+        let product = af::product_all(self.af());
         num::Complex::new(product.0, product.1)
     }
 }
 
-impl TensorChunkReduce for ArrayExt<f32> {
+impl ArrayImplReduce for ArrayExt<f32> {
     type Sum = f64;
     type Product = f64;
 
     fn sum(&self) -> f64 {
-        af::sum_all(self.array()).0
+        af::sum_all(self.af()).0
     }
 
     fn product(&self) -> f64 {
-        af::product_all(self.array()).0
+        af::product_all(self.af()).0
     }
 }
 
-impl TensorChunkReduce for ArrayExt<f64> {
+impl ArrayImplReduce for ArrayExt<f64> {
     type Sum = f64;
     type Product = f64;
 
     fn sum(&self) -> f64 {
-        af::sum_all(self.array()).0
+        af::sum_all(self.af()).0
     }
 
     fn product(&self) -> f64 {
-        af::product_all(self.array()).0
+        af::product_all(self.af()).0
     }
 }
 
-impl TensorChunkReduce for ArrayExt<i16> {
+impl ArrayImplReduce for ArrayExt<i16> {
     type Sum = i64;
     type Product = i64;
 
     fn sum(&self) -> i64 {
-        af::sum_all(self.array()).0 as i64
+        af::sum_all(self.af()).0 as i64
     }
 
     fn product(&self) -> i64 {
-        af::product_all(self.array()).0 as i64
+        af::product_all(self.af()).0 as i64
     }
 }
 
-impl TensorChunkReduce for ArrayExt<i32> {
+impl ArrayImplReduce for ArrayExt<i32> {
     type Sum = i64;
     type Product = i64;
 
     fn sum(&self) -> i64 {
-        af::sum_all(self.array()).0 as i64
+        af::sum_all(self.af()).0 as i64
     }
 
     fn product(&self) -> i64 {
-        af::product_all(self.array()).0 as i64
+        af::product_all(self.af()).0 as i64
     }
 }
 
-impl TensorChunkReduce for ArrayExt<i64> {
+impl ArrayImplReduce for ArrayExt<i64> {
     type Sum = i64;
     type Product = i64;
 
     fn sum(&self) -> i64 {
-        af::sum_all(self.array()).0 as i64
+        af::sum_all(self.af()).0 as i64
     }
 
     fn product(&self) -> i64 {
-        af::product_all(self.array()).0 as i64
+        af::product_all(self.af()).0 as i64
     }
 }
 
-impl TensorChunkReduce for ArrayExt<u8> {
+impl ArrayImplReduce for ArrayExt<u8> {
     type Sum = u64;
     type Product = u64;
 
     fn sum(&self) -> u64 {
-        af::sum_all(self.array()).0 as u64
+        af::sum_all(self.af()).0 as u64
     }
 
     fn product(&self) -> u64 {
-        af::product_all(self.array()).0 as u64
+        af::product_all(self.af()).0 as u64
     }
 }
 
-impl TensorChunkReduce for ArrayExt<u16> {
+impl ArrayImplReduce for ArrayExt<u16> {
     type Sum = u64;
     type Product = u64;
 
     fn sum(&self) -> u64 {
-        af::sum_all(self.array()).0 as u64
+        af::sum_all(self.af()).0 as u64
     }
 
     fn product(&self) -> u64 {
-        af::product_all(self.array()).0 as u64
+        af::product_all(self.af()).0 as u64
     }
 }
 
-impl TensorChunkReduce for ArrayExt<u32> {
+impl ArrayImplReduce for ArrayExt<u32> {
     type Sum = u64;
     type Product = u64;
 
     fn sum(&self) -> u64 {
-        af::sum_all(self.array()).0 as u64
+        af::sum_all(self.af()).0 as u64
     }
 
     fn product(&self) -> u64 {
-        af::product_all(self.array()).0 as u64
+        af::product_all(self.af()).0 as u64
     }
 }
 
-impl TensorChunkReduce for ArrayExt<u64> {
+impl ArrayImplReduce for ArrayExt<u64> {
     type Sum = u64;
     type Product = u64;
 
     fn sum(&self) -> u64 {
-        af::sum_all(self.array()).0 as u64
+        af::sum_all(self.af()).0 as u64
     }
 
     fn product(&self) -> u64 {
-        af::product_all(self.array()).0 as u64
+        af::product_all(self.af()).0 as u64
     }
 }
 
 #[derive(Clone)]
-pub enum ChunkData {
+pub enum Array {
     Bool(ArrayExt<bool>),
     C32(ArrayExt<num::Complex<f32>>),
     C64(ArrayExt<num::Complex<f64>>),
@@ -883,13 +842,13 @@ pub enum ChunkData {
     U64(ArrayExt<u64>),
 }
 
-impl ChunkData {
-    pub fn constant(value: Number, len: usize) -> ChunkData {
+impl Array {
+    pub fn constant(value: Number, len: usize) -> Array {
         let dim = dim4(len);
 
-        use ChunkData::*;
+        use Array::*;
         match value {
-            Number::Bool(b) => ChunkData::Bool(af::constant(b, dim).into()),
+            Number::Bool(b) => Array::Bool(af::constant(b, dim).into()),
             Number::Complex(c) => match c {
                 Complex::C32(c) => C32(af::constant(c, dim).into()),
                 Complex::C64(c) => C64(af::constant(c, dim).into()),
@@ -912,11 +871,11 @@ impl ChunkData {
         }
     }
 
-    fn try_from_bytes(data: Bytes, dtype: NumberType) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    fn try_from_bytes(data: Bytes, dtype: NumberType) -> TCResult<Array> {
+        use Array::*;
         use NumberType::*;
         match dtype {
-            NumberType::Bool => Ok(ChunkData::Bool(data.try_into()?)),
+            NumberType::Bool => Ok(Array::Bool(data.try_into()?)),
             Complex(c) => match c {
                 ComplexType::C32 => Ok(C32(data.try_into()?)),
                 ComplexType::C64 => Ok(C64(data.try_into()?)),
@@ -939,10 +898,10 @@ impl ChunkData {
         }
     }
 
-    pub fn try_from_values(values: Vec<Number>, dtype: NumberType) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn try_from_values(values: Vec<Number>, dtype: NumberType) -> TCResult<Array> {
+        use Array::*;
         let chunk = match dtype {
-            NumberType::Bool => ChunkData::Bool(vec_try_into(values)?.into()),
+            NumberType::Bool => Array::Bool(vec_try_into(values)?.into()),
             NumberType::Complex(c) => {
                 let values: Vec<Complex> = vec_try_into(values)?;
                 match c {
@@ -979,12 +938,30 @@ impl ChunkData {
         Ok(chunk)
     }
 
-    pub fn into_type(self, dtype: NumberType) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn dtype(&self) -> NumberType {
+        use Array::*;
+        match self {
+            Bool(_) => NumberType::Bool,
+            C32(_) => ComplexType::C32.into(),
+            C64(_) => ComplexType::C32.into(),
+            F32(_) => FloatType::F32.into(),
+            F64(_) => FloatType::F32.into(),
+            I16(_) => IntType::I16.into(),
+            I32(_) => IntType::I32.into(),
+            I64(_) => IntType::I64.into(),
+            U8(_) => UIntType::U16.into(),
+            U16(_) => UIntType::U16.into(),
+            U32(_) => UIntType::U32.into(),
+            U64(_) => UIntType::U64.into(),
+        }
+    }
+
+    pub fn into_type(self, dtype: NumberType) -> TCResult<Array> {
+        use Array::*;
         use NumberType::*;
         let converted = match self {
-            ChunkData::Bool(b) => match dtype {
-                NumberType::Bool => ChunkData::Bool(b.as_type()),
+            Array::Bool(b) => match dtype {
+                NumberType::Bool => Array::Bool(b.as_type()),
                 Complex(c) => match c {
                     ComplexType::C32 => C32(b.as_type()),
                     ComplexType::C64 => C64(b.as_type()),
@@ -1006,7 +983,7 @@ impl ChunkData {
                 },
             },
             C32(c) => match dtype {
-                NumberType::Bool => ChunkData::Bool(c.as_type()),
+                NumberType::Bool => Array::Bool(c.as_type()),
                 Complex(ct) => match ct {
                     ComplexType::C32 => C32(c.as_type()),
                     ComplexType::C64 => C64(c.as_type()),
@@ -1028,7 +1005,7 @@ impl ChunkData {
                 },
             },
             C64(c) => match dtype {
-                NumberType::Bool => ChunkData::Bool(c.as_type()),
+                NumberType::Bool => Array::Bool(c.as_type()),
                 Complex(ct) => match ct {
                     ComplexType::C32 => C32(c.as_type()),
                     ComplexType::C64 => C64(c.as_type()),
@@ -1050,7 +1027,7 @@ impl ChunkData {
                 },
             },
             F32(f) => match dtype {
-                NumberType::Bool => ChunkData::Bool(f.as_type()),
+                NumberType::Bool => Array::Bool(f.as_type()),
                 Complex(c) => match c {
                     ComplexType::C32 => C32(f.as_type()),
                     ComplexType::C64 => C64(f.as_type()),
@@ -1072,7 +1049,7 @@ impl ChunkData {
                 },
             },
             F64(f) => match dtype {
-                NumberType::Bool => ChunkData::Bool(f.as_type()),
+                NumberType::Bool => Array::Bool(f.as_type()),
                 Complex(c) => match c {
                     ComplexType::C32 => C32(f.as_type()),
                     ComplexType::C64 => C64(f.as_type()),
@@ -1094,7 +1071,7 @@ impl ChunkData {
                 },
             },
             I16(i) => match dtype {
-                NumberType::Bool => ChunkData::Bool(i.as_type()),
+                NumberType::Bool => Array::Bool(i.as_type()),
                 Complex(c) => match c {
                     ComplexType::C32 => C32(i.as_type()),
                     ComplexType::C64 => C64(i.as_type()),
@@ -1116,7 +1093,7 @@ impl ChunkData {
                 },
             },
             I32(i) => match dtype {
-                NumberType::Bool => ChunkData::Bool(i.as_type()),
+                NumberType::Bool => Array::Bool(i.as_type()),
                 Complex(c) => match c {
                     ComplexType::C32 => C32(i.as_type()),
                     ComplexType::C64 => C64(i.as_type()),
@@ -1138,7 +1115,7 @@ impl ChunkData {
                 },
             },
             I64(i) => match dtype {
-                NumberType::Bool => ChunkData::Bool(i.as_type()),
+                NumberType::Bool => Array::Bool(i.as_type()),
                 Complex(c) => match c {
                     ComplexType::C32 => C32(i.as_type()),
                     ComplexType::C64 => C64(i.as_type()),
@@ -1160,7 +1137,7 @@ impl ChunkData {
                 },
             },
             U8(u) => match dtype {
-                NumberType::Bool => ChunkData::Bool(u.as_type()),
+                NumberType::Bool => Array::Bool(u.as_type()),
                 Complex(c) => match c {
                     ComplexType::C32 => C32(u.as_type()),
                     ComplexType::C64 => C64(u.as_type()),
@@ -1182,7 +1159,7 @@ impl ChunkData {
                 },
             },
             U16(u) => match dtype {
-                NumberType::Bool => ChunkData::Bool(u.as_type()),
+                NumberType::Bool => Array::Bool(u.as_type()),
                 Complex(c) => match c {
                     ComplexType::C32 => C32(u.as_type()),
                     ComplexType::C64 => C64(u.as_type()),
@@ -1204,7 +1181,7 @@ impl ChunkData {
                 },
             },
             U32(u) => match dtype {
-                NumberType::Bool => ChunkData::Bool(u.as_type()),
+                NumberType::Bool => Array::Bool(u.as_type()),
                 Complex(c) => match c {
                     ComplexType::C32 => C32(u.as_type()),
                     ComplexType::C64 => C64(u.as_type()),
@@ -1226,7 +1203,7 @@ impl ChunkData {
                 },
             },
             U64(u) => match dtype {
-                NumberType::Bool => ChunkData::Bool(u.as_type()),
+                NumberType::Bool => Array::Bool(u.as_type()),
                 Complex(c) => match c {
                     ComplexType::C32 => C32(u.as_type()),
                     ComplexType::C64 => C64(u.as_type()),
@@ -1252,8 +1229,8 @@ impl ChunkData {
         Ok(converted)
     }
 
-    pub fn abs(&self) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn abs(&self) -> TCResult<Array> {
+        use Array::*;
         match self {
             C32(c) => Ok(F32(c.abs())),
             C64(c) => Ok(F64(c.abs())),
@@ -1267,7 +1244,7 @@ impl ChunkData {
     }
 
     pub fn all(&self) -> bool {
-        use ChunkData::*;
+        use Array::*;
         match self {
             Bool(b) => b.all(),
             C32(c) => c.all(),
@@ -1285,7 +1262,7 @@ impl ChunkData {
     }
 
     pub fn any(&self) -> bool {
-        use ChunkData::*;
+        use Array::*;
         match self {
             Bool(b) => b.any(),
             C32(c) => c.any(),
@@ -1302,8 +1279,8 @@ impl ChunkData {
         }
     }
 
-    pub fn and(&self, other: &ChunkData) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn and(&self, other: &Array) -> TCResult<Array> {
+        use Array::*;
         match (self, other) {
             (Bool(l), Bool(r)) => Ok(Bool(l.and(r))),
             (C32(l), C32(r)) => Ok(Bool(l.and(r))),
@@ -1324,8 +1301,8 @@ impl ChunkData {
         }
     }
 
-    pub fn equals(&self, other: &ChunkData) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn equals(&self, other: &Array) -> TCResult<Array> {
+        use Array::*;
         match (self, other) {
             (Bool(l), Bool(r)) => Ok(Bool(l.equals(r))),
             (C32(l), C32(r)) => Ok(Bool(l.equals(r))),
@@ -1346,8 +1323,8 @@ impl ChunkData {
         }
     }
 
-    pub fn gt(&self, other: &ChunkData) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn gt(&self, other: &Array) -> TCResult<Array> {
+        use Array::*;
         match (self, other) {
             (Bool(l), Bool(r)) => Ok(Bool(l.gt(r))),
             (C32(l), C32(r)) => Ok(Bool(l.gt(r))),
@@ -1368,8 +1345,8 @@ impl ChunkData {
         }
     }
 
-    pub fn gte(&self, other: &ChunkData) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn gte(&self, other: &Array) -> TCResult<Array> {
+        use Array::*;
         match (self, other) {
             (Bool(l), Bool(r)) => Ok(Bool(l.gte(r))),
             (C32(l), C32(r)) => Ok(Bool(l.gte(r))),
@@ -1390,8 +1367,8 @@ impl ChunkData {
         }
     }
 
-    pub fn lt(&self, other: &ChunkData) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn lt(&self, other: &Array) -> TCResult<Array> {
+        use Array::*;
         match (self, other) {
             (Bool(l), Bool(r)) => Ok(Bool(l.lt(r))),
             (C32(l), C32(r)) => Ok(Bool(l.lt(r))),
@@ -1412,8 +1389,8 @@ impl ChunkData {
         }
     }
 
-    pub fn lte(&self, other: &ChunkData) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn lte(&self, other: &Array) -> TCResult<Array> {
+        use Array::*;
         match (self, other) {
             (Bool(l), Bool(r)) => Ok(Bool(l.lte(r))),
             (C32(l), C32(r)) => Ok(Bool(l.lte(r))),
@@ -1434,8 +1411,8 @@ impl ChunkData {
         }
     }
 
-    pub fn not(&self) -> ChunkData {
-        use ChunkData::*;
+    pub fn not(&self) -> Array {
+        use Array::*;
         match self {
             Bool(b) => Bool(b.not()),
             C32(c) => Bool(c.as_type().not()),
@@ -1452,8 +1429,8 @@ impl ChunkData {
         }
     }
 
-    pub fn or(&self, other: &ChunkData) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn or(&self, other: &Array) -> TCResult<Array> {
+        use Array::*;
         match (self, other) {
             (Bool(l), Bool(r)) => Ok(Bool(l.or(r))),
             (C32(l), C32(r)) => Ok(Bool(l.or(r))),
@@ -1475,7 +1452,7 @@ impl ChunkData {
     }
 
     pub fn product(&self) -> Number {
-        use ChunkData::*;
+        use Array::*;
         match self {
             Bool(b) => Number::UInt(b.product().into()),
             C32(c) => Number::Complex(c.product().into()),
@@ -1493,7 +1470,7 @@ impl ChunkData {
     }
 
     pub fn len(&self) -> usize {
-        use ChunkData::*;
+        use Array::*;
         match self {
             Bool(b) => b.len(),
             C32(c) => c.len(),
@@ -1524,7 +1501,7 @@ impl ChunkData {
     }
 
     fn get_at(&self, index: af::Indexer) -> Vec<Number> {
-        use ChunkData::*;
+        use Array::*;
         match self {
             Bool(b) => b.get(index).into(),
             C32(c) => c.get(index).into(),
@@ -1541,14 +1518,14 @@ impl ChunkData {
         }
     }
 
-    pub fn set(&mut self, index: af::Array<u64>, other: &ChunkData) -> TCResult<()> {
+    pub fn set(&mut self, index: af::Array<u64>, other: &Array) -> TCResult<()> {
         let mut indexer = af::Indexer::default();
         indexer.set_index(&index, 0, Some(false));
         self.set_at(indexer, other)
     }
 
-    fn set_at(&mut self, index: af::Indexer, value: &ChunkData) -> TCResult<()> {
-        use ChunkData::*;
+    fn set_at(&mut self, index: af::Indexer, value: &Array) -> TCResult<()> {
+        use Array::*;
         match (self, value) {
             (Bool(l), Bool(r)) => l.set(&index, r),
             (C32(l), C32(r)) => l.set(&index, r),
@@ -1572,8 +1549,8 @@ impl ChunkData {
         Ok(())
     }
 
-    pub fn xor(&self, other: &ChunkData) -> TCResult<ChunkData> {
-        use ChunkData::*;
+    pub fn xor(&self, other: &Array) -> TCResult<Array> {
+        use Array::*;
         match (self, other) {
             (Bool(l), Bool(r)) => Ok(Bool(l.xor(r))),
             (C32(l), C32(r)) => Ok(Bool(l.xor(r))),
@@ -1595,10 +1572,49 @@ impl ChunkData {
     }
 }
 
-impl From<ChunkData> for Bytes {
-    fn from(chunk: ChunkData) -> Bytes {
-        use ChunkData::*;
-        match chunk {
+impl TryFrom<Bytes> for Array {
+    type Error = error::TCError;
+
+    fn try_from(mut data: Bytes) -> TCResult<Array> {
+        let array = data.split_off(2);
+        let dtype: NumberType = bincode::deserialize(&data)
+            .map_err(|e| error::bad_request("Unable to deserialize Tensor array data type", e))?;
+
+        use Array::*;
+        use NumberType::*;
+        let array = match dtype {
+            NumberType::Bool => Array::Bool(array.try_into()?),
+            Complex(ct) => match ct {
+                ComplexType::C32 => C32(array.try_into()?),
+                ComplexType::C64 => C64(array.try_into()?),
+            },
+            Float(ft) => match ft {
+                FloatType::F32 => F32(array.try_into()?),
+                FloatType::F64 => F64(array.try_into()?),
+            },
+            Int(it) => match it {
+                IntType::I16 => I16(array.try_into()?),
+                IntType::I32 => I32(array.try_into()?),
+                IntType::I64 => I64(array.try_into()?),
+            },
+            UInt(ut) => match ut {
+                UIntType::U8 => U8(array.try_into()?),
+                UIntType::U16 => U16(array.try_into()?),
+                UIntType::U32 => U32(array.try_into()?),
+                UIntType::U64 => U64(array.try_into()?),
+            },
+        };
+
+        Ok(array)
+    }
+}
+
+impl From<Array> for Bytes {
+    fn from(array: Array) -> Bytes {
+        let dtype = array.dtype();
+
+        use Array::*;
+        let serialized: Bytes = match array {
             Bool(b) => b.into(),
             C32(c) => c.into(),
             C64(c) => c.into(),
@@ -1611,97 +1627,103 @@ impl From<ChunkData> for Bytes {
             U16(u) => u.into(),
             U32(u) => u.into(),
             U64(u) => u.into(),
-        }
+        };
+
+        let dtype = Bytes::from(bincode::serialize(&dtype).unwrap());
+        assert!(dtype.len() == 2);
+        Bytes::from([dtype, serialized].concat())
     }
 }
 
-impl From<Vec<bool>> for ChunkData {
-    fn from(b: Vec<bool>) -> ChunkData {
+impl Block for Array {}
+
+impl From<Vec<bool>> for Array {
+    fn from(b: Vec<bool>) -> Array {
         let data = af::Array::new(&b, dim4(b.len()));
-        ChunkData::Bool(data.into())
+        Array::Bool(data.into())
     }
 }
 
-impl From<Vec<num::Complex<f32>>> for ChunkData {
-    fn from(c: Vec<num::Complex<f32>>) -> ChunkData {
+impl From<Vec<num::Complex<f32>>> for Array {
+    fn from(c: Vec<num::Complex<f32>>) -> Array {
         let data = af::Array::new(&c, dim4(c.len()));
-        ChunkData::C32(data.into())
+        Array::C32(data.into())
     }
 }
 
-impl From<Vec<num::Complex<f64>>> for ChunkData {
-    fn from(c: Vec<num::Complex<f64>>) -> ChunkData {
+impl From<Vec<num::Complex<f64>>> for Array {
+    fn from(c: Vec<num::Complex<f64>>) -> Array {
         let data = af::Array::new(&c, dim4(c.len()));
-        ChunkData::C64(data.into())
+        Array::C64(data.into())
     }
 }
 
-impl From<Vec<f32>> for ChunkData {
-    fn from(f: Vec<f32>) -> ChunkData {
+impl From<Vec<f32>> for Array {
+    fn from(f: Vec<f32>) -> Array {
         let data = af::Array::new(&f, dim4(f.len()));
-        ChunkData::F32(data.into())
+        Array::F32(data.into())
     }
 }
 
-impl From<Vec<f64>> for ChunkData {
-    fn from(f: Vec<f64>) -> ChunkData {
+impl From<Vec<f64>> for Array {
+    fn from(f: Vec<f64>) -> Array {
         let data = af::Array::new(&f, dim4(f.len()));
-        ChunkData::F64(data.into())
+        Array::F64(data.into())
     }
 }
 
-impl From<Vec<i16>> for ChunkData {
-    fn from(i: Vec<i16>) -> ChunkData {
+impl From<Vec<i16>> for Array {
+    fn from(i: Vec<i16>) -> Array {
         let data = af::Array::new(&i, dim4(i.len()));
-        ChunkData::I16(data.into())
+        Array::I16(data.into())
     }
 }
 
-impl From<Vec<i32>> for ChunkData {
-    fn from(i: Vec<i32>) -> ChunkData {
+impl From<Vec<i32>> for Array {
+    fn from(i: Vec<i32>) -> Array {
         let data = af::Array::new(&i, dim4(i.len()));
-        ChunkData::I32(data.into())
+        Array::I32(data.into())
     }
 }
 
-impl From<Vec<i64>> for ChunkData {
-    fn from(i: Vec<i64>) -> ChunkData {
+impl From<Vec<i64>> for Array {
+    fn from(i: Vec<i64>) -> Array {
         let data = af::Array::new(&i, dim4(i.len()));
-        ChunkData::I64(data.into())
+        Array::I64(data.into())
     }
 }
 
-impl From<Vec<u8>> for ChunkData {
-    fn from(u: Vec<u8>) -> ChunkData {
+impl From<Vec<u8>> for Array {
+    fn from(u: Vec<u8>) -> Array {
         let data = af::Array::new(&u, dim4(u.len()));
-        ChunkData::U8(data.into())
+        Array::U8(data.into())
     }
 }
 
-impl From<Vec<u16>> for ChunkData {
-    fn from(u: Vec<u16>) -> ChunkData {
+impl From<Vec<u16>> for Array {
+    fn from(u: Vec<u16>) -> Array {
         let data = af::Array::new(&u, dim4(u.len()));
-        ChunkData::U16(data.into())
+        Array::U16(data.into())
     }
 }
 
-impl From<Vec<u32>> for ChunkData {
-    fn from(u: Vec<u32>) -> ChunkData {
+impl From<Vec<u32>> for Array {
+    fn from(u: Vec<u32>) -> Array {
         let data = af::Array::new(&u, dim4(u.len()));
-        ChunkData::U32(data.into())
+        Array::U32(data.into())
     }
 }
 
-impl From<Vec<u64>> for ChunkData {
-    fn from(u: Vec<u64>) -> ChunkData {
+impl From<Vec<u64>> for Array {
+    fn from(u: Vec<u64>) -> Array {
         let data = af::Array::new(&u, dim4(u.len()));
-        ChunkData::U64(data.into())
+        Array::U64(data.into())
     }
 }
 
-impl From<ChunkData> for Vec<Number> {
-    fn from(chunk: ChunkData) -> Vec<Number> {
-        use ChunkData::*;
+impl From<Array> for Vec<Number> {
+    fn from(chunk: Array) -> Vec<Number> {
+        use Array::*;
         match chunk {
             Bool(b) => b.into(),
             C32(c) => c.into(),
@@ -1719,7 +1741,7 @@ impl From<ChunkData> for Vec<Number> {
     }
 }
 
-impl fmt::Display for ChunkData {
+impl fmt::Display for Array {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let dtype = match self {
             Self::Bool(_) => "Bool",
@@ -1736,7 +1758,7 @@ impl fmt::Display for ChunkData {
             Self::U64(_) => "UInt::U64",
         };
 
-        write!(f, "TensorChunk<{}>", dtype)
+        write!(f, "ArrayImpl<{}>", dtype)
     }
 }
 

@@ -10,7 +10,7 @@ use itertools::MultiProduct;
 use crate::value::class::NumberType;
 use crate::value::{Number, TCResult};
 
-use super::chunk::ChunkData;
+use super::array::Array;
 
 pub type Coords = MultiProduct<AxisIter>;
 
@@ -40,37 +40,37 @@ impl Iterator for AxisIter {
     }
 }
 
-pub struct ValueChunkStream<T: Stream<Item = TCResult<Number>>> {
+pub struct ValueBlockStream<T: Stream<Item = TCResult<Number>>> {
     source: Pin<Box<T>>,
     dtype: NumberType,
-    chunk_len: usize,
+    block_len: usize,
     buffer: Vec<Number>,
     valid: bool,
 }
 
-impl<T: Stream<Item = TCResult<Number>>> ValueChunkStream<T> {
-    pub fn new(source: T, dtype: NumberType, chunk_len: usize) -> ValueChunkStream<T> {
-        let buffer = Vec::with_capacity(chunk_len);
+impl<T: Stream<Item = TCResult<Number>>> ValueBlockStream<T> {
+    pub fn new(source: T, dtype: NumberType, block_len: usize) -> ValueBlockStream<T> {
+        let buffer = Vec::with_capacity(block_len);
 
-        ValueChunkStream {
+        ValueBlockStream {
             source: Box::pin(source),
             dtype,
-            chunk_len,
+            block_len,
             buffer,
             valid: true,
         }
     }
 }
 
-impl<T: Stream<Item = TCResult<Number>>> Stream for ValueChunkStream<T> {
-    type Item = TCResult<ChunkData>;
+impl<T: Stream<Item = TCResult<Number>>> Stream for ValueBlockStream<T> {
+    type Item = TCResult<Array>;
 
     fn poll_next(mut self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         if !self.valid {
             Poll::Ready(None)
-        } else if self.buffer.len() == self.chunk_len {
-            match ChunkData::try_from_values(self.buffer.drain(..).collect(), self.dtype) {
-                Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
+        } else if self.buffer.len() == self.block_len {
+            match Array::try_from_values(self.buffer.drain(..).collect(), self.dtype) {
+                Ok(block) => Poll::Ready(Some(Ok(block))),
                 Err(cause) => {
                     self.valid = false;
                     Poll::Ready(Some(Err(cause)))
@@ -89,8 +89,8 @@ impl<T: Stream<Item = TCResult<Number>>> Stream for ValueChunkStream<T> {
                 }
                 Poll::Ready(None) if self.buffer.is_empty() => Poll::Ready(None),
                 Poll::Ready(None) => {
-                    match ChunkData::try_from_values(self.buffer.drain(..).collect(), self.dtype) {
-                        Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
+                    match Array::try_from_values(self.buffer.drain(..).collect(), self.dtype) {
+                        Ok(block) => Poll::Ready(Some(Ok(block))),
                         Err(cause) => {
                             self.valid = false;
                             Poll::Ready(Some(Err(cause)))
@@ -102,13 +102,13 @@ impl<T: Stream<Item = TCResult<Number>>> Stream for ValueChunkStream<T> {
     }
 }
 
-pub struct ValueStream<T: Stream<Item = TCResult<ChunkData>>> {
+pub struct ValueStream<T: Stream<Item = TCResult<Array>>> {
     source: Pin<Box<T>>,
     buffer: VecDeque<Number>,
     valid: bool,
 }
 
-impl<T: Stream<Item = TCResult<ChunkData>>> ValueStream<T> {
+impl<T: Stream<Item = TCResult<Array>>> ValueStream<T> {
     pub fn new(source: T) -> ValueStream<T> {
         ValueStream {
             source: Box::pin(source),
@@ -118,7 +118,7 @@ impl<T: Stream<Item = TCResult<ChunkData>>> ValueStream<T> {
     }
 }
 
-impl<T: Stream<Item = TCResult<ChunkData>>> Stream for ValueStream<T> {
+impl<T: Stream<Item = TCResult<Array>>> Stream for ValueStream<T> {
     type Item = TCResult<Number>;
 
     fn poll_next(mut self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
@@ -129,8 +129,8 @@ impl<T: Stream<Item = TCResult<ChunkData>>> Stream for ValueStream<T> {
         } else {
             match Pin::as_mut(&mut self.source).poll_next(cxt) {
                 Poll::Pending => Poll::Pending,
-                Poll::Ready(Some(Ok(chunk))) => {
-                    let buffered: Vec<Number> = chunk.into();
+                Poll::Ready(Some(Ok(block))) => {
+                    let buffered: Vec<Number> = block.into();
                     self.buffer.extend(buffered);
                     Poll::Ready(self.buffer.pop_front().map(|v| Ok(v)))
                 }

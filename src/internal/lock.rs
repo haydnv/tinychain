@@ -21,7 +21,7 @@ pub struct RwLockReadGuard<T> {
 }
 
 impl<T> RwLockReadGuard<T> {
-    fn upgrade(self) -> RwLockWriteFuture<T> {
+    pub fn upgrade(self) -> RwLockWriteFuture<T> {
         self.lock.write()
     }
 }

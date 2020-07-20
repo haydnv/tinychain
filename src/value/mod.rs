@@ -235,7 +235,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
             } else if let Ok(link) = key.parse::<link::Link>() {
                 Ok(Value::TCString(TCString::Link(link)))
             } else {
-                panic!("NOT IMPLEMENTED")
+                unimplemented!();
             }
         } else {
             Err(de::Error::custom("Unable to parse map entry"))

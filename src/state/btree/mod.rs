@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
-use std::ops::Bound;
+use std::ops::{Bound, Deref};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{self, join, try_join, try_join_all, BoxFuture, Future};
 use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
-use futures::try_join;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -26,11 +25,10 @@ mod collator;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
-const ERR_CORRUPT: &str = "BTree corrupted! Please restart Tinychain and file a bug report";
 
 type NodeId = BlockId;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct NodeKey {
     value: Vec<Value>,
     deleted: bool,
@@ -51,8 +49,8 @@ impl From<Vec<Value>> for NodeKey {
     }
 }
 
-#[derive(Deserialize, Serialize)]
-struct NodeData {
+#[derive(Clone, Deserialize, Serialize)]
+pub struct Node {
     leaf: bool,
     keys: Vec<NodeKey>,
     parent: Option<NodeId>,
@@ -60,9 +58,9 @@ struct NodeData {
     rebalance: bool, // TODO: implement rebalancing to clear deleted values
 }
 
-impl NodeData {
-    fn new(leaf: bool, parent: Option<NodeId>) -> NodeData {
-        NodeData {
+impl Node {
+    fn new(leaf: bool, parent: Option<NodeId>) -> Node {
+        Node {
             leaf,
             keys: vec![],
             parent,
@@ -76,66 +74,25 @@ impl NodeData {
     }
 }
 
-struct Node {
-    block: TxnLockReadGuard<Block>,
-    data: NodeData,
-}
+impl TryFrom<Bytes> for Node {
+    type Error = error::TCError;
 
-impl Node {
-    async fn create(
-        file: Arc<File>,
-        txn_id: &TxnId,
-        node_id: NodeId,
-        leaf: bool,
-        parent: Option<NodeId>,
-    ) -> TCResult<Node> {
-        Self::try_from(
-            file.create_block(
-                txn_id,
-                node_id,
-                bincode::serialize(&NodeData::new(leaf, parent))?.into(),
-            )
-            .await?,
-        )
-        .await
-    }
-
-    async fn try_from(block: TxnLockReadGuard<Block>) -> TCResult<Node> {
-        let data = bincode::deserialize(&block.as_bytes().await)?;
-        Ok(Node { block, data })
-    }
-
-    async fn upgrade(self) -> TCResult<NodeMut> {
-        Ok(NodeMut {
-            block: self.block.upgrade().await?,
-            data: self.data,
-        })
+    fn try_from(serialized: Bytes) -> TCResult<Node> {
+        bincode::deserialize(&serialized).map_err(|e| e.into())
     }
 }
 
-struct NodeMut {
-    block: TxnLockWriteGuard<Block>,
-    data: NodeData,
+impl From<Node> for Bytes {
+    fn from(node: Node) -> Bytes {
+        bincode::serialize(&node).unwrap().into()
+    }
 }
 
-impl NodeMut {
-    async fn sync(&self) -> TCResult<()> {
-        self.block
-            .rewrite(bincode::serialize(&self.data)?.into())
-            .await;
+impl Block for Node {}
 
-        Ok(())
-    }
-
-    async fn sync_and_downgrade(self, txn_id: &TxnId) -> TCResult<Node> {
-        self.block
-            .rewrite(bincode::serialize(&self.data)?.into())
-            .await;
-
-        Ok(Node {
-            block: self.block.downgrade(txn_id).await?,
-            data: self.data,
-        })
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "(BTree node)")
     }
 }
 
@@ -147,12 +104,14 @@ struct BTreeRoot(NodeId);
 
 #[async_trait]
 impl Mutate for BTreeRoot {
-    fn diverge(&self, _txn_id: &TxnId) -> Self {
-        self.clone()
+    type Pending = NodeId;
+
+    fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
+        self.0.clone()
     }
 
-    async fn converge(&mut self, new_value: BTreeRoot) {
-        self.0 = new_value.0
+    async fn converge(&mut self, new_value: Self::Pending) {
+        self.0 = new_value;
     }
 }
 
@@ -293,7 +252,7 @@ impl fmt::Display for Schema {
 }
 
 pub struct BTree {
-    file: Arc<File>,
+    file: Arc<File<Node>>,
     schema: Schema,
     order: usize,
     collator: collator::Collator,
@@ -301,11 +260,10 @@ pub struct BTree {
 }
 
 impl BTree {
-    pub async fn create(txn_id: TxnId, schema: Schema, file: Arc<File>) -> TCResult<BTree> {
+    pub async fn create(txn_id: TxnId, schema: Schema, file: Arc<File<Node>>) -> TCResult<BTree> {
         if !file.is_empty(&txn_id).await? {
-            return Err(error::bad_request(
+            return Err(error::internal(
                 "Tried to create a new BTree without a new File",
-                file,
             ));
         }
 
@@ -344,11 +302,7 @@ impl BTree {
 
         let root: BlockId = Uuid::new_v4().into();
         file.clone()
-            .create_block(
-                &txn_id,
-                root.clone(),
-                Bytes::from(bincode::serialize(&NodeData::new(true, None))?),
-            )
+            .create_block(txn_id.clone(), root.clone(), Node::new(true, None))
             .await?;
 
         let collator = collator::Collator::new(schema.dtypes())?;
@@ -369,25 +323,21 @@ impl BTree {
         &self.schema
     }
 
-    async fn get_node(&self, txn_id: &TxnId, node_id: &NodeId) -> TCResult<Node> {
-        if let Some(block) = self.file.get_block(txn_id, node_id).await? {
-            Node::try_from(block).await
-        } else {
-            Err(error::internal(ERR_CORRUPT))
-        }
+    async fn get_root<'a>(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<Node>> {
+        let root_id = self.root.read(&txn_id).await?;
+        self.file
+            .clone()
+            .get_block(txn_id, (*root_id).clone())
+            .await
     }
 
-    async fn get_root(&self, txn_id: &TxnId) -> TCResult<Node> {
-        let root_id = self.root.read(txn_id).await?;
-        self.get_node(txn_id, &root_id.0).await
-    }
-
-    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
-        Ok(self.get_root(txn_id).await?.data.keys.is_empty())
+    pub async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        self.get_root(txn_id).await.map(|root| root.keys.is_empty())
     }
 
     pub async fn len(self: Arc<Self>, txn_id: TxnId, bounds: Selector) -> TCResult<u64> {
-        // TODO: stream nodes directly rather than counting each key
+        // TODO:
+
         Ok(self
             .slice(txn_id, bounds)
             .await?
@@ -402,7 +352,7 @@ impl BTree {
     ) -> TCResult<TCStream<Key>> {
         self.schema.validate(&selector)?;
 
-        let root = self.get_root(&txn_id).await?;
+        let root = self.get_root(txn_id.clone()).await?;
 
         Ok(match selector {
             Selector::Key(key) => self._slice(txn_id, root, key.into()),
@@ -411,12 +361,17 @@ impl BTree {
         })
     }
 
-    fn _slice(self: Arc<Self>, txn_id: TxnId, node: Node, range: BTreeRange) -> TCStream<Key> {
-        let keys = node.data.values();
+    fn _slice(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        node: TxnLockReadGuard<Node>,
+        range: BTreeRange,
+    ) -> TCStream<Key> {
+        let keys = node.values();
         let (l, r) = range.bisect(&keys, &self.collator);
 
-        if node.data.leaf {
-            let keys: Vec<Key> = node.data.keys[l..r]
+        if node.leaf {
+            let keys: Vec<Key> = node.keys[l..r]
                 .iter()
                 .filter(|k| !k.deleted)
                 .map(|k| k.value.to_vec())
@@ -426,26 +381,36 @@ impl BTree {
             let mut selected: Selection = FuturesOrdered::new();
             for i in l..r {
                 let this = self.clone();
-                let child = node.data.children[i].clone();
+                let child = node.children[i].clone();
                 let txn_id = txn_id.clone();
                 let bounds = range.clone();
 
                 let selection = Box::pin(async move {
-                    let node = this.get_node(&txn_id, &child).await.unwrap();
+                    let node = this
+                        .file
+                        .clone()
+                        .get_block(txn_id.clone(), child)
+                        .await
+                        .unwrap();
                     this._slice(txn_id.clone(), node, bounds)
                 });
                 selected.push(Box::pin(selection));
 
-                if !node.data.keys[i].deleted {
-                    let key_at_i = node.data.keys[i].value.to_vec();
+                if !node.keys[i].deleted {
+                    let key_at_i = node.keys[i].value.to_vec();
                     let key_at_i: TCStream<Key> = Box::pin(stream::once(future::ready(key_at_i)));
                     selected.push(Box::pin(future::ready(key_at_i)));
                 }
             }
 
-            let last_child = node.data.children[r].clone();
+            let last_child = node.children[r].clone();
             let selection = Box::pin(async move {
-                let node = self.get_node(&txn_id, &last_child).await.unwrap();
+                let node = self
+                    .file
+                    .clone()
+                    .get_block(txn_id.clone(), last_child)
+                    .await
+                    .unwrap();
                 self._slice(txn_id, node, range)
             });
             selected.push(Box::pin(selection));
@@ -454,50 +419,61 @@ impl BTree {
         }
     }
 
-    fn _slice_reverse(
+    fn _slice_reverse<'a>(
         self: Arc<Self>,
         txn_id: TxnId,
-        node: Node,
+        node: TxnLockReadGuard<Node>,
         range: BTreeRange,
     ) -> TCStream<Key> {
-        let keys = node.data.values();
+        let keys = node.values();
         let (l, r) = range.bisect(&keys, &self.collator);
 
-        if node.data.leaf {
-            let keys: Vec<Key> = node.data.keys[l..r]
+        if node.leaf {
+            let keys: Vec<Key> = node.keys[l..r]
                 .iter()
                 .filter(|k| !k.deleted)
                 .map(|k| k.value.to_vec())
                 .rev()
                 .collect();
+
             Box::pin(stream::iter(keys))
         } else {
             let mut selected: Selection = FuturesOrdered::new();
 
-            let last_child = node.data.children[r].clone();
+            let last_child = node.children[r].clone();
             let this = self.clone();
             let txn_id_clone = txn_id.clone();
             let range_clone = range.clone();
             let selection = Box::pin(async move {
-                let node = this.get_node(&txn_id_clone, &last_child).await.unwrap();
+                let node = this
+                    .file
+                    .clone()
+                    .get_block(txn_id_clone.clone(), last_child)
+                    .await
+                    .unwrap();
                 this._slice_reverse(txn_id_clone, node, range_clone)
             });
             selected.push(Box::pin(selection));
 
             for i in (r..l).rev() {
                 let this = self.clone();
-                let child = node.data.children[i].clone();
+                let child = node.children[i].clone();
                 let txn_id = txn_id.clone();
                 let bounds = range.clone();
 
                 let selection = Box::pin(async move {
-                    let node = this.get_node(&txn_id, &child).await.unwrap();
-                    this._slice_reverse(txn_id.clone(), node, bounds)
+                    let node = this
+                        .file
+                        .clone()
+                        .get_block(txn_id.clone(), child)
+                        .await
+                        .unwrap();
+                    this._slice_reverse(txn_id, node, bounds)
                 });
                 selected.push(Box::pin(selection));
 
-                if !node.data.keys[i].deleted {
-                    let key_at_i = node.data.keys[i].value.to_vec();
+                if !node.keys[i].deleted {
+                    let key_at_i = node.keys[i].value.to_vec();
                     let key_at_i: TCStream<Key> = Box::pin(stream::once(future::ready(key_at_i)));
                     selected.push(Box::pin(future::ready(key_at_i)));
                 }
@@ -514,7 +490,7 @@ impl BTree {
         value: &'a [Value],
     ) -> TCResult<()> {
         let root_id = self.root.read(txn_id).await?;
-        self._update(txn_id, &root_id.0, bounds, value).await
+        self._update(txn_id, root_id.deref(), bounds, value).await
     }
 
     fn _update<'a>(
@@ -525,31 +501,35 @@ impl BTree {
         value: &'a [Value],
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
-            let node = self.get_node(txn_id, node_id).await?;
-            let keys = node.data.values();
+            let node = self
+                .file
+                .clone()
+                .get_block(txn_id.clone(), node_id.clone())
+                .await?;
+            let keys = node.values();
             let (l, r) = bounds.bisect(&keys, &self.collator);
 
-            if node.data.leaf {
+            if node.leaf {
                 if l == r {
                     return Ok(());
                 }
 
                 let mut node = node.upgrade().await?;
                 for i in l..r {
-                    node.data.keys[i] = value.into();
+                    node.keys[i] = value.into();
                 }
-                node.sync().await
+
+                Ok(())
             } else {
-                let children = node.data.children.to_vec();
+                let children = node.children.to_vec();
 
                 if r > l {
-                    let mut updates = Vec::with_capacity(r - l);
                     let mut node = node.upgrade().await?;
+                    let mut updates = Vec::with_capacity(r - l);
                     for (i, child) in children.iter().enumerate().take(r).skip(l) {
-                        node.data.keys[i] = value.into();
+                        node.keys[i] = value.into();
                         updates.push(self._update(txn_id, &child, bounds, value));
                     }
-                    node.sync().await?;
 
                     let last_update = self._update(txn_id, &children[r], bounds, value);
                     try_join(try_join_all(updates), last_update).await?;
@@ -563,38 +543,40 @@ impl BTree {
 
     pub async fn insert_from<S: Stream<Item = Key>>(
         &self,
-        txn_id: &TxnId,
+        txn_id: TxnId,
         source: S,
     ) -> TCResult<()> {
         source
             .map(|k| self.schema.validate_key(&k).map(|()| k))
-            .map_ok(|key| self.insert(txn_id, key))
+            .map_ok(|key| self.insert(txn_id.clone(), key))
             .try_buffer_unordered(2 * self.order)
             .fold(Ok(()), |_, r| future::ready(r))
             .await
     }
 
-    pub async fn insert(&self, txn_id: &TxnId, key: Key) -> TCResult<()> {
-        let root_id = self.root.read(&txn_id).await?;
-        let root = self.get_node(&txn_id, &root_id.0).await?;
+    pub async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        let mut root_id = self.root.write(txn_id.clone()).await?;
+        let root = self
+            .file
+            .clone()
+            .get_block(txn_id.clone(), (*root_id).clone())
+            .await?;
 
-        if root.data.keys.len() == (2 * self.order) - 1 {
-            let mut root_id = root_id.upgrade().await?;
-            let old_root_id = root_id.0.clone();
-            let old_root = root;
+        if root.keys.len() == (2 * self.order) - 1 {
+            let old_root_id = (*root_id).clone();
+            let old_root = root.upgrade().await?;
 
-            root_id.0 = self.file.unique_id(&txn_id).await?;
-            let mut new_root =
-                Node::create(self.file.clone(), &txn_id, root_id.0.clone(), false, None)
-                    .await?
-                    .upgrade()
-                    .await?;
-            new_root.data.children.push(old_root_id.clone());
-            self.split_child(&txn_id, old_root_id, old_root.upgrade().await?, 0)
+            (*root_id) = self.file.unique_id(&txn_id).await?;
+            let mut new_root = Node::new(false, None);
+            new_root.children.push(old_root_id.clone());
+            let new_root = self
+                .file
+                .create_block(txn_id.clone(), (*root_id).clone(), new_root)
                 .await?;
 
-            self._insert(&txn_id, new_root.sync_and_downgrade(&txn_id).await?, key)
-                .await
+            self.split_child(txn_id.clone(), old_root_id, old_root, 0)
+                .await?;
+            self._insert(&txn_id, new_root, key).await
         } else {
             self._insert(&txn_id, root, key).await
         }
@@ -603,36 +585,42 @@ impl BTree {
     fn _insert<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        mut node: Node,
+        node: TxnLockReadGuard<Node>,
         key: Key,
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
-            let keys = &node.data.keys;
-            let i = self.collator.bisect_left(&node.data.values(), &key);
-            if node.data.leaf {
-                if i == node.data.keys.len()
+            let keys = &node.keys;
+            let i = self.collator.bisect_left(&node.values(), &key);
+            if node.leaf {
+                if i == node.keys.len()
                     || self.collator.compare(&keys[i].value, &key) != Ordering::Equal
                 {
                     let mut node = node.upgrade().await?;
-                    node.data.keys.insert(i, key.into());
-                    node.sync().await
+                    node.keys.insert(i, key.into());
                 } else if keys[i].value == key && keys[i].deleted {
                     let mut node = node.upgrade().await?;
-                    node.data.keys[i].deleted = false;
-                    node.sync().await
-                } else {
-                    Ok(())
+                    node.keys[i].deleted = false;
                 }
+
+                Ok(())
             } else {
-                let child_id = &node.data.children[i];
-                let mut child = self.get_node(txn_id, child_id).await?;
-                if child.data.keys.len() == (2 * self.order) - 1 {
-                    let this_key = &node.data.keys[i].value.to_vec();
-                    node = self
-                        .split_child(txn_id, child_id.clone(), node.upgrade().await?, i)
+                let child_id = &node.children[i];
+                let mut child = self
+                    .file
+                    .clone()
+                    .get_block(txn_id.clone(), child_id.clone())
+                    .await?;
+                if child.keys.len() == (2 * self.order) - 1 {
+                    let this_key = &node.keys[i].value.to_vec();
+                    let node = self
+                        .split_child(txn_id.clone(), child_id.clone(), node.upgrade().await?, i)
                         .await?;
                     if self.collator.compare(&key, &this_key) == Ordering::Greater {
-                        child = self.get_node(txn_id, &node.data.children[i + 1]).await?;
+                        child = self
+                            .file
+                            .clone()
+                            .get_block(txn_id.clone(), node.children[i + 1].clone())
+                            .await?;
                     }
                 }
 
@@ -641,44 +629,39 @@ impl BTree {
         })
     }
 
-    async fn split_child(
+    async fn split_child<'a>(
         &self,
-        txn_id: &TxnId,
+        txn_id: TxnId,
         node_id: NodeId,
-        mut node: NodeMut,
+        mut node: TxnLockWriteGuard<Node>,
         i: usize,
-    ) -> TCResult<Node> {
-        let mut child = self.get_node(txn_id, &node.data.children[i]).await?;
-        let new_node_id = self.file.unique_id(txn_id).await?;
+    ) -> TCResult<TxnLockReadGuard<Node>> {
+        let mut child = self
+            .file
+            .clone()
+            .get_block(txn_id.clone(), node.children[i].clone())
+            .await?
+            .upgrade()
+            .await?;
+        let new_node_id = self.file.unique_id(&txn_id).await?;
 
-        node.data.children.insert(i + 1, new_node_id.clone());
-        node.data
-            .keys
-            .insert(i, child.data.keys.remove(self.order - 1));
-        let mut new_node = Node::create(
-            self.file.clone(),
-            txn_id,
-            new_node_id.clone(),
-            node.data.leaf,
-            Some(node_id),
-        )
-        .await?
-        .upgrade()
-        .await?;
-        new_node.data.keys = child.data.keys.drain((self.order - 1)..).collect();
+        node.children.insert(i + 1, new_node_id.clone());
+        node.keys.insert(i, child.keys.remove(self.order - 1));
 
-        if !child.data.leaf {
-            new_node.data.children = child.data.children.drain(self.order..).collect();
+        let mut new_node = Node::new(node.leaf, Some(node_id));
+        new_node.keys = child.keys.drain((self.order - 1)..).collect();
+        if !child.leaf {
+            new_node.children = child.children.drain(self.order..).collect();
         }
-
-        let (_, node) = try_join!(new_node.sync(), node.sync_and_downgrade(txn_id))?;
-
-        Ok(node)
+        self.file
+            .create_block(txn_id.clone(), new_node_id, new_node)
+            .await?;
+        node.downgrade(&txn_id).await
     }
 
     pub async fn delete(&self, txn_id: &TxnId, bounds: Selector) -> TCResult<()> {
         let root_id = self.root.read(txn_id).await?;
-        self._delete(txn_id, &root_id.0, &bounds).await
+        self._delete(txn_id, root_id.deref(), &bounds).await
     }
 
     fn _delete<'a>(
@@ -688,33 +671,37 @@ impl BTree {
         bounds: &'a Selector,
     ) -> BoxFuture<'a, TCResult<()>> {
         Box::pin(async move {
-            let node = self.get_node(txn_id, node_id).await?;
-            let keys = node.data.values();
+            let node = self
+                .file
+                .clone()
+                .get_block(txn_id.clone(), node_id.clone())
+                .await?;
+            let keys = node.values();
             let (l, r) = bounds.bisect(&keys, &self.collator);
 
-            if node.data.leaf {
+            if node.leaf {
                 if l == r {
                     return Ok(());
                 }
 
                 let mut node = node.upgrade().await?;
                 for i in l..r {
-                    node.data.keys[i].deleted = true;
+                    node.keys[i].deleted = true;
                 }
-                node.data.rebalance = true;
-                node.sync().await
+                node.rebalance = true;
+
+                Ok(())
             } else {
-                let children = node.data.children.to_vec();
+                let children = node.children.to_vec();
 
                 if r > l {
-                    let mut deletes = Vec::with_capacity(r - l);
                     let mut node = node.upgrade().await?;
+                    let mut deletes = Vec::with_capacity(r - l);
                     for i in l..r {
-                        node.data.keys[i].deleted = true;
+                        node.keys[i].deleted = true;
                         deletes.push(self._delete(txn_id, &children[i], bounds));
                     }
-                    node.data.rebalance = true;
-                    node.sync().await?;
+                    node.rebalance = true;
 
                     let last_delete = self._delete(txn_id, &children[r], bounds);
                     try_join(try_join_all(deletes), last_delete).await?;
@@ -890,7 +877,7 @@ impl Collect for BTree {
 
         match selector {
             Selector::Key(selector) if self.collator.compare(selector, &key) == Ordering::Equal => {
-                self.insert(txn.id(), key).await
+                self.insert(txn.id().clone(), key).await
             }
             selector => self.update(txn.id(), selector, &key).await,
         }
