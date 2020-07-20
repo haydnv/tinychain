@@ -5,7 +5,7 @@ use arrayfire as af;
 use bytes::Bytes;
 
 use crate::error;
-use crate::state::file::Block;
+use crate::state::file::BlockData;
 use crate::value::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
 use crate::value::{Complex, Float, Int, Number, TCResult, UInt};
 
@@ -1635,7 +1635,7 @@ impl From<Array> for Bytes {
     }
 }
 
-impl Block for Array {}
+impl BlockData for Array {}
 
 impl From<Vec<bool>> for Array {
     fn from(b: Vec<bool>) -> Array {

@@ -112,7 +112,7 @@ pub fn bad_request<T: fmt::Display>(message: &str, info: T) -> TCError {
 pub fn conflict() -> TCError {
     TCError::of(
         Code::Conflict,
-        format!("Transaction failed due to a concurrent access conflict"),
+        "Transaction failed due to a concurrent access conflict".to_string(),
     )
 }
 

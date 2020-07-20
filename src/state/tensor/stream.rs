@@ -132,7 +132,7 @@ impl<T: Stream<Item = TCResult<Array>>> Stream for ValueStream<T> {
                 Poll::Ready(Some(Ok(block))) => {
                     let buffered: Vec<Number> = block.into();
                     self.buffer.extend(buffered);
-                    Poll::Ready(self.buffer.pop_front().map(|v| Ok(v)))
+                    Poll::Ready(self.buffer.pop_front().map(Ok))
                 }
                 Poll::Ready(Some(Err(cause))) => {
                     self.valid = false;

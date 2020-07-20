@@ -32,7 +32,7 @@ pub struct Collator {
 impl Collator {
     pub fn new(schema: Vec<ValueType>) -> TCResult<Collator> {
         for dtype in &schema {
-            if !Collator::supports(dtype) {
+            if !Collator::supports(*dtype) {
                 return Err(error::bad_request("Collation is not supported for", dtype));
             }
         }
@@ -40,7 +40,7 @@ impl Collator {
         Ok(Collator { schema })
     }
 
-    pub fn supports(dtype: &ValueType) -> bool {
+    pub fn supports(dtype: ValueType) -> bool {
         use ValueType::*;
         match dtype {
             Number(_) => true,

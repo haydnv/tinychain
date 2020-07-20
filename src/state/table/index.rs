@@ -23,7 +23,7 @@ pub struct Index {
 }
 
 impl Index {
-    pub async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.btree.is_empty(txn_id).await
     }
 
@@ -69,7 +69,7 @@ impl Index {
         })
     }
 
-    async fn insert(&self, txn_id: TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
+    async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
         let key = self.schema().row_into_values(row, reject_extra_columns)?;
         self.btree.insert(txn_id, key).await
     }
@@ -184,13 +184,13 @@ impl ReadOnly {
             let btree = BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
 
             let rows = source.select(columns)?.stream(txn.id().clone()).await?;
-            btree.insert_from(txn.id().clone(), rows).await?;
+            btree.insert_from(txn.id(), rows).await?;
             (schema, btree)
         } else {
             let schema = source.schema().clone();
             let btree = BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
             let rows = source.stream(txn.id().clone()).await?;
-            btree.insert_from(txn.id().clone(), rows).await?;
+            btree.insert_from(txn.id(), rows).await?;
             (schema, btree)
         };
 
@@ -326,7 +326,7 @@ impl TableBase {
         );
         btree
             .insert_from(
-                txn.id().clone(),
+                txn.id(),
                 self.clone()
                     .select(schema.clone().into())?
                     .stream(txn.id().clone())
@@ -355,14 +355,14 @@ impl TableBase {
         }
     }
 
-    async fn upsert(self, txn_id: TxnId, row: Row) -> TCResult<()> {
-        self.delete_row(&txn_id, row.clone()).await?;
+    async fn upsert<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCResult<()> {
+        self.delete_row(txn_id, row.clone()).await?;
 
-        let auxiliary = self.auxiliary.read(&txn_id).await?;
+        let auxiliary = self.auxiliary.read(txn_id).await?;
 
         let mut inserts = Vec::with_capacity(auxiliary.len() + 1);
         for index in auxiliary.values() {
-            inserts.push(index.insert(txn_id.clone(), row.clone(), false));
+            inserts.push(index.insert(txn_id, row.clone(), false));
         }
         inserts.push(self.primary.insert(txn_id, row, true));
 
@@ -447,14 +447,14 @@ impl Selection for TableBase {
         let schema = self.schema().clone();
         schema.validate_row_partial(&value)?;
 
-        let txn_id = txn.id().clone();
-        self.clone()
-            .index(txn, None)
-            .await?
+        let index = self.clone().index(txn.clone(), None).await?;
+
+        let txn_id = txn.id();
+        index
             .stream(txn_id.clone())
             .await?
             .map(|row| schema.values_into_row(row))
-            .map_ok(move |row| self.clone().upsert(txn_id.clone(), row))
+            .map_ok(|row| self.upsert(txn_id, row))
             .try_buffer_unordered(2)
             .fold(Ok(()), |_, r| future::ready(r))
             .await

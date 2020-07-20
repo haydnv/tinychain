@@ -11,7 +11,7 @@ use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 
 use crate::error;
-use crate::state::file::{BlockId, File};
+use crate::state::file::{BlockId, BlockOwned, File};
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::{ComplexType, FloatType, NumberType};
 use crate::value::class::{Impl, NumberClass};
@@ -350,15 +350,10 @@ impl BlockTensor {
         }))
     }
 
-    fn blocks(&self, txn_id: TxnId) -> impl Stream<Item = TCResult<Array>> {
-        let file = self.file.clone();
+    fn blocks(self: Arc<Self>, txn_id: TxnId) -> impl Stream<Item = TCResult<BlockOwned<Array>>> {
         stream::iter(0..(self.size / self.per_block as u64))
             .map(BlockId::from)
-            .then(move |block_id| file.clone().get_block(txn_id.clone(), block_id))
-            .map_ok(|lock| {
-                let block: &Array = lock.deref().try_into().unwrap();
-                block.clone()
-            })
+            .then(move |block_id| self.file.clone().get_block_owned(txn_id.clone(), block_id))
     }
 }
 
@@ -451,12 +446,7 @@ impl BlockTensorView for BlockTensor {
                     let (block_offsets, new_start) =
                         block_offsets(&af_indices, &af_offsets, num_coords, start, block_id);
 
-                    match this
-                        .file
-                        .clone()
-                        .get_block(txn_id.clone(), block_id.into())
-                        .await
-                    {
+                    match this.file.clone().get_block(&txn_id, &block_id.into()).await {
                         Ok(block) => {
                             let array: &Array = block.deref().try_into().unwrap();
                             values.extend(array.get(block_offsets));
@@ -510,10 +500,10 @@ impl BlockTensorView for BlockTensor {
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, num_coords, start, block_id);
 
+                        let block_id: BlockId = block_id.into();
                         let mut block = this
                             .file
-                            .clone()
-                            .get_block(txn_id.clone(), block_id.into())
+                            .get_block(&txn_id, &block_id)
                             .await?
                             .upgrade()
                             .await?;
@@ -564,10 +554,10 @@ impl BlockTensorView for BlockTensor {
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, num_coords, start, block_id);
 
+                        let block_id: BlockId = block_id.into();
                         let mut block = this
                             .file
-                            .clone()
-                            .get_block(txn_id.clone(), block_id.into())
+                            .get_block(&txn_id, &block_id)
                             .await?
                             .upgrade()
                             .await?;
