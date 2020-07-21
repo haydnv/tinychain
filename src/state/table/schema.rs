@@ -120,6 +120,17 @@ impl Bounds {
     }
 }
 
+impl From<HashMap<ValueId, Value>> for Bounds {
+    fn from(mut bounds: HashMap<ValueId, Value>) -> Bounds {
+        Bounds(
+            bounds
+                .drain()
+                .map(|(column, equals)| (column, ColumnBound::Is(equals)))
+                .collect(),
+        )
+    }
+}
+
 impl fmt::Display for Bounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

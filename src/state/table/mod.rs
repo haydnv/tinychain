@@ -13,6 +13,7 @@ mod index;
 mod schema;
 mod view;
 
+pub type Bounds = schema::Bounds;
 pub type Column = schema::Column;
 pub type Schema = schema::Schema;
 pub type TableBase = index::TableBase;
