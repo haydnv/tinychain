@@ -90,7 +90,8 @@ impl<T: BlockData> File<T> {
             ));
         }
         listing.insert(block_id.clone());
-        let txn_lock = self.cache
+        let txn_lock = self
+            .cache
             .write()
             .await
             .insert(txn_id.clone(), block_id.clone(), data);
@@ -144,7 +145,11 @@ impl<T: BlockData> File<T> {
                 };
 
             let block: T = block.read().await.deref().clone().try_into()?;
-            let txn_lock = self.cache.write().await.insert(txn_id.clone(), block_id.clone(), block);
+            let txn_lock = self
+                .cache
+                .write()
+                .await
+                .insert(txn_id.clone(), block_id.clone(), block);
             txn_lock.read(txn_id).await
         } else {
             Err(error::not_found(block_id))
