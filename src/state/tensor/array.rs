@@ -5,7 +5,7 @@ use arrayfire as af;
 use bytes::Bytes;
 
 use crate::error;
-use crate::state::file::BlockData;
+use crate::state::file::block::BlockData;
 use crate::value::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
 use crate::value::{Complex, Float, Int, Number, TCResult, UInt};
 

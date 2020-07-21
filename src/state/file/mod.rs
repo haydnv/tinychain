@@ -1,117 +1,33 @@
-use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
+use std::collections::HashSet;
+use std::convert::TryInto;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Bytes;
+use futures::future::join_all;
 use uuid::Uuid;
 
 use crate::error;
 use crate::internal::hostfs;
 use crate::internal::lock::RwLock;
-use crate::transaction::lock::{Mutable, Mutate, TxnLock, TxnLockReadGuard, TxnLockWriteGuard};
+use crate::transaction::lock::{Mutable, TxnLock, TxnLockReadGuard};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
+pub mod block;
+mod cache;
+
+use block::*;
+
 const ERR_CORRUPT: &str = "Data corruption error detected! Please file a bug report.";
 const TXN_CACHE: &str = ".pending";
-
-pub type BlockId = PathSegment;
-
-pub struct Block<'a, T: BlockData> {
-    file: &'a File<T>,
-    block_id: BlockId,
-    lock: TxnLockReadGuard<T>,
-}
-
-impl<'a, T: BlockData> Block<'a, T> {
-    pub async fn upgrade(self) -> TCResult<BlockMut<'a, T>> {
-        self.file
-            .mutate(self.lock.txn_id().clone(), self.block_id.clone())
-            .await?;
-        Ok(BlockMut {
-            file: self.file,
-            block_id: self.block_id,
-            lock: self.lock.upgrade().await?,
-        })
-    }
-}
-
-impl<'a, T: BlockData> Deref for Block<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        self.lock.deref()
-    }
-}
-
-pub struct BlockMut<'a, T: BlockData> {
-    file: &'a File<T>,
-    block_id: BlockId,
-    lock: TxnLockWriteGuard<T>,
-}
-
-impl<'a, T: BlockData> BlockMut<'a, T> {
-    pub async fn downgrade(self, txn_id: &'a TxnId) -> TCResult<Block<'a, T>> {
-        Ok(Block {
-            file: self.file,
-            block_id: self.block_id,
-            lock: self.lock.downgrade(txn_id).await?,
-        })
-    }
-}
-
-impl<'a, T: BlockData> Deref for BlockMut<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        self.lock.deref()
-    }
-}
-
-impl<'a, T: BlockData> DerefMut for BlockMut<'a, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        self.lock.deref_mut()
-    }
-}
-
-pub struct BlockOwned<T: BlockData> {
-    lock: TxnLockReadGuard<T>,
-}
-
-impl<T: BlockData> Deref for BlockOwned<T> {
-    type Target = T;
-
-    fn deref(&'_ self) -> &'_ T {
-        self.lock.deref()
-    }
-}
-
-pub trait BlockData:
-    Clone + Send + Sync + TryFrom<Bytes, Error = error::TCError> + Into<Bytes>
-{
-}
-
-#[async_trait]
-impl<T: BlockData> Mutate for T {
-    type Pending = Self;
-
-    fn diverge(&self, _txn_id: &TxnId) -> Self {
-        self.clone()
-    }
-
-    async fn converge(&mut self, other: Self) {
-        *self = other;
-    }
-}
 
 pub struct File<T: BlockData> {
     dir: RwLock<hostfs::Dir>,
     pending: RwLock<hostfs::Dir>,
     listing: TxnLock<Mutable<HashSet<BlockId>>>,
-    cache: RwLock<HashMap<BlockId, TxnLock<T>>>,
+    cache: RwLock<cache::Cache<T>>,
     mutated: TxnLock<Mutable<HashSet<BlockId>>>,
 }
 
@@ -129,7 +45,7 @@ impl<T: BlockData> File<T> {
             dir,
             pending: lock.create_dir(TXN_CACHE.parse()?)?,
             listing: TxnLock::new(txn_id.clone(), HashSet::new().into()),
-            cache: RwLock::new(HashMap::new()),
+            cache: RwLock::new(cache::Cache::new()),
             mutated: TxnLock::new(txn_id, HashSet::new().into()),
         }))
     }
@@ -151,7 +67,7 @@ impl<T: BlockData> File<T> {
             .map(|block_ids| block_ids.clone())
     }
 
-    async fn mutate(&self, txn_id: TxnId, block_id: BlockId) -> TCResult<()> {
+    pub async fn mutate(&self, txn_id: TxnId, block_id: BlockId) -> TCResult<()> {
         self.mutated.write(txn_id).await?.insert(block_id);
         Ok(())
     }
@@ -174,17 +90,12 @@ impl<T: BlockData> File<T> {
             ));
         }
         listing.insert(block_id.clone());
-        let txn_lock = TxnLock::new(txn_id.clone(), data);
-        self.cache
+        let txn_lock = self.cache
             .write()
             .await
-            .insert(block_id.clone(), txn_lock.clone());
+            .insert(txn_id.clone(), block_id.clone(), data);
         let lock = txn_lock.read(&txn_id).await?;
-        Ok(Block {
-            file: self,
-            block_id,
-            lock,
-        })
+        Ok(Block::new(self, block_id, lock))
     }
 
     pub async fn get_block<'a>(
@@ -193,11 +104,7 @@ impl<T: BlockData> File<T> {
         block_id: BlockId,
     ) -> TCResult<Block<'a, T>> {
         let lock = self.lock_block(txn_id, &block_id).await?;
-        Ok(Block {
-            file: self,
-            block_id,
-            lock,
-        })
+        Ok(Block::new(self, block_id, lock))
     }
 
     pub async fn get_block_owned(
@@ -206,7 +113,7 @@ impl<T: BlockData> File<T> {
         block_id: BlockId,
     ) -> TCResult<BlockOwned<T>> {
         let lock = self.lock_block(&txn_id, &block_id).await?;
-        Ok(BlockOwned { lock })
+        Ok(BlockOwned::new(lock))
     }
 
     async fn lock_block(
@@ -236,11 +143,9 @@ impl<T: BlockData> File<T> {
                         .ok_or_else(|| error::internal(ERR_CORRUPT))?
                 };
 
-            let block = block.read().await;
-            let txn_lock = TxnLock::new(txn_id.clone(), (*block).clone().try_into()?);
-            let block = txn_lock.read(txn_id).await?;
-            self.cache.write().await.insert(block_id.clone(), txn_lock);
-            Ok(block)
+            let block: T = block.read().await.deref().clone().try_into()?;
+            let txn_lock = self.cache.write().await.insert(txn_id.clone(), block_id.clone(), block);
+            txn_lock.read(txn_id).await
         } else {
             Err(error::not_found(block_id))
         }
@@ -273,35 +178,35 @@ impl<T: BlockData> Transact for File<T> {
             .collect();
         self.mutated.commit(txn_id).await;
 
+        let cache = self.cache.read().await;
         let mut pending = self.pending.write().await;
         let txn_dir_id: PathSegment = txn_id.clone().into();
         if mutated.is_empty() {
+            cache.commit(txn_id).await;
             pending.delete_dir(&txn_dir_id).unwrap();
             return;
         }
 
-        let cache = self.cache.read().await;
-        let mut txn_dir = pending
-            .create_or_get_dir(&txn_dir_id)
-            .unwrap()
-            .write()
-            .await;
+        let txn_dir = pending.create_or_get_dir(&txn_dir_id).unwrap();
 
-        // TODO: run these copy ops in parallel
-        for block_id in mutated.drain(..) {
-            if let Some(lock) = cache.get(&block_id) {
-                txn_dir
-                    .create_or_get_block(
-                        &block_id,
-                        lock.read(txn_id).await.unwrap().deref().clone().into(),
-                    )
-                    .await
-                    .unwrap();
-                lock.commit(txn_id).await;
-            }
-        }
+        let copy_ops = mutated
+            .drain(..)
+            .filter_map(|block_id| cache.get(&block_id).map(|lock| (block_id, lock)))
+            .map(|(block_id, lock)| {
+                let dir_lock = txn_dir.write();
+                async move {
+                    let data = lock.read(txn_id).await.unwrap().deref().clone().into();
+                    dir_lock
+                        .await
+                        .create_or_get_block(block_id, data)
+                        .await
+                        .unwrap();
+                }
+            });
 
-        dir.move_all(txn_dir.deref_mut()).unwrap();
+        join_all(copy_ops).await;
+        cache.commit(txn_id).await;
+        dir.move_all(txn_dir.write().await.deref_mut()).unwrap();
         pending.delete_dir(&txn_dir_id).unwrap();
     }
 

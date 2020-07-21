@@ -18,7 +18,6 @@ pub enum DirEntry {
 pub struct Dir {
     mount_point: PathBuf,
     contents: HashMap<PathSegment, DirEntry>,
-    exists_on_fs: bool,
 }
 
 impl Dir {
@@ -26,7 +25,6 @@ impl Dir {
         Dir {
             mount_point,
             contents: HashMap::new(),
-            exists_on_fs: false,
         }
     }
 
@@ -57,12 +55,12 @@ impl Dir {
         }
     }
 
-    pub async fn create_or_get_block(
-        &mut self,
-        name: &PathSegment,
+    pub async fn create_or_get_block<'a>(
+        &'a mut self,
+        name: PathSegment,
         data: Bytes,
     ) -> TCResult<RwLock<Bytes>> {
-        match self.get_block(name) {
+        match self.get_block(&name) {
             Ok(Some(block)) => {
                 *(block.write().await.deref_mut()) = data;
                 Ok(block)
