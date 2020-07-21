@@ -10,7 +10,7 @@ use crate::value::class::NumberType;
 use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::base::*;
-use super::bounds::Shape;
+use super::bounds::{Bounds, Shape};
 use super::dense::BlockTensor;
 
 #[async_trait]
@@ -112,5 +112,13 @@ fn unwrap_u64(value: &Value) -> u64 {
         *unwrapped
     } else {
         panic!("Expected u64 but found {}", value)
+    }
+}
+
+impl Slice for SparseTensor {
+    type Slice = TensorSlice<SparseTensor>;
+
+    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
+        Ok(Arc::new(TensorSlice::new(self, bounds)?))
     }
 }
