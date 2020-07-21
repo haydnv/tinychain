@@ -8,7 +8,7 @@ use crate::error;
 use crate::state::table::{Column, Schema, Selection, TableBase};
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::NumberType;
-use crate::value::{Number, TCResult, TCStream, UInt, Value};
+use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::base::*;
 use super::bounds::Shape;
@@ -18,7 +18,7 @@ use super::dense::BlockTensor;
 pub trait SparseTensorView: TensorView {
     async fn filled(&self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>>;
 
-    async fn filled_at(&self, txn_id: &TxnId, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>>;
+    async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>>;
 
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64>;
 
@@ -78,8 +78,17 @@ impl SparseTensorView for SparseTensor {
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at(&self, _txn_id: &TxnId, _axes: &[usize]) -> TCResult<TCStream<Vec<u64>>> {
-        Err(error::not_implemented())
+    async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>> {
+        let txn_id = txn.id().clone();
+        let columns: Vec<ValueId> = axes.iter().map(|x| (*x).into()).collect();
+        Ok(Box::pin(
+            self.table
+                .group_by(txn, columns)
+                .await?
+                .stream(txn_id)
+                .await?
+                .map(|coord| unwrap_coord(&coord)),
+        ))
     }
 
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64> {
@@ -91,11 +100,12 @@ impl SparseTensorView for SparseTensor {
     }
 }
 
+fn unwrap_coord(coord: &[Value]) -> Vec<u64> {
+    coord.iter().map(|val| unwrap_u64(val)).collect()
+}
+
 fn unwrap_row(mut row: Vec<Value>) -> (Vec<u64>, Number) {
-    let coord = row[0..row.len() - 1]
-        .iter()
-        .map(|val| unwrap_u64(val))
-        .collect();
+    let coord = unwrap_coord(&row[0..row.len() - 1]);
     let value = row.pop().unwrap().try_into().unwrap();
     (coord, value)
 }
