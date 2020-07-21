@@ -5,16 +5,78 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future;
-use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use crate::error;
 use crate::state::btree::{BTree, BTreeRange};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
-use super::index::TableBase;
+use super::index::{ReadOnly, TableBase};
 use super::schema::{Bounds, Column, Row, Schema};
 use super::{Selection, Table};
+
+#[derive(Clone)]
+pub struct Aggregate {
+    index: ReadOnly,
+    columns: Vec<ValueId>,
+}
+
+impl Aggregate {
+    pub async fn new(txn: Arc<Txn>, source: Table, columns: Vec<ValueId>) -> TCResult<Aggregate> {
+        source
+            .index(txn, Some(columns.to_vec()))
+            .await
+            .map(|index| Aggregate { index, columns })
+    }
+}
+
+#[async_trait]
+impl Selection for Aggregate {
+    type Stream = TCStream<Vec<Value>>;
+
+    async fn group_by(&self, _txn: Arc<Txn>, _columns: Vec<ValueId>) -> TCResult<Aggregate> {
+        Err(error::unsupported("It does not make sense to aggregate an aggregate table; consider aggregating the source table directly"))
+    }
+
+    fn reversed(&self) -> TCResult<Table> {
+        Ok(Aggregate {
+            index: self.index.clone().into_reversed(),
+            columns: self.columns.clone(),
+        }
+        .into())
+    }
+
+    fn schema(&'_ self) -> &'_ Schema {
+        self.index.schema()
+    }
+
+    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
+        let first = self.index.stream(txn_id.clone()).await?.next().await;
+        let first = if let Some(first) = first {
+            first
+        } else {
+            return Ok(Box::pin(stream::empty()));
+        };
+
+        let left =
+            stream::once(future::ready(first)).chain(self.index.stream(txn_id.clone()).await?);
+        let right = self.index.stream(txn_id).await?;
+        let aggregate = left.zip(right).filter_map(|(l, r)| {
+            if l == r {
+                future::ready(None)
+            } else {
+                future::ready(Some(r))
+            }
+        });
+
+        Ok(Box::pin(aggregate))
+    }
+
+    async fn validate(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
+        Err(error::unsupported("Table aggregate does not support slicing, consider aggregating a slice of the source table"))
+    }
+}
 
 #[derive(Clone)]
 pub struct ColumnSelection {

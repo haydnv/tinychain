@@ -217,6 +217,12 @@ impl ReadOnly {
             .index_slice(Bounds::all())
             .map(|index| ReadOnly { index })
     }
+
+    pub fn into_reversed(self) -> ReadOnly {
+        ReadOnly {
+            index: self.index.into_reversed(),
+        }
+    }
 }
 
 #[async_trait]
@@ -228,10 +234,7 @@ impl Selection for ReadOnly {
     }
 
     fn reversed(&self) -> TCResult<Table> {
-        Ok(ReadOnly {
-            index: self.index.clone().into_reversed(),
-        }
-        .into())
+        Ok(self.clone().into_reversed().into())
     }
 
     fn schema(&'_ self) -> &'_ Schema {

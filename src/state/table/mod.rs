@@ -42,6 +42,10 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         Err(error::unsupported("This table view does not support row deletion (try deleting from the source table directly)"))
     }
 
+    async fn group_by(&self, txn: Arc<Txn>, columns: Vec<ValueId>) -> TCResult<view::Aggregate> {
+        view::Aggregate::new(txn, self.clone().into(), columns).await
+    }
+
     async fn index(
         &self,
         txn: Arc<Txn>,
@@ -114,6 +118,7 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
 
 #[derive(Clone)]
 pub enum Table {
+    Aggregate(view::Aggregate),
     Columns(view::ColumnSelection),
     Limit(view::Limited),
     Table(index::TableBase),
@@ -129,6 +134,7 @@ impl Selection for Table {
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         match self {
+            Self::Aggregate(aggregate) => aggregate.count(txn_id).await,
             Self::Columns(columns) => columns.count(txn_id).await,
             Self::Limit(limited) => limited.count(txn_id).await,
             Self::Table(table) => table.count(txn_id).await,
@@ -141,6 +147,7 @@ impl Selection for Table {
 
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         match self {
+            Self::Aggregate(aggregate) => aggregate.clone().delete(txn_id).await,
             Self::Columns(columns) => columns.clone().delete(txn_id).await,
             Self::Limit(limited) => limited.clone().delete(txn_id).await,
             Self::Table(table) => table.clone().delete(txn_id).await,
@@ -153,6 +160,7 @@ impl Selection for Table {
 
     async fn delete_row(&self, txn_id: &TxnId, row: schema::Row) -> TCResult<()> {
         match self {
+            Self::Aggregate(aggregate) => aggregate.delete_row(txn_id, row).await,
             Self::Columns(columns) => columns.delete_row(txn_id, row).await,
             Self::Limit(limited) => limited.delete_row(txn_id, row).await,
             Self::Table(table) => table.delete_row(txn_id, row).await,
@@ -165,6 +173,7 @@ impl Selection for Table {
 
     fn reversed(&self) -> TCResult<Table> {
         match self {
+            Self::Aggregate(aggregate) => aggregate.reversed(),
             Self::Columns(columns) => columns.reversed(),
             Self::Limit(limited) => limited.reversed(),
             Self::Table(table) => table.reversed(),
@@ -177,6 +186,7 @@ impl Selection for Table {
 
     fn schema(&'_ self) -> &'_ schema::Schema {
         match self {
+            Self::Aggregate(aggregate) => aggregate.schema(),
             Self::Columns(columns) => columns.schema(),
             Self::Limit(limited) => limited.schema(),
             Self::Table(table) => table.schema(),
@@ -189,6 +199,7 @@ impl Selection for Table {
 
     async fn slice(&self, txn_id: &TxnId, bounds: schema::Bounds) -> TCResult<Table> {
         match self {
+            Self::Aggregate(aggregate) => aggregate.slice(txn_id, bounds).await,
             Self::Columns(columns) => columns.slice(txn_id, bounds).await,
             Self::Limit(limited) => limited.slice(txn_id, bounds).await,
             Self::Table(table) => table.slice(txn_id, bounds).await,
@@ -201,6 +212,7 @@ impl Selection for Table {
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
         match self {
+            Self::Aggregate(aggregate) => aggregate.clone().stream(txn_id).await,
             Self::Columns(columns) => columns.clone().stream(txn_id).await,
             Self::Limit(limited) => limited.clone().stream(txn_id).await,
             Self::Table(table) => table.clone().stream(txn_id).await,
@@ -213,6 +225,7 @@ impl Selection for Table {
 
     async fn update(self, txn: Arc<Txn>, value: schema::Row) -> TCResult<()> {
         match self {
+            Self::Aggregate(aggregate) => aggregate.clone().update(txn, value).await,
             Self::Columns(columns) => columns.clone().update(txn, value).await,
             Self::Limit(limited) => limited.clone().update(txn, value).await,
             Self::Table(table) => table.clone().update(txn, value).await,
@@ -230,6 +243,7 @@ impl Selection for Table {
         value: schema::Row,
     ) -> TCResult<()> {
         match self {
+            Self::Aggregate(aggregate) => aggregate.update_row(txn_id, row, value).await,
             Self::Columns(columns) => columns.update_row(txn_id, row, value).await,
             Self::Limit(limited) => limited.update_row(txn_id, row, value).await,
             Self::Table(table) => table.update_row(txn_id, row, value).await,
@@ -242,6 +256,7 @@ impl Selection for Table {
 
     async fn validate(&self, txn_id: &TxnId, bounds: &schema::Bounds) -> TCResult<()> {
         match self {
+            Self::Aggregate(aggregate) => aggregate.validate(txn_id, bounds).await,
             Self::Columns(columns) => columns.validate(txn_id, bounds).await,
             Self::Limit(limited) => limited.validate(txn_id, bounds).await,
             Self::Table(table) => table.validate(txn_id, bounds).await,
@@ -250,6 +265,12 @@ impl Selection for Table {
             Self::ROIndex(ro_index) => ro_index.validate(txn_id, bounds).await,
             Self::TableSlice(table_slice) => table_slice.validate(txn_id, bounds).await,
         }
+    }
+}
+
+impl From<view::Aggregate> for Table {
+    fn from(aggregate: view::Aggregate) -> Table {
+        Table::Aggregate(aggregate)
     }
 }
 
