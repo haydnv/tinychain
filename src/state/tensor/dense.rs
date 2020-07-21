@@ -267,11 +267,9 @@ where
 }
 
 pub struct BlockTensor {
+    file: Arc<File<Array>>,
     dtype: NumberType,
     shape: Shape,
-    size: u64,
-    ndim: usize,
-    file: Arc<File<Array>>,
     per_block: usize,
     coord_bounds: Vec<u64>,
 }
@@ -326,9 +324,6 @@ impl BlockTensor {
             .create_tensor(txn.id().clone(), "block_tensor".parse()?)
             .await?;
 
-        let size = shape.size();
-        let ndim = shape.len();
-
         blocks
             .enumerate()
             .map(|(i, r)| r.map(|block| (BlockId::from(i), block)))
@@ -337,15 +332,13 @@ impl BlockTensor {
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
 
-        let coord_bounds = (0..ndim)
+        let coord_bounds = (0..shape.len())
             .map(|axis| shape[axis + 1..].iter().product())
             .collect();
 
         Ok(Arc::new(BlockTensor {
             dtype,
             shape,
-            size,
-            ndim,
             file,
             per_block: per_block(dtype),
             coord_bounds,
@@ -360,7 +353,7 @@ impl BlockTensor {
     }
 
     fn blocks(self: Arc<Self>, txn_id: TxnId) -> impl Stream<Item = TCResult<BlockOwned<Array>>> {
-        stream::iter(0..(self.size / self.per_block as u64))
+        stream::iter(0..(self.size() / self.per_block as u64))
             .map(BlockId::from)
             .then(move |block_id| self.file.clone().get_block_owned(txn_id.clone(), block_id))
     }
@@ -372,7 +365,7 @@ impl TensorView for BlockTensor {
     }
 
     fn ndim(&self) -> usize {
-        self.ndim
+        self.shape.len()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
@@ -380,7 +373,7 @@ impl TensorView for BlockTensor {
     }
 
     fn size(&self) -> u64 {
-        self.size
+        self.shape.size()
     }
 }
 
@@ -437,7 +430,7 @@ impl BlockTensorView for BlockTensor {
 
         let coord_bounds = af::Array::new(
             &self.coord_bounds,
-            af::Dim4::new(&[self.ndim as u64, 1, 1, 1]),
+            af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
         );
         let per_block = self.per_block as u64;
 
@@ -488,7 +481,7 @@ impl BlockTensorView for BlockTensor {
 
         let coord_bounds = af::Array::new(
             &self.coord_bounds,
-            af::Dim4::new(&[self.ndim as u64, 1, 1, 1]),
+            af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
         );
         let per_block = self.per_block as u64;
 
@@ -541,7 +534,7 @@ impl BlockTensorView for BlockTensor {
 
         let coord_bounds = af::Array::new(
             &self.coord_bounds,
-            af::Dim4::new(&[self.ndim as u64, 1, 1, 1]),
+            af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
         );
         let per_block = self.per_block as u64;
 
