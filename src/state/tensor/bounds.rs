@@ -176,6 +176,18 @@ impl From<Vec<u64>> for Bounds {
     }
 }
 
+impl From<(Vec<u64>, Vec<u64>)> for Bounds {
+    fn from(bounds: (Vec<u64>, Vec<u64>)) -> Bounds {
+        bounds
+            .0
+            .iter()
+            .zip(bounds.1.iter())
+            .map(|(s, e)| AxisBounds::In(*s..*e, 1))
+            .collect::<Vec<AxisBounds>>()
+            .into()
+    }
+}
+
 impl From<(AxisBounds, Vec<u64>)> for Bounds {
     fn from(mut tuple: (AxisBounds, Vec<u64>)) -> Bounds {
         let mut axes = Vec::with_capacity(tuple.1.len() + 1);

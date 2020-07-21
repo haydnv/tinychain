@@ -11,19 +11,14 @@ use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::base::*;
 use super::bounds::{Bounds, Shape};
-use super::dense::BlockTensor;
 
 #[async_trait]
 pub trait SparseTensorView: TensorView {
-    async fn filled(&self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>>;
+    async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>>;
 
     async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>>;
 
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64>;
-
-    async fn to_dense(self, txn: Arc<Txn>) -> TCResult<BlockTensor> {
-        BlockTensor::from_sparse(txn, self).await
-    }
 }
 
 pub struct SparseTensor {
@@ -73,7 +68,7 @@ impl TensorView for SparseTensor {
 
 #[async_trait]
 impl SparseTensorView for SparseTensor {
-    async fn filled(&self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
+    async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
         let filled = self.table.stream(txn_id).await?.map(unwrap_row);
 
         Ok(Box::pin(filled))

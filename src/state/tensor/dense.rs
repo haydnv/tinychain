@@ -345,11 +345,73 @@ impl BlockTensor {
         }))
     }
 
-    pub async fn from_sparse<S: SparseTensorView>(
-        _txn: Arc<Txn>,
-        _sparse: S,
-    ) -> TCResult<BlockTensor> {
-        Err(error::not_implemented())
+    pub async fn from_sparse<S: SparseTensorView + Slice>(
+        txn: Arc<Txn>,
+        sparse: Arc<S>,
+    ) -> TCResult<Arc<BlockTensor>>
+    where
+        <S as Slice>::Slice: SparseTensorView,
+    {
+        let txn_id = txn.id().clone();
+        let shape = sparse.shape().clone();
+        let dtype = sparse.dtype();
+        let per_block = per_block(dtype);
+        let ndim = shape.len();
+        let size = shape.size();
+
+        let coord_bounds: Vec<u64> = (0..shape.len())
+            .map(|axis| shape[axis + 1..].iter().product())
+            .collect();
+
+        let from_offsets = (0..size).step_by(per_block);
+        let to_offsets =
+            (per_block as u64..((size % per_block as u64) + per_block as u64)).step_by(per_block);
+
+        let from_limit = Bounds::all(sparse.shape()).affected().step_by(per_block);
+        let mut to_limit = Bounds::all(sparse.shape())
+            .affected()
+            .step_by(per_block)
+            .chain(iter::once(shape.to_vec()));
+        to_limit.next();
+
+        let blocks = stream::iter(from_limit.zip(to_limit))
+            .map(Bounds::from)
+            .map(|bounds| sparse.clone().slice(bounds))
+            .and_then(move |slice| slice.filled(txn_id.clone()))
+            .and_then(|filled| async {
+                let values: Vec<(Vec<u64>, Number)> = filled.collect().await;
+                Ok(values)
+            })
+            .zip(stream::iter(from_offsets.zip(to_offsets)))
+            .map(|(r, offset)| r.map(|values| (values, offset)))
+            .and_then(|(mut values, (from_offset, to_offset))| {
+                let coord_bounds =
+                    af::Array::new(&coord_bounds, af::Dim4::new(&[ndim as u64, 1, 1, 1]));
+
+                async move {
+                    let mut block =
+                        Array::constant(dtype.zero(), (to_offset - from_offset) as usize);
+                    if values.is_empty() {
+                        return Ok(block);
+                    }
+
+                    let (mut coords, values): (Vec<Vec<u64>>, Vec<Number>) =
+                        values.drain(..).unzip();
+                    let coords: Vec<u64> = coords.drain(..).flatten().collect();
+                    let coords_dim = af::Dim4::new(&[ndim as u64, values.len() as u64, 1, 1]);
+                    let mut coords: af::Array<u64> = af::Array::new(&coords, coords_dim);
+                    coords *= af::tile(&coord_bounds, coords_dim);
+                    let mut coords = af::sum(&coords, 1);
+                    coords -=
+                        af::constant(from_offset, af::Dim4::new(&[values.len() as u64, 1, 1, 1]));
+
+                    let values = Array::try_from_values(values, dtype)?;
+                    block.set(coords, &values)?;
+                    Ok(block)
+                }
+            });
+
+        BlockTensor::from_blocks(txn, shape, dtype, Box::pin(blocks)).await
     }
 
     fn blocks(self: Arc<Self>, txn_id: TxnId) -> impl Stream<Item = TCResult<BlockOwned<Array>>> {
@@ -432,7 +494,7 @@ impl BlockTensorView for BlockTensor {
             &self.coord_bounds,
             af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
         );
-        let per_block = self.per_block as u64;
+        let per_block = self.per_block;
 
         for coords in &bounds.affected().chunks(self.per_block) {
             let (block_ids, af_indices, af_offsets, num_coords) =
@@ -483,7 +545,7 @@ impl BlockTensorView for BlockTensor {
             &self.coord_bounds,
             af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
         );
-        let per_block = self.per_block as u64;
+        let per_block = self.per_block;
 
         stream::iter(bounds.affected())
             .chunks(self.per_block)
@@ -536,7 +598,7 @@ impl BlockTensorView for BlockTensor {
             &self.coord_bounds,
             af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
         );
-        let per_block = self.per_block as u64;
+        let per_block = self.per_block;
 
         stream::iter(bounds.affected())
             .chunks(self.per_block)
@@ -710,7 +772,7 @@ fn block_offsets(
 fn coord_block<I: Iterator<Item = Vec<u64>>>(
     coords: I,
     coord_bounds: &af::Array<u64>,
-    per_block: u64,
+    per_block: usize,
     ndim: usize,
 ) -> (Vec<u64>, af::Array<u64>, af::Array<u64>, u64) {
     let coords: Vec<u64> = coords.flatten().collect();
@@ -718,7 +780,10 @@ fn coord_block<I: Iterator<Item = Vec<u64>>>(
     let af_coords_dim = af::Dim4::new(&[num_coords as u64, ndim as u64, 1, 1]);
     let af_coords = af::Array::new(&coords, af_coords_dim) * af::tile(coord_bounds, af_coords_dim);
     let af_coords = af::sum(&af_coords, 1);
-    let af_per_block = af::constant(per_block, af::Dim4::new(&[1, num_coords as u64, 1, 1]));
+    let af_per_block = af::constant(
+        per_block as u64,
+        af::Dim4::new(&[1, num_coords as u64, 1, 1]),
+    );
     let af_offsets = af_coords.copy() % af_per_block.copy();
     let af_indices = af_coords / af_per_block;
     let af_block_ids = af::set_unique(&af_indices, true);
