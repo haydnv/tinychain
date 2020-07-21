@@ -16,6 +16,8 @@ use super::schema::{Bounds, Column, Row, Schema};
 use super::view::{IndexSlice, TableSlice};
 use super::{Selection, Table};
 
+const PRIMARY_INDEX: &str = "primary";
+
 #[derive(Clone)]
 pub struct Index {
     btree: Arc<BTree>,
@@ -23,6 +25,23 @@ pub struct Index {
 }
 
 impl Index {
+    pub async fn create(
+        txn_id: TxnId,
+        dir: Arc<Dir>,
+        name: ValueId,
+        schema: Schema,
+    ) -> TCResult<Index> {
+        let btree = Arc::new(
+            BTree::create(
+                txn_id.clone(),
+                schema.clone().into(),
+                dir.create_btree(txn_id, name).await?,
+            )
+            .await?,
+        );
+        Ok(Index { btree, schema })
+    }
+
     pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
         self.btree.is_empty(txn_id).await
     }
@@ -249,6 +268,24 @@ pub struct TableBase {
 }
 
 impl TableBase {
+    pub async fn create(txn_id: TxnId, dir: Arc<Dir>, schema: Schema) -> TCResult<TableBase> {
+        let primary = Index::create(
+            txn_id.clone(),
+            dir.clone(),
+            PRIMARY_INDEX.parse()?,
+            schema.clone(),
+        )
+        .await?;
+        let auxiliary = TxnLock::new(txn_id, BTreeMap::new().into());
+
+        Ok(TableBase {
+            dir,
+            primary,
+            auxiliary,
+            schema,
+        })
+    }
+
     pub fn primary(&'_ self) -> &'_ Index {
         &self.primary
     }
@@ -275,6 +312,13 @@ impl TableBase {
     }
 
     pub async fn add_index(&self, txn: Arc<Txn>, name: ValueId, key: Vec<ValueId>) -> TCResult<()> {
+        if name.to_string() == PRIMARY_INDEX {
+            return Err(error::bad_request(
+                "This index name is reserved",
+                PRIMARY_INDEX,
+            ));
+        }
+
         let index_key_set: HashSet<&ValueId> = key.iter().collect();
         if index_key_set.len() != key.len() {
             return Err(error::bad_request(
@@ -300,7 +344,7 @@ impl TableBase {
             .filter(|c| !index_key_set.contains(&c.name))
             .cloned()
             .collect();
-        let schema: Schema = (key, values).into();
+        let schema: Schema = Schema::new(key, values);
 
         let btree_file = self
             .dir

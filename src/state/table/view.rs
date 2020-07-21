@@ -57,7 +57,7 @@ impl<T: Into<Table>> TryFrom<(T, Vec<ValueId>)> for ColumnSelection {
 
         Ok(ColumnSelection {
             source: Box::new(source),
-            schema: (vec![], schema).into(),
+            schema: Schema::new(vec![], schema),
             columns,
             indices,
         })

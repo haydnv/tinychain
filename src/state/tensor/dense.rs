@@ -11,8 +11,8 @@ use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 
 use crate::error;
-use crate::state::file::File;
 use crate::state::file::block::{BlockId, BlockOwned};
+use crate::state::file::File;
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::{ComplexType, FloatType, NumberType};
 use crate::value::class::{Impl, NumberClass};

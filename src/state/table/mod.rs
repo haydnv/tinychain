@@ -13,6 +13,10 @@ mod index;
 mod schema;
 mod view;
 
+pub type Column = schema::Column;
+pub type Schema = schema::Schema;
+pub type TableBase = index::TableBase;
+
 #[async_trait]
 pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
     type Stream: Stream<Item = Vec<Value>> + Send + Sync + Unpin;

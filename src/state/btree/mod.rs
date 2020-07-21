@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error;
-use crate::state::file::File;
 use crate::state::file::block::*;
+use crate::state::file::File;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::{Impl, ValueClass, ValueType};

@@ -141,6 +141,10 @@ pub struct Schema {
 }
 
 impl Schema {
+    pub fn new(key: Vec<Column>, value: Vec<Column>) -> Schema {
+        Schema { key, value }
+    }
+
     pub fn columns(&self) -> Vec<Column> {
         [&self.key[..], &self.value[..]]
             .concat()
@@ -219,7 +223,7 @@ impl Schema {
             .cloned()
             .collect();
 
-        Ok((key, value).into())
+        Ok(Schema::new(key, value))
     }
 
     pub fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -333,15 +337,6 @@ impl Schema {
         }
 
         Ok(row)
-    }
-}
-
-impl From<(Vec<Column>, Vec<Column>)> for Schema {
-    fn from(kv: (Vec<Column>, Vec<Column>)) -> Schema {
-        Schema {
-            key: kv.0,
-            value: kv.1,
-        }
     }
 }
 
