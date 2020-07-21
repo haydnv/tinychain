@@ -114,7 +114,7 @@ impl<T: BlockData> File<T> {
         block_id: BlockId,
     ) -> TCResult<BlockOwned<T>> {
         let lock = self.lock_block(&txn_id, &block_id).await?;
-        Ok(BlockOwned::new(lock))
+        Ok(BlockOwned::new(self, block_id, lock))
     }
 
     async fn lock_block(

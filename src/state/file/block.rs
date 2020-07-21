@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -80,12 +81,19 @@ impl<'a, T: BlockData> DerefMut for BlockMut<'a, T> {
 }
 
 pub struct BlockOwned<T: BlockData> {
+    file: Arc<File<T>>,
+    block_id: BlockId,
     lock: TxnLockReadGuard<T>,
 }
 
 impl<T: BlockData> BlockOwned<T> {
-    pub fn new(lock: TxnLockReadGuard<T>) -> BlockOwned<T> {
-        BlockOwned { lock }
+    pub fn new(file: Arc<File<T>>, block_id: BlockId, lock: TxnLockReadGuard<T>) -> BlockOwned<T> {
+        BlockOwned { file, block_id, lock }
+    }
+
+    pub async fn upgrade(self) -> TCResult<BlockOwnedMut<T>> {
+        self.file.mutate(self.lock.txn_id().clone(), self.block_id.clone());
+        Ok(BlockOwnedMut { file: self.file, block_id: self.block_id, lock: self.lock.upgrade().await? })
     }
 }
 
@@ -94,6 +102,26 @@ impl<T: BlockData> Deref for BlockOwned<T> {
 
     fn deref(&'_ self) -> &'_ T {
         self.lock.deref()
+    }
+}
+
+pub struct BlockOwnedMut<T: BlockData> {
+    file: Arc<File<T>>,
+    block_id: BlockId,
+    lock: TxnLockWriteGuard<T>,
+}
+
+impl<T: BlockData> Deref for BlockOwnedMut<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.lock.deref()
+    }
+}
+
+impl<T: BlockData> DerefMut for BlockOwnedMut<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.lock.deref_mut()
     }
 }
 
