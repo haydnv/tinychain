@@ -6,7 +6,6 @@ use futures::stream::StreamExt;
 
 use crate::error;
 use crate::state::table::{Column, Schema, Selection, TableBase};
-use crate::state::Dir;
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::NumberType;
 use crate::value::{Number, TCResult, TCStream, UInt, Value};
@@ -33,12 +32,7 @@ pub struct SparseTensor {
 }
 
 impl SparseTensor {
-    pub async fn create(
-        txn_id: TxnId,
-        dir: Arc<Dir>,
-        dtype: NumberType,
-        shape: Shape,
-    ) -> TCResult<SparseTensor> {
+    pub async fn create(txn: Arc<Txn>, dtype: NumberType, shape: Shape) -> TCResult<SparseTensor> {
         let key: Vec<Column> = (0..shape.len())
             .map(|axis| Column {
                 name: axis.into(),
@@ -48,7 +42,7 @@ impl SparseTensor {
             .collect();
 
         let schema = Schema::new(key, vec![]);
-        let table = TableBase::create(txn_id, dir, schema).await?;
+        let table = TableBase::create(txn, schema).await?;
 
         Ok(SparseTensor {
             dtype,

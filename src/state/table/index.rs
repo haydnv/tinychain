@@ -25,17 +25,12 @@ pub struct Index {
 }
 
 impl Index {
-    pub async fn create(
-        txn_id: TxnId,
-        dir: Arc<Dir>,
-        name: ValueId,
-        schema: Schema,
-    ) -> TCResult<Index> {
+    pub async fn create(txn: Arc<Txn>, name: ValueId, schema: Schema) -> TCResult<Index> {
         let btree = Arc::new(
             BTree::create(
-                txn_id.clone(),
+                txn.id().clone(),
                 schema.clone().into(),
-                dir.create_btree(txn_id, name).await?,
+                txn.context().create_btree(txn.id().clone(), name).await?,
             )
             .await?,
         );
@@ -268,18 +263,12 @@ pub struct TableBase {
 }
 
 impl TableBase {
-    pub async fn create(txn_id: TxnId, dir: Arc<Dir>, schema: Schema) -> TCResult<TableBase> {
-        let primary = Index::create(
-            txn_id.clone(),
-            dir.clone(),
-            PRIMARY_INDEX.parse()?,
-            schema.clone(),
-        )
-        .await?;
-        let auxiliary = TxnLock::new(txn_id, BTreeMap::new().into());
+    pub async fn create(txn: Arc<Txn>, schema: Schema) -> TCResult<TableBase> {
+        let primary = Index::create(txn.clone(), PRIMARY_INDEX.parse()?, schema.clone()).await?;
+        let auxiliary = TxnLock::new(txn.id().clone(), BTreeMap::new().into());
 
         Ok(TableBase {
-            dir,
+            dir: txn.context(),
             primary,
             auxiliary,
             schema,
