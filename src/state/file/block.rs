@@ -88,12 +88,23 @@ pub struct BlockOwned<T: BlockData> {
 
 impl<T: BlockData> BlockOwned<T> {
     pub fn new(file: Arc<File<T>>, block_id: BlockId, lock: TxnLockReadGuard<T>) -> BlockOwned<T> {
-        BlockOwned { file, block_id, lock }
+        BlockOwned {
+            file,
+            block_id,
+            lock,
+        }
     }
 
     pub async fn upgrade(self) -> TCResult<BlockOwnedMut<T>> {
-        self.file.mutate(self.lock.txn_id().clone(), self.block_id.clone());
-        Ok(BlockOwnedMut { file: self.file, block_id: self.block_id, lock: self.lock.upgrade().await? })
+        self.file
+            .mutate(self.lock.txn_id().clone(), self.block_id.clone())
+            .await?;
+
+        Ok(BlockOwnedMut {
+            file: self.file,
+            block_id: self.block_id,
+            lock: self.lock.upgrade().await?,
+        })
     }
 }
 

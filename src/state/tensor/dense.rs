@@ -21,6 +21,7 @@ use crate::value::{Number, TCResult};
 use super::array::*;
 use super::base::*;
 use super::bounds::*;
+use super::sparse::SparseTensorView;
 use super::stream::{ValueBlockStream, ValueStream};
 
 const BLOCK_SIZE: usize = 1_000_000;
@@ -349,6 +350,13 @@ impl BlockTensor {
             per_block: per_block(dtype),
             coord_bounds,
         }))
+    }
+
+    pub async fn from_sparse<S: SparseTensorView>(
+        _txn: Arc<Txn>,
+        _sparse: S,
+    ) -> TCResult<BlockTensor> {
+        Err(error::not_implemented())
     }
 
     fn blocks(self: Arc<Self>, txn_id: TxnId) -> impl Stream<Item = TCResult<BlockOwned<Array>>> {

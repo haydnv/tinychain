@@ -4,7 +4,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::StreamExt;
 
-use crate::error;
 use crate::state::table::{Column, Schema, Selection, TableBase};
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::NumberType;
@@ -22,7 +21,9 @@ pub trait SparseTensorView: TensorView {
 
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64>;
 
-    async fn to_dense(&self, txn: &Arc<Txn>) -> TCResult<BlockTensor>;
+    async fn to_dense(self, txn: Arc<Txn>) -> TCResult<BlockTensor> {
+        BlockTensor::from_sparse(txn, self).await
+    }
 }
 
 pub struct SparseTensor {
@@ -32,7 +33,7 @@ pub struct SparseTensor {
 }
 
 impl SparseTensor {
-    pub async fn create(txn: Arc<Txn>, dtype: NumberType, shape: Shape) -> TCResult<SparseTensor> {
+    pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTensor> {
         let key: Vec<Column> = (0..shape.len())
             .map(|axis| Column {
                 name: axis.into(),
@@ -93,10 +94,6 @@ impl SparseTensorView for SparseTensor {
 
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.table.count(txn_id).await
-    }
-
-    async fn to_dense(&self, _txn: &Arc<Txn>) -> TCResult<BlockTensor> {
-        Err(error::not_implemented())
     }
 }
 
