@@ -131,6 +131,12 @@ impl From<HashMap<ValueId, Value>> for Bounds {
     }
 }
 
+impl From<Vec<(ValueId, ColumnBound)>> for Bounds {
+    fn from(mut bounds: Vec<(ValueId, ColumnBound)>) -> Bounds {
+        Bounds(bounds.drain(..).collect())
+    }
+}
+
 impl fmt::Display for Bounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

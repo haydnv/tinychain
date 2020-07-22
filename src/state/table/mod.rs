@@ -10,12 +10,9 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
 mod index;
-mod schema;
+pub mod schema;
 mod view;
 
-pub type Bounds = schema::Bounds;
-pub type Column = schema::Column;
-pub type Schema = schema::Schema;
 pub type TableBase = index::TableBase;
 
 #[async_trait]

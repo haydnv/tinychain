@@ -124,6 +124,7 @@ pub trait Rebase: TensorView {
 
     fn invert_bounds(&self, bounds: Bounds) -> Bounds;
 
+    // TODO: add a map_coord method also
     fn map_bounds(&self, source_bounds: Bounds) -> Bounds;
 
     fn source(&self) -> Arc<Self::Source>;
@@ -468,19 +469,19 @@ pub struct TensorSlice<T: TensorView> {
     shape: Shape,
     size: u64,
     ndim: usize,
-    slice: Bounds,
+    bounds: Bounds,
     offset: HashMap<usize, u64>,
     elided: HashSet<usize>,
 }
 
 impl<T: TensorView> TensorSlice<T> {
-    pub fn new(source: Arc<T>, slice: Bounds) -> TCResult<TensorSlice<T>> {
-        let mut shape: Vec<u64> = Vec::with_capacity(slice.len());
+    pub fn new(source: Arc<T>, bounds: Bounds) -> TCResult<TensorSlice<T>> {
+        let mut shape: Vec<u64> = Vec::with_capacity(bounds.len());
         let mut offset = HashMap::new();
         let mut elided = HashSet::new();
 
-        for axis in 0..slice.len() {
-            match &slice[axis] {
+        for axis in 0..bounds.len() {
+            match &bounds[axis] {
                 AxisBounds::At(_) => {
                     elided.insert(axis);
                 }
@@ -502,10 +503,14 @@ impl<T: TensorView> TensorSlice<T> {
             shape,
             size,
             ndim,
-            slice,
+            bounds,
             offset,
             elided,
         })
+    }
+
+    pub fn bounds(&'_ self) -> &'_ Bounds {
+        &self.bounds
     }
 }
 
@@ -561,21 +566,21 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
         let mut source_axis = 0;
         for axis in 0..self.ndim {
             if self.elided.contains(&axis) {
-                source_bounds.push(self.slice[axis].clone());
+                source_bounds.push(self.bounds[axis].clone());
                 continue;
             }
 
             use AxisBounds::*;
             match &bounds[source_axis] {
                 In(range, this_step) => {
-                    if let In(source_range, source_step) = &self.slice[axis] {
+                    if let In(source_range, source_step) = &self.bounds[axis] {
                         let start = range.start + source_range.start;
                         let end = start + (source_step * (range.end - range.start));
                         let step = source_step * this_step;
                         source_bounds.push((start..end, step).into());
                     } else {
                         assert!(range.start == 0);
-                        source_bounds.push(self.slice[axis].clone());
+                        source_bounds.push(self.bounds[axis].clone());
                     }
                 }
                 Of(indices) => {

@@ -99,6 +99,17 @@ impl Bounds {
         axes.iter().cloned().multi_cartesian_product()
     }
 
+    pub fn into_coord(self) -> Vec<u64> {
+        use AxisBounds::*;
+        self.axes
+            .into_iter()
+            .map(|ab| match ab {
+                At(x) => x,
+                _ => panic!("Expected axis index but found AxisBound!"),
+            })
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.axes.len()
     }
@@ -121,6 +132,10 @@ impl Bounds {
         for axis in self.axes.len()..shape.len() {
             self.axes.push(AxisBounds::all(shape[axis]))
         }
+    }
+
+    pub fn to_vec(&self) -> Vec<AxisBounds> {
+        self.axes.to_vec()
     }
 }
 

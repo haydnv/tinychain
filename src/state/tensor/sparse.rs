@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,13 +8,14 @@ use futures::future;
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
-use crate::state::table::{Column, Schema, Selection, TableBase};
+use crate::state::table::schema::*;
+use crate::state::table::{Selection, Table, TableBase};
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::{NumberType, UIntType, ValueType};
 use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::base::*;
-use super::bounds::{Bounds, Shape};
+use super::bounds::{AxisBounds, Bounds, Shape};
 
 #[async_trait]
 pub trait SparseTensorView: TensorView {
@@ -64,6 +66,33 @@ impl SparseTensor {
             shape,
             table,
         })
+    }
+
+    async fn slice_table(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<Table> {
+        let mut table: Table = self.table.clone().into();
+        use AxisBounds::*;
+        for (axis, axis_bound) in bounds.to_vec().into_iter().enumerate() {
+            let axis: ValueId = axis.into();
+            table = match axis_bound {
+                At(x) => {
+                    let column_bound = ColumnBound::Is(u64_to_value(x));
+                    table
+                        .slice(txn_id, vec![(axis, column_bound)].into())
+                        .await?
+                }
+                In(range, 1) => {
+                    let start = Bound::Included(u64_to_value(range.start));
+                    let end = Bound::Excluded(u64_to_value(range.end));
+                    let column_bound = ColumnBound::In(start, end);
+                    table
+                        .slice(txn_id, vec![(axis, column_bound)].into())
+                        .await?
+                }
+                _ => unimplemented!(),
+            };
+        }
+
+        Ok(table)
     }
 }
 
@@ -143,6 +172,69 @@ impl SparseTensorView for SparseTensor {
     }
 }
 
+impl Slice for SparseTensor {
+    type Slice = TensorSlice<SparseTensor>;
+
+    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
+        Ok(Arc::new(TensorSlice::new(self, bounds)?))
+    }
+}
+
+#[async_trait]
+impl SparseTensorView for TensorSlice<SparseTensor> {
+    async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
+        let stream = self
+            .source()
+            .slice_table(&txn_id, self.bounds())
+            .await?
+            .stream(txn_id)
+            .await?
+            .map(unwrap_row)
+            .map(move |(coord, value)| (self.map_bounds(coord.into()).into_coord(), value));
+
+        Ok(Box::pin(stream))
+    }
+
+    async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>> {
+        let table = self.source().slice_table(txn.id(), self.bounds()).await?;
+        let txn_id = txn.id().clone();
+        let columns: Vec<ValueId> = axes.iter().map(|x| (*x).into()).collect();
+        Ok(Box::pin(
+            table
+                .group_by(txn, columns)
+                .await?
+                .stream(txn_id)
+                .await?
+                .map(|coord| unwrap_coord(&coord)),
+        ))
+    }
+
+    async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.source()
+            .slice_table(&txn_id, self.bounds())
+            .await?
+            .count(txn_id)
+            .await
+    }
+
+    async fn write_sparse<T: SparseTensorView>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _bounds: Bounds,
+        _value: Arc<T>,
+    ) -> TCResult<()> {
+        Err(error::not_implemented())
+    }
+
+    async fn write_value(&self, _txn_id: &TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
+        Err(error::not_implemented())
+    }
+}
+
+fn u64_to_value(u: u64) -> Value {
+    Value::Number(Number::UInt(UInt::U64(u)))
+}
+
 fn unwrap_coord(coord: &[Value]) -> Vec<u64> {
     coord.iter().map(|val| unwrap_u64(val)).collect()
 }
@@ -158,41 +250,5 @@ fn unwrap_u64(value: &Value) -> u64 {
         *unwrapped
     } else {
         panic!("Expected u64 but found {}", value)
-    }
-}
-
-impl Slice for SparseTensor {
-    type Slice = TensorSlice<SparseTensor>;
-
-    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
-        Ok(Arc::new(TensorSlice::new(self, bounds)?))
-    }
-}
-
-#[async_trait]
-impl SparseTensorView for TensorSlice<SparseTensor> {
-    async fn filled(self: Arc<Self>, _txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
-        Err(error::not_implemented())
-    }
-
-    async fn filled_at(&self, _txn: Arc<Txn>, _axes: &[usize]) -> TCResult<TCStream<Vec<u64>>> {
-        Err(error::not_implemented())
-    }
-
-    async fn filled_count(&self, _txn_id: TxnId) -> TCResult<u64> {
-        Err(error::not_implemented())
-    }
-
-    async fn write_sparse<T: SparseTensorView>(
-        self: Arc<Self>,
-        _txn_id: TxnId,
-        _bounds: Bounds,
-        _value: Arc<T>,
-    ) -> TCResult<()> {
-        Err(error::not_implemented())
-    }
-
-    async fn write_value(&self, _txn_id: &TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
-        Err(error::not_implemented())
     }
 }
