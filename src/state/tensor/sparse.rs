@@ -18,7 +18,7 @@ use super::base::*;
 use super::bounds::{AxisBounds, Bounds, Shape};
 
 #[async_trait]
-pub trait SparseTensorView: TensorView {
+pub trait SparseTensorView: TensorView + Slice {
     async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>>;
 
     async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>>;
@@ -30,7 +30,19 @@ pub trait SparseTensorView: TensorView {
         txn_id: TxnId,
         bounds: Bounds,
         value: Arc<T>,
-    ) -> TCResult<()>;
+    ) -> TCResult<()>
+    where
+        <Self as Slice>::Slice: SparseTensorView,
+    {
+        let dest = self.slice(bounds)?;
+        value
+            .filled(txn_id.clone())
+            .await?
+            .map(|(coord, number)| Ok(dest.write_value(&txn_id, coord, number)))
+            .try_buffer_unordered(dest.size() as usize)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
 
     async fn write_value(&self, txn_id: &TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
 }
@@ -139,22 +151,6 @@ impl SparseTensorView for SparseTensor {
         self.table.count(txn_id).await
     }
 
-    async fn write_sparse<T: SparseTensorView>(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        bounds: Bounds,
-        value: Arc<T>,
-    ) -> TCResult<()> {
-        let dest = self.slice(bounds)?;
-        value
-            .filled(txn_id.clone())
-            .await?
-            .map(|(coord, number)| Ok(dest.write_value(&txn_id, coord, number)))
-            .try_buffer_unordered(dest.size() as usize)
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await
-    }
-
     async fn write_value(
         &self,
         txn_id: &TxnId,
@@ -217,17 +213,10 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
             .await
     }
 
-    async fn write_sparse<T: SparseTensorView>(
-        self: Arc<Self>,
-        _txn_id: TxnId,
-        _bounds: Bounds,
-        _value: Arc<T>,
-    ) -> TCResult<()> {
-        Err(error::not_implemented())
-    }
-
-    async fn write_value(&self, _txn_id: &TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn write_value(&self, txn_id: &TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+        self.source()
+            .write_value(txn_id, self.invert_bounds(coord.into()).into_coord(), value)
+            .await
     }
 }
 

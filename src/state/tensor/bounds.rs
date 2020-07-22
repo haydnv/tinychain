@@ -99,6 +99,7 @@ impl Bounds {
         axes.iter().cloned().multi_cartesian_product()
     }
 
+    // TODO: delete this function
     pub fn into_coord(self) -> Vec<u64> {
         use AxisBounds::*;
         self.axes
