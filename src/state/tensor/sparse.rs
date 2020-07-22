@@ -1,12 +1,15 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream::StreamExt;
+use futures::future;
+use futures::stream::{StreamExt, TryStreamExt};
 
+use crate::error;
 use crate::state::table::{Column, Schema, Selection, TableBase};
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::NumberType;
+use crate::value::class::{NumberType, UIntType, ValueType};
 use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::base::*;
@@ -19,6 +22,15 @@ pub trait SparseTensorView: TensorView {
     async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>>;
 
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64>;
+
+    async fn write_sparse<T: SparseTensorView>(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        bounds: Bounds,
+        value: Arc<T>,
+    ) -> TCResult<()>;
+
+    async fn write_value(&self, txn_id: &TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
 }
 
 pub struct SparseTensor {
@@ -29,15 +41,22 @@ pub struct SparseTensor {
 
 impl SparseTensor {
     pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTensor> {
+        let u64_type = ValueType::Number(NumberType::UInt(UIntType::U64));
         let key: Vec<Column> = (0..shape.len())
             .map(|axis| Column {
                 name: axis.into(),
-                dtype: dtype.into(),
+                dtype: u64_type,
                 max_len: None,
             })
             .collect();
 
-        let schema = Schema::new(key, vec![]);
+        let value = vec![Column {
+            name: "value".parse()?,
+            dtype: dtype.into(),
+            max_len: None,
+        }];
+
+        let schema = Schema::new(key, value);
         let table = TableBase::create(txn, schema).await?;
 
         Ok(SparseTensor {
@@ -90,6 +109,38 @@ impl SparseTensorView for SparseTensor {
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.table.count(txn_id).await
     }
+
+    async fn write_sparse<T: SparseTensorView>(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        bounds: Bounds,
+        value: Arc<T>,
+    ) -> TCResult<()> {
+        let dest = self.slice(bounds)?;
+        value
+            .filled(txn_id.clone())
+            .await?
+            .map(|(coord, number)| Ok(dest.write_value(&txn_id, coord, number)))
+            .try_buffer_unordered(dest.size() as usize)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+
+    async fn write_value(
+        &self,
+        txn_id: &TxnId,
+        mut coord: Vec<u64>,
+        value: Number,
+    ) -> TCResult<()> {
+        let mut row: HashMap<ValueId, Value> = coord
+            .drain(..)
+            .enumerate()
+            .map(|(x, v)| (x.into(), Value::Number(Number::UInt(UInt::U64(v)))))
+            .collect();
+
+        row.insert("value".parse()?, value.into());
+        self.table.upsert(txn_id, row).await
+    }
 }
 
 fn unwrap_coord(coord: &[Value]) -> Vec<u64> {
@@ -115,5 +166,33 @@ impl Slice for SparseTensor {
 
     fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
         Ok(Arc::new(TensorSlice::new(self, bounds)?))
+    }
+}
+
+#[async_trait]
+impl SparseTensorView for TensorSlice<SparseTensor> {
+    async fn filled(self: Arc<Self>, _txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
+        Err(error::not_implemented())
+    }
+
+    async fn filled_at(&self, _txn: Arc<Txn>, _axes: &[usize]) -> TCResult<TCStream<Vec<u64>>> {
+        Err(error::not_implemented())
+    }
+
+    async fn filled_count(&self, _txn_id: TxnId) -> TCResult<u64> {
+        Err(error::not_implemented())
+    }
+
+    async fn write_sparse<T: SparseTensorView>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _bounds: Bounds,
+        _value: Arc<T>,
+    ) -> TCResult<()> {
+        Err(error::not_implemented())
+    }
+
+    async fn write_value(&self, _txn_id: &TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
+        Err(error::not_implemented())
     }
 }

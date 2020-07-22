@@ -376,7 +376,7 @@ impl TableBase {
         }
     }
 
-    async fn upsert<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCResult<()> {
+    pub async fn upsert<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCResult<()> {
         self.delete_row(txn_id, row.clone()).await?;
 
         let auxiliary = self.auxiliary.read(txn_id).await?;
