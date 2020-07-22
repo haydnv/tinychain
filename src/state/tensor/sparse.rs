@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use futures::future;
 use futures::stream::{StreamExt, TryStreamExt};
 
-use crate::error;
 use crate::state::table::schema::*;
 use crate::state::table::{Selection, Table, TableBase};
 use crate::transaction::{Txn, TxnId};

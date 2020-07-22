@@ -11,6 +11,7 @@ use crate::value::class::NumberType;
 use crate::value::{Number, TCResult};
 
 use super::bounds::*;
+use super::dense::BlockTensor;
 
 #[async_trait]
 pub trait TensorBase {
@@ -18,72 +19,61 @@ pub trait TensorBase {
 }
 
 #[async_trait]
-pub trait TensorUnary {
-    type Base: Slice;
-    type Dense: Slice;
-
+pub trait DenseTensorUnary {
     async fn as_dtype(
         self: Arc<Self>,
         txn: Arc<Txn>,
         dtype: NumberType,
-    ) -> TCResult<Arc<Self::Base>>;
+    ) -> TCResult<Arc<BlockTensor>>;
 
-    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
+    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 
-    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
+    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 
-    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<Self::Base>>;
+    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<BlockTensor>>;
 
     async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<Self::Base>>;
+    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<BlockTensor>>;
 
     async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
+    async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 }
 
 #[async_trait]
-pub trait TensorArithmetic<Object: TensorView> {
-    type Base: TensorView;
+pub trait DenseTensorArithmetic<Object: TensorView> {
+    async fn add(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn add(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Self::Base>;
+    async fn multiply(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn multiply(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Self::Base>;
-
-    async fn subtract(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Self::Base>;
+    async fn subtract(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 #[async_trait]
-pub trait TensorBoolean<Object: TensorView> {
-    type Base: TensorView;
-    type Dense: TensorView;
+pub trait DenseTensorBoolean<Object: TensorView> {
+    async fn and(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 
-    async fn and(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
+    async fn or(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 
-    async fn or(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
-
-    async fn xor(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
+    async fn xor(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 }
 
 #[async_trait]
-pub trait TensorCompare<Object: TensorView> {
-    type Base: TensorView;
-    type Dense: TensorView;
-
+pub trait DenseTensorCompare<Object: TensorView> {
     async fn equals(
         self: Arc<Self>,
         other: Arc<Object>,
         txn: Arc<Txn>,
-    ) -> TCResult<Arc<Self::Base>>;
+    ) -> TCResult<Arc<BlockTensor>>;
 
-    async fn gt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
+    async fn gt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 
-    async fn gte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
+    async fn gte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 
-    async fn lt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Base>>;
+    async fn lt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 
-    async fn lte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<Self::Dense>>;
+    async fn lte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 }
 
 pub trait TensorView: Sized + Send + Sync {
