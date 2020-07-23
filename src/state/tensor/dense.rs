@@ -445,13 +445,6 @@ impl TensorView for BlockTensor {
 }
 
 #[async_trait]
-impl TensorBase for BlockTensor {
-    async fn zeros(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<Arc<Self>> {
-        Self::constant(txn, shape, dtype.zero()).await
-    }
-}
-
-#[async_trait]
 impl AnyAll for BlockTensor {
     async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
         let mut blocks = self.block_stream(txn_id);
@@ -647,17 +640,6 @@ impl Slice for BlockTensor {
 
     fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
         Ok(Arc::new(TensorSlice::new(self, bounds)?))
-    }
-}
-
-impl Transpose for BlockTensor {
-    type Permutation = Permutation<BlockTensor>;
-
-    fn transpose(
-        self: Arc<Self>,
-        permutation: Option<Vec<usize>>,
-    ) -> TCResult<Arc<Self::Permutation>> {
-        Ok(Arc::new(Permutation::new(self, permutation)))
     }
 }
 

@@ -15,11 +15,6 @@ use super::dense::{BlockTensor, DenseTensorView};
 use super::sparse::{SparseTensor, SparseTensorView};
 
 #[async_trait]
-pub trait TensorBase {
-    async fn zeros(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<Arc<Self>>;
-}
-
-#[async_trait]
 pub trait DenseTensorUnary {
     async fn as_dtype(
         self: Arc<Self>,
@@ -43,7 +38,39 @@ pub trait DenseTensorUnary {
 }
 
 #[async_trait]
+pub trait SparseTensorUnary {
+    async fn as_dtype(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        dtype: NumberType,
+    ) -> TCResult<Arc<BlockTensor>>;
+
+    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+
+    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+
+    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<SparseTensor>>;
+
+    async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
+
+    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<SparseTensor>>;
+
+    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
+
+    async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+}
+
+#[async_trait]
 pub trait DenseTensorArithmetic<Object: DenseTensorView> {
+    async fn add(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+
+    async fn multiply(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+
+    async fn subtract(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+}
+
+#[async_trait]
+pub trait SparseTensorArithmetic<Object: DenseTensorView> {
     async fn add(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
     async fn multiply(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
@@ -58,6 +85,17 @@ pub trait DenseTensorBoolean<Object: DenseTensorView> {
     async fn or(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 
     async fn xor(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+}
+
+#[async_trait]
+pub trait SparseTensorBoolean<Object: SparseTensorView> {
+    async fn and(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>)
+        -> TCResult<Arc<SparseTensor>>;
+
+    async fn or(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+
+    async fn xor(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>)
+        -> TCResult<Arc<SparseTensor>>;
 }
 
 #[async_trait]
@@ -116,9 +154,9 @@ pub trait Broadcast: TensorView {
 }
 
 pub trait Expand: TensorView {
-    type Expansion: TensorView;
-
-    fn expand_dims(self: Arc<Self>, axis: usize) -> TCResult<Self::Expansion>;
+    fn expand_dims(self: Arc<Self>, axis: usize) -> Expansion<Self> {
+        Expansion::new(self, axis)
+    }
 }
 
 pub trait Slice: TensorView {
@@ -139,12 +177,9 @@ pub trait Rebase: TensorView {
 }
 
 pub trait Transpose: TensorView {
-    type Permutation: TensorView;
-
-    fn transpose(
-        self: Arc<Self>,
-        permutation: Option<Vec<usize>>,
-    ) -> TCResult<Arc<Self::Permutation>>;
+    fn transpose(self: Arc<Self>, permutation: Option<Vec<usize>>) -> Arc<Permutation<Self>> {
+        Arc::new(Permutation::new(self, permutation))
+    }
 }
 
 pub struct TensorBroadcast<T: TensorView> {
@@ -340,6 +375,8 @@ impl<T: TensorView> Rebase for Expansion<T> {
     }
 }
 
+impl<T: TensorView> Expand for T {}
+
 pub struct Permutation<T: TensorView> {
     source: Arc<T>,
     shape: Shape,
@@ -439,7 +476,7 @@ impl<T: TensorView + Slice> Slice for Permutation<T>
 where
     <T as Slice>::Slice: Transpose,
 {
-    type Slice = <<<Self as Rebase>::Source as Slice>::Slice as Transpose>::Permutation;
+    type Slice = Permutation<<T as Slice>::Slice>;
 
     fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
         let mut permutation: BTreeMap<usize, usize> = self
@@ -468,7 +505,7 @@ where
         let source_bounds = self.invert_bounds(bounds);
         let source = self.source();
         let slice = source.slice(source_bounds)?;
-        slice.transpose(Some(permutation))
+        Ok(slice.transpose(Some(permutation)))
     }
 }
 
@@ -522,17 +559,7 @@ impl<T: TensorView> TensorSlice<T> {
     }
 }
 
-impl<T: TensorView> Transpose for TensorSlice<T> {
-    type Permutation = Permutation<T>;
-
-    fn transpose(
-        self: Arc<Self>,
-        _permutation: Option<Vec<usize>>,
-    ) -> TCResult<Arc<Self::Permutation>> {
-        // TODO
-        Err(error::not_implemented())
-    }
-}
+impl<T: TensorView> Transpose for T {}
 
 #[async_trait]
 impl<T: TensorView> TensorView for TensorSlice<T> {
