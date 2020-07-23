@@ -4,7 +4,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future;
+use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
@@ -16,6 +16,7 @@ use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::base::*;
 use super::bounds::{AxisBounds, Bounds, Shape};
+use super::dense::{BlockTensor, DenseTensorView};
 
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
@@ -262,6 +263,75 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
         self.source()
             .write_value(txn_id, self.invert_bounds(coord.into()).into_coord(), value)
             .await
+    }
+}
+
+#[async_trait]
+impl<T: SparseTensorView + Slice, O: SparseTensorView> SparseTensorCompare<O> for T
+where
+    <T as Slice>::Slice: SparseTensorView + Slice,
+{
+    async fn equals(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+        if self.shape() != other.shape() {
+            return Err(error::bad_request(
+                "Cannot compare with shape",
+                other.shape(),
+            ));
+        }
+
+        let txn_id = txn.id().clone();
+        let shape = self.shape().clone();
+        let dtype = self.dtype();
+        let per_block = super::dense::per_block(dtype);
+
+        let blocks = BlockTensor::sparse_into_blocks(txn.id().clone(), self.clone())
+            .and_then(|block| future::ready(block.into_type(NumberType::Bool)))
+            .map_ok(|block| block.not());
+        let equals = BlockTensor::from_blocks(txn, shape, dtype, Box::pin(blocks)).await?;
+
+        other
+            .filled(txn_id.clone())
+            .await?
+            .map(|(coord, right)| {
+                Ok(self
+                    .clone()
+                    .read_value(txn_id.clone(), coord.to_vec())
+                    .and_then(|left| future::ready(Ok((coord, left, right)))))
+            })
+            .try_buffer_unordered(per_block)
+            .try_filter_map(|(coord, left, right)| {
+                if left == right {
+                    future::ready(Ok(None))
+                } else {
+                    future::ready(Ok(Some(coord)))
+                }
+            })
+            .map_ok(|coord| {
+                equals
+                    .clone()
+                    .write_value(txn_id.clone(), coord.into(), Number::Bool(false))
+            })
+            .try_buffer_unordered(per_block)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(equals)
+    }
+
+    async fn gt(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+        Err(error::not_implemented())
+    }
+
+    async fn gte(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+        Err(error::not_implemented())
+    }
+
+    async fn lt(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+        Err(error::not_implemented())
+    }
+
+    async fn lte(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+        Err(error::not_implemented())
     }
 }
 

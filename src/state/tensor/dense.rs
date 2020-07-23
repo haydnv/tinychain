@@ -307,7 +307,7 @@ impl BlockTensor {
         }
     }
 
-    async fn from_blocks<S: Stream<Item = TCResult<Array>> + Send + Unpin>(
+    pub async fn from_blocks<S: Stream<Item = TCResult<Array>> + Send + Unpin>(
         txn: Arc<Txn>,
         shape: Shape,
         dtype: NumberType,
@@ -393,7 +393,6 @@ impl BlockTensor {
             .and_then(move |(mut values, (from_offset, to_offset))| {
                 let coord_bounds =
                     af::Array::new(&coord_bounds, af::Dim4::new(&[ndim as u64, 1, 1, 1]));
-                let dtype = dtype;
 
                 async move {
                     let mut block =
@@ -729,7 +728,7 @@ impl AnyAll for TensorSlice<BlockTensor> {
     }
 }
 
-fn per_block(dtype: NumberType) -> usize {
+pub fn per_block(dtype: NumberType) -> usize {
     BLOCK_SIZE / dtype.size()
 }
 
