@@ -190,7 +190,7 @@ where
         let mut sum = self.dtype().zero();
         let mut blocks = self.block_stream(txn_id);
         while let Some(block) = blocks.next().await {
-            sum = sum + block?.product();
+            sum = sum + block?.sum();
         }
 
         Ok(sum)

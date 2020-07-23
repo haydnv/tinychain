@@ -74,7 +74,10 @@ pub trait ValueImpl: Impl + Serialize {
 pub trait NumberImpl:
     ValueImpl + Add + Mul + Sized + PartialOrd + From<bool> + Into<Number> + CastInto<bool>
 {
+    type Abs: NumberImpl;
     type Class: NumberClass;
+
+    fn abs(&self) -> Self::Abs;
 
     fn into_type(self, dtype: NumberType) -> Number {
         match dtype {

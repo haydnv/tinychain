@@ -1469,6 +1469,24 @@ impl Array {
         }
     }
 
+    pub fn sum(&self) -> Number {
+        use Array::*;
+        match self {
+            Bool(b) => Number::UInt(b.sum().into()),
+            C32(c) => Number::Complex(c.sum().into()),
+            C64(c) => Number::Complex(c.sum().into()),
+            F32(f) => Number::Float(f.sum().into()),
+            F64(f) => Number::Float(f.sum().into()),
+            I16(i) => Number::Int(i.sum().into()),
+            I32(i) => Number::Int(i.sum().into()),
+            I64(i) => Number::Int(i.sum().into()),
+            U8(u) => Number::UInt(u.sum().into()),
+            U16(u) => Number::UInt(u.sum().into()),
+            U32(u) => Number::UInt(u.sum().into()),
+            U64(u) => Number::UInt(u.sum().into()),
+        }
+    }
+
     pub fn len(&self) -> usize {
         use Array::*;
         match self {

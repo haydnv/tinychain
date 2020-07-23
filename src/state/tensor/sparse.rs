@@ -17,6 +17,7 @@ use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 use super::base::*;
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::dense::{BlockTensor, DenseTensorView};
+use super::stream::ValueBlockStream;
 
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
@@ -429,23 +430,39 @@ impl<T: SparseTensorView> SparseTensorUnary for T {
         Ok(copy)
     }
 
-    async fn abs(self: Arc<Self>, _txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
-        Err(error::not_implemented())
+    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+        let dtype = self.dtype();
+        let txn_id = txn.id().clone();
+        let copy = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
+        self.filled(txn_id.clone())
+            .await?
+            .map(|(coord, value)| copy.clone().write_value(txn_id.clone(), coord, value.abs()))
+            .buffer_unordered(super::dense::per_block(dtype))
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(copy)
     }
 
     async fn sum(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Arc<SparseTensor>> {
         Err(error::not_implemented())
     }
 
-    async fn sum_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Number> {
-        Err(error::not_implemented())
+    async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
+        let dtype = self.dtype();
+        let values = self.filled(txn_id).await?.map(|(_, value)| Ok(value));
+        ValueBlockStream::new(values, dtype, super::dense::per_block(dtype))
+            .try_fold(dtype.zero(), |sum, block| {
+                future::ready(Ok(sum + block.sum()))
+            })
+            .await
     }
 
     async fn product(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Arc<SparseTensor>> {
         Err(error::not_implemented())
     }
 
-    async fn product_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Number> {
+    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
         Err(error::not_implemented())
     }
 

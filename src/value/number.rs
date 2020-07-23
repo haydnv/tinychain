@@ -33,7 +33,15 @@ impl ValueImpl for Complex {
 }
 
 impl NumberImpl for Complex {
+    type Abs = Float;
     type Class = ComplexType;
+
+    fn abs(&self) -> Float {
+        match self {
+            Self::C32(c) => Float::F32(c.norm_sqr()),
+            Self::C64(c) => Float::F64(c.norm_sqr()),
+        }
+    }
 }
 
 impl CastFrom<Number> for Complex {
@@ -251,7 +259,15 @@ impl ValueImpl for Float {
 }
 
 impl NumberImpl for Float {
+    type Abs = Float;
     type Class = FloatType;
+
+    fn abs(&self) -> Float {
+        match self {
+            Self::F32(f) => Self::F32(f.abs()),
+            Self::F64(f) => Self::F64(f.abs()),
+        }
+    }
 }
 
 impl CastFrom<Complex> for Float {
@@ -439,7 +455,16 @@ impl ValueImpl for Int {
 }
 
 impl NumberImpl for Int {
+    type Abs = Self;
     type Class = IntType;
+
+    fn abs(&self) -> Self {
+        match self {
+            Self::I16(i) => Int::I16(i.abs()),
+            Self::I32(i) => Int::I32(i.abs()),
+            Self::I64(i) => Int::I64(i.abs()),
+        }
+    }
 }
 
 impl CastFrom<Complex> for Int {
@@ -651,7 +676,12 @@ impl ValueImpl for UInt {
 }
 
 impl NumberImpl for UInt {
+    type Abs = Self;
     type Class = UIntType;
+
+    fn abs(&self) -> UInt {
+        self.clone()
+    }
 }
 
 impl CastFrom<Complex> for UInt {
@@ -932,7 +962,18 @@ impl ValueImpl for Number {
 }
 
 impl NumberImpl for Number {
+    type Abs = Number;
     type Class = NumberType;
+
+    fn abs(&self) -> Number {
+        use Number::*;
+        match self {
+            Complex(c) => Float(c.abs()),
+            Float(f) => Float(f.abs()),
+            Int(i) => Int(i.abs()),
+            other => other.clone(),
+        }
+    }
 }
 
 impl CastFrom<Number> for bool {
