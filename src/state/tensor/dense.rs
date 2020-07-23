@@ -397,6 +397,7 @@ impl BlockTensor {
                 async move {
                     let mut block =
                         Array::constant(dtype.zero(), (to_offset - from_offset) as usize);
+
                     if values.is_empty() {
                         return Ok(block);
                     }

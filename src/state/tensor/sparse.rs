@@ -43,13 +43,18 @@ pub trait SparseTensorView: TensorView + Slice + 'static {
         value
             .filled(txn_id.clone())
             .await?
-            .map(|(coord, number)| Ok(dest.write_value(&txn_id, coord, number)))
+            .map(|(coord, number)| Ok(dest.clone().write_value(txn_id.clone(), coord, number)))
             .try_buffer_unordered(dest.size() as usize)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
 
-    async fn write_value(&self, txn_id: &TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
+    async fn write_value(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> TCResult<()>;
 }
 
 pub struct SparseTensor {
@@ -59,7 +64,11 @@ pub struct SparseTensor {
 }
 
 impl SparseTensor {
-    pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTensor> {
+    pub async fn create(
+        txn: Arc<Txn>,
+        shape: Shape,
+        dtype: NumberType,
+    ) -> TCResult<Arc<SparseTensor>> {
         let u64_type = ValueType::Number(NumberType::UInt(UIntType::U64));
         let key: Vec<Column> = (0..shape.len())
             .map(|axis| Column {
@@ -78,11 +87,11 @@ impl SparseTensor {
         let schema = Schema::new(key, value);
         let table = TableBase::create(txn, schema).await?;
 
-        Ok(SparseTensor {
+        Ok(Arc::new(SparseTensor {
             dtype,
             shape,
             table,
-        })
+        }))
     }
 
     async fn slice_table(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<Table> {
@@ -186,8 +195,8 @@ impl SparseTensorView for SparseTensor {
     }
 
     async fn write_value(
-        &self,
-        txn_id: &TxnId,
+        self: Arc<Self>,
+        txn_id: TxnId,
         mut coord: Vec<u64>,
         value: Number,
     ) -> TCResult<()> {
@@ -198,7 +207,7 @@ impl SparseTensorView for SparseTensor {
             .collect();
 
         row.insert("value".parse()?, value.into());
-        self.table.upsert(txn_id, row).await
+        self.table.upsert(&txn_id, row).await
     }
 }
 
@@ -259,7 +268,12 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
             .await
     }
 
-    async fn write_value(&self, txn_id: &TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+    async fn write_value(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> TCResult<()> {
         self.source()
             .write_value(txn_id, self.invert_bounds(coord.into()).into_coord(), value)
             .await
@@ -274,7 +288,7 @@ where
     async fn equals(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
         if self.shape() != other.shape() {
             return Err(error::bad_request(
-                "Cannot compare with shape",
+                "Cannot compare tensor with shape",
                 other.shape(),
             ));
         }
@@ -293,12 +307,11 @@ where
             .filled(txn_id.clone())
             .await?
             .map(|(coord, right)| {
-                Ok(self
-                    .clone()
+                self.clone()
                     .read_value(txn_id.clone(), coord.to_vec())
-                    .and_then(|left| future::ready(Ok((coord, left, right)))))
+                    .and_then(|left| future::ready(Ok((coord, left, right))))
             })
-            .try_buffer_unordered(per_block)
+            .buffer_unordered(per_block)
             .try_filter_map(|(coord, left, right)| {
                 if left == right {
                     future::ready(Ok(None))
@@ -318,8 +331,66 @@ where
         Ok(equals)
     }
 
-    async fn gt(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
-        Err(error::not_implemented())
+    async fn gt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+        if self.shape() != other.shape() {
+            return Err(error::bad_request(
+                "Cannot compare tensor with shape",
+                other.shape(),
+            ));
+        }
+
+        let txn_id = txn.id().clone();
+        let txn_id_clone = txn_id.clone();
+        let per_block = super::dense::per_block(NumberType::Bool);
+        let gt = SparseTensor::create(txn, self.shape().clone(), NumberType::Bool).await?;
+
+        let other_clone = other.clone();
+        let this = self
+            .clone()
+            .filled(txn_id.clone())
+            .await?
+            .map(|(coord, left)| {
+                other
+                    .clone()
+                    .read_value(txn_id.clone(), coord.to_vec())
+                    .and_then(move |right| future::ready(Ok((coord, left, right))))
+            })
+            .buffer_unordered(per_block)
+            .try_filter_map(|(coord, left, right)| {
+                if left > right {
+                    future::ready(Ok(Some(coord)))
+                } else {
+                    future::ready(Ok(None))
+                }
+            });
+
+        let that = other_clone
+            .filled(txn_id.clone())
+            .await?
+            .map(|(coord, right)| {
+                self.clone()
+                    .read_value(txn_id.clone(), coord.to_vec())
+                    .and_then(move |left| future::ready(Ok((coord, left, right))))
+            })
+            .buffer_unordered(per_block)
+            .try_filter_map(|(coord, left, right)| {
+                if left > right {
+                    future::ready(Ok(Some(coord)))
+                } else {
+                    future::ready(Ok(None))
+                }
+            });
+
+        this.chain(that)
+            .map_ok(|coord| {
+                gt.clone()
+                    .write_value(txn_id_clone.clone(), coord, Number::Bool(true))
+            })
+            .try_buffer_unordered(per_block)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(gt)
     }
 
     async fn gte(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
