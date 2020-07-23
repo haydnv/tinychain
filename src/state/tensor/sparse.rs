@@ -19,6 +19,7 @@ use super::base::*;
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::dense::{BlockTensor, DenseTensorView};
 use super::stream::ValueBlockStream;
+use super::TensorView;
 
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 

@@ -13,6 +13,7 @@ use crate::value::{Number, TCResult};
 use super::bounds::*;
 use super::dense::{BlockTensor, DenseTensorView};
 use super::sparse::{SparseTensor, SparseTensorView};
+use super::TensorView;
 
 #[async_trait]
 pub trait DenseTensorUnary {
@@ -130,16 +131,6 @@ pub trait SparseTensorCompare<Object: SparseTensorView> {
     async fn lt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
 
     async fn lte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
-}
-
-pub trait TensorView: Sized + Send + Sync {
-    fn dtype(&self) -> NumberType;
-
-    fn ndim(&self) -> usize;
-
-    fn shape(&'_ self) -> &'_ Shape;
-
-    fn size(&self) -> u64;
 }
 
 #[async_trait]

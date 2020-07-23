@@ -23,6 +23,7 @@ use super::base::*;
 use super::bounds::*;
 use super::sparse::SparseTensorView;
 use super::stream::{ValueBlockStream, ValueStream};
+use super::TensorView;
 
 const BLOCK_SIZE: usize = 1_000_000;
 

@@ -1,7 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 
 use crate::error;
 use crate::value::TCResult;
+
+use super::{Tensor, TensorView};
 
 const VALID_LABELS: [char; 52] = [
     'a', 'A', 'b', 'B', 'c', 'C', 'd', 'D', 'e', 'E', 'f', 'F', 'g', 'G', 'h', 'H', 'i', 'I', 'j',
@@ -47,4 +50,42 @@ fn parse_format(format: &str) -> TCResult<(Vec<Vec<char>>, Vec<char>)> {
     }
 
     Ok((f_inputs, f_output))
+}
+
+fn validate_args(
+    f_inputs: Vec<Vec<char>>,
+    tensors: Vec<Arc<Tensor>>,
+) -> TCResult<BTreeMap<char, u64>> {
+    if f_inputs.len() != tensors.len() {
+        return Err(error::bad_request(
+            "Number of tensors passed to einsum does not match number of format strings",
+            format!("{} != {}", tensors.len(), f_inputs.len()),
+        ));
+    }
+
+    let mut dimensions = BTreeMap::new();
+
+    for (f_input, tensor) in f_inputs.iter().zip(tensors.iter()) {
+        if f_input.len() != tensor.ndim() {
+            return Err(error::bad_request(
+                "Wrong tensor shape found for format string",
+                f_input.into_iter().collect::<String>(),
+            ));
+        }
+
+        for (label, dim) in f_input.iter().zip(tensor.shape().to_vec().iter()) {
+            if let Some(known_dim) = dimensions.get(label) {
+                if *dim != *known_dim {
+                    return Err(error::bad_request(
+                        "einsum found inconsistent dimension for axis",
+                        label,
+                    ));
+                }
+            } else {
+                dimensions.insert(*label, *dim);
+            }
+        }
+    }
+
+    Ok(dimensions)
 }
