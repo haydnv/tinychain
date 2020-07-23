@@ -2,6 +2,7 @@ mod array;
 mod base;
 mod bounds;
 mod dense;
+mod einsum;
 mod sparse;
 mod stream;
 
