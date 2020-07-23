@@ -462,12 +462,27 @@ impl<T: SparseTensorView> SparseTensorUnary for T {
         Err(error::not_implemented())
     }
 
-    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
+    async fn product_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Number> {
         Err(error::not_implemented())
     }
 
-    async fn not(self: Arc<Self>, _txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
-        Err(error::not_implemented())
+    async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+        let dtype = self.dtype();
+        let txn_id = txn.id().clone();
+        let copy = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
+        self.filled(txn_id.clone())
+            .await?
+            .map(|(coord, value)| (coord, value.into_type(NumberType::Bool)))
+            .map(|(coord, value)| {
+                let r: TCResult<bool> = value.try_into();
+                r.map(|v| (coord, Number::Bool(!v)))
+            })
+            .map_ok(|(coord, value)| copy.clone().write_value(txn_id.clone(), coord, value))
+            .try_buffer_unordered(super::dense::per_block(dtype))
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(copy)
     }
 }
 
