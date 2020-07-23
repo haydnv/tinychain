@@ -395,6 +395,20 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
 }
 
 #[async_trait]
+impl<T: SparseTensorView> AnyAll for T {
+    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        let mut values = self.filled(txn_id).await?;
+        Ok(values.next().await.is_some())
+    }
+
+    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+        self.filled_count(txn_id)
+            .await
+            .map(|count| count == self.size())
+    }
+}
+
+#[async_trait]
 impl<T: SparseTensorView> SparseTensorUnary for T {
     async fn as_dtype(
         self: Arc<Self>,
@@ -469,7 +483,7 @@ impl<T: SparseTensorView> SparseTensorUnary for T {
     async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
         let dtype = self.dtype();
         let txn_id = txn.id().clone();
-        let copy = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
+        let not = SparseTensor::create(txn, self.shape().clone(), NumberType::Bool).await?;
         self.filled(txn_id.clone())
             .await?
             .map(|(coord, value)| (coord, value.into_type(NumberType::Bool)))
@@ -477,12 +491,12 @@ impl<T: SparseTensorView> SparseTensorUnary for T {
                 let r: TCResult<bool> = value.try_into();
                 r.map(|v| (coord, Number::Bool(!v)))
             })
-            .map_ok(|(coord, value)| copy.clone().write_value(txn_id.clone(), coord, value))
+            .map_ok(|(coord, value)| not.clone().write_value(txn_id.clone(), coord, value))
             .try_buffer_unordered(super::dense::per_block(dtype))
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
 
-        Ok(copy)
+        Ok(not)
     }
 }
 
