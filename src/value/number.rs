@@ -7,8 +7,8 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::error;
 
+use super::class::{CastFrom, CastInto, Impl, NumberClass, NumberImpl, ValueImpl};
 use super::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
-use super::class::{Impl, NumberClass, NumberImpl, ValueImpl};
 use super::TCResult;
 
 #[derive(Clone, PartialEq)]
@@ -34,6 +34,30 @@ impl ValueImpl for Complex {
 
 impl NumberImpl for Complex {
     type Class = ComplexType;
+}
+
+impl CastFrom<Number> for Complex {
+    fn cast_from(number: Number) -> Complex {
+        use Number::*;
+        match number {
+            Bool(b) => b.cast_into(),
+            Complex(c) => c,
+            Float(f) => Self::cast_from(f),
+            Int(i) => Self::cast_from(i),
+            UInt(u) => Self::cast_from(u),
+        }
+    }
+}
+
+impl CastFrom<Complex> for bool {
+    fn cast_from(c: Complex) -> bool {
+        use Complex::*;
+        match c {
+            C32(c) if c.norm_sqr() == 0f32 => false,
+            C64(c) if c.norm_sqr() == 0f64 => false,
+            _ => true,
+        }
+    }
 }
 
 impl Eq for Complex {}
@@ -98,6 +122,12 @@ impl From<Float> for Complex {
     }
 }
 
+impl CastFrom<Float> for Complex {
+    fn cast_from(f: Float) -> Self {
+        f.into()
+    }
+}
+
 impl From<Int> for Complex {
     fn from(i: Int) -> Self {
         match i {
@@ -105,6 +135,12 @@ impl From<Int> for Complex {
             Int::I32(i) => Self::C32(num::Complex::new(i as f32, 0.0f32)),
             Int::I16(i) => Self::C32(num::Complex::new(i as f32, 0.0f32)),
         }
+    }
+}
+
+impl CastFrom<Int> for Complex {
+    fn cast_from(i: Int) -> Self {
+        i.into()
     }
 }
 
@@ -119,6 +155,12 @@ impl From<UInt> for Complex {
     }
 }
 
+impl CastFrom<UInt> for Complex {
+    fn cast_from(u: UInt) -> Self {
+        u.into()
+    }
+}
+
 impl From<bool> for Complex {
     fn from(b: bool) -> Self {
         if b {
@@ -126,6 +168,12 @@ impl From<bool> for Complex {
         } else {
             Self::C64(num::Complex::new(1.0f64, 0.0f64))
         }
+    }
+}
+
+impl CastFrom<bool> for Complex {
+    fn cast_from(b: bool) -> Complex {
+        b.into()
     }
 }
 
@@ -206,6 +254,27 @@ impl NumberImpl for Float {
     type Class = FloatType;
 }
 
+impl CastFrom<Complex> for Float {
+    fn cast_from(c: Complex) -> Float {
+        use Complex::*;
+        match c {
+            C32(c) => Self::F32(c.re),
+            C64(c) => Self::F64(c.re),
+        }
+    }
+}
+
+impl CastFrom<Float> for bool {
+    fn cast_from(f: Float) -> bool {
+        use Float::*;
+        match f {
+            F32(f) if f == 0f32 => false,
+            F64(f) if f == 0f64 => false,
+            _ => true,
+        }
+    }
+}
+
 impl Eq for Float {}
 
 impl Add for Float {
@@ -244,6 +313,22 @@ impl PartialOrd for Float {
     }
 }
 
+impl From<bool> for Float {
+    fn from(b: bool) -> Self {
+        if b {
+            Self::F32(1.0f32)
+        } else {
+            Self::F32(0.0f32)
+        }
+    }
+}
+
+impl CastFrom<bool> for Float {
+    fn cast_from(b: bool) -> Self {
+        b.into()
+    }
+}
+
 impl From<f32> for Float {
     fn from(f: f32) -> Self {
         Self::F32(f)
@@ -266,6 +351,12 @@ impl From<Int> for Float {
     }
 }
 
+impl CastFrom<Int> for Float {
+    fn cast_from(i: Int) -> Self {
+        i.into()
+    }
+}
+
 impl From<UInt> for Float {
     fn from(u: UInt) -> Self {
         match u {
@@ -277,13 +368,9 @@ impl From<UInt> for Float {
     }
 }
 
-impl From<bool> for Float {
-    fn from(b: bool) -> Self {
-        if b {
-            Self::F32(1.0f32)
-        } else {
-            Self::F32(0.0f32)
-        }
+impl CastFrom<UInt> for Float {
+    fn cast_from(u: UInt) -> Self {
+        u.into()
     }
 }
 
@@ -353,6 +440,38 @@ impl ValueImpl for Int {
 
 impl NumberImpl for Int {
     type Class = IntType;
+}
+
+impl CastFrom<Complex> for Int {
+    fn cast_from(c: Complex) -> Int {
+        use Complex::*;
+        match c {
+            C32(c) => Self::I32(c.re as i32),
+            C64(c) => Self::I64(c.re as i64),
+        }
+    }
+}
+
+impl CastFrom<Float> for Int {
+    fn cast_from(f: Float) -> Int {
+        use Float::*;
+        match f {
+            F32(f) => Self::I32(f as i32),
+            F64(f) => Self::I64(f as i64),
+        }
+    }
+}
+
+impl CastFrom<Int> for bool {
+    fn cast_from(i: Int) -> bool {
+        use Int::*;
+        match i {
+            I16(i) if i == 0i16 => false,
+            I32(i) if i == 0i32 => false,
+            I64(i) if i == 0i64 => false,
+            _ => true,
+        }
+    }
 }
 
 impl Eq for Int {}
@@ -429,6 +548,12 @@ impl From<UInt> for Int {
     }
 }
 
+impl CastFrom<UInt> for Int {
+    fn cast_from(u: UInt) -> Int {
+        u.into()
+    }
+}
+
 impl From<bool> for Int {
     fn from(b: bool) -> Int {
         if b {
@@ -438,6 +563,13 @@ impl From<bool> for Int {
         }
     }
 }
+
+impl CastFrom<bool> for Int {
+    fn cast_from(b: bool) -> Int {
+        b.into()
+    }
+}
+
 impl TryFrom<Int> for i16 {
     type Error = error::TCError;
 
@@ -522,6 +654,50 @@ impl NumberImpl for UInt {
     type Class = UIntType;
 }
 
+impl CastFrom<Complex> for UInt {
+    fn cast_from(c: Complex) -> UInt {
+        use Complex::*;
+        match c {
+            C32(c) => Self::U32(c.re as u32),
+            C64(c) => Self::U64(c.re as u64),
+        }
+    }
+}
+
+impl CastFrom<Float> for UInt {
+    fn cast_from(f: Float) -> UInt {
+        use Float::*;
+        match f {
+            F32(f) => Self::U32(f as u32),
+            F64(f) => Self::U64(f as u64),
+        }
+    }
+}
+
+impl CastFrom<Int> for UInt {
+    fn cast_from(i: Int) -> UInt {
+        use Int::*;
+        match i {
+            I16(i) => Self::U16(i as u16),
+            I32(i) => Self::U32(i as u32),
+            I64(i) => Self::U64(i as u64),
+        }
+    }
+}
+
+impl CastFrom<UInt> for bool {
+    fn cast_from(u: UInt) -> bool {
+        use UInt::*;
+        match u {
+            U8(u) if u == 0u8 => false,
+            U16(u) if u == 0u16 => false,
+            U32(u) if u == 0u32 => false,
+            U64(u) if u == 0u64 => false,
+            _ => true,
+        }
+    }
+}
+
 impl Add for UInt {
     type Output = Self;
 
@@ -599,6 +775,12 @@ impl From<bool> for UInt {
         } else {
             UInt::U8(0)
         }
+    }
+}
+
+impl CastFrom<bool> for UInt {
+    fn cast_from(b: bool) -> UInt {
+        b.into()
     }
 }
 
@@ -751,6 +933,58 @@ impl ValueImpl for Number {
 
 impl NumberImpl for Number {
     type Class = NumberType;
+}
+
+impl CastFrom<Number> for bool {
+    fn cast_from(number: Number) -> bool {
+        use Number::*;
+        match number {
+            Bool(b) => b,
+            Complex(c) => bool::cast_from(c),
+            Float(f) => bool::cast_from(f),
+            Int(i) => bool::cast_from(i),
+            UInt(u) => bool::cast_from(u),
+        }
+    }
+}
+
+impl CastFrom<Number> for Float {
+    fn cast_from(number: Number) -> Float {
+        use Number::*;
+        match number {
+            Bool(b) => Self::cast_from(b),
+            Complex(c) => Self::cast_from(c),
+            Float(f) => f,
+            Int(i) => Self::cast_from(i),
+            UInt(u) => Self::cast_from(u),
+        }
+    }
+}
+
+impl CastFrom<Number> for Int {
+    fn cast_from(number: Number) -> Int {
+        use Number::*;
+        match number {
+            Bool(b) => Self::cast_from(b),
+            Complex(c) => Self::cast_from(c),
+            Float(f) => Self::cast_from(f),
+            Int(i) => i,
+            UInt(u) => Self::cast_from(u),
+        }
+    }
+}
+
+impl CastFrom<Number> for UInt {
+    fn cast_from(number: Number) -> UInt {
+        use Number::*;
+        match number {
+            Bool(b) => Self::cast_from(b),
+            Complex(c) => Self::cast_from(c),
+            Float(f) => Self::cast_from(f),
+            Int(i) => Self::cast_from(i),
+            UInt(u) => u,
+        }
+    }
 }
 
 impl Add for Number {

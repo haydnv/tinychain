@@ -19,8 +19,8 @@ pub trait ValueClass: Class {
     fn size(self) -> Option<usize>;
 }
 
-pub trait NumberClass: Class + Into<NumberType> {
-    type Impl: NumberImpl;
+pub trait NumberClass: Class + Into<NumberType> + Send + Sync {
+    type Impl: NumberImpl + Into<Number>;
 
     fn size(self) -> usize;
 
@@ -71,19 +71,31 @@ pub trait ValueImpl: Impl + Serialize {
     type Class: ValueClass;
 }
 
-pub trait NumberImpl: ValueImpl + Add + Mul + Sized + PartialOrd + From<bool> {
+pub trait NumberImpl:
+    ValueImpl + Add + Mul + Sized + PartialOrd + From<bool> + Into<Number> + CastInto<bool>
+{
     type Class: NumberClass;
 
-    fn into_type<T: NumberClass>(self) -> <T as NumberClass>::Impl
-    where
-        <T as NumberClass>::Impl: Cast<Self>,
-    {
-        <T as NumberClass>::Impl::cast(self)
+    fn into_type(self, dtype: NumberType) -> Number {
+        match dtype {
+            NumberType::Bool => Number::Bool(self.cast_into()),
+            _ => unimplemented!(),
+        }
     }
 }
 
-pub trait Cast<T: NumberImpl>: NumberImpl {
-    fn cast(number: T) -> Self;
+pub trait CastFrom<T> {
+    fn cast_from(value: T) -> Self;
+}
+
+pub trait CastInto<T> {
+    fn cast_into(self) -> T;
+}
+
+impl<T, F: CastFrom<T>> CastInto<F> for T {
+    fn cast_into(self) -> F {
+        F::cast_from(self)
+    }
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Deserialize, Serialize)]

@@ -11,7 +11,7 @@ use crate::error;
 use crate::state::table::schema::*;
 use crate::state::table::{Selection, Table, TableBase};
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::{NumberClass, NumberType, UIntType, ValueType};
+use crate::value::class::{NumberClass, NumberImpl, NumberType, UIntType, ValueType};
 use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::base::*;
@@ -397,10 +397,22 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
 impl<T: SparseTensorView> SparseTensorUnary for T {
     async fn as_dtype(
         self: Arc<Self>,
-        _txn: Arc<Txn>,
-        _dtype: NumberType,
-    ) -> TCResult<Arc<BlockTensor>> {
-        Err(error::not_implemented())
+        txn: Arc<Txn>,
+        dtype: NumberType,
+    ) -> TCResult<Arc<SparseTensor>> {
+        let txn_id = txn.id().clone();
+        let cast = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
+        self.filled(txn_id.clone())
+            .await?
+            .map(|(coord, value)| {
+                cast.clone()
+                    .write_value(txn_id.clone(), coord, value.into_type(dtype))
+            })
+            .buffer_unordered(super::dense::per_block(dtype))
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(cast)
     }
 
     async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {

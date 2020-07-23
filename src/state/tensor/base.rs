@@ -43,7 +43,7 @@ pub trait SparseTensorUnary {
         self: Arc<Self>,
         txn: Arc<Txn>,
         dtype: NumberType,
-    ) -> TCResult<Arc<BlockTensor>>;
+    ) -> TCResult<Arc<SparseTensor>>;
 
     async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
 
