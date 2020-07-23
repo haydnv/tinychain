@@ -22,13 +22,73 @@ const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
 #[async_trait]
 pub trait SparseTensorView: TensorView + 'static {
+    async fn filter_map<
+        O: SparseTensorView,
+        F: Fn(Vec<u64>, Number, Number) -> Option<Vec<u64>> + Send + Sync,
+    >(
+        this: Arc<Self>,
+        that: Arc<O>,
+        txn: Arc<Txn>,
+        filter: F,
+        value: Number,
+    ) -> TCResult<Arc<SparseTensor>> {
+        if this.shape() != that.shape() {
+            return Err(error::bad_request(
+                "Cannot compare tensor with shape",
+                that.shape(),
+            ));
+        }
+
+        let txn_id = txn.id().clone();
+        let txn_id_clone = txn_id.clone();
+        let per_block = super::dense::per_block(NumberType::Bool);
+        let sparse = SparseTensor::create(txn, this.shape().clone(), NumberType::Bool).await?;
+
+        let that_clone = that.clone();
+        let these_values = this
+            .clone()
+            .filled(txn_id.clone())
+            .await?
+            .map(|(coord, left)| {
+                that.clone()
+                    .read_value(txn_id.clone(), coord.to_vec())
+                    .and_then(move |right| future::ready(Ok((coord, left, right))))
+            })
+            .buffer_unordered(per_block)
+            .try_filter_map(|(coord, left, right)| future::ready(Ok(filter(coord, left, right))));
+
+        let those_values = that_clone
+            .filled(txn_id.clone())
+            .await?
+            .map(|(coord, right)| {
+                this.clone()
+                    .read_value(txn_id.clone(), coord.to_vec())
+                    .and_then(move |left| future::ready(Ok((coord, left, right))))
+            })
+            .buffer_unordered(per_block)
+            .try_filter_map(|(coord, left, right)| future::ready(Ok(filter(coord, left, right))));
+
+        these_values
+            .chain(those_values)
+            .map_ok(|coord| {
+                sparse
+                    .clone()
+                    .write_value(txn_id_clone.clone(), coord, value.clone())
+            })
+            .try_buffer_unordered(per_block)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(sparse)
+    }
+
     async fn filter_map_dense<
         O: SparseTensorView,
         F: Fn(Vec<u64>, Number, Number) -> Option<Vec<u64>> + Send + Sync,
     >(
-        txn: Arc<Txn>,
         this: Arc<Self>,
         that: Arc<O>,
+        txn: Arc<Txn>,
         filter: F,
         value: Number,
     ) -> TCResult<Arc<BlockTensor>>
@@ -347,69 +407,19 @@ where
             }
         };
 
-        SparseTensorView::filter_map_dense(txn, self, other, filter, Number::Bool(false)).await
+        SparseTensorView::filter_map_dense(self, other, txn, filter, Number::Bool(false)).await
     }
 
     async fn gt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
-        if self.shape() != other.shape() {
-            return Err(error::bad_request(
-                "Cannot compare tensor with shape",
-                other.shape(),
-            ));
-        }
+        let filter = |coord, left, right| {
+            if left > right {
+                Some(coord)
+            } else {
+                None
+            }
+        };
 
-        let txn_id = txn.id().clone();
-        let txn_id_clone = txn_id.clone();
-        let per_block = super::dense::per_block(NumberType::Bool);
-        let gt = SparseTensor::create(txn, self.shape().clone(), NumberType::Bool).await?;
-
-        let other_clone = other.clone();
-        let this = self
-            .clone()
-            .filled(txn_id.clone())
-            .await?
-            .map(|(coord, left)| {
-                other
-                    .clone()
-                    .read_value(txn_id.clone(), coord.to_vec())
-                    .and_then(move |right| future::ready(Ok((coord, left, right))))
-            })
-            .buffer_unordered(per_block)
-            .try_filter_map(|(coord, left, right)| {
-                if left > right {
-                    future::ready(Ok(Some(coord)))
-                } else {
-                    future::ready(Ok(None))
-                }
-            });
-
-        let that = other_clone
-            .filled(txn_id.clone())
-            .await?
-            .map(|(coord, right)| {
-                self.clone()
-                    .read_value(txn_id.clone(), coord.to_vec())
-                    .and_then(move |left| future::ready(Ok((coord, left, right))))
-            })
-            .buffer_unordered(per_block)
-            .try_filter_map(|(coord, left, right)| {
-                if left > right {
-                    future::ready(Ok(Some(coord)))
-                } else {
-                    future::ready(Ok(None))
-                }
-            });
-
-        this.chain(that)
-            .map_ok(|coord| {
-                gt.clone()
-                    .write_value(txn_id_clone.clone(), coord, Number::Bool(true))
-            })
-            .try_buffer_unordered(per_block)
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await?;
-
-        Ok(gt)
+        SparseTensorView::filter_map(self, other, txn, filter, Number::Bool(true)).await
     }
 
     async fn gte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
@@ -421,15 +431,31 @@ where
             }
         };
 
-        SparseTensorView::filter_map_dense(txn, self, other, filter, Number::Bool(false)).await
+        SparseTensorView::filter_map_dense(self, other, txn, filter, Number::Bool(false)).await
     }
 
-    async fn lt(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
-        Err(error::not_implemented())
+    async fn lt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+        let filter = |coord, left, right| {
+            if left < right {
+                Some(coord)
+            } else {
+                None
+            }
+        };
+
+        SparseTensorView::filter_map(self, other, txn, filter, Number::Bool(true)).await
     }
 
-    async fn lte(self: Arc<Self>, _other: Arc<O>, _txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
-        Err(error::not_implemented())
+    async fn lte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+        let filter = |coord, left, right| {
+            if left <= right {
+                None
+            } else {
+                Some(coord)
+            }
+        };
+
+        SparseTensorView::filter_map_dense(self, other, txn, filter, Number::Bool(false)).await
     }
 }
 
