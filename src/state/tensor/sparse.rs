@@ -394,6 +394,55 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
 }
 
 #[async_trait]
+impl<T: SparseTensorView> SparseTensorUnary for T {
+    async fn as_dtype(
+        self: Arc<Self>,
+        _txn: Arc<Txn>,
+        _dtype: NumberType,
+    ) -> TCResult<Arc<BlockTensor>> {
+        Err(error::not_implemented())
+    }
+
+    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+        let dtype = self.dtype();
+        let txn_id = txn.id().clone();
+        let copy = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
+        self.filled(txn_id.clone())
+            .await?
+            .map(|(coord, value)| copy.clone().write_value(txn_id.clone(), coord, value))
+            .buffer_unordered(super::dense::per_block(dtype))
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(copy)
+    }
+
+    async fn abs(self: Arc<Self>, _txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+        Err(error::not_implemented())
+    }
+
+    async fn sum(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Arc<SparseTensor>> {
+        Err(error::not_implemented())
+    }
+
+    async fn sum_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Number> {
+        Err(error::not_implemented())
+    }
+
+    async fn product(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Arc<SparseTensor>> {
+        Err(error::not_implemented())
+    }
+
+    async fn product_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Number> {
+        Err(error::not_implemented())
+    }
+
+    async fn not(self: Arc<Self>, _txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+        Err(error::not_implemented())
+    }
+}
+
+#[async_trait]
 impl<T: SparseTensorView + Slice, O: SparseTensorView> SparseTensorCompare<O> for T
 where
     <T as Slice>::Slice: SparseTensorView + Slice,
