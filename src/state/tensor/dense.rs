@@ -42,7 +42,7 @@ pub trait DenseTensorView: TensorView + 'static {
         value: Arc<T>,
     ) -> TCResult<()>;
 
-    async fn write_one(
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
@@ -167,7 +167,7 @@ where
                     let value = slice.sum_all(txn_id.clone()).await?;
                     summed
                         .clone()
-                        .write_one(txn_id.clone(), bounds, value)
+                        .write_value(txn_id.clone(), bounds, value)
                         .await
                 })
                 .fold(Ok(()), |_, r| future::ready(r))
@@ -213,7 +213,7 @@ where
                     let value = slice.product_all(txn_id.clone()).await?;
                     product
                         .clone()
-                        .write_one(txn_id.clone(), bounds, value)
+                        .write_value(txn_id.clone(), bounds, value)
                         .await
                 })
                 .fold(Ok(()), |_, r| future::ready(r))
@@ -287,7 +287,11 @@ impl BlockTensor {
         BlockTensor::from_blocks(txn, shape, dtype, blocks).await
     }
 
-    async fn constant(txn: Arc<Txn>, shape: Shape, value: Number) -> TCResult<Arc<BlockTensor>> {
+    pub async fn constant(
+        txn: Arc<Txn>,
+        shape: Shape,
+        value: Number,
+    ) -> TCResult<Arc<BlockTensor>> {
         let per_block = BLOCK_SIZE / value.class().size();
         let size = shape.size();
 
@@ -342,7 +346,19 @@ impl BlockTensor {
     where
         <S as Slice>::Slice: SparseTensorView,
     {
-        let txn_id = txn.id().clone();
+        let shape = sparse.shape().clone();
+        let dtype = sparse.dtype();
+        let blocks = Self::sparse_into_blocks(txn.id().clone(), sparse);
+        BlockTensor::from_blocks(txn, shape, dtype, Box::pin(blocks)).await
+    }
+
+    pub fn sparse_into_blocks<S: SparseTensorView + Slice>(
+        txn_id: TxnId,
+        sparse: Arc<S>,
+    ) -> impl Stream<Item = TCResult<Array>>
+    where
+        <S as Slice>::Slice: SparseTensorView,
+    {
         let shape = sparse.shape().clone();
         let dtype = sparse.dtype();
         let per_block = per_block(dtype);
@@ -364,9 +380,9 @@ impl BlockTensor {
             .chain(iter::once(shape.to_vec()));
         to_limit.next();
 
-        let blocks = stream::iter(from_limit.zip(to_limit))
+        stream::iter(from_limit.zip(to_limit))
             .map(Bounds::from)
-            .map(|bounds| sparse.clone().slice(bounds))
+            .map(move |bounds| sparse.clone().slice(bounds))
             .and_then(move |slice| slice.filled(txn_id.clone()))
             .and_then(|filled| async {
                 let values: Vec<(Vec<u64>, Number)> = filled.collect().await;
@@ -374,9 +390,10 @@ impl BlockTensor {
             })
             .zip(stream::iter(from_offsets.zip(to_offsets)))
             .map(|(r, offset)| r.map(|values| (values, offset)))
-            .and_then(|(mut values, (from_offset, to_offset))| {
+            .and_then(move |(mut values, (from_offset, to_offset))| {
                 let coord_bounds =
                     af::Array::new(&coord_bounds, af::Dim4::new(&[ndim as u64, 1, 1, 1]));
+                let dtype = dtype;
 
                 async move {
                     let mut block =
@@ -399,9 +416,7 @@ impl BlockTensor {
                     block.set(coords, &values)?;
                     Ok(block)
                 }
-            });
-
-        BlockTensor::from_blocks(txn, shape, dtype, Box::pin(blocks)).await
+            })
     }
 
     fn blocks(self: Arc<Self>, txn_id: TxnId) -> impl Stream<Item = TCResult<BlockOwned<Array>>> {
@@ -475,7 +490,7 @@ impl DenseTensorView for BlockTensor {
             return Box::pin(ValueStream::new(self.block_stream(txn_id)));
         }
 
-        assert!(self.shape().contains(&bounds));
+        assert!(self.shape().contains_bounds(&bounds));
         let mut selected = FuturesOrdered::new();
 
         let ndim = bounds.ndim();
@@ -525,7 +540,7 @@ impl DenseTensorView for BlockTensor {
         bounds: Bounds,
         value: Arc<T>,
     ) -> TCResult<()> {
-        if !self.shape().contains(&bounds) {
+        if !self.shape().contains_bounds(&bounds) {
             return Err(error::bad_request("Bounds out of bounds", bounds));
         }
 
@@ -572,13 +587,13 @@ impl DenseTensorView for BlockTensor {
             .await
     }
 
-    async fn write_one(
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
         value: Number,
     ) -> TCResult<()> {
-        if !self.shape().contains(&bounds) {
+        if !self.shape().contains_bounds(&bounds) {
             return Err(error::bad_request("Bounds out of bounds", bounds));
         }
 
@@ -661,7 +676,7 @@ where
     }
 
     fn value_stream(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> Self::ValueStream {
-        assert!(self.shape().contains(&bounds));
+        assert!(self.shape().contains_bounds(&bounds));
         self.source()
             .value_stream(txn_id, self.invert_bounds(bounds))
     }
@@ -677,14 +692,14 @@ where
             .await
     }
 
-    async fn write_one(
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
         value: Number,
     ) -> TCResult<()> {
         self.source()
-            .write_one(txn_id, self.invert_bounds(bounds), value)
+            .write_value(txn_id, self.invert_bounds(bounds), value)
             .await
     }
 }

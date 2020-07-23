@@ -7,22 +7,27 @@ use async_trait::async_trait;
 use futures::future;
 use futures::stream::{StreamExt, TryStreamExt};
 
+use crate::error;
 use crate::state::table::schema::*;
 use crate::state::table::{Selection, Table, TableBase};
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::{NumberType, UIntType, ValueType};
+use crate::value::class::{NumberClass, NumberType, UIntType, ValueType};
 use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::base::*;
 use super::bounds::{AxisBounds, Bounds, Shape};
 
+const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
+
 #[async_trait]
-pub trait SparseTensorView: TensorView + Slice {
+pub trait SparseTensorView: TensorView + Slice + 'static {
     async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>>;
 
     async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>>;
 
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64>;
+
+    async fn read_value(self: Arc<Self>, txn_id: TxnId, coord: Vec<u64>) -> TCResult<Number>;
 
     async fn write_sparse<T: SparseTensorView>(
         self: Arc<Self>,
@@ -150,6 +155,35 @@ impl SparseTensorView for SparseTensor {
         self.table.count(txn_id).await
     }
 
+    async fn read_value(self: Arc<Self>, txn_id: TxnId, coord: Vec<u64>) -> TCResult<Number> {
+        if !self.shape().contains_coord(&coord) {
+            return Err(error::bad_request(
+                "Coordinate out of bounds",
+                Bounds::from(coord),
+            ));
+        }
+
+        let selector: HashMap<ValueId, Value> = coord
+            .iter()
+            .enumerate()
+            .map(|(axis, at)| (axis.into(), u64_to_value(*at)))
+            .collect();
+
+        let mut slice = self
+            .table
+            .slice(&txn_id, selector.into())
+            .await?
+            .select(vec!["value".parse()?])?
+            .stream(txn_id)
+            .await?;
+
+        match slice.next().await {
+            Some(mut number) if number.len() == 1 => number.pop().unwrap().try_into(),
+            None => Ok(self.dtype().zero()),
+            _ => Err(error::internal(ERR_CORRUPT)),
+        }
+    }
+
     async fn write_value(
         &self,
         txn_id: &TxnId,
@@ -202,6 +236,18 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
                 .await?
                 .map(|coord| unwrap_coord(&coord)),
         ))
+    }
+
+    async fn read_value(self: Arc<Self>, txn_id: TxnId, coord: Vec<u64>) -> TCResult<Number> {
+        if !self.shape().contains_coord(&coord) {
+            return Err(error::bad_request(
+                "Coordinate out of bounds",
+                Bounds::from(coord),
+            ));
+        }
+
+        let source_coord = self.invert_bounds(coord.into()).into_coord();
+        self.source().read_value(txn_id, source_coord).await
     }
 
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64> {

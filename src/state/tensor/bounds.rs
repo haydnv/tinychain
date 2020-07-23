@@ -241,14 +241,14 @@ impl Shape {
         axes.into()
     }
 
-    pub fn contains(&self, coord: &Bounds) -> bool {
-        if coord.len() > self.len() {
+    pub fn contains_bounds(&self, bounds: &Bounds) -> bool {
+        if bounds.len() > self.len() {
             return false;
         }
 
-        for axis in 0..coord.len() {
+        for axis in 0..bounds.len() {
             let size = &self[axis];
-            match &coord[axis] {
+            match &bounds[axis] {
                 AxisBounds::At(i) => {
                     if i > size {
                         return false;
@@ -272,8 +272,22 @@ impl Shape {
         true
     }
 
+    pub fn contains_coord(&self, coord: &[u64]) -> bool {
+        if coord.len() > self.len() {
+            return false;
+        }
+
+        for axis in 0..coord.len() {
+            if coord[axis] > self[axis] {
+                return false;
+            }
+        }
+
+        true
+    }
+
     pub fn selection(&self, coord: &Bounds) -> Shape {
-        assert!(self.contains(coord));
+        assert!(self.contains_bounds(coord));
 
         let mut shape = Vec::with_capacity(self.len());
         for axis in 0..coord.len() {

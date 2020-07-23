@@ -137,6 +137,17 @@ impl From<Vec<(ValueId, ColumnBound)>> for Bounds {
     }
 }
 
+impl From<Vec<(ValueId, Value)>> for Bounds {
+    fn from(mut bounds: Vec<(ValueId, Value)>) -> Bounds {
+        Bounds(
+            bounds
+                .drain(..)
+                .map(|(axis, at)| (axis, ColumnBound::Is(at)))
+                .collect(),
+        )
+    }
+}
+
 impl fmt::Display for Bounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

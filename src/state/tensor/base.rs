@@ -11,7 +11,8 @@ use crate::value::class::NumberType;
 use crate::value::{Number, TCResult};
 
 use super::bounds::*;
-use super::dense::BlockTensor;
+use super::dense::{BlockTensor, DenseTensorView};
+use super::sparse::{SparseTensor, SparseTensorView};
 
 #[async_trait]
 pub trait TensorBase {
@@ -42,7 +43,7 @@ pub trait DenseTensorUnary {
 }
 
 #[async_trait]
-pub trait DenseTensorArithmetic<Object: TensorView> {
+pub trait DenseTensorArithmetic<Object: DenseTensorView> {
     async fn add(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
     async fn multiply(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
@@ -51,7 +52,7 @@ pub trait DenseTensorArithmetic<Object: TensorView> {
 }
 
 #[async_trait]
-pub trait DenseTensorBoolean<Object: TensorView> {
+pub trait DenseTensorBoolean<Object: DenseTensorView> {
     async fn and(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 
     async fn or(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
@@ -60,7 +61,7 @@ pub trait DenseTensorBoolean<Object: TensorView> {
 }
 
 #[async_trait]
-pub trait DenseTensorCompare<Object: TensorView> {
+pub trait DenseTensorCompare<Object: DenseTensorView> {
     async fn equals(
         self: Arc<Self>,
         other: Arc<Object>,
@@ -72,6 +73,23 @@ pub trait DenseTensorCompare<Object: TensorView> {
     async fn gte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 
     async fn lt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+
+    async fn lte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+}
+
+#[async_trait]
+pub trait SparseTensorCompare<Object: SparseTensorView> {
+    async fn equals(
+        self: Arc<Self>,
+        other: Arc<Object>,
+        txn: Arc<Txn>,
+    ) -> TCResult<Arc<BlockTensor>>;
+
+    async fn gt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+
+    async fn gte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+
+    async fn lt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
 
     async fn lte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
 }
