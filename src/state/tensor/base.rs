@@ -38,7 +38,7 @@ pub trait DenseTensorUnary {
 }
 
 #[async_trait]
-pub trait SparseTensorUnary {
+pub trait SparseTensorUnary: SparseTensorView {
     async fn as_dtype(
         self: Arc<Self>,
         txn: Arc<Txn>,

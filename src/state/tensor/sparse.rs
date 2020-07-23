@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::iter;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -409,7 +410,10 @@ impl<T: SparseTensorView> AnyAll for T {
 }
 
 #[async_trait]
-impl<T: SparseTensorView> SparseTensorUnary for T {
+impl<T: SparseTensorView + Slice> SparseTensorUnary for T
+where
+    <T as Slice>::Slice: SparseTensorUnary,
+{
     async fn as_dtype(
         self: Arc<Self>,
         txn: Arc<Txn>,
@@ -458,8 +462,66 @@ impl<T: SparseTensorView> SparseTensorUnary for T {
         Ok(copy)
     }
 
-    async fn sum(self: Arc<Self>, _txn: Arc<Txn>, _axis: usize) -> TCResult<Arc<SparseTensor>> {
-        Err(error::not_implemented())
+    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<SparseTensor>> {
+        if axis >= self.ndim() {
+            return Err(error::bad_request("Axis out of range", axis));
+        }
+
+        let dtype = self.dtype();
+        let txn_id = txn.id().clone();
+        let per_block = super::dense::per_block(dtype);
+        let mut shape = self.shape().clone();
+        shape.remove(axis);
+        let summed = SparseTensor::create(txn.clone(), shape, dtype).await?;
+
+        if axis == 0 {
+            let dim = self.shape()[0];
+            let axes: Vec<usize> = (1..self.ndim()).collect();
+            self.filled_at(txn, &axes)
+                .await?
+                .map(|coord| {
+                    let axis_bound = iter::once(AxisBounds::all(dim));
+                    let bounds = coord.iter().map(|x| AxisBounds::At(*x));
+                    let bounds =
+                        Bounds::from(axis_bound.chain(bounds).collect::<Vec<AxisBounds>>());
+                    (coord, bounds)
+                })
+                .map(|(coord, source_bounds)| {
+                    self.clone().slice(source_bounds).map(|slice| {
+                        slice
+                            .sum_all(txn_id.clone())
+                            .and_then(|slice_sum| future::ready(Ok((coord, slice_sum))))
+                    })
+                })
+                .try_buffer_unordered(per_block)
+                .map_ok(|(coord, slice_sum)| {
+                    summed.clone().write_value(txn_id.clone(), coord, slice_sum)
+                })
+                .try_buffer_unordered(per_block)
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await?;
+        } else {
+            let axes: Vec<usize> = (0..axis).collect();
+            self.filled_at(txn.clone(), &axes)
+                .await?
+                .map(|prefix| {
+                    self.clone().slice(prefix.to_vec().into()).map(|slice| {
+                        slice
+                            .sum(txn.clone(), 0)
+                            .and_then(|slice_sum| future::ready(Ok((prefix, slice_sum))))
+                    })
+                })
+                .try_buffer_unordered(2)
+                .map_ok(|(prefix, slice_sum)| {
+                    summed.clone()
+                        .write_sparse(txn_id.clone(), prefix.into(), slice_sum)
+                })
+                .try_buffer_unordered(2)
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await?;
+        }
+
+        Ok(summed)
     }
 
     async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
@@ -476,8 +538,18 @@ impl<T: SparseTensorView> SparseTensorUnary for T {
         Err(error::not_implemented())
     }
 
-    async fn product_all(self: Arc<Self>, _txn_id: TxnId) -> TCResult<Number> {
-        Err(error::not_implemented())
+    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
+        let dtype = self.dtype();
+        if !self.clone().all(txn_id.clone()).await? {
+            return Ok(dtype.zero());
+        }
+
+        let values = self.filled(txn_id).await?.map(|(_, value)| Ok(value));
+        ValueBlockStream::new(values, dtype, super::dense::per_block(dtype))
+            .try_fold(dtype.one(), |product, block| {
+                future::ready(Ok(product * block.product()))
+            })
+            .await
     }
 
     async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
