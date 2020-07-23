@@ -73,6 +73,17 @@ pub trait ValueImpl: Impl + Serialize {
 
 pub trait NumberImpl: ValueImpl + Add + Mul + Sized + PartialOrd + From<bool> {
     type Class: NumberClass;
+
+    fn into_type<T: NumberClass>(self) -> <T as NumberClass>::Impl
+    where
+        <T as NumberClass>::Impl: Cast<Self>,
+    {
+        <T as NumberClass>::Impl::cast(self)
+    }
+}
+
+pub trait Cast<T: NumberImpl>: NumberImpl {
+    fn cast(number: T) -> Self;
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Deserialize, Serialize)]
