@@ -555,7 +555,7 @@ impl DenseTensorView for BlockTensor {
                 let this = self.clone();
                 let txn_id = txn_id.clone();
 
-                Ok(async move {
+                async move {
                     let values = block?;
                     let mut start = 0.0f64;
                     for block_id in block_ids {
@@ -573,10 +573,10 @@ impl DenseTensorView for BlockTensor {
                     }
 
                     Ok(())
-                })
+                }
             })
-            .try_buffer_unordered(2)
-            .fold(Ok(()), |_, r| future::ready(r))
+            .buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
 

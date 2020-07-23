@@ -156,8 +156,8 @@ pub trait SparseTensorView: TensorView + 'static {
         value
             .filled(txn_id.clone())
             .await?
-            .map(|(coord, number)| Ok(dest.clone().write_value(txn_id.clone(), coord, number)))
-            .try_buffer_unordered(dest.size() as usize)
+            .map(|(coord, number)| dest.clone().write_value(txn_id.clone(), coord, number))
+            .buffer_unordered(dest.size() as usize)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }

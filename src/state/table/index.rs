@@ -477,7 +477,7 @@ impl Selection for TableBase {
             .map(|row| schema.values_into_row(row))
             .map_ok(|row| self.upsert(txn_id, row))
             .try_buffer_unordered(2)
-            .fold(Ok(()), |_, r| future::ready(r))
+            .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
 }

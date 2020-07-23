@@ -315,9 +315,10 @@ impl Selection for Limited {
         let schema = source.schema().clone();
         self.stream(txn_id.clone())
             .await?
-            .map(|row| Ok(source.delete_row(&txn_id, schema.values_into_row(row)?)))
+            .map(|row| schema.values_into_row(row))
+            .map_ok(|row| source.delete_row(&txn_id, row))
             .try_buffer_unordered(2)
-            .fold(Ok(()), |_, r| future::ready(r))
+            .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
 
@@ -347,11 +348,10 @@ impl Selection for Limited {
         let txn_id = txn.id().clone();
         self.stream(txn_id.clone())
             .await?
-            .map(|row| {
-                Ok(source.update_row(txn_id.clone(), schema.values_into_row(row)?, value.clone()))
-            })
+            .map(|row| schema.values_into_row(row))
+            .map_ok(|row| source.update_row(txn_id.clone(), row, value.clone()))
             .try_buffer_unordered(2)
-            .fold(Ok(()), |_, r| future::ready(r))
+            .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
 }
@@ -447,7 +447,7 @@ impl Selection for TableSlice {
             .map(|row| schema.values_into_row(row))
             .map_ok(|row| self.update_row(txn_id.clone(), row, value.clone()))
             .try_buffer_unordered(2)
-            .fold(Ok(()), |_, r| future::ready(r))
+            .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
 
