@@ -124,9 +124,9 @@ pub trait Broadcast: TensorView {
 }
 
 pub trait Expand: TensorView {
-    fn expand_dims(self, axis: usize) -> Expansion<Self> {
-        Expansion::new(self, axis)
-    }
+    type Expansion: TensorView;
+
+    fn expand_dims(self, axis: usize) -> TCResult<Self::Expansion>;
 }
 
 pub trait Slice: TensorView {
@@ -293,23 +293,40 @@ impl<T: TensorView> Rebase for TensorBroadcast<T> {
 pub struct Expansion<T: TensorView> {
     source: T,
     shape: Shape,
-    expand: usize,
+    expand: HashMap<usize, usize>,
 }
 
 impl<T: TensorView> Expansion<T> {
-    fn new(source: T, expand: usize) -> Expansion<T> {
-        assert!(expand < source.ndim());
+    fn new(source: T, expand: HashMap<usize, usize>) -> TCResult<Expansion<T>> {
+        if expand.len() > source.ndim() {
+            return Err(error::bad_request(
+                "Invalid expansion requested for tensor with shape",
+                source.shape(),
+            ));
+        }
 
-        let mut shape = source.shape().to_vec();
-        shape.insert(expand, 1);
+        for (axis, dims) in expand.iter() {
+            if axis > &source.ndim() {
+                return Err(error::bad_request("Dimension out of range", axis));
+            } else if *dims == 0 {
+                return Err(error::bad_request("Invalid dimension expansion", dims));
+            }
+        }
 
+        let mut shape = vec![];
+        for source_axis in 0..source.ndim() {
+            if let Some(dims) = expand.get(&source_axis) {
+                shape.extend(iter::repeat(1).take(*dims));
+            }
+            shape.push(source.shape()[source_axis]);
+        }
         let shape: Shape = shape.into();
 
-        Expansion {
+        Ok(Expansion {
             source,
             shape,
             expand,
-        }
+        })
     }
 }
 
@@ -345,33 +362,69 @@ impl<T: TensorView + AnyAll> AnyAll for Expansion<T> {
 impl<T: TensorView> Rebase for Expansion<T> {
     type Source = T;
 
-    fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
-        if bounds.len() >= self.expand {
-            bounds.axes.remove(self.expand);
+    fn invert_bounds(&self, bounds: Bounds) -> Bounds {
+        let mut bounds = bounds.to_vec();
+
+        if bounds.len() == self.ndim() && self.expand.contains_key(&self.source().ndim()) {
+            bounds.pop();
         }
 
-        bounds
+        for axis in 0..Ord::min(self.source().ndim(), bounds.len()) {
+            if let Some(dims) = self.expand.get(&axis) {
+                bounds.drain(axis..Ord::min(bounds.len(), axis + dims));
+            }
+        }
+
+        bounds.into()
     }
 
     fn invert_coord(&self, mut coord: Vec<u64>) -> Vec<u64> {
-        if coord.len() >= self.expand {
-            coord.remove(self.expand);
+        if coord.len() == self.ndim() && self.expand.contains_key(&self.source().ndim()) {
+            coord.pop();
+        }
+
+        for axis in 0..Ord::min(self.source().ndim(), coord.len()) {
+            if let Some(dims) = self.expand.get(&axis) {
+                coord.drain(axis..Ord::min(coord.len(), axis + dims));
+            }
         }
 
         coord
     }
 
-    fn map_bounds(&self, mut bounds: Bounds) -> Bounds {
-        if bounds.len() >= self.expand {
-            bounds.axes.insert(self.expand, 0.into());
+    fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
+        assert!(source_bounds.len() == self.source.ndim());
+
+        let mut bounds = Vec::with_capacity(self.ndim());
+
+        for axis in 0..self.source.ndim() {
+            if let Some(dims) = self.expand.get(&axis) {
+                bounds.extend(iter::repeat(AxisBounds::At(0)).take(*dims));
+            }
+            bounds.push(source_bounds[axis].clone());
         }
 
-        bounds
+        if let Some(dims) = self.expand.get(&self.source.ndim()) {
+            bounds.extend(iter::repeat(AxisBounds::At(0)).take(*dims));
+        }
+
+        bounds.into()
     }
 
-    fn map_coord(&self, mut coord: Vec<u64>) -> Vec<u64> {
-        if coord.len() >= self.expand {
-            coord.insert(self.expand, 0);
+    fn map_coord(&self, source_coord: Vec<u64>) -> Vec<u64> {
+        assert!(source_coord.len() == self.source.ndim());
+
+        let mut coord = Vec::with_capacity(self.ndim());
+
+        for (axis, x) in source_coord.iter().enumerate() {
+            if let Some(dims) = self.expand.get(&axis) {
+                coord.extend(iter::repeat(0).take(*dims));
+            }
+            coord.push(*x);
+        }
+
+        if let Some(dims) = self.expand.get(&self.source.ndim()) {
+            coord.extend(iter::repeat(0).take(*dims));
         }
 
         coord
@@ -382,7 +435,36 @@ impl<T: TensorView> Rebase for Expansion<T> {
     }
 }
 
-impl<T: TensorView> Expand for T {}
+impl<T: TensorView> Expand for Expansion<T> {
+    type Expansion = Self;
+
+    fn expand_dims(self, axis: usize) -> TCResult<Self::Expansion> {
+        let mut offset = 0;
+        let mut expand = self.expand.clone();
+        for source_axis in 0..self.source().ndim() {
+            if let Some(dims) = expand.get_mut(&source_axis) {
+                let start = source_axis + offset;
+                offset += *dims;
+                let stop = source_axis + offset;
+                if (start..stop).contains(&axis) {
+                    *dims += 1;
+                }
+            } else if axis == source_axis + offset {
+                expand.insert(source_axis, 1);
+            }
+        }
+
+        if axis == self.ndim() {
+            if let Some(dims) = expand.get_mut(&self.source().ndim()) {
+                *dims += 1;
+            } else {
+                expand.insert(self.source().ndim(), 1);
+            }
+        }
+
+        Expansion::new(self.source().clone(), expand)
+    }
+}
 
 #[derive(Clone)]
 pub struct Permutation<T: TensorView> {
