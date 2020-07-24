@@ -58,8 +58,6 @@ pub trait DenseTensorArithmetic<Object: DenseTensorView> {
     async fn add(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
     async fn multiply(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
-
-    async fn subtract(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 #[async_trait]
@@ -67,8 +65,6 @@ pub trait SparseTensorArithmetic<Object: DenseTensorView> {
     async fn add(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
     async fn multiply(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
-
-    async fn subtract(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 #[async_trait]

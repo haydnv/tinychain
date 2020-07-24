@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::ops::{Add, Mul};
 
 use arrayfire as af;
 use bytes::Bytes;
@@ -8,6 +9,8 @@ use crate::error;
 use crate::state::file::block::BlockData;
 use crate::value::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
 use crate::value::{Complex, Float, Int, Number, TCResult, UInt};
+
+const BATCH: bool = true;
 
 pub trait ArrayImpl {
     type DType: af::HasAfEnum;
@@ -474,6 +477,32 @@ impl TryFrom<Bytes> for ArrayExt<u64> {
     }
 }
 
+impl<T: af::HasAfEnum + af::ImplicitPromote<T> + af::Convertable<OutType = T>> Add for ArrayExt<T>
+where
+    <T as af::ImplicitPromote<T>>::Output: af::HasAfEnum,
+    <T as af::Convertable>::OutType: af::ImplicitPromote<<T as af::Convertable>::OutType>,
+    <<T as af::Convertable>::OutType as af::ImplicitPromote<<T as af::Convertable>::OutType>>::Output: af::HasAfEnum, {
+
+    type Output = ArrayExt<<<T as af::Convertable>::OutType as af::ImplicitPromote<<T as af::Convertable>::OutType>>::Output>;
+
+    fn add(self, other: Self) -> Self::Output {
+        ArrayExt(af::add(&self.0, &other.0, BATCH))
+    }
+}
+
+impl<T: af::HasAfEnum + af::ImplicitPromote<T> + af::Convertable<OutType = T>> Mul for ArrayExt<T>
+where
+    <T as af::ImplicitPromote<T>>::Output: af::HasAfEnum,
+    <T as af::Convertable>::OutType: af::ImplicitPromote<<T as af::Convertable>::OutType>,
+    <<T as af::Convertable>::OutType as af::ImplicitPromote<<T as af::Convertable>::OutType>>::Output: af::HasAfEnum, {
+
+    type Output = ArrayExt<<<T as af::Convertable>::OutType as af::ImplicitPromote<<T as af::Convertable>::OutType>>::Output>;
+
+    fn mul(self, other: Self) -> Self::Output {
+        ArrayExt(af::mul(&self.0, &other.0, BATCH))
+    }
+}
+
 pub trait ArrayImplAbs: ArrayImpl {
     type AbsValue: af::HasAfEnum;
 
@@ -603,22 +632,22 @@ impl<T: af::HasAfEnum> ArrayImplBool for ArrayExt<T> {
     fn and(&self, other: &Self) -> ArrayExt<bool> {
         let l: af::Array<bool> = self.af().cast();
         let r: af::Array<bool> = other.af().cast();
-        ArrayExt(af::and(&l, &r, false))
+        ArrayExt(af::and(&l, &r, BATCH))
     }
 
     fn or(&self, other: &Self) -> ArrayExt<bool> {
         let l: af::Array<bool> = self.af().cast();
         let r: af::Array<bool> = other.af().cast();
-        ArrayExt(af::and(&l, &r, false))
+        ArrayExt(af::and(&l, &r, BATCH))
     }
 
     fn xor(&self, other: &Self) -> ArrayExt<bool> {
         let l: af::Array<bool> = self.af().cast();
         let r: af::Array<bool> = other.af().cast();
 
-        let one = af::or(&l, &r, false);
-        let not_both = !(&af::and(&l, &r, false));
-        let one_and_not_both = af::and(&one, &not_both, false);
+        let one = af::or(&l, &r, BATCH);
+        let not_both = !(&af::and(&l, &r, BATCH));
+        let one_and_not_both = af::and(&one, &not_both, BATCH);
         ArrayExt(one_and_not_both.cast())
     }
 }
@@ -637,23 +666,23 @@ trait ArrayImplCompare {
 
 impl<T: af::HasAfEnum + af::ImplicitPromote<T>> ArrayImplCompare for ArrayExt<T> {
     fn equals(&self, other: &Self) -> ArrayExt<bool> {
-        af::eq(self.af(), other.af(), false).into()
+        af::eq(self.af(), other.af(), BATCH).into()
     }
 
     fn gt(&self, other: &Self) -> ArrayExt<bool> {
-        af::gt(self.af(), other.af(), false).into()
+        af::gt(self.af(), other.af(), BATCH).into()
     }
 
     fn gte(&self, other: &Self) -> ArrayExt<bool> {
-        af::ge(self.af(), other.af(), false).into()
+        af::ge(self.af(), other.af(), BATCH).into()
     }
 
     fn lt(&self, other: &Self) -> ArrayExt<bool> {
-        af::lt(self.af(), other.af(), false).into()
+        af::lt(self.af(), other.af(), BATCH).into()
     }
 
     fn lte(&self, other: &Self) -> ArrayExt<bool> {
-        af::le(self.af(), other.af(), false).into()
+        af::le(self.af(), other.af(), BATCH).into()
     }
 }
 
@@ -1279,6 +1308,25 @@ impl Array {
         }
     }
 
+    pub fn add(self, other: Array) -> TCResult<Array> {
+        use Array::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => Ok(Bool(l.or(&r))),
+            (C32(l), C32(r)) => Ok(C32(l + r)),
+            (C64(l), C64(r)) => Ok(C64(l + r)),
+            (F32(l), F32(r)) => Ok(F32(l + r)),
+            (F64(l), F64(r)) => Ok(F64(l + r)),
+            (I16(l), I16(r)) => Ok(I16(l + r)),
+            (I32(l), I32(r)) => Ok(I32(l + r)),
+            (I64(l), I64(r)) => Ok(I64(l + r)),
+            (U8(l), U8(r)) => Ok(U8(l + r)),
+            (U16(l), U16(r)) => Ok(U16(l + r)),
+            (U32(l), U32(r)) => Ok(U32(l + r)),
+            (U64(l), U64(r)) => Ok(U64(l + r)),
+            (l, r) => Err(error::internal(format!("Tried to add {} and {}", l, r))),
+        }
+    }
+
     pub fn and(&self, other: &Array) -> TCResult<Array> {
         use Array::*;
         match (self, other) {
@@ -1411,6 +1459,28 @@ impl Array {
         }
     }
 
+    pub fn multiply(self, other: Array) -> TCResult<Array> {
+        use Array::*;
+        match (self, other) {
+            (Bool(l), Bool(r)) => Ok(Bool(l.and(&r))),
+            (C32(l), C32(r)) => Ok(C32(l * r)),
+            (C64(l), C64(r)) => Ok(C64(l * r)),
+            (F32(l), F32(r)) => Ok(F32(l * r)),
+            (F64(l), F64(r)) => Ok(F64(l * r)),
+            (I16(l), I16(r)) => Ok(I16(l * r)),
+            (I32(l), I32(r)) => Ok(I32(l * r)),
+            (I64(l), I64(r)) => Ok(I64(l * r)),
+            (U8(l), U8(r)) => Ok(U8(l * r)),
+            (U16(l), U16(r)) => Ok(U16(l * r)),
+            (U32(l), U32(r)) => Ok(U32(l * r)),
+            (U64(l), U64(r)) => Ok(U64(l * r)),
+            (l, r) => Err(error::internal(format!(
+                "Tried to multiply {} and {}",
+                l, r
+            ))),
+        }
+    }
+
     pub fn not(&self) -> Array {
         use Array::*;
         match self {
@@ -1514,7 +1584,7 @@ impl Array {
 
     pub fn get(&self, index: af::Array<u64>) -> Vec<Number> {
         let mut indexer = af::Indexer::default();
-        indexer.set_index(&index, 0, Some(false));
+        indexer.set_index(&index, 0, None);
         self.get_at(indexer)
     }
 
@@ -1538,7 +1608,7 @@ impl Array {
 
     pub fn set(&mut self, index: af::Array<u64>, other: &Array) -> TCResult<()> {
         let mut indexer = af::Indexer::default();
-        indexer.set_index(&index, 0, Some(false));
+        indexer.set_index(&index, 0, None);
         self.set_at(indexer, other)
     }
 

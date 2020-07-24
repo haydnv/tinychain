@@ -47,40 +47,51 @@ pub trait DenseTensorView: TensorView + 'static {
 }
 
 #[async_trait]
+impl<T: DenseTensorView, O: DenseTensorView> DenseTensorArithmetic<O> for T {
+    async fn add(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
+        BlockTensor::combine(txn, self, other, |l, r| l.add(r)).await
+    }
+
+    async fn multiply(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
+        BlockTensor::combine(txn, self, other, |l, r| l.multiply(r)).await
+    }
+}
+
+#[async_trait]
 impl<T: DenseTensorView, O: DenseTensorView> DenseTensorBoolean<O> for T {
     async fn and(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
-        BlockTensor::combine(txn, self, other, |(l, r)| l?.and(&r?)).await
+        BlockTensor::combine(txn, self, other, |l, r| l.and(&r)).await
     }
 
     async fn or(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
-        BlockTensor::combine(txn, self, other, |(l, r)| l?.or(&r?)).await
+        BlockTensor::combine(txn, self, other, |l, r| l.or(&r)).await
     }
 
     async fn xor(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
-        BlockTensor::combine(txn, self, other, |(l, r)| l?.xor(&r?)).await
+        BlockTensor::combine(txn, self, other, |l, r| l.xor(&r)).await
     }
 }
 
 #[async_trait]
 impl<T: DenseTensorView + Slice, O: DenseTensorView> DenseTensorCompare<O> for T {
     async fn equals(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
-        BlockTensor::combine(txn, self, other, |(l, r)| l?.equals(&r?)).await
+        BlockTensor::combine(txn, self, other, |l, r| l.equals(&r)).await
     }
 
     async fn gt(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
-        BlockTensor::combine(txn, self, other, |(l, r)| l?.gt(&r?)).await
+        BlockTensor::combine(txn, self, other, |l, r| l.gt(&r)).await
     }
 
     async fn gte(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
-        BlockTensor::combine(txn, self, other, |(l, r)| l?.gte(&r?)).await
+        BlockTensor::combine(txn, self, other, |l, r| l.gte(&r)).await
     }
 
     async fn lt(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
-        BlockTensor::combine(txn, self, other, |(l, r)| l?.lt(&r?)).await
+        BlockTensor::combine(txn, self, other, |l, r| l.lt(&r)).await
     }
 
     async fn lte(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
-        BlockTensor::combine(txn, self, other, |(l, r)| l?.lte(&r?)).await
+        BlockTensor::combine(txn, self, other, |l, r| l.lte(&r)).await
     }
 }
 
@@ -259,12 +270,12 @@ impl BlockTensor {
     async fn combine<
         L: DenseTensorView,
         R: DenseTensorView,
-        C: FnMut((TCResult<Array>, TCResult<Array>)) -> TCResult<Array> + Send,
+        C: FnMut(Array, Array) -> TCResult<Array> + Send,
     >(
         txn: Arc<Txn>,
         left: L,
         right: R,
-        combinator: C,
+        mut combinator: C,
     ) -> TCResult<BlockTensor> {
         compatible(&left, &right)?;
 
@@ -273,7 +284,8 @@ impl BlockTensor {
         let blocks = left
             .block_stream(txn.id().clone())
             .zip(right.block_stream(txn.id().clone()))
-            .map(combinator);
+            .map(|(l, r)| Ok((l?, r?)))
+            .and_then(|(l, r)| future::ready(combinator(l, r)));
 
         BlockTensor::from_blocks(txn, shape, dtype, blocks).await
     }
