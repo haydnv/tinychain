@@ -61,10 +61,10 @@ pub trait DenseTensorArithmetic<Object: DenseTensorView> {
 }
 
 #[async_trait]
-pub trait SparseTensorArithmetic<Object: DenseTensorView> {
-    async fn add(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+pub trait SparseTensorArithmetic<Object: SparseTensorView> {
+    async fn add(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
 
-    async fn multiply(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+    async fn multiply(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
 }
 
 #[async_trait]

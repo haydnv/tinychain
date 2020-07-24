@@ -26,13 +26,12 @@ const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 pub trait SparseTensorView: TensorView + 'static {
     async fn filter_map<
         O: SparseTensorView,
-        F: Fn(Vec<u64>, Number, Number) -> Option<Vec<u64>> + Send + Sync,
+        F: Fn(Vec<u64>, Number, Number) -> Option<(Vec<u64>, Number)> + Send + Sync,
     >(
         this: Self,
         that: O,
         txn: Arc<Txn>,
         filter: F,
-        value: Number,
     ) -> TCResult<SparseTensor> {
         if this.shape() != that.shape() {
             return Err(error::bad_request(
@@ -70,7 +69,7 @@ pub trait SparseTensorView: TensorView + 'static {
 
         these_values
             .chain(those_values)
-            .map_ok(|coord| sparse.write_value(txn_id_clone.clone(), coord, value.clone()))
+            .map_ok(|(coord, value)| sparse.write_value(txn_id_clone.clone(), coord, value))
             .try_buffer_unordered(per_block)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
@@ -80,13 +79,12 @@ pub trait SparseTensorView: TensorView + 'static {
 
     async fn filter_map_dense<
         O: SparseTensorView,
-        F: Fn(Vec<u64>, Number, Number) -> Option<Vec<u64>> + Send + Sync,
+        F: Fn(Vec<u64>, Number, Number) -> Option<(Vec<u64>, Number)> + Send + Sync,
     >(
         this: Self,
         that: O,
         txn: Arc<Txn>,
         filter: F,
-        value: Number,
     ) -> TCResult<BlockTensor>
     where
         Self: Slice,
@@ -117,11 +115,7 @@ pub trait SparseTensorView: TensorView + 'static {
             })
             .buffer_unordered(per_block)
             .try_filter_map(|(coord, left, right)| future::ready(Ok(filter(coord, left, right))))
-            .map_ok(|coord| {
-                dense
-                    .clone()
-                    .write_value(txn_id.clone(), coord.into(), value.clone())
-            })
+            .map_ok(|(coord, value)| dense.write_value_at(txn_id.clone(), coord, value))
             .try_buffer_unordered(per_block)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
@@ -411,6 +405,17 @@ impl<T: SparseTensorView> AnyAll for T {
 }
 
 #[async_trait]
+impl<T: SparseTensorView + SparseTensorUnary, O: SparseTensorView> SparseTensorArithmetic<O> for T {
+    async fn add(self, _other: O, _txn: Arc<Txn>) -> TCResult<SparseTensor> {
+        Err(error::not_implemented())
+    }
+
+    async fn multiply(self, _other: O, _txn: Arc<Txn>) -> TCResult<SparseTensor> {
+        Err(error::not_implemented())
+    }
+}
+
+#[async_trait]
 impl<T: SparseTensorView + Slice> SparseTensorUnary for T
 where
     <T as Slice>::Slice: SparseTensorUnary,
@@ -534,23 +539,23 @@ where
             if left == right {
                 None
             } else {
-                Some(coord)
+                Some((coord, Number::Bool(false)))
             }
         };
 
-        SparseTensorView::filter_map_dense(self, other, txn, filter, Number::Bool(false)).await
+        SparseTensorView::filter_map_dense(self, other, txn, filter).await
     }
 
     async fn gt(self, other: O, txn: Arc<Txn>) -> TCResult<SparseTensor> {
         let filter = |coord, left, right| {
             if left > right {
-                Some(coord)
+                Some((coord, Number::Bool(true)))
             } else {
                 None
             }
         };
 
-        SparseTensorView::filter_map(self, other, txn, filter, Number::Bool(true)).await
+        SparseTensorView::filter_map(self, other, txn, filter).await
     }
 
     async fn gte(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
@@ -558,23 +563,23 @@ where
             if left >= right {
                 None
             } else {
-                Some(coord)
+                Some((coord, Number::Bool(false)))
             }
         };
 
-        SparseTensorView::filter_map_dense(self, other, txn, filter, Number::Bool(false)).await
+        SparseTensorView::filter_map_dense(self, other, txn, filter).await
     }
 
     async fn lt(self, other: O, txn: Arc<Txn>) -> TCResult<SparseTensor> {
         let filter = |coord, left, right| {
             if left < right {
-                Some(coord)
+                Some((coord, Number::Bool(true)))
             } else {
                 None
             }
         };
 
-        SparseTensorView::filter_map(self, other, txn, filter, Number::Bool(true)).await
+        SparseTensorView::filter_map(self, other, txn, filter).await
     }
 
     async fn lte(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
@@ -582,11 +587,11 @@ where
             if left <= right {
                 None
             } else {
-                Some(coord)
+                Some((coord, Number::Bool(false)))
             }
         };
 
-        SparseTensorView::filter_map_dense(self, other, txn, filter, Number::Bool(false)).await
+        SparseTensorView::filter_map_dense(self, other, txn, filter).await
     }
 }
 

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use arrayfire as af;
 use async_trait::async_trait;
-use futures::future::{self, Future, TryFutureExt};
+use futures::future::{self, BoxFuture, Future, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 
@@ -44,6 +44,13 @@ pub trait DenseTensorView: TensorView + 'static {
     ) -> TCResult<()>;
 
     async fn write_value(self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
+
+    fn write_value_at<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> BoxFuture<'a, TCResult<()>>;
 }
 
 #[async_trait]
@@ -627,6 +634,44 @@ impl DenseTensorView for BlockTensor {
             .fold(Ok(()), |_, r| future::ready(r))
             .await
     }
+
+    fn write_value_at<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> BoxFuture<'a, TCResult<()>> {
+        Box::pin(async move {
+            if !self.shape().contains_coord(&coord) {
+                return Err(error::bad_request(
+                    "Invalid coordinate",
+                    format!("[{}]", coord.iter().map(|x| x.to_string()).join(", ")),
+                ));
+            } else if value.class() != self.dtype() {
+                return Err(error::bad_request(
+                    "Wrong class for tensor value",
+                    value.class(),
+                ));
+            }
+
+            let offset: u64 = self
+                .coord_bounds
+                .iter()
+                .zip(coord.iter())
+                .map(|(d, x)| d * x)
+                .sum();
+            let block_id: u64 = offset / self.per_block as u64;
+            let mut block = self
+                .file
+                .get_block(&txn_id, block_id.into())
+                .await?
+                .upgrade()
+                .await?;
+            block
+                .deref_mut()
+                .set_value((offset % self.per_block as u64) as usize, value)
+        })
+    }
 }
 
 impl Slice for BlockTensor {
@@ -675,6 +720,16 @@ where
             .clone()
             .write_value(txn_id, self.invert_bounds(bounds), value)
             .await
+    }
+
+    fn write_value_at<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> BoxFuture<'a, TCResult<()>> {
+        self.source()
+            .write_value_at(txn_id, self.invert_bounds(coord.into()).into_coord(), value)
     }
 }
 

@@ -273,7 +273,7 @@ impl Shape {
     }
 
     pub fn contains_coord(&self, coord: &[u64]) -> bool {
-        if coord.len() > self.len() {
+        if coord.len() != self.len() {
             return false;
         }
 

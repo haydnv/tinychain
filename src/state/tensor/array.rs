@@ -32,6 +32,11 @@ pub trait ArrayImpl {
     fn set<T: ArrayImpl<DType = Self::DType>>(&self, index: &af::Indexer, other: &T) {
         af::assign_gen(self.af(), index, other.af());
     }
+
+    fn set_at(&self, offset: usize, value: Self::DType) {
+        let seq = af::Seq::new(offset as f32, offset as f32, 1.0f32);
+        af::assign_seq(self.af(), &[seq], &af::Array::new(&[value], dim4(1)));
+    }
 }
 
 #[derive(Clone)]
@@ -1386,6 +1391,59 @@ impl Array {
         let mut indexer = af::Indexer::default();
         indexer.set_index(&index, 0, None);
         self.set_at(indexer, other)
+    }
+
+    pub fn set_value(&mut self, offset: usize, value: Number) -> TCResult<()> {
+        use Array::*;
+        match self {
+            Bool(b) => b.set_at(offset, value.try_into()?),
+            C32(c) => {
+                let value: Complex = value.try_into()?;
+                c.set_at(offset, value.try_into()?)
+            }
+            C64(c) => {
+                let value: Complex = value.try_into()?;
+                c.set_at(offset, value.try_into()?)
+            }
+            F32(f) => {
+                let value: Float = value.try_into()?;
+                f.set_at(offset, value.try_into()?)
+            }
+            F64(f) => {
+                let value: Float = value.try_into()?;
+                f.set_at(offset, value.try_into()?)
+            }
+            I16(i) => {
+                let value: Int = value.try_into()?;
+                i.set_at(offset, value.try_into()?)
+            }
+            I32(i) => {
+                let value: Int = value.try_into()?;
+                i.set_at(offset, value.try_into()?)
+            }
+            I64(i) => {
+                let value: Int = value.try_into()?;
+                i.set_at(offset, value.try_into()?)
+            }
+            U8(u) => {
+                let value: UInt = value.try_into()?;
+                u.set_at(offset, value.try_into()?)
+            }
+            U16(u) => {
+                let value: UInt = value.try_into()?;
+                u.set_at(offset, value.try_into()?)
+            }
+            U32(u) => {
+                let value: UInt = value.try_into()?;
+                u.set_at(offset, value.try_into()?)
+            }
+            U64(u) => {
+                let value: UInt = value.try_into()?;
+                u.set_at(offset, value.try_into()?)
+            }
+        }
+
+        Ok(())
     }
 
     fn set_at(&mut self, index: af::Indexer, value: &Array) -> TCResult<()> {
