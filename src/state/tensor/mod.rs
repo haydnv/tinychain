@@ -33,17 +33,19 @@ pub enum Tensor {
     SparseTranspose(Permutation<SparseTensor>),
 }
 
-impl Tensor {
-    pub fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Tensor> {
+impl Transpose for Tensor {
+    type Permutation = Self;
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Tensor> {
         if permutation == Some((0..self.ndim()).collect::<Vec<usize>>()) {
-            return Ok(self.clone());
+            return Ok(self);
         }
 
         match self {
-            Self::Dense(dense) => dense.clone().transpose(permutation).map(|t| t.into()),
-            Self::DenseTranspose(dt) => dt.clone().transpose(permutation).map(|t| t.into()),
-            Self::Sparse(sparse) => sparse.clone().transpose(permutation).map(|t| t.into()),
-            Self::SparseTranspose(st) => st.clone().transpose(permutation).map(|t| t.into()),
+            Self::Dense(dense) => dense.transpose(permutation).map(|t| t.into()),
+            Self::DenseTranspose(dt) => dt.transpose(permutation).map(|t| t.into()),
+            Self::Sparse(sparse) => sparse.transpose(permutation).map(|t| t.into()),
+            Self::SparseTranspose(st) => st.transpose(permutation).map(|t| t.into()),
         }
     }
 }
