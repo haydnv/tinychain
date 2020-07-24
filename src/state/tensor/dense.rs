@@ -682,6 +682,14 @@ impl Slice for BlockTensor {
     }
 }
 
+impl Transpose for BlockTensor {
+    type Permutation = Permutation<Self>;
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Permutation> {
+        Permutation::new(self, permutation)
+    }
+}
+
 #[async_trait]
 impl<T: Rebase + Slice + 'static> DenseTensorView for T
 where

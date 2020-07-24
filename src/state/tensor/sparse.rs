@@ -322,6 +322,14 @@ impl Slice for SparseTensor {
     }
 }
 
+impl Transpose for SparseTensor {
+    type Permutation = Permutation<Self>;
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Permutation> {
+        Permutation::new(self, permutation)
+    }
+}
+
 #[async_trait]
 impl SparseTensorView for TensorSlice<SparseTensor> {
     async fn filled(self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {

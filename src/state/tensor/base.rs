@@ -3,6 +3,7 @@ use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use num::Integer;
 
 use crate::error;
@@ -149,9 +150,9 @@ pub trait Rebase: TensorView {
 }
 
 pub trait Transpose: TensorView {
-    fn transpose(self, permutation: Option<Vec<usize>>) -> Permutation<Self> {
-        Permutation::new(self, permutation)
-    }
+    type Permutation: TensorView;
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Permutation>;
 }
 
 #[derive(Clone)]
@@ -387,13 +388,11 @@ impl<T: TensorView> Expand for T {}
 pub struct Permutation<T: TensorView> {
     source: T,
     shape: Shape,
-    size: u64,
-    ndim: usize,
     permutation: Vec<usize>,
 }
 
 impl<T: TensorView> Permutation<T> {
-    pub fn new(source: T, permutation: Option<Vec<usize>>) -> Permutation<T> {
+    pub fn new(source: T, permutation: Option<Vec<usize>>) -> TCResult<Permutation<T>> {
         let ndim = source.ndim();
         let permutation = permutation
             .or_else(|| {
@@ -403,7 +402,16 @@ impl<T: TensorView> Permutation<T> {
             })
             .unwrap();
 
-        assert!(permutation.len() == ndim);
+        if permutation.len() != ndim {
+            return Err(error::bad_request(
+                "Invalid permutation for transpose",
+                format!(
+                    "Tensor with shape {} cannot transpose axes ({})",
+                    source.shape(),
+                    permutation.iter().map(|x| x.to_string()).join(", ")
+                ),
+            ));
+        }
 
         let source_shape = source.shape();
         let mut shape: Vec<u64> = Vec::with_capacity(ndim);
@@ -411,14 +419,11 @@ impl<T: TensorView> Permutation<T> {
             shape.push(source_shape[*axis]);
         }
         let shape: Shape = shape.into();
-        let size = shape.size();
-        Permutation {
+        Ok(Permutation {
             source,
             shape,
-            size,
-            ndim,
             permutation,
-        }
+        })
     }
 
     pub fn permutation(&'_ self) -> &'_ [usize] {
@@ -432,7 +437,7 @@ impl<T: TensorView> TensorView for Permutation<T> {
     }
 
     fn ndim(&self) -> usize {
-        self.ndim
+        self.shape.len()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
@@ -440,7 +445,7 @@ impl<T: TensorView> TensorView for Permutation<T> {
     }
 
     fn size(&self) -> u64 {
-        self.size
+        self.shape.size()
     }
 }
 
@@ -501,7 +506,7 @@ impl<T: TensorView + Slice> Slice for Permutation<T>
 where
     <T as Slice>::Slice: Transpose,
 {
-    type Slice = Permutation<<T as Slice>::Slice>;
+    type Slice = <<T as Slice>::Slice as Transpose>::Permutation;
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let mut permutation: BTreeMap<usize, usize> = self
@@ -530,7 +535,27 @@ where
         let source_bounds = self.invert_bounds(bounds);
         let source = self.source().clone();
         let slice = source.slice(source_bounds)?;
-        Ok(slice.transpose(Some(permutation)))
+        slice.transpose(Some(permutation))
+    }
+}
+
+impl<T: TensorView> Transpose for Permutation<T> {
+    type Permutation = Self;
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Permutation> {
+        let permutation = permutation.unwrap_or((0..self.ndim()).rev().collect());
+
+        // map this axis -> source axis
+        let this_permutation: HashMap<usize, usize> =
+            self.permutation().iter().cloned().enumerate().collect();
+        // map requested axis -> source axis
+        let permutation = permutation
+            .iter()
+            .map(|requested_axis| this_permutation.get(requested_axis).unwrap())
+            .cloned()
+            .collect();
+
+        Permutation::new(self.source().clone(), Some(permutation))
     }
 }
 
@@ -578,8 +603,6 @@ impl<T: TensorView> TensorSlice<T> {
         &self.bounds
     }
 }
-
-impl<T: TensorView> Transpose for T {}
 
 #[async_trait]
 impl<T: TensorView> TensorView for TensorSlice<T> {
