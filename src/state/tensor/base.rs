@@ -139,8 +139,11 @@ pub trait Rebase: TensorView {
 
     fn invert_bounds(&self, bounds: Bounds) -> Bounds;
 
-    // TODO: add a map_coord method also
+    fn invert_coord(&self, coord: Vec<u64>) -> Vec<u64>;
+
     fn map_bounds(&self, source_bounds: Bounds) -> Bounds;
+
+    fn map_coord(&self, source_coord: Vec<u64>) -> Vec<u64>;
 
     fn source(&'_ self) -> &'_ Self::Source;
 }
@@ -155,8 +158,6 @@ pub trait Transpose: TensorView {
 pub struct TensorBroadcast<T: TensorView> {
     source: T,
     shape: Shape,
-    size: u64,
-    ndim: usize,
     broadcast: Vec<bool>,
     offset: usize,
 }
@@ -171,7 +172,6 @@ impl<T: TensorView> TensorBroadcast<T> {
             ));
         }
 
-        let size = shape.size();
         let offset = ndim - source.ndim();
         let mut broadcast: Vec<bool> = iter::repeat(true).take(ndim).collect();
 
@@ -192,8 +192,6 @@ impl<T: TensorView> TensorBroadcast<T> {
         Ok(TensorBroadcast {
             source,
             shape,
-            size,
-            ndim,
             broadcast,
             offset,
         })
@@ -207,7 +205,7 @@ impl<T: TensorView> TensorView for TensorBroadcast<T> {
     }
 
     fn ndim(&self) -> usize {
-        self.ndim
+        self.shape.len()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
@@ -215,7 +213,7 @@ impl<T: TensorView> TensorView for TensorBroadcast<T> {
     }
 
     fn size(&self) -> u64 {
-        self.size
+        self.shape.size()
     }
 }
 
@@ -247,16 +245,42 @@ impl<T: TensorView> Rebase for TensorBroadcast<T> {
         source_bounds.into()
     }
 
+    fn invert_coord(&self, coord: Vec<u64>) -> Vec<u64> {
+        let source_ndim = self.source.ndim();
+        let mut source_coord = Vec::with_capacity(source_ndim);
+        for axis in 0..source_ndim {
+            if self.broadcast[axis + self.offset] {
+                source_coord.push(0);
+            } else {
+                source_coord.push(coord[axis + self.offset]);
+            }
+        }
+
+        source_coord
+    }
+
     fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
         let mut bounds = Bounds::all(&self.shape);
 
-        for axis in 0..self.ndim {
+        for axis in 0..self.ndim() {
             if !self.broadcast[axis + self.offset] {
                 bounds[axis + self.offset] = source_bounds[axis].clone();
             }
         }
 
         bounds
+    }
+
+    fn map_coord(&self, source_coord: Vec<u64>) -> Vec<u64> {
+        let mut coord = Vec::with_capacity(self.ndim());
+
+        for axis in 0..self.ndim() {
+            if !self.broadcast[axis + self.offset] {
+                coord[axis + self.offset] = source_coord[axis];
+            }
+        }
+
+        coord
     }
 
     fn source(&'_ self) -> &'_ Self::Source {
@@ -268,8 +292,6 @@ impl<T: TensorView> Rebase for TensorBroadcast<T> {
 pub struct Expansion<T: TensorView> {
     source: T,
     shape: Shape,
-    size: u64,
-    ndim: usize,
     expand: usize,
 }
 
@@ -281,13 +303,10 @@ impl<T: TensorView> Expansion<T> {
         shape.insert(expand, 1);
 
         let shape: Shape = shape.into();
-        let size = shape.size();
-        let ndim = shape.len();
+
         Expansion {
             source,
             shape,
-            size,
-            ndim,
             expand,
         }
     }
@@ -299,7 +318,7 @@ impl<T: TensorView> TensorView for Expansion<T> {
     }
 
     fn ndim(&self) -> usize {
-        self.ndim
+        self.shape.len()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
@@ -307,7 +326,7 @@ impl<T: TensorView> TensorView for Expansion<T> {
     }
 
     fn size(&self) -> u64 {
-        self.size
+        self.shape.size()
     }
 }
 
@@ -333,12 +352,28 @@ impl<T: TensorView> Rebase for Expansion<T> {
         bounds
     }
 
+    fn invert_coord(&self, mut coord: Vec<u64>) -> Vec<u64> {
+        if coord.len() >= self.expand {
+            coord.remove(self.expand);
+        }
+
+        coord
+    }
+
     fn map_bounds(&self, mut bounds: Bounds) -> Bounds {
         if bounds.len() >= self.expand {
             bounds.axes.insert(self.expand, 0.into());
         }
 
         bounds
+    }
+
+    fn map_coord(&self, mut coord: Vec<u64>) -> Vec<u64> {
+        if coord.len() >= self.expand {
+            coord.insert(self.expand, 0);
+        }
+
+        coord
     }
 
     fn source(&'_ self) -> &'_ Self::Source {
@@ -431,12 +466,30 @@ impl<T: TensorView> Rebase for Permutation<T> {
         source_bounds
     }
 
+    fn invert_coord(&self, coord: Vec<u64>) -> Vec<u64> {
+        let mut source_coord = Vec::with_capacity(self.source.ndim());
+        for axis in 0..coord.len() {
+            source_coord[self.permutation[axis]] = coord[axis];
+        }
+
+        source_coord
+    }
+
     fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
         let mut bounds = Bounds::all(&self.shape);
         for axis in 0..source_bounds.len() {
             bounds[self.permutation[axis]] = source_bounds[axis].clone();
         }
         bounds
+    }
+
+    fn map_coord(&self, source_coord: Vec<u64>) -> Vec<u64> {
+        let mut coord = Vec::with_capacity(self.source.ndim());
+        for axis in 0..source_coord.len() {
+            coord[self.permutation[axis]] = source_coord[axis];
+        }
+
+        coord
     }
 
     fn source(&'_ self) -> &'_ Self::Source {
@@ -485,23 +538,21 @@ where
 pub struct TensorSlice<T: TensorView> {
     source: T,
     shape: Shape,
-    size: u64,
-    ndim: usize,
     bounds: Bounds,
     offset: HashMap<usize, u64>,
-    elided: HashSet<usize>,
+    elided: HashMap<usize, u64>,
 }
 
 impl<T: TensorView> TensorSlice<T> {
     pub fn new(source: T, bounds: Bounds) -> TCResult<TensorSlice<T>> {
         let mut shape: Vec<u64> = Vec::with_capacity(bounds.len());
         let mut offset = HashMap::new();
-        let mut elided = HashSet::new();
+        let mut elided = HashMap::new();
 
         for axis in 0..bounds.len() {
             match &bounds[axis] {
-                AxisBounds::At(_) => {
-                    elided.insert(axis);
+                AxisBounds::At(c) => {
+                    elided.insert(axis, *c);
                 }
                 AxisBounds::In(range, step) => {
                     let dim = (range.end - range.start).div_ceil(step);
@@ -513,14 +564,10 @@ impl<T: TensorView> TensorSlice<T> {
         }
 
         let shape: Shape = shape.into();
-        let size = shape.size();
-        let ndim = shape.len();
 
         Ok(TensorSlice {
             source,
             shape,
-            size,
-            ndim,
             bounds,
             offset,
             elided,
@@ -541,7 +588,7 @@ impl<T: TensorView> TensorView for TensorSlice<T> {
     }
 
     fn ndim(&self) -> usize {
-        self.ndim
+        self.shape.len()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
@@ -549,7 +596,7 @@ impl<T: TensorView> TensorView for TensorSlice<T> {
     }
 
     fn size(&self) -> u64 {
-        self.size
+        self.shape.size()
     }
 }
 
@@ -569,9 +616,9 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
 
         let mut source_bounds = Vec::with_capacity(self.source.ndim());
         let mut source_axis = 0;
-        for axis in 0..self.ndim {
-            if self.elided.contains(&axis) {
-                source_bounds.push(self.bounds[axis].clone());
+        for axis in 0..self.ndim() {
+            if let Some(c) = self.elided.get(&axis) {
+                source_bounds.push(AxisBounds::At(*c));
                 continue;
             }
 
@@ -609,19 +656,35 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
         source_bounds.into()
     }
 
-    fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
-        assert!(source_bounds.len() == self.ndim);
+    fn invert_coord(&self, coord: Vec<u64>) -> Vec<u64> {
+        let mut source_coord = Vec::with_capacity(self.source.ndim());
+        let mut source_axis = 0;
+        for axis in 0..self.ndim() {
+            if let Some(elided) = self.elided.get(&axis) {
+                source_coord.push(*elided);
+            } else {
+                let offset = self.offset.get(&axis).unwrap_or(&0);
+                source_coord.push(coord[source_axis] + *offset);
+                source_axis += 1;
+            }
+        }
 
-        let mut coord = Vec::with_capacity(self.ndim);
+        source_coord
+    }
+
+    fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
+        assert!(source_bounds.len() == self.source().ndim());
+
+        let mut coord: Vec<AxisBounds> = Vec::with_capacity(self.ndim());
 
         for axis in 0..self.source.ndim() {
-            if self.elided.contains(&axis) {
+            if self.elided.contains_key(&axis) {
                 continue;
             }
 
             use AxisBounds::*;
             match &source_bounds[axis] {
-                In(_, _) => panic!("NOT IMPLEMENTED"),
+                In(_, _) => todo!(),
                 Of(indices) => {
                     let offset = self.offset.get(&axis).unwrap_or(&0);
                     coord.push(
@@ -639,13 +702,22 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
             }
         }
 
-        for axis in source_bounds.len()..self.ndim {
-            if !self.elided.contains(&axis) {
-                coord.push(AxisBounds::all(self.shape[axis]))
+        coord.into()
+    }
+
+    fn map_coord(&self, source_coord: Vec<u64>) -> Vec<u64> {
+        assert!(source_coord.len() == self.source().ndim());
+        let mut coord = Vec::with_capacity(self.ndim());
+        for (axis, c) in source_coord.iter().enumerate() {
+            if self.elided.contains_key(&axis) {
+                continue;
             }
+
+            let offset = self.offset.get(&axis).unwrap_or(&0);
+            coord.push(c - offset);
         }
 
-        coord.into()
+        coord
     }
 
     fn source(&'_ self) -> &'_ Self::Source {

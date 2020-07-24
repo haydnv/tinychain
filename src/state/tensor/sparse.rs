@@ -333,7 +333,7 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
             .stream(txn_id)
             .await?
             .map(unwrap_row)
-            .map(move |(coord, value)| (self.map_bounds(coord.into()).into_coord(), value));
+            .map(move |(coord, value)| (self.map_coord(coord), value));
 
         Ok(Box::pin(stream))
     }
@@ -365,7 +365,7 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
                 ));
             }
 
-            let source_coord = self.invert_bounds(coord.into()).into_coord();
+            let source_coord = self.invert_coord(coord);
             self.source().read_value(txn_id, source_coord).await
         })
     }
@@ -386,7 +386,7 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
         value: Number,
     ) -> BoxFuture<'a, TCResult<()>> {
         self.source()
-            .write_value(txn_id, self.invert_bounds(coord.into()).into_coord(), value)
+            .write_value(txn_id, self.invert_coord(coord), value)
     }
 }
 

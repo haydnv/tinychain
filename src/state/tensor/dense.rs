@@ -729,7 +729,7 @@ where
         value: Number,
     ) -> BoxFuture<'a, TCResult<()>> {
         self.source()
-            .write_value_at(txn_id, self.invert_bounds(coord.into()).into_coord(), value)
+            .write_value_at(txn_id, self.invert_coord(coord), value)
     }
 }
 

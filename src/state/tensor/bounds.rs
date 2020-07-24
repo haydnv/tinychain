@@ -99,18 +99,6 @@ impl Bounds {
         axes.iter().cloned().multi_cartesian_product()
     }
 
-    // TODO: delete this function
-    pub fn into_coord(self) -> Vec<u64> {
-        use AxisBounds::*;
-        self.axes
-            .into_iter()
-            .map(|ab| match ab {
-                At(x) => x,
-                _ => panic!("Expected axis index but found AxisBound!"),
-            })
-            .collect()
-    }
-
     pub fn len(&self) -> usize {
         self.axes.len()
     }
