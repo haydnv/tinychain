@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 
 use crate::error;
 use crate::value::TCResult;
@@ -52,10 +51,7 @@ fn parse_format(format: &str) -> TCResult<(Vec<Vec<char>>, Vec<char>)> {
     Ok((f_inputs, f_output))
 }
 
-fn validate_args(
-    f_inputs: Vec<Vec<char>>,
-    tensors: Vec<Arc<Tensor>>,
-) -> TCResult<BTreeMap<char, u64>> {
+fn validate_args(f_inputs: Vec<Vec<char>>, tensors: Vec<Tensor>) -> TCResult<BTreeMap<char, u64>> {
     if f_inputs.len() != tensors.len() {
         return Err(error::bad_request(
             "Number of tensors passed to einsum does not match number of format strings",

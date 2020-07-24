@@ -17,135 +17,117 @@ use super::TensorView;
 
 #[async_trait]
 pub trait DenseTensorUnary {
-    async fn as_dtype(
-        self: Arc<Self>,
-        txn: Arc<Txn>,
-        dtype: NumberType,
-    ) -> TCResult<Arc<BlockTensor>>;
+    async fn as_dtype(self, txn: Arc<Txn>, dtype: NumberType) -> TCResult<BlockTensor>;
 
-    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn copy(self, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn abs(self, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<BlockTensor>>;
+    async fn sum(self, txn: Arc<Txn>, axis: usize) -> TCResult<BlockTensor>;
 
-    async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
+    async fn sum_all(self, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<BlockTensor>>;
+    async fn product(self, txn: Arc<Txn>, axis: usize) -> TCResult<BlockTensor>;
 
-    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
+    async fn product_all(self, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn not(self, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 #[async_trait]
 pub trait SparseTensorUnary: SparseTensorView {
-    async fn as_dtype(
-        self: Arc<Self>,
-        txn: Arc<Txn>,
-        dtype: NumberType,
-    ) -> TCResult<Arc<SparseTensor>>;
+    async fn as_dtype(self, txn: Arc<Txn>, dtype: NumberType) -> TCResult<SparseTensor>;
 
-    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+    async fn copy(self, txn: Arc<Txn>) -> TCResult<SparseTensor>;
 
-    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+    async fn abs(self, txn: Arc<Txn>) -> TCResult<SparseTensor>;
 
-    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<SparseTensor>>;
+    async fn sum(self, txn: Arc<Txn>, axis: usize) -> TCResult<SparseTensor>;
 
-    async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
+    async fn sum_all(self, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<SparseTensor>>;
+    async fn product(self, txn: Arc<Txn>, axis: usize) -> TCResult<SparseTensor>;
 
-    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number>;
+    async fn product_all(self, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+    async fn not(self, txn: Arc<Txn>) -> TCResult<SparseTensor>;
 }
 
 #[async_trait]
 pub trait DenseTensorArithmetic<Object: DenseTensorView> {
-    async fn add(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+    async fn add(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn multiply(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+    async fn multiply(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn subtract(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+    async fn subtract(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 #[async_trait]
 pub trait SparseTensorArithmetic<Object: DenseTensorView> {
-    async fn add(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+    async fn add(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn multiply(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+    async fn multiply(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn subtract(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<BlockTensor>;
+    async fn subtract(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 #[async_trait]
 pub trait DenseTensorBoolean<Object: DenseTensorView> {
-    async fn and(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn and(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn or(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn or(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn xor(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn xor(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 #[async_trait]
 pub trait SparseTensorBoolean<Object: SparseTensorView> {
-    async fn and(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>)
-        -> TCResult<Arc<SparseTensor>>;
+    async fn and(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
 
-    async fn or(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+    async fn or(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
 
-    async fn xor(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>)
-        -> TCResult<Arc<SparseTensor>>;
+    async fn xor(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
 }
 
 #[async_trait]
 pub trait DenseTensorCompare<Object: DenseTensorView> {
-    async fn equals(
-        self: Arc<Self>,
-        other: Arc<Object>,
-        txn: Arc<Txn>,
-    ) -> TCResult<Arc<BlockTensor>>;
+    async fn equals(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn gt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn gt(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn gte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn gte(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn lt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn lt(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn lte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn lte(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 #[async_trait]
 pub trait SparseTensorCompare<Object: SparseTensorView> {
-    async fn equals(
-        self: Arc<Self>,
-        other: Arc<Object>,
-        txn: Arc<Txn>,
-    ) -> TCResult<Arc<BlockTensor>>;
+    async fn equals(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn gt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+    async fn gt(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
 
-    async fn gte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn gte(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn lt(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>>;
+    async fn lt(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
 
-    async fn lte(self: Arc<Self>, other: Arc<Object>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>>;
+    async fn lte(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
 
 #[async_trait]
 pub trait AnyAll: TensorView {
-    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool>;
+    async fn all(self, txn_id: TxnId) -> TCResult<bool>;
 
-    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool>;
+    async fn any(self, txn_id: TxnId) -> TCResult<bool>;
 }
 
 pub trait Broadcast: TensorView {
-    fn broadcast(self: Arc<Self>, shape: Shape) -> TCResult<Arc<TensorBroadcast<Self>>>;
+    fn broadcast(self, shape: Shape) -> TCResult<TensorBroadcast<Self>>;
 }
 
 pub trait Expand: TensorView {
-    fn expand_dims(self: Arc<Self>, axis: usize) -> Expansion<Self> {
+    fn expand_dims(self, axis: usize) -> Expansion<Self> {
         Expansion::new(self, axis)
     }
 }
@@ -153,7 +135,7 @@ pub trait Expand: TensorView {
 pub trait Slice: TensorView {
     type Slice: TensorView;
 
-    fn slice(self: Arc<Self>, coord: Bounds) -> TCResult<Arc<Self::Slice>>;
+    fn slice(self, coord: Bounds) -> TCResult<Self::Slice>;
 }
 
 pub trait Rebase: TensorView {
@@ -164,17 +146,18 @@ pub trait Rebase: TensorView {
     // TODO: add a map_coord method also
     fn map_bounds(&self, source_bounds: Bounds) -> Bounds;
 
-    fn source(&self) -> Arc<Self::Source>;
+    fn source(&'_ self) -> &'_ Self::Source;
 }
 
 pub trait Transpose: TensorView {
-    fn transpose(self: Arc<Self>, permutation: Option<Vec<usize>>) -> Arc<Permutation<Self>> {
-        Arc::new(Permutation::new(self, permutation))
+    fn transpose(self, permutation: Option<Vec<usize>>) -> Permutation<Self> {
+        Permutation::new(self, permutation)
     }
 }
 
+#[derive(Clone)]
 pub struct TensorBroadcast<T: TensorView> {
-    source: Arc<T>,
+    source: T,
     shape: Shape,
     size: u64,
     ndim: usize,
@@ -183,7 +166,7 @@ pub struct TensorBroadcast<T: TensorView> {
 }
 
 impl<T: TensorView> TensorBroadcast<T> {
-    fn new(source: Arc<T>, shape: Shape) -> TCResult<Arc<TensorBroadcast<T>>> {
+    fn new(source: T, shape: Shape) -> TCResult<TensorBroadcast<T>> {
         let ndim = shape.len();
         if source.ndim() > ndim {
             return Err(error::bad_request(
@@ -210,14 +193,14 @@ impl<T: TensorView> TensorBroadcast<T> {
             }
         }
 
-        Ok(Arc::new(TensorBroadcast {
+        Ok(TensorBroadcast {
             source,
             shape,
             size,
             ndim,
             broadcast,
             offset,
-        }))
+        })
     }
 }
 
@@ -242,11 +225,11 @@ impl<T: TensorView> TensorView for TensorBroadcast<T> {
 
 #[async_trait]
 impl<T: TensorView + AnyAll> AnyAll for TensorBroadcast<T> {
-    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn all(self, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().all(txn_id).await
     }
 
-    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn any(self, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().any(txn_id).await
     }
 }
@@ -280,13 +263,14 @@ impl<T: TensorView> Rebase for TensorBroadcast<T> {
         bounds
     }
 
-    fn source(&self) -> Arc<Self::Source> {
-        self.source.clone()
+    fn source(&'_ self) -> &'_ Self::Source {
+        &self.source
     }
 }
 
+#[derive(Clone)]
 pub struct Expansion<T: TensorView> {
-    source: Arc<T>,
+    source: T,
     shape: Shape,
     size: u64,
     ndim: usize,
@@ -294,7 +278,7 @@ pub struct Expansion<T: TensorView> {
 }
 
 impl<T: TensorView> Expansion<T> {
-    fn new(source: Arc<T>, expand: usize) -> Expansion<T> {
+    fn new(source: T, expand: usize) -> Expansion<T> {
         assert!(expand < source.ndim());
 
         let mut shape = source.shape().to_vec();
@@ -333,11 +317,11 @@ impl<T: TensorView> TensorView for Expansion<T> {
 
 #[async_trait]
 impl<T: TensorView + AnyAll> AnyAll for Expansion<T> {
-    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn all(self, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().all(txn_id).await
     }
 
-    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn any(self, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().any(txn_id).await
     }
 }
@@ -361,15 +345,16 @@ impl<T: TensorView> Rebase for Expansion<T> {
         bounds
     }
 
-    fn source(&self) -> Arc<Self::Source> {
-        self.source.clone()
+    fn source(&'_ self) -> &'_ Self::Source {
+        &self.source
     }
 }
 
 impl<T: TensorView> Expand for T {}
 
+#[derive(Clone)]
 pub struct Permutation<T: TensorView> {
-    source: Arc<T>,
+    source: T,
     shape: Shape,
     size: u64,
     ndim: usize,
@@ -377,7 +362,7 @@ pub struct Permutation<T: TensorView> {
 }
 
 impl<T: TensorView> Permutation<T> {
-    pub fn new(source: Arc<T>, permutation: Option<Vec<usize>>) -> Permutation<T> {
+    pub fn new(source: T, permutation: Option<Vec<usize>>) -> Permutation<T> {
         let ndim = source.ndim();
         let permutation = permutation
             .or_else(|| {
@@ -430,11 +415,11 @@ impl<T: TensorView> TensorView for Permutation<T> {
 
 #[async_trait]
 impl<T: TensorView + Transpose + AnyAll> AnyAll for Permutation<T> {
-    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn all(self, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().all(txn_id).await
     }
 
-    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn any(self, txn_id: TxnId) -> TCResult<bool> {
         self.source.clone().any(txn_id).await
     }
 }
@@ -458,8 +443,8 @@ impl<T: TensorView> Rebase for Permutation<T> {
         bounds
     }
 
-    fn source(&self) -> Arc<Self::Source> {
-        self.source.clone()
+    fn source(&'_ self) -> &'_ Self::Source {
+        &self.source
     }
 }
 
@@ -469,7 +454,7 @@ where
 {
     type Slice = Permutation<<T as Slice>::Slice>;
 
-    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let mut permutation: BTreeMap<usize, usize> = self
             .permutation()
             .to_vec()
@@ -494,14 +479,15 @@ where
 
         let permutation: Vec<usize> = permutation.values().cloned().collect();
         let source_bounds = self.invert_bounds(bounds);
-        let source = self.source();
+        let source = self.source().clone();
         let slice = source.slice(source_bounds)?;
         Ok(slice.transpose(Some(permutation)))
     }
 }
 
+#[derive(Clone)]
 pub struct TensorSlice<T: TensorView> {
-    source: Arc<T>,
+    source: T,
     shape: Shape,
     size: u64,
     ndim: usize,
@@ -511,7 +497,7 @@ pub struct TensorSlice<T: TensorView> {
 }
 
 impl<T: TensorView> TensorSlice<T> {
-    pub fn new(source: Arc<T>, bounds: Bounds) -> TCResult<TensorSlice<T>> {
+    pub fn new(source: T, bounds: Bounds) -> TCResult<TensorSlice<T>> {
         let mut shape: Vec<u64> = Vec::with_capacity(bounds.len());
         let mut offset = HashMap::new();
         let mut elided = HashSet::new();
@@ -574,11 +560,8 @@ impl<T: TensorView> TensorView for TensorSlice<T> {
 impl<T: TensorView> Slice for TensorSlice<T> {
     type Slice = TensorSlice<T>;
 
-    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
-        Ok(Arc::new(TensorSlice::new(
-            self.source.clone(),
-            self.invert_bounds(bounds),
-        )?))
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        TensorSlice::new(self.source.clone(), self.invert_bounds(bounds))
     }
 }
 
@@ -669,7 +652,7 @@ impl<T: TensorView> Rebase for TensorSlice<T> {
         coord.into()
     }
 
-    fn source(&self) -> Arc<Self::Source> {
-        self.source.clone()
+    fn source(&'_ self) -> &'_ Self::Source {
+        &self.source
     }
 }

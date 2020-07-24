@@ -32,59 +32,54 @@ pub trait DenseTensorView: TensorView + 'static {
     type BlockStream: Stream<Item = TCResult<Array>> + Send + Unpin;
     type ValueStream: Stream<Item = TCResult<Number>> + Send;
 
-    fn block_stream(self: Arc<Self>, txn_id: TxnId) -> Self::BlockStream;
+    fn block_stream(self, txn_id: TxnId) -> Self::BlockStream;
 
-    fn value_stream(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> Self::ValueStream;
+    fn value_stream(self, txn_id: TxnId, bounds: Bounds) -> Self::ValueStream;
 
     async fn write<T: DenseTensorView>(
-        self: Arc<Self>,
+        self,
         txn_id: TxnId,
         bounds: Bounds,
-        value: Arc<T>,
+        value: T,
     ) -> TCResult<()>;
 
-    async fn write_value(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        bounds: Bounds,
-        number: Number,
-    ) -> TCResult<()>;
+    async fn write_value(self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
 }
 
 #[async_trait]
 impl<T: DenseTensorView, O: DenseTensorView> DenseTensorBoolean<O> for T {
-    async fn and(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn and(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         BlockTensor::combine(txn, self, other, |(l, r)| l?.and(&r?)).await
     }
 
-    async fn or(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn or(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         BlockTensor::combine(txn, self, other, |(l, r)| l?.or(&r?)).await
     }
 
-    async fn xor(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn xor(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         BlockTensor::combine(txn, self, other, |(l, r)| l?.xor(&r?)).await
     }
 }
 
 #[async_trait]
 impl<T: DenseTensorView + Slice, O: DenseTensorView> DenseTensorCompare<O> for T {
-    async fn equals(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn equals(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         BlockTensor::combine(txn, self, other, |(l, r)| l?.equals(&r?)).await
     }
 
-    async fn gt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn gt(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         BlockTensor::combine(txn, self, other, |(l, r)| l?.gt(&r?)).await
     }
 
-    async fn gte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn gte(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         BlockTensor::combine(txn, self, other, |(l, r)| l?.gte(&r?)).await
     }
 
-    async fn lt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn lt(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         BlockTensor::combine(txn, self, other, |(l, r)| l?.lt(&r?)).await
     }
 
-    async fn lte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn lte(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         BlockTensor::combine(txn, self, other, |(l, r)| l?.lte(&r?)).await
     }
 }
@@ -94,11 +89,7 @@ impl<T: DenseTensorView + Slice> DenseTensorUnary for T
 where
     <T as Slice>::Slice: DenseTensorUnary,
 {
-    async fn as_dtype(
-        self: Arc<Self>,
-        txn: Arc<Txn>,
-        dtype: NumberType,
-    ) -> TCResult<Arc<BlockTensor>> {
+    async fn as_dtype(self, txn: Arc<Txn>, dtype: NumberType) -> TCResult<BlockTensor> {
         let shape = self.shape().clone();
         let per_block = per_block(dtype);
         let source = self
@@ -109,14 +100,14 @@ where
         BlockTensor::from_blocks(txn, shape, dtype, blocks).await
     }
 
-    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn copy(self, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         let shape = self.shape().clone();
         let dtype = self.dtype();
         let blocks = self.block_stream(txn.id().clone());
         BlockTensor::from_blocks(txn, shape, dtype, blocks).await
     }
 
-    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn abs(self, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         let shape = self.shape().clone();
         let txn_id = txn.id().clone();
 
@@ -151,7 +142,7 @@ where
         }
     }
 
-    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<BlockTensor>> {
+    async fn sum(self, txn: Arc<Txn>, axis: usize) -> TCResult<BlockTensor> {
         if axis >= self.ndim() {
             return Err(error::bad_request("Axis out of range", axis));
         }
@@ -162,6 +153,7 @@ where
         let summed = BlockTensor::constant(txn.clone(), shape, self.dtype().zero()).await?;
 
         if axis == 0 {
+            // TODO: rewrite using TryStreamExt
             reduce_axis0(self)
                 .then(|r| async {
                     let (bounds, slice) = r?;
@@ -174,6 +166,7 @@ where
                 .fold(Ok(()), |_, r| future::ready(r))
                 .await?;
         } else {
+            // TODO: rewrite using TryStreamExt
             reduce_axis(self, axis)
                 .then(|r| async {
                     let (bounds, slice) = r?;
@@ -187,7 +180,7 @@ where
         Ok(summed)
     }
 
-    async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
+    async fn sum_all(self, txn_id: TxnId) -> TCResult<Number> {
         let mut sum = self.dtype().zero();
         let mut blocks = self.block_stream(txn_id);
         while let Some(block) = blocks.next().await {
@@ -197,7 +190,7 @@ where
         Ok(sum)
     }
 
-    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<BlockTensor>> {
+    async fn product(self, txn: Arc<Txn>, axis: usize) -> TCResult<BlockTensor> {
         if axis >= self.ndim() {
             return Err(error::bad_request("Axis out of range", axis));
         }
@@ -235,7 +228,7 @@ where
         Ok(product)
     }
 
-    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
+    async fn product_all(self, txn_id: TxnId) -> TCResult<Number> {
         let mut product = self.dtype().one();
         let mut blocks = self.block_stream(txn_id);
         while let Some(block) = blocks.next().await {
@@ -245,7 +238,7 @@ where
         Ok(product)
     }
 
-    async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn not(self, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         let blocks = self
             .clone()
             .as_dtype(txn.clone(), NumberType::Bool)
@@ -257,6 +250,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub struct BlockTensor {
     file: Arc<File<Array>>,
     dtype: NumberType,
@@ -272,10 +266,10 @@ impl BlockTensor {
         C: FnMut((TCResult<Array>, TCResult<Array>)) -> TCResult<Array> + Send,
     >(
         txn: Arc<Txn>,
-        left: Arc<L>,
-        right: Arc<R>,
+        left: L,
+        right: R,
         combinator: C,
-    ) -> TCResult<Arc<BlockTensor>> {
+    ) -> TCResult<BlockTensor> {
         compatible(&left, &right)?;
 
         let shape = left.shape().clone();
@@ -288,11 +282,7 @@ impl BlockTensor {
         BlockTensor::from_blocks(txn, shape, dtype, blocks).await
     }
 
-    pub async fn constant(
-        txn: Arc<Txn>,
-        shape: Shape,
-        value: Number,
-    ) -> TCResult<Arc<BlockTensor>> {
+    pub async fn constant(txn: Arc<Txn>, shape: Shape, value: Number) -> TCResult<BlockTensor> {
         let per_block = BLOCK_SIZE / value.class().size();
         let size = shape.size();
 
@@ -313,7 +303,7 @@ impl BlockTensor {
         shape: Shape,
         dtype: NumberType,
         blocks: S,
-    ) -> TCResult<Arc<BlockTensor>> {
+    ) -> TCResult<BlockTensor> {
         let file = txn
             .context()
             .create_tensor(txn.id().clone(), "block_tensor".parse()?)
@@ -331,19 +321,19 @@ impl BlockTensor {
             .map(|axis| shape[axis + 1..].iter().product())
             .collect();
 
-        Ok(Arc::new(BlockTensor {
+        Ok(BlockTensor {
             dtype,
             shape,
             file,
             per_block: per_block(dtype),
             coord_bounds,
-        }))
+        })
     }
 
     pub async fn from_sparse<S: SparseTensorView + Slice>(
         txn: Arc<Txn>,
-        sparse: Arc<S>,
-    ) -> TCResult<Arc<BlockTensor>>
+        sparse: S,
+    ) -> TCResult<BlockTensor>
     where
         <S as Slice>::Slice: SparseTensorView,
     {
@@ -355,7 +345,7 @@ impl BlockTensor {
 
     pub fn sparse_into_blocks<S: SparseTensorView + Slice>(
         txn_id: TxnId,
-        sparse: Arc<S>,
+        sparse: S,
     ) -> impl Stream<Item = TCResult<Array>>
     where
         <S as Slice>::Slice: SparseTensorView,
@@ -420,7 +410,7 @@ impl BlockTensor {
             })
     }
 
-    fn blocks(self: Arc<Self>, txn_id: TxnId) -> impl Stream<Item = TCResult<BlockOwned<Array>>> {
+    fn blocks(self, txn_id: TxnId) -> impl Stream<Item = TCResult<BlockOwned<Array>>> {
         stream::iter(0..(self.size() / self.per_block as u64))
             .map(BlockId::from)
             .then(move |block_id| self.file.clone().get_block_owned(txn_id.clone(), block_id))
@@ -447,7 +437,7 @@ impl TensorView for BlockTensor {
 
 #[async_trait]
 impl AnyAll for BlockTensor {
-    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn all(self, txn_id: TxnId) -> TCResult<bool> {
         let mut blocks = self.block_stream(txn_id);
         while let Some(block) = blocks.next().await {
             if !block?.all() {
@@ -458,7 +448,7 @@ impl AnyAll for BlockTensor {
         Ok(true)
     }
 
-    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn any(self, txn_id: TxnId) -> TCResult<bool> {
         let mut blocks = self.block_stream(txn_id);
         while let Some(block) = blocks.next().await {
             if !block?.any() {
@@ -475,11 +465,11 @@ impl DenseTensorView for BlockTensor {
     type BlockStream = Pin<Box<dyn Stream<Item = TCResult<Array>> + Send>>;
     type ValueStream = Pin<Box<dyn Stream<Item = TCResult<Number>> + Send>>;
 
-    fn block_stream(self: Arc<Self>, txn_id: TxnId) -> Self::BlockStream {
+    fn block_stream(self, txn_id: TxnId) -> Self::BlockStream {
         Box::pin(self.blocks(txn_id).map(|r| r.map(|block| block.clone())))
     }
 
-    fn value_stream(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> Self::ValueStream {
+    fn value_stream(self, txn_id: TxnId, bounds: Bounds) -> Self::ValueStream {
         if bounds == self.shape().all() {
             return Box::pin(ValueStream::new(self.block_stream(txn_id)));
         }
@@ -529,10 +519,10 @@ impl DenseTensorView for BlockTensor {
     }
 
     async fn write<T: DenseTensorView>(
-        self: Arc<Self>,
+        self,
         txn_id: TxnId,
         bounds: Bounds,
-        value: Arc<T>,
+        value: T,
     ) -> TCResult<()> {
         if !self.shape().contains_bounds(&bounds) {
             return Err(error::bad_request("Bounds out of bounds", bounds));
@@ -581,12 +571,7 @@ impl DenseTensorView for BlockTensor {
             .await
     }
 
-    async fn write_value(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        bounds: Bounds,
-        value: Number,
-    ) -> TCResult<()> {
+    async fn write_value(self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
         if !self.shape().contains_bounds(&bounds) {
             return Err(error::bad_request("Bounds out of bounds", bounds));
         }
@@ -639,8 +624,8 @@ impl DenseTensorView for BlockTensor {
 impl Slice for BlockTensor {
     type Slice = TensorSlice<BlockTensor>;
 
-    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
-        Ok(Arc::new(TensorSlice::new(self, bounds)?))
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        TensorSlice::new(self, bounds)
     }
 }
 
@@ -652,36 +637,34 @@ where
     type BlockStream = ValueBlockStream<Self::ValueStream>;
     type ValueStream = <<Self as Rebase>::Source as DenseTensorView>::ValueStream;
 
-    fn block_stream(self: Arc<Self>, txn_id: TxnId) -> Self::BlockStream {
+    fn block_stream(self, txn_id: TxnId) -> Self::BlockStream {
         let dtype = self.source().dtype();
         let bounds = self.shape().all();
         ValueBlockStream::new(self.value_stream(txn_id, bounds), dtype, per_block(dtype))
     }
 
-    fn value_stream(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> Self::ValueStream {
+    fn value_stream(self, txn_id: TxnId, bounds: Bounds) -> Self::ValueStream {
         assert!(self.shape().contains_bounds(&bounds));
         self.source()
+            .clone()
             .value_stream(txn_id, self.invert_bounds(bounds))
     }
 
     async fn write<O: DenseTensorView>(
-        self: Arc<Self>,
+        self,
         txn_id: TxnId,
         bounds: Bounds,
-        value: Arc<O>,
+        value: O,
     ) -> TCResult<()> {
         self.source()
+            .clone()
             .write(txn_id, self.invert_bounds(bounds), value)
             .await
     }
 
-    async fn write_value(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        bounds: Bounds,
-        value: Number,
-    ) -> TCResult<()> {
+    async fn write_value(self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
         self.source()
+            .clone()
             .write_value(txn_id, self.invert_bounds(bounds), value)
             .await
     }
@@ -689,7 +672,7 @@ where
 
 #[async_trait]
 impl AnyAll for TensorSlice<BlockTensor> {
-    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn all(self, txn_id: TxnId) -> TCResult<bool> {
         let mut blocks = self.block_stream(txn_id);
         while let Some(block) = blocks.next().await {
             if !block?.all() {
@@ -700,7 +683,7 @@ impl AnyAll for TensorSlice<BlockTensor> {
         Ok(true)
     }
 
-    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn any(self, txn_id: TxnId) -> TCResult<bool> {
         let mut blocks = self.block_stream(txn_id);
         while let Some(block) = blocks.next().await {
             if !block?.any() {
@@ -716,7 +699,7 @@ pub fn per_block(dtype: NumberType) -> usize {
     BLOCK_SIZE / dtype.size()
 }
 
-fn compatible<L: TensorView, R: TensorView>(l: &Arc<L>, r: &Arc<R>) -> TCResult<()> {
+fn compatible<L: TensorView, R: TensorView>(l: &L, r: &R) -> TCResult<()> {
     if l.shape() != r.shape() {
         Err(error::bad_request(
             "Can't compare shapes (try broadcasting first)",
@@ -782,8 +765,8 @@ fn coord_block<I: Iterator<Item = Vec<u64>>>(
 }
 
 fn reduce_axis0<T: DenseTensorView + Slice>(
-    source: Arc<T>,
-) -> impl Stream<Item = TCResult<(Bounds, Arc<<T as Slice>::Slice>)>> {
+    source: T,
+) -> impl Stream<Item = TCResult<(Bounds, <T as Slice>::Slice)>> {
     assert!(source.shape().len() > 1);
     let shape: Shape = source.shape()[1..].to_vec().into();
     let axis_bounds = source.shape().all()[0].clone();
@@ -795,9 +778,9 @@ fn reduce_axis0<T: DenseTensorView + Slice>(
 }
 
 fn reduce_axis<T: DenseTensorView + Slice>(
-    source: Arc<T>,
+    source: T,
     axis: usize,
-) -> impl Stream<Item = TCResult<(Bounds, Arc<<T as Slice>::Slice>)>> {
+) -> impl Stream<Item = TCResult<(Bounds, <T as Slice>::Slice)>> {
     let prefix_range: Shape = source.shape()[0..axis].to_vec().into();
     stream::iter(prefix_range.all().affected()).map(move |coord| {
         let bounds: Bounds = coord.into();

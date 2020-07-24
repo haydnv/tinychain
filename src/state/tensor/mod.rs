@@ -8,7 +8,7 @@ mod einsum;
 mod sparse;
 mod stream;
 
-pub trait TensorView: Sized + Send + Sync {
+pub trait TensorView: Clone + Sized + Send + Sync {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;
@@ -20,6 +20,7 @@ pub trait TensorView: Sized + Send + Sync {
 
 pub type Array = array::Array;
 
+#[derive(Clone)]
 pub enum Tensor {
     Dense(dense::BlockTensor),
     Sparse(sparse::SparseTensor),

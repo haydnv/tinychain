@@ -5,7 +5,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{self, Future, TryFutureExt};
+use futures::future::{self, BoxFuture, Future, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
@@ -29,12 +29,12 @@ pub trait SparseTensorView: TensorView + 'static {
         O: SparseTensorView,
         F: Fn(Vec<u64>, Number, Number) -> Option<Vec<u64>> + Send + Sync,
     >(
-        this: Arc<Self>,
-        that: Arc<O>,
+        this: Self,
+        that: O,
         txn: Arc<Txn>,
         filter: F,
         value: Number,
-    ) -> TCResult<Arc<SparseTensor>> {
+    ) -> TCResult<SparseTensor> {
         if this.shape() != that.shape() {
             return Err(error::bad_request(
                 "Cannot compare tensor with shape",
@@ -53,8 +53,7 @@ pub trait SparseTensorView: TensorView + 'static {
             .filled(txn_id.clone())
             .await?
             .map(|(coord, left)| {
-                that.clone()
-                    .read_value(txn_id.clone(), coord.to_vec())
+                that.read_value(txn_id.clone(), coord.to_vec())
                     .and_then(move |right| future::ready(Ok((coord, left, right))))
             })
             .buffer_unordered(per_block)
@@ -64,8 +63,7 @@ pub trait SparseTensorView: TensorView + 'static {
             .filled(txn_id.clone())
             .await?
             .map(|(coord, right)| {
-                this.clone()
-                    .read_value(txn_id.clone(), coord.to_vec())
+                this.read_value(txn_id.clone(), coord.to_vec())
                     .and_then(move |left| future::ready(Ok((coord, left, right))))
             })
             .buffer_unordered(per_block)
@@ -73,11 +71,7 @@ pub trait SparseTensorView: TensorView + 'static {
 
         these_values
             .chain(those_values)
-            .map_ok(|coord| {
-                sparse
-                    .clone()
-                    .write_value(txn_id_clone.clone(), coord, value.clone())
-            })
+            .map_ok(|coord| sparse.write_value(txn_id_clone.clone(), coord, value.clone()))
             .try_buffer_unordered(per_block)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
@@ -89,12 +83,12 @@ pub trait SparseTensorView: TensorView + 'static {
         O: SparseTensorView,
         F: Fn(Vec<u64>, Number, Number) -> Option<Vec<u64>> + Send + Sync,
     >(
-        this: Arc<Self>,
-        that: Arc<O>,
+        this: Self,
+        that: O,
         txn: Arc<Txn>,
         filter: F,
         value: Number,
-    ) -> TCResult<Arc<BlockTensor>>
+    ) -> TCResult<BlockTensor>
     where
         Self: Slice,
         <Self as Slice>::Slice: SparseTensorView + Slice,
@@ -119,8 +113,7 @@ pub trait SparseTensorView: TensorView + 'static {
         that.filled(txn_id.clone())
             .await?
             .map(|(coord, right)| {
-                this.clone()
-                    .read_value(txn_id.clone(), coord.to_vec())
+                this.read_value(txn_id.clone(), coord.to_vec())
                     .and_then(|left| future::ready(Ok((coord, left, right))))
             })
             .buffer_unordered(per_block)
@@ -137,19 +130,19 @@ pub trait SparseTensorView: TensorView + 'static {
         Ok(dense)
     }
 
-    async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>>;
+    async fn filled(self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>>;
 
     async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>>;
 
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64>;
 
-    async fn read_value(self: Arc<Self>, txn_id: TxnId, coord: Vec<u64>) -> TCResult<Number>;
+    fn read_value<'a>(&'a self, txn_id: TxnId, coord: Vec<u64>) -> BoxFuture<'a, TCResult<Number>>;
 
     async fn write_sparse<T: SparseTensorView>(
-        self: Arc<Self>,
+        self,
         txn_id: TxnId,
         bounds: Bounds,
-        value: Arc<T>,
+        value: T,
     ) -> TCResult<()>
     where
         Self: Slice,
@@ -159,20 +152,21 @@ pub trait SparseTensorView: TensorView + 'static {
         value
             .filled(txn_id.clone())
             .await?
-            .map(|(coord, number)| dest.clone().write_value(txn_id.clone(), coord, number))
+            .map(|(coord, number)| dest.write_value(txn_id.clone(), coord, number))
             .buffer_unordered(dest.size() as usize)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
 
-    async fn write_value(
-        self: Arc<Self>,
+    fn write_value<'a>(
+        &'a self,
         txn_id: TxnId,
         coord: Vec<u64>,
         value: Number,
-    ) -> TCResult<()>;
+    ) -> BoxFuture<'a, TCResult<()>>;
 }
 
+#[derive(Clone)]
 pub struct SparseTensor {
     dtype: NumberType,
     shape: Shape,
@@ -180,11 +174,7 @@ pub struct SparseTensor {
 }
 
 impl SparseTensor {
-    pub async fn create(
-        txn: Arc<Txn>,
-        shape: Shape,
-        dtype: NumberType,
-    ) -> TCResult<Arc<SparseTensor>> {
+    pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTensor> {
         let u64_type = ValueType::Number(NumberType::UInt(UIntType::U64));
         let key: Vec<Column> = (0..shape.len())
             .map(|axis| Column {
@@ -203,11 +193,11 @@ impl SparseTensor {
         let schema = Schema::new(key, value);
         let table = TableBase::create(txn, schema).await?;
 
-        Ok(Arc::new(SparseTensor {
+        Ok(SparseTensor {
             dtype,
             shape,
             table,
-        }))
+        })
     }
 
     async fn slice_table(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<Table> {
@@ -258,7 +248,7 @@ impl TensorView for SparseTensor {
 
 #[async_trait]
 impl SparseTensorView for SparseTensor {
-    async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
+    async fn filled(self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
         let filled = self.table.stream(txn_id).await?.map(unwrap_row);
 
         Ok(Box::pin(filled))
@@ -281,65 +271,70 @@ impl SparseTensorView for SparseTensor {
         self.table.count(txn_id).await
     }
 
-    async fn read_value(self: Arc<Self>, txn_id: TxnId, coord: Vec<u64>) -> TCResult<Number> {
-        if !self.shape().contains_coord(&coord) {
-            return Err(error::bad_request(
-                "Coordinate out of bounds",
-                Bounds::from(coord),
-            ));
-        }
+    fn read_value<'a>(&'a self, txn_id: TxnId, coord: Vec<u64>) -> BoxFuture<'a, TCResult<Number>> {
+        Box::pin(async move {
+            if !self.shape().contains_coord(&coord) {
+                return Err(error::bad_request(
+                    "Coordinate out of bounds",
+                    Bounds::from(coord),
+                ));
+            }
 
-        let selector: HashMap<ValueId, Value> = coord
-            .iter()
-            .enumerate()
-            .map(|(axis, at)| (axis.into(), u64_to_value(*at)))
-            .collect();
+            let selector: HashMap<ValueId, Value> = coord
+                .iter()
+                .enumerate()
+                .map(|(axis, at)| (axis.into(), u64_to_value(*at)))
+                .collect();
 
-        let mut slice = self
-            .table
-            .slice(&txn_id, selector.into())
-            .await?
-            .select(vec!["value".parse()?])?
-            .stream(txn_id)
-            .await?;
+            let mut slice = self
+                .table
+                .slice(&txn_id, selector.into())
+                .await?
+                .select(vec!["value".parse()?])?
+                .stream(txn_id)
+                .await?;
 
-        match slice.next().await {
-            Some(mut number) if number.len() == 1 => number.pop().unwrap().try_into(),
-            None => Ok(self.dtype().zero()),
-            _ => Err(error::internal(ERR_CORRUPT)),
-        }
+            match slice.next().await {
+                Some(mut number) if number.len() == 1 => number.pop().unwrap().try_into(),
+                None => Ok(self.dtype().zero()),
+                _ => Err(error::internal(ERR_CORRUPT)),
+            }
+        })
     }
 
-    async fn write_value(
-        self: Arc<Self>,
+    fn write_value<'a>(
+        &'a self,
         txn_id: TxnId,
         mut coord: Vec<u64>,
         value: Number,
-    ) -> TCResult<()> {
-        let mut row: HashMap<ValueId, Value> = coord
-            .drain(..)
-            .enumerate()
-            .map(|(x, v)| (x.into(), Value::Number(Number::UInt(UInt::U64(v)))))
-            .collect();
+    ) -> BoxFuture<'a, TCResult<()>> {
+        Box::pin(async move {
+            let mut row: HashMap<ValueId, Value> = coord
+                .drain(..)
+                .enumerate()
+                .map(|(x, v)| (x.into(), Value::Number(Number::UInt(UInt::U64(v)))))
+                .collect();
 
-        row.insert("value".parse()?, value.into());
-        self.table.upsert(&txn_id, row).await
+            row.insert("value".parse()?, value.into());
+            self.table.upsert(&txn_id, row).await
+        })
     }
 }
 
 impl Slice for SparseTensor {
     type Slice = TensorSlice<SparseTensor>;
 
-    fn slice(self: Arc<Self>, bounds: Bounds) -> TCResult<Arc<Self::Slice>> {
-        Ok(Arc::new(TensorSlice::new(self, bounds)?))
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        TensorSlice::new(self, bounds)
     }
 }
 
 #[async_trait]
 impl SparseTensorView for TensorSlice<SparseTensor> {
-    async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
+    async fn filled(self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
         let stream = self
             .source()
+            .clone()
             .slice_table(&txn_id, self.bounds())
             .await?
             .stream(txn_id)
@@ -351,7 +346,11 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
     }
 
     async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>> {
-        let table = self.source().slice_table(txn.id(), self.bounds()).await?;
+        let table = self
+            .source()
+            .clone()
+            .slice_table(txn.id(), self.bounds())
+            .await?;
         let txn_id = txn.id().clone();
         let columns: Vec<ValueId> = axes.iter().map(|x| (*x).into()).collect();
         Ok(Box::pin(
@@ -364,46 +363,48 @@ impl SparseTensorView for TensorSlice<SparseTensor> {
         ))
     }
 
-    async fn read_value(self: Arc<Self>, txn_id: TxnId, coord: Vec<u64>) -> TCResult<Number> {
-        if !self.shape().contains_coord(&coord) {
-            return Err(error::bad_request(
-                "Coordinate out of bounds",
-                Bounds::from(coord),
-            ));
-        }
+    fn read_value<'a>(&'a self, txn_id: TxnId, coord: Vec<u64>) -> BoxFuture<'a, TCResult<Number>> {
+        Box::pin(async move {
+            if !self.shape().contains_coord(&coord) {
+                return Err(error::bad_request(
+                    "Coordinate out of bounds",
+                    Bounds::from(coord),
+                ));
+            }
 
-        let source_coord = self.invert_bounds(coord.into()).into_coord();
-        self.source().read_value(txn_id, source_coord).await
+            let source_coord = self.invert_bounds(coord.into()).into_coord();
+            self.source().read_value(txn_id, source_coord).await
+        })
     }
 
     async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.source()
+            .clone()
             .slice_table(&txn_id, self.bounds())
             .await?
             .count(txn_id)
             .await
     }
 
-    async fn write_value(
-        self: Arc<Self>,
+    fn write_value<'a>(
+        &'a self,
         txn_id: TxnId,
         coord: Vec<u64>,
         value: Number,
-    ) -> TCResult<()> {
+    ) -> BoxFuture<'a, TCResult<()>> {
         self.source()
             .write_value(txn_id, self.invert_bounds(coord.into()).into_coord(), value)
-            .await
     }
 }
 
 #[async_trait]
 impl<T: SparseTensorView> AnyAll for T {
-    async fn any(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn any(self, txn_id: TxnId) -> TCResult<bool> {
         let mut values = self.filled(txn_id).await?;
         Ok(values.next().await.is_some())
     }
 
-    async fn all(self: Arc<Self>, txn_id: TxnId) -> TCResult<bool> {
+    async fn all(self, txn_id: TxnId) -> TCResult<bool> {
         self.filled_count(txn_id)
             .await
             .map(|count| count == self.size())
@@ -415,19 +416,12 @@ impl<T: SparseTensorView + Slice> SparseTensorUnary for T
 where
     <T as Slice>::Slice: SparseTensorUnary,
 {
-    async fn as_dtype(
-        self: Arc<Self>,
-        txn: Arc<Txn>,
-        dtype: NumberType,
-    ) -> TCResult<Arc<SparseTensor>> {
+    async fn as_dtype(self, txn: Arc<Txn>, dtype: NumberType) -> TCResult<SparseTensor> {
         let txn_id = txn.id().clone();
         let cast = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
         self.filled(txn_id.clone())
             .await?
-            .map(|(coord, value)| {
-                cast.clone()
-                    .write_value(txn_id.clone(), coord, value.into_type(dtype))
-            })
+            .map(|(coord, value)| cast.write_value(txn_id.clone(), coord, value.into_type(dtype)))
             .buffer_unordered(super::dense::per_block(dtype))
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
@@ -435,13 +429,13 @@ where
         Ok(cast)
     }
 
-    async fn copy(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+    async fn copy(self, txn: Arc<Txn>) -> TCResult<SparseTensor> {
         let dtype = self.dtype();
         let txn_id = txn.id().clone();
         let copy = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
         self.filled(txn_id.clone())
             .await?
-            .map(|(coord, value)| copy.clone().write_value(txn_id.clone(), coord, value))
+            .map(|(coord, value)| copy.write_value(txn_id.clone(), coord, value))
             .buffer_unordered(super::dense::per_block(dtype))
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
@@ -449,13 +443,13 @@ where
         Ok(copy)
     }
 
-    async fn abs(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+    async fn abs(self, txn: Arc<Txn>) -> TCResult<SparseTensor> {
         let dtype = self.dtype();
         let txn_id = txn.id().clone();
         let copy = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
         self.filled(txn_id.clone())
             .await?
-            .map(|(coord, value)| copy.clone().write_value(txn_id.clone(), coord, value.abs()))
+            .map(|(coord, value)| copy.write_value(txn_id.clone(), coord, value.abs()))
             .buffer_unordered(super::dense::per_block(dtype))
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
@@ -463,19 +457,19 @@ where
         Ok(copy)
     }
 
-    async fn sum(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<SparseTensor>> {
+    async fn sum(self, txn: Arc<Txn>, axis: usize) -> TCResult<SparseTensor> {
         let txn_id = txn.id().clone();
         if axis == 0 {
-            let reduce = |slice: Arc<<Self as Slice>::Slice>| slice.sum_all(txn_id.clone());
+            let reduce = |slice: <Self as Slice>::Slice| slice.sum_all(txn_id.clone());
             reduce_axis0(txn, self, reduce).await
         } else {
             let txn_clone = txn.clone();
-            let reduce = |slice: Arc<<Self as Slice>::Slice>| slice.sum(txn_clone.clone(), 0);
+            let reduce = |slice: <Self as Slice>::Slice| slice.sum(txn_clone.clone(), 0);
             reduce_axis(txn, self, reduce, axis).await
         }
     }
 
-    async fn sum_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
+    async fn sum_all(self, txn_id: TxnId) -> TCResult<Number> {
         let dtype = self.dtype();
         let values = self.filled(txn_id).await?.map(|(_, value)| Ok(value));
         ValueBlockStream::new(values, dtype, super::dense::per_block(dtype))
@@ -485,19 +479,19 @@ where
             .await
     }
 
-    async fn product(self: Arc<Self>, txn: Arc<Txn>, axis: usize) -> TCResult<Arc<SparseTensor>> {
+    async fn product(self, txn: Arc<Txn>, axis: usize) -> TCResult<SparseTensor> {
         let txn_id = txn.id().clone();
         if axis == 0 {
-            let reduce = |slice: Arc<<Self as Slice>::Slice>| slice.product_all(txn_id.clone());
+            let reduce = |slice: <Self as Slice>::Slice| slice.product_all(txn_id.clone());
             reduce_axis0(txn, self, reduce).await
         } else {
             let txn_clone = txn.clone();
-            let reduce = |slice: Arc<<Self as Slice>::Slice>| slice.product(txn_clone.clone(), 0);
+            let reduce = |slice: <Self as Slice>::Slice| slice.product(txn_clone.clone(), 0);
             reduce_axis(txn, self, reduce, axis).await
         }
     }
 
-    async fn product_all(self: Arc<Self>, txn_id: TxnId) -> TCResult<Number> {
+    async fn product_all(self, txn_id: TxnId) -> TCResult<Number> {
         let dtype = self.dtype();
         if !self.clone().all(txn_id.clone()).await? {
             return Ok(dtype.zero());
@@ -511,7 +505,7 @@ where
             .await
     }
 
-    async fn not(self: Arc<Self>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+    async fn not(self, txn: Arc<Txn>) -> TCResult<SparseTensor> {
         let dtype = self.dtype();
         let txn_id = txn.id().clone();
         let not = SparseTensor::create(txn, self.shape().clone(), NumberType::Bool).await?;
@@ -522,7 +516,7 @@ where
                 let r: TCResult<bool> = value.try_into();
                 r.map(|v| (coord, Number::Bool(!v)))
             })
-            .map_ok(|(coord, value)| not.clone().write_value(txn_id.clone(), coord, value))
+            .map_ok(|(coord, value)| not.write_value(txn_id.clone(), coord, value))
             .try_buffer_unordered(super::dense::per_block(dtype))
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
@@ -536,7 +530,7 @@ impl<T: SparseTensorView + Slice, O: SparseTensorView> SparseTensorCompare<O> fo
 where
     <T as Slice>::Slice: SparseTensorView + Slice,
 {
-    async fn equals(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn equals(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         let filter = |coord, left, right| {
             if left == right {
                 None
@@ -548,7 +542,7 @@ where
         SparseTensorView::filter_map_dense(self, other, txn, filter, Number::Bool(false)).await
     }
 
-    async fn gt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+    async fn gt(self, other: O, txn: Arc<Txn>) -> TCResult<SparseTensor> {
         let filter = |coord, left, right| {
             if left > right {
                 Some(coord)
@@ -560,7 +554,7 @@ where
         SparseTensorView::filter_map(self, other, txn, filter, Number::Bool(true)).await
     }
 
-    async fn gte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn gte(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         let filter = |coord, left, right| {
             if left >= right {
                 None
@@ -572,7 +566,7 @@ where
         SparseTensorView::filter_map_dense(self, other, txn, filter, Number::Bool(false)).await
     }
 
-    async fn lt(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<SparseTensor>> {
+    async fn lt(self, other: O, txn: Arc<Txn>) -> TCResult<SparseTensor> {
         let filter = |coord, left, right| {
             if left < right {
                 Some(coord)
@@ -584,7 +578,7 @@ where
         SparseTensorView::filter_map(self, other, txn, filter, Number::Bool(true)).await
     }
 
-    async fn lte(self: Arc<Self>, other: Arc<O>, txn: Arc<Txn>) -> TCResult<Arc<BlockTensor>> {
+    async fn lte(self, other: O, txn: Arc<Txn>) -> TCResult<BlockTensor> {
         let filter = |coord, left, right| {
             if left <= right {
                 None
@@ -600,12 +594,12 @@ where
 async fn reduce_axis0<
     S: SparseTensorView + Slice,
     F: Future<Output = TCResult<Number>>,
-    R: Fn(Arc<<S as Slice>::Slice>) -> F + Send + Sync,
+    R: Fn(<S as Slice>::Slice) -> F + Send + Sync,
 >(
     txn: Arc<Txn>,
-    source: Arc<S>,
+    source: S,
     reduce: R,
-) -> TCResult<Arc<SparseTensor>>
+) -> TCResult<SparseTensor>
 where
     <S as Slice>::Slice: SparseTensorUnary,
 {
@@ -633,11 +627,7 @@ where
             })
         })
         .try_buffer_unordered(2)
-        .map_ok(|(coord, reduced_value)| {
-            reduced
-                .clone()
-                .write_value(txn_id.clone(), coord, reduced_value)
-        })
+        .map_ok(|(coord, reduced_value)| reduced.write_value(txn_id.clone(), coord, reduced_value))
         .try_buffer_unordered(per_block)
         .try_fold((), |_, _| future::ready(Ok(())))
         .await?;
@@ -648,14 +638,14 @@ where
 async fn reduce_axis<
     S: SparseTensorView + Slice,
     O: SparseTensorView,
-    F: Future<Output = TCResult<Arc<O>>>,
-    R: Fn(Arc<<S as Slice>::Slice>) -> F + Send + Sync,
+    F: Future<Output = TCResult<O>>,
+    R: Fn(<S as Slice>::Slice) -> F + Send + Sync,
 >(
     txn: Arc<Txn>,
-    source: Arc<S>,
+    source: S,
     reduce: R,
     axis: usize,
-) -> TCResult<Arc<SparseTensor>> {
+) -> TCResult<SparseTensor> {
     if axis >= source.ndim() {
         return Err(error::bad_request("Axis out of range", axis));
     }
