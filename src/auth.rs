@@ -2,9 +2,10 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signature};
+use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signature as ECSignature};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
+use signature::{Signature, Signer, Verifier};
 
 use crate::error;
 use crate::value::link::{Link, TCPath};
@@ -93,7 +94,7 @@ impl Actor {
 
         let message = format!("{}.{}", encoded[0], encoded[1]);
         let signature =
-            Signature::from_bytes(&base64::decode(encoded.pop().unwrap()).map_err(|e| {
+            ECSignature::from_bytes(&base64::decode(encoded.pop().unwrap()).map_err(|e| {
                 error::unauthorized(&format!("Invalid bearer token signature: {}", e))
             })?)
             .map_err(|_| error::unauthorized("Invalid bearer token signature"))?;
