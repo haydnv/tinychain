@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use arrayfire as af;
 use async_trait::async_trait;
-use futures::future;
+use futures::future::{self, Future, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 
@@ -147,37 +147,35 @@ where
             return Err(error::bad_request("Axis out of range", axis));
         }
 
+        let dtype = self.dtype();
         let txn_id = txn.id().clone();
         let mut shape = self.shape().clone();
         shape.remove(axis);
-        let summed = BlockTensor::constant(txn.clone(), shape, self.dtype().zero()).await?;
 
         if axis == 0 {
-            // TODO: rewrite using TryStreamExt
-            reduce_axis0(self)
-                .then(|r| async {
-                    let (bounds, slice) = r?;
-                    let value = slice.sum_all(txn_id.clone()).await?;
-                    summed
-                        .clone()
-                        .write_value(txn_id.clone(), bounds, value)
-                        .await
-                })
-                .fold(Ok(()), |_, r| future::ready(r))
-                .await?;
+            let reduce = |slice: <Self as Slice>::Slice| slice.sum_all(txn_id.clone());
+            let stream = reduce_axis0(self, reduce);
+            let blocks = ValueBlockStream::new(stream, dtype, per_block(dtype));
+            BlockTensor::from_blocks(txn, shape, dtype, blocks).await
         } else {
-            // TODO: rewrite using TryStreamExt
-            reduce_axis(self, axis)
-                .then(|r| async {
-                    let (bounds, slice) = r?;
-                    let value = slice.sum(txn.clone().subcontext_tmp().await?, 0).await?;
-                    summed.clone().write(txn_id.clone(), bounds, value).await
-                })
-                .fold(Ok(()), |_, r| future::ready(r))
-                .await?;
-        }
+            let summed = BlockTensor::constant(txn.clone(), shape, self.dtype().zero()).await?;
 
-        Ok(summed)
+            reduce_axis(self, axis)
+                .map_ok(|(bounds, slice)| {
+                    txn.clone()
+                        .subcontext_tmp()
+                        .and_then(|context| slice.sum(context, 0))
+                        .map_ok(|slice_sum| (bounds, slice_sum))
+                })
+                .try_buffer_unordered(2)
+                .map_ok(|(bounds, slice_sum)| {
+                    summed.clone().write(txn_id.clone(), bounds, slice_sum)
+                })
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await?;
+
+            Ok(summed)
+        }
     }
 
     async fn sum_all(self, txn_id: TxnId) -> TCResult<Number> {
@@ -195,37 +193,35 @@ where
             return Err(error::bad_request("Axis out of range", axis));
         }
 
+        let dtype = self.dtype();
         let txn_id = txn.id().clone();
         let mut shape = self.shape().clone();
         shape.remove(axis);
-        let product = BlockTensor::constant(txn.clone(), shape, self.dtype().zero()).await?;
 
         if axis == 0 {
-            reduce_axis0(self)
-                .then(|r| async {
-                    let (bounds, slice) = r?;
-                    let value = slice.product_all(txn_id.clone()).await?;
-                    product
-                        .clone()
-                        .write_value(txn_id.clone(), bounds, value)
-                        .await
-                })
-                .fold(Ok(()), |_, r| future::ready(r))
-                .await?;
+            let reduce = |slice: <Self as Slice>::Slice| slice.product_all(txn_id.clone());
+            let stream = reduce_axis0(self, reduce);
+            let blocks = ValueBlockStream::new(stream, dtype, per_block(dtype));
+            BlockTensor::from_blocks(txn, shape, dtype, blocks).await
         } else {
-            reduce_axis(self, axis)
-                .then(|r| async {
-                    let (bounds, slice) = r?;
-                    let value = slice
-                        .product(txn.clone().subcontext_tmp().await?, 0)
-                        .await?;
-                    product.clone().write(txn_id.clone(), bounds, value).await
-                })
-                .fold(Ok(()), |_, r| future::ready(r))
-                .await?;
-        }
+            let product = BlockTensor::constant(txn.clone(), shape, dtype.zero()).await?;
 
-        Ok(product)
+            reduce_axis(self, axis)
+                .map_ok(|(bounds, slice)| {
+                    txn.clone()
+                        .subcontext_tmp()
+                        .and_then(|context| slice.product(context, 0))
+                        .map_ok(|slice_product| (bounds, slice_product))
+                })
+                .try_buffer_unordered(2)
+                .map_ok(|(bounds, slice_product)| {
+                    product.clone().write(txn_id.clone(), bounds, slice_product)
+                })
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await?;
+
+            Ok(product)
+        }
     }
 
     async fn product_all(self, txn_id: TxnId) -> TCResult<Number> {
@@ -764,17 +760,26 @@ fn coord_block<I: Iterator<Item = Vec<u64>>>(
     (block_ids, af_indices, af_offsets, num_coords as u64)
 }
 
-fn reduce_axis0<T: DenseTensorView + Slice>(
+fn reduce_axis0<
+    T: DenseTensorView + Slice,
+    F: Future<Output = TCResult<Number>>,
+    R: Fn(<T as Slice>::Slice) -> F + Send + Sync,
+>(
     source: T,
-) -> impl Stream<Item = TCResult<(Bounds, <T as Slice>::Slice)>> {
+    reduce: R,
+) -> impl Stream<Item = TCResult<Number>> {
     assert!(source.shape().len() > 1);
+
     let shape: Shape = source.shape()[1..].to_vec().into();
-    let axis_bounds = source.shape().all()[0].clone();
-    stream::iter(shape.all().affected()).map(move |coord| {
-        let source_bounds: Bounds = (axis_bounds.clone(), coord.clone()).into();
-        let slice = source.clone().slice(source_bounds)?;
-        Ok((coord.into(), slice))
-    })
+    let axis_bound = AxisBounds::all(shape[0]);
+
+    stream::iter(shape.all().affected())
+        .map(move |coord| {
+            let source_bounds: Bounds = (axis_bound.clone(), coord).into();
+            source_bounds
+        })
+        .map(move |bounds| source.clone().slice(bounds))
+        .and_then(move |slice| reduce(slice))
 }
 
 fn reduce_axis<T: DenseTensorView + Slice>(
