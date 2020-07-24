@@ -613,7 +613,7 @@ where
     let dim = source.shape()[0];
     let axes: Vec<usize> = (1..source.ndim()).collect();
     source
-        .filled_at(txn, &axes)
+        .filled_at(txn.subcontext_tmp().await?, &axes)
         .await?
         .map(|coord| {
             let axis_bound = iter::once(AxisBounds::all(dim));
@@ -657,7 +657,7 @@ async fn reduce_axis<
 
     let axes: Vec<usize> = (0..axis).collect();
     source
-        .filled_at(txn.clone(), &axes)
+        .filled_at(txn.subcontext_tmp().await?, &axes)
         .await?
         .map(|prefix| {
             source.clone().slice(prefix.to_vec().into()).map(|slice| {
