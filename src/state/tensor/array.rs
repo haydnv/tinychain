@@ -503,6 +503,78 @@ where
     }
 }
 
+impl From<ArrayExt<bool>> for Array {
+    fn from(data: ArrayExt<bool>) -> Array {
+        Array::Bool(data)
+    }
+}
+
+impl From<ArrayExt<num::Complex<f32>>> for Array {
+    fn from(data: ArrayExt<num::Complex<f32>>) -> Array {
+        Array::C32(data)
+    }
+}
+
+impl From<ArrayExt<num::Complex<f64>>> for Array {
+    fn from(data: ArrayExt<num::Complex<f64>>) -> Array {
+        Array::C64(data)
+    }
+}
+
+impl From<ArrayExt<f32>> for Array {
+    fn from(data: ArrayExt<f32>) -> Array {
+        Array::F32(data)
+    }
+}
+
+impl From<ArrayExt<f64>> for Array {
+    fn from(data: ArrayExt<f64>) -> Array {
+        Array::F64(data)
+    }
+}
+
+impl From<ArrayExt<i16>> for Array {
+    fn from(data: ArrayExt<i16>) -> Array {
+        Array::I16(data)
+    }
+}
+
+impl From<ArrayExt<i32>> for Array {
+    fn from(data: ArrayExt<i32>) -> Array {
+        Array::I32(data)
+    }
+}
+
+impl From<ArrayExt<i64>> for Array {
+    fn from(data: ArrayExt<i64>) -> Array {
+        Array::I64(data)
+    }
+}
+
+impl From<ArrayExt<u8>> for Array {
+    fn from(data: ArrayExt<u8>) -> Array {
+        Array::U8(data)
+    }
+}
+
+impl From<ArrayExt<u16>> for Array {
+    fn from(data: ArrayExt<u16>) -> Array {
+        Array::U16(data)
+    }
+}
+
+impl From<ArrayExt<u32>> for Array {
+    fn from(data: ArrayExt<u32>) -> Array {
+        Array::U32(data)
+    }
+}
+
+impl From<ArrayExt<u64>> for Array {
+    fn from(data: ArrayExt<u64>) -> Array {
+        Array::U64(data)
+    }
+}
+
 pub trait ArrayImplAbs: ArrayImpl {
     type AbsValue: af::HasAfEnum;
 
@@ -872,6 +944,24 @@ pub enum Array {
 }
 
 impl Array {
+    fn af_cast<T: af::HasAfEnum>(&self) -> ArrayExt<T> {
+        use Array::*;
+        match self {
+            Bool(b) => b.as_type(),
+            C32(c) => c.as_type(),
+            C64(c) => c.as_type(),
+            F32(f) => f.as_type(),
+            F64(f) => f.as_type(),
+            I16(i) => i.as_type(),
+            I32(i) => i.as_type(),
+            I64(i) => i.as_type(),
+            U8(u) => u.as_type(),
+            U16(u) => u.as_type(),
+            U32(u) => u.as_type(),
+            U64(u) => u.as_type(),
+        }
+    }
+
     pub fn constant(value: Number, len: usize) -> Array {
         let dim = dim4(len);
 
@@ -986,276 +1076,34 @@ impl Array {
     }
 
     pub fn into_type(self, dtype: NumberType) -> TCResult<Array> {
-        use Array::*;
+        use ComplexType::*;
+        use FloatType::*;
+        use IntType::*;
         use NumberType::*;
-        let converted = match self {
-            Array::Bool(b) => match dtype {
-                NumberType::Bool => Array::Bool(b.as_type()),
-                Complex(c) => match c {
-                    ComplexType::C32 => C32(b.as_type()),
-                    ComplexType::C64 => C64(b.as_type()),
-                },
-                Float(f) => match f {
-                    FloatType::F32 => F32(b.as_type()),
-                    FloatType::F64 => F64(b.as_type()),
-                },
-                Int(i) => match i {
-                    IntType::I16 => I16(b.as_type()),
-                    IntType::I32 => I32(b.as_type()),
-                    IntType::I64 => I64(b.as_type()),
-                },
-                UInt(u) => match u {
-                    UIntType::U8 => U8(b.as_type()),
-                    UIntType::U16 => U16(b.as_type()),
-                    UIntType::U32 => U32(b.as_type()),
-                    UIntType::U64 => U64(b.as_type()),
-                },
+        use UIntType::*;
+        let cast = match dtype {
+            Bool => Self::Bool(self.af_cast()),
+            Complex(ct) => match ct {
+                C32 => Self::C32(self.af_cast()),
+                C64 => Self::C64(self.af_cast()),
             },
-            C32(c) => match dtype {
-                NumberType::Bool => Array::Bool(c.as_type()),
-                Complex(ct) => match ct {
-                    ComplexType::C32 => C32(c.as_type()),
-                    ComplexType::C64 => C64(c.as_type()),
-                },
-                Float(f) => match f {
-                    FloatType::F32 => F32(c.as_type()),
-                    FloatType::F64 => F64(c.as_type()),
-                },
-                Int(i) => match i {
-                    IntType::I16 => I16(c.as_type()),
-                    IntType::I32 => I32(c.as_type()),
-                    IntType::I64 => I64(c.as_type()),
-                },
-                UInt(u) => match u {
-                    UIntType::U8 => U8(c.as_type()),
-                    UIntType::U16 => U16(c.as_type()),
-                    UIntType::U32 => U32(c.as_type()),
-                    UIntType::U64 => U64(c.as_type()),
-                },
+            Float(ft) => match ft {
+                F32 => Self::F32(self.af_cast()),
+                F64 => Self::F64(self.af_cast()),
             },
-            C64(c) => match dtype {
-                NumberType::Bool => Array::Bool(c.as_type()),
-                Complex(ct) => match ct {
-                    ComplexType::C32 => C32(c.as_type()),
-                    ComplexType::C64 => C64(c.as_type()),
-                },
-                Float(f) => match f {
-                    FloatType::F32 => F32(c.as_type()),
-                    FloatType::F64 => F64(c.as_type()),
-                },
-                Int(i) => match i {
-                    IntType::I16 => I16(c.as_type()),
-                    IntType::I32 => I32(c.as_type()),
-                    IntType::I64 => I64(c.as_type()),
-                },
-                UInt(u) => match u {
-                    UIntType::U8 => U8(c.as_type()),
-                    UIntType::U16 => U16(c.as_type()),
-                    UIntType::U32 => U32(c.as_type()),
-                    UIntType::U64 => U64(c.as_type()),
-                },
+            Int(it) => match it {
+                I16 => Self::I16(self.af_cast()),
+                I32 => Self::I32(self.af_cast()),
+                I64 => Self::I64(self.af_cast()),
             },
-            F32(f) => match dtype {
-                NumberType::Bool => Array::Bool(f.as_type()),
-                Complex(c) => match c {
-                    ComplexType::C32 => C32(f.as_type()),
-                    ComplexType::C64 => C64(f.as_type()),
-                },
-                Float(ft) => match ft {
-                    FloatType::F32 => F32(f.as_type()),
-                    FloatType::F64 => F64(f.as_type()),
-                },
-                Int(i) => match i {
-                    IntType::I16 => I16(f.as_type()),
-                    IntType::I32 => I32(f.as_type()),
-                    IntType::I64 => I64(f.as_type()),
-                },
-                UInt(u) => match u {
-                    UIntType::U8 => U8(f.as_type()),
-                    UIntType::U16 => U16(f.as_type()),
-                    UIntType::U32 => U32(f.as_type()),
-                    UIntType::U64 => U64(f.as_type()),
-                },
-            },
-            F64(f) => match dtype {
-                NumberType::Bool => Array::Bool(f.as_type()),
-                Complex(c) => match c {
-                    ComplexType::C32 => C32(f.as_type()),
-                    ComplexType::C64 => C64(f.as_type()),
-                },
-                Float(ft) => match ft {
-                    FloatType::F32 => F32(f.as_type()),
-                    FloatType::F64 => F64(f.as_type()),
-                },
-                Int(i) => match i {
-                    IntType::I16 => I16(f.as_type()),
-                    IntType::I32 => I32(f.as_type()),
-                    IntType::I64 => I64(f.as_type()),
-                },
-                UInt(u) => match u {
-                    UIntType::U8 => U8(f.as_type()),
-                    UIntType::U16 => U16(f.as_type()),
-                    UIntType::U32 => U32(f.as_type()),
-                    UIntType::U64 => U64(f.as_type()),
-                },
-            },
-            I16(i) => match dtype {
-                NumberType::Bool => Array::Bool(i.as_type()),
-                Complex(c) => match c {
-                    ComplexType::C32 => C32(i.as_type()),
-                    ComplexType::C64 => C64(i.as_type()),
-                },
-                Float(f) => match f {
-                    FloatType::F32 => F32(i.as_type()),
-                    FloatType::F64 => F64(i.as_type()),
-                },
-                Int(it) => match it {
-                    IntType::I16 => I16(i.as_type()),
-                    IntType::I32 => I32(i.as_type()),
-                    IntType::I64 => I64(i.as_type()),
-                },
-                UInt(u) => match u {
-                    UIntType::U8 => U8(i.as_type()),
-                    UIntType::U16 => U16(i.as_type()),
-                    UIntType::U32 => U32(i.as_type()),
-                    UIntType::U64 => U64(i.as_type()),
-                },
-            },
-            I32(i) => match dtype {
-                NumberType::Bool => Array::Bool(i.as_type()),
-                Complex(c) => match c {
-                    ComplexType::C32 => C32(i.as_type()),
-                    ComplexType::C64 => C64(i.as_type()),
-                },
-                Float(f) => match f {
-                    FloatType::F32 => F32(i.as_type()),
-                    FloatType::F64 => F64(i.as_type()),
-                },
-                Int(it) => match it {
-                    IntType::I16 => I16(i.as_type()),
-                    IntType::I32 => I32(i.as_type()),
-                    IntType::I64 => I64(i.as_type()),
-                },
-                UInt(u) => match u {
-                    UIntType::U8 => U8(i.as_type()),
-                    UIntType::U16 => U16(i.as_type()),
-                    UIntType::U32 => U32(i.as_type()),
-                    UIntType::U64 => U64(i.as_type()),
-                },
-            },
-            I64(i) => match dtype {
-                NumberType::Bool => Array::Bool(i.as_type()),
-                Complex(c) => match c {
-                    ComplexType::C32 => C32(i.as_type()),
-                    ComplexType::C64 => C64(i.as_type()),
-                },
-                Float(f) => match f {
-                    FloatType::F32 => F32(i.as_type()),
-                    FloatType::F64 => F64(i.as_type()),
-                },
-                Int(it) => match it {
-                    IntType::I16 => I16(i.as_type()),
-                    IntType::I32 => I32(i.as_type()),
-                    IntType::I64 => I64(i.as_type()),
-                },
-                UInt(u) => match u {
-                    UIntType::U8 => U8(i.as_type()),
-                    UIntType::U16 => U16(i.as_type()),
-                    UIntType::U32 => U32(i.as_type()),
-                    UIntType::U64 => U64(i.as_type()),
-                },
-            },
-            U8(u) => match dtype {
-                NumberType::Bool => Array::Bool(u.as_type()),
-                Complex(c) => match c {
-                    ComplexType::C32 => C32(u.as_type()),
-                    ComplexType::C64 => C64(u.as_type()),
-                },
-                Float(f) => match f {
-                    FloatType::F32 => F32(u.as_type()),
-                    FloatType::F64 => F64(u.as_type()),
-                },
-                Int(i) => match i {
-                    IntType::I16 => I16(u.as_type()),
-                    IntType::I32 => I32(u.as_type()),
-                    IntType::I64 => I64(u.as_type()),
-                },
-                UInt(ut) => match ut {
-                    UIntType::U8 => U8(u.as_type()),
-                    UIntType::U16 => U16(u.as_type()),
-                    UIntType::U32 => U32(u.as_type()),
-                    UIntType::U64 => U64(u.as_type()),
-                },
-            },
-            U16(u) => match dtype {
-                NumberType::Bool => Array::Bool(u.as_type()),
-                Complex(c) => match c {
-                    ComplexType::C32 => C32(u.as_type()),
-                    ComplexType::C64 => C64(u.as_type()),
-                },
-                Float(f) => match f {
-                    FloatType::F32 => F32(u.as_type()),
-                    FloatType::F64 => F64(u.as_type()),
-                },
-                Int(i) => match i {
-                    IntType::I16 => I16(u.as_type()),
-                    IntType::I32 => I32(u.as_type()),
-                    IntType::I64 => I64(u.as_type()),
-                },
-                UInt(ut) => match ut {
-                    UIntType::U8 => U8(u.as_type()),
-                    UIntType::U16 => U16(u.as_type()),
-                    UIntType::U32 => U32(u.as_type()),
-                    UIntType::U64 => U64(u.as_type()),
-                },
-            },
-            U32(u) => match dtype {
-                NumberType::Bool => Array::Bool(u.as_type()),
-                Complex(c) => match c {
-                    ComplexType::C32 => C32(u.as_type()),
-                    ComplexType::C64 => C64(u.as_type()),
-                },
-                Float(f) => match f {
-                    FloatType::F32 => F32(u.as_type()),
-                    FloatType::F64 => F64(u.as_type()),
-                },
-                Int(i) => match i {
-                    IntType::I16 => I16(u.as_type()),
-                    IntType::I32 => I32(u.as_type()),
-                    IntType::I64 => I64(u.as_type()),
-                },
-                UInt(ut) => match ut {
-                    UIntType::U8 => U8(u.as_type()),
-                    UIntType::U16 => U16(u.as_type()),
-                    UIntType::U32 => U32(u.as_type()),
-                    UIntType::U64 => U64(u.as_type()),
-                },
-            },
-            U64(u) => match dtype {
-                NumberType::Bool => Array::Bool(u.as_type()),
-                Complex(c) => match c {
-                    ComplexType::C32 => C32(u.as_type()),
-                    ComplexType::C64 => C64(u.as_type()),
-                },
-                Float(f) => match f {
-                    FloatType::F32 => F32(u.as_type()),
-                    FloatType::F64 => F64(u.as_type()),
-                },
-                Int(i) => match i {
-                    IntType::I16 => I16(u.as_type()),
-                    IntType::I32 => I32(u.as_type()),
-                    IntType::I64 => I64(u.as_type()),
-                },
-                UInt(ut) => match ut {
-                    UIntType::U8 => U8(u.as_type()),
-                    UIntType::U16 => U16(u.as_type()),
-                    UIntType::U32 => U32(u.as_type()),
-                    UIntType::U64 => U64(u.as_type()),
-                },
+            UInt(ut) => match ut {
+                U8 => Self::U8(self.af_cast()),
+                U16 => Self::U16(self.af_cast()),
+                U32 => Self::U32(self.af_cast()),
+                U64 => Self::U64(self.af_cast()),
             },
         };
-
-        Ok(converted)
+        Ok(cast)
     }
 
     pub fn abs(&self) -> TCResult<Array> {
