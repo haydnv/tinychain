@@ -770,8 +770,9 @@ fn reduce_axis0<
 ) -> impl Stream<Item = TCResult<Number>> {
     assert!(source.shape().len() > 1);
 
-    let shape: Shape = source.shape()[1..].to_vec().into();
+    let mut shape = source.shape().clone();
     let axis_bound = AxisBounds::all(shape[0]);
+    shape.remove(0);
 
     stream::iter(shape.all().affected())
         .map(move |coord| {

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::iter;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -607,18 +606,16 @@ where
     let txn_id = txn.id().clone();
     let per_block = super::dense::per_block(dtype);
     let mut shape = source.shape().clone();
+    let axis_bound = AxisBounds::all(shape[0]);
     shape.remove(0);
     let reduced = SparseTensor::create(txn.clone(), shape, dtype).await?;
 
-    let dim = source.shape()[0];
     let axes: Vec<usize> = (1..source.ndim()).collect();
     source
         .filled_at(txn.subcontext_tmp().await?, &axes)
         .await?
         .map(|coord| {
-            let axis_bound = iter::once(AxisBounds::all(dim));
-            let bounds = coord.iter().map(|x| AxisBounds::At(*x));
-            let bounds = Bounds::from(axis_bound.chain(bounds).collect::<Vec<AxisBounds>>());
+            let bounds: Bounds = (axis_bound.clone(), coord.to_vec()).into();
             (coord, bounds)
         })
         .map(|(coord, source_bounds)| {
