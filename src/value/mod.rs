@@ -26,6 +26,7 @@ pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + Unpin>>;
 pub type TCString = string::TCString;
 pub type TCRef = reference::TCRef;
 pub type TCResult<T> = Result<T, error::TCError>;
+pub type TCTryStream<T> = TCStream<TCResult<T>>;
 pub type ValueId = string::ValueId;
 
 #[derive(Clone, PartialEq)]
