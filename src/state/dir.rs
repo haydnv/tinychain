@@ -12,7 +12,7 @@ use crate::error;
 use crate::internal::hostfs;
 use crate::internal::lock::RwLock;
 use crate::state::btree;
-use crate::state::tensor;
+use crate::state::tensor_old;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
@@ -24,7 +24,7 @@ use super::file::File;
 enum DirEntry {
     Dir(Arc<Dir>),
     BTree(Arc<File<btree::Node>>),
-    Tensor(Arc<File<tensor::Array>>),
+    Tensor(Arc<File<tensor_old::Array>>),
 }
 
 impl fmt::Display for DirEntry {
@@ -137,7 +137,7 @@ impl Dir {
         &self,
         txn_id: &TxnId,
         name: &PathSegment,
-    ) -> TCResult<Option<Arc<File<tensor::Array>>>> {
+    ) -> TCResult<Option<Arc<File<tensor_old::Array>>>> {
         if let Some(entry) = self.contents.read(txn_id).await?.deref().get(name) {
             match entry {
                 DirEntry::Tensor(file) => Ok(Some(file.clone())),
@@ -203,7 +203,7 @@ impl Dir {
         &self,
         txn_id: TxnId,
         name: PathSegment,
-    ) -> TCResult<Arc<File<tensor::Array>>> {
+    ) -> TCResult<Arc<File<tensor_old::Array>>> {
         let mut contents = self.contents.write(txn_id.clone()).await?;
         match contents.entry(name) {
             Entry::Vacant(entry) => {
