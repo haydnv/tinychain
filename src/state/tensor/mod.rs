@@ -11,7 +11,7 @@ mod stream;
 
 use base::*;
 use dense::BlockTensor;
-use sparse::SparseTensor;
+use sparse::TableTensor;
 
 pub trait TensorView: Clone + Sized + Send + Sync {
     fn dtype(&self) -> NumberType;
@@ -29,8 +29,8 @@ pub type Array = array::Array;
 pub enum Tensor {
     Dense(BlockTensor),
     DenseTranspose(Permutation<BlockTensor>),
-    Sparse(SparseTensor),
-    SparseTranspose(Permutation<SparseTensor>),
+    Sparse(TableTensor),
+    SparseTranspose(Permutation<TableTensor>),
 }
 
 impl Transpose for Tensor {
@@ -100,14 +100,14 @@ impl From<Permutation<BlockTensor>> for Tensor {
     }
 }
 
-impl From<SparseTensor> for Tensor {
-    fn from(sparse: SparseTensor) -> Self {
+impl From<TableTensor> for Tensor {
+    fn from(sparse: TableTensor) -> Self {
         Self::Sparse(sparse)
     }
 }
 
-impl From<Permutation<SparseTensor>> for Tensor {
-    fn from(sparse: Permutation<SparseTensor>) -> Self {
+impl From<Permutation<TableTensor>> for Tensor {
+    fn from(sparse: Permutation<TableTensor>) -> Self {
         Self::SparseTranspose(sparse)
     }
 }

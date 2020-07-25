@@ -32,7 +32,7 @@ pub trait SparseTensorView: TensorView + 'static {
         that: O,
         txn: Arc<Txn>,
         filter: F,
-    ) -> TCResult<SparseTensor> {
+    ) -> TCResult<TableTensor> {
         if this.shape() != that.shape() {
             return Err(error::bad_request(
                 "Cannot compare tensor with shape",
@@ -43,7 +43,7 @@ pub trait SparseTensorView: TensorView + 'static {
         let txn_id = txn.id().clone();
         let txn_id_clone = txn_id.clone();
         let per_block = super::dense::per_block(NumberType::Bool);
-        let sparse = SparseTensor::create(txn, this.shape().clone(), NumberType::Bool).await?;
+        let sparse = TableTensor::create(txn, this.shape().clone(), NumberType::Bool).await?;
 
         let that_clone = that.clone();
         let these_values = this
@@ -160,14 +160,14 @@ pub trait SparseTensorView: TensorView + 'static {
 }
 
 #[derive(Clone)]
-pub struct SparseTensor {
+pub struct TableTensor {
     dtype: NumberType,
     shape: Shape,
     table: TableBase,
 }
 
-impl SparseTensor {
-    pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTensor> {
+impl TableTensor {
+    pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<TableTensor> {
         let u64_type = ValueType::Number(NumberType::UInt(UIntType::U64));
         let key: Vec<Column> = (0..shape.len())
             .map(|axis| Column {
@@ -186,7 +186,7 @@ impl SparseTensor {
         let schema = Schema::new(key, value);
         let table = TableBase::create(txn, schema).await?;
 
-        Ok(SparseTensor {
+        Ok(TableTensor {
             dtype,
             shape,
             table,
@@ -221,7 +221,7 @@ impl SparseTensor {
     }
 }
 
-impl TensorView for SparseTensor {
+impl TensorView for TableTensor {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -240,7 +240,7 @@ impl TensorView for SparseTensor {
 }
 
 #[async_trait]
-impl SparseTensorView for SparseTensor {
+impl SparseTensorView for TableTensor {
     async fn filled(self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
         let filled = self.table.stream(txn_id).await?.map(unwrap_row);
 
@@ -314,15 +314,15 @@ impl SparseTensorView for SparseTensor {
     }
 }
 
-impl Slice for SparseTensor {
-    type Slice = TensorSlice<SparseTensor>;
+impl Slice for TableTensor {
+    type Slice = TensorSlice<TableTensor>;
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         TensorSlice::new(self, bounds)
     }
 }
 
-impl Transpose for SparseTensor {
+impl Transpose for TableTensor {
     type Permutation = Permutation<Self>;
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Permutation> {
@@ -331,7 +331,7 @@ impl Transpose for SparseTensor {
 }
 
 #[async_trait]
-impl SparseTensorView for TensorSlice<SparseTensor> {
+impl SparseTensorView for TensorSlice<TableTensor> {
     async fn filled(self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
         let stream = self
             .source()
@@ -414,11 +414,11 @@ impl<T: SparseTensorView> AnyAll for T {
 
 #[async_trait]
 impl<T: SparseTensorView + SparseTensorUnary, O: SparseTensorView> SparseTensorArithmetic<O> for T {
-    async fn add(self, _other: O, _txn: Arc<Txn>) -> TCResult<SparseTensor> {
+    async fn add(self, _other: O, _txn: Arc<Txn>) -> TCResult<TableTensor> {
         Err(error::not_implemented())
     }
 
-    async fn multiply(self, _other: O, _txn: Arc<Txn>) -> TCResult<SparseTensor> {
+    async fn multiply(self, _other: O, _txn: Arc<Txn>) -> TCResult<TableTensor> {
         Err(error::not_implemented())
     }
 }
@@ -428,9 +428,9 @@ impl<T: SparseTensorView + Slice> SparseTensorUnary for T
 where
     <T as Slice>::Slice: SparseTensorUnary,
 {
-    async fn as_dtype(self, txn: Arc<Txn>, dtype: NumberType) -> TCResult<SparseTensor> {
+    async fn as_dtype(self, txn: Arc<Txn>, dtype: NumberType) -> TCResult<TableTensor> {
         let txn_id = txn.id().clone();
-        let cast = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
+        let cast = TableTensor::create(txn, self.shape().clone(), dtype).await?;
         self.filled(txn_id.clone())
             .await?
             .map(|(coord, value)| cast.write_value(txn_id.clone(), coord, value.into_type(dtype)))
@@ -441,10 +441,10 @@ where
         Ok(cast)
     }
 
-    async fn copy(self, txn: Arc<Txn>) -> TCResult<SparseTensor> {
+    async fn copy(self, txn: Arc<Txn>) -> TCResult<TableTensor> {
         let dtype = self.dtype();
         let txn_id = txn.id().clone();
-        let copy = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
+        let copy = TableTensor::create(txn, self.shape().clone(), dtype).await?;
         self.filled(txn_id.clone())
             .await?
             .map(|(coord, value)| copy.write_value(txn_id.clone(), coord, value))
@@ -455,10 +455,10 @@ where
         Ok(copy)
     }
 
-    async fn abs(self, txn: Arc<Txn>) -> TCResult<SparseTensor> {
+    async fn abs(self, txn: Arc<Txn>) -> TCResult<TableTensor> {
         let dtype = self.dtype();
         let txn_id = txn.id().clone();
-        let copy = SparseTensor::create(txn, self.shape().clone(), dtype).await?;
+        let copy = TableTensor::create(txn, self.shape().clone(), dtype).await?;
         self.filled(txn_id.clone())
             .await?
             .map(|(coord, value)| copy.write_value(txn_id.clone(), coord, value.abs()))
@@ -469,7 +469,7 @@ where
         Ok(copy)
     }
 
-    async fn sum(self, txn: Arc<Txn>, axis: usize) -> TCResult<SparseTensor> {
+    async fn sum(self, txn: Arc<Txn>, axis: usize) -> TCResult<TableTensor> {
         let txn_id = txn.id().clone();
         if axis == 0 {
             let reduce = |slice: <Self as Slice>::Slice| slice.sum_all(txn_id.clone());
@@ -491,7 +491,7 @@ where
             .await
     }
 
-    async fn product(self, txn: Arc<Txn>, axis: usize) -> TCResult<SparseTensor> {
+    async fn product(self, txn: Arc<Txn>, axis: usize) -> TCResult<TableTensor> {
         let txn_id = txn.id().clone();
         if axis == 0 {
             let reduce = |slice: <Self as Slice>::Slice| slice.product_all(txn_id.clone());
@@ -517,10 +517,10 @@ where
             .await
     }
 
-    async fn not(self, txn: Arc<Txn>) -> TCResult<SparseTensor> {
+    async fn not(self, txn: Arc<Txn>) -> TCResult<TableTensor> {
         let dtype = self.dtype();
         let txn_id = txn.id().clone();
-        let not = SparseTensor::create(txn, self.shape().clone(), NumberType::Bool).await?;
+        let not = TableTensor::create(txn, self.shape().clone(), NumberType::Bool).await?;
         self.filled(txn_id.clone())
             .await?
             .map(|(coord, value)| (coord, value.into_type(NumberType::Bool)))
@@ -554,7 +554,7 @@ where
         SparseTensorView::filter_map_dense(self, other, txn, filter).await
     }
 
-    async fn gt(self, other: O, txn: Arc<Txn>) -> TCResult<SparseTensor> {
+    async fn gt(self, other: O, txn: Arc<Txn>) -> TCResult<TableTensor> {
         let filter = |coord, left, right| {
             if left > right {
                 Some((coord, Number::Bool(true)))
@@ -578,7 +578,7 @@ where
         SparseTensorView::filter_map_dense(self, other, txn, filter).await
     }
 
-    async fn lt(self, other: O, txn: Arc<Txn>) -> TCResult<SparseTensor> {
+    async fn lt(self, other: O, txn: Arc<Txn>) -> TCResult<TableTensor> {
         let filter = |coord, left, right| {
             if left < right {
                 Some((coord, Number::Bool(true)))
@@ -611,7 +611,7 @@ async fn reduce_axis0<
     txn: Arc<Txn>,
     source: S,
     reduce: R,
-) -> TCResult<SparseTensor>
+) -> TCResult<TableTensor>
 where
     <S as Slice>::Slice: SparseTensorUnary,
 {
@@ -621,7 +621,7 @@ where
     let mut shape = source.shape().clone();
     let axis_bound = AxisBounds::all(shape[0]);
     shape.remove(0);
-    let reduced = SparseTensor::create(txn.clone(), shape, dtype).await?;
+    let reduced = TableTensor::create(txn.clone(), shape, dtype).await?;
 
     let axes: Vec<usize> = (1..source.ndim()).collect();
     source
@@ -655,7 +655,7 @@ async fn reduce_axis<
     source: S,
     reduce: R,
     axis: usize,
-) -> TCResult<SparseTensor> {
+) -> TCResult<TableTensor> {
     if axis >= source.ndim() {
         return Err(error::bad_request("Axis out of range", axis));
     }
@@ -663,7 +663,7 @@ async fn reduce_axis<
     let txn_id = txn.id().clone();
     let mut shape = source.shape().clone();
     shape.remove(axis);
-    let reduced = SparseTensor::create(txn.clone(), shape, source.dtype()).await?;
+    let reduced = TableTensor::create(txn.clone(), shape, source.dtype()).await?;
 
     let axes: Vec<usize> = (0..axis).collect();
     source

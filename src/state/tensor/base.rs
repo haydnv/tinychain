@@ -13,7 +13,7 @@ use crate::value::{Number, TCResult};
 
 use super::bounds::*;
 use super::dense::{BlockTensor, DenseTensorView};
-use super::sparse::{SparseTensor, SparseTensorView};
+use super::sparse::{SparseTensorView, TableTensor};
 use super::TensorView;
 
 #[async_trait]
@@ -37,21 +37,21 @@ pub trait DenseTensorUnary {
 
 #[async_trait]
 pub trait SparseTensorUnary: SparseTensorView {
-    async fn as_dtype(self, txn: Arc<Txn>, dtype: NumberType) -> TCResult<SparseTensor>;
+    async fn as_dtype(self, txn: Arc<Txn>, dtype: NumberType) -> TCResult<TableTensor>;
 
-    async fn copy(self, txn: Arc<Txn>) -> TCResult<SparseTensor>;
+    async fn copy(self, txn: Arc<Txn>) -> TCResult<TableTensor>;
 
-    async fn abs(self, txn: Arc<Txn>) -> TCResult<SparseTensor>;
+    async fn abs(self, txn: Arc<Txn>) -> TCResult<TableTensor>;
 
-    async fn sum(self, txn: Arc<Txn>, axis: usize) -> TCResult<SparseTensor>;
+    async fn sum(self, txn: Arc<Txn>, axis: usize) -> TCResult<TableTensor>;
 
     async fn sum_all(self, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn product(self, txn: Arc<Txn>, axis: usize) -> TCResult<SparseTensor>;
+    async fn product(self, txn: Arc<Txn>, axis: usize) -> TCResult<TableTensor>;
 
     async fn product_all(self, txn_id: TxnId) -> TCResult<Number>;
 
-    async fn not(self, txn: Arc<Txn>) -> TCResult<SparseTensor>;
+    async fn not(self, txn: Arc<Txn>) -> TCResult<TableTensor>;
 }
 
 #[async_trait]
@@ -63,9 +63,9 @@ pub trait DenseTensorArithmetic<Object: DenseTensorView> {
 
 #[async_trait]
 pub trait SparseTensorArithmetic<Object: SparseTensorView> {
-    async fn add(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
+    async fn add(self, other: Object, txn: Arc<Txn>) -> TCResult<TableTensor>;
 
-    async fn multiply(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
+    async fn multiply(self, other: Object, txn: Arc<Txn>) -> TCResult<TableTensor>;
 }
 
 #[async_trait]
@@ -79,11 +79,11 @@ pub trait DenseTensorBoolean<Object: DenseTensorView> {
 
 #[async_trait]
 pub trait SparseTensorBoolean<Object: SparseTensorView> {
-    async fn and(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
+    async fn and(self, other: Object, txn: Arc<Txn>) -> TCResult<TableTensor>;
 
-    async fn or(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
+    async fn or(self, other: Object, txn: Arc<Txn>) -> TCResult<TableTensor>;
 
-    async fn xor(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
+    async fn xor(self, other: Object, txn: Arc<Txn>) -> TCResult<TableTensor>;
 }
 
 #[async_trait]
@@ -103,11 +103,11 @@ pub trait DenseTensorCompare<Object: DenseTensorView> {
 pub trait SparseTensorCompare<Object: SparseTensorView> {
     async fn equals(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn gt(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
+    async fn gt(self, other: Object, txn: Arc<Txn>) -> TCResult<TableTensor>;
 
     async fn gte(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 
-    async fn lt(self, other: Object, txn: Arc<Txn>) -> TCResult<SparseTensor>;
+    async fn lt(self, other: Object, txn: Arc<Txn>) -> TCResult<TableTensor>;
 
     async fn lte(self, other: Object, txn: Arc<Txn>) -> TCResult<BlockTensor>;
 }
