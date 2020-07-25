@@ -17,6 +17,7 @@ pub mod file;
 pub mod graph;
 mod table;
 pub mod tensor_old;
+mod tensor;
 
 pub type Dir = dir::Dir;
 pub type GetResult = TCResult<TCStream<State>>;
