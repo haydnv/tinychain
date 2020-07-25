@@ -59,15 +59,15 @@ trait TensorMath: TensorView {
 }
 
 trait TensorTransform: TensorView {
-    fn as_type(&self, dtype: NumberType) -> TCResult<Self>;
+    fn into_type(self, dtype: NumberType) -> TCResult<Self>;
 
-    fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self>;
+    fn broadcast(self, shape: bounds::Shape) -> TCResult<Self>;
 
-    fn expand_dims(&self, axis: usize) -> TCResult<Self>;
+    fn expand_dims(self, axis: usize) -> TCResult<Self>;
 
-    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self>;
+    fn slice(self, bounds: bounds::Bounds) -> TCResult<Self>;
 
-    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
 }
 
 trait TensorUnary: TensorView {
