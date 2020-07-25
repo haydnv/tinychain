@@ -8,6 +8,7 @@ mod array;
 mod bounds;
 mod dense;
 mod sparse;
+mod transform;
 
 use dense::DenseTensor;
 use sparse::SparseTensor;

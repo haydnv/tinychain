@@ -1,10 +1,11 @@
-use futures::stream::TryStreamExt;
+use futures::stream::{self, StreamExt, TryStreamExt};
 
 use crate::error;
 use crate::value::class::{NumberImpl, NumberType};
 use crate::value::{Number, TCTryStream};
 
-use super::bounds::Shape;
+use super::bounds::{Bounds, Shape};
+use super::transform::Broadcast;
 use super::*;
 
 pub struct SparseTensor {
@@ -45,15 +46,35 @@ impl TensorTransform for SparseTensor {
         })
     }
 
-    fn broadcast(self, _shape: bounds::Shape) -> TCResult<Self> {
-        Err(error::not_implemented())
+    fn broadcast(self, shape: Shape) -> TCResult<Self> {
+        let dtype = self.dtype;
+        let broadcast = Broadcast::new(self.shape, shape.clone())?;
+
+        let source = Box::pin(
+            self.source
+                .map_ok(move |(coord, value)| {
+                    let bounds = broadcast.map_bounds(coord.into());
+                    stream::iter(
+                        bounds
+                            .affected()
+                            .map(move |coord| TCResult::Ok((coord, value.clone()))),
+                    )
+                })
+                .try_flatten(),
+        );
+
+        Ok(SparseTensor {
+            dtype,
+            source,
+            shape,
+        })
     }
 
     fn expand_dims(self, _axis: usize) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn slice(self, _bounds: bounds::Bounds) -> TCResult<Self> {
+    fn slice(self, _bounds: Bounds) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
