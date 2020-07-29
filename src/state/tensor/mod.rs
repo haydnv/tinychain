@@ -8,6 +8,9 @@ mod array;
 mod bounds;
 mod dense;
 mod sparse;
+mod stream;
+
+pub type Array = array::Array;
 
 use dense::DenseTensor;
 use sparse::SparseTensor;
