@@ -62,15 +62,15 @@ trait TensorMath: Sized + TensorView {
 }
 
 trait TensorTransform: Sized + TensorView {
-    fn as_type(self, dtype: NumberType) -> TCResult<Self>;
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self>;
 
-    fn broadcast(self, shape: bounds::Shape) -> TCResult<Self>;
+    fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self>;
 
-    fn expand_dims(self, axis: usize) -> TCResult<Self>;
+    fn expand_dims(&self, axis: usize) -> TCResult<Self>;
 
-    fn slice(self, bounds: bounds::Bounds) -> TCResult<Self>;
+    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self>;
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
+    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
 }
 
 trait TensorUnary: Sized + TensorView {
@@ -119,35 +119,35 @@ impl TensorView for Tensor {
 }
 
 impl TensorTransform for Tensor {
-    fn as_type(self, dtype: NumberType) -> TCResult<Self> {
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.as_type(dtype).map(Tensor::from),
             Self::Sparse(sparse) => sparse.as_type(dtype).map(Tensor::from),
         }
     }
 
-    fn broadcast(self, shape: bounds::Shape) -> TCResult<Self> {
+    fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.broadcast(shape).map(Tensor::from),
             Self::Sparse(sparse) => sparse.broadcast(shape).map(Tensor::from),
         }
     }
 
-    fn expand_dims(self, axis: usize) -> TCResult<Self> {
+    fn expand_dims(&self, axis: usize) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.expand_dims(axis).map(Tensor::from),
             Self::Sparse(sparse) => sparse.expand_dims(axis).map(Tensor::from),
         }
     }
 
-    fn slice(self, bounds: bounds::Bounds) -> TCResult<Self> {
+    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.slice(bounds).map(Tensor::from),
             Self::Sparse(sparse) => sparse.slice(bounds).map(Tensor::from),
         }
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.transpose(permutation).map(Tensor::from),
             Self::Sparse(sparse) => sparse.transpose(permutation).map(Tensor::from),

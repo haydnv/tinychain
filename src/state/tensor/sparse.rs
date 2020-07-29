@@ -3,14 +3,14 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, TryFutureExt};
 use futures::stream::StreamExt;
 
 use crate::error;
 use crate::state::table::schema::*;
 use crate::state::table::{Selection, TableBase};
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::{NumberClass, NumberType, UIntType, ValueType};
+use crate::value::class::{NumberClass, NumberImpl, NumberType, UIntType, ValueType};
 use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::bounds::{Bounds, Shape};
@@ -19,14 +19,19 @@ use super::*;
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
 #[async_trait]
-trait SparseAccessor: TensorView {
-    async fn filled(&self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>>;
+trait SparseAccessor: TensorView + Send + Sync {
+    async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>>;
 
-    async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>>;
+    async fn filled_at(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        axes: Vec<usize>,
+    ) -> TCResult<TCStream<Vec<u64>>>;
 
-    async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64>;
+    async fn filled_count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64>;
 
-    fn read_value<'a>(&'a self, txn_id: TxnId, coord: Vec<u64>) -> BoxFuture<'a, TCResult<Number>>;
+    fn read_value<'a>(&'a self, txn_id: TxnId, coord: &'a [u64])
+        -> BoxFuture<'a, TCResult<Number>>;
 
     fn write_value<'a>(
         &'a self,
@@ -34,6 +39,73 @@ trait SparseAccessor: TensorView {
         coord: Vec<u64>,
         value: Number,
     ) -> BoxFuture<'a, TCResult<()>>;
+}
+
+struct SparseCast {
+    source: Arc<dyn SparseAccessor>,
+    dtype: NumberType,
+}
+
+impl TensorView for SparseCast {
+    fn dtype(&self) -> NumberType {
+        self.dtype
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl SparseAccessor for SparseCast {
+    async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
+        let dtype = self.dtype;
+        let filled = self.source.clone().filled(txn_id).await?;
+        let cast = filled.map(move |(coord, value)| (coord, value.into_type(dtype)));
+        Ok(Box::pin(cast))
+    }
+
+    async fn filled_at(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        axes: Vec<usize>,
+    ) -> TCResult<TCStream<Vec<u64>>> {
+        self.source.clone().filled_at(txn, axes).await
+    }
+
+    async fn filled_count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
+        self.source.clone().filled_count(txn_id).await
+    }
+
+    fn read_value<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: &'a [u64],
+    ) -> BoxFuture<'a, TCResult<Number>> {
+        let dtype = self.dtype;
+        Box::pin(
+            self.source
+                .read_value(txn_id, coord)
+                .map_ok(move |value| value.into_type(dtype)),
+        )
+    }
+
+    fn write_value<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> BoxFuture<'a, TCResult<()>> {
+        self.source.write_value(txn_id, coord, value)
+    }
 }
 
 struct SparseTable {
@@ -90,32 +162,41 @@ impl TensorView for SparseTable {
 
 #[async_trait]
 impl SparseAccessor for SparseTable {
-    async fn filled(&self, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
-        let filled = self.table.stream(txn_id).await?.map(unwrap_row);
-
+    async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
+        let rows = self.table.stream(txn_id).await?;
+        let filled = rows.map(unwrap_row);
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at(&self, txn: Arc<Txn>, axes: &[usize]) -> TCResult<TCStream<Vec<u64>>> {
+    async fn filled_at(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        axes: Vec<usize>,
+    ) -> TCResult<TCStream<Vec<u64>>> {
         let txn_id = txn.id().clone();
         let columns: Vec<ValueId> = axes.iter().map(|x| (*x).into()).collect();
-        Ok(Box::pin(
-            self.table
-                .group_by(txn, columns)
-                .await?
-                .stream(txn_id)
-                .await?
-                .map(|coord| unwrap_coord(&coord)),
-        ))
+        let filled_at = self
+            .table
+            .group_by(txn, columns)
+            .await?
+            .stream(txn_id)
+            .await?
+            .map(|coord| unwrap_coord(&coord));
+
+        Ok(Box::pin(filled_at))
     }
 
-    async fn filled_count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn filled_count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
         self.table.count(txn_id).await
     }
 
-    fn read_value<'a>(&'a self, txn_id: TxnId, coord: Vec<u64>) -> BoxFuture<'a, TCResult<Number>> {
+    fn read_value<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: &'a [u64],
+    ) -> BoxFuture<'a, TCResult<Number>> {
         Box::pin(async move {
-            if !self.shape().contains_coord(&coord) {
+            if !self.shape().contains_coord(coord) {
                 return Err(error::bad_request(
                     "Coordinate out of bounds",
                     Bounds::from(coord),
@@ -150,6 +231,8 @@ impl SparseAccessor for SparseTable {
         mut coord: Vec<u64>,
         value: Number,
     ) -> BoxFuture<'a, TCResult<()>> {
+        let value = value.into_type(self.dtype);
+
         Box::pin(async move {
             let mut row: HashMap<ValueId, Value> = coord
                 .drain(..)
@@ -163,8 +246,9 @@ impl SparseAccessor for SparseTable {
     }
 }
 
+#[derive(Clone)]
 pub struct SparseTensor {
-    accessor: Box<dyn SparseAccessor>,
+    accessor: Arc<dyn SparseAccessor>,
 }
 
 impl TensorView for SparseTensor {
@@ -186,24 +270,38 @@ impl TensorView for SparseTensor {
 }
 
 impl TensorTransform for SparseTensor {
-    fn as_type(self, _dtype: NumberType) -> TCResult<Self> {
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
+        if dtype == self.dtype() {
+            return Ok(self.clone());
+        }
+
+        let accessor: Arc<dyn SparseAccessor> = Arc::new(SparseCast {
+            source: self.accessor.clone(),
+            dtype: self.dtype(),
+        });
+        Ok(SparseTensor::from(accessor))
+    }
+
+    fn broadcast(&self, _shape: Shape) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn broadcast(self, _shape: Shape) -> TCResult<Self> {
+    fn expand_dims(&self, _axis: usize) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn expand_dims(self, _axis: usize) -> TCResult<Self> {
+    fn slice(&self, _bounds: Bounds) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn slice(self, _bounds: Bounds) -> TCResult<Self> {
+    fn transpose(&self, _permutation: Option<Vec<usize>>) -> TCResult<Self> {
         Err(error::not_implemented())
     }
+}
 
-    fn transpose(self, _permutation: Option<Vec<usize>>) -> TCResult<Self> {
-        Err(error::not_implemented())
+impl From<Arc<dyn SparseAccessor>> for SparseTensor {
+    fn from(accessor: Arc<dyn SparseAccessor>) -> SparseTensor {
+        SparseTensor { accessor }
     }
 }
 

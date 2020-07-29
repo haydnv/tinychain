@@ -284,23 +284,23 @@ impl TensorView for DenseTensor {
 }
 
 impl TensorTransform for DenseTensor {
-    fn as_type(self, _dtype: NumberType) -> TCResult<Self> {
+    fn as_type(&self, _dtype: NumberType) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn broadcast(self, _shape: Shape) -> TCResult<Self> {
+    fn broadcast(&self, _shape: Shape) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn expand_dims(self, _axis: usize) -> TCResult<Self> {
+    fn expand_dims(&self, _axis: usize) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn slice(self, _bounds: Bounds) -> TCResult<Self> {
+    fn slice(&self, _bounds: Bounds) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn transpose(self, _permutation: Option<Vec<usize>>) -> TCResult<Self> {
+    fn transpose(&self, _permutation: Option<Vec<usize>>) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 }
