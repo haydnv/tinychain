@@ -62,7 +62,7 @@ trait TensorMath: Sized + TensorView {
 }
 
 trait TensorTransform: Sized + TensorView {
-    fn into_type(self, dtype: NumberType) -> TCResult<Self>;
+    fn as_type(self, dtype: NumberType) -> TCResult<Self>;
 
     fn broadcast(self, shape: bounds::Shape) -> TCResult<Self>;
 
@@ -84,36 +84,85 @@ trait TensorUnary: Sized + TensorView {
 }
 
 enum Tensor {
-    Sparse(SparseTensor),
     Dense(DenseTensor),
+    Sparse(SparseTensor),
 }
 
 impl TensorView for Tensor {
     fn dtype(&self) -> NumberType {
         match self {
-            Self::Sparse(sparse) => sparse.dtype(),
             Self::Dense(dense) => dense.dtype(),
+            Self::Sparse(sparse) => sparse.dtype(),
         }
     }
 
     fn ndim(&self) -> usize {
         match self {
-            Self::Sparse(sparse) => sparse.ndim(),
             Self::Dense(dense) => dense.ndim(),
+            Self::Sparse(sparse) => sparse.ndim(),
         }
     }
 
     fn shape(&'_ self) -> &'_ bounds::Shape {
         match self {
-            Self::Sparse(sparse) => sparse.shape(),
             Self::Dense(dense) => dense.shape(),
+            Self::Sparse(sparse) => sparse.shape(),
         }
     }
 
     fn size(&self) -> u64 {
         match self {
-            Self::Sparse(sparse) => sparse.size(),
             Self::Dense(dense) => dense.size(),
+            Self::Sparse(sparse) => sparse.size(),
         }
+    }
+}
+
+impl TensorTransform for Tensor {
+    fn as_type(self, dtype: NumberType) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.as_type(dtype).map(Tensor::from),
+            Self::Sparse(sparse) => sparse.as_type(dtype).map(Tensor::from),
+        }
+    }
+
+    fn broadcast(self, shape: bounds::Shape) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.broadcast(shape).map(Tensor::from),
+            Self::Sparse(sparse) => sparse.broadcast(shape).map(Tensor::from),
+        }
+    }
+
+    fn expand_dims(self, axis: usize) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.expand_dims(axis).map(Tensor::from),
+            Self::Sparse(sparse) => sparse.expand_dims(axis).map(Tensor::from),
+        }
+    }
+
+    fn slice(self, bounds: bounds::Bounds) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.slice(bounds).map(Tensor::from),
+            Self::Sparse(sparse) => sparse.slice(bounds).map(Tensor::from),
+        }
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.transpose(permutation).map(Tensor::from),
+            Self::Sparse(sparse) => sparse.transpose(permutation).map(Tensor::from),
+        }
+    }
+}
+
+impl From<DenseTensor> for Tensor {
+    fn from(dense: DenseTensor) -> Tensor {
+        Self::Dense(dense)
+    }
+}
+
+impl From<SparseTensor> for Tensor {
+    fn from(sparse: SparseTensor) -> Tensor {
+        Self::Sparse(sparse)
     }
 }

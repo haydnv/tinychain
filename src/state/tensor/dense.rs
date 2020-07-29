@@ -19,7 +19,7 @@ use crate::value::{Number, TCResult, TCStream};
 use super::array::Array;
 use super::bounds::{Bounds, Shape};
 use super::stream::ValueStream;
-use super::TensorView;
+use super::*;
 
 const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
@@ -280,6 +280,28 @@ impl TensorView for DenseTensor {
 
     fn size(&self) -> u64 {
         self.blocks.size()
+    }
+}
+
+impl TensorTransform for DenseTensor {
+    fn as_type(self, _dtype: NumberType) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn broadcast(self, _shape: Shape) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn expand_dims(self, _axis: usize) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn slice(self, _bounds: Bounds) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn transpose(self, _permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        Err(error::not_implemented())
     }
 }
 

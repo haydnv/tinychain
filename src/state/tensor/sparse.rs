@@ -14,7 +14,7 @@ use crate::value::class::{NumberClass, NumberType, UIntType, ValueType};
 use crate::value::{Number, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::bounds::{Bounds, Shape};
-use super::TensorView;
+use super::*;
 
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
@@ -182,6 +182,28 @@ impl TensorView for SparseTensor {
 
     fn size(&self) -> u64 {
         self.accessor.size()
+    }
+}
+
+impl TensorTransform for SparseTensor {
+    fn as_type(self, _dtype: NumberType) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn broadcast(self, _shape: Shape) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn expand_dims(self, _axis: usize) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn slice(self, _bounds: Bounds) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn transpose(self, _permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        Err(error::not_implemented())
     }
 }
 
