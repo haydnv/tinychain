@@ -1,30 +1,28 @@
 use crate::value::class::NumberType;
-use crate::value::TCTryStream;
 
-use super::array::Array;
 use super::bounds::Shape;
 use super::TensorView;
 
+trait BlockList: TensorView {}
+
 pub struct DenseTensor {
-    dtype: NumberType,
-    source: TCTryStream<Array>,
-    shape: Shape,
+    blocks: Box<dyn BlockList>,
 }
 
 impl TensorView for DenseTensor {
     fn dtype(&self) -> NumberType {
-        self.dtype
+        self.blocks.dtype()
     }
 
     fn ndim(&self) -> usize {
-        self.shape.len()
+        self.blocks.ndim()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
-        &self.shape
+        self.blocks.shape()
     }
 
     fn size(&self) -> u64 {
-        self.shape.size()
+        self.blocks.size()
     }
 }

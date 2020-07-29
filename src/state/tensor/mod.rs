@@ -8,12 +8,11 @@ mod array;
 mod bounds;
 mod dense;
 mod sparse;
-mod transform;
 
 use dense::DenseTensor;
 use sparse::SparseTensor;
 
-trait TensorView: Sized {
+trait TensorView {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;
@@ -23,7 +22,7 @@ trait TensorView: Sized {
     fn size(&self) -> u64;
 }
 
-trait TensorBoolean: TensorView {
+trait TensorBoolean: Sized + TensorView {
     fn all(&self, txn_id: TxnId) -> TCResult<bool>;
 
     fn any(&self, txn_id: TxnId) -> TCResult<bool>;
@@ -37,7 +36,7 @@ trait TensorBoolean: TensorView {
     fn xor(&self, other: &Self) -> TCResult<Self>;
 }
 
-trait TensorCompare: TensorView {
+trait TensorCompare: Sized + TensorView {
     fn eq(&self, other: &Self) -> TCResult<DenseTensor>;
 
     fn gt(&self, other: &Self) -> TCResult<Self>;
@@ -51,7 +50,7 @@ trait TensorCompare: TensorView {
     fn ne(&self, other: &Self) -> TCResult<Self>;
 }
 
-trait TensorMath: TensorView {
+trait TensorMath: Sized + TensorView {
     fn abs(&self) -> TCResult<Self>;
 
     fn add(&self, other: &Self) -> TCResult<Self>;
@@ -59,7 +58,7 @@ trait TensorMath: TensorView {
     fn multiply(&self, other: &Self) -> TCResult<Self>;
 }
 
-trait TensorTransform: TensorView {
+trait TensorTransform: Sized + TensorView {
     fn into_type(self, dtype: NumberType) -> TCResult<Self>;
 
     fn broadcast(self, shape: bounds::Shape) -> TCResult<Self>;
@@ -71,7 +70,7 @@ trait TensorTransform: TensorView {
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
 }
 
-trait TensorUnary: TensorView {
+trait TensorUnary: Sized + TensorView {
     fn product(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self>;
 
     fn product_all(&self, txn_id: TxnId) -> TCResult<Number>;
@@ -84,4 +83,34 @@ trait TensorUnary: TensorView {
 enum Tensor {
     Sparse(SparseTensor),
     Dense(DenseTensor),
+}
+
+impl TensorView for Tensor {
+    fn dtype(&self) -> NumberType {
+        match self {
+            Self::Sparse(sparse) => sparse.dtype(),
+            Self::Dense(dense) => dense.dtype(),
+        }
+    }
+
+    fn ndim(&self) -> usize {
+        match self {
+            Self::Sparse(sparse) => sparse.ndim(),
+            Self::Dense(dense) => dense.ndim(),
+        }
+    }
+
+    fn shape(&'_ self) -> &'_ bounds::Shape {
+        match self {
+            Self::Sparse(sparse) => sparse.shape(),
+            Self::Dense(dense) => dense.shape(),
+        }
+    }
+
+    fn size(&self) -> u64 {
+        match self {
+            Self::Sparse(sparse) => sparse.size(),
+            Self::Dense(dense) => dense.size(),
+        }
+    }
 }
