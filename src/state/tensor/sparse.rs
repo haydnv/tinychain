@@ -19,7 +19,7 @@ use super::*;
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
 #[async_trait]
-trait SparseAccessor: TensorView + Send + Sync {
+trait SparseAccessor: TensorView + 'static {
     async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>>;
 
     async fn filled_at(
@@ -275,11 +275,12 @@ impl TensorTransform for SparseTensor {
             return Ok(self.clone());
         }
 
-        let accessor: Arc<dyn SparseAccessor> = Arc::new(SparseCast {
+        let accessor = Arc::new(SparseCast {
             source: self.accessor.clone(),
             dtype: self.dtype(),
         });
-        Ok(SparseTensor::from(accessor))
+
+        Ok(SparseTensor { accessor })
     }
 
     fn broadcast(&self, _shape: Shape) -> TCResult<Self> {
@@ -296,12 +297,6 @@ impl TensorTransform for SparseTensor {
 
     fn transpose(&self, _permutation: Option<Vec<usize>>) -> TCResult<Self> {
         Err(error::not_implemented())
-    }
-}
-
-impl From<Arc<dyn SparseAccessor>> for SparseTensor {
-    fn from(accessor: Arc<dyn SparseAccessor>) -> SparseTensor {
-        SparseTensor { accessor }
     }
 }
 

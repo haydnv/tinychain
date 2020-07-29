@@ -15,7 +15,7 @@ pub type Array = array::Array;
 use dense::DenseTensor;
 use sparse::SparseTensor;
 
-trait TensorView {
+trait TensorView: Send + Sync {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;

@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::iter;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -14,22 +13,24 @@ use crate::state::file::block::BlockId;
 use crate::state::file::File;
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::{Impl, NumberType};
-use crate::value::{Number, TCResult, TCStream};
+use crate::value::{Number, TCResult, TCStream, TCTryStream};
 
 use super::array::Array;
 use super::bounds::{Bounds, Shape};
-use super::stream::ValueStream;
 use super::*;
 
 const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
 #[async_trait]
 trait BlockList: TensorView {
-    fn block_stream(self, txn_id: TxnId) -> TCStream<TCResult<Array>>;
+    fn block_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Array>;
 
-    fn value_stream(self, txn_id: TxnId, bounds: Bounds) -> TCStream<TCResult<Number>>;
-
-    async fn write_value(self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
+    async fn write_value(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        bounds: Bounds,
+        number: Number,
+    ) -> TCResult<()>;
 
     fn write_value_at<'a>(
         &'a self,
@@ -115,7 +116,7 @@ impl TensorView for BlockListFile {
 
 #[async_trait]
 impl BlockList for BlockListFile {
-    fn block_stream(self, txn_id: TxnId) -> TCStream<TCResult<Array>> {
+    fn block_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Array> {
         let blocks = Box::pin(
             stream::iter(0..(self.size() / PER_BLOCK as u64))
                 .map(BlockId::from)
@@ -125,56 +126,12 @@ impl BlockList for BlockListFile {
         Box::pin(blocks.and_then(|block| future::ready(Ok(block.deref().clone()))))
     }
 
-    fn value_stream(self, txn_id: TxnId, bounds: Bounds) -> TCStream<TCResult<Number>> {
-        if bounds == self.shape().all() {
-            return Box::pin(ValueStream::new(self.block_stream(txn_id)));
-        }
-
-        assert!(self.shape().contains_bounds(&bounds));
-
-        let ndim = bounds.ndim();
-
-        let coord_bounds = af::Array::new(
-            &self.coord_bounds,
-            af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
-        );
-
-        let selected = stream::iter(bounds.affected())
-            .chunks(PER_BLOCK)
-            .then(move |coords| {
-                let (block_ids, af_indices, af_offsets, num_coords) =
-                    coord_block(coords.into_iter(), &coord_bounds, PER_BLOCK, ndim);
-
-                let this = self.clone();
-                let txn_id = txn_id.clone();
-
-                async move {
-                    let mut start = 0.0f64;
-                    let mut values = vec![];
-                    for block_id in block_ids {
-                        let (block_offsets, new_start) =
-                            block_offsets(&af_indices, &af_offsets, num_coords, start, block_id);
-
-                        match this.file.clone().get_block(&txn_id, block_id.into()).await {
-                            Ok(block) => {
-                                let array: &Array = block.deref().try_into().unwrap();
-                                values.extend(array.get(block_offsets));
-                            }
-                            Err(cause) => return stream::iter(vec![Err(cause)]),
-                        }
-
-                        start = new_start;
-                    }
-
-                    let values: Vec<TCResult<Number>> = values.drain(..).map(Ok).collect();
-                    stream::iter(values)
-                }
-            });
-
-        Box::pin(Box::pin(selected).flatten())
-    }
-
-    async fn write_value(self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+    async fn write_value(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        bounds: Bounds,
+        value: Number,
+    ) -> TCResult<()> {
         if !self.shape().contains_bounds(&bounds) {
             return Err(error::bad_request("Bounds out of bounds", bounds));
         }
@@ -261,8 +218,62 @@ impl BlockList for BlockListFile {
     }
 }
 
+struct BlockListCast {
+    source: Arc<dyn BlockList>,
+    dtype: NumberType,
+}
+
+impl TensorView for BlockListCast {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl BlockList for BlockListCast {
+    fn block_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Array> {
+        let dtype = self.dtype;
+        let blocks: TCStream<TCResult<Array>> = self.source.clone().block_stream(txn_id);
+        let cast = blocks.and_then(move |array| future::ready(array.into_type(dtype)));
+        Box::pin(cast)
+    }
+
+    async fn write_value(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        bounds: Bounds,
+        number: Number,
+    ) -> TCResult<()> {
+        self.source
+            .clone()
+            .write_value(txn_id, bounds, number)
+            .await
+    }
+
+    fn write_value_at<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> BoxFuture<'a, TCResult<()>> {
+        self.source.write_value_at(txn_id, coord, value)
+    }
+}
+
 pub struct DenseTensor {
-    blocks: Box<dyn BlockList>,
+    blocks: Arc<dyn BlockList>,
 }
 
 impl TensorView for DenseTensor {
@@ -284,8 +295,12 @@ impl TensorView for DenseTensor {
 }
 
 impl TensorTransform for DenseTensor {
-    fn as_type(&self, _dtype: NumberType) -> TCResult<Self> {
-        Err(error::not_implemented())
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
+        let blocks = Arc::new(BlockListCast {
+            source: self.blocks.clone(),
+            dtype,
+        });
+        Ok(DenseTensor { blocks })
     }
 
     fn broadcast(&self, _shape: Shape) -> TCResult<Self> {
