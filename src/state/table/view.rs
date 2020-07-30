@@ -499,6 +499,13 @@ enum MergeSource {
 }
 
 impl MergeSource {
+    fn bounds(&'_ self) -> &'_ Bounds {
+        match self {
+            Self::Table(table_slice) => table_slice.bounds(),
+            Self::Merge(merged) => merged.left.bounds(),
+        }
+    }
+
     fn into_reversed(self) -> MergeSource {
         match self {
             Self::Table(table_slice) => Self::Table(table_slice.into_reversed()),
@@ -581,8 +588,13 @@ impl Selection for Merged {
         }
     }
 
-    fn slice<'a>(&'a self, _txn_id: &'a TxnId, _bounds: Bounds) -> TCBoxTryFuture<'a, Table> {
-        Box::pin(async move { Err(error::not_implemented()) })
+    fn slice<'a>(&'a self, txn_id: &'a TxnId, bounds: Bounds) -> TCBoxTryFuture<'a, Table> {
+        // TODO: reject bounds which lie outside the bounds of the table slice
+
+        match &self.left {
+            MergeSource::Merge(merged) => merged.slice(txn_id, bounds),
+            MergeSource::Table(table) => table.slice(txn_id, bounds),
+        }
     }
 
     fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
@@ -603,6 +615,7 @@ impl Selection for Merged {
                 .then(move |slice| slice.stream(txn_id_clone.clone()))
                 .map(|stream| stream.unwrap())
                 .flatten();
+
             let rows: TCStream<Vec<Value>> = Box::pin(rows);
             Ok(rows)
         })
@@ -610,14 +623,20 @@ impl Selection for Merged {
 
     fn validate_bounds<'a>(
         &'a self,
-        _txn_id: &'a TxnId,
-        _bounds: &'a Bounds,
+        txn_id: &'a TxnId,
+        bounds: &'a Bounds,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move { Err(error::not_implemented()) })
+        match &self.left {
+            MergeSource::Merge(merge) => merge.validate_bounds(txn_id, bounds),
+            MergeSource::Table(table) => table.validate_bounds(txn_id, bounds),
+        }
     }
 
-    async fn validate_order(&self, _txn_id: &TxnId, _order: &[ValueId]) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
+        match &self.left {
+            MergeSource::Merge(merge) => merge.validate_order(txn_id, order).await,
+            MergeSource::Table(table) => table.validate_order(txn_id, order).await,
+        }
     }
 
     async fn update(self, _txn: Arc<Txn>, _value: Row) -> TCResult<()> {
@@ -645,6 +664,10 @@ impl TableSlice {
             bounds,
             reversed: false,
         })
+    }
+
+    pub fn bounds(&'_ self) -> &'_ Bounds {
+        &self.bounds
     }
 
     fn into_reversed(self) -> TableSlice {
