@@ -493,7 +493,7 @@ impl Selection for Limited {
 }
 
 #[derive(Clone)]
-enum MergeSource {
+pub enum MergeSource {
     Table(TableSlice),
     Merge(Arc<Merged>),
 }
@@ -523,6 +523,10 @@ pub struct Merged {
 }
 
 impl Merged {
+    pub fn new(left: MergeSource, right: IndexSlice) -> Merged {
+        Merged { left, right }
+    }
+
     fn as_reversed(self: Arc<Self>) -> Arc<Self> {
         Arc::new(Merged {
             left: self.left.clone().into_reversed(),

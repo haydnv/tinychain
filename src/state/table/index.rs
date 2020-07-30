@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,7 +14,7 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
 
 use super::schema::{Bounds, Column, Row, Schema};
-use super::view::{IndexSlice, TableSlice};
+use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
 use super::{Selection, Table};
 
 const PRIMARY_INDEX: &str = "primary";
@@ -453,11 +454,61 @@ impl Selection for TableBase {
 
     async fn order_by(
         &self,
-        _txn_id: &TxnId,
-        _columns: Vec<ValueId>,
-        _reverse: bool,
+        txn_id: &TxnId,
+        columns: Vec<ValueId>,
+        reverse: bool,
     ) -> TCResult<Table> {
-        Err(error::not_implemented())
+        self.validate_order(txn_id, &columns).await?;
+
+        if self.primary.validate_order(txn_id, &columns).await.is_ok() {
+            let ordered = TableSlice::new(self.clone(), txn_id, Bounds::all()).await?;
+            if reverse {
+                return ordered.reversed();
+            } else {
+                return Ok(ordered.into());
+            }
+        }
+
+        let auxiliary = self.auxiliary.read(txn_id).await?;
+
+        let selection = TableSlice::new(self.clone(), txn_id, Bounds::all()).await?;
+        let mut merge_source = MergeSource::Table(selection);
+
+        let mut columns = &columns[..];
+        loop {
+            let initial = columns.to_vec();
+            for i in (1..columns.len() + 1).rev() {
+                let subset = &columns[..i];
+
+                for index in iter::once(&self.primary).chain(auxiliary.values()) {
+                    if index.validate_order(txn_id, subset).await.is_ok() {
+                        columns = &columns[i..];
+
+                        let index_slice = self.primary.index_slice(Bounds::all())?;
+                        let merged = Merged::new(merge_source, index_slice);
+
+                        if columns.is_empty() {
+                            if reverse {
+                                return merged.reversed();
+                            } else {
+                                return Ok(merged.into());
+                            }
+                        }
+
+                        merge_source = MergeSource::Merge(Arc::new(merged));
+                        break;
+                    }
+                }
+            }
+
+            if columns == &initial[..] {
+                let order: Vec<String> = columns.iter().map(String::from).collect();
+                return Err(error::bad_request(
+                    "This table has no index to support the order",
+                    order.join(", "),
+                ));
+            }
+        }
     }
 
     fn schema(&'_ self) -> &'_ Schema {
