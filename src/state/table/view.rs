@@ -639,12 +639,23 @@ impl Selection for Merged {
         }
     }
 
-    async fn update(self, _txn: Arc<Txn>, _value: Row) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
+        let schema = self.schema();
+        self.clone()
+            .stream(txn.id().clone())
+            .await?
+            .map(|values| schema.values_into_row(values))
+            .map_ok(|row| self.update_row(txn.id().clone(), row, value.clone()))
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
     }
 
-    async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
+        match &self.left {
+            MergeSource::Table(table) => table.update_row(txn_id, row, value).await,
+            MergeSource::Merge(merged) => merged.update_row(txn_id, row, value).await,
+        }
     }
 }
 
