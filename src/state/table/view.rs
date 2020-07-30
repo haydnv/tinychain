@@ -499,6 +499,13 @@ enum MergeSource {
 }
 
 impl MergeSource {
+    fn into_reversed(self) -> MergeSource {
+        match self {
+            Self::Table(table_slice) => Self::Table(table_slice.into_reversed()),
+            Self::Merge(merged) => Self::Merge(merged.as_reversed()),
+        }
+    }
+
     fn slice<'a>(self, txn_id: TxnId, bounds: Bounds) -> TCBoxTryFuture<'a, Table> {
         Box::pin(async move {
             match self {
@@ -513,6 +520,15 @@ impl MergeSource {
 pub struct Merged {
     left: MergeSource,
     right: IndexSlice,
+}
+
+impl Merged {
+    fn as_reversed(self: Arc<Self>) -> Arc<Self> {
+        Arc::new(Merged {
+            left: self.left.clone().into_reversed(),
+            right: self.right.clone().into_reversed(),
+        })
+    }
 }
 
 #[async_trait]
@@ -540,15 +556,22 @@ impl Selection for Merged {
 
     async fn order_by(
         &self,
-        _txn_id: &TxnId,
-        _columns: Vec<ValueId>,
-        _reverse: bool,
+        txn_id: &TxnId,
+        columns: Vec<ValueId>,
+        reverse: bool,
     ) -> TCResult<Table> {
-        Err(error::not_implemented())
+        match &self.left {
+            MergeSource::Merge(merged) => merged.order_by(txn_id, columns, reverse).await,
+            MergeSource::Table(table_slice) => table_slice.order_by(txn_id, columns, reverse).await,
+        }
     }
 
     fn reversed(&self) -> TCResult<Table> {
-        Err(error::not_implemented())
+        Ok(Merged {
+            left: self.left.clone().into_reversed(),
+            right: self.right.clone().into_reversed(),
+        }
+        .into())
     }
 
     fn schema(&'_ self) -> &'_ Schema {
@@ -622,6 +645,14 @@ impl TableSlice {
             bounds,
             reversed: false,
         })
+    }
+
+    fn into_reversed(self) -> TableSlice {
+        TableSlice {
+            table: self.table,
+            bounds: self.bounds,
+            reversed: !self.reversed,
+        }
     }
 }
 
