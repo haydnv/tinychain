@@ -125,6 +125,10 @@ impl Bounds {
         axes.iter().cloned().multi_cartesian_product()
     }
 
+    pub fn is_empty(&self) -> bool {
+        return self.axes.is_empty();
+    }
+
     pub fn len(&self) -> usize {
         self.axes.len()
     }
@@ -147,6 +151,23 @@ impl Bounds {
         for axis in self.axes.len()..shape.len() {
             self.axes.push(AxisBounds::all(shape[axis]))
         }
+    }
+
+    pub fn size(&self) -> u64 {
+        if self.is_empty() {
+            return 0;
+        }
+
+        let mut size = 1;
+        for bound in &self.axes {
+            match bound {
+                AxisBounds::At(_) => {}
+                AxisBounds::In(range, step) => size *= (range.end - range.start) / step,
+                AxisBounds::Of(indices) => size *= indices.len() as u64,
+            }
+        }
+
+        size
     }
 
     pub fn to_vec(&self) -> Vec<AxisBounds> {

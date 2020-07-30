@@ -29,7 +29,12 @@ trait BlockList: TensorView {
         let values = self
             .block_stream(txn_id)
             .and_then(|array| future::ready(Ok(array.into_values())))
-            .map_ok(|mut values| values.drain(..).map(|v| Ok(v)).collect::<Vec<TCResult<Number>>>())
+            .map_ok(|mut values| {
+                values
+                    .drain(..)
+                    .map(|v| Ok(v))
+                    .collect::<Vec<TCResult<Number>>>()
+            })
             .map_ok(stream::iter)
             .try_flatten();
 
@@ -229,6 +234,80 @@ impl BlockList for BlockListFile {
     }
 }
 
+struct BlockListBroadcast {
+    source: Arc<dyn BlockList>,
+    rebase: transform::Broadcast,
+}
+
+impl TensorView for BlockListBroadcast {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl BlockList for BlockListBroadcast {
+    fn block_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Array> {
+        let dtype = self.dtype();
+        let blocks = self
+            .value_stream(txn_id)
+            .chunks(PER_BLOCK)
+            .map(|values| values.into_iter().collect::<TCResult<Vec<Number>>>())
+            .and_then(move |values| future::ready(Array::try_from_values(values, dtype)));
+
+        Box::pin(blocks)
+    }
+
+    fn value_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Number> {
+        let coords = Bounds::all(self.source.shape()).affected();
+        let rebase = self.rebase.clone();
+        let values = self
+            .source
+            .clone()
+            .value_stream(txn_id)
+            .zip(stream::iter(coords))
+            .map(move |(value, coord)| {
+                let broadcast = rebase.invert_bounds(coord.into());
+                stream::iter(iter::repeat(value).take(broadcast.size() as usize))
+            })
+            .flatten();
+
+        Box::pin(values)
+    }
+
+    async fn write_value(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _bounds: Bounds,
+        _number: Number,
+    ) -> TCResult<()> {
+        Err(error::unsupported("Cannot write to a broadcasted tensor since it is not a bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor."))
+    }
+
+    fn write_value_at<'a>(
+        &'a self,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
+    ) -> BoxFuture<'a, TCResult<()>> {
+        Box::pin(async move {
+            Err(error::unsupported("Cannot write to a broadcasted tensor since it is not a bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor."))
+        })
+    }
+}
+
 struct BlockListCast {
     source: Arc<dyn BlockList>,
     dtype: NumberType,
@@ -311,11 +390,17 @@ impl TensorTransform for DenseTensor {
             source: self.blocks.clone(),
             dtype,
         });
+
         Ok(DenseTensor { blocks })
     }
 
-    fn broadcast(&self, _shape: Shape) -> TCResult<Self> {
-        Err(error::not_implemented())
+    fn broadcast(&self, shape: Shape) -> TCResult<Self> {
+        let rebase = transform::Broadcast::new(self.shape().clone(), shape)?;
+        let blocks = Arc::new(BlockListBroadcast {
+            source: self.blocks.clone(),
+            rebase,
+        });
+        Ok(DenseTensor { blocks })
     }
 
     fn expand_dims(&self, _axis: usize) -> TCResult<Self> {
