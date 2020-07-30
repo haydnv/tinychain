@@ -6,7 +6,7 @@ use futures::future::{self, try_join_all, Future};
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
-use crate::state::btree::{self, BTree, BTreeRange, Key};
+use crate::state::btree::{self, BTree, BTreeRange};
 use crate::state::dir::Dir;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Txn, TxnId};
@@ -37,16 +37,8 @@ impl Index {
         Ok(Index { btree, schema })
     }
 
-    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.btree.is_empty(txn_id).await
-    }
-
     pub async fn len(&self, txn_id: TxnId) -> TCResult<u64> {
         self.btree.clone().len(txn_id, btree::Selector::all()).await
-    }
-
-    pub async fn contains(&self, txn_id: TxnId, key: Key) -> TCResult<bool> {
-        Ok(self.btree.clone().len(txn_id, key.into()).await? > 0)
     }
 
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
@@ -88,7 +80,7 @@ impl Index {
         self.btree.insert(txn_id, key).await
     }
 
-    pub fn validate_bounds(&self, outer: Bounds, inner: Bounds) -> TCResult<()> {
+    pub fn validate_schema_bounds(&self, outer: Bounds, inner: Bounds) -> TCResult<()> {
         self.schema.validate_bounds(&outer)?;
         self.schema.validate_bounds(&inner)?;
 
@@ -123,6 +115,27 @@ impl Selection for Index {
         self.btree.delete(txn_id, btree::Selector::Key(key)).await
     }
 
+    async fn order_by(
+        &self,
+        _txn_id: &TxnId,
+        order: Vec<ValueId>,
+        reverse: bool,
+    ) -> TCResult<Table> {
+        if self.schema.starts_with(&order) {
+            if reverse {
+                self.reversed()
+            } else {
+                Ok(self.clone().into())
+            }
+        } else {
+            let order: Vec<String> = order.iter().map(String::from).collect();
+            Err(error::bad_request(
+                &format!("Index with schema {} does not support order", self.schema),
+                order.join(", "),
+            ))
+        }
+    }
+
     fn schema(&'_ self) -> &'_ Schema {
         &self.schema
     }
@@ -142,7 +155,7 @@ impl Selection for Index {
             .await
     }
 
-    async fn validate(&self, _txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+    async fn validate_bounds(&self, _txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
         self.schema.validate_bounds(bounds)?;
 
         for (column, (bound_column, bound_range)) in self.schema.columns()[0..bounds.len()]
@@ -163,6 +176,18 @@ impl Selection for Index {
         }
 
         Ok(())
+    }
+
+    async fn validate_order(&self, _txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
+        if !self.schema.starts_with(&order) {
+            let order: Vec<String> = order.iter().map(|c| c.to_string()).collect();
+            Err(error::bad_request(
+                &format!("Cannot order index with schema {} by", self.schema),
+                order.join(", "),
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     async fn update(self, txn: Arc<Txn>, row: Row) -> TCResult<()> {
@@ -233,6 +258,21 @@ impl Selection for ReadOnly {
         self.index.clone().count(txn_id).await
     }
 
+    async fn order_by(
+        &self,
+        txn_id: &TxnId,
+        order: Vec<ValueId>,
+        reverse: bool,
+    ) -> TCResult<Table> {
+        self.index.validate_order(txn_id, &order).await?;
+
+        if reverse {
+            self.reversed()
+        } else {
+            Ok(self.clone().into())
+        }
+    }
+
     fn reversed(&self) -> TCResult<Table> {
         Ok(self.clone().into_reversed().into())
     }
@@ -242,7 +282,7 @@ impl Selection for ReadOnly {
     }
 
     async fn slice(&self, txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
-        self.validate(txn_id, &bounds).await?;
+        self.validate_bounds(txn_id, &bounds).await?;
         self.index
             .slice_index(bounds)
             .map(|index| ReadOnly { index }.into())
@@ -252,8 +292,12 @@ impl Selection for ReadOnly {
         self.index.stream(txn_id).await
     }
 
-    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        self.index.validate(txn_id, bounds).await
+    async fn validate_bounds(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+        self.index.validate_bounds(txn_id, bounds).await
+    }
+
+    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
+        self.index.validate_order(txn_id, order).await
     }
 }
 
@@ -287,12 +331,12 @@ impl TableBase {
         txn_id: &'a TxnId,
         bounds: &'a Bounds,
     ) -> TCResult<Index> {
-        if self.primary.validate(txn_id, bounds).await.is_ok() {
+        if self.primary.validate_bounds(txn_id, bounds).await.is_ok() {
             return Ok(self.primary.clone());
         }
 
         for index in self.auxiliary.read(txn_id).await?.values() {
-            if index.validate(txn_id, bounds).await.is_ok() {
+            if index.validate_bounds(txn_id, bounds).await.is_ok() {
                 return Ok(index.clone());
             }
         }
@@ -304,7 +348,7 @@ impl TableBase {
     }
 
     pub async fn add_index(&self, txn: Arc<Txn>, name: ValueId, key: Vec<ValueId>) -> TCResult<()> {
-        if name.to_string() == PRIMARY_INDEX {
+        if name.as_str() == PRIMARY_INDEX {
             return Err(error::bad_request(
                 "This index name is reserved",
                 PRIMARY_INDEX,
@@ -426,6 +470,15 @@ impl Selection for TableBase {
         Ok(())
     }
 
+    async fn order_by(
+        &self,
+        _txn_id: &TxnId,
+        _columns: Vec<ValueId>,
+        _reverse: bool,
+    ) -> TCResult<Table> {
+        Err(error::not_implemented())
+    }
+
     fn schema(&'_ self) -> &'_ Schema {
         &self.schema
     }
@@ -437,31 +490,25 @@ impl Selection for TableBase {
     }
 
     async fn slice(&self, txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
-        TableSlice::new(self.clone(), txn_id, bounds)
-            .await
-            .map(|t| t.into())
+        if self.primary.validate_bounds(txn_id, &bounds).await.is_ok() {
+            return TableSlice::new(self.clone(), txn_id, bounds)
+                .await
+                .map(|t| t.into());
+        }
+
+        Err(error::not_implemented())
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
         self.primary.stream(txn_id).await
     }
 
-    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        if self.primary.validate(txn_id, bounds).await.is_ok() {
-            return Ok(());
-        }
+    async fn validate_bounds(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
+        Err(error::not_implemented())
+    }
 
-        let auxiliary = self.auxiliary.read(txn_id).await?;
-        for index in auxiliary.values() {
-            if index.validate(txn_id, bounds).await.is_ok() {
-                return Ok(());
-            }
-        }
-
-        Err(error::bad_request(
-            "This Table has no index which supports these bounds",
-            bounds,
-        ))
+    async fn validate_order(&self, _txn_id: &TxnId, _order: &[ValueId]) -> TCResult<()> {
+        Err(error::not_implemented())
     }
 
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {

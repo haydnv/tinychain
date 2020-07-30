@@ -362,6 +362,7 @@ impl BlockList for BlockListCast {
     }
 }
 
+#[derive(Clone)]
 pub struct DenseTensor {
     blocks: Arc<dyn BlockList>,
 }
@@ -386,6 +387,10 @@ impl TensorView for DenseTensor {
 
 impl TensorTransform for DenseTensor {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
+        if dtype == self.dtype() {
+            return Ok(self.clone());
+        }
+
         let blocks = Arc::new(BlockListCast {
             source: self.blocks.clone(),
             dtype,
@@ -395,6 +400,10 @@ impl TensorTransform for DenseTensor {
     }
 
     fn broadcast(&self, shape: Shape) -> TCResult<Self> {
+        if &shape == self.shape() {
+            return Ok(self.clone());
+        }
+
         let rebase = transform::Broadcast::new(self.shape().clone(), shape)?;
         let blocks = Arc::new(BlockListBroadcast {
             source: self.blocks.clone(),

@@ -12,22 +12,20 @@ use crate::state::btree::{BTree, BTreeRange};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCResult, TCStream, Value, ValueId};
 
-use super::index::{ReadOnly, TableBase};
+use super::index::TableBase;
 use super::schema::{Bounds, Column, Row, Schema};
 use super::{Selection, Table};
 
 #[derive(Clone)]
 pub struct Aggregate {
-    index: ReadOnly,
+    source: Box<Table>,
     columns: Vec<ValueId>,
 }
 
 impl Aggregate {
-    pub async fn new(txn: Arc<Txn>, source: Table, columns: Vec<ValueId>) -> TCResult<Aggregate> {
-        source
-            .index(txn, Some(columns.to_vec()))
-            .await
-            .map(|index| Aggregate { index, columns })
+    pub async fn new(source: Table, txn_id: TxnId, columns: Vec<ValueId>) -> TCResult<Aggregate> {
+        let source = Box::new(source.order_by(&txn_id, columns.to_vec(), false).await?);
+        Ok(Aggregate { source, columns })
     }
 }
 
@@ -35,24 +33,40 @@ impl Aggregate {
 impl Selection for Aggregate {
     type Stream = TCStream<Vec<Value>>;
 
-    async fn group_by(&self, _txn: Arc<Txn>, _columns: Vec<ValueId>) -> TCResult<Aggregate> {
-        Err(error::unsupported("It does not make sense to aggregate an aggregate table; consider aggregating the source table directly"))
+    async fn group_by(&self, _txn_id: TxnId, _columns: Vec<ValueId>) -> TCResult<Aggregate> {
+        Err(error::unsupported("It doesn't make sense to aggregate an aggregate table view; consider aggregating the source table directly"))
     }
 
-    fn reversed(&self) -> TCResult<Table> {
+    async fn order_by(
+        &self,
+        txn_id: &TxnId,
+        columns: Vec<ValueId>,
+        reverse: bool,
+    ) -> TCResult<Table> {
+        let source = Box::new(self.source.order_by(txn_id, columns, reverse).await?);
         Ok(Aggregate {
-            index: self.index.clone().into_reversed(),
-            columns: self.columns.clone(),
+            source,
+            columns: self.columns.to_vec(),
         }
         .into())
     }
 
+    fn reversed(&self) -> TCResult<Table> {
+        let columns = self.columns.to_vec();
+        let reversed = self
+            .source
+            .reversed()
+            .map(Box::new)
+            .map(|source| Aggregate { source, columns })?;
+        Ok(reversed.into())
+    }
+
     fn schema(&'_ self) -> &'_ Schema {
-        self.index.schema()
+        self.source.schema()
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let first = self.index.stream(txn_id.clone()).await?.next().await;
+        let first = self.source.stream(txn_id.clone()).await?.next().await;
         let first = if let Some(first) = first {
             first
         } else {
@@ -60,8 +74,8 @@ impl Selection for Aggregate {
         };
 
         let left =
-            stream::once(future::ready(first)).chain(self.index.stream(txn_id.clone()).await?);
-        let right = self.index.stream(txn_id).await?;
+            stream::once(future::ready(first)).chain(self.source.stream(txn_id.clone()).await?);
+        let right = self.source.stream(txn_id).await?;
         let aggregate = left.zip(right).filter_map(|(l, r)| {
             if l == r {
                 future::ready(None)
@@ -73,8 +87,12 @@ impl Selection for Aggregate {
         Ok(Box::pin(aggregate))
     }
 
-    async fn validate(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
+    async fn validate_bounds(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
         Err(error::unsupported("Table aggregate does not support slicing, consider aggregating a slice of the source table"))
+    }
+
+    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
+        self.source.validate_order(txn_id, order).await
     }
 }
 
@@ -134,6 +152,29 @@ impl Selection for ColumnSelection {
         self.source.clone().count(txn_id).await
     }
 
+    async fn order_by(
+        &self,
+        txn_id: &TxnId,
+        order: Vec<ValueId>,
+        reverse: bool,
+    ) -> TCResult<Table> {
+        self.validate_order(txn_id, &order).await?;
+
+        let source = self
+            .source
+            .order_by(txn_id, order, reverse)
+            .await
+            .map(Box::new)?;
+
+        Ok(ColumnSelection {
+            source,
+            schema: self.schema.clone(),
+            columns: self.columns.to_vec(),
+            indices: self.indices.to_vec(),
+        }
+        .into())
+    }
+
     fn reversed(&self) -> TCResult<Table> {
         self.source
             .reversed()?
@@ -155,22 +196,34 @@ impl Selection for ColumnSelection {
         Ok(Box::pin(selected))
     }
 
-    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+    async fn validate_bounds(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
         let bounds_columns: HashSet<&ValueId> = bounds.keys().collect();
         let selected: HashSet<&ValueId> = self.schema.column_names();
         let mut unknown: HashSet<&&ValueId> = selected.difference(&bounds_columns).collect();
         if !unknown.is_empty() {
+            let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
             return Err(error::bad_request(
                 "Tried to slice by unselected columns",
-                unknown
-                    .drain()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
+                unknown.join(", "),
             ));
         }
 
-        self.source.validate(txn_id, bounds).await
+        self.source.validate_bounds(txn_id, bounds).await
+    }
+
+    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
+        let order_columns: HashSet<&ValueId> = order.iter().collect();
+        let selected: HashSet<&ValueId> = self.schema().column_names();
+        let mut unknown: HashSet<&&ValueId> = selected.difference(&order_columns).collect();
+        if !unknown.is_empty() {
+            let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
+            return Err(error::bad_request(
+                "Tried to order by unselected columns",
+                unknown.join(", "),
+            ));
+        }
+
+        self.source.validate_order(txn_id, order).await
     }
 }
 
@@ -246,6 +299,27 @@ impl Selection for IndexSlice {
         self.source.delete(&txn_id, self.range.into()).await
     }
 
+    async fn order_by(
+        &self,
+        _txn_id: &TxnId,
+        order: Vec<ValueId>,
+        reverse: bool,
+    ) -> TCResult<Table> {
+        if self.schema.starts_with(&order) {
+            if reverse {
+                self.reversed()
+            } else {
+                Ok(self.clone().into())
+            }
+        } else {
+            let order: Vec<String> = order.iter().map(String::from).collect();
+            Err(error::bad_request(
+                &format!("Index with schema {} does not support order", &self.schema),
+                order.join(", "),
+            ))
+        }
+    }
+
     fn reversed(&self) -> TCResult<Table> {
         Ok(self.clone().into_reversed().into())
     }
@@ -271,11 +345,23 @@ impl Selection for IndexSlice {
             .await
     }
 
-    async fn validate(&self, _txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+    async fn validate_bounds(&self, _txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
         let schema = self.schema();
         let outer = self.bounds.clone().try_into_btree_range(schema)?;
         let inner = bounds.clone().try_into_btree_range(schema)?;
         outer.contains(&inner, schema.data_types()).map(|_| ())
+    }
+
+    async fn validate_order(&self, _txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
+        if self.schema.starts_with(order) {
+            Ok(())
+        } else {
+            let order: Vec<String> = order.iter().map(String::from).collect();
+            Err(error::bad_request(
+                &format!("Index with schema {} does not support order", &self.schema),
+                order.join(", "),
+            ))
+        }
     }
 }
 
@@ -322,6 +408,15 @@ impl Selection for Limited {
             .await
     }
 
+    async fn order_by(
+        &self,
+        _txn_id: &TxnId,
+        _order: Vec<ValueId>,
+        _reverse: bool,
+    ) -> TCResult<Table> {
+        Err(error::unsupported("Cannot order a limited selection, consider ordering the source or indexing the selection"))
+    }
+
     fn reversed(&self) -> TCResult<Table> {
         Err(error::unsupported(
             "Cannot reverse a limited selection, consider reversing a slice before limiting",
@@ -338,8 +433,12 @@ impl Selection for Limited {
         Ok(Box::pin(rows.take(self.limit)))
     }
 
-    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        self.source.validate(txn_id, bounds).await
+    async fn validate_bounds(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+        self.source.validate_bounds(txn_id, bounds).await
+    }
+
+    async fn validate_order(&self, _txn_id: &TxnId, _order: &[ValueId]) -> TCResult<()> {
+        Err(error::unsupported("Cannot order a limited selection, consider ordering the source or indexing the selection"))
     }
 
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
@@ -365,7 +464,8 @@ pub struct TableSlice {
 
 impl TableSlice {
     pub async fn new(table: TableBase, txn_id: &TxnId, bounds: Bounds) -> TCResult<TableSlice> {
-        table.validate(txn_id, &bounds).await?;
+        table.validate_bounds(txn_id, &bounds).await?;
+
         Ok(TableSlice {
             table,
             bounds,
@@ -402,6 +502,15 @@ impl Selection for TableSlice {
         self.table.delete_row(txn_id, row).await
     }
 
+    async fn order_by(
+        &self,
+        txn_id: &TxnId,
+        order: Vec<ValueId>,
+        reverse: bool,
+    ) -> TCResult<Table> {
+        self.table.order_by(txn_id, order, reverse).await
+    }
+
     fn reversed(&self) -> TCResult<Table> {
         let mut selection = self.clone();
         selection.reversed = true;
@@ -413,14 +522,14 @@ impl Selection for TableSlice {
     }
 
     async fn slice(&self, txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
-        self.validate(txn_id, &bounds).await?;
+        self.validate_bounds(txn_id, &bounds).await?;
         self.table.slice(txn_id, bounds).await
     }
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
         let left = Arc::new(self.table.primary().clone());
         let right = self.table.supporting_index(&txn_id, &self.bounds).await?;
-        right.validate(&txn_id, &self.bounds).await?;
+        right.validate_bounds(&txn_id, &self.bounds).await?;
 
         let rows = right
             .stream(txn_id.clone())
@@ -432,11 +541,15 @@ impl Selection for TableSlice {
         Ok(Box::pin(rows))
     }
 
-    async fn validate(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
+    async fn validate_bounds(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
         let index = self.table.supporting_index(txn_id, &self.bounds).await?;
         index
-            .validate_bounds(self.bounds.clone(), bounds.clone())
+            .validate_schema_bounds(self.bounds.clone(), bounds.clone())
             .map(|_| ())
+    }
+
+    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
+        self.table.validate_order(txn_id, order).await
     }
 
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {

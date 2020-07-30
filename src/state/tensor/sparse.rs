@@ -3,8 +3,8 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{BoxFuture, TryFutureExt};
-use futures::stream::StreamExt;
+use futures::future::{self, BoxFuture, TryFutureExt};
+use futures::stream::{self, StreamExt};
 
 use crate::error;
 use crate::state::table::schema::*;
@@ -24,7 +24,7 @@ trait SparseAccessor: TensorView + 'static {
 
     async fn filled_at(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn_id: TxnId,
         axes: Vec<usize>,
     ) -> TCResult<TCStream<Vec<u64>>>;
 
@@ -39,6 +39,91 @@ trait SparseAccessor: TensorView + 'static {
         coord: Vec<u64>,
         value: Number,
     ) -> BoxFuture<'a, TCResult<()>>;
+}
+
+struct SparseBroadcast {
+    source: Arc<dyn SparseAccessor>,
+    rebase: transform::Broadcast,
+}
+
+impl TensorView for SparseBroadcast {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        &self.rebase.shape
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl SparseAccessor for SparseBroadcast {
+    async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
+        let rebase = self.rebase.clone();
+        let source = self.source.clone().filled(txn_id).await?;
+        let filled = source
+            .map(move |(coord, value)| {
+                let broadcast = rebase
+                    .map_bounds(coord.into())
+                    .affected()
+                    .map(move |coord| (coord, value.clone()));
+                stream::iter(broadcast)
+            })
+            .flatten();
+
+        Ok(Box::pin(filled))
+    }
+
+    async fn filled_count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
+        let filled = self.source.clone().filled(txn_id).await?;
+        let rebase = self.rebase.clone();
+        Ok(filled
+            .fold(0u64, |count, (coord, _)| {
+                future::ready(count + rebase.map_bounds(coord.into()).size())
+            })
+            .await)
+    }
+
+    async fn filled_at(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        axes: Vec<usize>,
+    ) -> TCResult<TCStream<Vec<u64>>> {
+        self.source
+            .clone()
+            .filled_at(txn_id, self.rebase.invert_axes(axes))
+            .await
+    }
+
+    fn read_value<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: &'a [u64],
+    ) -> BoxFuture<'a, TCResult<Number>> {
+        Box::pin(async move {
+            self.source
+                .read_value(txn_id, &self.rebase.invert_coord(coord.to_vec()))
+                .await
+        })
+    }
+
+    fn write_value<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> BoxFuture<'a, TCResult<()>> {
+        self.source
+            .write_value(txn_id, self.rebase.invert_coord(coord), value)
+    }
 }
 
 struct SparseCast {
@@ -75,10 +160,10 @@ impl SparseAccessor for SparseCast {
 
     async fn filled_at(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn_id: TxnId,
         axes: Vec<usize>,
     ) -> TCResult<TCStream<Vec<u64>>> {
-        self.source.clone().filled_at(txn, axes).await
+        self.source.clone().filled_at(txn_id, axes).await
     }
 
     async fn filled_count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
@@ -170,14 +255,13 @@ impl SparseAccessor for SparseTable {
 
     async fn filled_at(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn_id: TxnId,
         axes: Vec<usize>,
     ) -> TCResult<TCStream<Vec<u64>>> {
-        let txn_id = txn.id().clone();
         let columns: Vec<ValueId> = axes.iter().map(|x| (*x).into()).collect();
         let filled_at = self
             .table
-            .group_by(txn, columns)
+            .group_by(txn_id.clone(), columns)
             .await?
             .stream(txn_id)
             .await?
@@ -283,8 +367,17 @@ impl TensorTransform for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    fn broadcast(&self, _shape: Shape) -> TCResult<Self> {
-        Err(error::not_implemented())
+    fn broadcast(&self, shape: Shape) -> TCResult<Self> {
+        if &shape == self.shape() {
+            return Ok(self.clone());
+        }
+
+        let rebase = transform::Broadcast::new(self.shape().clone(), shape)?;
+        let accessor = Arc::new(SparseBroadcast {
+            source: self.accessor.clone(),
+            rebase,
+        });
+        Ok(SparseTensor { accessor })
     }
 
     fn expand_dims(&self, _axis: usize) -> TCResult<Self> {

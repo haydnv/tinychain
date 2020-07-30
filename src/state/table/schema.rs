@@ -276,6 +276,8 @@ impl Schema {
         Ok(())
     }
 
+
+
     pub fn validate_row_partial(&self, row: &Row) -> TCResult<()> {
         let columns: HashMap<ValueId, ValueType> = self
             .columns()

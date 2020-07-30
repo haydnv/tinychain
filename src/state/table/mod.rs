@@ -39,8 +39,8 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         Err(error::unsupported("This table view does not support row deletion (try deleting from the source table directly)"))
     }
 
-    async fn group_by(&self, txn: Arc<Txn>, columns: Vec<ValueId>) -> TCResult<view::Aggregate> {
-        view::Aggregate::new(txn, self.clone().into(), columns).await
+    async fn group_by(&self, txn_id: TxnId, columns: Vec<ValueId>) -> TCResult<view::Aggregate> {
+        view::Aggregate::new(self.clone().into(), txn_id, columns).await
     }
 
     async fn index(
@@ -58,25 +58,10 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
 
     async fn order_by(
         &self,
-        txn: Arc<Txn>,
+        txn_id: &TxnId,
         columns: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table> {
-        if self.schema().starts_with(&columns) {
-            if reverse {
-                self.reversed()
-            } else {
-                Ok(self.clone().into())
-            }
-        } else {
-            let index = self.index(txn, Some(columns)).await?;
-            if reverse {
-                index.reversed()
-            } else {
-                Ok(index.into())
-            }
-        }
-    }
+    ) -> TCResult<Table>;
 
     fn reversed(&self) -> TCResult<Table>;
 
@@ -95,7 +80,9 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
 
     async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream>;
 
-    async fn validate(&self, txn_id: &TxnId, bounds: &schema::Bounds) -> TCResult<()>;
+    async fn validate_bounds(&self, txn_id: &TxnId, bounds: &schema::Bounds) -> TCResult<()>;
+
+    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()>;
 
     async fn update(self, _txn: Arc<Txn>, _value: schema::Row) -> TCResult<()> {
         Err(error::unsupported(
@@ -165,6 +152,24 @@ impl Selection for Table {
             Self::IndexSlice(index_slice) => index_slice.delete_row(txn_id, row).await,
             Self::ROIndex(ro_index) => ro_index.delete_row(txn_id, row).await,
             Self::TableSlice(table_slice) => table_slice.delete_row(txn_id, row).await,
+        }
+    }
+
+    async fn order_by(
+        &self,
+        txn_id: &TxnId,
+        order: Vec<ValueId>,
+        reverse: bool,
+    ) -> TCResult<Table> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.order_by(txn_id, order, reverse).await,
+            Self::Columns(columns) => columns.order_by(txn_id, order, reverse).await,
+            Self::Limit(limited) => limited.order_by(txn_id, order, reverse).await,
+            Self::Table(table) => table.order_by(txn_id, order, reverse).await,
+            Self::Index(index) => index.order_by(txn_id, order, reverse).await,
+            Self::IndexSlice(index_slice) => index_slice.order_by(txn_id, order, reverse).await,
+            Self::ROIndex(ro_index) => ro_index.order_by(txn_id, order, reverse).await,
+            Self::TableSlice(table_slice) => table_slice.order_by(txn_id, order, reverse).await,
         }
     }
 
@@ -251,16 +256,29 @@ impl Selection for Table {
         }
     }
 
-    async fn validate(&self, txn_id: &TxnId, bounds: &schema::Bounds) -> TCResult<()> {
+    async fn validate_bounds(&self, txn_id: &TxnId, bounds: &schema::Bounds) -> TCResult<()> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.validate(txn_id, bounds).await,
-            Self::Columns(columns) => columns.validate(txn_id, bounds).await,
-            Self::Limit(limited) => limited.validate(txn_id, bounds).await,
-            Self::Table(table) => table.validate(txn_id, bounds).await,
-            Self::Index(index) => index.validate(txn_id, bounds).await,
-            Self::IndexSlice(index_slice) => index_slice.validate(txn_id, bounds).await,
-            Self::ROIndex(ro_index) => ro_index.validate(txn_id, bounds).await,
-            Self::TableSlice(table_slice) => table_slice.validate(txn_id, bounds).await,
+            Self::Aggregate(aggregate) => aggregate.validate_bounds(txn_id, bounds).await,
+            Self::Columns(columns) => columns.validate_bounds(txn_id, bounds).await,
+            Self::Limit(limited) => limited.validate_bounds(txn_id, bounds).await,
+            Self::Table(table) => table.validate_bounds(txn_id, bounds).await,
+            Self::Index(index) => index.validate_bounds(txn_id, bounds).await,
+            Self::IndexSlice(index_slice) => index_slice.validate_bounds(txn_id, bounds).await,
+            Self::ROIndex(ro_index) => ro_index.validate_bounds(txn_id, bounds).await,
+            Self::TableSlice(table_slice) => table_slice.validate_bounds(txn_id, bounds).await,
+        }
+    }
+
+    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.validate_order(txn_id, order).await,
+            Self::Columns(columns) => columns.validate_order(txn_id, order).await,
+            Self::Limit(limited) => limited.validate_order(txn_id, order).await,
+            Self::Table(table) => table.validate_order(txn_id, order).await,
+            Self::Index(index) => index.validate_order(txn_id, order).await,
+            Self::IndexSlice(index_slice) => index_slice.validate_order(txn_id, order).await,
+            Self::ROIndex(ro_index) => ro_index.validate_order(txn_id, order).await,
+            Self::TableSlice(table_slice) => table_slice.validate_order(txn_id, order).await,
         }
     }
 }

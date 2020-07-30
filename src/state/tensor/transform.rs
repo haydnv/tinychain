@@ -8,9 +8,10 @@ use super::bounds::{AxisBounds, Bounds, Shape};
 #[derive(Clone)]
 pub struct Broadcast {
     source_shape: Shape,
-    shape: Shape,
+    pub shape: Shape,
     broadcast: Vec<bool>,
     offset: usize,
+    inverted_axes: Vec<usize>,
 }
 
 impl Broadcast {
@@ -24,13 +25,15 @@ impl Broadcast {
         }
 
         let offset = ndim - source_shape.len();
+        let mut inverted_axes = Vec::with_capacity(shape.len());
         let mut broadcast: Vec<bool> = iter::repeat(true).take(ndim).collect();
 
         for axis in offset..ndim {
             if shape[axis] == source_shape[axis - offset] {
                 broadcast[axis] = false;
+                inverted_axes.push(axis);
             } else if shape[axis] == 1 || source_shape[axis - offset] == 1 {
-                // no-op
+                inverted_axes.push(axis - offset);
             } else {
                 return Err(error::bad_request(
                     &format!("Cannot broadcast into {}", shape),
@@ -44,7 +47,14 @@ impl Broadcast {
             shape,
             broadcast,
             offset,
+            inverted_axes,
         })
+    }
+
+    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+        let mut inverted: Vec<usize> = axes.iter().map(|x| self.inverted_axes[*x]).collect();
+        inverted.dedup();
+        inverted
     }
 
     pub fn invert_bounds(&self, bounds: Bounds) -> Bounds {
