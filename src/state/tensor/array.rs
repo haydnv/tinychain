@@ -1039,6 +1039,24 @@ impl Array {
         Ok(cast)
     }
 
+    pub fn into_values(self) -> Vec<Number> {
+        use Array::*;
+        match self {
+            Bool(b) => b.into(),
+            C32(c) => c.into(),
+            C64(c) => c.into(),
+            F32(f) => f.into(),
+            F64(f) => f.into(),
+            I16(i) => i.into(),
+            I32(i) => i.into(),
+            I64(i) => i.into(),
+            U8(u) => u.into(),
+            U16(u) => u.into(),
+            U32(u) => u.into(),
+            U64(u) => u.into(),
+        }
+    }
+
     pub fn abs(&self) -> TCResult<Array> {
         use Array::*;
         match self {
@@ -1356,7 +1374,7 @@ impl Array {
         }
     }
 
-    pub fn get_one(&self, index: usize) -> Option<Number> {
+    pub fn get_value(&self, index: usize) -> Option<Number> {
         let seq = af::Seq::new(index as f64, index as f64, 1.0f64);
         let mut indexer = af::Indexer::default();
         indexer.set_index(&seq, 0, None);

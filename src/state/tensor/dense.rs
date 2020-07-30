@@ -25,6 +25,17 @@ const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 trait BlockList: TensorView {
     fn block_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Array>;
 
+    fn value_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Number> {
+        let values = self
+            .block_stream(txn_id)
+            .and_then(|array| future::ready(Ok(array.into_values())))
+            .map_ok(|mut values| values.drain(..).map(|v| Ok(v)).collect::<Vec<TCResult<Number>>>())
+            .map_ok(stream::iter)
+            .try_flatten();
+
+        Box::pin(values)
+    }
+
     async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
