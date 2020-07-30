@@ -499,13 +499,6 @@ enum MergeSource {
 }
 
 impl MergeSource {
-    fn bounds(&'_ self) -> &'_ Bounds {
-        match self {
-            Self::Table(table_slice) => table_slice.bounds(),
-            Self::Merge(merged) => merged.left.bounds(),
-        }
-    }
-
     fn into_reversed(self) -> MergeSource {
         match self {
             Self::Table(table_slice) => Self::Table(table_slice.into_reversed()),
@@ -675,10 +668,6 @@ impl TableSlice {
             bounds,
             reversed: false,
         })
-    }
-
-    pub fn bounds(&'_ self) -> &'_ Bounds {
-        &self.bounds
     }
 
     fn into_reversed(self) -> TableSlice {

@@ -2,11 +2,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{self, try_join_all, Future};
+use futures::future::{self, try_join_all};
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
-use crate::state::btree::{self, BTree, BTreeRange};
+use crate::state::btree::{self, BTree};
 use crate::state::dir::Dir;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Txn, TxnId};
@@ -44,35 +44,6 @@ impl Index {
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
         self.schema.validate_bounds(&bounds)?;
         IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)
-    }
-
-    pub async fn slice_reversed(
-        &self,
-        txn_id: TxnId,
-        range: BTreeRange,
-    ) -> TCResult<TCStream<Vec<Value>>> {
-        self.btree
-            .clone()
-            .slice(txn_id, btree::Selector::reverse(range))
-            .await
-    }
-
-    pub fn get_by_key(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        key: Vec<Value>,
-    ) -> impl Future<Output = Option<Vec<Value>>> {
-        Box::pin(async move {
-            match self
-                .btree
-                .clone()
-                .slice(txn_id, btree::Selector::Key(key))
-                .await
-            {
-                Ok(mut rows) => rows.next().await,
-                Err(_) => None,
-            }
-        })
     }
 
     async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
@@ -512,7 +483,7 @@ impl Selection for TableBase {
     }
 
     fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
-        self.primary.clone().stream(txn_id)
+        self.primary.stream(txn_id)
     }
 
     fn validate_bounds<'a>(
@@ -523,8 +494,37 @@ impl Selection for TableBase {
         Box::pin(async move { Err(error::not_implemented()) })
     }
 
-    async fn validate_order(&self, _txn_id: &TxnId, _order: &[ValueId]) -> TCResult<()> {
-        Err(error::not_implemented())
+    async fn validate_order(&self, txn_id: &TxnId, mut order: &[ValueId]) -> TCResult<()> {
+        let auxiliary = self.auxiliary.read(txn_id).await?;
+
+        while !order.is_empty() {
+            let initial = order.to_vec();
+            for i in (1..order.len() + 1).rev() {
+                let subset = &order[..i];
+
+                if self.primary.validate_order(txn_id, subset).await.is_ok() {
+                    order = &order[i..];
+                    break;
+                }
+
+                for index in auxiliary.values() {
+                    if index.validate_order(txn_id, subset).await.is_ok() {
+                        order = &order[i..];
+                        break;
+                    }
+                }
+            }
+
+            if order == &initial[..] {
+                let order: Vec<String> = order.iter().map(String::from).collect();
+                return Err(error::bad_request(
+                    "This table has no index to support the order",
+                    order.join(", "),
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
