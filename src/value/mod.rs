@@ -3,7 +3,7 @@ use std::fmt;
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::stream::Stream;
+use futures::{Future, Stream};
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
@@ -22,6 +22,8 @@ pub type Float = number::Float;
 pub type Int = number::Int;
 pub type UInt = number::UInt;
 pub type Number = number::Number;
+pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send + Sync>>;
+pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
 pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + Unpin>>;
 pub type TCString = string::TCString;
 pub type TCRef = reference::TCRef;

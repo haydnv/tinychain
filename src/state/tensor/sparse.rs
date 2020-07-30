@@ -248,7 +248,7 @@ impl TensorView for SparseTable {
 #[async_trait]
 impl SparseAccessor for SparseTable {
     async fn filled(self: Arc<Self>, txn_id: TxnId) -> TCResult<TCStream<(Vec<u64>, Number)>> {
-        let rows = self.table.stream(txn_id).await?;
+        let rows = self.table.clone().stream(txn_id).await?;
         let filled = rows.map(unwrap_row);
         Ok(Box::pin(filled))
     }

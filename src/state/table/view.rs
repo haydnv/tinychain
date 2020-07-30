@@ -1,16 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future;
-use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::stream::{self, StreamExt, TryStreamExt};
 
 use crate::error;
 use crate::state::btree::{BTree, BTreeRange};
 use crate::transaction::{Txn, TxnId};
-use crate::value::{TCResult, TCStream, Value, ValueId};
+use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
 
 use super::index::TableBase;
 use super::schema::{Bounds, Column, Row, Schema};
@@ -65,30 +64,46 @@ impl Selection for Aggregate {
         self.source.schema()
     }
 
-    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let first = self.source.stream(txn_id.clone()).await?.next().await;
-        let first = if let Some(first) = first {
-            first
-        } else {
-            return Ok(Box::pin(stream::empty()));
-        };
-
-        let left =
-            stream::once(future::ready(first)).chain(self.source.stream(txn_id.clone()).await?);
-        let right = self.source.stream(txn_id).await?;
-        let aggregate = left.zip(right).filter_map(|(l, r)| {
-            if l == r {
-                future::ready(None)
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        Box::pin(async move {
+            let first = self
+                .source
+                .clone()
+                .stream(txn_id.clone())
+                .await?
+                .next()
+                .await;
+            let first = if let Some(first) = first {
+                first
             } else {
-                future::ready(Some(r))
-            }
-        });
+                let stream: TCStream<Vec<Value>> = Box::pin(stream::empty());
+                return Ok(stream);
+            };
 
-        Ok(Box::pin(aggregate))
+            let left = stream::once(future::ready(first))
+                .chain(self.source.clone().stream(txn_id.clone()).await?);
+            let right = self.source.clone().stream(txn_id).await?;
+            let aggregate = left.zip(right).filter_map(|(l, r)| {
+                if l == r {
+                    future::ready(None)
+                } else {
+                    future::ready(Some(r))
+                }
+            });
+            let aggregate: TCStream<Vec<Value>> = Box::pin(aggregate);
+
+            Ok(aggregate)
+        })
     }
 
-    async fn validate_bounds(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
-        Err(error::unsupported("Table aggregate does not support slicing, consider aggregating a slice of the source table"))
+    fn validate_bounds<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        _bounds: &'a Bounds,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            Err(error::unsupported("Table aggregate does not support slicing, consider aggregating a slice of the source table"))
+        })
     }
 
     async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
@@ -186,29 +201,37 @@ impl Selection for ColumnSelection {
         &self.schema
     }
 
-    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let indices = self.indices.to_vec();
-        let selected = self.source.clone().stream(txn_id).await?.map(move |row| {
-            let selection: Vec<Value> = indices.iter().map(|i| row[*i].clone()).collect();
-            selection
-        });
-
-        Ok(Box::pin(selected))
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        Box::pin(async move {
+            let indices = self.indices.to_vec();
+            let selected = self.source.clone().stream(txn_id).await?.map(move |row| {
+                let selection: Vec<Value> = indices.iter().map(|i| row[*i].clone()).collect();
+                selection
+            });
+            let selected: TCStream<Vec<Value>> = Box::pin(selected);
+            Ok(selected)
+        })
     }
 
-    async fn validate_bounds(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        let bounds_columns: HashSet<&ValueId> = bounds.keys().collect();
-        let selected: HashSet<&ValueId> = self.schema.column_names();
-        let mut unknown: HashSet<&&ValueId> = selected.difference(&bounds_columns).collect();
-        if !unknown.is_empty() {
-            let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
-            return Err(error::bad_request(
-                "Tried to slice by unselected columns",
-                unknown.join(", "),
-            ));
-        }
+    fn validate_bounds<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        bounds: &'a Bounds,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let bounds_columns: HashSet<&ValueId> = bounds.keys().collect();
+            let selected: HashSet<&ValueId> = self.schema.column_names();
+            let mut unknown: HashSet<&&ValueId> = selected.difference(&bounds_columns).collect();
+            if !unknown.is_empty() {
+                let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
+                return Err(error::bad_request(
+                    "Tried to slice by unselected columns",
+                    unknown.join(", "),
+                ));
+            }
 
-        self.source.validate_bounds(txn_id, bounds).await
+            self.source.validate_bounds(txn_id, bounds).await
+        })
     }
 
     async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
@@ -328,11 +351,13 @@ impl Selection for IndexSlice {
         &self.schema
     }
 
-    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        self.source
-            .clone()
-            .slice(txn_id.clone(), self.range.clone().into())
-            .await
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        Box::pin(async move {
+            self.source
+                .clone()
+                .slice(txn_id.clone(), self.range.clone().into())
+                .await
+        })
     }
 
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
@@ -345,11 +370,17 @@ impl Selection for IndexSlice {
             .await
     }
 
-    async fn validate_bounds(&self, _txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        let schema = self.schema();
-        let outer = self.bounds.clone().try_into_btree_range(schema)?;
-        let inner = bounds.clone().try_into_btree_range(schema)?;
-        outer.contains(&inner, schema.data_types()).map(|_| ())
+    fn validate_bounds<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        bounds: &'a Bounds,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let schema = self.schema();
+            let outer = self.bounds.clone().try_into_btree_range(schema)?;
+            let inner = bounds.clone().try_into_btree_range(schema)?;
+            outer.contains(&inner, schema.data_types()).map(|_| ())
+        })
     }
 
     async fn validate_order(&self, _txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
@@ -427,14 +458,20 @@ impl Selection for Limited {
         self.source.schema()
     }
 
-    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let rows = self.source.clone().stream(txn_id).await?;
-
-        Ok(Box::pin(rows.take(self.limit)))
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        Box::pin(async move {
+            let rows = self.source.clone().stream(txn_id).await?;
+            let rows: TCStream<Vec<Value>> = Box::pin(rows.take(self.limit));
+            Ok(rows)
+        })
     }
 
-    async fn validate_bounds(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        self.source.validate_bounds(txn_id, bounds).await
+    fn validate_bounds<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        bounds: &'a Bounds,
+    ) -> TCBoxTryFuture<'a, ()> {
+        self.source.validate_bounds(txn_id, bounds)
     }
 
     async fn validate_order(&self, _txn_id: &TxnId, _order: &[ValueId]) -> TCResult<()> {
@@ -452,6 +489,120 @@ impl Selection for Limited {
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
+    }
+}
+
+#[derive(Clone)]
+enum MergeSource {
+    Table(TableSlice),
+    Merge(Arc<Merged>),
+}
+
+impl MergeSource {
+    fn slice<'a>(self, txn_id: TxnId, bounds: Bounds) -> TCBoxTryFuture<'a, Table> {
+        Box::pin(async move {
+            match self {
+                Self::Table(table) => table.slice(&txn_id, bounds).await,
+                Self::Merge(merged) => merged.slice(&txn_id, bounds).await,
+            }
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct Merged {
+    left: MergeSource,
+    right: IndexSlice,
+}
+
+#[async_trait]
+impl Selection for Merged {
+    type Stream = TCStream<Vec<Value>>;
+
+    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+        let schema = self.schema();
+        self.clone()
+            .stream(txn_id.clone())
+            .await?
+            .map(|values| schema.values_into_row(values))
+            .map_ok(|row| self.delete_row(&txn_id, row))
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+
+    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+        match &self.left {
+            MergeSource::Table(table) => table.delete_row(txn_id, row).await,
+            MergeSource::Merge(merged) => merged.delete_row(txn_id, row).await,
+        }
+    }
+
+    async fn order_by(
+        &self,
+        _txn_id: &TxnId,
+        _columns: Vec<ValueId>,
+        _reverse: bool,
+    ) -> TCResult<Table> {
+        Err(error::not_implemented())
+    }
+
+    fn reversed(&self) -> TCResult<Table> {
+        Err(error::not_implemented())
+    }
+
+    fn schema(&'_ self) -> &'_ Schema {
+        match &self.left {
+            MergeSource::Table(table) => table.schema(),
+            MergeSource::Merge(merged) => merged.schema(),
+        }
+    }
+
+    fn slice<'a>(&'a self, _txn_id: &'a TxnId, _bounds: Bounds) -> TCBoxTryFuture<'a, Table> {
+        Box::pin(async move { Err(error::not_implemented()) })
+    }
+
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        Box::pin(async move {
+            let schema = self.schema().clone();
+            let key_names = schema.key_names();
+            let left = self.left.clone();
+            let key_into_bounds = move |key| schema.key_into_bounds(key);
+            let txn_id_clone = txn_id.clone();
+            let rows = self
+                .right
+                .select(key_names)?
+                .stream(txn_id.clone())
+                .await?
+                .map(key_into_bounds)
+                .then(move |key| left.clone().slice(txn_id.clone(), key))
+                .map(|slice| slice.unwrap())
+                .then(move |slice| slice.stream(txn_id_clone.clone()))
+                .map(|stream| stream.unwrap())
+                .flatten();
+            let rows: TCStream<Vec<Value>> = Box::pin(rows);
+            Ok(rows)
+        })
+    }
+
+    fn validate_bounds<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        _bounds: &'a Bounds,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move { Err(error::not_implemented()) })
+    }
+
+    async fn validate_order(&self, _txn_id: &TxnId, _order: &[ValueId]) -> TCResult<()> {
+        Err(error::not_implemented())
+    }
+
+    async fn update(self, _txn: Arc<Txn>, _value: Row) -> TCResult<()> {
+        Err(error::not_implemented())
+    }
+
+    async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
+        Err(error::not_implemented())
     }
 }
 
@@ -476,7 +627,7 @@ impl TableSlice {
 
 #[async_trait]
 impl Selection for TableSlice {
-    type Stream = Pin<Box<dyn Stream<Item = Vec<Value>> + Send + Sync + Unpin>>;
+    type Stream = TCStream<Vec<Value>>;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         let index = self.table.supporting_index(&txn_id, &self.bounds).await?;
@@ -489,7 +640,8 @@ impl Selection for TableSlice {
 
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         let schema = self.schema().clone();
-        self.stream(txn_id.clone())
+        self.clone()
+            .stream(txn_id.clone())
             .await?
             .map(|row| schema.values_into_row(row))
             .map_ok(|row| self.delete_row(&txn_id, row))
@@ -521,31 +673,28 @@ impl Selection for TableSlice {
         self.table.schema()
     }
 
-    async fn slice(&self, txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
-        self.validate_bounds(txn_id, &bounds).await?;
-        self.table.slice(txn_id, bounds).await
+    fn slice<'a>(&'a self, txn_id: &'a TxnId, bounds: Bounds) -> TCBoxTryFuture<'a, Table> {
+        Box::pin(async move {
+            self.validate_bounds(txn_id, &bounds).await?;
+            self.table.slice(txn_id, bounds).await
+        })
     }
 
-    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let left = Arc::new(self.table.primary().clone());
-        let right = self.table.supporting_index(&txn_id, &self.bounds).await?;
-        right.validate_bounds(&txn_id, &self.bounds).await?;
-
-        let rows = right
-            .stream(txn_id.clone())
-            .await?
-            .then(move |key| left.clone().get_by_key(txn_id.clone(), key))
-            .filter(|row| future::ready(row.is_some()))
-            .map(|row| row.unwrap());
-
-        Ok(Box::pin(rows))
+    fn stream<'a>(self, _txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        Box::pin(async move { Err(error::not_implemented()) })
     }
 
-    async fn validate_bounds(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        let index = self.table.supporting_index(txn_id, &self.bounds).await?;
-        index
-            .validate_schema_bounds(self.bounds.clone(), bounds.clone())
-            .map(|_| ())
+    fn validate_bounds<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        bounds: &'a Bounds,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let index = self.table.supporting_index(txn_id, &self.bounds).await?;
+            index
+                .validate_schema_bounds(self.bounds.clone(), bounds.clone())
+                .map(|_| ())
+        })
     }
 
     async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
@@ -555,7 +704,8 @@ impl Selection for TableSlice {
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
         let txn_id = txn.id().clone();
         let schema = self.schema().clone();
-        self.stream(txn_id.clone())
+        self.clone()
+            .stream(txn_id.clone())
             .await?
             .map(|row| schema.values_into_row(row))
             .map_ok(|row| self.update_row(txn_id.clone(), row, value.clone()))

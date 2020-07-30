@@ -10,7 +10,7 @@ use crate::state::btree::{self, BTree, BTreeRange};
 use crate::state::dir::Dir;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Txn, TxnId};
-use crate::value::{TCResult, TCStream, Value, ValueId};
+use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
 
 use super::schema::{Bounds, Column, Row, Schema};
 use super::view::{IndexSlice, TableSlice};
@@ -144,38 +144,42 @@ impl Selection for Index {
         Ok(IndexSlice::all(self.btree.clone(), self.schema.clone(), true).into())
     }
 
-    async fn slice(&self, _txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
-        self.index_slice(bounds).map(|is| is.into())
+    fn slice(&self, _txn_id: &TxnId, bounds: Bounds) -> TCBoxTryFuture<Table> {
+        Box::pin(async move { self.index_slice(bounds).map(|is| is.into()) })
     }
 
-    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        self.btree
-            .clone()
-            .slice(txn_id, btree::Selector::all())
-            .await
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        Box::pin(async move {
+            self.btree
+                .clone()
+                .slice(txn_id, btree::Selector::all())
+                .await
+        })
     }
 
-    async fn validate_bounds(&self, _txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        self.schema.validate_bounds(bounds)?;
+    fn validate_bounds<'a>(&'a self, _txn_id: &'a TxnId, bounds: &'a Bounds) -> TCBoxTryFuture<()> {
+        Box::pin(async move {
+            self.schema.validate_bounds(bounds)?;
 
-        for (column, (bound_column, bound_range)) in self.schema.columns()[0..bounds.len()]
-            .iter()
-            .zip(bounds.iter())
-        {
-            if &column.name != bound_column {
-                return Err(error::bad_request(
-                    &format!(
-                        "Expected column {} in index range selector but found",
-                        column.name
-                    ),
-                    bound_column,
-                ));
+            for (column, (bound_column, bound_range)) in self.schema.columns()[0..bounds.len()]
+                .iter()
+                .zip(bounds.iter())
+            {
+                if &column.name != bound_column {
+                    return Err(error::bad_request(
+                        &format!(
+                            "Expected column {} in index range selector but found",
+                            column.name
+                        ),
+                        bound_column,
+                    ));
+                }
+
+                bound_range.expect(column.dtype, &format!("for column {}", column.name))?;
             }
 
-            bound_range.expect(column.dtype, &format!("for column {}", column.name))?;
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 
     async fn validate_order(&self, _txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
@@ -281,19 +285,25 @@ impl Selection for ReadOnly {
         self.index.schema()
     }
 
-    async fn slice(&self, txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
-        self.validate_bounds(txn_id, &bounds).await?;
-        self.index
-            .slice_index(bounds)
-            .map(|index| ReadOnly { index }.into())
+    fn slice<'a>(&'a self, txn_id: &'a TxnId, bounds: Bounds) -> TCBoxTryFuture<'a, Table> {
+        Box::pin(async move {
+            self.validate_bounds(txn_id, &bounds).await?;
+            self.index
+                .slice_index(bounds)
+                .map(|index| ReadOnly { index }.into())
+        })
     }
 
-    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        self.index.stream(txn_id).await
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        Box::pin(async move { self.index.clone().stream(txn_id).await })
     }
 
-    async fn validate_bounds(&self, txn_id: &TxnId, bounds: &Bounds) -> TCResult<()> {
-        self.index.validate_bounds(txn_id, bounds).await
+    fn validate_bounds<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        bounds: &'a Bounds,
+    ) -> TCBoxTryFuture<'a, ()> {
+        self.index.validate_bounds(txn_id, bounds)
     }
 
     async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
@@ -489,22 +499,28 @@ impl Selection for TableBase {
         ))
     }
 
-    async fn slice(&self, txn_id: &TxnId, bounds: Bounds) -> TCResult<Table> {
-        if self.primary.validate_bounds(txn_id, &bounds).await.is_ok() {
-            return TableSlice::new(self.clone(), txn_id, bounds)
-                .await
-                .map(|t| t.into());
-        }
+    fn slice<'a>(&'a self, txn_id: &'a TxnId, bounds: Bounds) -> TCBoxTryFuture<'a, Table> {
+        Box::pin(async move {
+            if self.primary.validate_bounds(txn_id, &bounds).await.is_ok() {
+                return TableSlice::new(self.clone(), txn_id, bounds)
+                    .await
+                    .map(|t| t.into());
+            }
 
-        Err(error::not_implemented())
+            Err(error::not_implemented())
+        })
     }
 
-    async fn stream(&self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        self.primary.stream(txn_id).await
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        self.primary.clone().stream(txn_id)
     }
 
-    async fn validate_bounds(&self, _txn_id: &TxnId, _bounds: &Bounds) -> TCResult<()> {
-        Err(error::not_implemented())
+    fn validate_bounds<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        _bounds: &'a Bounds,
+    ) -> TCBoxTryFuture<()> {
+        Box::pin(async move { Err(error::not_implemented()) })
     }
 
     async fn validate_order(&self, _txn_id: &TxnId, _order: &[ValueId]) -> TCResult<()> {

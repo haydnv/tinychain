@@ -217,6 +217,12 @@ impl Schema {
         &self.key
     }
 
+    pub fn key_into_bounds(&self, mut key: Vec<Value>) -> Bounds {
+        assert!(key.len() == self.key.len());
+        let key: HashMap<ValueId, Value> = self.key_names().drain(..).zip(key.drain(..)).collect();
+        key.into()
+    }
+
     pub fn key_names(&self) -> Vec<ValueId> {
         self.key.iter().map(|c| &c.name).cloned().collect()
     }
@@ -275,8 +281,6 @@ impl Schema {
 
         Ok(())
     }
-
-
 
     pub fn validate_row_partial(&self, row: &Row) -> TCResult<()> {
         let columns: HashMap<ValueId, ValueType> = self
