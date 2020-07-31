@@ -492,6 +492,79 @@ impl BlockList for BlockListCast {
     }
 }
 
+struct BlockListExpand {
+    source: Arc<dyn BlockList>,
+    rebase: transform::Expand,
+}
+
+impl TensorView for BlockListExpand {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim() + 1
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.shape().size()
+    }
+}
+
+#[async_trait]
+impl BlockList for BlockListExpand {
+    fn block_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Array> {
+        self.source.clone().block_stream(txn_id)
+    }
+
+    fn value_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Number> {
+        self.source.clone().value_stream(txn_id)
+    }
+
+    fn slice_value_stream(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> TCTryStream<Number> {
+        let bounds = self.rebase.invert_bounds(bounds);
+        self.source.clone().slice_value_stream(txn_id, bounds)
+    }
+
+    fn read_value_at<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        coord: &'a [u64],
+    ) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(async move {
+            let coord = self.rebase.invert_coord(coord);
+            self.source.read_value_at(txn_id, &coord).await
+        })
+    }
+
+    async fn write_value(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        bounds: Bounds,
+        number: Number,
+    ) -> TCResult<()> {
+        let bounds = self.rebase.invert_bounds(bounds);
+        self.source
+            .clone()
+            .write_value(txn_id, bounds, number)
+            .await
+    }
+
+    fn write_value_at<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> BoxFuture<'a, TCResult<()>> {
+        let coord = self.rebase.invert_coord(&coord);
+        self.source.write_value_at(txn_id, coord, value)
+    }
+}
+
 struct BlockListSlice {
     source: Arc<dyn BlockList>,
     rebase: transform::Slice,
@@ -689,8 +762,14 @@ impl TensorTransform for DenseTensor {
         Ok(DenseTensor { blocks })
     }
 
-    fn expand_dims(&self, _axis: usize) -> TCResult<Self> {
-        Err(error::not_implemented())
+    fn expand_dims(&self, axis: usize) -> TCResult<Self> {
+        let rebase = transform::Expand::new(self.shape().clone(), axis)?;
+        let blocks = Arc::new(BlockListExpand {
+            source: self.blocks.clone(),
+            rebase,
+        });
+
+        Ok(DenseTensor { blocks })
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self> {
