@@ -125,6 +125,10 @@ impl Bounds {
         axes.iter().cloned().multi_cartesian_product()
     }
 
+    pub fn insert(&mut self, axis: usize, bound: AxisBounds) {
+        self.axes.insert(axis, bound)
+    }
+
     pub fn is_empty(&self) -> bool {
         return self.axes.is_empty();
     }
@@ -151,6 +155,10 @@ impl Bounds {
         for axis in self.axes.len()..shape.len() {
             self.axes.push(AxisBounds::all(shape[axis]))
         }
+    }
+
+    pub fn remove(&mut self, axis: usize) {
+        self.axes.remove(axis);
     }
 
     pub fn size(&self) -> u64 {

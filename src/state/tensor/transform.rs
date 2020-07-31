@@ -108,6 +108,82 @@ impl Broadcast {
 }
 
 #[derive(Clone)]
+pub struct Expand {
+    source_shape: Shape,
+    shape: Shape,
+    expand: usize,
+    inverted_axes: Vec<usize>,
+}
+
+impl Expand {
+    pub fn new(source_shape: Shape, expand: usize) -> TCResult<Expand> {
+        if expand > source_shape.len() {
+            return Err(error::bad_request("Axis out of bounds", expand));
+        }
+
+        let mut inverted_axes = Vec::with_capacity(source_shape.len() + 1);
+        inverted_axes.extend(0..source_shape.len());
+        inverted_axes.insert(expand, expand);
+
+        let mut shape = source_shape.to_vec();
+        shape.insert(expand, 1);
+        let shape: Shape = shape.into();
+
+        Ok(Expand {
+            source_shape,
+            shape,
+            expand,
+            inverted_axes,
+        })
+    }
+
+    pub fn shape(&'_ self) -> &'_ Shape {
+        &self.shape
+    }
+
+    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+        let mut axes: Vec<usize> = axes.iter().map(|x| self.inverted_axes[*x]).collect();
+        axes.dedup();
+        axes
+    }
+
+    pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+        if bounds.len() < self.expand {
+            bounds.remove(self.expand);
+        }
+
+        bounds
+    }
+
+    pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
+        assert!(coord.len() == self.shape.len());
+
+        let mut inverted = Vec::with_capacity(self.source_shape.len());
+        inverted.extend(&coord[..self.expand]);
+
+        if self.expand < self.source_shape.len() {
+            inverted.extend(&coord[self.expand + 1..]);
+        }
+
+        inverted
+    }
+
+    pub fn map_bounds(&self, mut bounds: Bounds) -> Bounds {
+        if self.expand < bounds.len() {
+            bounds.insert(self.expand, AxisBounds::At(0));
+        }
+
+        bounds
+    }
+
+    pub fn map_coord(&self, mut coord: Vec<u64>) -> Vec<u64> {
+        assert!(coord.len() == self.source_shape.len());
+        coord.insert(self.expand, 0);
+        coord
+    }
+}
+
+#[derive(Clone)]
 pub struct Slice {
     source_shape: Shape,
     shape: Shape,

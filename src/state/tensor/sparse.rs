@@ -244,18 +244,18 @@ impl SparseAccessor for SparseCast {
     }
 }
 
-struct SparseTranspose {
+struct SparseExpand {
     source: Arc<dyn SparseAccessor>,
-    rebase: transform::Transpose,
+    rebase: transform::Expand,
 }
 
-impl TensorView for SparseTranspose {
+impl TensorView for SparseExpand {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
 
     fn ndim(&self) -> usize {
-        self.source.ndim()
+        self.source.ndim() + 1
     }
 
     fn shape(&'_ self) -> &'_ Shape {
@@ -263,24 +263,25 @@ impl TensorView for SparseTranspose {
     }
 
     fn size(&self) -> u64 {
-        self.source.size()
+        self.shape().size()
     }
 }
 
 #[async_trait]
-impl SparseAccessor for SparseTranspose {
+impl SparseAccessor for SparseExpand {
     async fn filled(
         self: Arc<Self>,
         txn_id: TxnId,
         order: Option<Vec<usize>>,
     ) -> TCResult<TCStream<(Vec<u64>, Number)>> {
-        let order = if let Some(order) = order {
-            self.rebase.invert_axes(order)
-        } else {
-            self.rebase.invert_axes((0..self.ndim()).collect())
-        };
+        let filled = self
+            .source
+            .clone()
+            .filled(txn_id, order.map(|axes| self.rebase.invert_axes(axes)))
+            .await?
+            .map(move |(coord, value)| (self.rebase.map_coord(coord), value));
 
-        self.source.clone().filled(txn_id, Some(order)).await
+        Ok(Box::pin(filled))
     }
 
     async fn filled_at(
@@ -302,19 +303,14 @@ impl SparseAccessor for SparseTranspose {
         order: Option<Vec<usize>>,
     ) -> TCResult<TCStream<(Vec<u64>, Number)>> {
         let bounds = self.rebase.invert_bounds(bounds);
-
-        let order = if let Some(order) = order {
-            self.rebase.invert_axes(order)
-        } else {
-            self.rebase.invert_axes((0..self.ndim()).collect())
-        };
-
-        let source = self
+        let order = order.map(|axes| self.rebase.invert_axes(axes));
+        let filled_in = self
             .source
             .clone()
-            .filled_in(txn_id, bounds, Some(order))
-            .await?;
-        let filled_in = source.map(move |(coord, value)| (self.rebase.map_coord(coord), value));
+            .filled_in(txn_id, bounds, order)
+            .await?
+            .map(move |(coord, value)| (self.rebase.map_coord(coord), value));
+
         Ok(Box::pin(filled_in))
     }
 
@@ -331,8 +327,8 @@ impl SparseAccessor for SparseTranspose {
         coord: Vec<u64>,
         value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        self.source
-            .write_value(txn_id, self.rebase.invert_coord(&coord), value)
+        let coord = self.rebase.invert_coord(&coord);
+        self.source.write_value(txn_id, coord, value)
     }
 }
 
@@ -430,6 +426,98 @@ impl SparseAccessor for SparseSlice {
             let coord = self.rebase.invert_coord(&coord);
             self.source.write_value(txn_id, coord, value).await
         })
+    }
+}
+
+struct SparseTranspose {
+    source: Arc<dyn SparseAccessor>,
+    rebase: transform::Transpose,
+}
+
+impl TensorView for SparseTranspose {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl SparseAccessor for SparseTranspose {
+    async fn filled(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        order: Option<Vec<usize>>,
+    ) -> TCResult<TCStream<(Vec<u64>, Number)>> {
+        let order = if let Some(order) = order {
+            self.rebase.invert_axes(order)
+        } else {
+            self.rebase.invert_axes((0..self.ndim()).collect())
+        };
+
+        self.source.clone().filled(txn_id, Some(order)).await
+    }
+
+    async fn filled_at(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        axes: Vec<usize>,
+    ) -> TCResult<TCStream<Vec<u64>>> {
+        group_axes(self, txn_id, axes).await
+    }
+
+    async fn filled_count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
+        self.source.clone().filled_count(txn_id).await
+    }
+
+    async fn filled_in(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        bounds: Bounds,
+        order: Option<Vec<usize>>,
+    ) -> TCResult<TCStream<(Vec<u64>, Number)>> {
+        let bounds = self.rebase.invert_bounds(bounds);
+
+        let order = if let Some(order) = order {
+            self.rebase.invert_axes(order)
+        } else {
+            self.rebase.invert_axes((0..self.ndim()).collect())
+        };
+
+        let source = self
+            .source
+            .clone()
+            .filled_in(txn_id, bounds, Some(order))
+            .await?;
+        let filled_in = source.map(move |(coord, value)| (self.rebase.map_coord(coord), value));
+        Ok(Box::pin(filled_in))
+    }
+
+    fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(async move {
+            let coord = self.rebase.invert_coord(coord);
+            self.source.read_value(txn_id, &coord).await
+        })
+    }
+
+    fn write_value<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        self.source
+            .write_value(txn_id, self.rebase.invert_coord(&coord), value)
     }
 }
 
@@ -641,8 +729,14 @@ impl TensorTransform for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    fn expand_dims(&self, _axis: usize) -> TCResult<Self> {
-        Err(error::not_implemented())
+    fn expand_dims(&self, axis: usize) -> TCResult<Self> {
+        let rebase = transform::Expand::new(self.shape().clone(), axis)?;
+        let accessor = Arc::new(SparseExpand {
+            source: self.accessor.clone(),
+            rebase,
+        });
+
+        Ok(SparseTensor { accessor })
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self> {
@@ -672,43 +766,6 @@ impl TensorTransform for SparseTensor {
 
         Ok(SparseTensor { accessor })
     }
-}
-
-async fn slice_table(
-    mut table: Table,
-    txn_id: &TxnId,
-    bounds: &Bounds,
-    order: Option<Vec<usize>>,
-) -> TCResult<Table> {
-    use AxisBounds::*;
-
-    if let Some(order) = order {
-        let order = order.iter().map(|x| ValueId::from(*x)).collect();
-        table = table.order_by(txn_id, order, false).await?;
-    }
-
-    for (axis, axis_bound) in bounds.to_vec().into_iter().enumerate() {
-        let axis: ValueId = axis.into();
-        table = match axis_bound {
-            At(x) => {
-                let column_bound = ColumnBound::Is(u64_to_value(x));
-                table
-                    .slice(txn_id, vec![(axis, column_bound)].into())
-                    .await?
-            }
-            In(range, 1) => {
-                let start = Bound::Included(u64_to_value(range.start));
-                let end = Bound::Excluded(u64_to_value(range.end));
-                let column_bound = ColumnBound::In(start, end);
-                table
-                    .slice(txn_id, vec![(axis, column_bound)].into())
-                    .await?
-            }
-            _ => todo!(),
-        };
-    }
-
-    Ok(table)
 }
 
 async fn group_axes(
@@ -747,6 +804,43 @@ async fn group_axes(
     });
 
     Ok(Box::pin(filled_at))
+}
+
+async fn slice_table(
+    mut table: Table,
+    txn_id: &TxnId,
+    bounds: &Bounds,
+    order: Option<Vec<usize>>,
+) -> TCResult<Table> {
+    use AxisBounds::*;
+
+    if let Some(order) = order {
+        let order = order.iter().map(|x| ValueId::from(*x)).collect();
+        table = table.order_by(txn_id, order, false).await?;
+    }
+
+    for (axis, axis_bound) in bounds.to_vec().into_iter().enumerate() {
+        let axis: ValueId = axis.into();
+        table = match axis_bound {
+            At(x) => {
+                let column_bound = ColumnBound::Is(u64_to_value(x));
+                table
+                    .slice(txn_id, vec![(axis, column_bound)].into())
+                    .await?
+            }
+            In(range, 1) => {
+                let start = Bound::Included(u64_to_value(range.start));
+                let end = Bound::Excluded(u64_to_value(range.end));
+                let column_bound = ColumnBound::In(start, end);
+                table
+                    .slice(txn_id, vec![(axis, column_bound)].into())
+                    .await?
+            }
+            _ => todo!(),
+        };
+    }
+
+    Ok(table)
 }
 
 fn u64_to_value(u: u64) -> Value {
