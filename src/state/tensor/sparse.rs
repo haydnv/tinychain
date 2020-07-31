@@ -17,6 +17,8 @@ use crate::value::{Number, TCBoxTryFuture, TCResult, TCStream, UInt, Value, Valu
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::*;
 
+const ERR_BROADCAST_WRITE: &str = "Cannot write to a broadcasted tensor since it is not a \
+bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor.";
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
 #[async_trait]
@@ -133,22 +135,21 @@ impl SparseAccessor for SparseBroadcast {
         self.source.clone().filled_in(txn_id, bounds, order).await
     }
 
-    fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move {
-            self.source
-                .read_value(txn_id, &self.rebase.invert_coord(coord))
-                .await
-        })
+    fn read_value<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        _coord: &'a [u64],
+    ) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(future::ready(Err(error::unsupported(ERR_BROADCAST_WRITE))))
     }
 
     fn write_value<'a>(
         &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        self.source
-            .write_value(txn_id, self.rebase.invert_coord(&coord), value)
+        Box::pin(future::ready(Err(error::unsupported(ERR_BROADCAST_WRITE))))
     }
 }
 

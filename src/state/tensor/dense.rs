@@ -21,6 +21,8 @@ use super::*;
 
 const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
+const ERR_BROADCAST_WRITE: &str = "Cannot write to a broadcasted tensor since it is not a \
+bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor.";
 const ERR_CORRUPT: &str = "DenseTensor corrupted! Please file a bug report.";
 
 #[async_trait]
@@ -342,7 +344,7 @@ impl BlockList for BlockListBroadcast {
         _bounds: Bounds,
         _number: Number,
     ) -> TCResult<()> {
-        Err(error::unsupported("Cannot write to a broadcasted tensor since it is not a bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor."))
+        Err(error::unsupported(ERR_BROADCAST_WRITE))
     }
 
     fn write_value_at<'a>(
@@ -351,9 +353,7 @@ impl BlockList for BlockListBroadcast {
         _coord: Vec<u64>,
         _value: Number,
     ) -> BoxFuture<'a, TCResult<()>> {
-        Box::pin(async move {
-            Err(error::unsupported("Cannot write to a broadcasted tensor since it is not a bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor."))
-        })
+        Box::pin(future::ready(Err(error::unsupported(ERR_BROADCAST_WRITE))))
     }
 }
 
