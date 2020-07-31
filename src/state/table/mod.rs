@@ -93,7 +93,11 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         bounds: &'a schema::Bounds,
     ) -> TCBoxTryFuture<'a, ()>;
 
-    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()>;
+    fn validate_order<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        order: &'a [ValueId],
+    ) -> TCBoxTryFuture<'a, ()>;
 
     async fn update(self, _txn: Arc<Txn>, _value: schema::Row) -> TCResult<()> {
         Err(error::unsupported(
@@ -296,7 +300,11 @@ impl Selection for Table {
         }
     }
 
-    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+    fn validate_order<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        order: &'a [ValueId],
+    ) -> TCBoxTryFuture<'a, ()> {
         match self {
             Self::Aggregate(aggregate) => aggregate.validate_order(txn_id, order),
             Self::Columns(columns) => columns.validate_order(txn_id, order),

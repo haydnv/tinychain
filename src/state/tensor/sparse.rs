@@ -232,9 +232,7 @@ impl SparseAccessor for SparseCast {
         Box::pin(async move {
             let dtype = self.dtype;
             let source = self.source.clone().filled_in(txn_id, bounds, order).await?;
-            let filled_in = source.map(move |(coord, value)| {
-                (coord, value.into_type(dtype))
-            });
+            let filled_in = source.map(move |(coord, value)| (coord, value.into_type(dtype)));
             let filled_in: SparseStream = Box::pin(filled_in);
             Ok(filled_in)
         })
@@ -720,10 +718,7 @@ pub struct SparseTensor {
 }
 
 impl SparseTensor {
-    pub fn filled<'a>(
-        &'a self,
-        txn_id: TxnId,
-    ) -> TCBoxTryFuture<'a, SparseStream> {
+    pub fn filled<'a>(&'a self, txn_id: TxnId) -> TCBoxTryFuture<'a, SparseStream> {
         self.accessor.clone().filled(txn_id, None)
     }
 }

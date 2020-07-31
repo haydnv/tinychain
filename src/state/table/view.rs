@@ -108,7 +108,11 @@ impl Selection for Aggregate {
         })
     }
 
-    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+    fn validate_order<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        order: &'a [ValueId],
+    ) -> TCBoxTryFuture<'a, ()> {
         self.source.validate_order(txn_id, order)
     }
 }
@@ -238,7 +242,11 @@ impl Selection for ColumnSelection {
         })
     }
 
-    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+    fn validate_order<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        order: &'a [ValueId],
+    ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let order_columns: HashSet<ValueId> = order.iter().cloned().collect();
             let selected: HashSet<ValueId> = self.schema().column_names();
@@ -391,7 +399,11 @@ impl Selection for IndexSlice {
         })
     }
 
-    fn validate_order<'a>(&'a self, _txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+    fn validate_order<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        order: &'a [ValueId],
+    ) -> TCBoxTryFuture<'a, ()> {
         let result = if self.schema.starts_with(order) {
             Ok(())
         } else {
@@ -484,7 +496,11 @@ impl Selection for Limited {
         self.source.validate_bounds(txn_id, bounds)
     }
 
-    fn validate_order<'a>(&'a self, _txn_id: &'a TxnId, _order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+    fn validate_order<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        _order: &'a [ValueId],
+    ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(future::ready(Err(error::unsupported("Cannot order a limited selection, consider ordering the source or indexing the selection"))))
     }
 
@@ -639,7 +655,11 @@ impl Selection for Merged {
         }
     }
 
-    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+    fn validate_order<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        order: &'a [ValueId],
+    ) -> TCBoxTryFuture<'a, ()> {
         match &self.left {
             MergeSource::Merge(merge) => merge.validate_order(txn_id, order),
             MergeSource::Table(table) => table.validate_order(txn_id, order),
@@ -772,7 +792,11 @@ impl Selection for TableSlice {
         })
     }
 
-    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+    fn validate_order<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        order: &'a [ValueId],
+    ) -> TCBoxTryFuture<'a, ()> {
         self.table.validate_order(txn_id, order)
     }
 

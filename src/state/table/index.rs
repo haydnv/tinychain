@@ -165,7 +165,11 @@ impl Selection for Index {
         })
     }
 
-    fn validate_order<'a>(&'a self, _txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+    fn validate_order<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        order: &'a [ValueId],
+    ) -> TCBoxTryFuture<'a, ()> {
         let result = if !self.schema.starts_with(&order) {
             let order: Vec<String> = order.iter().map(|c| c.to_string()).collect();
             Err(error::bad_request(
@@ -638,7 +642,11 @@ impl Selection for TableBase {
         })
     }
 
-    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, mut order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+    fn validate_order<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        mut order: &'a [ValueId],
+    ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let auxiliary = self.auxiliary.read(txn_id).await?;
 
