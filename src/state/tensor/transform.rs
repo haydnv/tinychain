@@ -71,7 +71,7 @@ impl Broadcast {
         source_bounds.into()
     }
 
-    pub fn invert_coord(&self, coord: Vec<u64>) -> Vec<u64> {
+    pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
         let source_ndim = self.source_shape.len();
         let mut source_coord = Vec::with_capacity(source_ndim);
         for axis in 0..source_ndim {
@@ -104,6 +104,7 @@ impl Broadcast {
     }
 }
 
+#[derive(Clone)]
 pub struct Transpose {
     source_shape: Shape,
     shape: Shape,
@@ -157,7 +158,7 @@ impl Transpose {
         source_bounds
     }
 
-    pub fn invert_coord(&self, coord: Vec<u64>) -> Vec<u64> {
+    pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
         let mut source_coord = Vec::with_capacity(self.source_shape.len());
         for axis in 0..coord.len() {
             source_coord[self.permutation[axis]] = coord[axis];

@@ -117,7 +117,7 @@ impl SparseAccessor for SparseBroadcast {
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             self.source
-                .read_value(txn_id, &self.rebase.invert_coord(coord.to_vec()))
+                .read_value(txn_id, &self.rebase.invert_coord(coord))
                 .await
         })
     }
@@ -129,7 +129,7 @@ impl SparseAccessor for SparseBroadcast {
         value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
         self.source
-            .write_value(txn_id, self.rebase.invert_coord(coord), value)
+            .write_value(txn_id, self.rebase.invert_coord(&coord), value)
     }
 }
 
@@ -256,7 +256,7 @@ impl SparseAccessor for SparseTranspose {
 
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
-            let coord = self.rebase.invert_coord(coord.to_vec());
+            let coord = self.rebase.invert_coord(coord);
             self.source.read_value(txn_id, &coord).await
         })
     }
@@ -268,7 +268,7 @@ impl SparseAccessor for SparseTranspose {
         value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
         self.source
-            .write_value(txn_id, self.rebase.invert_coord(coord), value)
+            .write_value(txn_id, self.rebase.invert_coord(&coord), value)
     }
 }
 
