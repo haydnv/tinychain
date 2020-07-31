@@ -83,7 +83,7 @@ impl Bounds {
     pub fn try_into_btree_range(mut self, schema: &Schema) -> TCResult<btree::BTreeRange> {
         let mut start = Vec::with_capacity(self.len());
         let mut end = Vec::with_capacity(self.len());
-        let column_names: Vec<&ValueId> = schema.column_names();
+        let column_names: Vec<ValueId> = schema.column_names();
 
         use Bound::*;
         for name in &column_names[0..self.len()] {
@@ -180,11 +180,12 @@ impl Schema {
             .collect()
     }
 
-    pub fn column_names<'a, F: FromIterator<&'a ValueId>>(&'a self) -> F {
+    pub fn column_names<F: FromIterator<ValueId>>(&self) -> F {
         self.key
             .iter()
             .map(|c| &c.name)
             .chain(self.value.iter().map(|c| &c.name))
+            .cloned()
             .collect()
     }
 
@@ -232,9 +233,9 @@ impl Schema {
     }
 
     pub fn starts_with(&self, expected: &[ValueId]) -> bool {
-        let actual: Vec<&ValueId> = self.column_names();
+        let actual: Vec<ValueId> = self.column_names();
         for (a, e) in actual[0..expected.len()].iter().zip(expected.iter()) {
-            if a != &e {
+            if a != e {
                 return false;
             }
         }
@@ -261,7 +262,7 @@ impl Schema {
     }
 
     pub fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        let column_names: HashSet<&ValueId> = self.column_names();
+        let column_names: HashSet<ValueId> = self.column_names();
         for name in bounds.0.keys() {
             if !column_names.contains(name) {
                 return Err(error::not_found(name));
@@ -272,7 +273,7 @@ impl Schema {
     }
 
     pub fn validate_columns(&self, columns: &[ValueId]) -> TCResult<()> {
-        let valid_columns: HashSet<&ValueId> = self.column_names();
+        let valid_columns: HashSet<ValueId> = self.column_names();
         for column in columns {
             if !valid_columns.contains(column) {
                 return Err(error::not_found(column));
@@ -300,10 +301,10 @@ impl Schema {
     }
 
     pub fn validate_row(&self, row: &Row) -> TCResult<()> {
-        let expected: HashSet<&ValueId> = self.column_names();
-        let actual: HashSet<&ValueId> = row.keys().collect();
-        let mut missing: Vec<&&ValueId> = expected.difference(&actual).collect();
-        let mut extra: Vec<&&ValueId> = actual.difference(&expected).collect();
+        let expected: HashSet<ValueId> = self.column_names();
+        let actual: HashSet<ValueId> = row.keys().cloned().collect();
+        let mut missing: Vec<&ValueId> = expected.difference(&actual).collect();
+        let mut extra: Vec<&ValueId> = actual.difference(&expected).collect();
 
         if !missing.is_empty() {
             return Err(error::bad_request(

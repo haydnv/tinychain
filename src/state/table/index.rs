@@ -13,7 +13,7 @@ use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
 
-use super::schema::{Bounds, Column, Row, Schema};
+use super::schema::{Bounds, Column, ColumnBound, Row, Schema};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
 use super::{Selection, Table};
 
@@ -537,12 +537,42 @@ impl Selection for TableBase {
         self.primary.stream(txn_id)
     }
 
-    fn validate_bounds<'a>(
-        &'a self,
-        _txn_id: &'a TxnId,
-        _bounds: &'a Bounds,
-    ) -> TCBoxTryFuture<()> {
-        Box::pin(async move { Err(error::not_implemented()) })
+    fn validate_bounds<'a>(&'a self, txn_id: &'a TxnId, bounds: &'a Bounds) -> TCBoxTryFuture<()> {
+        Box::pin(async move {
+            let mut columns: Vec<ValueId> = self.schema().column_names();
+            let bounds: Vec<(ValueId, ColumnBound)> = columns
+                .drain(..)
+                .filter_map(|name| bounds.get(&name).map(|bound| (name, bound.clone())))
+                .collect();
+
+            let auxiliary = self.auxiliary.read(txn_id).await?;
+
+            let mut bounds = &bounds[..];
+            while !bounds.is_empty() {
+                let initial = bounds.len();
+                for i in (1..bounds.len() + 1).rev() {
+                    let subset: Bounds = bounds[..i].to_vec().into();
+
+                    for index in iter::once(&self.primary).chain(auxiliary.values()) {
+                        if index.validate_bounds(txn_id, &subset).await.is_ok() {
+                            bounds = &bounds[i..];
+                            break;
+                        }
+                    }
+                }
+
+                if bounds.len() == initial {
+                    let order: Vec<String> =
+                        bounds.iter().map(|(name, _)| name.to_string()).collect();
+                    return Err(error::bad_request(
+                        "This table has no index to support selection bounds on",
+                        order.join(", "),
+                    ));
+                }
+            }
+
+            Ok(())
+        })
     }
 
     async fn validate_order(&self, txn_id: &TxnId, mut order: &[ValueId]) -> TCResult<()> {
@@ -553,12 +583,7 @@ impl Selection for TableBase {
             for i in (1..order.len() + 1).rev() {
                 let subset = &order[..i];
 
-                if self.primary.validate_order(txn_id, subset).await.is_ok() {
-                    order = &order[i..];
-                    break;
-                }
-
-                for index in auxiliary.values() {
+                for index in iter::once(&self.primary).chain(auxiliary.values()) {
                     if index.validate_order(txn_id, subset).await.is_ok() {
                         order = &order[i..];
                         break;

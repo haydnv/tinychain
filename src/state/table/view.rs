@@ -219,9 +219,9 @@ impl Selection for ColumnSelection {
         bounds: &'a Bounds,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
-            let bounds_columns: HashSet<&ValueId> = bounds.keys().collect();
-            let selected: HashSet<&ValueId> = self.schema.column_names();
-            let mut unknown: HashSet<&&ValueId> = selected.difference(&bounds_columns).collect();
+            let bounds_columns: HashSet<ValueId> = bounds.keys().cloned().collect();
+            let selected: HashSet<ValueId> = self.schema.column_names();
+            let mut unknown: HashSet<&ValueId> = selected.difference(&bounds_columns).collect();
             if !unknown.is_empty() {
                 let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
                 return Err(error::bad_request(
@@ -235,9 +235,9 @@ impl Selection for ColumnSelection {
     }
 
     async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
-        let order_columns: HashSet<&ValueId> = order.iter().collect();
-        let selected: HashSet<&ValueId> = self.schema().column_names();
-        let mut unknown: HashSet<&&ValueId> = selected.difference(&order_columns).collect();
+        let order_columns: HashSet<ValueId> = order.iter().cloned().collect();
+        let selected: HashSet<ValueId> = self.schema().column_names();
+        let mut unknown: HashSet<&ValueId> = selected.difference(&order_columns).collect();
         if !unknown.is_empty() {
             let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
             return Err(error::bad_request(
