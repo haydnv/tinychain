@@ -57,12 +57,12 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         Ok(Arc::new(limited))
     }
 
-    async fn order_by(
-        &self,
-        txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         columns: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table>;
+    ) -> TCBoxTryFuture<'a, Table>;
 
     fn reversed(&self) -> TCResult<Table>;
 
@@ -93,7 +93,7 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         bounds: &'a schema::Bounds,
     ) -> TCBoxTryFuture<'a, ()>;
 
-    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()>;
+    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()>;
 
     async fn update(self, _txn: Arc<Txn>, _value: schema::Row) -> TCResult<()> {
         Err(error::unsupported(
@@ -170,22 +170,22 @@ impl Selection for Table {
         }
     }
 
-    async fn order_by(
-        &self,
-        txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         order: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table> {
+    ) -> TCBoxTryFuture<'a, Table> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.order_by(txn_id, order, reverse).await,
-            Self::Columns(columns) => columns.order_by(txn_id, order, reverse).await,
-            Self::Limit(limited) => limited.order_by(txn_id, order, reverse).await,
-            Self::Index(index) => index.order_by(txn_id, order, reverse).await,
-            Self::IndexSlice(index_slice) => index_slice.order_by(txn_id, order, reverse).await,
-            Self::Merge(merged) => merged.order_by(txn_id, order, reverse).await,
-            Self::ROIndex(ro_index) => ro_index.order_by(txn_id, order, reverse).await,
-            Self::Table(table) => table.order_by(txn_id, order, reverse).await,
-            Self::TableSlice(table_slice) => table_slice.order_by(txn_id, order, reverse).await,
+            Self::Aggregate(aggregate) => aggregate.order_by(txn_id, order, reverse),
+            Self::Columns(columns) => columns.order_by(txn_id, order, reverse),
+            Self::Limit(limited) => limited.order_by(txn_id, order, reverse),
+            Self::Index(index) => index.order_by(txn_id, order, reverse),
+            Self::IndexSlice(index_slice) => index_slice.order_by(txn_id, order, reverse),
+            Self::Merge(merged) => merged.order_by(txn_id, order, reverse),
+            Self::ROIndex(ro_index) => ro_index.order_by(txn_id, order, reverse),
+            Self::Table(table) => table.order_by(txn_id, order, reverse),
+            Self::TableSlice(table_slice) => table_slice.order_by(txn_id, order, reverse),
         }
     }
 
@@ -296,17 +296,17 @@ impl Selection for Table {
         }
     }
 
-    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.validate_order(txn_id, order).await,
-            Self::Columns(columns) => columns.validate_order(txn_id, order).await,
-            Self::Limit(limited) => limited.validate_order(txn_id, order).await,
-            Self::Index(index) => index.validate_order(txn_id, order).await,
-            Self::IndexSlice(index_slice) => index_slice.validate_order(txn_id, order).await,
-            Self::Merge(merged) => merged.validate_order(txn_id, order).await,
-            Self::ROIndex(ro_index) => ro_index.validate_order(txn_id, order).await,
-            Self::Table(table) => table.validate_order(txn_id, order).await,
-            Self::TableSlice(table_slice) => table_slice.validate_order(txn_id, order).await,
+            Self::Aggregate(aggregate) => aggregate.validate_order(txn_id, order),
+            Self::Columns(columns) => columns.validate_order(txn_id, order),
+            Self::Limit(limited) => limited.validate_order(txn_id, order),
+            Self::Index(index) => index.validate_order(txn_id, order),
+            Self::IndexSlice(index_slice) => index_slice.validate_order(txn_id, order),
+            Self::Merge(merged) => merged.validate_order(txn_id, order),
+            Self::ROIndex(ro_index) => ro_index.validate_order(txn_id, order),
+            Self::Table(table) => table.validate_order(txn_id, order),
+            Self::TableSlice(table_slice) => table_slice.validate_order(txn_id, order),
         }
     }
 }

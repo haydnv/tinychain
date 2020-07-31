@@ -96,13 +96,13 @@ impl Selection for Index {
         })
     }
 
-    async fn order_by(
-        &self,
-        _txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
         order: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table> {
-        if self.schema.starts_with(&order) {
+    ) -> TCBoxTryFuture<Table> {
+        let table = if self.schema.starts_with(&order) {
             if reverse {
                 self.reversed()
             } else {
@@ -114,7 +114,9 @@ impl Selection for Index {
                 &format!("Index with schema {} does not support order", self.schema),
                 order.join(", "),
             ))
-        }
+        };
+
+        Box::pin(future::ready(table))
     }
 
     fn schema(&'_ self) -> &'_ Schema {
@@ -163,8 +165,8 @@ impl Selection for Index {
         })
     }
 
-    async fn validate_order(&self, _txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
-        if !self.schema.starts_with(&order) {
+    fn validate_order<'a>(&'a self, _txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+        let result = if !self.schema.starts_with(&order) {
             let order: Vec<String> = order.iter().map(|c| c.to_string()).collect();
             Err(error::bad_request(
                 &format!("Cannot order index with schema {} by", self.schema),
@@ -172,7 +174,9 @@ impl Selection for Index {
             ))
         } else {
             Ok(())
-        }
+        };
+
+        Box::pin(future::ready(result))
     }
 
     async fn update(self, txn: Arc<Txn>, row: Row) -> TCResult<()> {
@@ -243,19 +247,21 @@ impl Selection for ReadOnly {
         self.index.clone().count(txn_id).await
     }
 
-    async fn order_by(
-        &self,
-        txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         order: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table> {
-        self.index.validate_order(txn_id, &order).await?;
+    ) -> TCBoxTryFuture<'a, Table> {
+        Box::pin(async move {
+            self.index.validate_order(txn_id, &order).await?;
 
-        if reverse {
-            self.reversed()
-        } else {
-            Ok(self.clone().into())
-        }
+            if reverse {
+                self.reversed()
+            } else {
+                Ok(self.clone().into())
+            }
+        })
     }
 
     fn reversed(&self) -> TCResult<Table> {
@@ -287,8 +293,8 @@ impl Selection for ReadOnly {
         self.index.validate_bounds(txn_id, bounds)
     }
 
-    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
-        self.index.validate_order(txn_id, order).await
+    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<()> {
+        self.index.validate_order(txn_id, order)
     }
 }
 
@@ -465,63 +471,65 @@ impl Selection for TableBase {
         })
     }
 
-    async fn order_by(
-        &self,
-        txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         columns: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table> {
-        self.validate_order(txn_id, &columns).await?;
+    ) -> TCBoxTryFuture<'a, Table> {
+        Box::pin(async move {
+            self.validate_order(txn_id, &columns).await?;
 
-        if self.primary.validate_order(txn_id, &columns).await.is_ok() {
-            let ordered = TableSlice::new(self.clone(), txn_id, Bounds::all()).await?;
-            if reverse {
-                return ordered.reversed();
-            } else {
-                return Ok(ordered.into());
-            }
-        }
-
-        let auxiliary = self.auxiliary.read(txn_id).await?;
-
-        let selection = TableSlice::new(self.clone(), txn_id, Bounds::all()).await?;
-        let mut merge_source = MergeSource::Table(selection);
-
-        let mut columns = &columns[..];
-        loop {
-            let initial = columns.to_vec();
-            for i in (1..columns.len() + 1).rev() {
-                let subset = &columns[..i];
-
-                for index in iter::once(&self.primary).chain(auxiliary.values()) {
-                    if index.validate_order(txn_id, subset).await.is_ok() {
-                        columns = &columns[i..];
-
-                        let index_slice = self.primary.index_slice(Bounds::all())?;
-                        let merged = Merged::new(merge_source, index_slice);
-
-                        if columns.is_empty() {
-                            if reverse {
-                                return merged.reversed();
-                            } else {
-                                return Ok(merged.into());
-                            }
-                        }
-
-                        merge_source = MergeSource::Merge(Arc::new(merged));
-                        break;
-                    }
+            if self.primary.validate_order(txn_id, &columns).await.is_ok() {
+                let ordered = TableSlice::new(self.clone(), txn_id, Bounds::all()).await?;
+                if reverse {
+                    return ordered.reversed();
+                } else {
+                    return Ok(ordered.into());
                 }
             }
 
-            if columns == &initial[..] {
-                let order: Vec<String> = columns.iter().map(String::from).collect();
-                return Err(error::bad_request(
-                    "This table has no index to support the order",
-                    order.join(", "),
-                ));
+            let auxiliary = self.auxiliary.read(txn_id).await?;
+
+            let selection = TableSlice::new(self.clone(), txn_id, Bounds::all()).await?;
+            let mut merge_source = MergeSource::Table(selection);
+
+            let mut columns = &columns[..];
+            loop {
+                let initial = columns.to_vec();
+                for i in (1..columns.len() + 1).rev() {
+                    let subset = &columns[..i];
+
+                    for index in iter::once(&self.primary).chain(auxiliary.values()) {
+                        if index.validate_order(txn_id, subset).await.is_ok() {
+                            columns = &columns[i..];
+
+                            let index_slice = self.primary.index_slice(Bounds::all())?;
+                            let merged = Merged::new(merge_source, index_slice);
+
+                            if columns.is_empty() {
+                                if reverse {
+                                    return merged.reversed();
+                                } else {
+                                    return Ok(merged.into());
+                                }
+                            }
+
+                            merge_source = MergeSource::Merge(Arc::new(merged));
+                            break;
+                        }
+                    }
+                }
+
+                if columns == &initial[..] {
+                    let order: Vec<String> = columns.iter().map(String::from).collect();
+                    return Err(error::bad_request(
+                        "This table has no index to support the order",
+                        order.join(", "),
+                    ));
+                }
             }
-        }
+        })
     }
 
     fn schema(&'_ self) -> &'_ Schema {
@@ -630,32 +638,34 @@ impl Selection for TableBase {
         })
     }
 
-    async fn validate_order(&self, txn_id: &TxnId, mut order: &[ValueId]) -> TCResult<()> {
-        let auxiliary = self.auxiliary.read(txn_id).await?;
+    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, mut order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let auxiliary = self.auxiliary.read(txn_id).await?;
 
-        while !order.is_empty() {
-            let initial = order.to_vec();
-            for i in (1..order.len() + 1).rev() {
-                let subset = &order[..i];
+            while !order.is_empty() {
+                let initial = order.to_vec();
+                for i in (1..order.len() + 1).rev() {
+                    let subset = &order[..i];
 
-                for index in iter::once(&self.primary).chain(auxiliary.values()) {
-                    if index.validate_order(txn_id, subset).await.is_ok() {
-                        order = &order[i..];
-                        break;
+                    for index in iter::once(&self.primary).chain(auxiliary.values()) {
+                        if index.validate_order(txn_id, subset).await.is_ok() {
+                            order = &order[i..];
+                            break;
+                        }
                     }
+                }
+
+                if order == &initial[..] {
+                    let order: Vec<String> = order.iter().map(String::from).collect();
+                    return Err(error::bad_request(
+                        "This table has no index to support the order",
+                        order.join(", "),
+                    ));
                 }
             }
 
-            if order == &initial[..] {
-                let order: Vec<String> = order.iter().map(String::from).collect();
-                return Err(error::bad_request(
-                    "This table has no index to support the order",
-                    order.join(", "),
-                ));
-            }
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {

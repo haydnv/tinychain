@@ -36,18 +36,20 @@ impl Selection for Aggregate {
         Err(error::unsupported("It doesn't make sense to aggregate an aggregate table view; consider aggregating the source table directly"))
     }
 
-    async fn order_by(
-        &self,
-        txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         columns: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table> {
-        let source = Box::new(self.source.order_by(txn_id, columns, reverse).await?);
-        Ok(Aggregate {
-            source,
-            columns: self.columns.to_vec(),
-        }
-        .into())
+    ) -> TCBoxTryFuture<'a, Table> {
+        Box::pin(async move {
+            let source = Box::new(self.source.order_by(txn_id, columns, reverse).await?);
+            Ok(Aggregate {
+                source,
+                columns: self.columns.to_vec(),
+            }
+            .into())
+        })
     }
 
     fn reversed(&self) -> TCResult<Table> {
@@ -106,8 +108,8 @@ impl Selection for Aggregate {
         })
     }
 
-    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
-        self.source.validate_order(txn_id, order).await
+    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+        self.source.validate_order(txn_id, order)
     }
 }
 
@@ -167,27 +169,29 @@ impl Selection for ColumnSelection {
         self.source.clone().count(txn_id).await
     }
 
-    async fn order_by(
-        &self,
-        txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         order: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table> {
-        self.validate_order(txn_id, &order).await?;
+    ) -> TCBoxTryFuture<'a, Table> {
+        Box::pin(async move {
+            self.validate_order(txn_id, &order).await?;
 
-        let source = self
-            .source
-            .order_by(txn_id, order, reverse)
-            .await
-            .map(Box::new)?;
+            let source = self
+                .source
+                .order_by(txn_id, order, reverse)
+                .await
+                .map(Box::new)?;
 
-        Ok(ColumnSelection {
-            source,
-            schema: self.schema.clone(),
-            columns: self.columns.to_vec(),
-            indices: self.indices.to_vec(),
-        }
-        .into())
+            Ok(ColumnSelection {
+                source,
+                schema: self.schema.clone(),
+                columns: self.columns.to_vec(),
+                indices: self.indices.to_vec(),
+            }
+            .into())
+        })
     }
 
     fn reversed(&self) -> TCResult<Table> {
@@ -234,19 +238,21 @@ impl Selection for ColumnSelection {
         })
     }
 
-    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
-        let order_columns: HashSet<ValueId> = order.iter().cloned().collect();
-        let selected: HashSet<ValueId> = self.schema().column_names();
-        let mut unknown: HashSet<&ValueId> = selected.difference(&order_columns).collect();
-        if !unknown.is_empty() {
-            let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
-            return Err(error::bad_request(
-                "Tried to order by unselected columns",
-                unknown.join(", "),
-            ));
-        }
+    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let order_columns: HashSet<ValueId> = order.iter().cloned().collect();
+            let selected: HashSet<ValueId> = self.schema().column_names();
+            let mut unknown: HashSet<&ValueId> = selected.difference(&order_columns).collect();
+            if !unknown.is_empty() {
+                let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
+                return Err(error::bad_request(
+                    "Tried to order by unselected columns",
+                    unknown.join(", "),
+                ));
+            }
 
-        self.source.validate_order(txn_id, order).await
+            self.source.validate_order(txn_id, order).await
+        })
     }
 }
 
@@ -322,13 +328,13 @@ impl Selection for IndexSlice {
         self.source.delete(&txn_id, self.range.into()).await
     }
 
-    async fn order_by(
-        &self,
-        _txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
         order: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table> {
-        if self.schema.starts_with(&order) {
+    ) -> TCBoxTryFuture<'a, Table> {
+        let result = if self.schema.starts_with(&order) {
             if reverse {
                 self.reversed()
             } else {
@@ -340,7 +346,9 @@ impl Selection for IndexSlice {
                 &format!("Index with schema {} does not support order", &self.schema),
                 order.join(", "),
             ))
-        }
+        };
+
+        Box::pin(future::ready(result))
     }
 
     fn reversed(&self) -> TCResult<Table> {
@@ -383,8 +391,8 @@ impl Selection for IndexSlice {
         })
     }
 
-    async fn validate_order(&self, _txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
-        if self.schema.starts_with(order) {
+    fn validate_order<'a>(&'a self, _txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+        let result = if self.schema.starts_with(order) {
             Ok(())
         } else {
             let order: Vec<String> = order.iter().map(String::from).collect();
@@ -392,7 +400,9 @@ impl Selection for IndexSlice {
                 &format!("Index with schema {} does not support order", &self.schema),
                 order.join(", "),
             ))
-        }
+        };
+
+        Box::pin(future::ready(result))
     }
 }
 
@@ -439,13 +449,13 @@ impl Selection for Limited {
             .await
     }
 
-    async fn order_by(
-        &self,
-        _txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
         _order: Vec<ValueId>,
         _reverse: bool,
-    ) -> TCResult<Table> {
-        Err(error::unsupported("Cannot order a limited selection, consider ordering the source or indexing the selection"))
+    ) -> TCBoxTryFuture<Table> {
+        Box::pin(future::ready(Err(error::unsupported("Cannot order a limited selection, consider ordering the source or indexing the selection"))))
     }
 
     fn reversed(&self) -> TCResult<Table> {
@@ -474,8 +484,8 @@ impl Selection for Limited {
         self.source.validate_bounds(txn_id, bounds)
     }
 
-    async fn validate_order(&self, _txn_id: &TxnId, _order: &[ValueId]) -> TCResult<()> {
-        Err(error::unsupported("Cannot order a limited selection, consider ordering the source or indexing the selection"))
+    fn validate_order<'a>(&'a self, _txn_id: &'a TxnId, _order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::unsupported("Cannot order a limited selection, consider ordering the source or indexing the selection"))))
     }
 
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
@@ -558,15 +568,15 @@ impl Selection for Merged {
         }
     }
 
-    async fn order_by(
-        &self,
-        txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         columns: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table> {
+    ) -> TCBoxTryFuture<'a, Table> {
         match &self.left {
-            MergeSource::Merge(merged) => merged.order_by(txn_id, columns, reverse).await,
-            MergeSource::Table(table_slice) => table_slice.order_by(txn_id, columns, reverse).await,
+            MergeSource::Merge(merged) => merged.order_by(txn_id, columns, reverse),
+            MergeSource::Table(table_slice) => table_slice.order_by(txn_id, columns, reverse),
         }
     }
 
@@ -629,10 +639,10 @@ impl Selection for Merged {
         }
     }
 
-    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
         match &self.left {
-            MergeSource::Merge(merge) => merge.validate_order(txn_id, order).await,
-            MergeSource::Table(table) => table.validate_order(txn_id, order).await,
+            MergeSource::Merge(merge) => merge.validate_order(txn_id, order),
+            MergeSource::Table(table) => table.validate_order(txn_id, order),
         }
     }
 
@@ -712,13 +722,13 @@ impl Selection for TableSlice {
         self.table.delete_row(txn_id, row)
     }
 
-    async fn order_by(
-        &self,
-        txn_id: &TxnId,
+    fn order_by<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         order: Vec<ValueId>,
         reverse: bool,
-    ) -> TCResult<Table> {
-        self.table.order_by(txn_id, order, reverse).await
+    ) -> TCBoxTryFuture<'a, Table> {
+        self.table.order_by(txn_id, order, reverse)
     }
 
     fn reversed(&self) -> TCResult<Table> {
@@ -762,8 +772,8 @@ impl Selection for TableSlice {
         })
     }
 
-    async fn validate_order(&self, txn_id: &TxnId, order: &[ValueId]) -> TCResult<()> {
-        self.table.validate_order(txn_id, order).await
+    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<'a, ()> {
+        self.table.validate_order(txn_id, order)
     }
 
     async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
