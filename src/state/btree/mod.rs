@@ -18,7 +18,7 @@ use crate::state::file::File;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::{Impl, ValueClass, ValueType};
-use crate::value::{TCResult, TCStream, Value, ValueId};
+use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
 
 use super::{Collect, GetResult, State};
 
@@ -538,29 +538,31 @@ impl BTree {
             .await
     }
 
-    pub async fn insert(&self, txn_id: &TxnId, key: Key) -> TCResult<()> {
-        let root_id = self.root.read(txn_id).await?;
-        let root_id_clone = (*root_id).clone();
-        let root = self.file.get_block(txn_id, root_id_clone).await?;
+    pub fn insert<'a>(&'a self, txn_id: &'a TxnId, key: Key) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let root_id = self.root.read(txn_id).await?;
+            let root_id_clone = (*root_id).clone();
+            let root = self.file.get_block(txn_id, root_id_clone).await?;
 
-        if root.keys.len() == (2 * self.order) - 1 {
-            let mut root_id = root_id.upgrade().await?;
-            let old_root_id = (*root_id).clone();
-            let old_root = root.upgrade().await?;
+            if root.keys.len() == (2 * self.order) - 1 {
+                let mut root_id = root_id.upgrade().await?;
+                let old_root_id = (*root_id).clone();
+                let old_root = root.upgrade().await?;
 
-            (*root_id) = self.file.unique_id(&txn_id).await?;
-            let mut new_root = Node::new(false, None);
-            new_root.children.push(old_root_id.clone());
-            let new_root = self
-                .file
-                .create_block(txn_id.clone(), (*root_id).clone(), new_root)
-                .await?;
+                (*root_id) = self.file.unique_id(&txn_id).await?;
+                let mut new_root = Node::new(false, None);
+                new_root.children.push(old_root_id.clone());
+                let new_root = self
+                    .file
+                    .create_block(txn_id.clone(), (*root_id).clone(), new_root)
+                    .await?;
 
-            self.split_child(txn_id, old_root_id, old_root, 0).await?;
-            self._insert(txn_id, new_root, key).await
-        } else {
-            self._insert(txn_id, root, key).await
-        }
+                self.split_child(txn_id, old_root_id, old_root, 0).await?;
+                self._insert(txn_id, new_root, key).await
+            } else {
+                self._insert(txn_id, root, key).await
+            }
+        })
     }
 
     fn _insert<'a>(
@@ -568,7 +570,7 @@ impl BTree {
         txn_id: &'a TxnId,
         node: Block<'a, Node>,
         key: Key,
-    ) -> BoxFuture<'a, TCResult<()>> {
+    ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let keys = &node.keys;
             let i = self.collator.bisect_left(&node.values(), &key);
@@ -634,9 +636,11 @@ impl BTree {
         node.downgrade(&txn_id).await
     }
 
-    pub async fn delete(&self, txn_id: &TxnId, bounds: Selector) -> TCResult<()> {
-        let root_id = self.root.read(txn_id).await?;
-        self._delete(txn_id, (*root_id).clone(), &bounds).await
+    pub fn delete<'a>(&'a self, txn_id: &'a TxnId, bounds: Selector) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let root_id = self.root.read(txn_id).await?;
+            self._delete(txn_id, (*root_id).clone(), &bounds).await
+        })
     }
 
     fn _delete<'a>(
@@ -644,7 +648,7 @@ impl BTree {
         txn_id: &'a TxnId,
         node_id: NodeId,
         bounds: &'a Selector,
-    ) -> BoxFuture<'a, TCResult<()>> {
+    ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let node = self.file.get_block(txn_id, node_id).await?;
             let keys = node.values();

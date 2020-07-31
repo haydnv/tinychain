@@ -35,8 +35,9 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         ))
     }
 
-    async fn delete_row(&self, _txn_id: &TxnId, _row: schema::Row) -> TCResult<()> {
-        Err(error::unsupported("This table view does not support row deletion (try deleting from the source table directly)"))
+    fn delete_row<'a>(&'a self, _txn_id: &'a TxnId, _row: schema::Row) -> TCBoxTryFuture<'a, ()> {
+        let err_msg = "This table view does not support row deletion (try deleting from the source table directly)";
+        Box::pin(future::ready(Err(error::unsupported(err_msg))))
     }
 
     async fn group_by(&self, txn_id: TxnId, columns: Vec<ValueId>) -> TCResult<view::Aggregate> {
@@ -155,17 +156,17 @@ impl Selection for Table {
         }
     }
 
-    async fn delete_row(&self, txn_id: &TxnId, row: schema::Row) -> TCResult<()> {
+    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: schema::Row) -> TCBoxTryFuture<'a, ()> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.delete_row(txn_id, row).await,
-            Self::Columns(columns) => columns.delete_row(txn_id, row).await,
-            Self::Limit(limited) => limited.delete_row(txn_id, row).await,
-            Self::Index(index) => index.delete_row(txn_id, row).await,
-            Self::IndexSlice(index_slice) => index_slice.delete_row(txn_id, row).await,
-            Self::Merge(merged) => merged.delete_row(txn_id, row).await,
-            Self::ROIndex(ro_index) => ro_index.delete_row(txn_id, row).await,
-            Self::Table(table) => table.delete_row(txn_id, row).await,
-            Self::TableSlice(table_slice) => table_slice.delete_row(txn_id, row).await,
+            Self::Aggregate(aggregate) => aggregate.delete_row(txn_id, row),
+            Self::Columns(columns) => columns.delete_row(txn_id, row),
+            Self::Limit(limited) => limited.delete_row(txn_id, row),
+            Self::Index(index) => index.delete_row(txn_id, row),
+            Self::IndexSlice(index_slice) => index_slice.delete_row(txn_id, row),
+            Self::Merge(merged) => merged.delete_row(txn_id, row),
+            Self::ROIndex(ro_index) => ro_index.delete_row(txn_id, row),
+            Self::Table(table) => table.delete_row(txn_id, row),
+            Self::TableSlice(table_slice) => table_slice.delete_row(txn_id, row),
         }
     }
 

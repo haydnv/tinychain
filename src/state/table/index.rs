@@ -47,9 +47,16 @@ impl Index {
         IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)
     }
 
-    async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
-        let key = self.schema().row_into_values(row, reject_extra_columns)?;
-        self.btree.insert(txn_id, key).await
+    fn insert<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        row: Row,
+        reject_extra_columns: bool,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let key = self.schema().row_into_values(row, reject_extra_columns)?;
+            self.btree.insert(txn_id, key).await
+        })
     }
 
     pub fn validate_schema_bounds(&self, outer: Bounds, inner: Bounds) -> TCResult<()> {
@@ -82,9 +89,11 @@ impl Selection for Index {
         self.btree.delete(&txn_id, btree::Selector::all()).await
     }
 
-    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
-        let key = self.schema.row_into_values(row, false)?;
-        self.btree.delete(txn_id, btree::Selector::Key(key)).await
+    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let key = self.schema.row_into_values(row, false)?;
+            self.btree.delete(txn_id, btree::Selector::Key(key)).await
+        })
     }
 
     async fn order_by(
@@ -402,19 +411,21 @@ impl TableBase {
         }
     }
 
-    pub async fn upsert<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCResult<()> {
-        self.delete_row(txn_id, row.clone()).await?;
+    pub fn upsert<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            self.delete_row(txn_id, row.clone()).await?;
 
-        let auxiliary = self.auxiliary.read(txn_id).await?;
+            let auxiliary = self.auxiliary.read(txn_id).await?;
 
-        let mut inserts = Vec::with_capacity(auxiliary.len() + 1);
-        for index in auxiliary.values() {
-            inserts.push(index.insert(txn_id, row.clone(), false));
-        }
-        inserts.push(self.primary.insert(txn_id, row, true));
+            let mut inserts = Vec::with_capacity(auxiliary.len() + 1);
+            for index in auxiliary.values() {
+                inserts.push(index.insert(txn_id, row.clone(), false));
+            }
+            inserts.push(self.primary.insert(txn_id, row, true));
 
-        try_join_all(inserts).await?;
-        Ok(())
+            try_join_all(inserts).await?;
+            Ok(())
+        })
     }
 }
 
@@ -438,18 +449,20 @@ impl Selection for TableBase {
         Ok(())
     }
 
-    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
-        self.schema().validate_row(&row)?;
+    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            self.schema().validate_row(&row)?;
 
-        let auxiliary = self.auxiliary.read(txn_id).await?;
-        let mut deletes = Vec::with_capacity(auxiliary.len() + 1);
-        for index in auxiliary.values() {
-            deletes.push(index.delete_row(txn_id, row.clone()));
-        }
-        deletes.push(self.primary.delete_row(txn_id, row));
-        try_join_all(deletes).await?;
+            let auxiliary = self.auxiliary.read(txn_id).await?;
+            let mut deletes = Vec::with_capacity(auxiliary.len() + 1);
+            for index in auxiliary.values() {
+                deletes.push(index.delete_row(txn_id, row.clone()));
+            }
+            deletes.push(self.primary.delete_row(txn_id, row));
+            try_join_all(deletes).await?;
 
-        Ok(())
+            Ok(())
+        })
     }
 
     async fn order_by(

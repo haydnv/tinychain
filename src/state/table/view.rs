@@ -551,10 +551,10 @@ impl Selection for Merged {
             .await
     }
 
-    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
         match &self.left {
-            MergeSource::Table(table) => table.delete_row(txn_id, row).await,
-            MergeSource::Merge(merged) => merged.delete_row(txn_id, row).await,
+            MergeSource::Table(table) => table.delete_row(txn_id, row),
+            MergeSource::Merge(merged) => merged.delete_row(txn_id, row),
         }
     }
 
@@ -708,8 +708,8 @@ impl Selection for TableSlice {
             .await
     }
 
-    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
-        self.table.delete_row(txn_id, row).await
+    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
+        self.table.delete_row(txn_id, row)
     }
 
     async fn order_by(
