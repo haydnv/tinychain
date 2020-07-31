@@ -734,6 +734,21 @@ impl TensorView for DenseTensor {
     }
 }
 
+#[async_trait]
+impl TensorIO for DenseTensor {
+    async fn read_value(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Number> {
+        self.blocks.read_value_at(txn_id, coord).await
+    }
+
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+        self.blocks.clone().write_value(txn_id, bounds, value).await
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+        self.blocks.write_value_at(txn_id, coord, value).await
+    }
+}
+
 impl TensorTransform for DenseTensor {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
         if dtype == self.dtype() {

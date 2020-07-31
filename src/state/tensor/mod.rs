@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
+
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::NumberType;
 use crate::value::{Number, TCResult};
@@ -51,6 +53,20 @@ trait TensorCompare: Sized + TensorView {
     fn lte(&self, other: &Self) -> TCResult<DenseTensor>;
 
     fn ne(&self, other: &Self) -> TCResult<Self>;
+}
+
+#[async_trait]
+trait TensorIO: Sized + TensorView {
+    async fn read_value(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Number>;
+
+    async fn write_value(
+        &self,
+        txn_id: TxnId,
+        bounds: bounds::Bounds,
+        value: Number,
+    ) -> TCResult<()>;
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
 }
 
 trait TensorMath: Sized + TensorView {
@@ -118,39 +134,68 @@ impl TensorView for Tensor {
     }
 }
 
+#[async_trait]
+impl TensorIO for Tensor {
+    async fn read_value(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Number> {
+        match self {
+            Self::Dense(dense) => dense.read_value(txn_id, coord).await,
+            Self::Sparse(sparse) => sparse.read_value(txn_id, coord).await,
+        }
+    }
+
+    async fn write_value(
+        &self,
+        txn_id: TxnId,
+        bounds: bounds::Bounds,
+        value: Number,
+    ) -> TCResult<()> {
+        match self {
+            Self::Dense(dense) => dense.write_value(txn_id, bounds, value).await,
+            Self::Sparse(sparse) => sparse.write_value(txn_id, bounds, value).await,
+        }
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+        match self {
+            Self::Dense(dense) => dense.write_value_at(txn_id, coord, value).await,
+            Self::Sparse(sparse) => sparse.write_value_at(txn_id, coord, value).await,
+        }
+    }
+}
+
 impl TensorTransform for Tensor {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.as_type(dtype).map(Tensor::from),
-            Self::Sparse(sparse) => sparse.as_type(dtype).map(Tensor::from),
+            Self::Dense(dense) => dense.as_type(dtype).map(Self::from),
+            Self::Sparse(sparse) => sparse.as_type(dtype).map(Self::from),
         }
     }
 
     fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.broadcast(shape).map(Tensor::from),
-            Self::Sparse(sparse) => sparse.broadcast(shape).map(Tensor::from),
+            Self::Dense(dense) => dense.broadcast(shape).map(Self::from),
+            Self::Sparse(sparse) => sparse.broadcast(shape).map(Self::from),
         }
     }
 
     fn expand_dims(&self, axis: usize) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.expand_dims(axis).map(Tensor::from),
-            Self::Sparse(sparse) => sparse.expand_dims(axis).map(Tensor::from),
+            Self::Dense(dense) => dense.expand_dims(axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.expand_dims(axis).map(Self::from),
         }
     }
 
     fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.slice(bounds).map(Tensor::from),
-            Self::Sparse(sparse) => sparse.slice(bounds).map(Tensor::from),
+            Self::Dense(dense) => dense.slice(bounds).map(Self::from),
+            Self::Sparse(sparse) => sparse.slice(bounds).map(Self::from),
         }
     }
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.transpose(permutation).map(Tensor::from),
-            Self::Sparse(sparse) => sparse.transpose(permutation).map(Tensor::from),
+            Self::Dense(dense) => dense.transpose(permutation).map(Self::from),
+            Self::Sparse(sparse) => sparse.transpose(permutation).map(Self::from),
         }
     }
 }

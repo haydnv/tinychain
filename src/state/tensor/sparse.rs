@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
-use futures::stream::{self, Stream, StreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use crate::error;
 use crate::state::table::schema::*;
@@ -698,6 +698,25 @@ impl TensorView for SparseTensor {
 
     fn size(&self) -> u64 {
         self.accessor.size()
+    }
+}
+
+#[async_trait]
+impl TensorIO for SparseTensor {
+    async fn read_value(&self, txn_id: &TxnId, coord: &[u64]) -> TCResult<Number> {
+        self.accessor.read_value(txn_id, coord).await
+    }
+
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+        stream::iter(bounds.affected())
+            .map(|coord| Ok(self.write_value_at(txn_id.clone(), coord, value.clone())))
+            .try_buffer_unordered(2usize)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+        self.accessor.write_value(txn_id, coord, value).await
     }
 }
 
