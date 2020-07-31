@@ -738,8 +738,15 @@ impl Selection for TableSlice {
         })
     }
 
-    fn stream<'a>(self, _txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
-        Box::pin(async move { Err(error::not_implemented()) })
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        Box::pin(async move {
+            let slice = self
+                .table
+                .primary()
+                .slice(&txn_id, self.bounds.clone())
+                .await?;
+            slice.stream(txn_id).await
+        })
     }
 
     fn validate_bounds<'a>(
