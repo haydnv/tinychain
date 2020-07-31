@@ -529,7 +529,49 @@ impl Selection for TableBase {
                     .map(|t| t.into());
             }
 
-            Err(error::not_implemented())
+            let mut columns: Vec<ValueId> = self.schema().column_names();
+            let bounds: Vec<(ValueId, ColumnBound)> = columns
+                .drain(..)
+                .filter_map(|name| bounds.get(&name).map(|bound| (name, bound.clone())))
+                .collect();
+
+            let auxiliary = self.auxiliary.read(txn_id).await?;
+
+            let selection = TableSlice::new(self.clone(), txn_id, Bounds::all()).await?;
+            let mut merge_source = MergeSource::Table(selection);
+
+            let mut bounds = &bounds[..];
+            loop {
+                let initial = bounds.len();
+                for i in (1..bounds.len() + 1).rev() {
+                    let subset: Bounds = bounds[..i].to_vec().into();
+
+                    for index in iter::once(&self.primary).chain(auxiliary.values()) {
+                        if index.validate_bounds(txn_id, &subset).await.is_ok() {
+                            bounds = &bounds[i..];
+
+                            let index_slice = self.primary.index_slice(subset)?;
+                            let merged = Merged::new(merge_source, index_slice);
+
+                            if bounds.is_empty() {
+                                return Ok(merged.into());
+                            }
+
+                            merge_source = MergeSource::Merge(Arc::new(merged));
+                            break;
+                        }
+                    }
+                }
+
+                if bounds.len() == initial {
+                    let order: Vec<String> =
+                        bounds.iter().map(|(name, _)| name.to_string()).collect();
+                    return Err(error::bad_request(
+                        "This table has no index to support selection bounds on",
+                        order.join(", "),
+                    ));
+                }
+            }
         })
     }
 
