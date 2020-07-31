@@ -363,13 +363,19 @@ impl TensorView for BlockListBroadcast {
 #[async_trait]
 impl BlockList for BlockListBroadcast {
     fn value_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Number> {
-        let coords = Bounds::all(self.source.shape()).affected();
+        let bounds = Bounds::all(self.shape());
+        self.slice_value_stream(txn_id, bounds)
+    }
+
+    fn slice_value_stream(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> TCTryStream<Number> {
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        let source_coords = source_bounds.affected();
         let rebase = self.rebase.clone();
         let values = self
             .source
             .clone()
-            .value_stream(txn_id)
-            .zip(stream::iter(coords))
+            .slice_value_stream(txn_id, source_bounds)
+            .zip(stream::iter(source_coords))
             .map(move |(value, coord)| {
                 let broadcast = rebase.invert_bounds(coord.into());
                 stream::iter(iter::repeat(value).take(broadcast.size() as usize))
@@ -377,12 +383,6 @@ impl BlockList for BlockListBroadcast {
             .flatten();
 
         Box::pin(values)
-    }
-
-    fn slice_value_stream(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> TCTryStream<Number> {
-        self.source
-            .clone()
-            .slice_value_stream(txn_id, self.rebase.invert_bounds(bounds))
     }
 
     fn read_value_at<'a>(
@@ -590,13 +590,10 @@ impl TensorView for BlockListTranspose {
 #[async_trait]
 impl BlockList for BlockListTranspose {
     fn value_stream(self: Arc<Self>, txn_id: TxnId) -> TCTryStream<Number> {
-        let source = self.source.clone();
-        let rebase = self.rebase.clone();
-        Box::pin(
-            stream::iter(Bounds::all(self.shape()).affected())
-                .map(move |coord| rebase.invert_coord(&coord))
-                .then(move |coord| source.clone().read_value_at_owned(txn_id.clone(), coord)),
-        )
+        let values = stream::iter(Bounds::all(self.shape()).affected())
+            .then(move |coord| self.clone().read_value_at_owned(txn_id.clone(), coord));
+
+        Box::pin(values)
     }
 
     fn read_value_at<'a>(
@@ -611,9 +608,10 @@ impl BlockList for BlockListTranspose {
     }
 
     fn slice_value_stream(self: Arc<Self>, txn_id: TxnId, bounds: Bounds) -> TCTryStream<Number> {
-        self.source
-            .clone()
-            .slice_value_stream(txn_id, self.rebase.invert_bounds(bounds))
+        let values = stream::iter(bounds.affected())
+            .then(move |coord| self.clone().read_value_at_owned(txn_id.clone(), coord));
+
+        Box::pin(values)
     }
 
     async fn write_value(
