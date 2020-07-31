@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use arrayfire as af;
 use async_trait::async_trait;
-use futures::future::{self, BoxFuture, TryFutureExt};
+use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 
@@ -78,7 +78,7 @@ trait BlockList: TensorView + 'static {
         txn_id: TxnId,
         coord: Vec<u64>,
         value: Number,
-    ) -> BoxFuture<'a, TCResult<()>>;
+    ) -> TCBoxTryFuture<'a, ()>;
 }
 
 #[derive(Clone)]
@@ -303,7 +303,7 @@ impl BlockList for BlockListFile {
         txn_id: TxnId,
         coord: Vec<u64>,
         value: Number,
-    ) -> BoxFuture<'a, TCResult<()>> {
+    ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             if !self.shape().contains_coord(&coord) {
                 return Err(error::bad_request(
@@ -410,7 +410,7 @@ impl BlockList for BlockListBroadcast {
         _txn_id: TxnId,
         _coord: Vec<u64>,
         _value: Number,
-    ) -> BoxFuture<'a, TCResult<()>> {
+    ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(future::ready(Err(error::unsupported(ERR_BROADCAST_WRITE))))
     }
 }
@@ -487,7 +487,7 @@ impl BlockList for BlockListCast {
         txn_id: TxnId,
         coord: Vec<u64>,
         value: Number,
-    ) -> BoxFuture<'a, TCResult<()>> {
+    ) -> TCBoxTryFuture<'a, ()> {
         self.source.write_value_at(txn_id, coord, value)
     }
 }
@@ -559,7 +559,7 @@ impl BlockList for BlockListExpand {
         txn_id: TxnId,
         coord: Vec<u64>,
         value: Number,
-    ) -> BoxFuture<'a, TCResult<()>> {
+    ) -> TCBoxTryFuture<'a, ()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
     }
@@ -631,7 +631,7 @@ impl BlockList for BlockListSlice {
         txn_id: TxnId,
         coord: Vec<u64>,
         value: Number,
-    ) -> BoxFuture<'a, TCResult<()>> {
+    ) -> TCBoxTryFuture<'a, ()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
     }
@@ -705,7 +705,7 @@ impl BlockList for BlockListTranspose {
         txn_id: TxnId,
         coord: Vec<u64>,
         value: Number,
-    ) -> BoxFuture<'a, TCResult<()>> {
+    ) -> TCBoxTryFuture<'a, ()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
     }
