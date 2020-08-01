@@ -692,6 +692,21 @@ impl BlockList for BlockListSlice {
 
 struct BlockListSparse {
     source: SparseTensor,
+    coord_index: Vec<u64>,
+}
+
+impl BlockListSparse {
+    fn new(source: SparseTensor) -> BlockListSparse {
+        let shape = source.shape().to_vec();
+        let coord_index: Vec<u64> = (0..source.ndim())
+            .map(|x| shape[x + 1..].iter().product())
+            .collect();
+
+        BlockListSparse {
+            source,
+            coord_index,
+        }
+    }
 }
 
 impl TensorView for BlockListSparse {
@@ -716,19 +731,59 @@ impl BlockList for BlockListSparse {
     fn block_stream<'a>(self: Arc<Self>, txn_id: TxnId) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
             let dtype = self.dtype();
-            let shape = af::Array::new(
-                &self.shape().to_vec(),
-                af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
-            );
+            let ndim = self.ndim();
+            let source = self.source.clone();
+            let shape = self.source.shape().to_vec();
+            let coord_index = self.coord_index.to_vec();
 
             let block_offsets = ((PER_BLOCK as u64)..self.size()).step_by(PER_BLOCK);
-            let block_stream = stream::iter(block_offsets).map(move |offset| {
-                let block = Array::constant(dtype.zero(), PER_BLOCK);
+            let block_stream = stream::iter(block_offsets)
+                .map(|offset| (offset - PER_BLOCK as u64, offset))
+                .map(move |(start, end)| {
 
-                todo!();
+                    let start: Vec<u64> = coord_index
+                        .iter()
+                        .zip(shape.iter())
+                        .map(|(index, dim)| (start / index) % dim)
+                        .collect();
 
-                Ok(block)
-            });
+                    let end: Vec<u64> = coord_index
+                        .iter()
+                        .zip(shape.iter())
+                        .map(|(index, dim)| (end / index) % dim)
+                        .collect();
+
+                    (start, end)
+                })
+                .then(move |(start, end)| {
+                    let source = source.clone();
+                    let txn_id = txn_id.clone();
+
+                    Box::pin(async move {
+                        let mut filled: Vec<(Vec<u64>, Number)> = source
+                            .filled_range(txn_id, start, end)
+                            .await?
+                            .collect()
+                            .await;
+
+                        let mut block = Array::constant(dtype.zero(), PER_BLOCK);
+                        if filled.is_empty() {
+                            return Ok(block);
+                        }
+
+                        let (mut coords, values): (Vec<Vec<u64>>, Vec<Number>) =
+                            filled.drain(..).unzip();
+                        let coords: Vec<u64> = coords.drain(..).flatten().collect();
+                        let coords = af::Array::new(
+                            &coords,
+                            af::Dim4::new(&[ndim as u64, coords.len() as u64, 1, 1]),
+                        );
+                        let values = Array::try_from_values(values, dtype)?;
+                        block.set(coords, &values)?;
+
+                        Ok(block)
+                    })
+                });
 
             let block_stream: TCTryStream<Array> = Box::pin(block_stream);
             Ok(block_stream)
@@ -742,7 +797,7 @@ impl BlockList for BlockListSparse {
     ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         Box::pin(async move {
             let source = self.source.clone().slice(bounds)?;
-            let blocks = Arc::new(BlockListSparse { source });
+            let blocks = Arc::new(BlockListSparse::new(source));
             blocks.value_stream(txn_id).await
         })
     }

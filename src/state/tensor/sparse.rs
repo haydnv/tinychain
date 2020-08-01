@@ -883,8 +883,13 @@ pub struct SparseTensor {
 }
 
 impl SparseTensor {
-    pub fn filled<'a>(&'a self, txn_id: TxnId) -> TCBoxTryFuture<'a, SparseStream> {
-        self.accessor.clone().filled(txn_id, None)
+    pub fn filled_range<'a>(
+        &'a self,
+        txn_id: TxnId,
+        start: Vec<u64>,
+        end: Vec<u64>,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        self.accessor.clone().filled_range(txn_id, start, end, None)
     }
 }
 
