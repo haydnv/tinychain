@@ -911,6 +911,32 @@ impl TensorView for SparseTensor {
     }
 }
 
+impl TensorBoolean for SparseTensor {
+    fn all(&self, _txn_id: TxnId) -> TCResult<bool> {
+        Err(error::not_implemented())
+    }
+
+    fn any(&self, _txn_id: TxnId) -> TCResult<bool> {
+        Err(error::not_implemented())
+    }
+
+    fn and(&self, _other: &Self) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn not(&self) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn or(&self, _other: &Self) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn xor(&self, _other: &Self) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+}
+
 impl TensorIO for SparseTensor {
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         self.accessor.read_value(txn_id, coord)

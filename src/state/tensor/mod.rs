@@ -136,6 +136,62 @@ impl TensorView for Tensor {
     }
 }
 
+impl TensorBoolean for Tensor {
+    fn all(&self, txn_id: TxnId) -> TCResult<bool> {
+        match self {
+            Self::Dense(dense) => dense.all(txn_id),
+            Self::Sparse(sparse) => sparse.all(txn_id),
+        }
+    }
+
+    fn any(&self, txn_id: TxnId) -> TCResult<bool> {
+        match self {
+            Self::Dense(dense) => dense.any(txn_id),
+            Self::Sparse(sparse) => sparse.any(txn_id),
+        }
+    }
+
+    fn and(&self, other: &Self) -> TCResult<Self> {
+        use Tensor::*;
+        match (self, other) {
+            (Dense(left), Dense(right)) => left.and(right).map(Self::from),
+            (Sparse(left), Sparse(right)) => left.and(right).map(Self::from),
+            (Dense(left), Sparse(right)) => left
+                .and(&DenseTensor::from_sparse(right.clone()))
+                .map(Self::from),
+            _ => other.and(self),
+        }
+    }
+
+    fn not(&self) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.not().map(Self::from),
+            Self::Sparse(sparse) => sparse.not().map(Self::from),
+        }
+    }
+
+    fn or(&self, other: &Self) -> TCResult<Self> {
+        use Tensor::*;
+        match (self, other) {
+            (Dense(left), Dense(right)) => left.or(right).map(Self::from),
+            (Sparse(left), Sparse(right)) => left.or(right).map(Self::from),
+            (Dense(left), Sparse(right)) => left
+                .or(&DenseTensor::from_sparse(right.clone()))
+                .map(Self::from),
+            _ => other.and(self),
+        }
+    }
+
+    fn xor(&self, other: &Self) -> TCResult<Self> {
+        use Tensor::*;
+        match (self, other) {
+            (Dense(left), Dense(right)) => left.xor(right).map(Self::from),
+            (Sparse(left), _) => Dense(DenseTensor::from_sparse(left.clone())).xor(other),
+            (left, right) => right.xor(left),
+        }
+    }
+}
+
 impl TensorIO for Tensor {
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         match self {

@@ -740,7 +740,6 @@ impl BlockList for BlockListSparse {
             let block_stream = stream::iter(block_offsets)
                 .map(|offset| (offset - PER_BLOCK as u64, offset))
                 .map(move |(start, end)| {
-
                     let start: Vec<u64> = coord_index
                         .iter()
                         .zip(shape.iter())
@@ -917,6 +916,13 @@ pub struct DenseTensor {
     blocks: Arc<dyn BlockList>,
 }
 
+impl DenseTensor {
+    pub fn from_sparse(sparse: SparseTensor) -> DenseTensor {
+        let blocks = Arc::new(BlockListSparse::new(sparse));
+        DenseTensor { blocks }
+    }
+}
+
 impl TensorView for DenseTensor {
     fn dtype(&self) -> NumberType {
         self.blocks.dtype()
@@ -932,6 +938,32 @@ impl TensorView for DenseTensor {
 
     fn size(&self) -> u64 {
         self.blocks.size()
+    }
+}
+
+impl TensorBoolean for DenseTensor {
+    fn all(&self, _txn_id: TxnId) -> TCResult<bool> {
+        Err(error::not_implemented())
+    }
+
+    fn any(&self, _txn_id: TxnId) -> TCResult<bool> {
+        Err(error::not_implemented())
+    }
+
+    fn and(&self, _other: &Self) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn not(&self) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn or(&self, _other: &Self) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn xor(&self, _other: &Self) -> TCResult<Self> {
+        Err(error::not_implemented())
     }
 }
 
