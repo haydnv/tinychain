@@ -720,16 +720,15 @@ impl BlockList for BlockListSparse {
                 &self.shape().to_vec(),
                 af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
             );
-            let filled = self.source.filled(txn_id).await?;
 
-            let block_stream = stream::iter(((PER_BLOCK as u64)..self.size()).step_by(PER_BLOCK))
-                .map(move |offset| {
-                    let block = Array::constant(dtype.zero(), PER_BLOCK);
+            let block_offsets = ((PER_BLOCK as u64)..self.size()).step_by(PER_BLOCK);
+            let block_stream = stream::iter(block_offsets).map(move |offset| {
+                let block = Array::constant(dtype.zero(), PER_BLOCK);
 
-                    todo!();
+                todo!();
 
-                    Ok(block)
-                });
+                Ok(block)
+            });
 
             let block_stream: TCTryStream<Array> = Box::pin(block_stream);
             Ok(block_stream)

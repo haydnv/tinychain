@@ -131,9 +131,15 @@ impl From<HashMap<ValueId, Value>> for Bounds {
     }
 }
 
-impl From<Vec<(ValueId, ColumnBound)>> for Bounds {
-    fn from(mut bounds: Vec<(ValueId, ColumnBound)>) -> Bounds {
-        Bounds(bounds.drain(..).collect())
+impl FromIterator<(ValueId, ColumnBound)> for Bounds {
+    fn from_iter<I: IntoIterator<Item = (ValueId, ColumnBound)>>(iter: I) -> Self {
+        let mut bounds = HashMap::new();
+
+        for (column, bound) in iter {
+            bounds.insert(column, bound);
+        }
+
+        Bounds(bounds)
     }
 }
 

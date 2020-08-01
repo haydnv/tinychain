@@ -569,7 +569,7 @@ impl Selection for TableBase {
             loop {
                 let initial = bounds.len();
                 for i in (1..bounds.len() + 1).rev() {
-                    let subset: Bounds = bounds[..i].to_vec().into();
+                    let subset: Bounds = bounds[..i].iter().cloned().collect();
 
                     for index in iter::once(&self.primary).chain(auxiliary.values()) {
                         if index.validate_bounds(txn_id, &subset).await.is_ok() {
@@ -618,7 +618,7 @@ impl Selection for TableBase {
             while !bounds.is_empty() {
                 let initial = bounds.len();
                 for i in (1..bounds.len() + 1).rev() {
-                    let subset: Bounds = bounds[..i].to_vec().into();
+                    let subset: Bounds = bounds[..i].iter().cloned().collect();
 
                     for index in iter::once(&self.primary).chain(auxiliary.values()) {
                         if index.validate_bounds(txn_id, &subset).await.is_ok() {
