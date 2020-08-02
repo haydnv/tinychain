@@ -13,7 +13,7 @@ use super::{SparseRow, SparseStream};
 
 // Based on: https://github.com/rust-lang/futures-rs/blob/master/futures-util/src/stream/select.rs
 #[pin_project]
-struct SparseCombine {
+pub struct SparseCombine {
     #[pin]
     left: Fuse<SparseStream>,
     #[pin]
@@ -48,18 +48,17 @@ impl SparseCombine {
         }
     }
 
-    fn swap_value(pending: &mut Option<SparseRow>) -> Number {
+    fn swap_value(pending: &mut Option<SparseRow>) -> (Vec<u64>, Number) {
         assert!(pending.is_some());
 
         let mut row: Option<SparseRow> = None;
         mem::swap(pending, &mut row);
-        let (_, value) = row.unwrap();
-        value
+        row.unwrap()
     }
 }
 
 impl Stream for SparseCombine {
-    type Item = (Option<Number>, Option<Number>);
+    type Item = (Vec<u64>, Option<Number>, Option<Number>);
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut task::Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -82,25 +81,25 @@ impl Stream for SparseCombine {
 
             match compare_coord(l_coord, r_coord) {
                 Ordering::Equal => {
-                    let l_value = Self::swap_value(this.pending_left);
-                    let r_value = Self::swap_value(this.pending_right);
-                    Poll::Ready(Some((Some(l_value), Some(r_value))))
+                    let (l_coord, l_value) = Self::swap_value(this.pending_left);
+                    let (_, r_value) = Self::swap_value(this.pending_right);
+                    Poll::Ready(Some((l_coord, Some(l_value), Some(r_value))))
                 }
                 Ordering::Less => {
-                    let l_value = Self::swap_value(this.pending_left);
-                    Poll::Ready(Some((Some(l_value), None)))
+                    let (l_coord, l_value) = Self::swap_value(this.pending_left);
+                    Poll::Ready(Some((l_coord, Some(l_value), None)))
                 }
                 Ordering::Greater => {
-                    let r_value = Self::swap_value(this.pending_right);
-                    Poll::Ready(Some((None, Some(r_value))))
+                    let (r_coord, r_value) = Self::swap_value(this.pending_right);
+                    Poll::Ready(Some((r_coord, None, Some(r_value))))
                 }
             }
         } else if right_done && this.pending_left.is_some() {
-            let l_value = Self::swap_value(this.pending_left);
-            Poll::Ready(Some((Some(l_value), None)))
+            let (l_coord, l_value) = Self::swap_value(this.pending_left);
+            Poll::Ready(Some((l_coord, Some(l_value), None)))
         } else if left_done && this.pending_right.is_some() {
-            let r_value = Self::swap_value(this.pending_right);
-            Poll::Ready(Some((None, Some(r_value))))
+            let (r_coord, r_value) = Self::swap_value(this.pending_right);
+            Poll::Ready(Some((r_coord, None, Some(r_value))))
         } else if left_done && right_done {
             Poll::Ready(None)
         } else {

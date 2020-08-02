@@ -7,6 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::try_join;
 
 use crate::error;
 use crate::state::table::{self, Selection, Table, TableBase};
@@ -18,6 +19,8 @@ use super::bounds::{AxisBounds, Bounds, Shape};
 use super::*;
 
 mod combine;
+
+use combine::SparseCombine;
 
 pub type SparseRow = (Vec<u64>, Number);
 pub type SparseStream = TCStream<SparseRow>;
@@ -311,6 +314,132 @@ impl SparseAccessor for SparseCast {
         value: Number,
     ) -> TCBoxTryFuture<()> {
         self.source.write_value(txn_id, coord, value)
+    }
+}
+
+struct SparseCombinator {
+    left: Arc<dyn SparseAccessor>,
+    right: Arc<dyn SparseAccessor>,
+    combinator: fn(Option<Number>, Option<Number>) -> Option<Number>,
+}
+
+impl SparseCombinator {
+    fn new(
+        left: Arc<dyn SparseAccessor>,
+        right: Arc<dyn SparseAccessor>,
+        combinator: fn(Option<Number>, Option<Number>) -> Option<Number>,
+    ) -> TCResult<SparseCombinator> {
+        if left.shape() != right.shape() {
+            return Err(error::internal(
+                "Tried to combine SparseTensors with different shapes",
+            ));
+        }
+
+        Ok(SparseCombinator {
+            left,
+            right,
+            combinator,
+        })
+    }
+}
+
+impl TensorView for SparseCombinator {
+    fn dtype(&self) -> NumberType {
+        self.left.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.left.ndim() + 1
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.left.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.left.size()
+    }
+}
+
+#[async_trait]
+impl SparseAccessor for SparseCombinator {
+    fn filled<'a>(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        order: Option<Vec<usize>>,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(async move {
+            let left = self.left.clone().filled(txn_id.clone(), order.clone());
+            let right = self.right.clone().filled(txn_id, order);
+            let (left, right) = try_join!(left, right)?;
+
+            let combinator = self.combinator;
+            let zero = self.dtype().zero();
+            let combined = SparseCombine::new(left, right).filter_map(move |(coord, l, r)| {
+                let row = if let Some(value) = combinator(l, r) {
+                    if value == zero {
+                        None
+                    } else {
+                        Some((coord, value))
+                    }
+                } else {
+                    None
+                };
+
+                future::ready(row)
+            });
+
+            let combined: SparseStream = Box::pin(combined);
+            Ok(combined)
+        })
+    }
+
+    async fn filled_at(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _axes: Vec<usize>,
+    ) -> TCResult<TCStream<Vec<u64>>> {
+        Err(error::not_implemented())
+    }
+
+    async fn filled_count(self: Arc<Self>, _txn_id: TxnId) -> TCResult<u64> {
+        Err(error::not_implemented())
+    }
+
+    fn filled_in<'a>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _bounds: Bounds,
+        _order: Option<Vec<usize>>,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn filled_range<'a>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _start: Vec<u64>,
+        _end: Vec<u64>,
+        _order: Option<Vec<usize>>,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn read_value<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        _coord: &'a [u64],
+    ) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn write_value<'a>(
+        &'a self,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::not_implemented())))
     }
 }
 
