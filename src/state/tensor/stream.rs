@@ -21,21 +21,15 @@ struct SparseCombine {
     #[pin]
     right: Fuse<SparseStream>,
 
-    combinator: fn(Option<Number>, Option<Number>) -> Option<Number>,
     pending_left: Option<SparseRow>,
     pending_right: Option<SparseRow>,
 }
 
 impl SparseCombine {
-    pub fn new(
-        left: SparseStream,
-        right: SparseStream,
-        combinator: fn(Option<Number>, Option<Number>) -> Option<Number>,
-    ) -> SparseCombine {
+    pub fn new(left: SparseStream, right: SparseStream) -> SparseCombine {
         SparseCombine {
             left: left.fuse(),
             right: right.fuse(),
-            combinator,
             pending_left: None,
             pending_right: None,
         }
