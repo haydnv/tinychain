@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt;
 use std::iter;
 use std::ops;
@@ -401,4 +402,18 @@ impl fmt::Display for Shape {
                 .join(", ")
         )
     }
+}
+
+pub fn compare_coord(left: &[u64], right: &[u64]) -> Ordering {
+    assert!(left.len() == right.len());
+
+    for (l, r) in left.iter().zip(right.iter()) {
+        if l < r {
+            return Ordering::Less;
+        } else if l > r {
+            return Ordering::Greater;
+        }
+    }
+
+    Ordering::Equal
 }

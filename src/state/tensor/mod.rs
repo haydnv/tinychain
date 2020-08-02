@@ -8,6 +8,7 @@ mod array;
 mod bounds;
 mod dense;
 mod sparse;
+mod stream;
 mod transform;
 
 pub type Array = array::Array;

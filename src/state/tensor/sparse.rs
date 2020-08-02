@@ -15,13 +15,12 @@ use crate::value::class::{NumberClass, NumberImpl, NumberType, UIntType, ValueTy
 use crate::value::{Number, TCBoxTryFuture, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
+use super::stream::SparseStream;
 use super::*;
 
 const ERR_BROADCAST_WRITE: &str = "Cannot write to a broadcasted tensor since it is not a \
 bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor.";
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
-
-pub type SparseStream = TCStream<(Vec<u64>, Number)>;
 
 #[async_trait]
 trait SparseAccessor: TensorView + 'static {
@@ -942,12 +941,12 @@ impl TensorIO for SparseTensor {
         self.accessor.read_value(txn_id, coord)
     }
 
-    fn write_value<'a>(
-        &'a self,
+    fn write_value(
+        &'_ self,
         txn_id: TxnId,
         bounds: Bounds,
         value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCBoxTryFuture<'_, ()> {
         Box::pin(async move {
             stream::iter(bounds.affected())
                 .map(|coord| Ok(self.write_value_at(txn_id.clone(), coord, value.clone())))
