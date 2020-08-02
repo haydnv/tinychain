@@ -15,8 +15,12 @@ use crate::value::class::{NumberClass, NumberImpl, NumberType, UIntType, ValueTy
 use crate::value::{Number, TCBoxTryFuture, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
-use super::stream::SparseStream;
 use super::*;
+
+mod combine;
+
+pub type SparseRow = (Vec<u64>, Number);
+pub type SparseStream = TCStream<SparseRow>;
 
 const ERR_BROADCAST_WRITE: &str = "Cannot write to a broadcasted tensor since it is not a \
 bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor.";

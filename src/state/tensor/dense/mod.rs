@@ -15,9 +15,12 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::class::{Impl, NumberClass, NumberImpl, NumberType};
 use crate::value::{Number, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 
-use super::array::Array;
 use super::bounds::{Bounds, Shape};
 use super::*;
+
+pub mod array;
+
+use array::Array;
 
 const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 

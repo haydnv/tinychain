@@ -6,12 +6,10 @@ use std::task::{self, Poll};
 use futures::stream::{Fuse, Stream, StreamExt};
 use pin_project::pin_project;
 
-use crate::value::{Number, TCStream};
+use crate::value::Number;
 
 use super::bounds::compare_coord;
-
-pub type SparseRow = (Vec<u64>, Number);
-pub type SparseStream = TCStream<SparseRow>;
+use super::{SparseRow, SparseStream};
 
 // Based on: https://github.com/rust-lang/futures-rs/blob/master/futures-util/src/stream/select.rs
 #[pin_project]

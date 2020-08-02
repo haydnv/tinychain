@@ -4,14 +4,12 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::class::NumberType;
 use crate::value::{Number, TCBoxTryFuture, TCResult};
 
-mod array;
 mod bounds;
 mod dense;
 mod sparse;
-mod stream;
 mod transform;
 
-pub type Array = array::Array;
+pub type Array = dense::array::Array;
 
 use dense::DenseTensor;
 use sparse::SparseTensor;

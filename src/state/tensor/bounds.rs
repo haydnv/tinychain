@@ -408,10 +408,9 @@ pub fn compare_coord(left: &[u64], right: &[u64]) -> Ordering {
     assert!(left.len() == right.len());
 
     for (l, r) in left.iter().zip(right.iter()) {
-        if l < r {
-            return Ordering::Less;
-        } else if l > r {
-            return Ordering::Greater;
+        match l.cmp(r) {
+            Ordering::Equal => {}
+            ordering => return ordering,
         }
     }
 
