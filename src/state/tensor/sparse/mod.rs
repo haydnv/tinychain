@@ -782,10 +782,20 @@ impl SparseAccessor for SparseTranspose {
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        _txn_id: TxnId,
-        _bounds: Bounds,
+        txn_id: TxnId,
+        bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(async move {
+            let slice_rebase = transform::Slice::new(
+                self.source.shape().clone(),
+                self.rebase.invert_bounds(bounds),
+            )?;
+            let slice = SparseSlice {
+                source: self.source.clone(),
+                rebase: slice_rebase,
+            };
+            Arc::new(slice).filled(txn_id).await
+        })
     }
 
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
