@@ -26,7 +26,12 @@ pub type SparseRow = (Vec<u64>, Number);
 pub type SparseStream = TCStream<SparseRow>;
 
 const ERR_BROADCAST_WRITE: &str = "Cannot write to a broadcasted tensor since it is not a \
-bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor.";
+bijection of its source. Consider copying the broadcast into a new Tensor, \
+or writing directly to the source Tensor.";
+
+const ERR_PRODUCT_WRITE: &str = "Cannot write to a product of two Tensors. \
+Consider copying the product into a new Tensor, or writing to the source Tensors directly.";
+
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
 #[async_trait]
@@ -321,6 +326,7 @@ struct SparseCombinator {
     left: Arc<dyn SparseAccessor>,
     right: Arc<dyn SparseAccessor>,
     combinator: fn(Option<Number>, Option<Number>) -> Option<Number>,
+    zero: Number,
 }
 
 impl SparseCombinator {
@@ -335,11 +341,34 @@ impl SparseCombinator {
             ));
         }
 
+        let zero = left.dtype().zero() * right.dtype().zero();
+
         Ok(SparseCombinator {
             left,
             right,
             combinator,
+            zero,
         })
+    }
+
+    fn filled_inner(&self, left: SparseStream, right: SparseStream) -> SparseStream {
+        let combinator = self.combinator;
+        let zero = self.zero.clone();
+        let combined = SparseCombine::new(left, right).filter_map(move |(coord, l, r)| {
+            let row = if let Some(value) = combinator(l, r) {
+                if value == zero {
+                    None
+                } else {
+                    Some((coord, value))
+                }
+            } else {
+                None
+            };
+
+            future::ready(row)
+        });
+
+        Box::pin(combined)
     }
 }
 
@@ -372,25 +401,7 @@ impl SparseAccessor for SparseCombinator {
             let left = self.left.clone().filled(txn_id.clone(), order.clone());
             let right = self.right.clone().filled(txn_id, order);
             let (left, right) = try_join!(left, right)?;
-
-            let combinator = self.combinator;
-            let zero = self.dtype().zero();
-            let combined = SparseCombine::new(left, right).filter_map(move |(coord, l, r)| {
-                let row = if let Some(value) = combinator(l, r) {
-                    if value == zero {
-                        None
-                    } else {
-                        Some((coord, value))
-                    }
-                } else {
-                    None
-                };
-
-                future::ready(row)
-            });
-
-            let combined: SparseStream = Box::pin(combined);
-            Ok(combined)
+            Ok(self.filled_inner(left, right))
         })
     }
 
@@ -402,35 +413,67 @@ impl SparseAccessor for SparseCombinator {
         Err(error::not_implemented())
     }
 
-    async fn filled_count(self: Arc<Self>, _txn_id: TxnId) -> TCResult<u64> {
-        Err(error::not_implemented())
+    async fn filled_count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
+        let count = self
+            .filled(txn_id, None)
+            .await?
+            .fold(0u64, |count, _| future::ready(count + 1))
+            .await;
+
+        Ok(count)
     }
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        _txn_id: TxnId,
-        _bounds: Bounds,
-        _order: Option<Vec<usize>>,
+        txn_id: TxnId,
+        bounds: Bounds,
+        order: Option<Vec<usize>>,
     ) -> TCBoxTryFuture<'a, SparseStream> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(async move {
+            let left = self
+                .left
+                .clone()
+                .filled_in(txn_id.clone(), bounds.clone(), order.clone());
+
+            let right = self.right.clone().filled_in(txn_id, bounds, order);
+
+            let (left, right) = try_join!(left, right)?;
+
+            Ok(self.filled_inner(left, right))
+        })
     }
 
     fn filled_range<'a>(
         self: Arc<Self>,
-        _txn_id: TxnId,
-        _start: Vec<u64>,
-        _end: Vec<u64>,
-        _order: Option<Vec<usize>>,
+        txn_id: TxnId,
+        start: Vec<u64>,
+        end: Vec<u64>,
+        order: Option<Vec<usize>>,
     ) -> TCBoxTryFuture<'a, SparseStream> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(async move {
+            let left = self.left.clone().filled_range(
+                txn_id.clone(),
+                start.to_vec(),
+                end.to_vec(),
+                order.clone(),
+            );
+
+            let right = self.right.clone().filled_range(txn_id, start, end, order);
+
+            let (left, right) = try_join!(left, right)?;
+
+            Ok(self.filled_inner(left, right))
+        })
     }
 
-    fn read_value<'a>(
-        &'a self,
-        _txn_id: &'a TxnId,
-        _coord: &'a [u64],
-    ) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+    fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(async move {
+            let left = self.left.read_value(txn_id, coord);
+            let right = self.right.read_value(txn_id, coord);
+            let (left, right) = try_join!(left, right)?;
+            let combinator = self.combinator;
+            Ok(combinator(Some(left), Some(right)).unwrap_or_else(|| self.zero.clone()))
+        })
     }
 
     fn write_value<'a>(
@@ -439,7 +482,7 @@ impl SparseAccessor for SparseCombinator {
         _coord: Vec<u64>,
         _value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(future::ready(Err(error::unsupported(ERR_PRODUCT_WRITE))))
     }
 }
 
@@ -666,6 +709,7 @@ impl SparseAccessor for SparseSlice {
                 .await?
                 // TODO: use a filter to handle the case of a slice with step > 1
                 .map(move |(coord, value)| (rebase.map_coord(coord), value));
+
             let filled_range: SparseStream = Box::pin(filled_range);
             Ok(filled_range)
         })
@@ -885,9 +929,11 @@ impl SparseAccessor for SparseTable {
                     .await?
                     .stream(txn_id)
                     .await?
+
             } else {
                 self.table.clone().stream(txn_id).await?
             };
+
             let filled = rows.map(unwrap_row);
             let filled: SparseStream = Box::pin(filled);
             Ok(filled)
