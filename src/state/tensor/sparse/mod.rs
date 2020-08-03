@@ -18,6 +18,7 @@ use crate::value::{Number, TCBoxTryFuture, TCResult, TCStream, UInt, Value, Valu
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::*;
 
+mod combinator;
 mod combine;
 
 use combine::SparseCombine;
@@ -1100,8 +1101,15 @@ impl TensorBoolean for SparseTensor {
         Ok(filled.next().await.is_some())
     }
 
-    async fn and(&self, _other: &Self) -> TCResult<Self> {
-        Err(error::not_implemented())
+    async fn and(&self, other: &Self) -> TCResult<Self> {
+        let accessor = SparseCombinator::new(
+            self.accessor.clone(),
+            other.accessor.clone(),
+            combinator::and,
+        )
+        .map(Arc::new)?;
+
+        Ok(SparseTensor { accessor })
     }
 
     async fn not(&self) -> TCResult<Self> {
