@@ -407,10 +407,10 @@ impl SparseAccessor for SparseCombinator {
 
     async fn filled_at(
         self: Arc<Self>,
-        _txn_id: TxnId,
-        _axes: Vec<usize>,
+        txn_id: TxnId,
+        axes: Vec<usize>,
     ) -> TCResult<TCStream<Vec<u64>>> {
-        Err(error::not_implemented())
+        group_axes(self, txn_id, axes).await
     }
 
     async fn filled_count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
@@ -929,7 +929,6 @@ impl SparseAccessor for SparseTable {
                     .await?
                     .stream(txn_id)
                     .await?
-
             } else {
                 self.table.clone().stream(txn_id).await?
             };
