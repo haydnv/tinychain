@@ -15,7 +15,7 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::class::{Impl, NumberClass, NumberImpl, NumberType};
 use crate::value::{Number, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 
-use super::bounds::{Bounds, Shape};
+use super::bounds::{AxisBounds, Bounds, Shape};
 use super::*;
 
 pub mod array;
@@ -736,34 +736,20 @@ impl BlockList for BlockListSparse {
             let dtype = self.dtype();
             let ndim = self.ndim();
             let source = self.source.clone();
-            let shape = self.source.shape().to_vec();
-            let coord_index = self.coord_index.to_vec();
+            let source_size = source.size();
 
             let block_offsets = ((PER_BLOCK as u64)..self.size()).step_by(PER_BLOCK);
             let block_stream = stream::iter(block_offsets)
                 .map(|offset| (offset - PER_BLOCK as u64, offset))
-                .map(move |(start, end)| {
-                    let start: Vec<u64> = coord_index
-                        .iter()
-                        .zip(shape.iter())
-                        .map(|(index, dim)| (start / index) % dim)
-                        .collect();
-
-                    let end: Vec<u64> = coord_index
-                        .iter()
-                        .zip(shape.iter())
-                        .map(|(index, dim)| (end / index) % dim)
-                        .collect();
-
-                    (start, end)
-                })
                 .then(move |(start, end)| {
                     let source = source.clone();
                     let txn_id = txn_id.clone();
 
                     Box::pin(async move {
                         let mut filled: Vec<(Vec<u64>, Number)> = source
-                            .filled_range(txn_id, start, end)
+                            .reshape(vec![source_size].into())?
+                            .slice(Bounds::from(vec![AxisBounds::In(start..end)]))?
+                            .filled(txn_id)
                             .await?
                             .collect()
                             .await;
@@ -1052,17 +1038,11 @@ impl TensorTransform for DenseTensor {
     }
 
     fn reshape(&self, shape: Shape) -> TCResult<Self> {
-        if shape.size() != self.size() {
-            return Err(error::bad_request(
-                &format!(
-                    "Cannot reshape a SparseTensor with shape {} into",
-                    self.shape()
-                ),
-                shape,
-            ));
-        } else if &shape == self.shape() {
+        if &shape == self.shape() {
             return Ok(self.clone());
         }
+
+        let _rebase = transform::Reshape::new(self.shape().clone(), shape);
 
         Err(error::not_implemented())
     }

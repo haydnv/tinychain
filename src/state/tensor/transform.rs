@@ -52,12 +52,6 @@ impl Broadcast {
         })
     }
 
-    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        let mut inverted: Vec<usize> = axes.iter().map(|x| self.inverted_axes[*x]).collect();
-        inverted.dedup();
-        inverted
-    }
-
     pub fn invert_bounds(&self, bounds: Bounds) -> Bounds {
         let source_ndim = self.source_shape.len();
         let mut source_bounds = Vec::with_capacity(source_ndim);
@@ -139,12 +133,6 @@ impl Expand {
         &self.shape
     }
 
-    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        let mut axes: Vec<usize> = axes.iter().map(|x| self.inverted_axes[*x]).collect();
-        axes.dedup();
-        axes
-    }
-
     pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
         if bounds.len() < self.expand {
             bounds.remove(self.expand);
@@ -166,18 +154,45 @@ impl Expand {
         inverted
     }
 
-    pub fn map_bounds(&self, mut bounds: Bounds) -> Bounds {
-        if self.expand < bounds.len() {
-            bounds.insert(self.expand, AxisBounds::At(0));
-        }
-
-        bounds
-    }
-
     pub fn map_coord(&self, mut coord: Vec<u64>) -> Vec<u64> {
         assert!(coord.len() == self.source_shape.len());
         coord.insert(self.expand, 0);
         coord
+    }
+}
+
+#[derive(Clone)]
+pub struct Reshape {
+    source_shape: Shape,
+    source_coord_index: Vec<u64>,
+
+    dest_shape: Shape,
+    dest_coord_index: Vec<u64>,
+}
+
+impl Reshape {
+    pub fn new(source_shape: Shape, dest_shape: Shape) -> TCResult<Reshape> {
+        if source_shape.size() != dest_shape.size() {
+            return Err(error::bad_request(
+                &format!("Cannot reshape {} into", source_shape),
+                dest_shape,
+            ));
+        }
+
+        let source_coord_index: Vec<u64> = (0..source_shape.len())
+            .map(|x| source_shape[x + 1..].iter().product())
+            .collect();
+
+        let dest_coord_index: Vec<u64> = (0..dest_shape.len())
+            .map(|x| dest_shape[x + 1..].iter().product())
+            .collect();
+
+        Ok(Reshape {
+            source_shape,
+            source_coord_index,
+            dest_shape,
+            dest_coord_index,
+        })
     }
 }
 
@@ -247,15 +262,6 @@ impl Slice {
 
     pub fn size(&self) -> u64 {
         self.shape.size()
-    }
-
-    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        assert!(axes.len() <= self.ndim());
-        for x in &axes {
-            assert!(*x < self.ndim());
-        }
-
-        axes.iter().map(|x| self.inverted_axes[*x]).collect()
     }
 
     pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
@@ -374,10 +380,6 @@ impl Transpose {
             shape,
             permutation,
         })
-    }
-
-    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        axes.iter().map(|x| self.permutation[*x]).collect()
     }
 
     pub fn invert_bounds(&self, bounds: Bounds) -> Bounds {
