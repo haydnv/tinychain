@@ -145,11 +145,17 @@ impl SparseAccessor for DenseAccessor {
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        _txn_id: TxnId,
-        _bounds: Bounds,
-        _order: Option<Vec<usize>>,
+        txn_id: TxnId,
+        bounds: Bounds,
+        order: Option<Vec<usize>>,
     ) -> TCBoxTryFuture<'a, SparseStream> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        match self.source.slice(bounds) {
+            Ok(source) => {
+                let slice = Arc::new(DenseAccessor { source });
+                slice.filled(txn_id, order)
+            }
+            Err(cause) => Box::pin(future::ready(Err(cause))),
+        }
     }
 
     fn filled_range<'a>(
