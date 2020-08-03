@@ -168,21 +168,17 @@ impl SparseAccessor for DenseAccessor {
         Box::pin(future::ready(Err(error::not_implemented())))
     }
 
-    fn read_value<'a>(
-        &'a self,
-        _txn_id: &'a TxnId,
-        _coord: &'a [u64],
-    ) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+    fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+        self.source.read_value(txn_id, coord)
     }
 
     fn write_value<'a>(
         &'a self,
-        _txn_id: TxnId,
-        _coord: Vec<u64>,
-        _value: Number,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        self.source.write_value(txn_id, coord.into(), value)
     }
 }
 
