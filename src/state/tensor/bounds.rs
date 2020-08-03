@@ -131,7 +131,7 @@ impl Bounds {
     }
 
     pub fn is_empty(&self) -> bool {
-        return self.axes.is_empty();
+        self.axes.is_empty()
     }
 
     pub fn len(&self) -> usize {

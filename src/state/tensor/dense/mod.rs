@@ -954,8 +954,8 @@ impl TensorBoolean for DenseTensor {
         Err(error::not_implemented())
     }
 
-    async fn any(&self, _txn_id: TxnId) -> TCResult<bool> {
-        Err(error::not_implemented())
+    fn any(&'_ self, _txn_id: TxnId) -> TCBoxTryFuture<'_, bool> {
+        Box::pin(future::ready(Err(error::not_implemented())))
     }
 
     async fn and(&self, _other: &Self) -> TCResult<Self> {

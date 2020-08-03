@@ -30,7 +30,7 @@ trait TensorView: Send + Sync {
 trait TensorBoolean: Sized + TensorView {
     async fn all(&self, txn_id: TxnId) -> TCResult<bool>;
 
-    async fn any(&self, txn_id: TxnId) -> TCResult<bool>;
+    fn any<'a>(&'a self, txn_id: TxnId) -> TCBoxTryFuture<'a, bool>;
 
     async fn and(&self, other: &Self) -> TCResult<Self>;
 
@@ -147,10 +147,10 @@ impl TensorBoolean for Tensor {
         }
     }
 
-    async fn any(&self, txn_id: TxnId) -> TCResult<bool> {
+    fn any<'a>(&'a self, txn_id: TxnId) -> TCBoxTryFuture<'a, bool> {
         match self {
-            Self::Dense(dense) => dense.any(txn_id).await,
-            Self::Sparse(sparse) => sparse.any(txn_id).await,
+            Self::Dense(dense) => dense.any(txn_id),
+            Self::Sparse(sparse) => sparse.any(txn_id),
         }
     }
 

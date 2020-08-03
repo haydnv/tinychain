@@ -129,10 +129,50 @@ impl SparseAccessor for DenseAccessor {
 
     async fn filled_at(
         self: Arc<Self>,
-        _txn_id: TxnId,
-        _axes: Vec<usize>,
+        txn_id: TxnId,
+        axes: Vec<usize>,
     ) -> TCResult<TCStream<Vec<u64>>> {
-        Err(error::not_implemented())
+        let shape = self.shape();
+        let source = self.source.clone();
+        let bounds: HashMap<usize, AxisBounds> = shape
+            .to_vec()
+            .drain(..)
+            .map(|dim| AxisBounds::In(0..dim, 1))
+            .enumerate()
+            .collect();
+
+        let filled_at = stream::iter(
+            Bounds::all(&Shape::from(
+                axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>(),
+            ))
+            .affected(),
+        )
+        .filter_map(move |at| {
+            let source = source.clone();
+            let txn_id = txn_id.clone();
+            let axes = axes.to_vec();
+            let mut bounds = bounds.clone();
+
+            Box::pin(async move {
+                for (axis, coord) in axes.iter().zip(at.iter()) {
+                    bounds.insert(*axis, AxisBounds::At(*coord));
+                }
+                let bounds: Bounds = (0..bounds.len())
+                    .map(|x| bounds.remove(&x).unwrap())
+                    .collect::<Vec<AxisBounds>>()
+                    .into();
+
+                let slice = source.slice(bounds).unwrap(); // TODO: remove this call to .unwrap()
+                if slice.any(txn_id.clone()).await.unwrap() {
+                    // TODO: remove this call to .unwrap()
+                    Some(at)
+                } else {
+                    None
+                }
+            })
+        });
+
+        Ok(Box::pin(filled_at))
     }
 
     async fn filled_count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
@@ -1202,9 +1242,11 @@ impl TensorBoolean for SparseTensor {
         Ok(filled_count == self.size())
     }
 
-    async fn any(&self, txn_id: TxnId) -> TCResult<bool> {
-        let mut filled = self.accessor.clone().filled(txn_id, None).await?;
-        Ok(filled.next().await.is_some())
+    fn any<'a>(&'a self, txn_id: TxnId) -> TCBoxTryFuture<'a, bool> {
+        Box::pin(async move {
+            let mut filled = self.accessor.clone().filled(txn_id, None).await?;
+            Ok(filled.next().await.is_some())
+        })
     }
 
     async fn and(&self, other: &Self) -> TCResult<Self> {
