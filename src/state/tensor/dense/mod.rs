@@ -944,28 +944,29 @@ impl TensorView for DenseTensor {
     }
 }
 
+#[async_trait]
 impl TensorBoolean for DenseTensor {
-    fn all(&self, _txn_id: TxnId) -> TCResult<bool> {
+    async fn all(&self, _txn_id: TxnId) -> TCResult<bool> {
         Err(error::not_implemented())
     }
 
-    fn any(&self, _txn_id: TxnId) -> TCResult<bool> {
+    async fn any(&self, _txn_id: TxnId) -> TCResult<bool> {
         Err(error::not_implemented())
     }
 
-    fn and(&self, _other: &Self) -> TCResult<Self> {
+    async fn and(&self, _other: &Self) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn not(&self) -> TCResult<Self> {
+    async fn not(&self) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn or(&self, _other: &Self) -> TCResult<Self> {
+    async fn or(&self, _other: &Self) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn xor(&self, _other: &Self) -> TCResult<Self> {
+    async fn xor(&self, _other: &Self) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 }

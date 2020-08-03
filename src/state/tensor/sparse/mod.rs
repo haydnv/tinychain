@@ -1088,28 +1088,31 @@ impl TensorView for SparseTensor {
     }
 }
 
+#[async_trait]
 impl TensorBoolean for SparseTensor {
-    fn all(&self, _txn_id: TxnId) -> TCResult<bool> {
+    async fn all(&self, txn_id: TxnId) -> TCResult<bool> {
+        let filled_count = self.accessor.clone().filled_count(txn_id).await?;
+        Ok(filled_count == self.size())
+    }
+
+    async fn any(&self, txn_id: TxnId) -> TCResult<bool> {
+        let mut filled = self.accessor.clone().filled(txn_id, None).await?;
+        Ok(filled.next().await.is_some())
+    }
+
+    async fn and(&self, _other: &Self) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn any(&self, _txn_id: TxnId) -> TCResult<bool> {
+    async fn not(&self) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn and(&self, _other: &Self) -> TCResult<Self> {
+    async fn or(&self, _other: &Self) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    fn not(&self) -> TCResult<Self> {
-        Err(error::not_implemented())
-    }
-
-    fn or(&self, _other: &Self) -> TCResult<Self> {
-        Err(error::not_implemented())
-    }
-
-    fn xor(&self, _other: &Self) -> TCResult<Self> {
+    async fn xor(&self, _other: &Self) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 }
