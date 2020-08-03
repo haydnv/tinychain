@@ -90,6 +90,8 @@ trait TensorTransform: Sized + TensorView {
 
     fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self>;
 
+    fn reshape(&self, shape: bounds::Shape) -> TCResult<Self>;
+
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
 }
 
@@ -147,7 +149,7 @@ impl TensorBoolean for Tensor {
         }
     }
 
-    fn any<'a>(&'a self, txn_id: TxnId) -> TCBoxTryFuture<'a, bool> {
+    fn any(&'_ self, txn_id: TxnId) -> TCBoxTryFuture<'_, bool> {
         match self {
             Self::Dense(dense) => dense.any(txn_id),
             Self::Sparse(sparse) => sparse.any(txn_id),
@@ -262,6 +264,13 @@ impl TensorTransform for Tensor {
         match self {
             Self::Dense(dense) => dense.slice(bounds).map(Self::from),
             Self::Sparse(sparse) => sparse.slice(bounds).map(Self::from),
+        }
+    }
+
+    fn reshape(&self, shape: bounds::Shape) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.reshape(shape).map(Self::from),
+            Self::Sparse(sparse) => sparse.reshape(shape).map(Self::from),
         }
     }
 

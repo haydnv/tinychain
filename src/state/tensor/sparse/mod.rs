@@ -1363,6 +1363,22 @@ impl TensorTransform for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
+    fn reshape(&self, shape: Shape) -> TCResult<Self> {
+        if shape.size() != self.size() {
+            return Err(error::bad_request(
+                &format!(
+                    "Cannot reshape a SparseTensor with shape {} into",
+                    self.shape()
+                ),
+                shape,
+            ));
+        } else if &shape == self.shape() {
+            return Ok(self.clone());
+        }
+
+        Err(error::not_implemented())
+    }
+
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
         if permutation == Some((0..self.ndim()).collect()) {
             return Ok(self.clone());
