@@ -5,7 +5,6 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::BoxFuture;
 use uuid::Uuid;
 
 use crate::error;
@@ -16,7 +15,7 @@ use crate::state::tensor;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
-use crate::value::TCResult;
+use crate::value::{TCBoxTryFuture, TCResult};
 
 use super::file::File;
 
@@ -97,7 +96,7 @@ impl Dir {
         &'a self,
         txn_id: &'a TxnId,
         path: &'a TCPath,
-    ) -> BoxFuture<'a, TCResult<Option<Arc<Dir>>>> {
+    ) -> TCBoxTryFuture<'a, Option<Arc<Dir>>> {
         Box::pin(async move {
             if path.is_empty() {
                 Err(error::bad_request("Cannot get Dir at empty path", path))
@@ -152,7 +151,7 @@ impl Dir {
         &'a self,
         txn_id: &'a TxnId,
         path: &'a TCPath,
-    ) -> BoxFuture<'a, TCResult<Arc<Dir>>> {
+    ) -> TCBoxTryFuture<'a, Arc<Dir>> {
         Box::pin(async move {
             if path.is_empty() {
                 Err(error::bad_request("Not a valid directory name", path))
@@ -223,7 +222,7 @@ impl Dir {
         &'a self,
         txn_id: &'a TxnId,
         path: &'a TCPath,
-    ) -> BoxFuture<'a, TCResult<Arc<Dir>>> {
+    ) -> TCBoxTryFuture<'a, Arc<Dir>> {
         Box::pin(async move {
             if let Some(dir) = self.get_dir(txn_id, path).await? {
                 Ok(dir)

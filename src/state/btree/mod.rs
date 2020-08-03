@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::{self, join, try_join, try_join_all, BoxFuture, Future, TryFutureExt};
+use futures::future::{self, join, try_join, try_join_all, Future, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -319,12 +319,11 @@ impl BTree {
         self.get_root(txn_id).await.map(|root| root.keys.is_empty())
     }
 
-    pub async fn len(self: Arc<Self>, txn_id: TxnId, selector: Selector) -> TCResult<u64> {
-        Ok(self
-            .slice(txn_id, selector)
-            .await?
-            .fold(0u64, |len, _| future::ready(len + 1))
-            .await)
+    pub fn len<'a>(self: Arc<Self>, txn_id: TxnId, selector: Selector) -> TCBoxTryFuture<'a, u64> {
+        Box::pin(async move {
+            let slice = self.slice(txn_id, selector).await?;
+            Ok(slice.fold(0u64, |len, _| future::ready(len + 1)).await)
+        })
     }
 
     pub async fn slice(
@@ -469,15 +468,17 @@ impl BTree {
         }
     }
 
-    pub async fn update<'a>(
+    pub fn update<'a>(
         &'a self,
         txn_id: &'a TxnId,
         bounds: &'a Selector,
         value: &'a [Value],
-    ) -> TCResult<()> {
-        let root_id = self.root.read(txn_id).await?;
-        self._update(txn_id, (*root_id).clone(), bounds, value)
-            .await
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let root_id = self.root.read(txn_id).await?;
+            self._update(txn_id, (*root_id).clone(), bounds, value)
+                .await
+        })
     }
 
     fn _update<'a>(
@@ -486,7 +487,7 @@ impl BTree {
         node_id: NodeId,
         bounds: &'a Selector,
         value: &'a [Value],
-    ) -> BoxFuture<'a, TCResult<()>> {
+    ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let node = self.file.get_block(txn_id, node_id).await?;
             let keys = node.values();

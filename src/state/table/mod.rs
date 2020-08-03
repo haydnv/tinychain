@@ -1,7 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
 
@@ -13,43 +12,57 @@ mod index;
 pub mod schema;
 mod view;
 
+const ERR_DELETE: &str =
+    "This table view does not support deletion (try deleting a slice of the source table)";
+const ERR_SLICE: &str =
+    "This table view does not support slicing (consider slicing the source table directly)";
+const ERR_UPDATE: &str =
+    "This table view does not support updates (consider updating a slice of the source table)";
+
 pub type TableBase = index::TableBase;
 
-#[async_trait]
 pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
     type Stream: Stream<Item = Vec<Value>> + Send + Sync + Unpin;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        let count = self
-            .clone()
-            .stream(txn_id)
-            .await?
-            .fold(0, |count, _| future::ready(count + 1))
-            .await;
-        Ok(count)
+    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+        Box::pin(async move {
+            let count = self
+                .clone()
+                .stream(txn_id)
+                .await?
+                .fold(0, |count, _| future::ready(count + 1))
+                .await;
+
+            Ok(count)
+        })
     }
 
-    async fn delete(self, _txn_id: TxnId) -> TCResult<()> {
-        Err(error::unsupported(
-            "This table view does not support deletion (try deleting a slice of the source table)",
-        ))
+    fn delete<'a>(self, _txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::unsupported(ERR_DELETE))))
     }
 
     fn delete_row<'a>(&'a self, _txn_id: &'a TxnId, _row: schema::Row) -> TCBoxTryFuture<'a, ()> {
-        let err_msg = "This table view does not support row deletion (try deleting from the source table directly)";
-        Box::pin(future::ready(Err(error::unsupported(err_msg))))
+        Box::pin(future::ready(Err(error::unsupported(ERR_DELETE))))
     }
 
-    async fn group_by(&self, txn_id: TxnId, columns: Vec<ValueId>) -> TCResult<view::Aggregate> {
-        view::Aggregate::new(self.clone().into(), txn_id, columns).await
+    fn group_by<'a>(
+        &'a self,
+        txn_id: TxnId,
+        columns: Vec<ValueId>,
+    ) -> TCBoxTryFuture<'a, view::Aggregate> {
+        Box::pin(view::Aggregate::new(self.clone().into(), txn_id, columns))
     }
 
-    async fn index(
-        &self,
+    fn index<'a>(
+        &'a self,
         txn: Arc<Txn>,
         columns: Option<Vec<ValueId>>,
-    ) -> TCResult<index::ReadOnly> {
-        index::ReadOnly::copy_from(self.clone().into(), txn, columns).await
+    ) -> TCBoxTryFuture<'a, index::ReadOnly> {
+        Box::pin(index::ReadOnly::copy_from(
+            self.clone().into(),
+            txn,
+            columns,
+        ))
     }
 
     fn limit(&self, limit: u64) -> TCResult<Arc<view::Limited>> {
@@ -78,11 +91,7 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         _txn_id: &'a TxnId,
         _bounds: schema::Bounds,
     ) -> TCBoxTryFuture<'a, Table> {
-        Box::pin(async move {
-            Err(error::unsupported(
-                "This table view does not support slicing (consider slicing the source table directly)",
-            ))
-        })
+        Box::pin(future::ready(Err(error::unsupported(ERR_SLICE))))
     }
 
     fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream>;
@@ -99,19 +108,17 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         order: &'a [ValueId],
     ) -> TCBoxTryFuture<'a, ()>;
 
-    async fn update(self, _txn: Arc<Txn>, _value: schema::Row) -> TCResult<()> {
-        Err(error::unsupported(
-            "This table view does not support updates (consider updating a slice of the source table)",
-        ))
+    fn update<'a>(self, _txn: Arc<Txn>, _value: schema::Row) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::unsupported(ERR_UPDATE))))
     }
 
-    async fn update_row(
+    fn update_row(
         &self,
         _txn_id: TxnId,
         _row: schema::Row,
         _value: schema::Row,
-    ) -> TCResult<()> {
-        Err(error::unsupported("This table view does not support updates (consider updating a row in the source table directly)"))
+    ) -> TCBoxTryFuture<()> {
+        Box::pin(future::ready(Err(error::unsupported(ERR_UPDATE))))
     }
 }
 
@@ -128,35 +135,34 @@ pub enum Table {
     TableSlice(view::TableSlice),
 }
 
-#[async_trait]
 impl Selection for Table {
     type Stream = TCStream<Vec<Value>>;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.count(txn_id).await,
-            Self::Columns(columns) => columns.count(txn_id).await,
-            Self::Limit(limited) => limited.count(txn_id).await,
-            Self::Index(index) => index.count(txn_id).await,
-            Self::IndexSlice(index_slice) => index_slice.count(txn_id).await,
-            Self::Merge(merged) => merged.count(txn_id).await,
-            Self::ROIndex(ro_index) => ro_index.count(txn_id).await,
-            Self::Table(table) => table.count(txn_id).await,
-            Self::TableSlice(table_slice) => table_slice.count(txn_id).await,
+            Self::Aggregate(aggregate) => aggregate.count(txn_id),
+            Self::Columns(columns) => columns.count(txn_id),
+            Self::Limit(limited) => limited.count(txn_id),
+            Self::Index(index) => index.count(txn_id),
+            Self::IndexSlice(index_slice) => index_slice.count(txn_id),
+            Self::Merge(merged) => merged.count(txn_id),
+            Self::ROIndex(ro_index) => ro_index.count(txn_id),
+            Self::Table(table) => table.count(txn_id),
+            Self::TableSlice(table_slice) => table_slice.count(txn_id),
         }
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+    fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.clone().delete(txn_id).await,
-            Self::Columns(columns) => columns.clone().delete(txn_id).await,
-            Self::Limit(limited) => limited.clone().delete(txn_id).await,
-            Self::Index(index) => index.clone().delete(txn_id).await,
-            Self::IndexSlice(index_slice) => index_slice.clone().delete(txn_id).await,
-            Self::Merge(merged) => merged.clone().delete(txn_id).await,
-            Self::ROIndex(ro_index) => ro_index.clone().delete(txn_id).await,
-            Self::Table(table) => table.clone().delete(txn_id).await,
-            Self::TableSlice(table_slice) => table_slice.clone().delete(txn_id).await,
+            Self::Aggregate(aggregate) => aggregate.delete(txn_id),
+            Self::Columns(columns) => columns.delete(txn_id),
+            Self::Limit(limited) => limited.delete(txn_id),
+            Self::Index(index) => index.delete(txn_id),
+            Self::IndexSlice(index_slice) => index_slice.delete(txn_id),
+            Self::Merge(merged) => merged.delete(txn_id),
+            Self::ROIndex(ro_index) => ro_index.delete(txn_id),
+            Self::Table(table) => table.delete(txn_id),
+            Self::TableSlice(table_slice) => table_slice.delete(txn_id),
         }
     }
 
@@ -237,48 +243,48 @@ impl Selection for Table {
 
     fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.clone().stream(txn_id),
-            Self::Columns(columns) => columns.clone().stream(txn_id),
-            Self::Limit(limited) => limited.clone().stream(txn_id),
-            Self::Index(index) => index.clone().stream(txn_id),
-            Self::IndexSlice(index_slice) => index_slice.clone().stream(txn_id),
-            Self::Merge(merged) => merged.clone().stream(txn_id),
-            Self::ROIndex(ro_index) => ro_index.clone().stream(txn_id),
-            Self::Table(table) => table.clone().stream(txn_id),
-            Self::TableSlice(table_slice) => table_slice.clone().stream(txn_id),
+            Self::Aggregate(aggregate) => aggregate.stream(txn_id),
+            Self::Columns(columns) => columns.stream(txn_id),
+            Self::Limit(limited) => limited.stream(txn_id),
+            Self::Index(index) => index.stream(txn_id),
+            Self::IndexSlice(index_slice) => index_slice.stream(txn_id),
+            Self::Merge(merged) => merged.stream(txn_id),
+            Self::ROIndex(ro_index) => ro_index.stream(txn_id),
+            Self::Table(table) => table.stream(txn_id),
+            Self::TableSlice(table_slice) => table_slice.stream(txn_id),
         }
     }
 
-    async fn update(self, txn: Arc<Txn>, value: schema::Row) -> TCResult<()> {
+    fn update<'a>(self, txn: Arc<Txn>, value: schema::Row) -> TCBoxTryFuture<'a, ()> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.clone().update(txn, value).await,
-            Self::Columns(columns) => columns.clone().update(txn, value).await,
-            Self::Limit(limited) => limited.clone().update(txn, value).await,
-            Self::Index(index) => index.clone().update(txn, value).await,
-            Self::IndexSlice(index_slice) => index_slice.clone().update(txn, value).await,
-            Self::Merge(merged) => merged.clone().update(txn, value).await,
-            Self::ROIndex(ro_index) => ro_index.update(txn, value).await,
-            Self::Table(table) => table.clone().update(txn, value).await,
-            Self::TableSlice(table_slice) => table_slice.update(txn, value).await,
+            Self::Aggregate(aggregate) => aggregate.update(txn, value),
+            Self::Columns(columns) => columns.update(txn, value),
+            Self::Limit(limited) => limited.update(txn, value),
+            Self::Index(index) => index.update(txn, value),
+            Self::IndexSlice(index_slice) => index_slice.update(txn, value),
+            Self::Merge(merged) => merged.update(txn, value),
+            Self::ROIndex(ro_index) => ro_index.update(txn, value),
+            Self::Table(table) => table.update(txn, value),
+            Self::TableSlice(table_slice) => table_slice.update(txn, value),
         }
     }
 
-    async fn update_row(
+    fn update_row(
         &self,
         txn_id: TxnId,
         row: schema::Row,
         value: schema::Row,
-    ) -> TCResult<()> {
+    ) -> TCBoxTryFuture<()> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.update_row(txn_id, row, value).await,
-            Self::Columns(columns) => columns.update_row(txn_id, row, value).await,
-            Self::Limit(limited) => limited.update_row(txn_id, row, value).await,
-            Self::Index(index) => index.update_row(txn_id, row, value).await,
-            Self::IndexSlice(index_slice) => index_slice.update_row(txn_id, row, value).await,
-            Self::Merge(merged) => merged.update_row(txn_id, row, value).await,
-            Self::ROIndex(ro_index) => ro_index.update_row(txn_id, row, value).await,
-            Self::Table(table) => table.update_row(txn_id, row, value).await,
-            Self::TableSlice(table_slice) => table_slice.update_row(txn_id, row, value).await,
+            Self::Aggregate(aggregate) => aggregate.update_row(txn_id, row, value),
+            Self::Columns(columns) => columns.update_row(txn_id, row, value),
+            Self::Limit(limited) => limited.update_row(txn_id, row, value),
+            Self::Index(index) => index.update_row(txn_id, row, value),
+            Self::IndexSlice(index_slice) => index_slice.update_row(txn_id, row, value),
+            Self::Merge(merged) => merged.update_row(txn_id, row, value),
+            Self::ROIndex(ro_index) => ro_index.update_row(txn_id, row, value),
+            Self::Table(table) => table.update_row(txn_id, row, value),
+            Self::TableSlice(table_slice) => table_slice.update_row(txn_id, row, value),
         }
     }
 

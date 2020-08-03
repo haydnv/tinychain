@@ -30,7 +30,7 @@ trait TensorView: Send + Sync {
 trait TensorBoolean: Sized + TensorView {
     async fn all(&self, txn_id: TxnId) -> TCResult<bool>;
 
-    fn any<'a>(&'a self, txn_id: TxnId) -> TCBoxTryFuture<'a, bool>;
+    fn any(&self, txn_id: TxnId) -> TCBoxTryFuture<bool>;
 
     async fn and(&self, other: &Self) -> TCResult<Self>;
 
@@ -58,12 +58,12 @@ trait TensorCompare: Sized + TensorView {
 trait TensorIO: Sized + TensorView {
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
 
-    fn write_value<'a>(
-        &'a self,
+    fn write_value(
+        &self,
         txn_id: TxnId,
         bounds: bounds::Bounds,
         value: Number,
-    ) -> TCBoxTryFuture<'a, ()>;
+    ) -> TCBoxTryFuture<()>;
 
     fn write_value_at<'a>(
         &'a self,
@@ -213,12 +213,12 @@ impl TensorIO for Tensor {
         }
     }
 
-    fn write_value<'a>(
-        &'a self,
+    fn write_value(
+        &self,
         txn_id: TxnId,
         bounds: bounds::Bounds,
         value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCBoxTryFuture<()> {
         match self {
             Self::Dense(dense) => dense.write_value(txn_id, bounds, value),
             Self::Sparse(sparse) => sparse.write_value(txn_id, bounds, value),

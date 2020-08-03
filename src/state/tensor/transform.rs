@@ -382,6 +382,10 @@ impl Transpose {
         })
     }
 
+    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+        axes.iter().map(|x| self.permutation[*x]).collect()
+    }
+
     pub fn invert_bounds(&self, bounds: Bounds) -> Bounds {
         let mut source_bounds = Bounds::all(&self.source_shape);
         for axis in 0..bounds.len() {
@@ -400,7 +404,7 @@ impl Transpose {
     }
 
     pub fn map_coord(&self, source_coord: Vec<u64>) -> Vec<u64> {
-        let mut coord = Vec::with_capacity(self.source_shape.len());
+        let mut coord = Vec::with_capacity(source_coord.len());
         for axis in 0..source_coord.len() {
             coord[self.permutation[axis]] = source_coord[axis];
         }

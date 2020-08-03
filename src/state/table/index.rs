@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::future::{self, try_join_all};
 use futures::stream::{StreamExt, TryStreamExt};
 
@@ -38,8 +37,8 @@ impl Index {
         Ok(Index { btree, schema })
     }
 
-    pub async fn len(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.btree.clone().len(txn_id, btree::Selector::all()).await
+    pub fn len(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+        self.btree.clone().len(txn_id, btree::Selector::all())
     }
 
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
@@ -77,16 +76,15 @@ impl Index {
     }
 }
 
-#[async_trait]
 impl Selection for Index {
     type Stream = TCStream<Vec<Value>>;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.len(txn_id).await
+    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+        self.len(txn_id)
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
-        self.btree.delete(&txn_id, btree::Selector::all()).await
+    fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move { self.btree.delete(&txn_id, btree::Selector::all()).await })
     }
 
     fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
@@ -183,11 +181,13 @@ impl Selection for Index {
         Box::pin(future::ready(result))
     }
 
-    async fn update(self, txn: Arc<Txn>, row: Row) -> TCResult<()> {
-        let key: btree::Key = self.schema().row_into_values(row, false)?;
-        self.btree
-            .update(txn.id(), &btree::Selector::all(), &key)
-            .await
+    fn update<'a>(self, txn: Arc<Txn>, row: Row) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let key: btree::Key = self.schema().row_into_values(row, false)?;
+            self.btree
+                .update(txn.id(), &btree::Selector::all(), &key)
+                .await
+        })
     }
 }
 
@@ -197,43 +197,47 @@ pub struct ReadOnly {
 }
 
 impl ReadOnly {
-    pub async fn copy_from(
+    pub fn copy_from<'a>(
         source: Table,
         txn: Arc<Txn>,
         key_columns: Option<Vec<ValueId>>,
-    ) -> TCResult<ReadOnly> {
-        let btree_file = txn
-            .clone()
-            .subcontext_tmp()
-            .await?
-            .context()
-            .create_btree(txn.id().clone(), "index".parse()?)
-            .await?;
+    ) -> TCBoxTryFuture<'a, ReadOnly> {
+        Box::pin(async move {
+            let btree_file = txn
+                .clone()
+                .subcontext_tmp()
+                .await?
+                .context()
+                .create_btree(txn.id().clone(), "index".parse()?)
+                .await?;
 
-        let (schema, btree) = if let Some(columns) = key_columns {
-            let column_names: HashSet<&ValueId> = columns.iter().collect();
-            let schema = source.schema().subset(column_names)?;
-            let btree = BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
+            let (schema, btree) = if let Some(columns) = key_columns {
+                let column_names: HashSet<&ValueId> = columns.iter().collect();
+                let schema = source.schema().subset(column_names)?;
+                let btree =
+                    BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
 
-            let rows = source.select(columns)?.stream(txn.id().clone()).await?;
-            btree.insert_from(txn.id(), rows).await?;
-            (schema, btree)
-        } else {
-            let schema = source.schema().clone();
-            let btree = BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
-            let rows = source.stream(txn.id().clone()).await?;
-            btree.insert_from(txn.id(), rows).await?;
-            (schema, btree)
-        };
+                let rows = source.select(columns)?.stream(txn.id().clone()).await?;
+                btree.insert_from(txn.id(), rows).await?;
+                (schema, btree)
+            } else {
+                let schema = source.schema().clone();
+                let btree =
+                    BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
+                let rows = source.stream(txn.id().clone()).await?;
+                btree.insert_from(txn.id(), rows).await?;
+                (schema, btree)
+            };
 
-        let index = Index {
-            schema,
-            btree: Arc::new(btree),
-        };
+            let index = Index {
+                schema,
+                btree: Arc::new(btree),
+            };
 
-        index
-            .index_slice(Bounds::all())
-            .map(|index| ReadOnly { index })
+            index
+                .index_slice(Bounds::all())
+                .map(|index| ReadOnly { index })
+        })
     }
 
     pub fn into_reversed(self) -> ReadOnly {
@@ -243,12 +247,11 @@ impl ReadOnly {
     }
 }
 
-#[async_trait]
 impl Selection for ReadOnly {
     type Stream = <Index as Selection>::Stream;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.index.clone().count(txn_id).await
+    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+        Box::pin(async move { self.index.clone().count(txn_id).await })
     }
 
     fn order_by<'a>(
@@ -439,24 +442,25 @@ impl TableBase {
     }
 }
 
-#[async_trait]
 impl Selection for TableBase {
     type Stream = <Index as Selection>::Stream;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.primary.count(txn_id).await
+    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+        self.primary.count(txn_id)
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
-        let auxiliary = self.auxiliary.read(&txn_id).await?;
-        let mut deletes = Vec::with_capacity(auxiliary.len() + 1);
-        for index in auxiliary.values() {
-            deletes.push(index.clone().delete(txn_id.clone()));
-        }
-        deletes.push(self.primary.delete(txn_id));
+    fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let auxiliary = self.auxiliary.read(&txn_id).await?;
+            let mut deletes = Vec::with_capacity(auxiliary.len() + 1);
+            for index in auxiliary.values() {
+                deletes.push(index.clone().delete(txn_id.clone()));
+            }
+            deletes.push(self.primary.delete(txn_id));
 
-        try_join_all(deletes).await?;
-        Ok(())
+            try_join_all(deletes).await?;
+            Ok(())
+        })
     }
 
     fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
@@ -676,20 +680,22 @@ impl Selection for TableBase {
         })
     }
 
-    async fn update(self, txn: Arc<Txn>, value: Row) -> TCResult<()> {
-        let schema = self.schema().clone();
-        schema.validate_row_partial(&value)?;
+    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let schema = self.schema().clone();
+            schema.validate_row_partial(&value)?;
 
-        let index = self.clone().index(txn.clone(), None).await?;
+            let index = self.clone().index(txn.clone(), None).await?;
 
-        let txn_id = txn.id();
-        index
-            .stream(txn_id.clone())
-            .await?
-            .map(|row| schema.values_into_row(row))
-            .map_ok(|row| self.upsert(txn_id, row))
-            .try_buffer_unordered(2)
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await
+            let txn_id = txn.id();
+            index
+                .stream(txn_id.clone())
+                .await?
+                .map(|row| schema.values_into_row(row))
+                .map_ok(|row| self.upsert(txn_id, row))
+                .try_buffer_unordered(2)
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await
+        })
     }
 }

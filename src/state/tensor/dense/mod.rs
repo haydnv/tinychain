@@ -695,20 +695,11 @@ impl BlockList for BlockListSlice {
 
 struct BlockListSparse {
     source: SparseTensor,
-    coord_index: Vec<u64>,
 }
 
 impl BlockListSparse {
     fn new(source: SparseTensor) -> BlockListSparse {
-        let shape = source.shape().to_vec();
-        let coord_index: Vec<u64> = (0..source.ndim())
-            .map(|x| shape[x + 1..].iter().product())
-            .collect();
-
-        BlockListSparse {
-            source,
-            coord_index,
-        }
+        BlockListSparse { source }
     }
 }
 
