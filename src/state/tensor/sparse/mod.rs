@@ -790,11 +790,19 @@ impl SparseAccessor for SparseTranspose {
                 self.source.shape().clone(),
                 self.rebase.invert_bounds(bounds),
             )?;
+
             let slice = SparseSlice {
                 source: self.source.clone(),
                 rebase: slice_rebase,
             };
-            Arc::new(slice).filled(txn_id).await
+
+            let rebase = self.rebase.clone();
+            let filled = Arc::new(slice)
+                .filled(txn_id)
+                .await?
+                .map(move |(coord, value)| (rebase.map_coord(coord), value));
+            let filled: SparseStream = Box::pin(filled);
+            Ok(filled)
         })
     }
 
