@@ -135,8 +135,12 @@ impl SparseAccessor for DenseAccessor {
         Err(error::not_implemented())
     }
 
-    async fn filled_count(self: Arc<Self>, _txn_id: TxnId) -> TCResult<u64> {
-        Err(error::not_implemented())
+    async fn filled_count(self: Arc<Self>, txn_id: TxnId) -> TCResult<u64> {
+        self.source
+            .value_stream(txn_id)
+            .await?
+            .try_fold(0u64, |count, _| future::ready(Ok(count + 1)))
+            .await
     }
 
     fn filled_in<'a>(
