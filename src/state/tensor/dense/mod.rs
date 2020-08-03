@@ -59,7 +59,7 @@ trait BlockList: TensorView + 'static {
         })
     }
 
-    fn slice_value_stream<'a>(
+    fn value_stream_slice<'a>(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
@@ -185,7 +185,7 @@ impl BlockList for BlockListFile {
         })
     }
 
-    fn slice_value_stream<'a>(
+    fn value_stream_slice<'a>(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
@@ -403,10 +403,10 @@ impl TensorView for BlockListBroadcast {
 impl BlockList for BlockListBroadcast {
     fn value_stream<'a>(self: Arc<Self>, txn_id: TxnId) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         let bounds = Bounds::all(self.shape());
-        self.slice_value_stream(txn_id, bounds)
+        self.value_stream_slice(txn_id, bounds)
     }
 
-    fn slice_value_stream<'a>(
+    fn value_stream_slice<'a>(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
@@ -418,7 +418,7 @@ impl BlockList for BlockListBroadcast {
             let values = self
                 .source
                 .clone()
-                .slice_value_stream(txn_id, source_bounds)
+                .value_stream_slice(txn_id, source_bounds)
                 .await?
                 .zip(stream::iter(source_coords))
                 .map(move |(value, coord)| {
@@ -497,7 +497,7 @@ impl BlockList for BlockListCast {
         })
     }
 
-    fn slice_value_stream<'a>(
+    fn value_stream_slice<'a>(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
@@ -507,7 +507,7 @@ impl BlockList for BlockListCast {
             let value_stream = self
                 .source
                 .clone()
-                .slice_value_stream(txn_id, bounds)
+                .value_stream_slice(txn_id, bounds)
                 .await?
                 .map_ok(move |value| value.into_type(dtype));
 
@@ -580,13 +580,13 @@ impl BlockList for BlockListExpand {
         self.source.clone().value_stream(txn_id)
     }
 
-    fn slice_value_stream<'a>(
+    fn value_stream_slice<'a>(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.clone().slice_value_stream(txn_id, bounds)
+        self.source.clone().value_stream_slice(txn_id, bounds)
     }
 
     fn read_value_at<'a>(
@@ -648,17 +648,17 @@ impl BlockList for BlockListSlice {
     fn value_stream<'a>(self: Arc<Self>, txn_id: TxnId) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         self.source
             .clone()
-            .slice_value_stream(txn_id, self.rebase.bounds().clone())
+            .value_stream_slice(txn_id, self.rebase.bounds().clone())
     }
 
-    fn slice_value_stream<'a>(
+    fn value_stream_slice<'a>(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         self.source
             .clone()
-            .slice_value_stream(txn_id, self.rebase.invert_bounds(bounds))
+            .value_stream_slice(txn_id, self.rebase.invert_bounds(bounds))
     }
 
     fn read_value_at<'a>(
@@ -792,7 +792,7 @@ impl BlockList for BlockListSparse {
         })
     }
 
-    fn slice_value_stream<'a>(
+    fn value_stream_slice<'a>(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
@@ -869,7 +869,7 @@ impl BlockList for BlockListTranspose {
         })
     }
 
-    fn slice_value_stream<'a>(
+    fn value_stream_slice<'a>(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,

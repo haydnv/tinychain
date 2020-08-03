@@ -109,16 +109,17 @@ impl SparseAccessor for DenseAccessor {
         order: Option<Vec<usize>>,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
-            if order.is_some() {
-                return Err(error::not_implemented());
-            }
+            let source = if order.is_none() {
+                self.source.clone()
+            } else {
+                self.source.transpose(order)?
+            };
 
-            let coords = Bounds::all(self.shape()).affected();
             // TODO: remove this .unwrap() and have SparseStream return a Result
-            let values = self.source.value_stream(txn_id).await?.map(|r| r.unwrap());
+            let values = source.value_stream(txn_id).await?.map(|r| r.unwrap());
 
             let zero = self.dtype().zero();
-            let filled = stream::iter(coords)
+            let filled = stream::iter(Bounds::all(self.shape()).affected())
                 .zip(values)
                 .filter(move |(_, value)| future::ready(value != &zero));
 
