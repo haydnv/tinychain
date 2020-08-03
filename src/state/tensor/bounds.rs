@@ -4,7 +4,6 @@ use std::iter;
 use std::ops;
 
 use itertools::{Itertools, MultiProduct};
-use num::integer::Integer;
 
 pub type Coords = MultiProduct<AxisIter>;
 
@@ -37,13 +36,13 @@ impl Iterator for AxisIter {
 #[derive(Clone)]
 pub enum AxisBounds {
     At(u64),
-    In(ops::Range<u64>, u64),
+    In(ops::Range<u64>),
     Of(Vec<u64>),
 }
 
 impl AxisBounds {
     pub fn all(dim: u64) -> AxisBounds {
-        AxisBounds::In(0..dim, 1)
+        AxisBounds::In(0..dim)
     }
 }
 
@@ -52,7 +51,7 @@ impl PartialEq for AxisBounds {
         use AxisBounds::*;
         match (self, other) {
             (At(l), At(r)) if l == r => true,
-            (In(lr, ls), In(rr, rs)) if lr == rr && ls == rs => true,
+            (In(lr), In(rr)) if lr == rr => true,
             (Of(l), Of(r)) if l == r => true,
             _ => false,
         }
@@ -71,9 +70,9 @@ impl From<Vec<u64>> for AxisBounds {
     }
 }
 
-impl From<(ops::Range<u64>, u64)> for AxisBounds {
-    fn from(slice: (ops::Range<u64>, u64)) -> AxisBounds {
-        AxisBounds::In(slice.0, slice.1)
+impl From<ops::Range<u64>> for AxisBounds {
+    fn from(range: ops::Range<u64>) -> AxisBounds {
+        AxisBounds::In(range)
     }
 }
 
@@ -82,8 +81,7 @@ impl fmt::Display for AxisBounds {
         use AxisBounds::*;
         match self {
             At(at) => write!(f, "{}", at),
-            In(range, 1) => write!(f, "[{}, {})", range.start, range.end),
-            In(range, step) => write!(f, "[{}, {}) step {}", range.start, range.end, step),
+            In(range) => write!(f, "[{}, {})", range.start, range.end),
             Of(indices) => write!(
                 f,
                 "({})",
@@ -107,7 +105,7 @@ impl Bounds {
         shape
             .0
             .iter()
-            .map(|dim| AxisBounds::In(0..*dim, 1))
+            .map(|dim| AxisBounds::In(0..*dim))
             .collect::<Vec<AxisBounds>>()
             .into()
     }
@@ -118,7 +116,7 @@ impl Bounds {
         for axis in 0..self.len() {
             axes.push(match &self[axis] {
                 At(i) => AxisIter::One(iter::once(*i)),
-                In(range, step) => AxisIter::Step(range.clone().step_by(*step as usize)),
+                In(range) => AxisIter::Step(range.clone().step_by(1)),
                 Of(indices) => AxisIter::Each(indices.to_vec(), 0),
             });
         }
@@ -171,7 +169,7 @@ impl Bounds {
         for bound in &self.axes {
             match bound {
                 AxisBounds::At(_) => {}
-                AxisBounds::In(range, step) => size *= (range.end - range.start) / step,
+                AxisBounds::In(range) => size *= range.end - range.start,
                 AxisBounds::Of(indices) => size *= indices.len() as u64,
             }
         }
@@ -242,7 +240,7 @@ impl From<(Vec<u64>, Vec<u64>)> for Bounds {
             .0
             .iter()
             .zip(bounds.1.iter())
-            .map(|(s, e)| AxisBounds::In(*s..*e, 1))
+            .map(|(s, e)| AxisBounds::In(*s..*e))
             .collect::<Vec<AxisBounds>>()
             .into()
     }
@@ -280,7 +278,7 @@ impl Shape {
     pub fn all(&self) -> Bounds {
         let mut axes = Vec::with_capacity(self.len());
         for dim in &self.0 {
-            axes.push(AxisBounds::In(0..*dim, 1));
+            axes.push(AxisBounds::In(0..*dim));
         }
         axes.into()
     }
@@ -298,7 +296,7 @@ impl Shape {
                         return false;
                     }
                 }
-                AxisBounds::In(range, _) => {
+                AxisBounds::In(range) => {
                     if range.start > *size || range.end > *size {
                         return false;
                     }
@@ -337,8 +335,8 @@ impl Shape {
         for axis in 0..coord.len() {
             match &coord[axis] {
                 AxisBounds::At(_) => {}
-                AxisBounds::In(range, step) => {
-                    let dim = (range.end - range.start).div_ceil(&step);
+                AxisBounds::In(range) => {
+                    let dim = range.end - range.start;
                     shape.push(dim)
                 }
                 AxisBounds::Of(indices) => shape.push(indices.len() as u64),

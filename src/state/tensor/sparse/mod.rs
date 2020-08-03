@@ -138,7 +138,7 @@ impl SparseAccessor for DenseAccessor {
         let bounds: HashMap<usize, AxisBounds> = shape
             .to_vec()
             .drain(..)
-            .map(|dim| AxisBounds::In(0..dim, 1))
+            .map(|dim| AxisBounds::In(0..dim))
             .enumerate()
             .collect();
 
@@ -1439,7 +1439,7 @@ fn slice_table<'a>(
                         .slice(txn_id, iter::once((axis, column_bound)).collect())
                         .await?
                 }
-                In(range, 1) => {
+                In(range) => {
                     let start = Bound::Included(u64_to_value(range.start));
                     let end = Bound::Excluded(u64_to_value(range.end));
                     let column_bound = table::schema::ColumnBound::In(start, end);

@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::iter;
 
-use num::Integer;
-
 use crate::error;
 use crate::value::TCResult;
 
@@ -205,8 +203,8 @@ impl Slice {
                 AxisBounds::At(c) => {
                     elided.insert(axis, *c);
                 }
-                AxisBounds::In(range, step) => {
-                    let dim = (range.end - range.start).div_ceil(step);
+                AxisBounds::In(range) => {
+                    let dim = range.end - range.start;
                     shape.push(dim);
                     offset.insert(axis, range.start);
                     inverted_axes.push(axis);
@@ -273,12 +271,11 @@ impl Slice {
 
             use AxisBounds::*;
             match &bounds[source_axis] {
-                In(range, this_step) => {
-                    if let In(source_range, source_step) = &self.bounds[axis] {
+                In(range) => {
+                    if let In(source_range) = &self.bounds[axis] {
                         let start = range.start + source_range.start;
-                        let end = start + (source_step * (range.end - range.start));
-                        let step = source_step * this_step;
-                        source_bounds.push((start..end, step).into());
+                        let end = start + (range.end - range.start);
+                        source_bounds.push((start..end).into());
                     } else {
                         assert!(range.start == 0);
                         source_bounds.push(self.bounds[axis].clone());
@@ -319,39 +316,6 @@ impl Slice {
         }
 
         source_coord
-    }
-
-    pub fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
-        assert!(source_bounds.len() == self.source_shape.len());
-
-        let mut coord: Vec<AxisBounds> = Vec::with_capacity(self.shape.len());
-
-        for axis in 0..self.source_shape.len() {
-            if self.elided.contains_key(&axis) {
-                continue;
-            }
-
-            use AxisBounds::*;
-            match &source_bounds[axis] {
-                In(_, _) => todo!(),
-                Of(indices) => {
-                    let offset = self.offset.get(&axis).unwrap_or(&0);
-                    coord.push(
-                        indices
-                            .iter()
-                            .map(|i| i - offset)
-                            .collect::<Vec<u64>>()
-                            .into(),
-                    );
-                }
-                At(i) => {
-                    let offset = self.offset.get(&axis).unwrap_or(&0);
-                    coord.push((i - offset).into())
-                }
-            }
-        }
-
-        coord.into()
     }
 
     pub fn map_coord(&self, source_coord: Vec<u64>) -> Vec<u64> {
@@ -431,14 +395,6 @@ impl Transpose {
         }
 
         source_coord
-    }
-
-    pub fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
-        let mut bounds = Bounds::all(&self.shape);
-        for axis in 0..source_bounds.len() {
-            bounds[self.permutation[axis]] = source_bounds[axis].clone();
-        }
-        bounds
     }
 
     pub fn map_coord(&self, source_coord: Vec<u64>) -> Vec<u64> {
