@@ -924,6 +924,10 @@ impl DenseTensor {
         let blocks = Arc::new(BlockListSparse::new(sparse));
         DenseTensor { blocks }
     }
+
+    pub async fn value_stream(&self, txn_id: TxnId) -> TCResult<TCStream<TCResult<Number>>> {
+        self.blocks.clone().value_stream(txn_id).await
+    }
 }
 
 impl TensorView for DenseTensor {

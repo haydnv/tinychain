@@ -105,10 +105,26 @@ impl TensorView for DenseAccessor {
 impl SparseAccessor for DenseAccessor {
     fn filled<'a>(
         self: Arc<Self>,
-        _txn_id: TxnId,
-        _order: Option<Vec<usize>>,
+        txn_id: TxnId,
+        order: Option<Vec<usize>>,
     ) -> TCBoxTryFuture<'a, SparseStream> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(async move {
+            if order.is_some() {
+                return Err(error::not_implemented());
+            }
+
+            let coords = Bounds::all(self.shape()).affected();
+            // TODO: remove this .unwrap() and have SparseStream return a Result
+            let values = self.source.value_stream(txn_id).await?.map(|r| r.unwrap());
+
+            let zero = self.dtype().zero();
+            let filled = stream::iter(coords)
+                .zip(values)
+                .filter(move |(_, value)| future::ready(value != &zero));
+
+            let filled: SparseStream = Box::pin(filled);
+            Ok(filled)
+        })
     }
 
     async fn filled_at(
