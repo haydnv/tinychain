@@ -33,6 +33,9 @@ or writing directly to the source Tensor.";
 const ERR_PRODUCT_WRITE: &str = "Cannot write to a product of two Tensors. \
 Consider copying the product into a new Tensor, or writing to the source Tensors directly.";
 
+const ERR_NOT_SPARSE: &str = "The result of the requested operation would not be sparse;\
+convert to a DenseTensor first.";
+
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
 #[async_trait]
@@ -74,6 +77,87 @@ trait SparseAccessor: TensorView + 'static {
         coord: Vec<u64>,
         value: Number,
     ) -> TCBoxTryFuture<'a, ()>;
+}
+
+struct DenseAccessor {
+    source: DenseTensor,
+}
+
+impl TensorView for DenseAccessor {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl SparseAccessor for DenseAccessor {
+    fn filled<'a>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _order: Option<Vec<usize>>,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    async fn filled_at(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _axes: Vec<usize>,
+    ) -> TCResult<TCStream<Vec<u64>>> {
+        Err(error::not_implemented())
+    }
+
+    async fn filled_count(self: Arc<Self>, _txn_id: TxnId) -> TCResult<u64> {
+        Err(error::not_implemented())
+    }
+
+    fn filled_in<'a>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _bounds: Bounds,
+        _order: Option<Vec<usize>>,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn filled_range<'a>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _start: Vec<u64>,
+        _end: Vec<u64>,
+        _order: Option<Vec<usize>>,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn read_value<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        _coord: &'a [u64],
+    ) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn write_value<'a>(
+        &'a self,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
 }
 
 struct SparseBroadcast {
@@ -1113,15 +1197,22 @@ impl TensorBoolean for SparseTensor {
     }
 
     async fn not(&self) -> TCResult<Self> {
-        Err(error::not_implemented())
+        Err(error::unsupported(ERR_NOT_SPARSE))
     }
 
-    async fn or(&self, _other: &Self) -> TCResult<Self> {
-        Err(error::not_implemented())
+    async fn or(&self, other: &Self) -> TCResult<Self> {
+        let accessor = SparseCombinator::new(
+            self.accessor.clone(),
+            other.accessor.clone(),
+            combinator::or,
+        )
+        .map(Arc::new)?;
+
+        Ok(SparseTensor { accessor })
     }
 
     async fn xor(&self, _other: &Self) -> TCResult<Self> {
-        Err(error::not_implemented())
+        Err(error::unsupported(ERR_NOT_SPARSE))
     }
 }
 

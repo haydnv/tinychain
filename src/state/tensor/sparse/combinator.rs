@@ -8,3 +8,12 @@ pub fn and(left: Option<Number>, right: Option<Number>) -> Option<Number> {
         _ => None,
     }
 }
+
+pub fn or(left: Option<Number>, right: Option<Number>) -> Option<Number> {
+    match (left, right) {
+        (Some(l), Some(r)) if l != l.class().zero() || r != r.class().zero() => {
+            Some(Number::Bool(true))
+        }
+        _ => None,
+    }
+}
