@@ -194,6 +194,50 @@ impl Reshape {
             dest_coord_index,
         })
     }
+
+    pub fn ndim(&self) -> usize {
+        self.dest_shape.len()
+    }
+
+    pub fn shape(&'_ self) -> &'_ Shape {
+        &self.dest_shape
+    }
+
+    pub fn offset(&self, coord: &[u64]) -> u64 {
+        assert!(coord.len() == self.dest_shape.len());
+
+        self.dest_coord_index
+            .iter()
+            .zip(coord)
+            .map(|(i, c)| i * c)
+            .sum()
+    }
+
+    pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
+        let offset = self.offset(coord);
+        self.source_coord_index
+            .iter()
+            .zip(self.shape().to_vec().iter())
+            .map(|(i, dim)| (offset / i) % dim)
+            .collect()
+    }
+
+    pub fn map_coord(&self, coord: Vec<u64>) -> Vec<u64> {
+        assert!(coord.len() == self.source_shape.len());
+
+        let offset: u64 = self
+            .source_coord_index
+            .iter()
+            .zip(coord)
+            .map(|(i, c)| i * c)
+            .sum();
+
+        self.dest_coord_index
+            .iter()
+            .zip(self.shape().to_vec().iter())
+            .map(|(i, dim)| (offset / i) % dim)
+            .collect()
+    }
 }
 
 #[derive(Clone)]

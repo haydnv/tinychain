@@ -124,8 +124,30 @@ impl Bounds {
         axes.iter().cloned().multi_cartesian_product()
     }
 
+    pub fn contains_coord(&self, coord: &[u64]) -> bool {
+        if coord.len() != self.len() {
+            return false;
+        }
+
+        use AxisBounds::*;
+        for (bound, c) in self.axes.iter().zip(coord) {
+            match bound {
+                At(i) if i != c => return false,
+                In(range) if !range.contains(c) => return false,
+                Of(indices) if !indices.contains(c) => return false,
+                _ => {}
+            }
+        }
+
+        true
+    }
+
     pub fn is_empty(&self) -> bool {
         self.axes.is_empty()
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<AxisBounds> {
+        self.axes.iter()
     }
 
     pub fn len(&self) -> usize {

@@ -615,6 +615,145 @@ impl SparseAccessor for SparseExpand {
     }
 }
 
+struct SparseReshape {
+    source: Arc<dyn SparseAccessor>,
+    rebase: transform::Reshape,
+}
+
+impl TensorView for SparseReshape {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.rebase.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl SparseAccessor for SparseReshape {
+    fn filled<'a>(self: Arc<Self>, txn_id: TxnId) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(async move {
+            let rebase = self.rebase.clone();
+            let filled = self
+                .source
+                .clone()
+                .filled(txn_id)
+                .await?
+                .map(move |(coord, value)| (rebase.map_coord(coord), value));
+
+            let filled: SparseStream = Box::pin(filled);
+            Ok(filled)
+        })
+    }
+
+    fn filled_at<'a>(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        axes: Vec<usize>,
+    ) -> TCBoxTryFuture<'a, TCStream<Vec<u64>>> {
+        group_axes(self, txn_id, axes)
+    }
+
+    fn filled_count<'a>(self: Arc<Self>, txn_id: TxnId) -> TCBoxTryFuture<'a, u64> {
+        self.source.clone().filled_count(txn_id)
+    }
+
+    fn filled_in<'a>(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        bounds: Bounds,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(async move {
+            if self.source.ndim() == 1 {
+                let start: Vec<u64> = bounds
+                    .iter()
+                    .map(|bound| match bound {
+                        AxisBounds::At(x) => *x,
+                        AxisBounds::In(range) => range.start,
+                        AxisBounds::Of(indices) => *indices.iter().min().unwrap(),
+                    })
+                    .collect();
+
+                let end: Vec<u64> = bounds
+                    .iter()
+                    .map(|bound| match bound {
+                        AxisBounds::At(x) => *x,
+                        AxisBounds::In(range) => range.end,
+                        AxisBounds::Of(indices) => indices.iter().cloned().fold(0u64, u64::max),
+                    })
+                    .collect();
+
+                let start = self.rebase.offset(&start);
+                let end = self.rebase.offset(&end);
+
+                let rebase = transform::Slice::new(
+                    self.source.shape().clone(),
+                    vec![AxisBounds::from(start..end)].into(),
+                )?;
+
+                let slice = Arc::new(SparseSlice {
+                    source: self.source.clone(),
+                    rebase,
+                });
+
+                let rebase = self.rebase.clone();
+                let filled = slice
+                    .filled(txn_id)
+                    .await?
+                    .map(move |(coord, value)| (rebase.map_coord(coord), value))
+                    .filter(move |(coord, _)| future::ready(bounds.contains_coord(coord)));
+
+                let filled: SparseStream = Box::pin(filled);
+                Ok(filled)
+            } else {
+                let rebase = transform::Reshape::new(
+                    self.source.shape().clone(),
+                    vec![self.source.size()].into(),
+                )?;
+                let flat = Arc::new(SparseReshape {
+                    source: self.source.clone(),
+                    rebase,
+                });
+
+                let rebase = transform::Reshape::new(flat.shape().clone(), self.shape().clone())?;
+                let unflat = Arc::new(SparseReshape {
+                    source: flat,
+                    rebase,
+                });
+                unflat.filled_in(txn_id, bounds).await
+            }
+        })
+    }
+
+    fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(async move {
+            let coord = self.rebase.invert_coord(coord);
+            self.source.read_value(txn_id, &coord).await
+        })
+    }
+
+    fn write_value<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let coord = self.rebase.invert_coord(&coord);
+            self.source.write_value(txn_id, coord, value).await
+        })
+    }
+}
+
 struct SparseSlice {
     source: Arc<dyn SparseAccessor>,
     rebase: transform::Slice,
@@ -1136,9 +1275,13 @@ impl TensorTransform for SparseTensor {
             return Ok(self.clone());
         }
 
-        let _rebase = transform::Reshape::new(self.shape().clone(), shape);
+        let rebase = transform::Reshape::new(self.shape().clone(), shape)?;
+        let accessor = Arc::new(SparseReshape {
+            source: self.accessor.clone(),
+            rebase,
+        });
 
-        Err(error::not_implemented())
+        Ok(SparseTensor { accessor })
     }
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
