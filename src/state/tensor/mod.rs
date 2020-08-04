@@ -58,6 +58,13 @@ trait TensorCompare: Sized + TensorView {
 trait TensorIO: Sized + TensorView {
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
 
+    fn write<'a>(
+        &'a self,
+        txn: Arc<Txn>,
+        bounds: bounds::Bounds,
+        value: Self,
+    ) -> TCBoxTryFuture<'a, ()>;
+
     fn write_value(
         &self,
         txn_id: TxnId,
@@ -210,6 +217,24 @@ impl TensorIO for Tensor {
         match self {
             Self::Dense(dense) => dense.read_value(txn_id, coord),
             Self::Sparse(sparse) => sparse.read_value(txn_id, coord),
+        }
+    }
+
+    fn write<'a>(
+        &'a self,
+        txn: Arc<Txn>,
+        bounds: bounds::Bounds,
+        value: Self,
+    ) -> TCBoxTryFuture<'a, ()> {
+        match self {
+            Self::Dense(this) => match value {
+                Self::Dense(that) => this.write(txn, bounds, that),
+                Self::Sparse(that) => this.write(txn, bounds, DenseTensor::from_sparse(that)),
+            },
+            Self::Sparse(this) => match value {
+                Self::Dense(that) => this.write(txn, bounds, SparseTensor::from_dense(that)),
+                Self::Sparse(that) => this.write(txn, bounds, that),
+            },
         }
     }
 

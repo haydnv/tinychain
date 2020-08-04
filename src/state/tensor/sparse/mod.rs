@@ -1147,6 +1147,15 @@ impl TensorIO for SparseTensor {
         self.accessor.read_value(txn_id, coord)
     }
 
+    fn write<'a>(
+        &'a self,
+        _txn: Arc<Txn>,
+        _bounds: Bounds,
+        _value: Self,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
     fn write_value(
         &'_ self,
         txn_id: TxnId,
