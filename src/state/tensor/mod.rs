@@ -28,9 +28,9 @@ trait TensorView: Send + Sync {
 
 #[async_trait]
 trait TensorBoolean: Sized + TensorView {
-    async fn all(&self, txn_id: TxnId) -> TCResult<bool>;
+    async fn all(&self, txn: Arc<Txn>) -> TCResult<bool>;
 
-    fn any(&self, txn_id: TxnId) -> TCBoxTryFuture<bool>;
+    fn any(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
 
     async fn and(&self, other: &Self) -> TCResult<Self>;
 
@@ -142,17 +142,17 @@ impl TensorView for Tensor {
 
 #[async_trait]
 impl TensorBoolean for Tensor {
-    async fn all(&self, txn_id: TxnId) -> TCResult<bool> {
+    async fn all(&self, txn: Arc<Txn>) -> TCResult<bool> {
         match self {
-            Self::Dense(dense) => dense.all(txn_id).await,
-            Self::Sparse(sparse) => sparse.all(txn_id).await,
+            Self::Dense(dense) => dense.all(txn).await,
+            Self::Sparse(sparse) => sparse.all(txn).await,
         }
     }
 
-    fn any(&'_ self, txn_id: TxnId) -> TCBoxTryFuture<'_, bool> {
+    fn any(&'_ self, txn: Arc<Txn>) -> TCBoxTryFuture<'_, bool> {
         match self {
-            Self::Dense(dense) => dense.any(txn_id),
-            Self::Sparse(sparse) => sparse.any(txn_id),
+            Self::Dense(dense) => dense.any(txn),
+            Self::Sparse(sparse) => sparse.any(txn),
         }
     }
 
