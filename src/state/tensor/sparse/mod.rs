@@ -9,6 +9,7 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 
 use crate::error;
+use crate::state::btree;
 use crate::state::table::{self, Selection, Table, TableBase};
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::{NumberClass, NumberImpl, NumberType, UIntType, ValueType};
@@ -1295,17 +1296,64 @@ fn group_axes<'a>(
         }
 
         let axes_clone = axes.to_vec();
-        let left = accessor
-            .clone()
-            .filled(txn.clone())
-            .await?
-            .map(move |(coord, _)| axes_clone.iter().map(|x| coord[*x]).collect::<Vec<u64>>());
+        let map = move |(coord, _): (Vec<u64>, Number)| {
+            axes_clone.iter().map(|x| coord[*x]).collect::<Vec<u64>>()
+        };
 
-        let mut right = accessor
-            .clone()
-            .filled(txn)
-            .await?
-            .map(move |(coord, _)| axes.iter().map(|x| coord[*x]).collect::<Vec<u64>>());
+        let sorted_axes: Vec<usize> = itertools::sorted(axes.to_vec()).collect::<Vec<usize>>();
+        let (left, mut right): (TCStream<Vec<u64>>, TCStream<Vec<u64>>) = if axes == sorted_axes {
+            let left = accessor.clone().filled(txn.clone()).await?.map(map.clone());
+            let right = accessor.clone().filled(txn.clone()).await?.map(map);
+            (Box::pin(left), Box::pin(right))
+        } else {
+            let schema: btree::Schema = axes
+                .iter()
+                .cloned()
+                .map(ValueId::from)
+                .map(|x| (x, ValueType::Number(NumberType::UInt(UIntType::U64)), None).into())
+                .collect::<Vec<btree::Column>>()
+                .into();
+
+            let btree_file = txn
+                .clone()
+                .subcontext_tmp()
+                .await?
+                .context()
+                .create_btree(txn.id().clone(), "axes".parse()?)
+                .await?;
+            let btree = Arc::new(btree::BTree::create(txn.id().clone(), schema, btree_file).await?);
+
+            btree
+                .insert_from(
+                    txn.id(),
+                    accessor
+                        .clone()
+                        .filled(txn.clone())
+                        .await?
+                        .map(map)
+                        .map(|mut coord| {
+                            coord
+                                .drain(..)
+                                .map(|i| Number::UInt(i.into()))
+                                .map(|n| n.into())
+                                .collect::<Vec<Value>>()
+                        }),
+                )
+                .await?;
+
+            let left = btree
+                .clone()
+                .slice(txn.id().clone(), btree::Selector::all())
+                .await?
+                .map(move |coord| unwrap_coord(&coord));
+
+            let right = btree
+                .slice(txn.id().clone(), btree::Selector::all())
+                .await?
+                .map(move |coord| unwrap_coord(&coord));
+
+            (Box::pin(left), Box::pin(right))
+        };
 
         if right.next().await.is_none() {
             let filled_at: TCStream<Vec<u64>> = Box::pin(stream::empty());
