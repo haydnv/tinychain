@@ -661,17 +661,22 @@ impl BlockList for BlockListReshape {
         Box::pin(async move {
             if self.ndim() == 1 {
                 let (start, end) = self.rebase.offsets(&bounds);
-                let rebase = transform::Slice::new(
-                    self.source.shape().clone(),
-                    vec![AxisBounds::from(start..end)].into(),
-                )?;
+                let source_bounds: Bounds = vec![AxisBounds::from(start..end)].into();
+                let rebase =
+                    transform::Slice::new(self.source.shape().clone(), source_bounds.clone())?;
 
                 let slice = Arc::new(BlockListSlice {
                     source: self.source.clone(),
                     rebase,
                 });
 
-                slice.value_stream(txn_id).await
+                let value_stream = stream::iter(source_bounds.affected())
+                    .zip(slice.value_stream(txn_id).await?)
+                    .map(|(coord, r)| r.map(|value| (coord, value)))
+                    .try_filter(move |(coord, _)| future::ready(bounds.contains_coord(coord)))
+                    .map_ok(|(_, value)| value);
+                let value_stream: TCTryStream<Number> = Box::pin(value_stream);
+                Ok(value_stream)
             } else {
                 let rebase = transform::Reshape::new(
                     self.source.shape().clone(),
