@@ -115,49 +115,17 @@ impl SparseAccessor for DenseAccessor {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        _txn: Arc<Txn>,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCStream<Vec<u64>>> {
         Box::pin(async move {
             let shape = self.shape();
-            let source = self.source.clone();
-            let bounds: HashMap<usize, AxisBounds> = shape
-                .to_vec()
-                .drain(..)
-                .map(|dim| AxisBounds::In(0..dim))
-                .enumerate()
-                .collect();
-
             let filled_at = stream::iter(
                 Bounds::all(&Shape::from(
                     axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>(),
                 ))
                 .affected(),
-            )
-            .filter_map(move |at| {
-                let source = source.clone();
-                let txn = txn.clone();
-                let axes = axes.to_vec();
-                let mut bounds = bounds.clone();
-
-                Box::pin(async move {
-                    for (axis, coord) in axes.iter().zip(at.iter()) {
-                        bounds.insert(*axis, AxisBounds::At(*coord));
-                    }
-                    let bounds: Bounds = (0..bounds.len())
-                        .map(|x| bounds.remove(&x).unwrap())
-                        .collect::<Vec<AxisBounds>>()
-                        .into();
-
-                    let slice = source.slice(bounds).unwrap(); // TODO: remove this call to .unwrap()
-                    if slice.any(txn).await.unwrap() {
-                        // TODO: remove this call to .unwrap()
-                        Some(at)
-                    } else {
-                        None
-                    }
-                })
-            });
+            );
 
             let filled_at: TCStream<Vec<u64>> = Box::pin(filled_at);
             Ok(filled_at)
@@ -881,14 +849,15 @@ impl SparseAccessor for SparseTranspose {
         txn: Arc<Txn>,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCStream<Vec<u64>>> {
+        // can't use group_axes here because it would lead to a circular dependency in self.filled
         Box::pin(async move {
             let rebase = self.rebase.clone();
             let filled_at = self
                 .source
                 .clone()
-                .filled_at(txn, rebase.invert_axes(axes))
+                .filled_at(txn, rebase.invert_axes(&axes))
                 .await?
-                .map(move |coord| rebase.map_coord(coord));
+                .map(move |coord| rebase.map_coord_axes(coord, &axes));
 
             let filled_at: TCStream<Vec<u64>> = Box::pin(filled_at);
             Ok(filled_at)

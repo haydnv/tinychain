@@ -448,7 +448,7 @@ impl Transpose {
         })
     }
 
-    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+    pub fn invert_axes(&self, axes: &[usize]) -> Vec<usize> {
         axes.iter().map(|x| self.permutation[*x]).collect()
     }
 
@@ -475,6 +475,24 @@ impl Transpose {
             coord[self.permutation[axis]] = source_coord[axis];
         }
 
+        coord
+    }
+
+    pub fn map_coord_axes(&self, mut partial_source_coord: Vec<u64>, axes: &[usize]) -> Vec<u64> {
+        assert!(partial_source_coord.len() == axes.len());
+
+        let mut source_coord: HashMap<usize, u64> = axes
+            .iter()
+            .cloned()
+            .zip(partial_source_coord.drain(..))
+            .collect();
+
+        let mut coord = Vec::with_capacity(self.shape.len());
+        for axis in &self.permutation {
+            if let Some(i) = source_coord.remove(axis) {
+                coord.push(i)
+            }
+        }
         coord
     }
 
