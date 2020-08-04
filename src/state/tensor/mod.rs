@@ -161,8 +161,8 @@ impl TensorBoolean for Tensor {
         match (self, other) {
             (Dense(left), Dense(right)) => left.and(right).await.map(Self::from),
             (Sparse(left), Sparse(right)) => left.and(right).await.map(Self::from),
-            (Dense(left), Sparse(right)) => left
-                .and(&DenseTensor::from_sparse(right.clone()))
+            (Sparse(left), Dense(right)) => left
+                .and(&SparseTensor::from_dense(right.clone()))
                 .await
                 .map(Self::from),
 

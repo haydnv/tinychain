@@ -674,26 +674,7 @@ impl SparseAccessor for SparseReshape {
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             if self.source.ndim() == 1 {
-                let start: Vec<u64> = bounds
-                    .iter()
-                    .map(|bound| match bound {
-                        AxisBounds::At(x) => *x,
-                        AxisBounds::In(range) => range.start,
-                        AxisBounds::Of(indices) => *indices.iter().min().unwrap(),
-                    })
-                    .collect();
-
-                let end: Vec<u64> = bounds
-                    .iter()
-                    .map(|bound| match bound {
-                        AxisBounds::At(x) => *x,
-                        AxisBounds::In(range) => range.end,
-                        AxisBounds::Of(indices) => indices.iter().cloned().fold(0u64, u64::max),
-                    })
-                    .collect();
-
-                let start = self.rebase.offset(&start);
-                let end = self.rebase.offset(&end);
+                let (start, end) = self.rebase.offsets(&bounds);
 
                 let rebase = transform::Slice::new(
                     self.source.shape().clone(),
@@ -1122,6 +1103,11 @@ pub struct SparseTensor {
 impl SparseTensor {
     pub fn filled(&'_ self, txn_id: TxnId) -> TCBoxTryFuture<'_, SparseStream> {
         self.accessor.clone().filled(txn_id)
+    }
+
+    pub fn from_dense(source: DenseTensor) -> SparseTensor {
+        let accessor = Arc::new(DenseAccessor { source });
+        SparseTensor { accessor }
     }
 }
 

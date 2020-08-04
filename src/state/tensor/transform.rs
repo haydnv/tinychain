@@ -213,6 +213,28 @@ impl Reshape {
             .sum()
     }
 
+    pub fn offsets(&self, bounds: &Bounds) -> (u64, u64) {
+        let start: Vec<u64> = bounds
+            .iter()
+            .map(|bound| match bound {
+                AxisBounds::At(x) => *x,
+                AxisBounds::In(range) => range.start,
+                AxisBounds::Of(indices) => *indices.iter().min().unwrap(),
+            })
+            .collect();
+
+        let end: Vec<u64> = bounds
+            .iter()
+            .map(|bound| match bound {
+                AxisBounds::At(x) => *x,
+                AxisBounds::In(range) => range.end,
+                AxisBounds::Of(indices) => indices.iter().cloned().fold(0u64, u64::max),
+            })
+            .collect();
+
+        (self.offset(&start), self.offset(&end))
+    }
+
     pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
         let offset = self.offset(coord);
         self.source_coord_index
