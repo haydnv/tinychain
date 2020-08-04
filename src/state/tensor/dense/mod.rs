@@ -1021,6 +1021,10 @@ impl DenseTensor {
     pub async fn value_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<TCResult<Number>>> {
         self.blocks.clone().value_stream(txn).await
     }
+
+    fn read_value_owned<'a>(self, txn_id: TxnId, coord: Vec<u64>) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(async move { self.read_value(&txn_id, &coord).await })
+    }
 }
 
 impl TensorView for DenseTensor {
@@ -1073,13 +1077,29 @@ impl TensorIO for DenseTensor {
         self.blocks.read_value_at(txn_id, coord)
     }
 
-    fn write<'a>(
-        &'a self,
-        _txn: Arc<Txn>,
-        _bounds: Bounds,
-        _value: Self,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+    fn write<'a>(&'a self, txn: Arc<Txn>, bounds: Bounds, other: Self) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let slice = self.slice(bounds)?;
+            let other = other
+                .broadcast(slice.shape().clone())?
+                .as_type(self.dtype())?;
+
+            let txn_id = txn.id().clone();
+            let txn_id_clone = txn_id.clone();
+            stream::iter(Bounds::all(slice.shape()).affected())
+                .map(move |coord| {
+                    Ok(other
+                        .clone()
+                        .read_value_owned(txn_id.clone(), coord.to_vec())
+                        .map_ok(|value| (coord, value)))
+                })
+                .try_buffer_unordered(2)
+                .map_ok(|(coord, value)| slice.write_value_at(txn_id_clone.clone(), coord, value))
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await?;
+
+            Ok(())
+        })
     }
 
     fn write_value(
