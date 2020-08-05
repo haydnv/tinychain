@@ -1126,26 +1126,10 @@ impl Array {
         }
     }
 
-    pub fn and(&self, other: &Array) -> TCResult<Array> {
-        use Array::*;
-        match (self, other) {
-            (Bool(l), Bool(r)) => Ok(Bool(l.and(r))),
-            (C32(l), C32(r)) => Ok(Bool(l.and(r))),
-            (C64(l), C64(r)) => Ok(Bool(l.and(r))),
-            (F32(l), F32(r)) => Ok(Bool(l.and(r))),
-            (F64(l), F64(r)) => Ok(Bool(l.and(r))),
-            (I16(l), I16(r)) => Ok(Bool(l.and(r))),
-            (I32(l), I32(r)) => Ok(Bool(l.and(r))),
-            (I64(l), I64(r)) => Ok(Bool(l.and(r))),
-            (U8(l), U8(r)) => Ok(Bool(l.and(r))),
-            (U16(l), U16(r)) => Ok(Bool(l.and(r))),
-            (U32(l), U32(r)) => Ok(Bool(l.and(r))),
-            (U64(l), U64(r)) => Ok(Bool(l.and(r))),
-            (l, r) => Err(error::internal(format!(
-                "Tried to compare {} with {}",
-                l, r
-            ))),
-        }
+    pub fn and(&self, other: &Array) -> Array {
+        let this: ArrayExt<bool> = self.af_cast();
+        let that: ArrayExt<bool> = other.af_cast();
+        Array::Bool(this.and(&that))
     }
 
     pub fn equals(&self, other: &Array) -> TCResult<Array> {

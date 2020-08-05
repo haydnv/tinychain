@@ -20,6 +20,7 @@ use super::bounds::{AxisBounds, Bounds, Shape};
 use super::*;
 
 pub mod array;
+mod combinator;
 
 use array::Array;
 
@@ -103,7 +104,7 @@ trait BlockList: TensorView + 'static {
 struct BlockListCombine {
     left: Arc<dyn BlockList>,
     right: Arc<dyn BlockList>,
-    combinator: fn(Array, Array) -> Array,
+    combinator: fn(&Array, &Array) -> Array,
     value_combinator: fn(Number, Number) -> Number,
 }
 
@@ -111,7 +112,7 @@ impl BlockListCombine {
     fn new(
         left: Arc<dyn BlockList>,
         right: Arc<dyn BlockList>,
-        combinator: fn(Array, Array) -> Array,
+        combinator: fn(&Array, &Array) -> Array,
         value_combinator: fn(Number, Number) -> Number,
     ) -> TCResult<BlockListCombine> {
         if left.shape() != right.shape() {
@@ -159,7 +160,7 @@ impl BlockList for BlockListCombine {
             let blocks = left
                 .zip(right)
                 .map(|(l, r)| Ok((l?, r?)))
-                .map_ok(move |(l, r)| combinator(l, r));
+                .map_ok(move |(l, r)| combinator(&l, &r));
             let blocks: TCTryStream<Array> = Box::pin(blocks);
             Ok(blocks)
         })
@@ -1203,8 +1204,15 @@ impl TensorBoolean for DenseTensor {
         })
     }
 
-    async fn and(&self, _other: &Self) -> TCResult<Self> {
-        Err(error::not_implemented())
+    async fn and(&self, other: &Self) -> TCResult<Self> {
+        let blocks = Arc::new(BlockListCombine::new(
+            self.blocks.clone(),
+            other.blocks.clone(),
+            Array::and,
+            combinator::and,
+        )?);
+
+        Ok(DenseTensor { blocks })
     }
 
     async fn not(&self) -> TCResult<Self> {
