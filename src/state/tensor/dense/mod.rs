@@ -160,10 +160,25 @@ impl BlockList for BlockListCombine {
 
     fn value_stream_slice<'a>(
         self: Arc<Self>,
-        _txn: Arc<Txn>,
-        _bounds: Bounds,
+        txn: Arc<Txn>,
+        bounds: Bounds,
     ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(async move {
+            let rebase = transform::Slice::new(self.left.shape().clone(), bounds.clone())?;
+            let left = Arc::new(BlockListSlice {
+                source: self.left.clone(),
+                rebase,
+            });
+
+            let rebase = transform::Slice::new(self.right.shape().clone(), bounds)?;
+            let right = Arc::new(BlockListSlice {
+                source: self.right.clone(),
+                rebase,
+            });
+
+            let slice = Arc::new(BlockListCombine::new(left, right, self.combinator)?);
+            slice.value_stream(txn).await
+        })
     }
 
     fn read_value_at<'a>(
