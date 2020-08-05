@@ -874,27 +874,15 @@ impl SparseAccessor for SparseTranspose {
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
-            // Get the source slice
-            let slice_rebase = transform::Slice::new(
-                self.source.shape().clone(),
-                self.rebase.invert_bounds(bounds),
-            )?;
-
-            let slice = SparseSlice {
-                source: self.source.clone(),
-                rebase: slice_rebase.clone(),
-            };
-
-            let filled = Arc::new(slice)
-                .filled(txn)
+            let filled_in = self
+                .source
+                .clone()
+                .filled_in(txn, self.rebase.invert_bounds(bounds))
                 .await?
-                // Map the slice coordinate basis back to the source coordinate basis.
-                // TODO: remove the redundant map step
-                .map(move |(coord, value)| (slice_rebase.invert_coord(&coord), value))
-                // Map the source coodinate basis to this coordinate basis
                 .map(move |(coord, value)| (self.rebase.map_coord(coord), value));
-            let filled: SparseStream = Box::pin(filled);
-            Ok(filled)
+
+            let filled_in: SparseStream = Box::pin(filled_in);
+            Ok(filled_in)
         })
     }
 
