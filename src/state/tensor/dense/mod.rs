@@ -1094,7 +1094,7 @@ impl TensorIO for DenseTensor {
                         .map_ok(|value| (coord, value)))
                 })
                 .try_buffer_unordered(2)
-                .map_ok(|(coord, value)| slice.write_value_at(txn_id_clone.clone(), coord, value))
+                .and_then(|(coord, value)| slice.write_value_at(txn_id_clone.clone(), coord, value))
                 .try_fold((), |_, _| future::ready(Ok(())))
                 .await?;
 
