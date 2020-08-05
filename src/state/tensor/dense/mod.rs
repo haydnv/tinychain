@@ -6,6 +6,7 @@ use std::sync::Arc;
 use arrayfire as af;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::try_join;
 use itertools::Itertools;
 
 use crate::error;
@@ -95,7 +96,105 @@ trait BlockList: TensorView + 'static {
 }
 
 #[derive(Clone)]
-pub struct BlockListFile {
+struct BlockListCombine {
+    left: Arc<dyn BlockList>,
+    right: Arc<dyn BlockList>,
+    combinator: fn(Array, Array) -> Array,
+}
+
+impl BlockListCombine {
+    fn new(
+        left: Arc<dyn BlockList>,
+        right: Arc<dyn BlockList>,
+        combinator: fn(Array, Array) -> Array,
+    ) -> TCResult<BlockListCombine> {
+        if left.shape() != right.shape() {
+            return Err(error::bad_request(
+                &format!("Cannot combine shape {} with shape", left.shape()),
+                right.shape(),
+            ));
+        }
+
+        Ok(BlockListCombine {
+            left,
+            right,
+            combinator,
+        })
+    }
+}
+
+impl TensorView for BlockListCombine {
+    fn dtype(&self) -> NumberType {
+        self.left.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.left.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.left.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.left.size()
+    }
+}
+
+impl BlockList for BlockListCombine {
+    fn block_stream<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
+        Box::pin(async move {
+            let left = self.left.clone().block_stream(txn.clone());
+            let right = self.right.clone().block_stream(txn);
+            let (left, right) = try_join!(left, right)?;
+
+            let combinator = self.combinator;
+            let blocks = left
+                .zip(right)
+                .map(|(l, r)| Ok((l?, r?)))
+                .map_ok(move |(l, r)| combinator(l, r));
+            let blocks: TCTryStream<Array> = Box::pin(blocks);
+            Ok(blocks)
+        })
+    }
+
+    fn value_stream_slice<'a>(
+        self: Arc<Self>,
+        _txn: Arc<Txn>,
+        _bounds: Bounds,
+    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn read_value_at<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        _coord: &'a [u64],
+    ) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn write_value<'a>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _bounds: Bounds,
+        _number: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn write_value_at<'a>(
+        &'a self,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+}
+
+#[derive(Clone)]
+struct BlockListFile {
     file: Arc<File<Array>>,
     dtype: NumberType,
     shape: Shape,
