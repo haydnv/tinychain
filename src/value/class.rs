@@ -95,6 +95,21 @@ pub trait NumberInstance:
         this.and(that).into()
     }
 
+    fn lt(self, other: Self) -> Self {
+        let lt: Boolean = PartialOrd::lt(&self, &other).into();
+        lt.into()
+    }
+
+    fn gt(self, other: Self) -> Self {
+        let gt: Boolean = PartialOrd::gt(&self, &other).into();
+        gt.into()
+    }
+
+    fn ne(self, other: Self) -> Self {
+        let ne: Boolean = (self != other).into();
+        ne.into()
+    }
+
     fn not(self) -> Self
     where
         Self: CastInto<Boolean>,

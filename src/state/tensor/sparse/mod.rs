@@ -1130,6 +1130,53 @@ impl TensorBoolean for SparseTensor {
     }
 }
 
+impl TensorCompare for SparseTensor {
+    fn eq(&self, _other: &Self) -> TCResult<DenseTensor> {
+        Err(error::not_implemented())
+    }
+
+    fn gt(&self, other: &Self) -> TCResult<Self> {
+        let accessor = SparseCombinator::new(
+            self.accessor.clone(),
+            other.accessor.clone(),
+            <Number as NumberInstance>::gt,
+        )
+        .map(Arc::new)?;
+
+        Ok(SparseTensor { accessor })
+    }
+
+    fn gte(&self, _other: &Self) -> TCResult<DenseTensor> {
+        Err(error::not_implemented())
+    }
+
+    fn lt(&self, other: &Self) -> TCResult<Self> {
+        let accessor = SparseCombinator::new(
+            self.accessor.clone(),
+            other.accessor.clone(),
+            <Number as NumberInstance>::lt,
+        )
+        .map(Arc::new)?;
+
+        Ok(SparseTensor { accessor })
+    }
+
+    fn lte(&self, _other: &Self) -> TCResult<DenseTensor> {
+        Err(error::not_implemented())
+    }
+
+    fn ne(&self, other: &Self) -> TCResult<Self> {
+        let accessor = SparseCombinator::new(
+            self.accessor.clone(),
+            other.accessor.clone(),
+            <Number as NumberInstance>::ne,
+        )
+        .map(Arc::new)?;
+
+        Ok(SparseTensor { accessor })
+    }
+}
+
 impl TensorIO for SparseTensor {
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         self.accessor.read_value(txn_id, coord)
