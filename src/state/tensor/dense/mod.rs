@@ -23,11 +23,15 @@ pub mod array;
 
 use array::Array;
 
-const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
+const ERR_CORRUPT: &str = "DenseTensor corrupted! Please file a bug report.";
 
 const ERR_BROADCAST_WRITE: &str = "Cannot write to a broadcasted tensor since it is not a \
 bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor.";
-const ERR_CORRUPT: &str = "DenseTensor corrupted! Please file a bug report.";
+
+const ERR_TRANSITIVE_WRITE: &str = "Cannot write to a transitive DenseTensor, \
+consider copying first or writing to the source tensors";
+
+const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
 trait BlockList: TensorView + 'static {
     fn block_stream<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
@@ -100,6 +104,7 @@ struct BlockListCombine {
     left: Arc<dyn BlockList>,
     right: Arc<dyn BlockList>,
     combinator: fn(Array, Array) -> Array,
+    value_combinator: fn(Number, Number) -> Number,
 }
 
 impl BlockListCombine {
@@ -107,6 +112,7 @@ impl BlockListCombine {
         left: Arc<dyn BlockList>,
         right: Arc<dyn BlockList>,
         combinator: fn(Array, Array) -> Array,
+        value_combinator: fn(Number, Number) -> Number,
     ) -> TCResult<BlockListCombine> {
         if left.shape() != right.shape() {
             return Err(error::bad_request(
@@ -119,6 +125,7 @@ impl BlockListCombine {
             left,
             right,
             combinator,
+            value_combinator,
         })
     }
 }
@@ -176,17 +183,28 @@ impl BlockList for BlockListCombine {
                 rebase,
             });
 
-            let slice = Arc::new(BlockListCombine::new(left, right, self.combinator)?);
+            let slice = Arc::new(BlockListCombine::new(
+                left,
+                right,
+                self.combinator,
+                self.value_combinator,
+            )?);
             slice.value_stream(txn).await
         })
     }
 
     fn read_value_at<'a>(
         &'a self,
-        _txn_id: &'a TxnId,
-        _coord: &'a [u64],
+        txn_id: &'a TxnId,
+        coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(async move {
+            let left = self.left.read_value_at(txn_id, coord);
+            let right = self.right.read_value_at(txn_id, coord);
+            let (left, right) = try_join!(left, right)?;
+            let combinator = self.value_combinator;
+            Ok(combinator(left, right))
+        })
     }
 
     fn write_value<'a>(
@@ -195,7 +213,7 @@ impl BlockList for BlockListCombine {
         _bounds: Bounds,
         _number: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(future::ready(Err(error::unsupported(ERR_TRANSITIVE_WRITE))))
     }
 
     fn write_value_at<'a>(
@@ -204,7 +222,7 @@ impl BlockList for BlockListCombine {
         _coord: Vec<u64>,
         _value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(future::ready(Err(error::unsupported(ERR_TRANSITIVE_WRITE))))
     }
 }
 
