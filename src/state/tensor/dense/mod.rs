@@ -20,7 +20,6 @@ use super::bounds::{AxisBounds, Bounds, Shape};
 use super::*;
 
 pub mod array;
-mod combinator;
 
 use array::Array;
 
@@ -1140,6 +1139,90 @@ impl BlockList for BlockListTranspose {
     }
 }
 
+pub struct BlockListUnary {
+    source: Arc<dyn BlockList>,
+    transform: fn(&Array) -> Array,
+    value_transform: fn(Number) -> Number,
+}
+
+impl TensorView for BlockListUnary {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+impl BlockList for BlockListUnary {
+    fn block_stream<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
+        Box::pin(async move {
+            let transform = self.transform;
+            let blocks = self
+                .source
+                .clone()
+                .block_stream(txn)
+                .await?
+                .map_ok(move |array| transform(&array));
+
+            let blocks: TCTryStream<Array> = Box::pin(blocks);
+            Ok(blocks)
+        })
+    }
+
+    fn value_stream_slice<'a>(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        bounds: Bounds,
+    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
+        Box::pin(async move {
+            let rebase = transform::Slice::new(self.source.shape().clone(), bounds)?;
+            let slice = Arc::new(BlockListSlice {
+                source: self.source.clone(),
+                rebase,
+            });
+
+            slice.value_stream(txn).await
+        })
+    }
+
+    fn read_value_at<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        coord: &'a [u64],
+    ) -> TCBoxTryFuture<'a, Number> {
+        let transform = self.value_transform;
+        Box::pin(self.source.read_value_at(txn_id, coord).map_ok(transform))
+    }
+
+    fn write_value<'a>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _bounds: Bounds,
+        _number: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::unsupported(ERR_TRANSITIVE_WRITE))))
+    }
+
+    fn write_value_at<'a>(
+        &'a self,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::unsupported(ERR_TRANSITIVE_WRITE))))
+    }
+}
+
 #[derive(Clone)]
 pub struct DenseTensor {
     blocks: Arc<dyn BlockList>,
@@ -1209,14 +1292,19 @@ impl TensorBoolean for DenseTensor {
             self.blocks.clone(),
             other.blocks.clone(),
             Array::and,
-            combinator::and,
+            Number::and,
         )?);
 
         Ok(DenseTensor { blocks })
     }
 
     async fn not(&self) -> TCResult<Self> {
-        Err(error::not_implemented())
+        let blocks = Arc::new(BlockListUnary {
+            source: self.blocks.clone(),
+            transform: Array::not,
+            value_transform: Number::not,
+        });
+        Ok(DenseTensor { blocks })
     }
 
     async fn or(&self, _other: &Self) -> TCResult<Self> {

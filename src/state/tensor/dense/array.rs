@@ -8,7 +8,7 @@ use bytes::Bytes;
 use crate::error;
 use crate::state::file::block::BlockData;
 use crate::value::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
-use crate::value::{Complex, Float, Int, Number, TCResult, UInt};
+use crate::value::{Boolean, Complex, Float, Int, Number, TCResult, UInt};
 
 const BATCH: bool = true;
 
@@ -61,6 +61,7 @@ impl<T: af::HasAfEnum> From<ArrayExt<T>> for Vec<T> {
 impl From<ArrayExt<bool>> for Vec<Number> {
     fn from(array: ArrayExt<bool>) -> Vec<Number> {
         let array: Vec<bool> = array.into();
+        let array: Vec<Boolean> = vec_into(array);
         vec_into(array)
     }
 }
@@ -900,7 +901,10 @@ impl Array {
 
         use Array::*;
         match value {
-            Number::Bool(b) => Array::Bool(af::constant(b, dim).into()),
+            Number::Bool(b) => {
+                let b: bool = b.into();
+                Bool(af::constant(b, dim).into())
+            }
             Number::Complex(c) => match c {
                 Complex::C32(c) => C32(af::constant(c, dim).into()),
                 Complex::C64(c) => C64(af::constant(c, dim).into()),
@@ -953,7 +957,10 @@ impl Array {
     pub fn try_from_values(values: Vec<Number>, dtype: NumberType) -> TCResult<Array> {
         use Array::*;
         let chunk = match dtype {
-            NumberType::Bool => Array::Bool(vec_try_into(values)?.into()),
+            NumberType::Bool => {
+                let values: Vec<Boolean> = vec_try_into(values)?;
+                Bool(vec_into(values).into())
+            }
             NumberType::Complex(c) => {
                 let values: Vec<Complex> = vec_try_into(values)?;
                 match c {
@@ -1265,21 +1272,8 @@ impl Array {
     }
 
     pub fn not(&self) -> Array {
-        use Array::*;
-        match self {
-            Bool(b) => Bool(b.not()),
-            C32(c) => Bool(c.as_type().not()),
-            C64(c) => Bool(c.as_type().not()),
-            F32(c) => Bool(c.as_type().not()),
-            F64(c) => Bool(c.as_type().not()),
-            I16(c) => Bool(c.as_type().not()),
-            I32(c) => Bool(c.as_type().not()),
-            I64(c) => Bool(c.as_type().not()),
-            U8(c) => Bool(c.as_type().not()),
-            U16(c) => Bool(c.as_type().not()),
-            U32(c) => Bool(c.as_type().not()),
-            U64(c) => Bool(c.as_type().not()),
-        }
+        let this: ArrayExt<bool> = self.af_cast();
+        Array::Bool(this.not())
     }
 
     pub fn or(&self, other: &Array) -> TCResult<Array> {
@@ -1398,7 +1392,10 @@ impl Array {
     pub fn set_value(&mut self, offset: usize, value: Number) -> TCResult<()> {
         use Array::*;
         match self {
-            Bool(b) => b.set_at(offset, value.try_into()?),
+            Bool(b) => {
+                let value: Boolean = value.try_into()?;
+                b.set_at(offset, value.try_into()?);
+            }
             C32(c) => {
                 let value: Complex = value.try_into()?;
                 c.set_at(offset, value.try_into()?)

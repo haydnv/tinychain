@@ -12,13 +12,12 @@ use crate::error;
 use crate::state::btree;
 use crate::state::table::{self, Selection, Table, TableBase};
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::{NumberClass, NumberImpl, NumberType, UIntType, ValueType};
+use crate::value::class::{Impl, NumberClass, NumberImpl, NumberType, UIntType, ValueType};
 use crate::value::{Number, TCBoxTryFuture, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::*;
 
-mod combinator;
 mod combine;
 
 use combine::SparseCombine;
@@ -363,16 +362,17 @@ impl SparseAccessor for SparseCast {
 
 struct SparseCombinator {
     left: Arc<dyn SparseAccessor>,
+    left_zero: Number,
     right: Arc<dyn SparseAccessor>,
-    combinator: fn(Option<Number>, Option<Number>) -> Option<Number>,
-    zero: Number,
+    right_zero: Number,
+    combinator: fn(Number, Number) -> Number,
 }
 
 impl SparseCombinator {
     fn new(
         left: Arc<dyn SparseAccessor>,
         right: Arc<dyn SparseAccessor>,
-        combinator: fn(Option<Number>, Option<Number>) -> Option<Number>,
+        combinator: fn(Number, Number) -> Number,
     ) -> TCResult<SparseCombinator> {
         if left.shape() != right.shape() {
             return Err(error::internal(
@@ -380,28 +380,30 @@ impl SparseCombinator {
             ));
         }
 
-        let zero = left.dtype().zero() * right.dtype().zero();
-
+        let left_zero = left.dtype().zero();
+        let right_zero = right.dtype().zero();
         Ok(SparseCombinator {
             left,
+            left_zero,
             right,
+            right_zero,
             combinator,
-            zero,
         })
     }
 
     fn filled_inner(&self, left: SparseStream, right: SparseStream) -> SparseStream {
         let combinator = self.combinator;
-        let zero = self.zero.clone();
+        let left_zero = self.left_zero.clone();
+        let right_zero = self.right_zero.clone();
+
         let combined = SparseCombine::new(left, right).filter_map(move |(coord, l, r)| {
-            let row = if let Some(value) = combinator(l, r) {
-                if value == zero {
-                    None
-                } else {
-                    Some((coord, value))
-                }
-            } else {
+            let l = l.unwrap_or_else(|| left_zero.clone());
+            let r = r.unwrap_or_else(|| right_zero.clone());
+            let value = combinator(l, r);
+            let row = if value == value.class().zero() {
                 None
+            } else {
+                Some((coord, value))
             };
 
             future::ready(row)
@@ -479,7 +481,7 @@ impl SparseAccessor for SparseCombinator {
             let right = self.right.read_value(txn_id, coord);
             let (left, right) = try_join!(left, right)?;
             let combinator = self.combinator;
-            Ok(combinator(Some(left), Some(right)).unwrap_or_else(|| self.zero.clone()))
+            Ok(combinator(left, right))
         })
     }
 
@@ -1104,12 +1106,9 @@ impl TensorBoolean for SparseTensor {
     }
 
     async fn and(&self, other: &Self) -> TCResult<Self> {
-        let accessor = SparseCombinator::new(
-            self.accessor.clone(),
-            other.accessor.clone(),
-            combinator::and,
-        )
-        .map(Arc::new)?;
+        let accessor =
+            SparseCombinator::new(self.accessor.clone(), other.accessor.clone(), Number::and)
+                .map(Arc::new)?;
 
         Ok(SparseTensor { accessor })
     }
@@ -1119,12 +1118,9 @@ impl TensorBoolean for SparseTensor {
     }
 
     async fn or(&self, other: &Self) -> TCResult<Self> {
-        let accessor = SparseCombinator::new(
-            self.accessor.clone(),
-            other.accessor.clone(),
-            combinator::or,
-        )
-        .map(Arc::new)?;
+        let accessor =
+            SparseCombinator::new(self.accessor.clone(), other.accessor.clone(), Number::or)
+                .map(Arc::new)?;
 
         Ok(SparseTensor { accessor })
     }

@@ -7,9 +7,109 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::error;
 
+use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{CastFrom, CastInto, Impl, NumberClass, NumberImpl, ValueImpl};
-use super::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::TCResult;
+
+#[derive(Clone, PartialEq)]
+pub struct Boolean(bool);
+
+impl Impl for Boolean {
+    type Class = BooleanType;
+
+    fn class(&self) -> BooleanType {
+        BooleanType
+    }
+}
+
+impl ValueImpl for Boolean {
+    type Class = BooleanType;
+}
+
+impl NumberImpl for Boolean {
+    type Abs = Self;
+    type Class = BooleanType;
+
+    fn abs(self) -> Self {
+        self.clone()
+    }
+
+    fn and(self, other: Self) -> Self {
+        Boolean(self.0 && other.0)
+    }
+
+    fn into_type(self, _dtype: BooleanType) -> Boolean {
+        self
+    }
+
+    fn not(self) -> Self {
+        Boolean(!self.0)
+    }
+
+    fn or(self, other: Self) -> Self {
+        Boolean(self.0 || other.0)
+    }
+}
+
+impl From<bool> for Boolean {
+    fn from(b: bool) -> Boolean {
+        Boolean(b)
+    }
+}
+
+impl From<Boolean> for bool {
+    fn from(b: Boolean) -> bool {
+        b.0
+    }
+}
+
+impl Eq for Boolean {}
+
+impl Add for Boolean {
+    type Output = UInt;
+
+    fn add(self, other: Boolean) -> Self::Output {
+        match (self, other) {
+            (Boolean(true), Boolean(true)) => UInt::U8(2),
+            (Boolean(false), Boolean(false)) => UInt::U8(1),
+            _ => UInt::U8(1),
+        }
+    }
+}
+
+impl Mul for Boolean {
+    type Output = Self;
+
+    fn mul(self, other: Boolean) -> Self {
+        match (self, other) {
+            (Boolean(true), Boolean(true)) => Boolean(true),
+            _ => Boolean(false),
+        }
+    }
+}
+
+impl PartialOrd for Boolean {
+    fn partial_cmp(&self, other: &Boolean) -> Option<Ordering> {
+        match (self, other) {
+            (Boolean(l), Boolean(r)) => l.partial_cmp(r),
+        }
+    }
+}
+
+impl fmt::Display for Boolean {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Serialize for Boolean {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        s.serialize_bool(self.0)
+    }
+}
 
 #[derive(Clone, PartialEq)]
 pub enum Complex {
@@ -36,10 +136,24 @@ impl NumberImpl for Complex {
     type Abs = Float;
     type Class = ComplexType;
 
-    fn abs(&self) -> Float {
+    fn abs(self) -> Float {
         match self {
             Self::C32(c) => Float::F32(c.norm_sqr()),
             Self::C64(c) => Float::F64(c.norm_sqr()),
+        }
+    }
+
+    fn into_type(self, dtype: ComplexType) -> Complex {
+        use ComplexType::*;
+        match dtype {
+            C32 => match self {
+                Self::C64(c) => Self::C32(num::Complex::new(c.re as f32, c.im as f32)),
+                this => this,
+            },
+            C64 => match self {
+                Self::C32(c) => Self::C64(num::Complex::new(c.re as f64, c.im as f64)),
+                this => this,
+            },
         }
     }
 }
@@ -48,7 +162,7 @@ impl CastFrom<Number> for Complex {
     fn cast_from(number: Number) -> Complex {
         use Number::*;
         match number {
-            Bool(b) => b.cast_into(),
+            Number::Bool(b) => Self::cast_from(b),
             Complex(c) => c,
             Float(f) => Self::cast_from(f),
             Int(i) => Self::cast_from(i),
@@ -57,13 +171,13 @@ impl CastFrom<Number> for Complex {
     }
 }
 
-impl CastFrom<Complex> for bool {
-    fn cast_from(c: Complex) -> bool {
+impl CastFrom<Complex> for Boolean {
+    fn cast_from(c: Complex) -> Boolean {
         use Complex::*;
         match c {
-            C32(c) if c.norm_sqr() == 0f32 => false,
-            C64(c) if c.norm_sqr() == 0f64 => false,
-            _ => true,
+            C32(c) if c.norm_sqr() == 0f32 => Boolean(false),
+            C64(c) if c.norm_sqr() == 0f64 => Boolean(false),
+            _ => Boolean(true),
         }
     }
 }
@@ -169,18 +283,17 @@ impl CastFrom<UInt> for Complex {
     }
 }
 
-impl From<bool> for Complex {
-    fn from(b: bool) -> Self {
-        if b {
-            Self::C32(num::Complex::new(1.0f32, 0.0f32))
-        } else {
-            Self::C64(num::Complex::new(1.0f64, 0.0f64))
+impl From<Boolean> for Complex {
+    fn from(b: Boolean) -> Self {
+        match b {
+            Boolean(true) => Self::C32(num::Complex::new(1.0f32, 0.0f32)),
+            Boolean(false) => Self::C32(num::Complex::new(1.0f32, 0.0f32)),
         }
     }
 }
 
-impl CastFrom<bool> for Complex {
-    fn cast_from(b: bool) -> Complex {
+impl CastFrom<Boolean> for Complex {
+    fn cast_from(b: Boolean) -> Complex {
         b.into()
     }
 }
@@ -262,10 +375,24 @@ impl NumberImpl for Float {
     type Abs = Float;
     type Class = FloatType;
 
-    fn abs(&self) -> Float {
+    fn abs(self) -> Float {
         match self {
             Self::F32(f) => Self::F32(f.abs()),
             Self::F64(f) => Self::F64(f.abs()),
+        }
+    }
+
+    fn into_type(self, dtype: FloatType) -> Float {
+        use FloatType::*;
+        match dtype {
+            F32 => match self {
+                Self::F64(f) => Self::F32(f as f32),
+                this => this,
+            },
+            F64 => match self {
+                Self::F32(f) => Self::F64(f as f64),
+                this => this,
+            },
         }
     }
 }
@@ -280,14 +407,16 @@ impl CastFrom<Complex> for Float {
     }
 }
 
-impl CastFrom<Float> for bool {
-    fn cast_from(f: Float) -> bool {
+impl CastFrom<Float> for Boolean {
+    fn cast_from(f: Float) -> Boolean {
         use Float::*;
-        match f {
+        let b = match f {
             F32(f) if f == 0f32 => false,
             F64(f) if f == 0f64 => false,
             _ => true,
-        }
+        };
+
+        Boolean(b)
     }
 }
 
@@ -329,18 +458,17 @@ impl PartialOrd for Float {
     }
 }
 
-impl From<bool> for Float {
-    fn from(b: bool) -> Self {
-        if b {
-            Self::F32(1.0f32)
-        } else {
-            Self::F32(0.0f32)
+impl From<Boolean> for Float {
+    fn from(b: Boolean) -> Self {
+        match b {
+            Boolean(true) => Self::F32(1.0f32),
+            Boolean(false) => Self::F32(0.0f32),
         }
     }
 }
 
-impl CastFrom<bool> for Float {
-    fn cast_from(b: bool) -> Self {
+impl CastFrom<Boolean> for Float {
+    fn cast_from(b: Boolean) -> Self {
         b.into()
     }
 }
@@ -458,11 +586,32 @@ impl NumberImpl for Int {
     type Abs = Self;
     type Class = IntType;
 
-    fn abs(&self) -> Self {
+    fn abs(self) -> Self {
         match self {
             Self::I16(i) => Int::I16(i.abs()),
             Self::I32(i) => Int::I32(i.abs()),
             Self::I64(i) => Int::I64(i.abs()),
+        }
+    }
+
+    fn into_type(self, dtype: IntType) -> Int {
+        use IntType::*;
+        match dtype {
+            I16 => match self {
+                Self::I32(i) => Self::I16(i as i16),
+                Self::I64(i) => Self::I16(i as i16),
+                this => this,
+            },
+            I32 => match self {
+                Self::I16(i) => Self::I32(i as i32),
+                Self::I64(i) => Self::I32(i as i32),
+                this => this,
+            },
+            I64 => match self {
+                Self::I16(i) => Self::I64(i as i64),
+                Self::I32(i) => Self::I64(i as i64),
+                this => this,
+            },
         }
     }
 }
@@ -487,15 +636,17 @@ impl CastFrom<Float> for Int {
     }
 }
 
-impl CastFrom<Int> for bool {
-    fn cast_from(i: Int) -> bool {
+impl CastFrom<Int> for Boolean {
+    fn cast_from(i: Int) -> Boolean {
         use Int::*;
-        match i {
+        let b = match i {
             I16(i) if i == 0i16 => false,
             I32(i) if i == 0i32 => false,
             I64(i) if i == 0i64 => false,
             _ => true,
-        }
+        };
+
+        Boolean(b)
     }
 }
 
@@ -579,18 +730,17 @@ impl CastFrom<UInt> for Int {
     }
 }
 
-impl From<bool> for Int {
-    fn from(b: bool) -> Int {
-        if b {
-            Int::I16(1)
-        } else {
-            Int::I16(0)
+impl From<Boolean> for Int {
+    fn from(b: Boolean) -> Int {
+        match b {
+            Boolean(true) => Int::I16(1),
+            Boolean(false) => Int::I16(0),
         }
     }
 }
 
-impl CastFrom<bool> for Int {
-    fn cast_from(b: bool) -> Int {
+impl CastFrom<Boolean> for Int {
+    fn cast_from(b: Boolean) -> Int {
         b.into()
     }
 }
@@ -679,8 +829,38 @@ impl NumberImpl for UInt {
     type Abs = Self;
     type Class = UIntType;
 
-    fn abs(&self) -> UInt {
+    fn abs(self) -> UInt {
         self.clone()
+    }
+
+    fn into_type(self, dtype: UIntType) -> UInt {
+        use UIntType::*;
+        match dtype {
+            U8 => match self {
+                Self::U16(u) => Self::U8(u as u8),
+                Self::U32(u) => Self::U8(u as u8),
+                Self::U64(u) => Self::U8(u as u8),
+                this => this,
+            },
+            U16 => match self {
+                Self::U8(u) => Self::U16(u as u16),
+                Self::U32(u) => Self::U16(u as u16),
+                Self::U64(u) => Self::U16(u as u16),
+                this => this,
+            },
+            U32 => match self {
+                Self::U8(u) => Self::U32(u as u32),
+                Self::U16(u) => Self::U32(u as u32),
+                Self::U64(u) => Self::U32(u as u32),
+                this => this,
+            },
+            U64 => match self {
+                Self::U8(u) => Self::U64(u as u64),
+                Self::U16(u) => Self::U64(u as u64),
+                Self::U32(u) => Self::U64(u as u64),
+                this => this,
+            },
+        }
     }
 }
 
@@ -798,18 +978,17 @@ impl PartialOrd for UInt {
     }
 }
 
-impl From<bool> for UInt {
-    fn from(b: bool) -> UInt {
-        if b {
-            UInt::U8(1)
-        } else {
-            UInt::U8(0)
+impl From<Boolean> for UInt {
+    fn from(b: Boolean) -> UInt {
+        match b {
+            Boolean(true) => UInt::U8(1),
+            Boolean(false) => UInt::U8(0),
         }
     }
 }
 
-impl CastFrom<bool> for UInt {
-    fn cast_from(b: bool) -> UInt {
+impl CastFrom<Boolean> for UInt {
+    fn cast_from(b: Boolean) -> UInt {
         b.into()
     }
 }
@@ -909,7 +1088,7 @@ impl fmt::Display for UInt {
 
 #[derive(Clone, PartialEq)]
 pub enum Number {
-    Bool(bool),
+    Bool(Boolean),
     Complex(Complex),
     Float(Float),
     Int(Int),
@@ -965,7 +1144,7 @@ impl NumberImpl for Number {
     type Abs = Number;
     type Class = NumberType;
 
-    fn abs(&self) -> Number {
+    fn abs(self) -> Number {
         use Number::*;
         match self {
             Complex(c) => Float(c.abs()),
@@ -974,17 +1153,41 @@ impl NumberImpl for Number {
             other => other.clone(),
         }
     }
+
+    fn into_type(self, dtype: NumberType) -> Number {
+        use NumberType as NT;
+
+        match dtype {
+            NT::Bool => {
+                let b: Boolean = self.cast_into();
+                b.into()
+            }
+            NT::Complex(ct) => {
+                let c: Complex = self.cast_into();
+                c.into_type(ct).into()
+            }
+            NT::Float(ft) => {
+                let f: Float = self.cast_into();
+                f.into_type(ft).into()
+            }
+            NT::Int(it) => {
+                let i: Int = self.cast_into();
+                i.into_type(it).into()
+            }
+            NT::UInt(ut) => {
+                let u: UInt = self.cast_into();
+                u.into_type(ut).into()
+            }
+        }
+    }
 }
 
-impl CastFrom<Number> for bool {
-    fn cast_from(number: Number) -> bool {
-        use Number::*;
-        match number {
-            Bool(b) => b,
-            Complex(c) => bool::cast_from(c),
-            Float(f) => bool::cast_from(f),
-            Int(i) => bool::cast_from(i),
-            UInt(u) => bool::cast_from(u),
+impl CastFrom<Number> for Boolean {
+    fn cast_from(number: Number) -> Boolean {
+        if number == number.class().zero() {
+            Boolean(false)
+        } else {
+            Boolean(true)
         }
     }
 }
@@ -1033,7 +1236,7 @@ impl Add for Number {
 
     fn add(self, other: Number) -> Self {
         match (self, other) {
-            (Self::Bool(l), Self::Bool(r)) => match (l, r) {
+            (Self::Bool(Boolean(l)), Self::Bool(Boolean(r))) => match (l, r) {
                 (true, true) => Self::UInt(UInt::U8(2)),
                 (true, false) => Self::UInt(UInt::U8(1)),
                 (false, true) => Self::UInt(UInt::U8(1)),
@@ -1094,8 +1297,8 @@ impl Mul for Number {
 
     fn mul(self, other: Number) -> Self {
         match (self, other) {
-            (Self::Bool(false), r) => r.class().zero(),
-            (Self::Bool(true), r) => r,
+            (Self::Bool(Boolean(false)), r) => r.class().zero(),
+            (Self::Bool(Boolean(true)), r) => r,
 
             (Self::Complex(l), Self::Complex(r)) => Self::Complex(l * r),
             (Self::Complex(l), Self::Float(r)) => {
@@ -1130,13 +1333,11 @@ impl Mul for Number {
     }
 }
 
-impl From<bool> for Number {
-    fn from(b: bool) -> Number {
+impl From<Boolean> for Number {
+    fn from(b: Boolean) -> Number {
         Number::Bool(b)
     }
 }
-
-pub trait Numeric {}
 
 impl From<Complex> for Number {
     fn from(c: Complex) -> Number {
@@ -1162,13 +1363,13 @@ impl From<UInt> for Number {
     }
 }
 
-impl TryFrom<Number> for bool {
+impl TryFrom<Number> for Boolean {
     type Error = error::TCError;
 
-    fn try_from(n: Number) -> TCResult<bool> {
+    fn try_from(n: Number) -> TCResult<Boolean> {
         match n {
             Number::Bool(b) => Ok(b),
-            other => Err(error::bad_request("Expected Bool but found", other)),
+            other => Err(error::bad_request("Expected Boolean but found", other)),
         }
     }
 }
@@ -1223,7 +1424,7 @@ impl Serialize for Number {
         S: Serializer,
     {
         match self {
-            Number::Bool(b) => s.serialize_bool(*b),
+            Number::Bool(b) => b.serialize(s),
             Number::Complex(c) => c.serialize(s),
             Number::Float(f) => f.serialize(s),
             Number::Int(i) => i.serialize(s),

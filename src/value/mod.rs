@@ -17,6 +17,7 @@ mod reference;
 mod string;
 mod version;
 
+pub type Boolean = number::Boolean;
 pub type Complex = number::Complex;
 pub type Float = number::Float;
 pub type Int = number::Int;

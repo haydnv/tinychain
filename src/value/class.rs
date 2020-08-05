@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 
-use super::number::{Complex, Float, Int, Number, UInt};
+use super::number::{Boolean, Complex, Float, Int, Number, UInt};
 use super::string::TCString;
 use super::{TCResult, Value};
 
@@ -25,11 +25,13 @@ pub trait NumberClass: Class + Into<NumberType> + Send + Sync {
     fn size(self) -> usize;
 
     fn one(&self) -> <Self as NumberClass>::Impl {
-        true.into()
+        let b: Boolean = true.into();
+        b.into()
     }
 
     fn zero(&self) -> <Self as NumberClass>::Impl {
-        false.into()
+        let b: Boolean = false.into();
+        b.into()
     }
 }
 
@@ -72,19 +74,43 @@ pub trait ValueImpl: Impl + Serialize {
 }
 
 pub trait NumberImpl:
-    ValueImpl + Add + Mul + Sized + PartialOrd + From<bool> + Into<Number> + CastInto<bool>
+    ValueImpl + Add + Mul + Sized + PartialOrd + From<Boolean> + Into<Number>
 {
     type Abs: NumberImpl;
     type Class: NumberClass;
 
-    fn abs(&self) -> Self::Abs;
+    fn abs(self) -> Self::Abs;
 
-    fn into_type(self, dtype: NumberType) -> Number {
-        match dtype {
-            NumberType::Bool => Number::Bool(self.cast_into()),
-            _ => unimplemented!(),
-        }
+    fn and(self, other: Self) -> Self
+    where
+        Self: CastInto<Boolean>,
+    {
+        let this: Boolean = self.cast_into();
+        let that: Boolean = other.cast_into();
+        this.and(that).into()
     }
+
+    fn not(self) -> Self
+    where
+        Self: CastInto<Boolean>,
+    {
+        let this: Boolean = self.cast_into();
+        this.not().into()
+    }
+
+    fn or(self, other: Self) -> Self
+    where
+        Self: CastInto<Boolean>,
+    {
+        let this: Boolean = self.cast_into();
+        let that: Boolean = other.cast_into();
+        this.or(that).into()
+    }
+
+    fn into_type(
+        self,
+        dtype: <Self as NumberImpl>::Class,
+    ) -> <<Self as NumberImpl>::Class as NumberClass>::Impl;
 }
 
 pub trait CastFrom<T> {
@@ -93,6 +119,12 @@ pub trait CastFrom<T> {
 
 pub trait CastInto<T> {
     fn cast_into(self) -> T;
+}
+
+impl<T> CastFrom<T> for T {
+    fn cast_from(value: T) -> Self {
+        value
+    }
 }
 
 impl<T, F: CastFrom<T>> CastInto<F> for T {
@@ -138,6 +170,33 @@ impl fmt::Display for ComplexType {
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Deserialize, Serialize)]
+pub struct BooleanType;
+
+impl Class for BooleanType {
+    type Impl = Boolean;
+}
+
+impl NumberClass for BooleanType {
+    type Impl = Boolean;
+
+    fn size(self) -> usize {
+        1
+    }
+}
+
+impl From<BooleanType> for NumberType {
+    fn from(_bt: BooleanType) -> NumberType {
+        NumberType::Bool
+    }
+}
+
+impl fmt::Display for BooleanType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Boolean")
+    }
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Deserialize, Serialize)]
 pub enum FloatType {
     F32,
     F64,
@@ -152,8 +211,8 @@ impl NumberClass for FloatType {
 
     fn size(self) -> usize {
         match self {
-            FloatType::F32 => 8,
-            FloatType::F64 => 16,
+            FloatType::F32 => 4,
+            FloatType::F64 => 8,
         }
     }
 }
