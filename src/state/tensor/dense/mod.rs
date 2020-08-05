@@ -1307,12 +1307,26 @@ impl TensorBoolean for DenseTensor {
         Ok(DenseTensor { blocks })
     }
 
-    async fn or(&self, _other: &Self) -> TCResult<Self> {
-        Err(error::not_implemented())
+    async fn or(&self, other: &Self) -> TCResult<Self> {
+        let blocks = Arc::new(BlockListCombine::new(
+            self.blocks.clone(),
+            other.blocks.clone(),
+            Array::or,
+            Number::or,
+        )?);
+
+        Ok(DenseTensor { blocks })
     }
 
-    async fn xor(&self, _other: &Self) -> TCResult<Self> {
-        Err(error::not_implemented())
+    async fn xor(&self, other: &Self) -> TCResult<Self> {
+        let blocks = Arc::new(BlockListCombine::new(
+            self.blocks.clone(),
+            other.blocks.clone(),
+            Array::xor,
+            Number::xor,
+        )?);
+
+        Ok(DenseTensor { blocks })
     }
 }
 

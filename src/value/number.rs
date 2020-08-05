@@ -31,7 +31,7 @@ impl NumberImpl for Boolean {
     type Class = BooleanType;
 
     fn abs(self) -> Self {
-        self.clone()
+        self
     }
 
     fn and(self, other: Self) -> Self {
@@ -48,6 +48,10 @@ impl NumberImpl for Boolean {
 
     fn or(self, other: Self) -> Self {
         Boolean(self.0 || other.0)
+    }
+
+    fn xor(self, other: Self) -> Self {
+        Boolean(self.0 ^ other.0)
     }
 }
 

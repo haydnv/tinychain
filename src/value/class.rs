@@ -79,6 +79,11 @@ pub trait NumberImpl:
     type Abs: NumberImpl;
     type Class: NumberClass;
 
+    fn into_type(
+        self,
+        dtype: <Self as NumberImpl>::Class,
+    ) -> <<Self as NumberImpl>::Class as NumberClass>::Impl;
+
     fn abs(self) -> Self::Abs;
 
     fn and(self, other: Self) -> Self
@@ -107,10 +112,14 @@ pub trait NumberImpl:
         this.or(that).into()
     }
 
-    fn into_type(
-        self,
-        dtype: <Self as NumberImpl>::Class,
-    ) -> <<Self as NumberImpl>::Class as NumberClass>::Impl;
+    fn xor(self, other: Self) -> Self
+    where
+        Self: CastInto<Boolean>,
+    {
+        let this: Boolean = self.cast_into();
+        let that: Boolean = other.cast_into();
+        this.xor(that).into()
+    }
 }
 
 pub trait CastFrom<T> {
