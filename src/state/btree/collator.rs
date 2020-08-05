@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::ops::Bound;
 
 use crate::error;
-use crate::value::class::{Impl, ValueType};
+use crate::value::class::{Instance, ValueType};
 use crate::value::{Number, TCResult, Value};
 
 pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {

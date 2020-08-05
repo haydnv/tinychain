@@ -10,40 +10,40 @@ use super::string::TCString;
 use super::{TCResult, Value};
 
 pub trait Class: Clone + Eq + fmt::Display {
-    type Impl: Impl;
+    type Instance: Instance;
 }
 
 pub trait ValueClass: Class {
-    type Impl: ValueImpl;
+    type Instance: ValueInstance;
 
     fn size(self) -> Option<usize>;
 }
 
 pub trait NumberClass: Class + Into<NumberType> + Send + Sync {
-    type Impl: NumberImpl + Into<Number>;
+    type Instance: NumberInstance + Into<Number>;
 
     fn size(self) -> usize;
 
-    fn one(&self) -> <Self as NumberClass>::Impl {
+    fn one(&self) -> <Self as NumberClass>::Instance {
         let b: Boolean = true.into();
         b.into()
     }
 
-    fn zero(&self) -> <Self as NumberClass>::Impl {
+    fn zero(&self) -> <Self as NumberClass>::Instance {
         let b: Boolean = false.into();
         b.into()
     }
 }
 
 impl<T: NumberClass> ValueClass for T {
-    type Impl = <Self as NumberClass>::Impl;
+    type Instance = <Self as NumberClass>::Instance;
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
     }
 }
 
-pub trait Impl {
+pub trait Instance {
     type Class: Class;
 
     fn class(&self) -> Self::Class;
@@ -69,20 +69,20 @@ pub trait Impl {
     }
 }
 
-pub trait ValueImpl: Impl + Serialize {
+pub trait ValueInstance: Instance + Serialize {
     type Class: ValueClass;
 }
 
-pub trait NumberImpl:
-    ValueImpl + Add + Mul + Sized + PartialOrd + From<Boolean> + Into<Number>
+pub trait NumberInstance:
+    ValueInstance + Add + Mul + Sized + PartialOrd + From<Boolean> + Into<Number>
 {
-    type Abs: NumberImpl;
+    type Abs: NumberInstance;
     type Class: NumberClass;
 
     fn into_type(
         self,
-        dtype: <Self as NumberImpl>::Class,
-    ) -> <<Self as NumberImpl>::Class as NumberClass>::Impl;
+        dtype: <Self as NumberInstance>::Class,
+    ) -> <<Self as NumberInstance>::Class as NumberClass>::Instance;
 
     fn abs(self) -> Self::Abs;
 
@@ -149,11 +149,11 @@ pub enum ComplexType {
 }
 
 impl Class for ComplexType {
-    type Impl = Complex;
+    type Instance = Complex;
 }
 
 impl NumberClass for ComplexType {
-    type Impl = Complex;
+    type Instance = Complex;
 
     fn size(self) -> usize {
         match self {
@@ -182,11 +182,11 @@ impl fmt::Display for ComplexType {
 pub struct BooleanType;
 
 impl Class for BooleanType {
-    type Impl = Boolean;
+    type Instance = Boolean;
 }
 
 impl NumberClass for BooleanType {
-    type Impl = Boolean;
+    type Instance = Boolean;
 
     fn size(self) -> usize {
         1
@@ -212,11 +212,11 @@ pub enum FloatType {
 }
 
 impl Class for FloatType {
-    type Impl = Float;
+    type Instance = Float;
 }
 
 impl NumberClass for FloatType {
-    type Impl = Float;
+    type Instance = Float;
 
     fn size(self) -> usize {
         match self {
@@ -250,11 +250,11 @@ pub enum IntType {
 }
 
 impl Class for IntType {
-    type Impl = Int;
+    type Instance = Int;
 }
 
 impl NumberClass for IntType {
-    type Impl = Int;
+    type Instance = Int;
 
     fn size(self) -> usize {
         match self {
@@ -291,11 +291,11 @@ pub enum UIntType {
 }
 
 impl Class for UIntType {
-    type Impl = UInt;
+    type Instance = UInt;
 }
 
 impl NumberClass for UIntType {
-    type Impl = UInt;
+    type Instance = UInt;
 
     fn size(self) -> usize {
         match self {
@@ -335,11 +335,11 @@ pub enum NumberType {
 }
 
 impl Class for NumberType {
-    type Impl = Number;
+    type Instance = Number;
 }
 
 impl NumberClass for NumberType {
-    type Impl = Number;
+    type Instance = Number;
 
     fn size(self) -> usize {
         use NumberType::*;
@@ -381,7 +381,7 @@ pub enum StringType {
 }
 
 impl Class for StringType {
-    type Impl = TCString;
+    type Instance = TCString;
 }
 
 impl From<StringType> for ValueType {
@@ -413,11 +413,11 @@ pub enum ValueType {
 }
 
 impl Class for ValueType {
-    type Impl = Value;
+    type Instance = Value;
 }
 
 impl ValueClass for ValueType {
-    type Impl = Value;
+    type Instance = Value;
 
     fn size(self) -> Option<usize> {
         use ValueType::*;

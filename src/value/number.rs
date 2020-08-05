@@ -8,13 +8,13 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::error;
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
-use super::class::{CastFrom, CastInto, Impl, NumberClass, NumberImpl, ValueImpl};
+use super::class::{CastFrom, CastInto, Instance, NumberClass, NumberInstance, ValueInstance};
 use super::TCResult;
 
 #[derive(Clone, PartialEq)]
 pub struct Boolean(bool);
 
-impl Impl for Boolean {
+impl Instance for Boolean {
     type Class = BooleanType;
 
     fn class(&self) -> BooleanType {
@@ -22,11 +22,11 @@ impl Impl for Boolean {
     }
 }
 
-impl ValueImpl for Boolean {
+impl ValueInstance for Boolean {
     type Class = BooleanType;
 }
 
-impl NumberImpl for Boolean {
+impl NumberInstance for Boolean {
     type Abs = Self;
     type Class = BooleanType;
 
@@ -121,7 +121,7 @@ pub enum Complex {
     C64(num::Complex<f64>),
 }
 
-impl Impl for Complex {
+impl Instance for Complex {
     type Class = ComplexType;
 
     fn class(&self) -> ComplexType {
@@ -132,11 +132,11 @@ impl Impl for Complex {
     }
 }
 
-impl ValueImpl for Complex {
+impl ValueInstance for Complex {
     type Class = ComplexType;
 }
 
-impl NumberImpl for Complex {
+impl NumberInstance for Complex {
     type Abs = Float;
     type Class = ComplexType;
 
@@ -360,7 +360,7 @@ pub enum Float {
     F64(f64),
 }
 
-impl Impl for Float {
+impl Instance for Float {
     type Class = FloatType;
 
     fn class(&self) -> FloatType {
@@ -371,11 +371,11 @@ impl Impl for Float {
     }
 }
 
-impl ValueImpl for Float {
+impl ValueInstance for Float {
     type Class = FloatType;
 }
 
-impl NumberImpl for Float {
+impl NumberInstance for Float {
     type Abs = Float;
     type Class = FloatType;
 
@@ -570,7 +570,7 @@ pub enum Int {
     I64(i64),
 }
 
-impl Impl for Int {
+impl Instance for Int {
     type Class = IntType;
 
     fn class(&self) -> IntType {
@@ -582,11 +582,11 @@ impl Impl for Int {
     }
 }
 
-impl ValueImpl for Int {
+impl ValueInstance for Int {
     type Class = IntType;
 }
 
-impl NumberImpl for Int {
+impl NumberInstance for Int {
     type Abs = Self;
     type Class = IntType;
 
@@ -812,7 +812,7 @@ pub enum UInt {
     U64(u64),
 }
 
-impl Impl for UInt {
+impl Instance for UInt {
     type Class = UIntType;
 
     fn class(&self) -> UIntType {
@@ -825,11 +825,11 @@ impl Impl for UInt {
     }
 }
 
-impl ValueImpl for UInt {
+impl ValueInstance for UInt {
     type Class = UIntType;
 }
 
-impl NumberImpl for UInt {
+impl NumberInstance for UInt {
     type Abs = Self;
     type Class = UIntType;
 
@@ -1125,7 +1125,7 @@ impl PartialOrd for Number {
     }
 }
 
-impl Impl for Number {
+impl Instance for Number {
     type Class = NumberType;
 
     fn class(&self) -> NumberType {
@@ -1140,11 +1140,11 @@ impl Impl for Number {
     }
 }
 
-impl ValueImpl for Number {
+impl ValueInstance for Number {
     type Class = NumberType;
 }
 
-impl NumberImpl for Number {
+impl NumberInstance for Number {
     type Abs = Number;
     type Class = NumberType;
 

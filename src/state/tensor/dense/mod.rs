@@ -13,7 +13,7 @@ use crate::error;
 use crate::state::file::block::BlockId;
 use crate::state::file::File;
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::{Impl, NumberClass, NumberImpl, NumberType};
+use crate::value::class::{Instance, NumberClass, NumberInstance, NumberType};
 use crate::value::{Number, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 
 use super::bounds::{AxisBounds, Bounds, Shape};

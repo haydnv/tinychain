@@ -42,7 +42,7 @@ pub enum Value {
     Vector(Vec<Value>),
 }
 
-impl class::Impl for Value {
+impl class::Instance for Value {
     type Class = class::ValueType;
 
     fn class(&self) -> class::ValueType {
@@ -58,7 +58,7 @@ impl class::Impl for Value {
     }
 }
 
-impl class::ValueImpl for Value {
+impl class::ValueInstance for Value {
     type Class = class::ValueType;
 }
 

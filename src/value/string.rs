@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::error;
 
-use super::class::{Impl, StringType};
+use super::class::{Instance, StringType};
 use super::link::{Link, TCPath};
 use super::reference::TCRef;
 use super::TCResult;
@@ -159,7 +159,7 @@ pub enum TCString {
     r#String(String),
 }
 
-impl Impl for TCString {
+impl Instance for TCString {
     type Class = StringType;
 
     fn class(&self) -> StringType {

@@ -12,7 +12,7 @@ use crate::error;
 use crate::state::btree;
 use crate::state::table::{self, Selection, Table, TableBase};
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::{Impl, NumberClass, NumberImpl, NumberType, UIntType, ValueType};
+use crate::value::class::{Instance, NumberClass, NumberInstance, NumberType, UIntType, ValueType};
 use crate::value::{Number, TCBoxTryFuture, TCResult, TCStream, UInt, Value, ValueId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};

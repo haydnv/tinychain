@@ -17,7 +17,7 @@ use crate::state::file::block::*;
 use crate::state::file::File;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::class::{Impl, ValueClass, ValueType};
+use crate::value::class::{Instance, ValueClass, ValueType};
 use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
 
 use super::{Collect, GetResult, State};

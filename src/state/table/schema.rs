@@ -5,7 +5,7 @@ use std::ops::Bound;
 
 use crate::error;
 use crate::state::btree;
-use crate::value::class::{Impl, ValueType};
+use crate::value::class::{Instance, ValueType};
 use crate::value::{TCResult, Value, ValueId};
 
 pub type Row = HashMap<ValueId, Value>;
