@@ -1047,12 +1047,28 @@ impl TensorView for DenseTensor {
 
 #[async_trait]
 impl TensorBoolean for DenseTensor {
-    async fn all(&self, _txn: Arc<Txn>) -> TCResult<bool> {
-        Err(error::not_implemented())
+    async fn all(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        let mut blocks = self.blocks.clone().block_stream(txn).await?;
+        while let Some(array) = blocks.next().await {
+            if !array?.all() {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
-    fn any(&'_ self, _txn: Arc<Txn>) -> TCBoxTryFuture<'_, bool> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+    fn any(&'_ self, txn: Arc<Txn>) -> TCBoxTryFuture<'_, bool> {
+        Box::pin(async move {
+            let mut blocks = self.blocks.clone().block_stream(txn).await?;
+            while let Some(array) = blocks.next().await {
+                if array?.any() {
+                    return Ok(true);
+                }
+            }
+
+            Ok(false)
+        })
     }
 
     async fn and(&self, _other: &Self) -> TCResult<Self> {
