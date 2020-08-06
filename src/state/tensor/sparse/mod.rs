@@ -121,7 +121,7 @@ impl SparseAccessor for DenseAccessor {
                 ))
                 .affected(),
             )
-            .map(|at| Ok(at));
+            .map(Ok);
 
             let filled_at: TCTryStream<Vec<u64>> = Box::pin(filled_at);
             Ok(filled_at)
@@ -655,8 +655,7 @@ impl SparseAccessor for SparseReduce {
                     (l, r)
                 })
                 .try_filter_map(|(l, r)| {
-                    let row = if l != r { Some(l) } else { None };
-
+                    let row = if l == r { None } else { Some(l) };
                     future::ready(Ok(row))
                 });
 
@@ -665,8 +664,13 @@ impl SparseAccessor for SparseReduce {
         })
     }
 
-    fn filled_count<'a>(self: Arc<Self>, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+        Box::pin(async move {
+            self.filled(txn)
+                .await?
+                .try_fold(0u64, |count, _| future::ready(Ok(count + 1)))
+                .await
+        })
     }
 
     fn filled_in<'a>(
