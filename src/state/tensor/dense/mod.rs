@@ -1333,6 +1333,33 @@ impl TensorBoolean for DenseTensor {
     }
 }
 
+#[async_trait]
+impl TensorCompare for DenseTensor {
+    async fn eq(&self, other: &Self, _txn: Arc<Txn>) -> TCResult<DenseTensor> {
+        self.combine(other, Array::eq, <Number as NumberInstance>::eq)
+    }
+
+    fn gt(&self, other: &Self) -> TCResult<Self> {
+        self.combine(other, Array::gt, <Number as NumberInstance>::gt)
+    }
+
+    async fn gte(&self, other: &Self, _txn: Arc<Txn>) -> TCResult<DenseTensor> {
+        self.combine(other, Array::eq, <Number as NumberInstance>::gte)
+    }
+
+    fn lt(&self, other: &Self) -> TCResult<Self> {
+        self.combine(other, Array::eq, <Number as NumberInstance>::lt)
+    }
+
+    async fn lte(&self, other: &Self, _txn: Arc<Txn>) -> TCResult<DenseTensor> {
+        self.combine(other, Array::eq, <Number as NumberInstance>::lte)
+    }
+
+    fn ne(&self, other: &Self) -> TCResult<Self> {
+        self.combine(other, Array::eq, <Number as NumberInstance>::ne)
+    }
+}
+
 impl TensorIO for DenseTensor {
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
         self.blocks.read_value_at(txn_id, coord)

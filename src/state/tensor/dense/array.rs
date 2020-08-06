@@ -659,7 +659,7 @@ impl<T: af::HasAfEnum> ArrayInstanceBool for ArrayExt<T> {
 }
 
 trait ArrayInstanceCompare {
-    fn equals(&self, other: &Self) -> ArrayExt<bool>;
+    fn eq(&self, other: &Self) -> ArrayExt<bool>;
 
     fn gt(&self, other: &Self) -> ArrayExt<bool>;
 
@@ -671,7 +671,7 @@ trait ArrayInstanceCompare {
 }
 
 impl<T: af::HasAfEnum + af::ImplicitPromote<T>> ArrayInstanceCompare for ArrayExt<T> {
-    fn equals(&self, other: &Self) -> ArrayExt<bool> {
+    fn eq(&self, other: &Self) -> ArrayExt<bool> {
         af::eq(self.af(), other.af(), BATCH).into()
     }
 
@@ -1139,113 +1139,93 @@ impl Array {
         Array::Bool(this.and(&that))
     }
 
-    pub fn equals(&self, other: &Array) -> TCResult<Array> {
+    pub fn eq(&self, other: &Array) -> Array {
         use Array::*;
-        match (self, other) {
-            (Bool(l), Bool(r)) => Ok(Bool(l.equals(r))),
-            (C32(l), C32(r)) => Ok(Bool(l.equals(r))),
-            (C64(l), C64(r)) => Ok(Bool(l.equals(r))),
-            (F32(l), F32(r)) => Ok(Bool(l.equals(r))),
-            (F64(l), F64(r)) => Ok(Bool(l.equals(r))),
-            (I16(l), I16(r)) => Ok(Bool(l.equals(r))),
-            (I32(l), I32(r)) => Ok(Bool(l.equals(r))),
-            (I64(l), I64(r)) => Ok(Bool(l.equals(r))),
-            (U8(l), U8(r)) => Ok(Bool(l.equals(r))),
-            (U16(l), U16(r)) => Ok(Bool(l.equals(r))),
-            (U32(l), U32(r)) => Ok(Bool(l.equals(r))),
-            (U64(l), U64(r)) => Ok(Bool(l.equals(r))),
-            (l, r) => Err(error::internal(format!(
-                "Tried to compare {} with {}",
-                l, r
-            ))),
+        match self {
+            Bool(l) => Bool(l.eq(&other.af_cast())),
+            C32(l) => Bool(l.eq(&other.af_cast())),
+            C64(l) => Bool(l.eq(&other.af_cast())),
+            F32(l) => Bool(l.eq(&other.af_cast())),
+            F64(l) => Bool(l.eq(&other.af_cast())),
+            I16(l) => Bool(l.eq(&other.af_cast())),
+            I32(l) => Bool(l.eq(&other.af_cast())),
+            I64(l) => Bool(l.eq(&other.af_cast())),
+            U8(l) => Bool(l.eq(&other.af_cast())),
+            U16(l) => Bool(l.eq(&other.af_cast())),
+            U32(l) => Bool(l.eq(&other.af_cast())),
+            U64(l) => Bool(l.eq(&other.af_cast())),
         }
     }
 
-    pub fn gt(&self, other: &Array) -> TCResult<Array> {
+    pub fn gt(&self, other: &Array) -> Array {
         use Array::*;
-        match (self, other) {
-            (Bool(l), Bool(r)) => Ok(Bool(l.gt(r))),
-            (C32(l), C32(r)) => Ok(Bool(l.gt(r))),
-            (C64(l), C64(r)) => Ok(Bool(l.gt(r))),
-            (F32(l), F32(r)) => Ok(Bool(l.gt(r))),
-            (F64(l), F64(r)) => Ok(Bool(l.gt(r))),
-            (I16(l), I16(r)) => Ok(Bool(l.gt(r))),
-            (I32(l), I32(r)) => Ok(Bool(l.gt(r))),
-            (I64(l), I64(r)) => Ok(Bool(l.gt(r))),
-            (U8(l), U8(r)) => Ok(Bool(l.gt(r))),
-            (U16(l), U16(r)) => Ok(Bool(l.gt(r))),
-            (U32(l), U32(r)) => Ok(Bool(l.gt(r))),
-            (U64(l), U64(r)) => Ok(Bool(l.gt(r))),
-            (l, r) => Err(error::internal(format!(
-                "Tried to compare {} with {}",
-                l, r
-            ))),
+        match self {
+            Bool(l) => Bool(l.gt(&other.af_cast())),
+            C32(l) => Bool(l.gt(&other.af_cast())),
+            C64(l) => Bool(l.gt(&other.af_cast())),
+            F32(l) => Bool(l.gt(&other.af_cast())),
+            F64(l) => Bool(l.gt(&other.af_cast())),
+            I16(l) => Bool(l.gt(&other.af_cast())),
+            I32(l) => Bool(l.gt(&other.af_cast())),
+            I64(l) => Bool(l.gt(&other.af_cast())),
+            U8(l) => Bool(l.gt(&other.af_cast())),
+            U16(l) => Bool(l.gt(&other.af_cast())),
+            U32(l) => Bool(l.gt(&other.af_cast())),
+            U64(l) => Bool(l.gt(&other.af_cast())),
         }
     }
 
-    pub fn gte(&self, other: &Array) -> TCResult<Array> {
+    pub fn gte(&self, other: &Array) -> Array {
         use Array::*;
-        match (self, other) {
-            (Bool(l), Bool(r)) => Ok(Bool(l.gte(r))),
-            (C32(l), C32(r)) => Ok(Bool(l.gte(r))),
-            (C64(l), C64(r)) => Ok(Bool(l.gte(r))),
-            (F32(l), F32(r)) => Ok(Bool(l.gte(r))),
-            (F64(l), F64(r)) => Ok(Bool(l.gte(r))),
-            (I16(l), I16(r)) => Ok(Bool(l.gte(r))),
-            (I32(l), I32(r)) => Ok(Bool(l.gte(r))),
-            (I64(l), I64(r)) => Ok(Bool(l.gte(r))),
-            (U8(l), U8(r)) => Ok(Bool(l.gte(r))),
-            (U16(l), U16(r)) => Ok(Bool(l.gte(r))),
-            (U32(l), U32(r)) => Ok(Bool(l.gte(r))),
-            (U64(l), U64(r)) => Ok(Bool(l.gte(r))),
-            (l, r) => Err(error::internal(format!(
-                "Tried to compare {} with {}",
-                l, r
-            ))),
+        match self {
+            Bool(l) => Bool(l.gte(&other.af_cast())),
+            C32(l) => Bool(l.gte(&other.af_cast())),
+            C64(l) => Bool(l.gte(&other.af_cast())),
+            F32(l) => Bool(l.gte(&other.af_cast())),
+            F64(l) => Bool(l.gte(&other.af_cast())),
+            I16(l) => Bool(l.gte(&other.af_cast())),
+            I32(l) => Bool(l.gte(&other.af_cast())),
+            I64(l) => Bool(l.gte(&other.af_cast())),
+            U8(l) => Bool(l.gte(&other.af_cast())),
+            U16(l) => Bool(l.gte(&other.af_cast())),
+            U32(l) => Bool(l.gte(&other.af_cast())),
+            U64(l) => Bool(l.gte(&other.af_cast())),
         }
     }
 
-    pub fn lt(&self, other: &Array) -> TCResult<Array> {
+    pub fn lt(&self, other: &Array) -> Array {
         use Array::*;
-        match (self, other) {
-            (Bool(l), Bool(r)) => Ok(Bool(l.lt(r))),
-            (C32(l), C32(r)) => Ok(Bool(l.lt(r))),
-            (C64(l), C64(r)) => Ok(Bool(l.lt(r))),
-            (F32(l), F32(r)) => Ok(Bool(l.lt(r))),
-            (F64(l), F64(r)) => Ok(Bool(l.lt(r))),
-            (I16(l), I16(r)) => Ok(Bool(l.lt(r))),
-            (I32(l), I32(r)) => Ok(Bool(l.lt(r))),
-            (I64(l), I64(r)) => Ok(Bool(l.lt(r))),
-            (U8(l), U8(r)) => Ok(Bool(l.lt(r))),
-            (U16(l), U16(r)) => Ok(Bool(l.lt(r))),
-            (U32(l), U32(r)) => Ok(Bool(l.lt(r))),
-            (U64(l), U64(r)) => Ok(Bool(l.lt(r))),
-            (l, r) => Err(error::internal(format!(
-                "Tried to compare {} with {}",
-                l, r
-            ))),
+        match self {
+            Bool(l) => Bool(l.lt(&other.af_cast())),
+            C32(l) => Bool(l.lt(&other.af_cast())),
+            C64(l) => Bool(l.lt(&other.af_cast())),
+            F32(l) => Bool(l.lt(&other.af_cast())),
+            F64(l) => Bool(l.lt(&other.af_cast())),
+            I16(l) => Bool(l.lt(&other.af_cast())),
+            I32(l) => Bool(l.lt(&other.af_cast())),
+            I64(l) => Bool(l.lt(&other.af_cast())),
+            U8(l) => Bool(l.lt(&other.af_cast())),
+            U16(l) => Bool(l.lt(&other.af_cast())),
+            U32(l) => Bool(l.lt(&other.af_cast())),
+            U64(l) => Bool(l.lt(&other.af_cast())),
         }
     }
 
-    pub fn lte(&self, other: &Array) -> TCResult<Array> {
+    pub fn lte(&self, other: &Array) -> Array {
         use Array::*;
-        match (self, other) {
-            (Bool(l), Bool(r)) => Ok(Bool(l.lte(r))),
-            (C32(l), C32(r)) => Ok(Bool(l.lte(r))),
-            (C64(l), C64(r)) => Ok(Bool(l.lte(r))),
-            (F32(l), F32(r)) => Ok(Bool(l.lte(r))),
-            (F64(l), F64(r)) => Ok(Bool(l.lte(r))),
-            (I16(l), I16(r)) => Ok(Bool(l.lte(r))),
-            (I32(l), I32(r)) => Ok(Bool(l.lte(r))),
-            (I64(l), I64(r)) => Ok(Bool(l.lte(r))),
-            (U8(l), U8(r)) => Ok(Bool(l.lte(r))),
-            (U16(l), U16(r)) => Ok(Bool(l.lte(r))),
-            (U32(l), U32(r)) => Ok(Bool(l.lte(r))),
-            (U64(l), U64(r)) => Ok(Bool(l.lte(r))),
-            (l, r) => Err(error::internal(format!(
-                "Tried to compare {} with {}",
-                l, r
-            ))),
+        match self {
+            Bool(l) => Bool(l.lte(&other.af_cast())),
+            C32(l) => Bool(l.lte(&other.af_cast())),
+            C64(l) => Bool(l.lte(&other.af_cast())),
+            F32(l) => Bool(l.lte(&other.af_cast())),
+            F64(l) => Bool(l.lte(&other.af_cast())),
+            I16(l) => Bool(l.lte(&other.af_cast())),
+            I32(l) => Bool(l.lte(&other.af_cast())),
+            I64(l) => Bool(l.lte(&other.af_cast())),
+            U8(l) => Bool(l.lte(&other.af_cast())),
+            U16(l) => Bool(l.lte(&other.af_cast())),
+            U32(l) => Bool(l.lte(&other.af_cast())),
+            U64(l) => Bool(l.lte(&other.af_cast())),
         }
     }
 
