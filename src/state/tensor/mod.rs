@@ -89,6 +89,16 @@ trait TensorMath: Sized + TensorView {
     fn multiply(&self, other: &Self) -> TCResult<Self>;
 }
 
+trait TensorReduce: Sized + TensorView {
+    fn product(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self>;
+
+    fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
+
+    fn sum(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self>;
+
+    fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
+}
+
 trait TensorTransform: Sized + TensorView {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self>;
 
@@ -101,17 +111,6 @@ trait TensorTransform: Sized + TensorView {
     fn reshape(&self, shape: bounds::Shape) -> TCResult<Self>;
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
-}
-
-#[async_trait]
-trait TensorUnary: Sized + TensorView {
-    fn product(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self>;
-
-    async fn product_all(&self, txn: Arc<Txn>) -> TCResult<Number>;
-
-    fn sum(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self>;
-
-    async fn sum_all(&self, txn: Arc<Txn>) -> TCResult<Number>;
 }
 
 enum Tensor {
@@ -377,6 +376,36 @@ impl TensorMath for Tensor {
     }
 }
 
+impl TensorReduce for Tensor {
+    fn product(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.product(txn, axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.product(txn, axis).map(Self::from),
+        }
+    }
+
+    fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+        match self {
+            Self::Dense(dense) => dense.product_all(txn),
+            Self::Sparse(sparse) => sparse.product_all(txn),
+        }
+    }
+
+    fn sum(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.product(txn, axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.product(txn, axis).map(Self::from),
+        }
+    }
+
+    fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+        match self {
+            Self::Dense(dense) => dense.product_all(txn),
+            Self::Sparse(sparse) => sparse.product_all(txn),
+        }
+    }
+}
+
 impl TensorTransform for Tensor {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
         match self {
@@ -417,37 +446,6 @@ impl TensorTransform for Tensor {
         match self {
             Self::Dense(dense) => dense.transpose(permutation).map(Self::from),
             Self::Sparse(sparse) => sparse.transpose(permutation).map(Self::from),
-        }
-    }
-}
-
-#[async_trait]
-impl TensorUnary for Tensor {
-    fn product(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
-        match self {
-            Self::Dense(dense) => dense.product(txn, axis).map(Self::from),
-            Self::Sparse(sparse) => sparse.product(txn, axis).map(Self::from),
-        }
-    }
-
-    async fn product_all(&self, txn: Arc<Txn>) -> TCResult<Number> {
-        match self {
-            Self::Dense(dense) => dense.product_all(txn).await,
-            Self::Sparse(sparse) => sparse.product_all(txn).await,
-        }
-    }
-
-    fn sum(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
-        match self {
-            Self::Dense(dense) => dense.product(txn, axis).map(Self::from),
-            Self::Sparse(sparse) => sparse.product(txn, axis).map(Self::from),
-        }
-    }
-
-    async fn sum_all(&self, txn: Arc<Txn>) -> TCResult<Number> {
-        match self {
-            Self::Dense(dense) => dense.product_all(txn).await,
-            Self::Sparse(sparse) => sparse.product_all(txn).await,
         }
     }
 }

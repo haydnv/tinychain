@@ -1566,38 +1566,41 @@ impl TensorTransform for DenseTensor {
     }
 }
 
-#[async_trait]
-impl TensorUnary for DenseTensor {
+impl TensorReduce for DenseTensor {
     fn product(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    async fn product_all(&self, txn: Arc<Txn>) -> TCResult<Number> {
-        self.blocks
-            .clone()
-            .block_stream(txn)
-            .await?
-            .map_ok(|array| array.product())
-            .try_fold(self.dtype().one(), |product, block_product| {
-                future::ready(Ok(product * block_product))
-            })
-            .await
+    fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+        Box::pin(async move {
+            self.blocks
+                .clone()
+                .block_stream(txn)
+                .await?
+                .map_ok(|array| array.product())
+                .try_fold(self.dtype().one(), |product, block_product| {
+                    future::ready(Ok(product * block_product))
+                })
+                .await
+        })
     }
 
     fn sum(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
-    async fn sum_all(&self, txn: Arc<Txn>) -> TCResult<Number> {
-        self.blocks
-            .clone()
-            .block_stream(txn)
-            .await?
-            .map_ok(|array| array.sum())
-            .try_fold(self.dtype().one(), |sum, block_sum| {
-                future::ready(Ok(sum + block_sum))
-            })
-            .await
+    fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+        Box::pin(async move {
+            self.blocks
+                .clone()
+                .block_stream(txn)
+                .await?
+                .map_ok(|array| array.sum())
+                .try_fold(self.dtype().one(), |sum, block_sum| {
+                    future::ready(Ok(sum + block_sum))
+                })
+                .await
+        })
     }
 }
 

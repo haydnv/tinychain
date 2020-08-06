@@ -1569,6 +1569,24 @@ impl TensorMath for SparseTensor {
     }
 }
 
+impl TensorReduce for SparseTensor {
+    fn product(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn sum(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+}
+
 impl TensorTransform for SparseTensor {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
         if dtype == self.dtype() {
@@ -1647,45 +1665,6 @@ impl TensorTransform for SparseTensor {
         });
 
         Ok(SparseTensor { accessor })
-    }
-}
-
-#[async_trait]
-impl TensorUnary for SparseTensor {
-    fn product(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
-        Err(error::not_implemented())
-    }
-
-    async fn product_all(&self, txn: Arc<Txn>) -> TCResult<Number> {
-        if !self.all(txn.clone()).await? {
-            return Ok(self.dtype().zero());
-        }
-
-        self.accessor
-            .clone()
-            .filled(txn)
-            .await?
-            .map_ok(|(_, value)| value)
-            .try_fold(self.dtype().one(), |product, value| {
-                future::ready(Ok(product * value))
-            })
-            .await
-    }
-
-    fn sum(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
-        Err(error::not_implemented())
-    }
-
-    async fn sum_all(&self, txn: Arc<Txn>) -> TCResult<Number> {
-        self.accessor
-            .clone()
-            .filled(txn)
-            .await?
-            .map_ok(|(_, value)| value)
-            .try_fold(self.dtype().one(), |product, value| {
-                future::ready(Ok(product + value))
-            })
-            .await
     }
 }
 
