@@ -207,6 +207,89 @@ impl TensorBoolean for Tensor {
     }
 }
 
+#[async_trait]
+impl TensorCompare for Tensor {
+    async fn eq(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.eq(right, txn).await,
+            (Self::Sparse(left), Self::Sparse(right)) => left.eq(right, txn).await,
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.eq(&DenseTensor::from_sparse(right.clone()), txn).await
+            }
+            (Self::Sparse(left), Self::Dense(right)) => {
+                DenseTensor::from_sparse(left.clone()).eq(right, txn).await
+            }
+        }
+    }
+
+    fn gt(&self, other: &Self) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.gt(right).map(Self::from),
+            (Self::Sparse(left), Self::Sparse(right)) => left.gt(right).map(Self::from),
+            (Self::Dense(left), Self::Sparse(right)) => left
+                .gt(&DenseTensor::from_sparse(right.clone()))
+                .map(Self::from),
+            (Self::Sparse(left), Self::Dense(right)) => left
+                .gt(&SparseTensor::from_dense(right.clone()))
+                .map(Self::from),
+        }
+    }
+
+    async fn gte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.gte(right, txn).await,
+            (Self::Sparse(left), Self::Sparse(right)) => left.gte(right, txn).await,
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.gte(&DenseTensor::from_sparse(right.clone()), txn)
+                    .await
+            }
+            (Self::Sparse(left), Self::Dense(right)) => {
+                DenseTensor::from_sparse(left.clone()).gte(right, txn).await
+            }
+        }
+    }
+
+    fn lt(&self, other: &Self) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.lt(right).map(Self::from),
+            (Self::Sparse(left), Self::Sparse(right)) => left.lt(right).map(Self::from),
+            (Self::Dense(left), Self::Sparse(right)) => left
+                .lt(&DenseTensor::from_sparse(right.clone()))
+                .map(Self::from),
+            (Self::Sparse(left), Self::Dense(right)) => left
+                .lt(&SparseTensor::from_dense(right.clone()))
+                .map(Self::from),
+        }
+    }
+
+    async fn lte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.lte(right, txn).await,
+            (Self::Sparse(left), Self::Sparse(right)) => left.lte(right, txn).await,
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.lte(&DenseTensor::from_sparse(right.clone()), txn)
+                    .await
+            }
+            (Self::Sparse(left), Self::Dense(right)) => {
+                DenseTensor::from_sparse(left.clone()).lte(right, txn).await
+            }
+        }
+    }
+
+    fn ne(&self, other: &Self) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.ne(right).map(Self::from),
+            (Self::Sparse(left), Self::Sparse(right)) => left.ne(right).map(Self::from),
+            (Self::Dense(left), Self::Sparse(right)) => left
+                .ne(&DenseTensor::from_sparse(right.clone()))
+                .map(Self::from),
+            (Self::Sparse(left), Self::Dense(right)) => DenseTensor::from_sparse(left.clone())
+                .ne(right)
+                .map(Self::from),
+        }
+    }
+}
+
 impl TensorIO for Tensor {
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         match self {
