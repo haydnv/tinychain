@@ -25,9 +25,6 @@ use combine::SparseCombine;
 pub type SparseRow = (Vec<u64>, Number);
 pub type SparseStream = TCTryStream<SparseRow>;
 
-const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
-bijection of its source. Consider copying first, or writing directly to the source Tensor.";
-
 const ERR_NOT_SPARSE: &str = "The result of the requested operation would not be sparse;\
 convert to a DenseTensor first.";
 

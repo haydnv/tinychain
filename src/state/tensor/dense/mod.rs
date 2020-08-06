@@ -24,13 +24,6 @@ pub mod array;
 use array::Array;
 
 const ERR_CORRUPT: &str = "DenseTensor corrupted! Please file a bug report.";
-
-const ERR_BROADCAST_WRITE: &str = "Cannot write to a broadcasted tensor since it is not a \
-bijection of its source. Consider copying the broadcast, or writing directly to the source Tensor.";
-
-const ERR_TRANSITIVE_WRITE: &str = "Cannot write to a transitive DenseTensor, \
-consider copying first or writing to the source tensors";
-
 const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
 trait BlockList: TensorView + 'static {
@@ -217,7 +210,9 @@ impl BlockList for BlockListCombine {
         _bounds: Bounds,
         _number: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_TRANSITIVE_WRITE))))
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
     }
 
     fn write_value_at<'a>(
@@ -226,7 +221,9 @@ impl BlockList for BlockListCombine {
         _coord: Vec<u64>,
         _value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_TRANSITIVE_WRITE))))
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
     }
 }
 
@@ -587,7 +584,9 @@ impl BlockList for BlockListBroadcast {
         _bounds: Bounds,
         _number: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_BROADCAST_WRITE))))
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
     }
 
     fn write_value_at<'a>(
@@ -596,7 +595,9 @@ impl BlockList for BlockListBroadcast {
         _coord: Vec<u64>,
         _value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_BROADCAST_WRITE))))
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
     }
 }
 
@@ -755,6 +756,97 @@ impl BlockList for BlockListExpand {
     ) -> TCBoxTryFuture<'a, ()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
+    }
+}
+
+type Reductor = fn(&DenseTensor, Arc<Txn>) -> TCBoxTryFuture<Number>;
+
+struct BlockListReduce {
+    source: DenseTensor,
+    axis: usize,
+    shape: Shape,
+    reductor: Reductor,
+}
+
+impl BlockListReduce {
+    fn new(source: DenseTensor, axis: usize, reductor: Reductor) -> TCResult<BlockListReduce> {
+        if axis >= source.ndim() {
+            return Err(error::bad_request(
+                &format!("Tensor with shape {} has no such axis", source.shape()),
+                axis,
+            ));
+        }
+
+        let mut shape = source.shape().clone();
+        shape.remove(axis);
+        Ok(BlockListReduce {
+            source,
+            shape,
+            axis,
+            reductor,
+        })
+    }
+}
+
+impl TensorView for BlockListReduce {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.shape.len()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        &self.shape
+    }
+
+    fn size(&self) -> u64 {
+        self.shape.size()
+    }
+}
+
+impl BlockList for BlockListReduce {
+    fn block_stream<'a>(self: Arc<Self>, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
+        Box::pin(async move { Err(error::not_implemented()) })
+    }
+
+    fn value_stream_slice<'a>(
+        self: Arc<Self>,
+        _txn: Arc<Txn>,
+        _bounds: Bounds,
+    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
+        Box::pin(async move { Err(error::not_implemented()) })
+    }
+
+    fn read_value_at<'a>(
+        &'a self,
+        _txn: &'a Arc<Txn>,
+        _coord: &'a [u64],
+    ) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(async move { Err(error::not_implemented()) })
+    }
+
+    fn write_value<'a>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _bounds: Bounds,
+        _number: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
+    }
+
+    fn write_value_at<'a>(
+        &'a self,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
     }
 }
 
@@ -1215,7 +1307,9 @@ impl BlockList for BlockListUnary {
         _bounds: Bounds,
         _number: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_TRANSITIVE_WRITE))))
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
     }
 
     fn write_value_at<'a>(
@@ -1224,7 +1318,9 @@ impl BlockList for BlockListUnary {
         _coord: Vec<u64>,
         _value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_TRANSITIVE_WRITE))))
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
     }
 }
 
@@ -1486,6 +1582,44 @@ impl TensorIO for DenseTensor {
     }
 }
 
+impl TensorReduce for DenseTensor {
+    fn product(&self, _axis: usize) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+        Box::pin(async move {
+            self.blocks
+                .clone()
+                .block_stream(txn)
+                .await?
+                .map_ok(|array| array.product())
+                .try_fold(self.dtype().one(), |product, block_product| {
+                    future::ready(Ok(product * block_product))
+                })
+                .await
+        })
+    }
+
+    fn sum(&self, _axis: usize) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+        Box::pin(async move {
+            self.blocks
+                .clone()
+                .block_stream(txn)
+                .await?
+                .map_ok(|array| array.sum())
+                .try_fold(self.dtype().one(), |sum, block_sum| {
+                    future::ready(Ok(sum + block_sum))
+                })
+                .await
+        })
+    }
+}
+
 impl TensorTransform for DenseTensor {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
         if dtype == self.dtype() {
@@ -1564,44 +1698,6 @@ impl TensorTransform for DenseTensor {
         });
 
         Ok(DenseTensor { blocks })
-    }
-}
-
-impl TensorReduce for DenseTensor {
-    fn product(&self, _axis: usize) -> TCResult<Self> {
-        Err(error::not_implemented())
-    }
-
-    fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
-        Box::pin(async move {
-            self.blocks
-                .clone()
-                .block_stream(txn)
-                .await?
-                .map_ok(|array| array.product())
-                .try_fold(self.dtype().one(), |product, block_product| {
-                    future::ready(Ok(product * block_product))
-                })
-                .await
-        })
-    }
-
-    fn sum(&self, _axis: usize) -> TCResult<Self> {
-        Err(error::not_implemented())
-    }
-
-    fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
-        Box::pin(async move {
-            self.blocks
-                .clone()
-                .block_stream(txn)
-                .await?
-                .map_ok(|array| array.sum())
-                .try_fold(self.dtype().one(), |sum, block_sum| {
-                    future::ready(Ok(sum + block_sum))
-                })
-                .await
-        })
     }
 }
 

@@ -11,10 +11,13 @@ mod dense;
 mod sparse;
 mod transform;
 
-pub type Array = dense::array::Array;
-
 use dense::DenseTensor;
 use sparse::SparseTensor;
+
+pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
+bijection of its source. Consider copying first, or writing directly to the source Tensor.";
+
+pub type Array = dense::array::Array;
 
 trait TensorView: Send + Sync {
     fn dtype(&self) -> NumberType;
