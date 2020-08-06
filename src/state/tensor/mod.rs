@@ -41,16 +41,17 @@ trait TensorBoolean: Sized + TensorView {
     async fn xor(&self, other: &Self) -> TCResult<Self>;
 }
 
+#[async_trait]
 trait TensorCompare: Sized + TensorView {
-    fn eq(&self, other: &Self) -> TCResult<DenseTensor>;
+    async fn eq(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor>;
 
     fn gt(&self, other: &Self) -> TCResult<Self>;
 
-    fn gte(&self, other: &Self) -> TCResult<DenseTensor>;
+    async fn gte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor>;
 
     fn lt(&self, other: &Self) -> TCResult<Self>;
 
-    fn lte(&self, other: &Self) -> TCResult<DenseTensor>;
+    async fn lte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor>;
 
     fn ne(&self, other: &Self) -> TCResult<Self>;
 }

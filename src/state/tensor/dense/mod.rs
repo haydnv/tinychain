@@ -1229,6 +1229,11 @@ pub struct DenseTensor {
 }
 
 impl DenseTensor {
+    pub async fn constant(txn: Arc<Txn>, shape: Shape, value: Number) -> TCResult<DenseTensor> {
+        let blocks = Arc::new(BlockListFile::constant(txn, shape, value).await?);
+        Ok(DenseTensor { blocks })
+    } 
+
     pub fn from_sparse(sparse: SparseTensor) -> DenseTensor {
         let blocks = Arc::new(BlockListSparse::new(sparse));
         DenseTensor { blocks }
@@ -1306,6 +1311,7 @@ impl TensorBoolean for DenseTensor {
             transform: Array::not,
             value_transform: Number::not,
         });
+
         Ok(DenseTensor { blocks })
     }
 

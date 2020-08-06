@@ -95,14 +95,29 @@ pub trait NumberInstance:
         this.and(that).into()
     }
 
+    fn eq(self, other: Self) -> Self {
+        let eq: Boolean = (self == other).into();
+        eq.into()
+    }
+
     fn lt(self, other: Self) -> Self {
         let lt: Boolean = PartialOrd::lt(&self, &other).into();
         lt.into()
     }
 
+    fn lte(self, other: Self) -> Self {
+        let lte: Boolean = (self <= other).into();
+        lte.into()
+    }
+
     fn gt(self, other: Self) -> Self {
         let gt: Boolean = PartialOrd::gt(&self, &other).into();
         gt.into()
+    }
+
+    fn gte(self, other: Self) -> Self {
+        let gte: Boolean = (self >= other).into();
+        gte.into()
     }
 
     fn ne(self, other: Self) -> Self {

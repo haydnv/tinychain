@@ -1337,6 +1337,12 @@ impl Mul for Number {
     }
 }
 
+impl From<bool> for Number {
+    fn from(b: bool) -> Number {
+        Number::Bool(b.into())
+    }
+}
+
 impl From<Boolean> for Number {
     fn from(b: Boolean) -> Number {
         Number::Bool(b)
