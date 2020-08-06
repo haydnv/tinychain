@@ -1571,8 +1571,9 @@ impl TensorMath for SparseTensor {
 }
 
 impl TensorReduce for SparseTensor {
-    fn product(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
-        Err(error::not_implemented())
+    fn product(&self, axis: usize) -> TCResult<Self> {
+        let accessor = SparseReduce::new(self.clone(), axis, Self::product_all).map(Arc::new)?;
+        Ok(SparseTensor { accessor })
     }
 
     fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
@@ -1587,8 +1588,9 @@ impl TensorReduce for SparseTensor {
         })
     }
 
-    fn sum(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
-        Err(error::not_implemented())
+    fn sum(&self, axis: usize) -> TCResult<Self> {
+        let accessor = SparseReduce::new(self.clone(), axis, Self::sum_all).map(Arc::new)?;
+        Ok(SparseTensor { accessor })
     }
 
     fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {

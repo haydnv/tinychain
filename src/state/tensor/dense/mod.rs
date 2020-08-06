@@ -1568,7 +1568,7 @@ impl TensorTransform for DenseTensor {
 }
 
 impl TensorReduce for DenseTensor {
-    fn product(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
+    fn product(&self, _axis: usize) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
@@ -1586,7 +1586,7 @@ impl TensorReduce for DenseTensor {
         })
     }
 
-    fn sum(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
+    fn sum(&self, _axis: usize) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 

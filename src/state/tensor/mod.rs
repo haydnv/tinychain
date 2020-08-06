@@ -89,11 +89,11 @@ trait TensorMath: Sized + TensorView {
 }
 
 trait TensorReduce: Sized + TensorView {
-    fn product(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self>;
+    fn product(&self, axis: usize) -> TCResult<Self>;
 
     fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
 
-    fn sum(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self>;
+    fn sum(&self, axis: usize) -> TCResult<Self>;
 
     fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
 }
@@ -375,10 +375,10 @@ impl TensorMath for Tensor {
 }
 
 impl TensorReduce for Tensor {
-    fn product(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
+    fn product(&self, axis: usize) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.product(txn, axis).map(Self::from),
-            Self::Sparse(sparse) => sparse.product(txn, axis).map(Self::from),
+            Self::Dense(dense) => dense.product(axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.product(axis).map(Self::from),
         }
     }
 
@@ -389,10 +389,10 @@ impl TensorReduce for Tensor {
         }
     }
 
-    fn sum(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
+    fn sum(&self, axis: usize) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.product(txn, axis).map(Self::from),
-            Self::Sparse(sparse) => sparse.product(txn, axis).map(Self::from),
+            Self::Dense(dense) => dense.product(axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.product(axis).map(Self::from),
         }
     }
 
