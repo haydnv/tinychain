@@ -72,16 +72,16 @@ trait BlockList: TensorView + 'static {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number>;
 
     fn read_value_at_owned<'a>(
         self: Arc<Self>,
-        txn_id: TxnId,
+        txn: Arc<Txn>,
         coord: Vec<u64>,
     ) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move { self.read_value_at(&txn_id, &coord).await })
+        Box::pin(async move { self.read_value_at(&txn, &coord).await })
     }
 
     fn write_value<'a>(
@@ -199,12 +199,12 @@ impl BlockList for BlockListCombine {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
-            let left = self.left.read_value_at(txn_id, coord);
-            let right = self.right.read_value_at(txn_id, coord);
+            let left = self.left.read_value_at(txn, coord);
+            let right = self.right.read_value_at(txn, coord);
             let (left, right) = try_join!(left, right)?;
             let combinator = self.value_combinator;
             Ok(combinator(left, right))
@@ -449,7 +449,7 @@ impl BlockList for BlockListFile {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
@@ -468,7 +468,7 @@ impl BlockList for BlockListFile {
                 .map(|(d, x)| d * x)
                 .sum();
             let block_id: u64 = offset / PER_BLOCK as u64;
-            let block = self.file.get_block(txn_id, block_id.into()).await?;
+            let block = self.file.get_block(txn.id(), block_id.into()).await?;
             block
                 .deref()
                 .get_value((offset % PER_BLOCK as u64) as usize)
@@ -572,12 +572,12 @@ impl BlockList for BlockListBroadcast {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn_id, &coord).await
+            self.source.read_value_at(txn, &coord).await
         })
     }
 
@@ -655,13 +655,13 @@ impl BlockList for BlockListCast {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
         let dtype = self.dtype;
         Box::pin(
             self.source
-                .read_value_at(txn_id, coord)
+                .read_value_at(txn, coord)
                 .map_ok(move |value| value.into_type(dtype)),
         )
     }
@@ -728,12 +728,12 @@ impl BlockList for BlockListExpand {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn_id, &coord).await
+            self.source.read_value_at(txn, &coord).await
         })
     }
 
@@ -838,12 +838,12 @@ impl BlockList for BlockListReshape {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn_id, &coord).await
+            self.source.read_value_at(txn, &coord).await
         })
     }
 
@@ -915,12 +915,12 @@ impl BlockList for BlockListSlice {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn_id, &coord).await
+            self.source.read_value_at(txn, &coord).await
         })
     }
 
@@ -1035,10 +1035,10 @@ impl BlockList for BlockListSparse {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
-        self.source.read_value(txn_id, coord)
+        self.source.read_value(txn, coord)
     }
 
     fn write_value<'a>(
@@ -1092,7 +1092,7 @@ impl BlockList for BlockListTranspose {
     fn value_stream<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         Box::pin(async move {
             let values = stream::iter(Bounds::all(self.shape()).affected())
-                .then(move |coord| self.clone().read_value_at_owned(txn.id().clone(), coord));
+                .then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
             let values: TCTryStream<Number> = Box::pin(values);
             Ok(values)
         })
@@ -1105,7 +1105,7 @@ impl BlockList for BlockListTranspose {
     ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         Box::pin(async move {
             let values = stream::iter(bounds.affected())
-                .then(move |coord| self.clone().read_value_at_owned(txn.id().clone(), coord));
+                .then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
             let values: TCTryStream<Number> = Box::pin(values);
             Ok(values)
         })
@@ -1113,12 +1113,12 @@ impl BlockList for BlockListTranspose {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn_id, &coord).await
+            self.source.read_value_at(txn, &coord).await
         })
     }
 
@@ -1202,11 +1202,11 @@ impl BlockList for BlockListUnary {
 
     fn read_value_at<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn: &'a Arc<Txn>,
         coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
         let transform = self.value_transform;
-        Box::pin(self.source.read_value_at(txn_id, coord).map_ok(transform))
+        Box::pin(self.source.read_value_at(txn, coord).map_ok(transform))
     }
 
     fn write_value<'a>(
@@ -1248,8 +1248,8 @@ impl DenseTensor {
         self.blocks.clone().value_stream(txn).await
     }
 
-    fn read_value_owned<'a>(self, txn_id: TxnId, coord: Vec<u64>) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move { self.read_value(&txn_id, &coord).await })
+    fn read_value_owned<'a>(self, txn: Arc<Txn>, coord: Vec<u64>) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(async move { self.read_value(&txn, &coord).await })
     }
 
     fn combine(
@@ -1437,8 +1437,8 @@ impl TensorMath for DenseTensor {
 }
 
 impl TensorIO for DenseTensor {
-    fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
-        self.blocks.read_value_at(txn_id, coord)
+    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
+        self.blocks.read_value_at(txn, coord)
     }
 
     fn write<'a>(&'a self, txn: Arc<Txn>, bounds: Bounds, other: Self) -> TCBoxTryFuture<'a, ()> {
@@ -1454,7 +1454,7 @@ impl TensorIO for DenseTensor {
                 .map(move |coord| {
                     Ok(other
                         .clone()
-                        .read_value_owned(txn_id.clone(), coord.to_vec())
+                        .read_value_owned(txn.clone(), coord.to_vec())
                         .map_ok(|value| (coord, value)))
                 })
                 .try_buffer_unordered(2)
