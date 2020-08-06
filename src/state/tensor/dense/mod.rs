@@ -1288,9 +1288,11 @@ impl TensorBoolean for DenseTensor {
     }
 
     async fn and(&self, other: &Self) -> TCResult<Self> {
+        let (this, that) = broadcast(self, other)?;
+
         let blocks = Arc::new(BlockListCombine::new(
-            self.blocks.clone(),
-            other.blocks.clone(),
+            this.blocks.clone(),
+            that.blocks.clone(),
             Array::and,
             Number::and,
         )?);
@@ -1308,9 +1310,11 @@ impl TensorBoolean for DenseTensor {
     }
 
     async fn or(&self, other: &Self) -> TCResult<Self> {
+        let (this, that) = broadcast(self, other)?;
+
         let blocks = Arc::new(BlockListCombine::new(
-            self.blocks.clone(),
-            other.blocks.clone(),
+            this.blocks.clone(),
+            that.blocks.clone(),
             Array::or,
             Number::or,
         )?);
@@ -1319,9 +1323,11 @@ impl TensorBoolean for DenseTensor {
     }
 
     async fn xor(&self, other: &Self) -> TCResult<Self> {
+        let (this, that) = broadcast(self, other)?;
+
         let blocks = Arc::new(BlockListCombine::new(
-            self.blocks.clone(),
-            other.blocks.clone(),
+            this.blocks.clone(),
+            that.blocks.clone(),
             Array::xor,
             Number::xor,
         )?);

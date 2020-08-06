@@ -318,3 +318,23 @@ impl From<SparseTensor> for Tensor {
         Self::Sparse(sparse)
     }
 }
+
+fn broadcast<L: Clone + TensorTransform, R: Clone + TensorTransform>(
+    left: &L,
+    right: &R,
+) -> TCResult<(L, R)> {
+    if left.shape() == right.shape() {
+        Ok((left.clone(), right.clone()))
+    } else {
+        let shape: bounds::Shape = left
+            .shape()
+            .to_vec()
+            .iter()
+            .zip(right.shape().to_vec().iter())
+            .map(|(l, r)| Ord::max(l, r))
+            .cloned()
+            .collect::<Vec<u64>>()
+            .into();
+        Ok((left.broadcast(shape.clone())?, right.broadcast(shape)?))
+    }
+}

@@ -1106,8 +1106,10 @@ impl TensorBoolean for SparseTensor {
     }
 
     async fn and(&self, other: &Self) -> TCResult<Self> {
+        let (this, that) = broadcast(self, other)?;
+
         let accessor =
-            SparseCombinator::new(self.accessor.clone(), other.accessor.clone(), Number::and)
+            SparseCombinator::new(this.accessor.clone(), that.accessor.clone(), Number::and)
                 .map(Arc::new)?;
 
         Ok(SparseTensor { accessor })
@@ -1118,8 +1120,10 @@ impl TensorBoolean for SparseTensor {
     }
 
     async fn or(&self, other: &Self) -> TCResult<Self> {
+        let (this, that) = broadcast(self, other)?;
+
         let accessor =
-            SparseCombinator::new(self.accessor.clone(), other.accessor.clone(), Number::or)
+            SparseCombinator::new(this.accessor.clone(), that.accessor.clone(), Number::or)
                 .map(Arc::new)?;
 
         Ok(SparseTensor { accessor })
@@ -1136,9 +1140,11 @@ impl TensorCompare for SparseTensor {
     }
 
     fn gt(&self, other: &Self) -> TCResult<Self> {
+        let (this, that) = broadcast(self, other)?;
+
         let accessor = SparseCombinator::new(
-            self.accessor.clone(),
-            other.accessor.clone(),
+            this.accessor.clone(),
+            that.accessor.clone(),
             <Number as NumberInstance>::gt,
         )
         .map(Arc::new)?;
@@ -1151,9 +1157,11 @@ impl TensorCompare for SparseTensor {
     }
 
     fn lt(&self, other: &Self) -> TCResult<Self> {
+        let (this, that) = broadcast(self, other)?;
+
         let accessor = SparseCombinator::new(
-            self.accessor.clone(),
-            other.accessor.clone(),
+            this.accessor.clone(),
+            that.accessor.clone(),
             <Number as NumberInstance>::lt,
         )
         .map(Arc::new)?;
@@ -1166,9 +1174,11 @@ impl TensorCompare for SparseTensor {
     }
 
     fn ne(&self, other: &Self) -> TCResult<Self> {
+        let (this, that) = broadcast(self, other)?;
+
         let accessor = SparseCombinator::new(
-            self.accessor.clone(),
-            other.accessor.clone(),
+            this.accessor.clone(),
+            that.accessor.clone(),
             <Number as NumberInstance>::ne,
         )
         .map(Arc::new)?;
