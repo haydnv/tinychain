@@ -584,19 +584,17 @@ impl SparseAccessor for SparseExpand {
     }
 }
 
+type Reductor = fn(&SparseTensor, Arc<Txn>) -> TCBoxTryFuture<Number>;
+
 struct SparseReduce {
     source: SparseTensor,
     shape: Shape,
     axis: usize,
-    reductor: fn(&SparseTensor, Arc<Txn>) -> TCBoxTryFuture<Number>,
+    reductor: Reductor,
 }
 
 impl SparseReduce {
-    fn new(
-        source: SparseTensor,
-        axis: usize,
-        reductor: fn(&SparseTensor, Arc<Txn>) -> TCBoxTryFuture<Number>,
-    ) -> TCResult<SparseReduce> {
+    fn new(source: SparseTensor, axis: usize, reductor: Reductor) -> TCResult<SparseReduce> {
         if axis >= source.ndim() {
             return Err(error::bad_request(
                 &format!("Tensor with shape {} has no such axis", source.shape()),
@@ -634,8 +632,32 @@ impl TensorView for SparseReduce {
 }
 
 impl SparseAccessor for SparseReduce {
-    fn filled<'a>(self: Arc<Self>, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(async move {
+            let reductor = self.reductor;
+            let source = self.source.clone();
+
+            let filled = self
+                .clone()
+                .filled_at(txn.clone(), (0..self.ndim()).collect())
+                .await?
+                .and_then(move |coord| {
+                    let mut bounds: Vec<AxisBounds> =
+                        coord.iter().map(|i| AxisBounds::At(*i)).collect();
+                    bounds.insert(self.axis, AxisBounds::all(self.source.shape()[self.axis]));
+                    let bounds: Bounds = bounds.into();
+
+                    let txn = txn.clone();
+                    let source = source.clone();
+                    Box::pin(async move {
+                        let slice = source.slice(bounds)?;
+                        Ok((coord, reductor(&slice, txn).await?))
+                    })
+                });
+
+            let filled: SparseStream = Box::pin(filled);
+            Ok(filled)
+        })
     }
 
     fn filled_at<'a>(
