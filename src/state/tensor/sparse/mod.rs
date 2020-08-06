@@ -25,12 +25,11 @@ use combine::SparseCombine;
 pub type SparseRow = (Vec<u64>, Number);
 pub type SparseStream = TCStream<SparseRow>;
 
-const ERR_BROADCAST_WRITE: &str = "Cannot write to a broadcasted tensor since it is not a \
-bijection of its source. Consider copying the broadcast into a new Tensor, \
-or writing directly to the source Tensor.";
+const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived tensor which is not a \
+bijection of its source. Consider copying first, or writing directly to the source Tensor.";
 
 const ERR_PRODUCT_WRITE: &str = "Cannot write to a product of two Tensors. \
-Consider copying the product into a new Tensor, or writing to the source Tensors directly.";
+Consider copying first, or writing to the source Tensors directly.";
 
 const ERR_NOT_SPARSE: &str = "The result of the requested operation would not be sparse;\
 convert to a DenseTensor first.";
@@ -263,12 +262,11 @@ impl SparseAccessor for SparseBroadcast {
         })
     }
 
-    fn read_value<'a>(
-        &'a self,
-        _txn_id: &'a TxnId,
-        _coord: &'a [u64],
-    ) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_BROADCAST_WRITE))))
+    fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(async move {
+            let coord = self.rebase.invert_coord(coord);
+            self.source.read_value(txn_id, &coord).await
+        })
     }
 
     fn write_value<'a>(
@@ -277,7 +275,9 @@ impl SparseAccessor for SparseBroadcast {
         _coord: Vec<u64>,
         _value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_BROADCAST_WRITE))))
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
     }
 }
 
@@ -583,6 +583,74 @@ impl SparseAccessor for SparseExpand {
     ) -> TCBoxTryFuture<'a, ()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value(txn_id, coord, value)
+    }
+}
+
+struct SparseReduce {
+    source: Arc<dyn SparseAccessor>,
+    shape: Shape,
+    axis: usize,
+    reductor: fn(&SparseTensor, Arc<Txn>) -> TCBoxTryFuture<Number>,
+}
+
+impl TensorView for SparseReduce {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim() - 1
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        &self.shape
+    }
+
+    fn size(&self) -> u64 {
+        self.shape.size()
+    }
+}
+
+impl SparseAccessor for SparseReduce {
+    fn filled<'a>(self: Arc<Self>, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn filled_at<'a>(
+        self: Arc<Self>,
+        _txn: Arc<Txn>,
+        _axes: Vec<usize>,
+    ) -> TCBoxTryFuture<'a, TCStream<Vec<u64>>> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn filled_count<'a>(self: Arc<Self>, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn filled_in<'a>(
+        self: Arc<Self>,
+        _txn: Arc<Txn>,
+        _bounds: Bounds,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn read_value<'a>(
+        &'a self,
+        _txn_id: &'a TxnId,
+        _coord: &'a [u64],
+    ) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(future::ready(Err(error::not_implemented())))
+    }
+
+    fn write_value<'a>(
+        &'a self,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::not_implemented())))
     }
 }
 
@@ -1448,7 +1516,14 @@ impl TensorTransform for SparseTensor {
 
 #[async_trait]
 impl TensorUnary for SparseTensor {
-    fn product(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
+    fn product(&self, _txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
+        if axis >= self.ndim() {
+            return Err(error::bad_request(
+                &format!("Tensor with shape {} has no such axis", self.shape()),
+                axis,
+            ));
+        }
+
         Err(error::not_implemented())
     }
 
@@ -1470,7 +1545,14 @@ impl TensorUnary for SparseTensor {
         Ok(product)
     }
 
-    fn sum(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
+    fn sum(&self, _txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
+        if axis >= self.ndim() {
+            return Err(error::bad_request(
+                &format!("Tensor with shape {} has no such axis", self.shape()),
+                axis,
+            ));
+        }
+
         Err(error::not_implemented())
     }
 

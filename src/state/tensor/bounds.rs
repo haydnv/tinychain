@@ -346,29 +346,12 @@ impl Shape {
         true
     }
 
-    pub fn selection(&self, coord: &Bounds) -> Shape {
-        assert!(self.contains_bounds(coord));
-
-        let mut shape = Vec::with_capacity(self.len());
-        for axis in 0..coord.len() {
-            match &coord[axis] {
-                AxisBounds::At(_) => {}
-                AxisBounds::In(range) => {
-                    let dim = range.end - range.start;
-                    shape.push(dim)
-                }
-                AxisBounds::Of(indices) => shape.push(indices.len() as u64),
-            }
-        }
-        shape.into()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn remove(&mut self, axis: usize) -> u64 {
+        self.0.remove(axis)
     }
 
     pub fn size(&self) -> u64 {
