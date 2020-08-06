@@ -994,8 +994,8 @@ impl BlockList for BlockListSparse {
                             .slice(Bounds::from(vec![AxisBounds::In(start..end)]))?
                             .filled(txn)
                             .await?
-                            .collect()
-                            .await;
+                            .try_collect()
+                            .await?;
 
                         let mut block = Array::constant(dtype.zero(), PER_BLOCK);
                         if filled.is_empty() {

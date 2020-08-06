@@ -6,7 +6,7 @@ use std::task::{self, Poll};
 use futures::stream::{Fuse, Stream, StreamExt};
 use pin_project::pin_project;
 
-use crate::value::Number;
+use crate::value::{Number, TCResult};
 
 use super::bounds::compare_coord;
 use super::{SparseRow, SparseStream};
@@ -37,14 +37,15 @@ impl SparseCombine {
         stream: Pin<&mut Fuse<SparseStream>>,
         pending: &mut Option<SparseRow>,
         cxt: &mut task::Context,
-    ) -> bool {
+    ) -> TCResult<bool> {
         match stream.poll_next(cxt) {
-            Poll::Pending => false,
-            Poll::Ready(Some(row)) => {
+            Poll::Pending => Ok(false),
+            Poll::Ready(Some(Ok(row))) => {
                 *pending = Some(row);
-                false
+                Ok(false)
             }
-            Poll::Ready(None) => true,
+            Poll::Ready(Some(Err(cause))) => Err(cause),
+            Poll::Ready(None) => Ok(true),
         }
     }
 
@@ -58,7 +59,7 @@ impl SparseCombine {
 }
 
 impl Stream for SparseCombine {
-    type Item = (Vec<u64>, Option<Number>, Option<Number>);
+    type Item = TCResult<(Vec<u64>, Option<Number>, Option<Number>)>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut task::Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -66,13 +67,19 @@ impl Stream for SparseCombine {
         let left_done = if this.left.is_done() {
             true
         } else {
-            Self::poll_inner(this.left, this.pending_left, cxt)
+            match Self::poll_inner(this.left, this.pending_left, cxt) {
+                Err(cause) => return Poll::Ready(Some(Err(cause))),
+                Ok(done) => done,
+            }
         };
 
         let right_done = if this.right.is_done() {
             true
         } else {
-            Self::poll_inner(this.right, this.pending_right, cxt)
+            match Self::poll_inner(this.right, this.pending_right, cxt) {
+                Err(cause) => return Poll::Ready(Some(Err(cause))),
+                Ok(done) => done,
+            }
         };
 
         if this.pending_left.is_some() && this.pending_right.is_some() {
@@ -83,23 +90,23 @@ impl Stream for SparseCombine {
                 Ordering::Equal => {
                     let (l_coord, l_value) = Self::swap_value(this.pending_left);
                     let (_, r_value) = Self::swap_value(this.pending_right);
-                    Poll::Ready(Some((l_coord, Some(l_value), Some(r_value))))
+                    Poll::Ready(Some(Ok((l_coord, Some(l_value), Some(r_value)))))
                 }
                 Ordering::Less => {
                     let (l_coord, l_value) = Self::swap_value(this.pending_left);
-                    Poll::Ready(Some((l_coord, Some(l_value), None)))
+                    Poll::Ready(Some(Ok((l_coord, Some(l_value), None))))
                 }
                 Ordering::Greater => {
                     let (r_coord, r_value) = Self::swap_value(this.pending_right);
-                    Poll::Ready(Some((r_coord, None, Some(r_value))))
+                    Poll::Ready(Some(Ok((r_coord, None, Some(r_value)))))
                 }
             }
         } else if right_done && this.pending_left.is_some() {
             let (l_coord, l_value) = Self::swap_value(this.pending_left);
-            Poll::Ready(Some((l_coord, Some(l_value), None)))
+            Poll::Ready(Some(Ok((l_coord, Some(l_value), None))))
         } else if left_done && this.pending_right.is_some() {
             let (r_coord, r_value) = Self::swap_value(this.pending_right);
-            Poll::Ready(Some((r_coord, None, Some(r_value))))
+            Poll::Ready(Some(Ok((r_coord, None, Some(r_value)))))
         } else if left_done && right_done {
             Poll::Ready(None)
         } else {

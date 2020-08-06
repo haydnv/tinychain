@@ -526,6 +526,19 @@ impl BTree {
         })
     }
 
+    pub async fn try_insert_from<S: Stream<Item = TCResult<Key>>>(
+        &self,
+        txn_id: &TxnId,
+        source: S,
+    ) -> TCResult<()> {
+        source
+            .and_then(|k| future::ready(self.schema.validate_key(&k).map(|()| k)))
+            .map_ok(|key| self.insert(txn_id, key))
+            .try_buffer_unordered(2 * self.order)
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
+    }
+
     pub async fn insert_from<S: Stream<Item = Key>>(
         &self,
         txn_id: &TxnId,
