@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt;
 use std::ops::{Add, Mul};
 
@@ -19,7 +20,7 @@ pub trait ValueClass: Class {
     fn size(self) -> Option<usize>;
 }
 
-pub trait NumberClass: Class + Into<NumberType> + Send + Sync {
+pub trait NumberClass: Class + Into<NumberType> + Ord + Send + Sync {
     type Instance: NumberInstance + Into<Number>;
 
     fn size(self) -> usize;
@@ -193,6 +194,24 @@ impl NumberClass for ComplexType {
     }
 }
 
+impl Ord for ComplexType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::C32, Self::C32) => Ordering::Equal,
+            (Self::C64, Self::C64) => Ordering::Equal,
+
+            (Self::C64, Self::C32) => Ordering::Greater,
+            (Self::C32, Self::C64) => Ordering::Less,
+        }
+    }
+}
+
+impl PartialOrd for ComplexType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl From<ComplexType> for NumberType {
     fn from(ct: ComplexType) -> NumberType {
         Self::Complex(ct)
@@ -220,6 +239,18 @@ impl NumberClass for BooleanType {
 
     fn size(self) -> usize {
         1
+    }
+}
+
+impl Ord for BooleanType {
+    fn cmp(&self, _other: &Self) -> Ordering {
+        Ordering::Equal
+    }
+}
+
+impl PartialOrd for BooleanType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -253,6 +284,24 @@ impl NumberClass for FloatType {
             FloatType::F32 => 4,
             FloatType::F64 => 8,
         }
+    }
+}
+
+impl Ord for FloatType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::F32, Self::F32) => Ordering::Equal,
+            (Self::F64, Self::F64) => Ordering::Equal,
+
+            (Self::F64, Self::F32) => Ordering::Greater,
+            (Self::F32, Self::F64) => Ordering::Less,
+        }
+    }
+}
+
+impl PartialOrd for FloatType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -295,6 +344,27 @@ impl NumberClass for IntType {
     }
 }
 
+impl Ord for IntType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::I16, Self::I16) => Ordering::Equal,
+            (Self::I32, Self::I32) => Ordering::Equal,
+            (Self::I64, Self::I64) => Ordering::Equal,
+
+            (Self::I64, _) => Ordering::Greater,
+            (_, Self::I64) => Ordering::Less,
+            (Self::I16, _) => Ordering::Less,
+            (_, Self::I16) => Ordering::Greater,
+        }
+    }
+}
+
+impl PartialOrd for IntType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl From<IntType> for NumberType {
     fn from(it: IntType) -> NumberType {
         NumberType::Int(it)
@@ -334,6 +404,29 @@ impl NumberClass for UIntType {
             UIntType::U32 => 4,
             UIntType::U64 => 8,
         }
+    }
+}
+
+impl Ord for UIntType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::U16, Self::U16) => Ordering::Equal,
+            (Self::U32, Self::U32) => Ordering::Equal,
+            (Self::U64, Self::U64) => Ordering::Equal,
+
+            (Self::U8, _) => Ordering::Less,
+            (_, Self::U8) => Ordering::Greater,
+            (Self::U64, _) => Ordering::Greater,
+            (_, Self::U64) => Ordering::Less,
+            (Self::U32, Self::U16) => Ordering::Greater,
+            (Self::U16, Self::U32) => Ordering::Less,
+        }
+    }
+}
+
+impl PartialOrd for UIntType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -380,6 +473,35 @@ impl NumberClass for NumberType {
             Int(it) => NumberClass::size(it),
             UInt(ut) => NumberClass::size(ut),
         }
+    }
+}
+
+impl Ord for NumberType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Bool, Self::Bool) => Ordering::Equal,
+            (Self::Complex(l), Self::Complex(r)) => l.cmp(r),
+            (Self::Float(l), Self::Float(r)) => l.cmp(r),
+            (Self::Int(l), Self::Int(r)) => l.cmp(r),
+            (Self::UInt(l), Self::UInt(r)) => l.cmp(r),
+
+            (Self::Bool, _) => Ordering::Less,
+            (_, Self::Bool) => Ordering::Greater,
+            (Self::Complex(_), _) => Ordering::Greater,
+            (_, Self::Complex(_)) => Ordering::Less,
+            (Self::UInt(_), Self::Int(_)) => Ordering::Less,
+            (Self::UInt(_), Self::Float(_)) => Ordering::Less,
+            (Self::Int(_), Self::UInt(_)) => Ordering::Greater,
+            (Self::Float(_), Self::UInt(_)) => Ordering::Greater,
+            (Self::Int(_), Self::Float(_)) => Ordering::Less,
+            (Self::Float(_), Self::Int(_)) => Ordering::Greater,
+        }
+    }
+}
+
+impl PartialOrd for NumberType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 

@@ -70,13 +70,12 @@ impl From<Boolean> for bool {
 impl Eq for Boolean {}
 
 impl Add for Boolean {
-    type Output = UInt;
+    type Output = Self;
 
     fn add(self, other: Boolean) -> Self::Output {
         match (self, other) {
-            (Boolean(true), Boolean(true)) => UInt::U8(2),
-            (Boolean(false), Boolean(false)) => UInt::U8(1),
-            _ => UInt::U8(1),
+            (Boolean(false), Boolean(false)) => Boolean(false),
+            _ => Boolean(true),
         }
     }
 }
@@ -94,9 +93,8 @@ impl Mul for Boolean {
 
 impl PartialOrd for Boolean {
     fn partial_cmp(&self, other: &Boolean) -> Option<Ordering> {
-        match (self, other) {
-            (Boolean(l), Boolean(r)) => l.partial_cmp(r),
-        }
+        let (Boolean(l), Boolean(r)) = (self, other);
+        l.partial_cmp(r)
     }
 }
 
@@ -834,7 +832,7 @@ impl NumberInstance for UInt {
     type Class = UIntType;
 
     fn abs(self) -> UInt {
-        self.clone()
+        self
     }
 
     fn into_type(self, dtype: UIntType) -> UInt {
@@ -1154,7 +1152,7 @@ impl NumberInstance for Number {
             Complex(c) => Float(c.abs()),
             Float(f) => Float(f.abs()),
             Int(i) => Int(i.abs()),
-            other => other.clone(),
+            other => other,
         }
     }
 
@@ -1239,59 +1237,31 @@ impl Add for Number {
     type Output = Self;
 
     fn add(self, other: Number) -> Self {
-        match (self, other) {
-            (Self::Bool(Boolean(l)), Self::Bool(Boolean(r))) => match (l, r) {
-                (true, true) => Self::UInt(UInt::U8(2)),
-                (true, false) => Self::UInt(UInt::U8(1)),
-                (false, true) => Self::UInt(UInt::U8(1)),
-                (false, false) => Self::UInt(UInt::U8(0)),
-            },
+        let dtype = Ord::max(self.class(), other.class());
 
-            (Self::Complex(l), Self::Complex(r)) => Self::Complex(l + r),
-            (Self::Complex(l), Self::Float(r)) => {
-                let r: Complex = r.into();
-                Self::Complex(l + r)
+        use NumberType as NT;
+
+        match dtype {
+            NT::Bool => {
+                let this: Boolean = self.cast_into();
+                (this + other.cast_into()).into()
             }
-            (Self::Complex(l), Self::Int(r)) => {
-                let r: Complex = r.into();
-                Self::Complex(l + r)
+            NT::Complex(_) => {
+                let this: Complex = self.cast_into();
+                (this + other.cast_into()).into()
             }
-            (Self::Complex(l), Self::UInt(r)) => {
-                let r: Complex = r.into();
-                Self::Complex(l + r)
+            NT::Float(_) => {
+                let this: Float = self.cast_into();
+                (this + other.cast_into()).into()
             }
-            (Self::Complex(l), Self::Bool(r)) => {
-                let r: Complex = r.into();
-                Self::Complex(l + r)
+            NT::Int(_) => {
+                let this: Int = self.cast_into();
+                (this + other.cast_into()).into()
             }
-            (Self::Float(l), Self::Float(r)) => Self::Float(l + r),
-            (Self::Float(l), Self::Int(r)) => {
-                let r: Float = r.into();
-                Self::Float(l + r)
+            NT::UInt(_) => {
+                let this: UInt = self.cast_into();
+                (this + other.cast_into()).into()
             }
-            (Self::Float(l), Self::UInt(r)) => {
-                let r: Float = r.into();
-                Self::Float(l + r)
-            }
-            (Self::Float(l), Self::Bool(r)) => {
-                let r: Float = r.into();
-                Self::Float(l + r)
-            }
-            (Self::Int(l), Self::Int(r)) => Self::Int(l + r),
-            (Self::Int(l), Self::UInt(r)) => {
-                let r: Int = r.into();
-                Self::Int(l + r)
-            }
-            (Self::Int(l), Self::Bool(r)) => {
-                let r: Int = r.into();
-                Self::Int(l + r)
-            }
-            (Self::UInt(l), Self::UInt(r)) => Self::UInt(l + r),
-            (Self::UInt(l), Self::Bool(r)) => {
-                let r: UInt = r.into();
-                Self::UInt(l + r)
-            }
-            (l, r) => r + l,
         }
     }
 }
@@ -1300,39 +1270,31 @@ impl Mul for Number {
     type Output = Self;
 
     fn mul(self, other: Number) -> Self {
-        match (self, other) {
-            (Self::Bool(Boolean(false)), r) => r.class().zero(),
-            (Self::Bool(Boolean(true)), r) => r,
+        let dtype = Ord::max(self.class(), other.class());
 
-            (Self::Complex(l), Self::Complex(r)) => Self::Complex(l * r),
-            (Self::Complex(l), Self::Float(r)) => {
-                let r: Complex = r.into();
-                Self::Complex(l * r)
+        use NumberType as NT;
+
+        match dtype {
+            NT::Bool => {
+                let this: Boolean = self.cast_into();
+                (this * other.cast_into()).into()
             }
-            (Self::Complex(l), Self::Int(r)) => {
-                let r: Complex = r.into();
-                Self::Complex(l * r)
+            NT::Complex(_) => {
+                let this: Complex = self.cast_into();
+                (this * other.cast_into()).into()
             }
-            (Self::Complex(l), Self::UInt(r)) => {
-                let r: Complex = r.into();
-                Self::Complex(l * r)
+            NT::Float(_) => {
+                let this: Float = self.cast_into();
+                (this * other.cast_into()).into()
             }
-            (Self::Float(l), Self::Float(r)) => Self::Float(l * r),
-            (Self::Float(l), Self::Int(r)) => {
-                let r: Float = r.into();
-                Self::Float(l * r)
+            NT::Int(_) => {
+                let this: Int = self.cast_into();
+                (this * other.cast_into()).into()
             }
-            (Self::Float(l), Self::UInt(r)) => {
-                let r: Float = r.into();
-                Self::Float(l * r)
+            NT::UInt(_) => {
+                let this: UInt = self.cast_into();
+                (this * other.cast_into()).into()
             }
-            (Self::Int(l), Self::Int(r)) => Self::Int(l * r),
-            (Self::Int(l), Self::UInt(r)) => {
-                let r: Int = r.into();
-                Self::Int(l * r)
-            }
-            (Self::UInt(l), Self::UInt(r)) => Self::UInt(l * r),
-            (l, r) => r * l,
         }
     }
 }

@@ -1015,13 +1015,14 @@ impl Array {
         }
     }
 
-    pub fn into_type(self, dtype: NumberType) -> TCResult<Array> {
+    pub fn into_type(self, dtype: NumberType) -> Array {
         use ComplexType::*;
         use FloatType::*;
         use IntType::*;
         use NumberType::*;
         use UIntType::*;
-        let cast = match dtype {
+
+        match dtype {
             Bool => Self::Bool(self.af_cast()),
             Complex(ct) => match ct {
                 C32 => Self::C32(self.af_cast()),
@@ -1042,8 +1043,7 @@ impl Array {
                 U32 => Self::U32(self.af_cast()),
                 U64 => Self::U64(self.af_cast()),
             },
-        };
-        Ok(cast)
+        }
     }
 
     pub fn into_values(self) -> Vec<Number> {
@@ -1114,22 +1114,36 @@ impl Array {
         }
     }
 
-    pub fn add(self, other: Array) -> TCResult<Array> {
-        use Array::*;
-        match (self, other) {
-            (Bool(l), Bool(r)) => Ok(Bool(l.or(&r))),
-            (C32(l), C32(r)) => Ok(C32(l + r)),
-            (C64(l), C64(r)) => Ok(C64(l + r)),
-            (F32(l), F32(r)) => Ok(F32(l + r)),
-            (F64(l), F64(r)) => Ok(F64(l + r)),
-            (I16(l), I16(r)) => Ok(I16(l + r)),
-            (I32(l), I32(r)) => Ok(I32(l + r)),
-            (I64(l), I64(r)) => Ok(I64(l + r)),
-            (U8(l), U8(r)) => Ok(U8(l + r)),
-            (U16(l), U16(r)) => Ok(U16(l + r)),
-            (U32(l), U32(r)) => Ok(U32(l + r)),
-            (U64(l), U64(r)) => Ok(U64(l + r)),
-            (l, r) => Err(error::internal(format!("Tried to add {} and {}", l, r))),
+    pub fn add(self, other: Array) -> Array {
+        let dtype = Ord::max(self.dtype(), other.dtype());
+
+        use ComplexType::*;
+        use FloatType::*;
+        use IntType::*;
+        use NumberType::*;
+        use UIntType::*;
+
+        match dtype {
+            Bool => Self::Bool(self.af_cast::<bool>() + other.af_cast()),
+            Complex(ct) => match ct {
+                C32 => Self::C32(self.af_cast::<num::Complex<f32>>() + other.af_cast()),
+                C64 => Self::C64(self.af_cast::<num::Complex<f64>>() + other.af_cast()),
+            },
+            Float(ft) => match ft {
+                F32 => Self::F32(self.af_cast::<f32>() + other.af_cast()),
+                F64 => Self::F64(self.af_cast::<f64>() + other.af_cast()),
+            },
+            Int(it) => match it {
+                I16 => Self::I16(self.af_cast::<i16>() + other.af_cast()),
+                I32 => Self::I32(self.af_cast::<i32>() + other.af_cast()),
+                I64 => Self::I64(self.af_cast::<i64>() + other.af_cast()),
+            },
+            UInt(ut) => match ut {
+                U8 => Self::U8(self.af_cast::<u8>() + other.af_cast()),
+                U16 => Self::U16(self.af_cast::<u16>() + other.af_cast()),
+                U32 => Self::U32(self.af_cast::<u32>() + other.af_cast()),
+                U64 => Self::U64(self.af_cast::<u64>() + other.af_cast()),
+            },
         }
     }
 
@@ -1229,25 +1243,36 @@ impl Array {
         }
     }
 
-    pub fn multiply(self, other: Array) -> TCResult<Array> {
-        use Array::*;
-        match (self, other) {
-            (Bool(l), Bool(r)) => Ok(Bool(l.and(&r))),
-            (C32(l), C32(r)) => Ok(C32(l * r)),
-            (C64(l), C64(r)) => Ok(C64(l * r)),
-            (F32(l), F32(r)) => Ok(F32(l * r)),
-            (F64(l), F64(r)) => Ok(F64(l * r)),
-            (I16(l), I16(r)) => Ok(I16(l * r)),
-            (I32(l), I32(r)) => Ok(I32(l * r)),
-            (I64(l), I64(r)) => Ok(I64(l * r)),
-            (U8(l), U8(r)) => Ok(U8(l * r)),
-            (U16(l), U16(r)) => Ok(U16(l * r)),
-            (U32(l), U32(r)) => Ok(U32(l * r)),
-            (U64(l), U64(r)) => Ok(U64(l * r)),
-            (l, r) => Err(error::internal(format!(
-                "Tried to multiply {} and {}",
-                l, r
-            ))),
+    pub fn multiply(self, other: Array) -> Array {
+        let dtype = Ord::max(self.dtype(), other.dtype());
+
+        use ComplexType::*;
+        use FloatType::*;
+        use IntType::*;
+        use NumberType::*;
+        use UIntType::*;
+
+        match dtype {
+            Bool => Self::Bool(self.af_cast::<bool>() * other.af_cast()),
+            Complex(ct) => match ct {
+                C32 => Self::C32(self.af_cast::<num::Complex<f32>>() * other.af_cast()),
+                C64 => Self::C64(self.af_cast::<num::Complex<f64>>() * other.af_cast()),
+            },
+            Float(ft) => match ft {
+                F32 => Self::F32(self.af_cast::<f32>() * other.af_cast()),
+                F64 => Self::F64(self.af_cast::<f64>() * other.af_cast()),
+            },
+            Int(it) => match it {
+                I16 => Self::I16(self.af_cast::<i16>() * other.af_cast()),
+                I32 => Self::I32(self.af_cast::<i32>() * other.af_cast()),
+                I64 => Self::I64(self.af_cast::<i64>() * other.af_cast()),
+            },
+            UInt(ut) => match ut {
+                U8 => Self::U8(self.af_cast::<u8>() * other.af_cast()),
+                U16 => Self::U16(self.af_cast::<u16>() * other.af_cast()),
+                U32 => Self::U32(self.af_cast::<u32>() * other.af_cast()),
+                U64 => Self::U64(self.af_cast::<u64>() * other.af_cast()),
+            },
         }
     }
 

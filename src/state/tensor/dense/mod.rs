@@ -624,7 +624,7 @@ impl BlockList for BlockListCast {
         Box::pin(async move {
             let dtype = self.dtype;
             let blocks: TCStream<TCResult<Array>> = self.source.clone().block_stream(txn).await?;
-            let cast = blocks.and_then(move |array| future::ready(array.into_type(dtype)));
+            let cast = blocks.map_ok(move |array| array.into_type(dtype));
             let cast: TCTryStream<Array> = Box::pin(cast);
             Ok(cast)
         })
