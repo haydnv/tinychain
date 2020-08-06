@@ -1064,17 +1064,17 @@ impl Array {
         }
     }
 
-    pub fn abs(&self) -> TCResult<Array> {
+    pub fn abs(&self) -> Array {
         use Array::*;
         match self {
-            C32(c) => Ok(F32(c.abs())),
-            C64(c) => Ok(F64(c.abs())),
-            F32(f) => Ok(F32(f.abs())),
-            F64(f) => Ok(F64(f.abs())),
-            I16(i) => Ok(I16(i.abs())),
-            I32(i) => Ok(I32(i.abs())),
-            I64(i) => Ok(I64(i.abs())),
-            other => Ok(other.clone()),
+            C32(c) => F32(c.abs()),
+            C64(c) => F64(c.abs()),
+            F32(f) => F32(f.abs()),
+            F64(f) => F64(f.abs()),
+            I16(i) => I16(i.abs()),
+            I32(i) => I32(i.abs()),
+            I64(i) => I64(i.abs()),
+            other => other.clone(),
         }
     }
 
@@ -1114,7 +1114,7 @@ impl Array {
         }
     }
 
-    pub fn add(self, other: Array) -> Array {
+    pub fn add(&self, other: &Array) -> Array {
         let dtype = Ord::max(self.dtype(), other.dtype());
 
         use ComplexType::*;
@@ -1243,7 +1243,7 @@ impl Array {
         }
     }
 
-    pub fn multiply(self, other: Array) -> Array {
+    pub fn multiply(&self, other: &Array) -> Array {
         let dtype = Ord::max(self.dtype(), other.dtype());
 
         use ComplexType::*;

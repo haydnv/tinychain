@@ -1398,6 +1398,44 @@ impl TensorCompare for DenseTensor {
     }
 }
 
+impl TensorMath for DenseTensor {
+    fn abs(&self) -> TCResult<Self> {
+        let is_abs = match self.dtype() {
+            NumberType::Bool => true,
+            NumberType::UInt(_) => true,
+            _ => false,
+        };
+
+        if is_abs {
+            return Ok(self.clone());
+        }
+
+        let blocks = Arc::new(BlockListUnary {
+            source: self.blocks.clone(),
+            transform: Array::abs,
+            value_transform: <Number as NumberInstance>::abs,
+            dtype: NumberType::Bool,
+        });
+
+        Ok(DenseTensor { blocks })
+    }
+
+    fn add(&self, other: &Self) -> TCResult<Self> {
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, Array::add, <Number as NumberInstance>::add, dtype)
+    }
+
+    fn multiply(&self, other: &Self) -> TCResult<Self> {
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(
+            other,
+            Array::multiply,
+            <Number as NumberInstance>::multiply,
+            dtype,
+        )
+    }
+}
+
 impl TensorIO for DenseTensor {
     fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
         self.blocks.read_value_at(txn_id, coord)
