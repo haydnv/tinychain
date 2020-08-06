@@ -366,6 +366,7 @@ struct SparseCombinator {
     right: Arc<dyn SparseAccessor>,
     right_zero: Number,
     combinator: fn(Number, Number) -> Number,
+    dtype: NumberType,
 }
 
 impl SparseCombinator {
@@ -373,6 +374,7 @@ impl SparseCombinator {
         left: Arc<dyn SparseAccessor>,
         right: Arc<dyn SparseAccessor>,
         combinator: fn(Number, Number) -> Number,
+        dtype: NumberType,
     ) -> TCResult<SparseCombinator> {
         if left.shape() != right.shape() {
             return Err(error::internal(
@@ -388,6 +390,7 @@ impl SparseCombinator {
             right,
             right_zero,
             combinator,
+            dtype,
         })
     }
 
@@ -415,7 +418,7 @@ impl SparseCombinator {
 
 impl TensorView for SparseCombinator {
     fn dtype(&self) -> NumberType {
-        self.left.dtype()
+        self.dtype
     }
 
     fn ndim(&self) -> usize {
@@ -1057,6 +1060,86 @@ impl SparseAccessor for SparseTable {
     }
 }
 
+struct SparseUnary {
+    source: Arc<dyn SparseAccessor>,
+    transform: fn(Number) -> Number,
+    dtype: NumberType,
+}
+
+impl TensorView for SparseUnary {
+    fn dtype(&self) -> NumberType {
+        self.dtype
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+impl SparseAccessor for SparseUnary {
+    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(async move {
+            let transform = self.transform;
+            let filled = self.source.clone().filled(txn).await?;
+            let cast = filled.map(move |(coord, value)| (coord, transform(value)));
+            let cast: SparseStream = Box::pin(cast);
+            Ok(cast)
+        })
+    }
+
+    fn filled_at<'a>(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        axes: Vec<usize>,
+    ) -> TCBoxTryFuture<'a, TCStream<Vec<u64>>> {
+        self.source.clone().filled_at(txn, axes)
+    }
+
+    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+        self.source.clone().filled_count(txn)
+    }
+
+    fn filled_in<'a>(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        bounds: Bounds,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(async move {
+            let transform = self.transform;
+            let source = self.source.clone().filled_in(txn, bounds).await?;
+            let filled_in = source.map(move |(coord, value)| (coord, transform(value)));
+            let filled_in: SparseStream = Box::pin(filled_in);
+            Ok(filled_in)
+        })
+    }
+
+    fn read_value<'a>(&'a self, txn_id: &'a TxnId, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
+        let dtype = self.dtype;
+        Box::pin(
+            self.source
+                .read_value(txn_id, coord)
+                .map_ok(move |value| value.into_type(dtype)),
+        )
+    }
+
+    fn write_value<'a>(
+        &'a self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> TCBoxTryFuture<()> {
+        self.source.write_value(txn_id, coord, value)
+    }
+}
+
 #[derive(Clone)]
 pub struct SparseTensor {
     accessor: Arc<dyn SparseAccessor>,
@@ -1072,12 +1155,21 @@ impl SparseTensor {
         SparseTensor { accessor }
     }
 
-    fn combine(&self, other: &Self, combinator: fn(Number, Number) -> Number) -> TCResult<Self> {
+    fn combine(
+        &self,
+        other: &Self,
+        combinator: fn(Number, Number) -> Number,
+        dtype: NumberType,
+    ) -> TCResult<Self> {
         let (this, that) = broadcast(self, other)?;
 
-        let accessor =
-            SparseCombinator::new(this.accessor.clone(), that.accessor.clone(), combinator)
-                .map(Arc::new)?;
+        let accessor = SparseCombinator::new(
+            this.accessor.clone(),
+            that.accessor.clone(),
+            combinator,
+            dtype,
+        )
+        .map(Arc::new)?;
 
         Ok(SparseTensor { accessor })
     }
@@ -1091,11 +1183,15 @@ impl SparseTensor {
     ) -> TCResult<DenseTensor> {
         let (this, that) = broadcast(self, other)?;
 
-        let condensed = DenseTensor::constant(txn.clone(), this.shape().clone(), default).await?;
+        let accessor = SparseCombinator::new(
+            this.accessor.clone(),
+            that.accessor.clone(),
+            condensor,
+            default.class(),
+        )
+        .map(Arc::new)?;
 
-        let accessor =
-            SparseCombinator::new(this.accessor.clone(), that.accessor.clone(), condensor)
-                .map(Arc::new)?;
+        let condensed = DenseTensor::constant(txn.clone(), this.shape().clone(), default).await?;
 
         let txn_id = txn.id().clone();
         accessor
@@ -1143,7 +1239,7 @@ impl TensorBoolean for SparseTensor {
     }
 
     fn and(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, Number::and)
+        self.combine(other, Number::and, NumberType::Bool)
     }
 
     fn not(&self) -> TCResult<Self> {
@@ -1151,7 +1247,7 @@ impl TensorBoolean for SparseTensor {
     }
 
     fn or(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, Number::or)
+        self.combine(other, Number::or, NumberType::Bool)
     }
 
     fn xor(&self, _other: &Self) -> TCResult<Self> {
@@ -1167,7 +1263,7 @@ impl TensorCompare for SparseTensor {
     }
 
     fn gt(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, <Number as NumberInstance>::gt)
+        self.combine(other, <Number as NumberInstance>::gt, NumberType::Bool)
     }
 
     async fn gte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
@@ -1176,7 +1272,7 @@ impl TensorCompare for SparseTensor {
     }
 
     fn lt(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, <Number as NumberInstance>::lt)
+        self.combine(other, <Number as NumberInstance>::lt, NumberType::Bool)
     }
 
     async fn lte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
@@ -1185,7 +1281,7 @@ impl TensorCompare for SparseTensor {
     }
 
     fn ne(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, <Number as NumberInstance>::ne)
+        self.combine(other, <Number as NumberInstance>::ne, NumberType::Bool)
     }
 }
 
@@ -1234,6 +1330,38 @@ impl TensorIO for SparseTensor {
         value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
         self.accessor.write_value(txn_id, coord, value)
+    }
+}
+
+impl TensorMath for SparseTensor {
+    fn abs(&self) -> TCResult<Self> {
+        let is_abs = match self.dtype() {
+            NumberType::Bool => true,
+            NumberType::UInt(_) => true,
+            _ => false,
+        };
+
+        if is_abs {
+            return Ok(self.clone());
+        }
+
+        let accessor = Arc::new(SparseUnary {
+            source: self.accessor.clone(),
+            transform: <Number as NumberInstance>::abs,
+            dtype: NumberType::Bool,
+        });
+
+        Ok(SparseTensor { accessor })
+    }
+
+    fn add(&self, other: &Self) -> TCResult<Self> {
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, <Number as NumberInstance>::add, dtype)
+    }
+
+    fn multiply(&self, other: &Self) -> TCResult<Self> {
+        let dtype = Ord::max(self.dtype(), other.dtype());
+        self.combine(other, <Number as NumberInstance>::multiply, dtype)
     }
 }
 

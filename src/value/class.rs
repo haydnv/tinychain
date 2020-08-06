@@ -75,7 +75,13 @@ pub trait ValueInstance: Instance + Serialize {
 }
 
 pub trait NumberInstance:
-    ValueInstance + Add + Mul + Sized + PartialOrd + From<Boolean> + Into<Number>
+    ValueInstance
+    + Add<Output = Self>
+    + Mul<Output = Self>
+    + Sized
+    + PartialOrd
+    + From<Boolean>
+    + Into<Number>
 {
     type Abs: NumberInstance;
     type Class: NumberClass;
@@ -86,6 +92,10 @@ pub trait NumberInstance:
     ) -> <<Self as NumberInstance>::Class as NumberClass>::Instance;
 
     fn abs(self) -> Self::Abs;
+
+    fn add(self, other: Self) -> Self {
+        self + other
+    }
 
     fn and(self, other: Self) -> Self
     where
@@ -119,6 +129,10 @@ pub trait NumberInstance:
     fn gte(self, other: Self) -> Self {
         let gte: Boolean = (self >= other).into();
         gte.into()
+    }
+
+    fn multiply(self, other: Self) -> Self {
+        self * other
     }
 
     fn ne(self, other: Self) -> Self {

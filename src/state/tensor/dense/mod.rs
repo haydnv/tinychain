@@ -105,6 +105,7 @@ struct BlockListCombine {
     right: Arc<dyn BlockList>,
     combinator: fn(&Array, &Array) -> Array,
     value_combinator: fn(Number, Number) -> Number,
+    dtype: NumberType,
 }
 
 impl BlockListCombine {
@@ -113,6 +114,7 @@ impl BlockListCombine {
         right: Arc<dyn BlockList>,
         combinator: fn(&Array, &Array) -> Array,
         value_combinator: fn(Number, Number) -> Number,
+        dtype: NumberType,
     ) -> TCResult<BlockListCombine> {
         if left.shape() != right.shape() {
             return Err(error::bad_request(
@@ -126,13 +128,14 @@ impl BlockListCombine {
             right,
             combinator,
             value_combinator,
+            dtype,
         })
     }
 }
 
 impl TensorView for BlockListCombine {
     fn dtype(&self) -> NumberType {
-        self.left.dtype()
+        self.dtype
     }
 
     fn ndim(&self) -> usize {
@@ -188,6 +191,7 @@ impl BlockList for BlockListCombine {
                 right,
                 self.combinator,
                 self.value_combinator,
+                self.dtype,
             )?);
             slice.value_stream(txn).await
         })
@@ -1143,11 +1147,12 @@ pub struct BlockListUnary {
     source: Arc<dyn BlockList>,
     transform: fn(&Array) -> Array,
     value_transform: fn(Number) -> Number,
+    dtype: NumberType,
 }
 
 impl TensorView for BlockListUnary {
     fn dtype(&self) -> NumberType {
-        self.source.dtype()
+        self.dtype
     }
 
     fn ndim(&self) -> usize {
@@ -1252,6 +1257,7 @@ impl DenseTensor {
         other: &Self,
         combinator: fn(&Array, &Array) -> Array,
         value_combinator: fn(Number, Number) -> Number,
+        dtype: NumberType,
     ) -> TCResult<Self> {
         let (this, that) = broadcast(self, other)?;
 
@@ -1260,6 +1266,7 @@ impl DenseTensor {
             that.blocks.clone(),
             combinator,
             value_combinator,
+            dtype,
         )?);
 
         Ok(DenseTensor { blocks })
@@ -1311,7 +1318,7 @@ impl TensorBoolean for DenseTensor {
     }
 
     fn and(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, Array::and, Number::and)
+        self.combine(other, Array::and, Number::and, NumberType::Bool)
     }
 
     fn not(&self) -> TCResult<Self> {
@@ -1319,44 +1326,75 @@ impl TensorBoolean for DenseTensor {
             source: self.blocks.clone(),
             transform: Array::not,
             value_transform: Number::not,
+            dtype: NumberType::Bool,
         });
 
         Ok(DenseTensor { blocks })
     }
 
     fn or(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, Array::or, Number::or)
+        self.combine(other, Array::or, Number::or, NumberType::Bool)
     }
 
     fn xor(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, Array::xor, Number::xor)
+        self.combine(other, Array::xor, Number::xor, NumberType::Bool)
     }
 }
 
 #[async_trait]
 impl TensorCompare for DenseTensor {
     async fn eq(&self, other: &Self, _txn: Arc<Txn>) -> TCResult<DenseTensor> {
-        self.combine(other, Array::eq, <Number as NumberInstance>::eq)
+        self.combine(
+            other,
+            Array::eq,
+            <Number as NumberInstance>::eq,
+            NumberType::Bool,
+        )
     }
 
     fn gt(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, Array::gt, <Number as NumberInstance>::gt)
+        self.combine(
+            other,
+            Array::gt,
+            <Number as NumberInstance>::gt,
+            NumberType::Bool,
+        )
     }
 
     async fn gte(&self, other: &Self, _txn: Arc<Txn>) -> TCResult<DenseTensor> {
-        self.combine(other, Array::eq, <Number as NumberInstance>::gte)
+        self.combine(
+            other,
+            Array::eq,
+            <Number as NumberInstance>::gte,
+            NumberType::Bool,
+        )
     }
 
     fn lt(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, Array::eq, <Number as NumberInstance>::lt)
+        self.combine(
+            other,
+            Array::eq,
+            <Number as NumberInstance>::lt,
+            NumberType::Bool,
+        )
     }
 
     async fn lte(&self, other: &Self, _txn: Arc<Txn>) -> TCResult<DenseTensor> {
-        self.combine(other, Array::eq, <Number as NumberInstance>::lte)
+        self.combine(
+            other,
+            Array::eq,
+            <Number as NumberInstance>::lte,
+            NumberType::Bool,
+        )
     }
 
     fn ne(&self, other: &Self) -> TCResult<Self> {
-        self.combine(other, Array::eq, <Number as NumberInstance>::ne)
+        self.combine(
+            other,
+            Array::eq,
+            <Number as NumberInstance>::ne,
+            NumberType::Bool,
+        )
     }
 }
 
