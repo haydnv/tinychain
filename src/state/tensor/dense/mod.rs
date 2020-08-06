@@ -1232,7 +1232,7 @@ impl DenseTensor {
     pub async fn constant(txn: Arc<Txn>, shape: Shape, value: Number) -> TCResult<DenseTensor> {
         let blocks = Arc::new(BlockListFile::constant(txn, shape, value).await?);
         Ok(DenseTensor { blocks })
-    } 
+    }
 
     pub fn from_sparse(sparse: SparseTensor) -> DenseTensor {
         let blocks = Arc::new(BlockListSparse::new(sparse));
@@ -1245,6 +1245,24 @@ impl DenseTensor {
 
     fn read_value_owned<'a>(self, txn_id: TxnId, coord: Vec<u64>) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move { self.read_value(&txn_id, &coord).await })
+    }
+
+    fn combine(
+        &self,
+        other: &Self,
+        combinator: fn(&Array, &Array) -> Array,
+        value_combinator: fn(Number, Number) -> Number,
+    ) -> TCResult<Self> {
+        let (this, that) = broadcast(self, other)?;
+
+        let blocks = Arc::new(BlockListCombine::new(
+            this.blocks.clone(),
+            that.blocks.clone(),
+            combinator,
+            value_combinator,
+        )?);
+
+        Ok(DenseTensor { blocks })
     }
 }
 
@@ -1292,20 +1310,11 @@ impl TensorBoolean for DenseTensor {
         })
     }
 
-    async fn and(&self, other: &Self) -> TCResult<Self> {
-        let (this, that) = broadcast(self, other)?;
-
-        let blocks = Arc::new(BlockListCombine::new(
-            this.blocks.clone(),
-            that.blocks.clone(),
-            Array::and,
-            Number::and,
-        )?);
-
-        Ok(DenseTensor { blocks })
+    fn and(&self, other: &Self) -> TCResult<Self> {
+        self.combine(other, Array::and, Number::and)
     }
 
-    async fn not(&self) -> TCResult<Self> {
+    fn not(&self) -> TCResult<Self> {
         let blocks = Arc::new(BlockListUnary {
             source: self.blocks.clone(),
             transform: Array::not,
@@ -1315,30 +1324,12 @@ impl TensorBoolean for DenseTensor {
         Ok(DenseTensor { blocks })
     }
 
-    async fn or(&self, other: &Self) -> TCResult<Self> {
-        let (this, that) = broadcast(self, other)?;
-
-        let blocks = Arc::new(BlockListCombine::new(
-            this.blocks.clone(),
-            that.blocks.clone(),
-            Array::or,
-            Number::or,
-        )?);
-
-        Ok(DenseTensor { blocks })
+    fn or(&self, other: &Self) -> TCResult<Self> {
+        self.combine(other, Array::or, Number::or)
     }
 
-    async fn xor(&self, other: &Self) -> TCResult<Self> {
-        let (this, that) = broadcast(self, other)?;
-
-        let blocks = Arc::new(BlockListCombine::new(
-            this.blocks.clone(),
-            that.blocks.clone(),
-            Array::xor,
-            Number::xor,
-        )?);
-
-        Ok(DenseTensor { blocks })
+    fn xor(&self, other: &Self) -> TCResult<Self> {
+        self.combine(other, Array::xor, Number::xor)
     }
 }
 

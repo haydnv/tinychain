@@ -32,13 +32,13 @@ trait TensorBoolean: Sized + TensorView {
 
     fn any(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
 
-    async fn and(&self, other: &Self) -> TCResult<Self>;
+    fn and(&self, other: &Self) -> TCResult<Self>;
 
-    async fn not(&self) -> TCResult<Self>;
+    fn not(&self) -> TCResult<Self>;
 
-    async fn or(&self, other: &Self) -> TCResult<Self>;
+    fn or(&self, other: &Self) -> TCResult<Self>;
 
-    async fn xor(&self, other: &Self) -> TCResult<Self>;
+    fn xor(&self, other: &Self) -> TCResult<Self>;
 }
 
 #[async_trait]
@@ -164,51 +164,45 @@ impl TensorBoolean for Tensor {
         }
     }
 
-    async fn and(&self, other: &Self) -> TCResult<Self> {
+    fn and(&self, other: &Self) -> TCResult<Self> {
         use Tensor::*;
         match (self, other) {
-            (Dense(left), Dense(right)) => left.and(right).await.map(Self::from),
-            (Sparse(left), Sparse(right)) => left.and(right).await.map(Self::from),
+            (Dense(left), Dense(right)) => left.and(right).map(Self::from),
+            (Sparse(left), Sparse(right)) => left.and(right).map(Self::from),
             (Sparse(left), Dense(right)) => left
                 .and(&SparseTensor::from_dense(right.clone()))
-                .await
                 .map(Self::from),
 
-            _ => other.and(self).await,
+            _ => other.and(self),
         }
     }
 
-    async fn not(&self) -> TCResult<Self> {
+    fn not(&self) -> TCResult<Self> {
         match self {
-            Self::Dense(dense) => dense.not().await.map(Self::from),
-            Self::Sparse(sparse) => sparse.not().await.map(Self::from),
+            Self::Dense(dense) => dense.not().map(Self::from),
+            Self::Sparse(sparse) => sparse.not().map(Self::from),
         }
     }
 
-    async fn or(&self, other: &Self) -> TCResult<Self> {
+    fn or(&self, other: &Self) -> TCResult<Self> {
         use Tensor::*;
         match (self, other) {
-            (Dense(left), Dense(right)) => left.or(right).await.map(Self::from),
-            (Sparse(left), Sparse(right)) => left.or(right).await.map(Self::from),
+            (Dense(left), Dense(right)) => left.or(right).map(Self::from),
+            (Sparse(left), Sparse(right)) => left.or(right).map(Self::from),
             (Dense(left), Sparse(right)) => left
                 .or(&DenseTensor::from_sparse(right.clone()))
-                .await
                 .map(Self::from),
 
-            _ => other.or(self).await,
+            _ => other.or(self),
         }
     }
 
-    async fn xor(&self, other: &Self) -> TCResult<Self> {
+    fn xor(&self, other: &Self) -> TCResult<Self> {
         use Tensor::*;
         match (self, other) {
-            (Dense(left), Dense(right)) => left.xor(right).await.map(Self::from),
-            (Sparse(left), _) => {
-                Dense(DenseTensor::from_sparse(left.clone()))
-                    .xor(other)
-                    .await
-            }
-            (left, right) => right.xor(left).await,
+            (Dense(left), Dense(right)) => left.xor(right).map(Self::from),
+            (Sparse(left), _) => Dense(DenseTensor::from_sparse(left.clone())).xor(other),
+            (left, right) => right.xor(left),
         }
     }
 }

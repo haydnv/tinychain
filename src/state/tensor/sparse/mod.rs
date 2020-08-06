@@ -1075,25 +1075,32 @@ impl SparseTensor {
     fn combine(&self, other: &Self, combinator: fn(Number, Number) -> Number) -> TCResult<Self> {
         let (this, that) = broadcast(self, other)?;
 
-        let accessor = SparseCombinator::new(
-            this.accessor.clone(),
-            that.accessor.clone(),
-            combinator,
-        )
-        .map(Arc::new)?;
+        let accessor =
+            SparseCombinator::new(this.accessor.clone(), that.accessor.clone(), combinator)
+                .map(Arc::new)?;
 
         Ok(SparseTensor { accessor })
     }
 
-    async fn condense(&self, other: &Self, txn: Arc<Txn>, default: Number, condensor: fn(Number, Number) -> Number) -> TCResult<DenseTensor> {
+    async fn condense(
+        &self,
+        other: &Self,
+        txn: Arc<Txn>,
+        default: Number,
+        condensor: fn(Number, Number) -> Number,
+    ) -> TCResult<DenseTensor> {
         let (this, that) = broadcast(self, other)?;
 
         let condensed = DenseTensor::constant(txn.clone(), this.shape().clone(), default).await?;
 
-        let accessor = SparseCombinator::new(this.accessor.clone(), that.accessor.clone(), condensor).map(Arc::new)?;
+        let accessor =
+            SparseCombinator::new(this.accessor.clone(), that.accessor.clone(), condensor)
+                .map(Arc::new)?;
 
         let txn_id = txn.id().clone();
-        accessor.filled(txn).await?
+        accessor
+            .filled(txn)
+            .await?
             .map(|(coord, value)| Ok(condensed.write_value_at(txn_id.clone(), coord, value)))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -1135,19 +1142,19 @@ impl TensorBoolean for SparseTensor {
         })
     }
 
-    async fn and(&self, other: &Self) -> TCResult<Self> {
+    fn and(&self, other: &Self) -> TCResult<Self> {
         self.combine(other, Number::and)
     }
 
-    async fn not(&self) -> TCResult<Self> {
+    fn not(&self) -> TCResult<Self> {
         Err(error::unsupported(ERR_NOT_SPARSE))
     }
 
-    async fn or(&self, other: &Self) -> TCResult<Self> {
+    fn or(&self, other: &Self) -> TCResult<Self> {
         self.combine(other, Number::or)
     }
 
-    async fn xor(&self, _other: &Self) -> TCResult<Self> {
+    fn xor(&self, _other: &Self) -> TCResult<Self> {
         Err(error::unsupported(ERR_NOT_SPARSE))
     }
 }
@@ -1155,7 +1162,8 @@ impl TensorBoolean for SparseTensor {
 #[async_trait]
 impl TensorCompare for SparseTensor {
     async fn eq(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
-        self.condense(other, txn, true.into(), <Number as NumberInstance>::eq).await
+        self.condense(other, txn, true.into(), <Number as NumberInstance>::eq)
+            .await
     }
 
     fn gt(&self, other: &Self) -> TCResult<Self> {
@@ -1163,7 +1171,8 @@ impl TensorCompare for SparseTensor {
     }
 
     async fn gte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
-        self.condense(other, txn, true.into(), <Number as NumberInstance>::gte).await
+        self.condense(other, txn, true.into(), <Number as NumberInstance>::gte)
+            .await
     }
 
     fn lt(&self, other: &Self) -> TCResult<Self> {
@@ -1171,7 +1180,8 @@ impl TensorCompare for SparseTensor {
     }
 
     async fn lte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
-        self.condense(other, txn, true.into(), <Number as NumberInstance>::lte).await
+        self.condense(other, txn, true.into(), <Number as NumberInstance>::lte)
+            .await
     }
 
     fn ne(&self, other: &Self) -> TCResult<Self> {
