@@ -146,8 +146,8 @@ impl Bounds {
         self.axes.is_empty()
     }
 
-    pub fn iter(&self) -> std::slice::Iter<AxisBounds> {
-        self.axes.iter()
+    pub fn iter(&'_ self) -> impl Iterator<Item = (usize, &'_ AxisBounds)> {
+        self.axes.iter().enumerate()
     }
 
     pub fn len(&self) -> usize {

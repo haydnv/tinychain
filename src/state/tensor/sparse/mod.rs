@@ -591,6 +591,30 @@ struct SparseReduce {
     reductor: fn(&SparseTensor, Arc<Txn>) -> TCBoxTryFuture<Number>,
 }
 
+impl SparseReduce {
+    fn new(
+        source: Arc<dyn SparseAccessor>,
+        axis: usize,
+        reductor: fn(&SparseTensor, Arc<Txn>) -> TCBoxTryFuture<Number>,
+    ) -> TCResult<SparseReduce> {
+        if axis >= source.ndim() {
+            return Err(error::bad_request(
+                &format!("Tensor with shape {} has no such axis", source.shape()),
+                axis,
+            ));
+        }
+
+        let mut shape = source.shape().clone();
+        shape.remove(axis);
+        Ok(SparseReduce {
+            source,
+            shape,
+            axis,
+            reductor,
+        })
+    }
+}
+
 impl TensorView for SparseReduce {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
@@ -675,10 +699,27 @@ impl SparseAccessor for SparseReduce {
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        _txn: Arc<Txn>,
-        _bounds: Bounds,
+        txn: Arc<Txn>,
+        bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(async move {
+            let source_bounds: Bounds = if bounds.len() < self.axis {
+                bounds
+            } else {
+                let mut source_bounds = bounds.to_vec();
+                source_bounds.insert(self.axis, AxisBounds::all(self.source.shape()[self.axis]));
+                source_bounds.into()
+            };
+
+            let rebase = transform::Slice::new(self.source.shape().clone(), source_bounds)?;
+            let source_slice = Arc::new(SparseSlice {
+                source: self.source.clone(),
+                rebase,
+            });
+
+            let reduction = Arc::new(SparseReduce::new(source_slice, self.axis, self.reductor)?);
+            reduction.filled(txn).await
+        })
     }
 
     fn read_value<'a>(
@@ -1560,14 +1601,7 @@ impl TensorTransform for SparseTensor {
 
 #[async_trait]
 impl TensorUnary for SparseTensor {
-    fn product(&self, _txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
-        if axis >= self.ndim() {
-            return Err(error::bad_request(
-                &format!("Tensor with shape {} has no such axis", self.shape()),
-                axis,
-            ));
-        }
-
+    fn product(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 
@@ -1587,14 +1621,7 @@ impl TensorUnary for SparseTensor {
             .await
     }
 
-    fn sum(&self, _txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
-        if axis >= self.ndim() {
-            return Err(error::bad_request(
-                &format!("Tensor with shape {} has no such axis", self.shape()),
-                axis,
-            ));
-        }
-
+    fn sum(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
         Err(error::not_implemented())
     }
 

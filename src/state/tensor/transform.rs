@@ -216,7 +216,7 @@ impl Reshape {
     pub fn offsets(&self, bounds: &Bounds) -> (u64, u64) {
         let start: Vec<u64> = bounds
             .iter()
-            .map(|bound| match bound {
+            .map(|(_, bound)| match bound {
                 AxisBounds::At(x) => *x,
                 AxisBounds::In(range) => range.start,
                 AxisBounds::Of(indices) => *indices.iter().min().unwrap(),
@@ -225,7 +225,7 @@ impl Reshape {
 
         let end: Vec<u64> = bounds
             .iter()
-            .map(|bound| match bound {
+            .map(|(_, bound)| match bound {
                 AxisBounds::At(x) => *x,
                 AxisBounds::In(range) => range.end,
                 AxisBounds::Of(indices) => indices.iter().cloned().fold(0u64, u64::max),
