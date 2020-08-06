@@ -1428,11 +1428,12 @@ impl TensorView for SparseTensor {
     }
 }
 
-#[async_trait]
 impl TensorBoolean for SparseTensor {
-    async fn all(&self, txn: Arc<Txn>) -> TCResult<bool> {
-        let filled_count = self.accessor.clone().filled_count(txn).await?;
-        Ok(filled_count == self.size())
+    fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool> {
+        Box::pin(async move {
+            let filled_count = self.accessor.clone().filled_count(txn).await?;
+            Ok(filled_count == self.size())
+        })
     }
 
     fn any(&'_ self, txn: Arc<Txn>) -> TCBoxTryFuture<'_, bool> {
@@ -1575,7 +1576,15 @@ impl TensorReduce for SparseTensor {
     }
 
     fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(async move {
+            if self.all(txn.clone()).await? {
+                DenseTensor::from_sparse(self.clone())
+                    .product_all(txn)
+                    .await
+            } else {
+                Ok(self.dtype().zero())
+            }
+        })
     }
 
     fn sum(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
@@ -1583,7 +1592,13 @@ impl TensorReduce for SparseTensor {
     }
 
     fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        Box::pin(async move {
+            if self.any(txn.clone()).await? {
+                DenseTensor::from_sparse(self.clone()).sum_all(txn).await
+            } else {
+                Ok(self.dtype().zero())
+            }
+        })
     }
 }
 

@@ -26,9 +26,8 @@ trait TensorView: Send + Sync {
     fn size(&self) -> u64;
 }
 
-#[async_trait]
 trait TensorBoolean: Sized + TensorView {
-    async fn all(&self, txn: Arc<Txn>) -> TCResult<bool>;
+    fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
 
     fn any(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
 
@@ -148,12 +147,11 @@ impl TensorView for Tensor {
     }
 }
 
-#[async_trait]
 impl TensorBoolean for Tensor {
-    async fn all(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool> {
         match self {
-            Self::Dense(dense) => dense.all(txn).await,
-            Self::Sparse(sparse) => sparse.all(txn).await,
+            Self::Dense(dense) => dense.all(txn),
+            Self::Sparse(sparse) => sparse.all(txn),
         }
     }
 
