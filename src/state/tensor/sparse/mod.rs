@@ -699,11 +699,34 @@ impl SparseAccessor for SparseReduce {
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        _txn: Arc<Txn>,
-        _bounds: Bounds,
+        txn: Arc<Txn>,
+        bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
-            Err(error::not_implemented())
+            let axis_offset = if bounds.len() < self.axis {
+                0
+            } else {
+                bounds.to_vec()[..self.axis]
+                    .iter()
+                    .fold(0usize, |offset, b| match b {
+                        AxisBounds::At(_) => offset + 1,
+                        _ => offset,
+                    })
+            };
+
+            let source_bounds = if bounds.len() < self.axis {
+                bounds
+            } else {
+                let mut source_bounds = bounds.to_vec();
+                source_bounds.insert(self.axis, AxisBounds::all(self.source.shape()[self.axis]));
+                source_bounds.into()
+            };
+
+            let slice = self.source.slice(source_bounds)?;
+            let slice_reduce_axis = self.axis - axis_offset;
+            Arc::new(SparseReduce::new(slice, slice_reduce_axis, self.reductor)?)
+                .filled(txn)
+                .await
         })
     }
 
@@ -717,7 +740,8 @@ impl SparseAccessor for SparseReduce {
                 ));
             }
 
-            let mut source_bounds: Vec<AxisBounds> = coord.iter().map(|i| AxisBounds::At(*i)).collect();
+            let mut source_bounds: Vec<AxisBounds> =
+                coord.iter().map(|i| AxisBounds::At(*i)).collect();
             source_bounds.insert(self.axis, AxisBounds::all(self.source.shape()[self.axis]));
             let source_bounds: Bounds = source_bounds.into();
 
@@ -1305,7 +1329,11 @@ impl SparseTensor {
         SparseTensor { accessor }
     }
 
-    fn filled_at(&'_ self, txn: Arc<Txn>, axes: Vec<usize>) -> TCBoxTryFuture<'_, TCTryStream<Vec<u64>>> {
+    fn filled_at(
+        &'_ self,
+        txn: Arc<Txn>,
+        axes: Vec<usize>,
+    ) -> TCBoxTryFuture<'_, TCTryStream<Vec<u64>>> {
         self.accessor.clone().filled_at(txn, axes)
     }
 
