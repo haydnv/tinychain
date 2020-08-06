@@ -103,14 +103,15 @@ trait TensorTransform: Sized + TensorView {
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
 }
 
+#[async_trait]
 trait TensorUnary: Sized + TensorView {
     fn product(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self>;
 
-    fn product_all(&self, txn_id: TxnId) -> TCResult<Number>;
+    async fn product_all(&self, txn: Arc<Txn>) -> TCResult<Number>;
 
     fn sum(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self>;
 
-    fn sum_all(&self, txn_id: TxnId) -> TCResult<Number>;
+    async fn sum_all(&self, txn: Arc<Txn>) -> TCResult<Number>;
 }
 
 enum Tensor {

@@ -1446,6 +1446,49 @@ impl TensorTransform for SparseTensor {
     }
 }
 
+#[async_trait]
+impl TensorUnary for SparseTensor {
+    fn product(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    async fn product_all(&self, txn: Arc<Txn>) -> TCResult<Number> {
+        if !self.all(txn.clone()).await? {
+            return Ok(self.dtype().zero());
+        }
+
+        let product = self
+            .accessor
+            .clone()
+            .filled(txn)
+            .await?
+            .map(|(_, value)| value)
+            .fold(self.dtype().one(), |product, value| {
+                future::ready(product * value)
+            })
+            .await;
+        Ok(product)
+    }
+
+    fn sum(&self, _txn: Arc<Txn>, _axis: usize) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+
+    async fn sum_all(&self, txn: Arc<Txn>) -> TCResult<Number> {
+        let sum = self
+            .accessor
+            .clone()
+            .filled(txn)
+            .await?
+            .map(|(_, value)| value)
+            .fold(self.dtype().one(), |product, value| {
+                future::ready(product + value)
+            })
+            .await;
+        Ok(sum)
+    }
+}
+
 fn group_axes<'a>(
     accessor: Arc<dyn SparseAccessor>,
     txn: Arc<Txn>,
