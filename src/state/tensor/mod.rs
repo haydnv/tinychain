@@ -341,6 +341,41 @@ impl TensorIO for Tensor {
     }
 }
 
+impl TensorMath for Tensor {
+    fn abs(&self) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.abs().map(Self::from),
+            Self::Sparse(sparse) => sparse.abs().map(Self::from),
+        }
+    }
+
+    fn add(&self, other: &Self) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.add(right).map(Self::from),
+            (Self::Sparse(left), Self::Sparse(right)) => left.add(right).map(Self::from),
+            (Self::Dense(left), Self::Sparse(right)) => left
+                .add(&DenseTensor::from_sparse(right.clone()))
+                .map(Self::from),
+            (Self::Sparse(left), Self::Dense(right)) => DenseTensor::from_sparse(left.clone())
+                .add(right)
+                .map(Self::from),
+        }
+    }
+
+    fn multiply(&self, other: &Self) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.multiply(right).map(Self::from),
+            (Self::Sparse(left), Self::Sparse(right)) => left.multiply(right).map(Self::from),
+            (Self::Dense(left), Self::Sparse(right)) => left
+                .multiply(&DenseTensor::from_sparse(right.clone()))
+                .map(Self::from),
+            (Self::Sparse(left), Self::Dense(right)) => DenseTensor::from_sparse(left.clone())
+                .multiply(right)
+                .map(Self::from),
+        }
+    }
+}
+
 impl TensorTransform for Tensor {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
         match self {
