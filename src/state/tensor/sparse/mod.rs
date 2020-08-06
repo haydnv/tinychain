@@ -28,9 +28,6 @@ pub type SparseStream = TCTryStream<SparseRow>;
 const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
 
-const ERR_PRODUCT_WRITE: &str = "Cannot write to a product of two Tensors. \
-Consider copying first, or writing to the source Tensors directly.";
-
 const ERR_NOT_SPARSE: &str = "The result of the requested operation would not be sparse;\
 convert to a DenseTensor first.";
 
@@ -493,7 +490,9 @@ impl SparseAccessor for SparseCombinator {
         _coord: Vec<u64>,
         _value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_PRODUCT_WRITE))))
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
     }
 }
 
@@ -617,10 +616,53 @@ impl SparseAccessor for SparseReduce {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        _txn: Arc<Txn>,
-        _axes: Vec<usize>,
+        txn: Arc<Txn>,
+        axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
-        Box::pin(future::ready(Err(error::not_implemented())))
+        if axes.is_empty() {
+            let filled_at: TCTryStream<Vec<u64>> = Box::pin(stream::empty());
+            return Box::pin(future::ready(Ok(filled_at)));
+        } else if axes.iter().cloned().fold(axes[0], Ord::max) < self.axis {
+            return self.source.clone().filled_at(txn, axes);
+        }
+
+        Box::pin(async move {
+            let source_axes: Vec<usize> = axes
+                .iter()
+                .cloned()
+                .map(|x| if x < self.axis { x } else { x + 1 })
+                .chain(iter::once(self.axis))
+                .collect();
+
+            let left = self
+                .source
+                .clone()
+                .filled_at(txn.clone(), source_axes.to_vec())
+                .await?;
+            let mut right = self.source.clone().filled_at(txn, source_axes).await?;
+
+            if right.next().await.is_none() {
+                let filled_at: TCTryStream<Vec<u64>> = Box::pin(stream::empty());
+                return Ok(filled_at);
+            }
+
+            let filled_at = left
+                .zip(right)
+                .map(|(lr, rr)| Ok((lr?, rr?)))
+                .map_ok(|(mut l, mut r)| {
+                    l.pop();
+                    r.pop();
+                    (l, r)
+                })
+                .try_filter_map(|(l, r)| {
+                    let row = if l != r { Some(l) } else { None };
+
+                    future::ready(Ok(row))
+                });
+
+            let filled_at: TCTryStream<Vec<u64>> = Box::pin(filled_at);
+            Ok(filled_at)
+        })
     }
 
     fn filled_count<'a>(self: Arc<Self>, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
