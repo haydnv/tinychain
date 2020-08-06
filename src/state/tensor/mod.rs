@@ -421,6 +421,37 @@ impl TensorTransform for Tensor {
     }
 }
 
+#[async_trait]
+impl TensorUnary for Tensor {
+    fn product(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.product(txn, axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.product(txn, axis).map(Self::from),
+        }
+    }
+
+    async fn product_all(&self, txn: Arc<Txn>) -> TCResult<Number> {
+        match self {
+            Self::Dense(dense) => dense.product_all(txn).await,
+            Self::Sparse(sparse) => sparse.product_all(txn).await,
+        }
+    }
+
+    fn sum(&self, txn: Arc<Txn>, axis: usize) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.product(txn, axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.product(txn, axis).map(Self::from),
+        }
+    }
+
+    async fn sum_all(&self, txn: Arc<Txn>) -> TCResult<Number> {
+        match self {
+            Self::Dense(dense) => dense.product_all(txn).await,
+            Self::Sparse(sparse) => sparse.product_all(txn).await,
+        }
+    }
+}
+
 impl From<DenseTensor> for Tensor {
     fn from(dense: DenseTensor) -> Tensor {
         Self::Dense(dense)
