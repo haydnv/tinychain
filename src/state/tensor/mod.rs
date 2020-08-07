@@ -116,6 +116,7 @@ trait TensorTransform: Sized + TensorView {
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
 }
 
+#[derive(Clone)]
 enum Tensor {
     Dense(DenseTensor),
     Sparse(SparseTensor),

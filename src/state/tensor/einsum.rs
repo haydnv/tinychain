@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::error;
 use crate::value::TCResult;
 
-use super::{Tensor, TensorView};
+use super::{Tensor, TensorMath, TensorTransform, TensorView};
 
 const VALID_LABELS: [char; 52] = [
     'a', 'A', 'b', 'B', 'c', 'C', 'd', 'D', 'e', 'E', 'f', 'F', 'g', 'G', 'h', 'H', 'i', 'I', 'j',
@@ -61,6 +61,8 @@ fn validate_args(
             "Number of tensors passed to einsum does not match number of format strings",
             format!("{} != {}", tensors.len(), f_inputs.len()),
         ));
+    } else if tensors.is_empty() {
+        return Err(error::bad_request("No Tensor was provided to einsum", "[]"));
     }
 
     let mut dimensions = BTreeMap::new();
@@ -88,4 +90,65 @@ fn validate_args(
     }
 
     Ok(dimensions)
+}
+
+fn normalize(
+    tensor: &Tensor,
+    f_input: &[char],
+    f_output: &[char],
+    dimensions: &BTreeMap<char, u64>,
+) -> TCResult<Tensor> {
+    if f_input == f_output {
+        return Ok(tensor.clone());
+    }
+
+    let source: HashMap<char, usize> = f_input.iter().cloned().zip(0..f_input.len()).collect();
+    let permutation: Vec<usize> = f_output
+        .iter()
+        .filter_map(|l| source.get(l))
+        .cloned()
+        .collect();
+
+    let mut labels = Vec::with_capacity(f_output.len());
+    for axis in &permutation {
+        labels.push(f_input[*axis]);
+    }
+
+    let mut tensor = tensor.transpose(Some(permutation))?;
+
+    let mut i = 0;
+    while i < dimensions.len() {
+        if i == labels.len() || labels[i] != f_output[i] {
+            tensor = tensor.expand_dims(i)?;
+            labels.insert(i, f_output[i]);
+        } else {
+            i += 1;
+        }
+    }
+
+    Ok(tensor)
+}
+
+fn outer_product(
+    f_inputs: Vec<Vec<char>>,
+    dimensions: BTreeMap<char, u64>,
+    tensors: Vec<Tensor>,
+) -> TCResult<Tensor> {
+    assert!(f_inputs.len() == tensors.len());
+    assert!(!tensors.is_empty());
+
+    let f_output: Vec<char> = dimensions.keys().cloned().collect();
+
+    let mut normalized = tensors
+        .iter()
+        .zip(f_inputs.iter())
+        .map(|(tensor, f_input)| normalize(tensor, f_input, &f_output, &dimensions))
+        .collect::<TCResult<Vec<Tensor>>>()?;
+
+    let mut op = normalized.pop().unwrap();
+    while let Some(tensor) = normalized.pop() {
+        op = op.multiply(&tensor)?;
+    }
+
+    Ok(op)
 }
