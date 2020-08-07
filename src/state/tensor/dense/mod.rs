@@ -763,26 +763,15 @@ type Reductor = fn(&DenseTensor, Arc<Txn>) -> TCBoxTryFuture<Number>;
 
 struct BlockListReduce {
     source: DenseTensor,
-    axis: usize,
-    shape: Shape,
+    rebase: transform::Reduce,
     reductor: Reductor,
 }
 
 impl BlockListReduce {
     fn new(source: DenseTensor, axis: usize, reductor: Reductor) -> TCResult<BlockListReduce> {
-        if axis >= source.ndim() {
-            return Err(error::bad_request(
-                &format!("Tensor with shape {} has no such axis", source.shape()),
-                axis,
-            ));
-        }
-
-        let mut shape = source.shape().clone();
-        shape.remove(axis);
-        Ok(BlockListReduce {
+        transform::Reduce::new(source.shape().clone(), axis).map(|rebase| BlockListReduce {
             source,
-            shape,
-            axis,
+            rebase,
             reductor,
         })
     }
@@ -794,15 +783,15 @@ impl TensorView for BlockListReduce {
     }
 
     fn ndim(&self) -> usize {
-        self.shape.len()
+        self.shape().len()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
-        &self.shape
+        self.rebase.shape()
     }
 
     fn size(&self) -> u64 {
-        self.shape.size()
+        self.shape().size()
     }
 }
 
@@ -810,15 +799,11 @@ impl BlockList for BlockListReduce {
     fn value_stream<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         Box::pin(async move {
             let values = stream::iter(Bounds::all(self.shape()).affected()).then(move |coord| {
-                let mut source_bounds: Vec<AxisBounds> =
-                    coord.iter().map(|i| AxisBounds::At(*i)).collect();
-                source_bounds.insert(self.axis, AxisBounds::all(self.source.shape()[self.axis]));
-                let bounds: Bounds = source_bounds.into();
-
+                let reductor = self.reductor;
                 let txn = txn.clone();
                 let source = self.source.clone();
-                let reductor = self.reductor;
-                Box::pin(async move { reductor(&source.slice(bounds)?, txn).await })
+                let source_bounds = self.rebase.invert_coord(&coord);
+                Box::pin(async move { reductor(&source.slice(source_bounds)?, txn).await })
             });
 
             let values: TCTryStream<Number> = Box::pin(values);
@@ -828,18 +813,29 @@ impl BlockList for BlockListReduce {
 
     fn value_stream_slice<'a>(
         self: Arc<Self>,
-        _txn: Arc<Txn>,
-        _bounds: Bounds,
+        txn: Arc<Txn>,
+        bounds: Bounds,
     ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(async move { Err(error::not_implemented()) })
+        Box::pin(async move {
+            let (source_bounds, slice_reduce_axis) = self.rebase.invert_bounds(bounds);
+            let slice = self.source.slice(source_bounds)?;
+            BlockListReduce::new(slice, slice_reduce_axis, self.reductor)
+                .map(Arc::new)?
+                .value_stream(txn)
+                .await
+        })
     }
 
     fn read_value_at<'a>(
         &'a self,
-        _txn: &'a Arc<Txn>,
-        _coord: &'a [u64],
+        txn: &'a Arc<Txn>,
+        coord: &'a [u64],
     ) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move { Err(error::not_implemented()) })
+        Box::pin(async move {
+            let reductor = self.reductor;
+            let source_bounds = self.rebase.invert_coord(coord);
+            reductor(&self.source.slice(source_bounds)?, txn.clone()).await
+        })
     }
 
     fn write_value<'a>(

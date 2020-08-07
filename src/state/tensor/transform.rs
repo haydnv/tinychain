@@ -162,6 +162,67 @@ impl Expand {
 }
 
 #[derive(Clone)]
+pub struct Reduce {
+    source_shape: Shape,
+    axis: usize,
+    shape: Shape,
+}
+
+impl Reduce {
+    pub fn new(source_shape: Shape, axis: usize) -> TCResult<Reduce> {
+        if axis >= source_shape.len() {
+            return Err(error::bad_request(
+                &format!("Tensor with shape {} has no such axis", source_shape),
+                axis,
+            ));
+        }
+
+        let mut shape = source_shape.clone();
+        shape.remove(axis);
+        Ok(Reduce {
+            source_shape,
+            shape,
+            axis,
+        })
+    }
+
+    pub fn axis(&self) -> usize {
+        self.axis
+    }
+
+    pub fn shape(&'_ self) -> &'_ Shape {
+        &self.shape
+    }
+
+    pub fn invert_bounds(&self, bounds: Bounds) -> (Bounds, usize) {
+        let axis_offset = if bounds.len() < self.axis {
+            0
+        } else {
+            bounds.to_vec()[..self.axis]
+                .iter()
+                .fold(0usize, |offset, b| match b {
+                    AxisBounds::At(_) => offset + 1,
+                    _ => offset,
+                })
+        };
+
+        if bounds.len() < self.axis {
+            (bounds, self.axis - axis_offset)
+        } else {
+            let mut source_bounds = bounds.to_vec();
+            source_bounds.insert(self.axis, AxisBounds::all(self.source_shape[self.axis]));
+            (source_bounds.into(), self.axis - axis_offset)
+        }
+    }
+
+    pub fn invert_coord(&self, coord: &[u64]) -> Bounds {
+        let mut bounds: Vec<AxisBounds> = coord.iter().map(|i| AxisBounds::At(*i)).collect();
+        bounds.insert(self.axis, AxisBounds::all(self.source_shape[self.axis]));
+        bounds.into()
+    }
+}
+
+#[derive(Clone)]
 pub struct Reshape {
     source_shape: Shape,
     source_coord_index: Vec<u64>,

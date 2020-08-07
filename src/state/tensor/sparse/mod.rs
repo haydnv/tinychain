@@ -585,26 +585,15 @@ type Reductor = fn(&SparseTensor, Arc<Txn>) -> TCBoxTryFuture<Number>;
 
 struct SparseReduce {
     source: SparseTensor,
-    shape: Shape,
-    axis: usize,
+    rebase: transform::Reduce,
     reductor: Reductor,
 }
 
 impl SparseReduce {
     fn new(source: SparseTensor, axis: usize, reductor: Reductor) -> TCResult<SparseReduce> {
-        if axis >= source.ndim() {
-            return Err(error::bad_request(
-                &format!("Tensor with shape {} has no such axis", source.shape()),
-                axis,
-            ));
-        }
-
-        let mut shape = source.shape().clone();
-        shape.remove(axis);
-        Ok(SparseReduce {
+        transform::Reduce::new(source.shape().clone(), axis).map(|rebase| SparseReduce {
             source,
-            shape,
-            axis,
+            rebase,
             reductor,
         })
     }
@@ -616,15 +605,15 @@ impl TensorView for SparseReduce {
     }
 
     fn ndim(&self) -> usize {
-        self.source.ndim() - 1
+        self.shape().len()
     }
 
     fn shape(&'_ self) -> &'_ Shape {
-        &self.shape
+        self.rebase.shape()
     }
 
     fn size(&self) -> u64 {
-        self.shape.size()
+        self.shape().size()
     }
 }
 
@@ -639,16 +628,12 @@ impl SparseAccessor for SparseReduce {
                 .filled_at(txn.clone(), (0..self.ndim()).collect())
                 .await?
                 .and_then(move |coord| {
-                    let mut bounds: Vec<AxisBounds> =
-                        coord.iter().map(|i| AxisBounds::At(*i)).collect();
-                    bounds.insert(self.axis, AxisBounds::all(self.source.shape()[self.axis]));
-                    let bounds: Bounds = bounds.into();
-
                     let txn = txn.clone();
                     let source = source.clone();
-                    Box::pin(
-                        async move { Ok((coord, reductor(&source.slice(bounds)?, txn).await?)) },
-                    )
+                    let source_bounds = self.rebase.invert_coord(&coord);
+                    Box::pin(async move {
+                        Ok((coord, reductor(&source.slice(source_bounds)?, txn).await?))
+                    })
                 });
 
             let filled: SparseStream = Box::pin(filled);
@@ -662,18 +647,20 @@ impl SparseAccessor for SparseReduce {
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         Box::pin(async move {
+            let reduce_axis = self.rebase.axis();
+
             if axes.is_empty() {
                 let filled_at: TCTryStream<Vec<u64>> = Box::pin(stream::empty());
                 return Ok(filled_at);
-            } else if axes.iter().cloned().fold(axes[0], Ord::max) < self.axis {
+            } else if axes.iter().cloned().fold(axes[0], Ord::max) < reduce_axis {
                 return self.source.clone().filled_at(txn, axes).await;
             }
 
             let source_axes: Vec<usize> = axes
                 .iter()
                 .cloned()
-                .map(|x| if x < self.axis { x } else { x + 1 })
-                .chain(iter::once(self.axis))
+                .map(|x| if x < reduce_axis { x } else { x + 1 })
+                .chain(iter::once(reduce_axis))
                 .collect();
 
             let left = self
@@ -721,27 +708,8 @@ impl SparseAccessor for SparseReduce {
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
-            let axis_offset = if bounds.len() < self.axis {
-                0
-            } else {
-                bounds.to_vec()[..self.axis]
-                    .iter()
-                    .fold(0usize, |offset, b| match b {
-                        AxisBounds::At(_) => offset + 1,
-                        _ => offset,
-                    })
-            };
-
-            let source_bounds = if bounds.len() < self.axis {
-                bounds
-            } else {
-                let mut source_bounds = bounds.to_vec();
-                source_bounds.insert(self.axis, AxisBounds::all(self.source.shape()[self.axis]));
-                source_bounds.into()
-            };
-
+            let (source_bounds, slice_reduce_axis) = self.rebase.invert_bounds(bounds);
             let slice = self.source.slice(source_bounds)?;
-            let slice_reduce_axis = self.axis - axis_offset;
             Arc::new(SparseReduce::new(slice, slice_reduce_axis, self.reductor)?)
                 .filled(txn)
                 .await
@@ -750,19 +718,7 @@ impl SparseAccessor for SparseReduce {
 
     fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
-            if !coord.len() == self.shape().len() {
-                let coord: Vec<String> = coord.iter().map(|i| i.to_string()).collect();
-                return Err(error::bad_request(
-                    &format!("Invalid coordinate for tensor with shape {}", self.shape()),
-                    format!("({})", coord.join(", ")),
-                ));
-            }
-
-            let mut source_bounds: Vec<AxisBounds> =
-                coord.iter().map(|i| AxisBounds::At(*i)).collect();
-            source_bounds.insert(self.axis, AxisBounds::all(self.source.shape()[self.axis]));
-            let source_bounds: Bounds = source_bounds.into();
-
+            let source_bounds = self.rebase.invert_coord(coord);
             let reductor = self.reductor;
             reductor(&self.source.slice(source_bounds)?, txn.clone()).await
         })
