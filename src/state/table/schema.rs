@@ -56,6 +56,15 @@ impl TryFrom<(&str, NumberType)> for Column {
     }
 }
 
+impl fmt::Display for Column {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.max_len {
+            Some(max_len) => write!(f, "{}: {}({})", self.name, self.dtype, max_len),
+            None => write!(f, "{}: {}", self.name, self.dtype),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum ColumnBound {
     Is(Value),
@@ -312,6 +321,27 @@ impl Schema {
         for column in columns {
             if !valid_columns.contains(column) {
                 return Err(error::not_found(column));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn validate_key(&self, key: &[Value]) -> TCResult<()> {
+        if key.len() != self.key.len() {
+            let key_columns: Vec<String> = self.key.iter().map(|c| c.to_string()).collect();
+            return Err(error::bad_request(
+                "Invalid key, expected",
+                format!("[{}]", key_columns.join(", ")),
+            ));
+        }
+
+        for (val, col) in key.iter().zip(self.key.iter()) {
+            if !val.is_a(col.dtype) {
+                return Err(error::bad_request(
+                    &format!("Expected {} for column {}, found", col.dtype, col.name),
+                    val,
+                ));
             }
         }
 

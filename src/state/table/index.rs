@@ -37,6 +37,19 @@ impl Index {
         Ok(Index { btree, schema })
     }
 
+    pub fn get(&self, txn_id: TxnId, key: Vec<Value>) -> TCBoxTryFuture<Option<Vec<Value>>> {
+        Box::pin(async move {
+            self.schema.validate_key(&key)?;
+
+            let mut rows = self.btree.clone().slice(txn_id, key.into()).await?;
+            if let Some(row) = rows.next().await {
+                Ok(Some(row))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
     pub fn len(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
         self.btree.clone().len(txn_id, btree::Selector::all())
     }
@@ -422,6 +435,33 @@ impl TableBase {
             Some(_index) => self.dir.clone().delete_file(txn_id, name).await,
             None => Err(error::not_found(name)),
         }
+    }
+
+    pub fn insert<'a>(
+        &'a self,
+        txn_id: TxnId,
+        key: Vec<Value>,
+        value: Vec<Value>,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            if self
+                .primary
+                .get(txn_id.clone(), key.to_vec())
+                .await?
+                .is_some()
+            {
+                let key: Vec<String> = key.iter().map(|v| v.to_string()).collect();
+                Err(error::bad_request(
+                    "Tried to insert but this key already exists",
+                    format!("[{}]", key.join(", ")),
+                ))
+            } else {
+                let mut values = key;
+                values.extend(value);
+                self.upsert(&txn_id, self.schema.values_into_row(values)?)
+                    .await
+            }
+        })
     }
 
     pub fn upsert<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {

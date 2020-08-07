@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::NumberType;
-use crate::value::TCResult;
+use crate::value::{Number, TCResult, UInt, Value};
 
 use super::table;
 use super::tensor;
@@ -35,6 +35,15 @@ impl Graph {
             max_id,
         })
     }
+
+    async fn add_node(&self, txn_id: TxnId, node: Vec<Value>) -> TCResult<()> {
+        let mut max_id = self.max_id.write(txn_id.clone()).await?;
+        self.nodes
+            .insert(txn_id, vec![u64_value(&max_id)], node)
+            .await?;
+        *max_id += 1;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -46,4 +55,8 @@ impl Transact for Graph {
     async fn rollback(&self, txn_id: &TxnId) {
         self.max_id.rollback(txn_id).await
     }
+}
+
+fn u64_value(value: &u64) -> Value {
+    Value::Number(Number::UInt(UInt::U64(*value)))
 }
