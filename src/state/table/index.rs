@@ -2,14 +2,15 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter;
 use std::sync::Arc;
 
-use futures::future::{self, try_join_all};
+use async_trait::async_trait;
+use futures::future::{self, join_all, try_join_all};
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::error;
 use crate::state::btree::{self, BTree};
 use crate::state::dir::Dir;
 use crate::transaction::lock::{Mutable, TxnLock};
-use crate::transaction::{Txn, TxnId};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
 
 use super::schema::{Bounds, Column, ColumnBound, Row, Schema};
@@ -201,6 +202,17 @@ impl Selection for Index {
                 .update(txn.id(), &btree::Selector::all(), &key)
                 .await
         })
+    }
+}
+
+#[async_trait]
+impl Transact for Index {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.btree.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.btree.rollback(txn_id).await
     }
 }
 
@@ -748,5 +760,28 @@ impl Selection for TableBase {
                 .try_fold((), |_, _| future::ready(Ok(())))
                 .await
         })
+    }
+}
+
+#[async_trait]
+impl Transact for TableBase {
+    async fn commit(&self, txn_id: &TxnId) {
+        let aux = self.auxiliary.read(txn_id).await.unwrap();
+        let mut commits = Vec::with_capacity(aux.len() + 1);
+        commits.push(self.primary.commit(txn_id));
+        for index in aux.values() {
+            commits.push(index.commit(txn_id));
+        }
+        join_all(commits).await;
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        let aux = self.auxiliary.read(txn_id).await.unwrap();
+        let mut rollbacks = Vec::with_capacity(aux.len() + 1);
+        rollbacks.push(self.primary.rollback(txn_id));
+        for index in aux.values() {
+            rollbacks.push(index.commit(txn_id));
+        }
+        join_all(rollbacks).await;
     }
 }

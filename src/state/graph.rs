@@ -2,8 +2,9 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::future::{self, join_all};
 use futures::stream::{FuturesOrdered, StreamExt, TryStreamExt};
-use futures::{future, try_join};
+use futures::try_join;
 
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
@@ -106,11 +107,21 @@ impl Graph {
 #[async_trait]
 impl Transact for Graph {
     async fn commit(&self, txn_id: &TxnId) {
-        self.max_id.commit(txn_id).await
+        join_all(vec![
+            self.nodes.commit(txn_id),
+            self.edges.commit(txn_id),
+            self.max_id.commit(txn_id),
+        ])
+        .await;
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.max_id.rollback(txn_id).await
+        join_all(vec![
+            self.nodes.rollback(txn_id),
+            self.edges.rollback(txn_id),
+            self.max_id.rollback(txn_id),
+        ])
+        .await;
     }
 }
 
