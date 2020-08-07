@@ -646,10 +646,9 @@ impl SparseAccessor for SparseReduce {
 
                     let txn = txn.clone();
                     let source = source.clone();
-                    Box::pin(async move {
-                        let slice = source.slice(bounds)?;
-                        Ok((coord, reductor(&slice, txn).await?))
-                    })
+                    Box::pin(
+                        async move { Ok((coord, reductor(&source.slice(bounds)?, txn).await?)) },
+                    )
                 });
 
             let filled: SparseStream = Box::pin(filled);

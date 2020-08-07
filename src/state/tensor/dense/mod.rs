@@ -807,8 +807,23 @@ impl TensorView for BlockListReduce {
 }
 
 impl BlockList for BlockListReduce {
-    fn block_stream<'a>(self: Arc<Self>, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
-        Box::pin(async move { Err(error::not_implemented()) })
+    fn value_stream<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
+        Box::pin(async move {
+            let values = stream::iter(Bounds::all(self.shape()).affected()).then(move |coord| {
+                let mut source_bounds: Vec<AxisBounds> =
+                    coord.iter().map(|i| AxisBounds::At(*i)).collect();
+                source_bounds.insert(self.axis, AxisBounds::all(self.source.shape()[self.axis]));
+                let bounds: Bounds = source_bounds.into();
+
+                let txn = txn.clone();
+                let source = self.source.clone();
+                let reductor = self.reductor;
+                Box::pin(async move { reductor(&source.slice(bounds)?, txn).await })
+            });
+
+            let values: TCTryStream<Number> = Box::pin(values);
+            Ok(values)
+        })
     }
 
     fn value_stream_slice<'a>(
