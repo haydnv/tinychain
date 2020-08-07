@@ -8,6 +8,7 @@ use crate::value::{Number, TCBoxTryFuture, TCResult};
 
 mod bounds;
 mod dense;
+mod einsum;
 mod sparse;
 mod transform;
 
