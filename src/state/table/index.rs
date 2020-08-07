@@ -384,7 +384,7 @@ impl TableBase {
             .filter(|c| !index_key_set.contains(&c.name))
             .cloned()
             .collect();
-        let schema: Schema = Schema::new(key, values);
+        let schema: Schema = (key, values).into();
 
         let btree_file = self
             .dir

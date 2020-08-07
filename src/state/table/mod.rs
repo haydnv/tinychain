@@ -9,7 +9,7 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
 
 mod index;
-pub mod schema;
+mod schema;
 mod view;
 
 const ERR_DELETE: &str =
@@ -19,6 +19,9 @@ const ERR_SLICE: &str =
 const ERR_UPDATE: &str =
     "This table view does not support updates (consider updating a slice of the source table)";
 
+pub type Column = schema::Column;
+pub type ColumnBound = schema::ColumnBound;
+pub type Schema = schema::Schema;
 pub type TableBase = index::TableBase;
 
 pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
@@ -133,6 +136,12 @@ pub enum Table {
     ROIndex(index::ReadOnly),
     Table(index::TableBase),
     TableSlice(view::TableSlice),
+}
+
+impl Table {
+    pub async fn create(txn: Arc<Txn>, schema: schema::Schema) -> TCResult<TableBase> {
+        index::TableBase::create(txn, schema).await
+    }
 }
 
 impl Selection for Table {

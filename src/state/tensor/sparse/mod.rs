@@ -4,7 +4,7 @@ use std::iter;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use futures::future::{self, TryFutureExt};
+use futures::future::{self, try_join_all, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 
@@ -12,7 +12,7 @@ use crate::error;
 use crate::state::btree;
 use crate::state::table::{self, Selection, Table, TableBase};
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::{Instance, NumberClass, NumberInstance, NumberType, UIntType, ValueType};
+use crate::value::class::{Instance, NumberClass, NumberInstance, NumberType, ValueType};
 use crate::value::{Number, TCBoxTryFuture, TCResult, TCTryStream, UInt, Value, ValueId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
@@ -1057,7 +1057,7 @@ impl SparseAccessor for SparseTranspose {
     }
 }
 
-struct SparseTable {
+pub struct SparseTable {
     table: TableBase,
     shape: Shape,
     dtype: NumberType,
@@ -1065,29 +1065,31 @@ struct SparseTable {
 
 impl SparseTable {
     pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTable> {
-        let u64_type = ValueType::Number(NumberType::UInt(UIntType::U64));
-        let key: Vec<table::schema::Column> = (0..shape.len())
-            .map(|axis| table::schema::Column {
-                name: axis.into(),
-                dtype: u64_type,
-                max_len: None,
-            })
-            .collect();
-
-        let value = vec![table::schema::Column {
-            name: "value".parse()?,
-            dtype: dtype.into(),
-            max_len: None,
-        }];
-
-        let schema = table::schema::Schema::new(key, value);
-        let table = TableBase::create(txn, schema).await?;
+        let table = Self::create_table(txn, shape.len(), dtype).await?;
 
         Ok(SparseTable {
             table,
             dtype,
             shape,
         })
+    }
+
+    pub async fn create_table(
+        txn: Arc<Txn>,
+        ndim: usize,
+        dtype: NumberType,
+    ) -> TCResult<TableBase> {
+        let u64_type = NumberType::uint64();
+        let key: Vec<table::Column> = (0..ndim).map(|axis| (axis, u64_type).into()).collect();
+
+        let value: Vec<table::Column> = vec![("value", dtype).try_into()?];
+        let table = Table::create(txn.clone(), (key, value).into()).await?;
+        try_join_all(
+            (0..ndim).map(|axis| table.add_index(txn.clone(), axis.into(), vec![axis.into()])),
+        )
+        .await?;
+
+        Ok(table)
     }
 }
 
@@ -1294,6 +1296,13 @@ pub struct SparseTensor {
 }
 
 impl SparseTensor {
+    pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTensor> {
+        SparseTable::create(txn, shape, dtype)
+            .await
+            .map(Arc::new)
+            .map(|accessor| SparseTensor { accessor })
+    }
+
     pub fn filled(&'_ self, txn: Arc<Txn>) -> TCBoxTryFuture<'_, SparseStream> {
         self.accessor.clone().filled(txn)
     }
@@ -1669,7 +1678,7 @@ fn group_axes<'a>(
                 .iter()
                 .cloned()
                 .map(ValueId::from)
-                .map(|x| (x, ValueType::Number(NumberType::UInt(UIntType::U64)), None).into())
+                .map(|x| (x, ValueType::uint64(), None).into())
                 .collect::<Vec<btree::Column>>()
                 .into();
 
@@ -1747,7 +1756,7 @@ fn slice_table<'a>(
             let axis: ValueId = axis.into();
             table = match axis_bound {
                 At(x) => {
-                    let column_bound = table::schema::ColumnBound::Is(u64_to_value(x));
+                    let column_bound = table::ColumnBound::Is(u64_to_value(x));
                     table
                         .slice(txn_id, iter::once((axis, column_bound)).collect())
                         .await?
@@ -1755,7 +1764,7 @@ fn slice_table<'a>(
                 In(range) => {
                     let start = Bound::Included(u64_to_value(range.start));
                     let end = Bound::Excluded(u64_to_value(range.end));
-                    let column_bound = table::schema::ColumnBound::In(start, end);
+                    let column_bound = table::ColumnBound::In(start, end);
                     table
                         .slice(txn_id, iter::once((axis, column_bound)).collect())
                         .await?

@@ -471,6 +471,12 @@ pub enum NumberType {
     UInt(UIntType),
 }
 
+impl NumberType {
+    pub fn uint64() -> Self {
+        NumberType::UInt(UIntType::U64)
+    }
+}
+
 impl Class for NumberType {
     type Instance = Number;
 }
@@ -576,6 +582,12 @@ pub enum ValueType {
     TCString(StringType),
     Op,
     Vector,
+}
+
+impl ValueType {
+    pub fn uint64() -> Self {
+        ValueType::Number(NumberType::uint64())
+    }
 }
 
 impl Class for ValueType {

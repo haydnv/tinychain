@@ -1,11 +1,12 @@
 use std::collections::{hash_map, HashMap, HashSet};
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::ops::Bound;
 
 use crate::error;
 use crate::state::btree;
-use crate::value::class::{Instance, ValueType};
+use crate::value::class::{Instance, NumberType, ValueType};
 use crate::value::{TCResult, Value, ValueId};
 
 pub type Row = HashMap<ValueId, Value>;
@@ -20,6 +21,38 @@ pub struct Column {
 impl From<Column> for btree::Column {
     fn from(column: Column) -> btree::Column {
         (column.name, column.dtype, column.max_len).into()
+    }
+}
+
+impl<Id: Into<ValueId>> From<(Id, NumberType)> for Column {
+    fn from(column: (Id, NumberType)) -> Column {
+        let (name, dtype) = column;
+        let name: ValueId = name.into();
+        let dtype: ValueType = dtype.into();
+        let max_len = None;
+
+        Column {
+            name,
+            dtype,
+            max_len,
+        }
+    }
+}
+
+impl TryFrom<(&str, NumberType)> for Column {
+    type Error = error::TCError;
+
+    fn try_from(column: (&str, NumberType)) -> TCResult<Column> {
+        let (name, dtype) = column;
+        let name: ValueId = name.parse()?;
+        let dtype: ValueType = dtype.into();
+        let max_len = None;
+
+        Ok(Column {
+            name,
+            dtype,
+            max_len,
+        })
     }
 }
 
@@ -175,10 +208,6 @@ pub struct Schema {
 }
 
 impl Schema {
-    pub fn new(key: Vec<Column>, value: Vec<Column>) -> Schema {
-        Schema { key, value }
-    }
-
     pub fn columns(&self) -> Vec<Column> {
         [&self.key[..], &self.value[..]]
             .concat()
@@ -264,7 +293,7 @@ impl Schema {
             .cloned()
             .collect();
 
-        Ok(Schema::new(key, value))
+        Ok((key, value).into())
     }
 
     pub fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -378,6 +407,13 @@ impl Schema {
         }
 
         Ok(row)
+    }
+}
+
+impl From<(Vec<Column>, Vec<Column>)> for Schema {
+    fn from(schema: (Vec<Column>, Vec<Column>)) -> Schema {
+        let (key, value) = schema;
+        Schema { key, value }
     }
 }
 
