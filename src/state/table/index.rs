@@ -437,6 +437,22 @@ impl TableBase {
         }
     }
 
+    pub fn get<'a>(
+        &'a self,
+        txn_id: TxnId,
+        key: Vec<Value>,
+    ) -> TCBoxTryFuture<'a, Option<Vec<Value>>> {
+        self.primary.get(txn_id, key)
+    }
+
+    pub fn get_owned<'a>(
+        self,
+        txn_id: TxnId,
+        key: Vec<Value>,
+    ) -> TCBoxTryFuture<'a, Option<Vec<Value>>> {
+        Box::pin(async move { self.get(txn_id, key).await })
+    }
+
     pub fn insert<'a>(
         &'a self,
         txn_id: TxnId,
@@ -444,12 +460,7 @@ impl TableBase {
         value: Vec<Value>,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
-            if self
-                .primary
-                .get(txn_id.clone(), key.to_vec())
-                .await?
-                .is_some()
-            {
+            if self.get(txn_id.clone(), key.to_vec()).await?.is_some() {
                 let key: Vec<String> = key.iter().map(|v| v.to_string()).collect();
                 Err(error::bad_request(
                     "Tried to insert but this key already exists",

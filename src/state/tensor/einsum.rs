@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::error;
 use crate::value::TCResult;
 
-use super::{Tensor, TensorMath, TensorReduce, TensorTransform, TensorView};
+use super::{TensorMath, TensorReduce, TensorTransform, TensorView};
 
 const VALID_LABELS: [char; 52] = [
     'a', 'A', 'b', 'B', 'c', 'C', 'd', 'D', 'e', 'E', 'f', 'F', 'g', 'G', 'h', 'H', 'i', 'I', 'j',
@@ -51,7 +51,10 @@ fn parse_format(format: &str) -> TCResult<(Vec<Vec<char>>, Vec<char>)> {
     Ok((f_inputs, f_output))
 }
 
-fn validate_args(f_inputs: &[Vec<char>], tensors: &[Tensor]) -> TCResult<BTreeMap<char, u64>> {
+fn validate_args<T: TensorView>(
+    f_inputs: &[Vec<char>],
+    tensors: &[T],
+) -> TCResult<BTreeMap<char, u64>> {
     if f_inputs.len() != tensors.len() {
         return Err(error::bad_request(
             "Number of tensors passed to einsum does not match number of format strings",
@@ -88,12 +91,12 @@ fn validate_args(f_inputs: &[Vec<char>], tensors: &[Tensor]) -> TCResult<BTreeMa
     Ok(dimensions)
 }
 
-fn normalize(
-    tensor: &Tensor,
+fn normalize<T: Clone + TensorTransform>(
+    tensor: &T,
     f_input: &[char],
     f_output: &[char],
     dimensions: &BTreeMap<char, u64>,
-) -> TCResult<Tensor> {
+) -> TCResult<T> {
     if f_input == f_output {
         return Ok(tensor.clone());
     }
@@ -125,11 +128,11 @@ fn normalize(
     Ok(tensor)
 }
 
-fn outer_product(
+fn outer_product<T: Clone + TensorMath + TensorTransform>(
     f_inputs: &[Vec<char>],
     dimensions: &BTreeMap<char, u64>,
-    tensors: Vec<Tensor>,
-) -> TCResult<Tensor> {
+    tensors: Vec<T>,
+) -> TCResult<T> {
     assert!(f_inputs.len() == tensors.len());
     assert!(!tensors.is_empty());
 
@@ -139,7 +142,7 @@ fn outer_product(
         .iter()
         .zip(f_inputs.iter())
         .map(|(tensor, f_input)| normalize(tensor, f_input, &f_output, &dimensions))
-        .collect::<TCResult<Vec<Tensor>>>()?;
+        .collect::<TCResult<Vec<T>>>()?;
 
     let mut op = normalized.pop().unwrap();
     while let Some(tensor) = normalized.pop() {
@@ -149,11 +152,11 @@ fn outer_product(
     Ok(op)
 }
 
-fn contract(
-    mut op: Tensor,
+fn contract<T: TensorReduce + TensorTransform>(
+    mut op: T,
     dimensions: BTreeMap<char, u64>,
     f_output: Vec<char>,
-) -> TCResult<Tensor> {
+) -> TCResult<T> {
     let mut f_input: Vec<char> = dimensions.keys().cloned().collect();
     let mut axis = 0;
     while op.ndim() > f_output.len() {
@@ -176,7 +179,10 @@ fn contract(
     }
 }
 
-fn einsum(format: &str, tensors: Vec<Tensor>) -> TCResult<Tensor> {
+pub fn einsum<T: Clone + TensorMath + TensorTransform + TensorReduce>(
+    format: &str,
+    tensors: Vec<T>,
+) -> TCResult<T> {
     let (f_inputs, f_output) = parse_format(format)?;
     let dimensions = validate_args(&f_inputs, &tensors)?;
 

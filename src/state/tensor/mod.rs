@@ -118,7 +118,7 @@ pub trait TensorTransform: Sized + TensorView {
 }
 
 #[derive(Clone)]
-enum Tensor {
+pub enum Tensor {
     Dense(DenseTensor),
     Sparse(SparseTensor),
 }
@@ -464,6 +464,13 @@ impl From<SparseTensor> for Tensor {
     fn from(sparse: SparseTensor) -> Tensor {
         Self::Sparse(sparse)
     }
+}
+
+pub fn einsum<T: Clone + TensorView + TensorMath + TensorReduce + TensorTransform>(
+    format: &str,
+    tensors: Vec<T>,
+) -> TCResult<T> {
+    einsum::einsum(format, tensors)
 }
 
 fn broadcast<L: Clone + TensorTransform, R: Clone + TensorTransform>(

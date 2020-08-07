@@ -1452,6 +1452,7 @@ impl TensorBoolean for SparseTensor {
     }
 
     fn and(&self, other: &Self) -> TCResult<Self> {
+        // TODO: use a custom method for this, to only iterate over self.filled (not other.filled)
         self.combine(other, Number::and, NumberType::Bool)
     }
 

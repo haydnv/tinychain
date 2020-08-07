@@ -2,14 +2,19 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::stream::{FuturesOrdered, StreamExt, TryStreamExt};
+use futures::{future, try_join};
 
+use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::NumberType;
-use crate::value::{Number, TCResult, UInt, Value};
+use crate::value::{Number, TCResult, TCTryStream, UInt, Value};
 
 use super::table;
-use super::tensor::{self, SparseTensor, TensorIO};
+use super::tensor::{self, einsum, SparseTensor, TensorBoolean, TensorIO};
+
+const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";
 
 pub struct Graph {
     nodes: table::TableBase,
@@ -19,6 +24,8 @@ pub struct Graph {
 
 impl Graph {
     pub async fn create(txn: Arc<Txn>, node_schema: Vec<table::Column>) -> TCResult<Graph> {
+        // TODO: replace incrementing numeric IDs with UUIDs
+
         let key: Vec<table::Column> = vec![("id", NumberType::uint64()).try_into()?];
         let nodes = table::Table::create(txn.clone(), (key, node_schema).into()).await?;
 
@@ -44,17 +51,55 @@ impl Graph {
     async fn add_node(&self, txn_id: TxnId, node: Vec<Value>) -> TCResult<()> {
         let mut max_id = self.max_id.write(txn_id.clone()).await?;
         self.nodes
-            .insert(txn_id, vec![u64_value(&max_id)], node)
+            .insert(txn_id, vec![u64_value(*max_id)], node)
             .await?;
         *max_id += 1;
         Ok(())
     }
 
     async fn add_edge(&self, txn_id: TxnId, node_from: u64, node_to: u64) -> TCResult<()> {
-        let adjacency_matrix = self.get_matrix(&txn_id).await?;
-        adjacency_matrix
+        let edges = self.get_matrix(&txn_id).await?;
+        edges
             .write_value_at(txn_id, vec![node_from, node_to], true.into())
             .await
+    }
+
+    async fn bft(&self, txn: Arc<Txn>, start_node: u64) -> TCResult<TCTryStream<Vec<Value>>> {
+        let edges = self.get_matrix(txn.id());
+        let max_id = self.max_id.read(txn.id());
+        let (edges, max_id) = try_join!(edges, max_id)?;
+
+        let visited = SparseTensor::create(txn.clone(), vec![*max_id].into(), NumberType::Bool);
+        let adjacent = SparseTensor::create(txn.clone(), vec![*max_id].into(), NumberType::Bool);
+        let (mut visited, mut adjacent) = try_join!(visited, adjacent)?;
+        adjacent
+            .write_value_at(txn.id().clone(), vec![start_node], true.into())
+            .await?;
+
+        // TODO: stream the search itself instead of buffering these futures
+        let mut found = FuturesOrdered::new();
+
+        while adjacent.any(txn.clone()).await? {
+            let txn_id = txn.id().clone();
+            let nodes = self.nodes.clone();
+
+            visited = visited.or(&adjacent)?;
+            adjacent = einsum("ji,j->i", vec![edges.clone(), adjacent])?.and(&visited.not()?)?;
+            let nodes = adjacent
+                .clone()
+                .filled(txn.clone())
+                .await?
+                .and_then(move |(id, _)| {
+                    nodes
+                        .clone()
+                        .get_owned(txn_id.clone(), vec![u64_value(id[0])])
+                })
+                .map(|r| r.and_then(|node| node.ok_or_else(|| error::internal(ERR_CORRUPT))));
+            found.push(future::ready(nodes));
+        }
+
+        let found: TCTryStream<Vec<Value>> = Box::pin(found.flatten());
+        Ok(found)
     }
 }
 
@@ -69,6 +114,6 @@ impl Transact for Graph {
     }
 }
 
-fn u64_value(value: &u64) -> Value {
-    Value::Number(Number::UInt(UInt::U64(*value)))
+fn u64_value(value: u64) -> Value {
+    Value::Number(Number::UInt(UInt::U64(value)))
 }
