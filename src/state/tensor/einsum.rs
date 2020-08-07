@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::error;
 use crate::value::TCResult;
 
-use super::{Tensor, TensorMath, TensorTransform, TensorView};
+use super::{Tensor, TensorMath, TensorReduce, TensorTransform, TensorView};
 
 const VALID_LABELS: [char; 52] = [
     'a', 'A', 'b', 'B', 'c', 'C', 'd', 'D', 'e', 'E', 'f', 'F', 'g', 'G', 'h', 'H', 'i', 'I', 'j',
@@ -151,4 +151,33 @@ fn outer_product(
     }
 
     Ok(op)
+}
+
+fn contract(
+    mut op: Tensor,
+    dimensions: BTreeMap<char, u64>,
+    f_output: Vec<char>,
+) -> TCResult<Tensor> {
+    assert!(!f_output.is_empty());
+
+    let mut f_input: Vec<char> = dimensions.keys().cloned().collect();
+    let mut axis = 0;
+    while op.ndim() > f_output.len() {
+        assert!(f_input.len() == op.ndim());
+
+        if !f_output.contains(&f_input[axis]) {
+            op = op.sum(axis)?;
+            f_input.remove(axis);
+        } else {
+            axis += 1;
+        }
+    }
+
+    if f_input == f_output {
+        Ok(op)
+    } else {
+        let source: HashMap<char, usize> = f_input.iter().cloned().zip(0..f_input.len()).collect();
+        let permutation: Vec<usize> = f_output.iter().map(|l| *source.get(l).unwrap()).collect();
+        op.transpose(Some(permutation))
+    }
 }
