@@ -154,8 +154,6 @@ fn contract(
     dimensions: BTreeMap<char, u64>,
     f_output: Vec<char>,
 ) -> TCResult<Tensor> {
-    assert!(!f_output.is_empty());
-
     let mut f_input: Vec<char> = dimensions.keys().cloned().collect();
     let mut axis = 0;
     while op.ndim() > f_output.len() {
