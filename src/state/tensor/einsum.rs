@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
 
 use crate::error;
 use crate::value::TCResult;
@@ -52,10 +51,7 @@ fn parse_format(format: &str) -> TCResult<(Vec<Vec<char>>, Vec<char>)> {
     Ok((f_inputs, f_output))
 }
 
-fn validate_args(
-    f_inputs: Vec<Vec<char>>,
-    tensors: Vec<Arc<Tensor>>,
-) -> TCResult<BTreeMap<char, u64>> {
+fn validate_args(f_inputs: &[Vec<char>], tensors: &[Tensor]) -> TCResult<BTreeMap<char, u64>> {
     if f_inputs.len() != tensors.len() {
         return Err(error::bad_request(
             "Number of tensors passed to einsum does not match number of format strings",
@@ -130,8 +126,8 @@ fn normalize(
 }
 
 fn outer_product(
-    f_inputs: Vec<Vec<char>>,
-    dimensions: BTreeMap<char, u64>,
+    f_inputs: &[Vec<char>],
+    dimensions: &BTreeMap<char, u64>,
     tensors: Vec<Tensor>,
 ) -> TCResult<Tensor> {
     assert!(f_inputs.len() == tensors.len());
@@ -180,4 +176,14 @@ fn contract(
         let permutation: Vec<usize> = f_output.iter().map(|l| *source.get(l).unwrap()).collect();
         op.transpose(Some(permutation))
     }
+}
+
+fn einsum(format: &str, tensors: Vec<Tensor>) -> TCResult<Tensor> {
+    let (f_inputs, f_output) = parse_format(format)?;
+    let dimensions = validate_args(&f_inputs, &tensors)?;
+
+    let op = outer_product(&f_inputs, &dimensions, tensors)?;
+    assert!(op.shape().to_vec() == dimensions.values().cloned().collect::<Vec<u64>>());
+
+    contract(op, dimensions, f_output)
 }
