@@ -11,7 +11,7 @@ use crate::value::{TCResult, Value, ValueId};
 
 pub type Row = HashMap<ValueId, Value>;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Column {
     pub name: ValueId,
     pub dtype: ValueType,
@@ -241,24 +241,7 @@ impl Schema {
             .collect()
     }
 
-    pub fn key(&self, row: &Row) -> TCResult<Vec<Value>> {
-        let mut key = Vec::with_capacity(self.key.len());
-        for column in &self.key {
-            if let Some(value) = row.get(&column.name) {
-                value.expect(column.dtype, format!("for table schema {}", self))?;
-                key.push(value.clone())
-            } else {
-                return Err(error::bad_request(
-                    "Row has no value for key column",
-                    &column.name,
-                ));
-            }
-        }
-
-        Ok(key)
-    }
-
-    pub fn key_columns(&'_ self) -> &'_ [Column] {
+    pub fn key(&'_ self) -> &'_ [Column] {
         &self.key
     }
 
@@ -274,6 +257,23 @@ impl Schema {
 
     pub fn len(&self) -> usize {
         self.key.len() + self.value.len()
+    }
+
+    pub fn row_as_key(&self, row: &Row) -> TCResult<Vec<Value>> {
+        let mut key = Vec::with_capacity(self.key.len());
+        for column in &self.key {
+            if let Some(value) = row.get(&column.name) {
+                value.expect(column.dtype, format!("for table schema {}", self))?;
+                key.push(value.clone())
+            } else {
+                return Err(error::bad_request(
+                    "Row has no value for key column",
+                    &column.name,
+                ));
+            }
+        }
+
+        Ok(key)
     }
 
     pub fn starts_with(&self, expected: &[ValueId]) -> bool {
@@ -394,6 +394,10 @@ impl Schema {
         }
 
         self.validate_row_partial(row)
+    }
+
+    pub fn value(&'_ self) -> &'_ [Column] {
+        &self.value
     }
 
     pub fn row_into_values(&self, mut row: Row, reject_extras: bool) -> TCResult<Vec<Value>> {

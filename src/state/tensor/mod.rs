@@ -21,7 +21,7 @@ pub type Shape = bounds::Shape;
 pub type SparseTable = sparse::SparseTable;
 pub type SparseTensor = sparse::SparseTensor;
 
-trait TensorView: Send + Sync {
+pub trait TensorView: Send + Sync {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;
@@ -31,7 +31,7 @@ trait TensorView: Send + Sync {
     fn size(&self) -> u64;
 }
 
-trait TensorBoolean: Sized + TensorView {
+pub trait TensorBoolean: Sized + TensorView {
     fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
 
     fn any(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
@@ -46,7 +46,7 @@ trait TensorBoolean: Sized + TensorView {
 }
 
 #[async_trait]
-trait TensorCompare: Sized + TensorView {
+pub trait TensorCompare: Sized + TensorView {
     async fn eq(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor>;
 
     fn gt(&self, other: &Self) -> TCResult<Self>;
@@ -60,7 +60,7 @@ trait TensorCompare: Sized + TensorView {
     fn ne(&self, other: &Self) -> TCResult<Self>;
 }
 
-trait TensorIO: Sized + TensorView {
+pub trait TensorIO: Sized + TensorView {
     fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
 
     fn write<'a>(
@@ -85,7 +85,7 @@ trait TensorIO: Sized + TensorView {
     ) -> TCBoxTryFuture<'a, ()>;
 }
 
-trait TensorMath: Sized + TensorView {
+pub trait TensorMath: Sized + TensorView {
     fn abs(&self) -> TCResult<Self>;
 
     fn add(&self, other: &Self) -> TCResult<Self>;
@@ -93,7 +93,7 @@ trait TensorMath: Sized + TensorView {
     fn multiply(&self, other: &Self) -> TCResult<Self>;
 }
 
-trait TensorReduce: Sized + TensorView {
+pub trait TensorReduce: Sized + TensorView {
     fn product(&self, axis: usize) -> TCResult<Self>;
 
     fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
@@ -103,7 +103,7 @@ trait TensorReduce: Sized + TensorView {
     fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
 }
 
-trait TensorTransform: Sized + TensorView {
+pub trait TensorTransform: Sized + TensorView {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self>;
 
     fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self>;

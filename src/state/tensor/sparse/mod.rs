@@ -1079,8 +1079,7 @@ impl SparseTable {
         ndim: usize,
         dtype: NumberType,
     ) -> TCResult<TableBase> {
-        let u64_type = NumberType::uint64();
-        let key: Vec<table::Column> = (0..ndim).map(|axis| (axis, u64_type).into()).collect();
+        let key: Vec<table::Column> = Self::key(ndim);
 
         let value: Vec<table::Column> = vec![("value", dtype).try_into()?];
         let table = Table::create(txn.clone(), (key, value).into()).await?;
@@ -1090,6 +1089,48 @@ impl SparseTable {
         .await?;
 
         Ok(table)
+    }
+
+    pub fn try_from_table(table: TableBase, shape: Shape) -> TCResult<SparseTable> {
+        let expected_key = Self::key(shape.len());
+        let actual_key = table.schema().key();
+
+        for (expected, actual) in actual_key.iter().zip(expected_key.iter()) {
+            if expected != actual {
+                return Err(error::bad_request(
+                    "Table has invalid key for SparseTable",
+                    table.schema(),
+                ));
+            }
+        }
+
+        let actual_value = table.schema().value();
+        if actual_value.len() != 1 {
+            let actual_value: Vec<String> = actual_value.iter().map(|c| c.to_string()).collect();
+            return Err(error::bad_request(
+                "Table has invalid value for SparseTable",
+                format!("[{}]", actual_value.join(", ")),
+            ));
+        }
+
+        let dtype = actual_value[0].dtype;
+        if let ValueType::Number(dtype) = dtype {
+            Ok(SparseTable {
+                table,
+                shape,
+                dtype,
+            })
+        } else {
+            Err(error::bad_request(
+                "Table has invalid data type for SparseTable",
+                dtype,
+            ))
+        }
+    }
+
+    fn key(ndim: usize) -> Vec<table::Column> {
+        let u64_type = NumberType::uint64();
+        (0..ndim).map(|axis| (axis, u64_type).into()).collect()
     }
 }
 
@@ -1299,6 +1340,12 @@ impl SparseTensor {
     pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTensor> {
         SparseTable::create(txn, shape, dtype)
             .await
+            .map(Arc::new)
+            .map(|accessor| SparseTensor { accessor })
+    }
+
+    pub fn try_from_table(table: TableBase, shape: Shape) -> TCResult<SparseTensor> {
+        SparseTable::try_from_table(table, shape)
             .map(Arc::new)
             .map(|accessor| SparseTensor { accessor })
     }

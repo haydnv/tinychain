@@ -9,7 +9,7 @@ use crate::value::class::NumberType;
 use crate::value::{Number, TCResult, UInt, Value};
 
 use super::table;
-use super::tensor;
+use super::tensor::{self, SparseTensor, TensorIO};
 
 pub struct Graph {
     nodes: table::TableBase,
@@ -25,8 +25,7 @@ impl Graph {
         let max_id = 0u64;
         let shape: tensor::Shape = vec![max_id, max_id].into();
         let edges =
-            tensor::SparseTable::create_table(txn.clone(), shape.len(), NumberType::uint64())
-                .await?;
+            tensor::SparseTable::create_table(txn.clone(), shape.len(), NumberType::Bool).await?;
         let max_id = TxnLock::new(txn.id().clone(), 0u64.into());
 
         Ok(Graph {
@@ -36,6 +35,12 @@ impl Graph {
         })
     }
 
+    async fn get_matrix(&self, txn_id: &TxnId) -> TCResult<SparseTensor> {
+        let max_id = self.max_id.read(txn_id).await?;
+        let shape: tensor::Shape = vec![*max_id, *max_id].into();
+        SparseTensor::try_from_table(self.edges.clone(), shape)
+    }
+
     async fn add_node(&self, txn_id: TxnId, node: Vec<Value>) -> TCResult<()> {
         let mut max_id = self.max_id.write(txn_id.clone()).await?;
         self.nodes
@@ -43,6 +48,13 @@ impl Graph {
             .await?;
         *max_id += 1;
         Ok(())
+    }
+
+    async fn add_edge(&self, txn_id: TxnId, node_from: u64, node_to: u64) -> TCResult<()> {
+        let adjacency_matrix = self.get_matrix(&txn_id).await?;
+        adjacency_matrix
+            .write_value_at(txn_id, vec![node_from, node_to], true.into())
+            .await
     }
 }
 

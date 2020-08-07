@@ -392,7 +392,7 @@ impl TableBase {
             .collect::<TCResult<Vec<Column>>>()?;
         let values: Vec<Column> = self
             .schema()
-            .key_columns()
+            .key()
             .iter()
             .filter(|c| !index_key_set.contains(&c.name))
             .cloned()
