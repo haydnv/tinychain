@@ -313,9 +313,12 @@ impl BlockList for BlockListFile {
                             .get_block_owned(txn.id().clone(), block_id)
                     }),
             );
+
             let block_stream =
                 block_stream.and_then(|block| future::ready(Ok(block.deref().clone())));
+
             let block_stream: TCTryStream<Array> = Box::pin(block_stream);
+
             Ok(block_stream)
         })
     }

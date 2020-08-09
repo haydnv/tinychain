@@ -1439,8 +1439,19 @@ impl TensorView for SparseTensor {
 impl TensorBoolean for SparseTensor {
     fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool> {
         Box::pin(async move {
-            let filled_count = self.accessor.clone().filled_count(txn).await?;
-            Ok(filled_count == self.size())
+            let mut coords = self.accessor.clone().filled(txn).await?
+                .map_ok(|(coord, _)| coord)
+                .zip(stream::iter(Bounds::all(self.shape()).affected()))
+                .map(|(r, expected)| r.map(|actual| (actual, expected)));
+
+            while let Some(result) = coords.next().await {
+                let (actual, expected) = result?;
+                if actual != expected {
+                    return Ok(false);
+                }
+            }
+
+            Ok(true)
         })
     }
 

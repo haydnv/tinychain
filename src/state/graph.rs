@@ -49,7 +49,7 @@ impl Graph {
         SparseTensor::try_from_table(self.edges.clone(), shape)
     }
 
-    async fn add_node(&self, txn_id: TxnId, node: Vec<Value>) -> TCResult<()> {
+    pub async fn add_node(&self, txn_id: TxnId, node: Vec<Value>) -> TCResult<()> {
         let mut max_id = self.max_id.write(txn_id.clone()).await?;
         self.nodes
             .insert(txn_id, vec![u64_value(*max_id)], node)
@@ -58,14 +58,14 @@ impl Graph {
         Ok(())
     }
 
-    async fn add_edge(&self, txn_id: TxnId, node_from: u64, node_to: u64) -> TCResult<()> {
+    pub async fn add_edge(&self, txn_id: TxnId, node_from: u64, node_to: u64) -> TCResult<()> {
         let edges = self.get_matrix(&txn_id).await?;
         edges
             .write_value_at(txn_id, vec![node_from, node_to], true.into())
             .await
     }
 
-    async fn bft(&self, txn: Arc<Txn>, start_node: u64) -> TCResult<TCTryStream<Vec<Value>>> {
+    pub async fn bft(&self, txn: Arc<Txn>, start_node: u64) -> TCResult<TCTryStream<Vec<Value>>> {
         let edges = self.get_matrix(txn.id());
         let max_id = self.max_id.read(txn.id());
         let (edges, max_id) = try_join!(edges, max_id)?;
@@ -81,12 +81,13 @@ impl Graph {
         let mut found = FuturesOrdered::new();
 
         while adjacent.any(txn.clone()).await? {
+            visited = visited.or(&adjacent)?;
+            adjacent = einsum("ji,j->i", vec![edges.clone(), adjacent])?.and(&visited.not()?)?;
+
             let txn_id = txn.id().clone();
             let nodes = self.nodes.clone();
 
-            visited = visited.or(&adjacent)?;
-            adjacent = einsum("ji,j->i", vec![edges.clone(), adjacent])?.and(&visited.not()?)?;
-            let nodes = adjacent
+            let adjacent_nodes = adjacent
                 .clone()
                 .filled(txn.clone())
                 .await?
@@ -96,7 +97,7 @@ impl Graph {
                         .get_owned(txn_id.clone(), vec![u64_value(id[0])])
                 })
                 .map(|r| r.and_then(|node| node.ok_or_else(|| error::internal(ERR_CORRUPT))));
-            found.push(future::ready(nodes));
+            found.push(future::ready(adjacent_nodes));
         }
 
         let found: TCTryStream<Vec<Value>> = Box::pin(found.flatten());
