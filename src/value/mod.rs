@@ -27,6 +27,7 @@ pub type TCRef = reference::TCRef;
 pub type TCResult<T> = Result<T, error::TCError>;
 pub type TCTryStream<T> = TCStream<TCResult<T>>;
 pub type ValueId = string::ValueId;
+pub type ValueType = class::ValueType;
 
 #[derive(Clone, PartialEq)]
 pub enum Value {

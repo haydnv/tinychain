@@ -1,8 +1,8 @@
 use std::fmt;
 
-use crate::collection::Collection;
+use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::value::{TCResult, Value};
+use crate::value::{TCResult, Value, ValueType};
 
 pub trait Class: Clone + Eq + fmt::Display {
     type Instance: Instance;
@@ -34,11 +34,19 @@ pub trait Instance {
     }
 }
 
-pub struct Object;
+pub enum TCType {
+    Collection(CollectionType),
+    Value(ValueType),
+}
+
+pub enum ClassDef {
+    Type(TCType),
+    Class(Box<ClassDef>),
+}
 
 pub enum State {
+    Class(ClassDef),
     Collection(Collection),
-    Object(Object),
     Value(Value),
 }
 

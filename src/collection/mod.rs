@@ -8,7 +8,6 @@ use serde::ser::Serialize;
 
 use crate::class::State;
 use crate::error;
-use crate::internal::archive::Archive;
 use crate::transaction::{Transact, Txn};
 use crate::value::{TCResult, TCStream, Value};
 
@@ -41,8 +40,11 @@ pub trait Collect: Transact + Send + Sync {
     ) -> TCResult<()>;
 }
 
-#[async_trait]
-pub trait Persist: Archive + Collect {}
+pub enum CollectionType {
+    BTree,
+    Table,
+    Tensor,
+}
 
 pub enum Collection {
     BTree(Arc<btree::BTree>),
