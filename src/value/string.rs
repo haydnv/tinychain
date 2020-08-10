@@ -8,9 +8,9 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use uuid::Uuid;
 
+use crate::class::{Class, Instance};
 use crate::error;
 
-use super::class::{Instance, StringType};
 use super::link::{Link, TCPath};
 use super::reference::TCRef;
 use super::TCResult;
@@ -20,36 +20,16 @@ const RESERVED_CHARS: [&str; 21] = [
     "//", "@", "#",
 ];
 
-fn validate_id(id: &str) -> TCResult<()> {
-    if id.is_empty() {
-        return Err(error::bad_request("ValueId cannot be empty", id));
-    }
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+pub enum StringType {
+    Id,
+    Link,
+    Ref,
+    r#String,
+}
 
-    let filtered: &str = &id.chars().filter(|c| *c as u8 > 32).collect::<String>();
-    if filtered != id {
-        return Err(error::bad_request(
-            "This value ID contains an ASCII control character",
-            filtered,
-        ));
-    }
-
-    for pattern in &RESERVED_CHARS {
-        if id.contains(pattern) {
-            return Err(error::bad_request(
-                "A value ID may not contain this pattern",
-                pattern,
-            ));
-        }
-    }
-
-    if let Some(w) = Regex::new(r"\s").unwrap().find(id) {
-        return Err(error::bad_request(
-            "A value ID may not contain whitespace",
-            format!("{:?}", w),
-        ));
-    }
-
-    Ok(())
+impl Class for StringType {
+    type Instance = TCString;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -277,4 +257,36 @@ impl fmt::Display for TCString {
             TCString::r#String(s) => write!(f, "String: {}", s),
         }
     }
+}
+
+fn validate_id(id: &str) -> TCResult<()> {
+    if id.is_empty() {
+        return Err(error::bad_request("ValueId cannot be empty", id));
+    }
+
+    let filtered: &str = &id.chars().filter(|c| *c as u8 > 32).collect::<String>();
+    if filtered != id {
+        return Err(error::bad_request(
+            "This value ID contains an ASCII control character",
+            filtered,
+        ));
+    }
+
+    for pattern in &RESERVED_CHARS {
+        if id.contains(pattern) {
+            return Err(error::bad_request(
+                "A value ID may not contain this pattern",
+                pattern,
+            ));
+        }
+    }
+
+    if let Some(w) = Regex::new(r"\s").unwrap().find(id) {
+        return Err(error::bad_request(
+            "A value ID may not contain whitespace",
+            format!("{:?}", w),
+        ));
+    }
+
+    Ok(())
 }

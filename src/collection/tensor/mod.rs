@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::NumberType;
+use crate::value::number::class::NumberType;
 use crate::value::{Number, TCBoxTryFuture, TCResult};
 
 mod bounds;

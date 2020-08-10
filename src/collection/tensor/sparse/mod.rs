@@ -8,12 +8,15 @@ use futures::future::{self, try_join_all, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 
+use crate::class::Instance;
 use crate::collection::btree;
 use crate::collection::table::{self, Selection, Table, TableBase};
 use crate::error;
 use crate::transaction::{Txn, TxnId};
-use crate::value::class::{Instance, NumberClass, NumberInstance, NumberType, ValueType};
-use crate::value::{Number, TCBoxTryFuture, TCResult, TCTryStream, UInt, Value, ValueId};
+use crate::value::class::ValueType;
+use crate::value::number::class::{NumberClass, NumberInstance, NumberType};
+use crate::value::number::instance::{Number, UInt};
+use crate::value::{TCBoxTryFuture, TCResult, TCTryStream, Value, ValueId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::*;

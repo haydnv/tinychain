@@ -5,11 +5,13 @@ use std::ops::{Add, Mul};
 
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
+use crate::class::Instance;
 use crate::error;
+use crate::value::class::ValueInstance;
+use crate::value::TCResult;
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
-use super::class::{CastFrom, CastInto, Instance, NumberClass, NumberInstance, ValueInstance};
-use super::TCResult;
+use super::class::{CastFrom, CastInto, NumberClass, NumberInstance};
 
 #[derive(Clone, PartialEq)]
 pub struct Boolean(bool);

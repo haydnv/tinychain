@@ -7,8 +7,9 @@ use bytes::Bytes;
 
 use crate::block::BlockData;
 use crate::error;
-use crate::value::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
-use crate::value::{Boolean, Complex, Float, Int, Number, TCResult, UInt};
+use crate::value::number::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
+use crate::value::number::instance::{Boolean, Complex, Float, Int, Number, UInt};
+use crate::value::TCResult;
 
 const BATCH: bool = true;
 

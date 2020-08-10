@@ -9,8 +9,9 @@ use futures::try_join;
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::class::NumberType;
-use crate::value::{Number, TCResult, TCTryStream, UInt, Value};
+use crate::value::number::class::NumberType;
+use crate::value::number::instance::{Number, UInt};
+use crate::value::{TCResult, TCTryStream, Value};
 
 use super::table;
 use super::tensor::{self, einsum, SparseTensor, TensorBoolean, TensorIO};

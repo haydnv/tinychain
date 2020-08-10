@@ -7,22 +7,18 @@ use futures::{Future, Stream};
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
+use crate::class::Instance;
 use crate::error;
 
 pub mod class;
 pub mod link;
-mod number;
+pub mod number;
 pub mod op;
-mod reference;
-mod string;
-mod version;
+pub mod reference;
+pub mod string;
+pub mod version;
 
-pub type Boolean = number::Boolean;
-pub type Complex = number::Complex;
-pub type Float = number::Float;
-pub type Int = number::Int;
-pub type UInt = number::UInt;
-pub type Number = number::Number;
+pub type Number = number::instance::Number;
 pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send + Sync>>;
 pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
 pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + Unpin>>;
@@ -42,7 +38,7 @@ pub enum Value {
     Vector(Vec<Value>),
 }
 
-impl class::Instance for Value {
+impl Instance for Value {
     type Class = class::ValueType;
 
     fn class(&self) -> class::ValueType {
@@ -163,11 +159,11 @@ impl<E: Into<error::TCError>, T: TryFrom<Value, Error = E>> TryFrom<Value> for V
 struct ValueVisitor;
 
 impl ValueVisitor {
-    fn visit_float<F: Into<Float>>(&self, f: F) -> TCResult<Value> {
+    fn visit_float<F: Into<number::instance::Float>>(&self, f: F) -> TCResult<Value> {
         self.visit_number(f.into())
     }
 
-    fn visit_int<I: Into<Int>>(&self, i: I) -> TCResult<Value> {
+    fn visit_int<I: Into<number::instance::Int>>(&self, i: I) -> TCResult<Value> {
         self.visit_number(i.into())
     }
 

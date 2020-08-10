@@ -2,8 +2,9 @@ use std::cmp::Ordering::{self, *};
 use std::convert::TryInto;
 use std::ops::Bound;
 
+use crate::class::Instance;
 use crate::error;
-use crate::value::class::{Instance, ValueType};
+use crate::value::class::ValueType;
 use crate::value::{Number, TCResult, Value};
 
 pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {

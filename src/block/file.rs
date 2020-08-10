@@ -15,8 +15,8 @@ use crate::transaction::{Transact, TxnId};
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
-use super::{Block, BlockData, BlockId, BlockOwned};
 use super::cache::Cache;
+use super::{Block, BlockData, BlockId, BlockOwned};
 
 const ERR_CORRUPT: &str = "Data corruption error detected! Please file a bug report.";
 const TXN_CACHE: &str = ".pending";
