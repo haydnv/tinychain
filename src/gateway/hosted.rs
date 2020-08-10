@@ -51,7 +51,6 @@ impl Hosted {
         }
     }
 
-    #[allow(dead_code)]
     pub fn push(&mut self, path: TCPath, cluster: Arc<Cluster>) -> Option<Arc<Cluster>> {
         let mut node = &mut self.root;
         for segment in path.clone() {

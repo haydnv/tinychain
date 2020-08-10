@@ -5,10 +5,10 @@ use futures::{future, stream, Stream};
 use crate::auth::{Auth, Token};
 use crate::block::dir::Dir;
 use crate::class::{State, TCResult};
-use crate::collection::GetResult;
+use crate::collection::{GetResult, Graph};
 use crate::error;
 use crate::kernel;
-use crate::transaction::{Txn, TxnContext, TxnId};
+use crate::transaction::{Txn, TxnId};
 use crate::value::link::Link;
 use crate::value::{Value, ValueId};
 
@@ -73,7 +73,7 @@ impl Gateway {
         subject: &Link,
         op: S,
         auth: &Auth,
-    ) -> TCResult<TxnContext> {
+    ) -> TCResult<Graph> {
         if subject.host().is_none() {
             kernel::post(subject.path(), op, auth).await
         } else {

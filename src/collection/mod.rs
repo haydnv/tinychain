@@ -16,7 +16,11 @@ pub mod graph;
 pub mod table;
 pub mod tensor;
 
+pub type BTree = btree::BTree;
 pub type GetResult = TCResult<TCStream<State>>;
+pub type Graph = graph::Graph;
+pub type Table = table::Table;
+pub type Tensor = tensor::Tensor;
 
 #[async_trait]
 pub trait Collect: Transact + Send + Sync {

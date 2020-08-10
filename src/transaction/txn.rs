@@ -3,21 +3,22 @@ use std::fmt;
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
 
-use futures::{future, Stream};
+use futures::future;
+use futures::stream::Stream;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::Auth;
 use crate::block::dir::Dir;
-use crate::class::{State, TCBoxTryFuture, TCResult};
-use crate::collection::GetResult;
+use crate::class::{TCBoxTryFuture, TCResult};
+use crate::collection::graph::Graph;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::value::link::*;
-use crate::value::op::Subject;
 use crate::value::*;
 
-use super::{Transact, TxnContext};
+use super::Transact;
+
+const GRAPH_NAME: &str = ".graph";
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct TxnId {
@@ -94,6 +95,10 @@ impl Txn {
     }
 
     pub async fn subcontext(self: Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn>> {
+        if subcontext.as_str() == GRAPH_NAME {
+            return Err(error::bad_request("This name is reserved", subcontext));
+        }
+
         let subcontext: Arc<Dir> = self
             .context
             .create_dir(&self.id, &subcontext.into())
@@ -125,6 +130,30 @@ impl Txn {
         &self.id
     }
 
+    pub async fn execute<S: Stream<Item = (ValueId, Value)>>(
+        &self,
+        _parameters: S,
+    ) -> TCResult<Graph> {
+        // instantiate a graph with two node classes: providers (Values) and provided (States)
+        // instantiate a new FuturesUnordered to execute the transaction's sub-tasks
+        // for each parameter:
+        //   if it's already resolved, add it to the graph
+        //   if all its dependencies are resolved, add a resolver future to the collection
+        //   otherwise (if it depends on an unresolved parameter) add it to the graph
+
+        // while there are unresolved futures in the collection:
+        // for each resolved parameter:
+        //   update its status in the graph
+        //   get a list of its unresolved dependents
+        //   for each of them:
+        //     if all its dependencies are resolved, add a resolver future to the collection
+
+        // if there are still unresolved parameters in the graph, return an error
+        // otherwise, return the graph
+
+        Err(error::not_implemented())
+    }
+
     pub async fn commit(&self) {
         println!("commit!");
 
@@ -145,59 +174,5 @@ impl Txn {
 
     fn mutate(self: &Arc<Self>, state: Arc<dyn Transact>) {
         self.mutated.write().unwrap().push(state)
-    }
-
-    pub async fn get(
-        self: &Arc<Self>,
-        subject: Subject,
-        selector: Value,
-        auth: &Auth,
-    ) -> GetResult {
-        println!("txn::get {}", subject);
-
-        match subject {
-            Subject::Ref(r) => match self.resolve(r) {
-                Ok(_state) => Err(error::not_implemented()),
-                Err(cause) => Err(cause),
-            },
-            Subject::Link(l) => {
-                self.gateway
-                    .get(&l, selector, auth, Some(self.id.clone()))
-                    .await
-            }
-        }
-    }
-
-    pub async fn put<S: Stream<Item = (Value, Value)>>(
-        self: &Arc<Self>,
-        subject: Subject,
-        selector: Value,
-        data: State,
-        auth: &Auth,
-    ) -> TCResult<State> {
-        println!("txn::put {}", subject);
-
-        match subject {
-            Subject::Ref(r) => match self.resolve(r) {
-                Ok(_state) => Err(error::not_implemented()),
-                Err(cause) => Err(cause),
-            },
-            Subject::Link(l) => self.gateway.put(&l, selector, data, auth).await,
-        }
-    }
-
-    pub async fn post<S: Stream<Item = (ValueId, Value)>>(
-        self: &Arc<Self>,
-        subject: Subject,
-        _op: S,
-        _auth: &Auth,
-    ) -> TCResult<TxnContext> {
-        println!("txn::post {}", subject);
-
-        Err(error::not_implemented())
-    }
-
-    fn resolve(&self, _id: TCRef) -> TCResult<State> {
-        Err(error::not_implemented())
     }
 }
