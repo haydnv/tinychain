@@ -49,7 +49,7 @@ pub enum ValueType {
     Number(NumberType),
     TCString(StringType),
     Op,
-    Vector,
+    Tuple,
 }
 
 impl ValueType {
@@ -84,7 +84,7 @@ impl fmt::Display for ValueType {
             Number(n) => write!(f, "type Number: {}", n),
             TCString(s) => write!(f, "type String: {}", s),
             Op => write!(f, "type Op"),
-            Vector => write!(f, "type Vector"),
+            Tuple => write!(f, "type Tuple"),
         }
     }
 }

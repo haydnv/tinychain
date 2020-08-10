@@ -36,7 +36,7 @@ pub enum Value {
     Number(Number),
     TCString(TCString),
     Op(Box<op::Op>),
-    Vector(Vec<Value>),
+    Tuple(Vec<Value>),
 }
 
 impl Instance for Value {
@@ -50,7 +50,7 @@ impl Instance for Value {
             Value::Number(n) => ValueType::Number(n.class()),
             Value::TCString(s) => ValueType::TCString(s.class()),
             Value::Op(_) => ValueType::Op,
-            Value::Vector(_) => ValueType::Vector,
+            Value::Tuple(_) => ValueType::Tuple,
         }
     }
 }
@@ -106,7 +106,7 @@ impl<T: Into<Value>> From<Option<T>> for Value {
 
 impl<T: Into<Value>> From<Vec<T>> for Value {
     fn from(mut v: Vec<T>) -> Value {
-        Value::Vector(v.drain(..).map(|i| i.into()).collect())
+        Value::Tuple(v.drain(..).map(|i| i.into()).collect())
     }
 }
 
@@ -148,11 +148,11 @@ impl<E: Into<error::TCError>, T: TryFrom<Value, Error = E>> TryFrom<Value> for V
 
     fn try_from(v: Value) -> TCResult<Vec<T>> {
         match v {
-            Value::Vector(mut v) => v
+            Value::Tuple(mut v) => v
                 .drain(..)
                 .map(|i| i.try_into().map_err(|e: E| e.into()))
                 .collect(),
-            other => Err(error::bad_request("Expected a Vector but found", other)),
+            other => Err(error::bad_request("Expected a Tuple but found", other)),
         }
     }
 }
@@ -230,7 +230,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                     2 => Ok(op::Op::Put(subject.into(), value.remove(0), value.remove(0)).into()),
                     _ => Err(de::Error::custom(format!(
                         "Expected a Get or Put op, found {}",
-                        Value::Vector(value)
+                        Value::Tuple(value)
                     ))),
                 }
             } else if let Ok(link) = key.parse::<link::Link>() {
@@ -279,7 +279,7 @@ impl Serialize for Value {
                 map.end()
             }
             Value::TCString(tc_string) => tc_string.serialize(s),
-            Value::Vector(v) => {
+            Value::Tuple(v) => {
                 let mut seq = s.serialize_seq(Some(v.len()))?;
                 for item in v {
                     seq.serialize_element(item)?;
@@ -304,7 +304,7 @@ impl fmt::Display for Value {
             Value::Number(n) => write!(f, "Number({})", n),
             Value::TCString(s) => write!(f, "String({})", s),
             Value::Op(op) => write!(f, "Op: {}", op),
-            Value::Vector(v) => write!(
+            Value::Tuple(v) => write!(
                 f,
                 "[{}]",
                 v.iter()

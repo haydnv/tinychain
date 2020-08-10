@@ -144,7 +144,7 @@ impl Schema {
     fn validate_key(&self, key: &[Value]) -> TCResult<()> {
         if self.len() != key.len() {
             return Err(error::bad_request(
-                &format!("Invalid key {} for schema", Value::Vector(key.to_vec())),
+                &format!("Invalid key {} for schema", Value::Tuple(key.to_vec())),
                 self,
             ));
         }
@@ -157,7 +157,7 @@ impl Schema {
             return Err(error::bad_request(
                 &format!(
                     "Invalid selector {} for schema",
-                    Value::Vector(prefix.to_vec())
+                    Value::Tuple(prefix.to_vec())
                 ),
                 self,
             ));
