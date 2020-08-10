@@ -5,11 +5,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 
+use crate::class::TCResult;
 use crate::error;
 use crate::transaction::lock::{Mutate, TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::TxnId;
 use crate::value::link::PathSegment;
-use crate::value::TCResult;
 
 mod cache;
 pub mod dir;

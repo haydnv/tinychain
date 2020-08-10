@@ -4,12 +4,12 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::ops::Bound;
 
-use crate::class::Instance;
+use crate::class::{Instance, TCResult};
 use crate::collection::btree;
 use crate::error;
 use crate::value::class::ValueType;
 use crate::value::number::class::NumberType;
-use crate::value::{TCResult, Value, ValueId};
+use crate::value::{Value, ValueId};
 
 pub type Row = HashMap<ValueId, Value>;
 

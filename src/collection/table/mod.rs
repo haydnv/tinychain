@@ -4,9 +4,10 @@ use std::sync::Arc;
 use futures::future;
 use futures::{Stream, StreamExt};
 
+use crate::class::{TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
 use crate::transaction::{Txn, TxnId};
-use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
+use crate::value::{Value, ValueId};
 
 mod index;
 mod schema;

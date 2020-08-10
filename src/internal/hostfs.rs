@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use bytes::Bytes;
 
+use crate::class::TCResult;
 use crate::error;
 use crate::value::link::PathSegment;
-use crate::value::TCResult;
 
 use super::lock::RwLock;
 

@@ -4,13 +4,13 @@ use futures::{future, stream, Stream};
 
 use crate::auth::{Auth, Token};
 use crate::block::dir::Dir;
-use crate::class::State;
+use crate::class::{State, TCResult};
 use crate::collection::GetResult;
 use crate::error;
 use crate::kernel;
 use crate::transaction::{Txn, TxnContext, TxnId};
 use crate::value::link::Link;
-use crate::value::{TCResult, Value, ValueId};
+use crate::value::{Value, ValueId};
 
 use super::{Hosted, NetworkTime};
 

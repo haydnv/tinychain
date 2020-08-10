@@ -7,6 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uuid::Uuid;
 
+use crate::class::{TCBoxTryFuture, TCResult};
 use crate::collection::btree;
 use crate::collection::tensor;
 use crate::error;
@@ -15,7 +16,6 @@ use crate::internal::lock::RwLock;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
-use crate::value::{TCBoxTryFuture, TCResult};
 
 use super::file::File;
 

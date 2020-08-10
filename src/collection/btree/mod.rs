@@ -14,12 +14,12 @@ use uuid::Uuid;
 
 use crate::block::file::File;
 use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
-use crate::class::Instance;
+use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::{ValueClass, ValueType};
-use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
+use crate::value::{Value, ValueId};
 
 use super::{Collect, GetResult, State};
 

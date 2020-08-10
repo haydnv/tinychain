@@ -15,12 +15,12 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use serde::de::DeserializeOwned;
 
 use crate::auth::Token;
-use crate::class::State;
+use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::gateway::{Gateway, Protocol};
 use crate::transaction::TxnId;
 use crate::value::link::*;
-use crate::value::{TCResult, TCStream, Value};
+use crate::value::Value;
 
 struct StreamReader<S: Stream<Item = Result<Bytes, hyper::Error>>> {
     source: S,

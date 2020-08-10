@@ -8,9 +8,9 @@ use bytes::Bytes;
 use futures::Stream;
 
 use crate::block::dir::Dir;
+use crate::class::TCStream;
 use crate::transaction::TxnId;
 use crate::value::link::TCPath;
-use crate::value::TCStream;
 
 type Blocks = TCStream<Bytes>;
 type FileData = (TCPath, Blocks);

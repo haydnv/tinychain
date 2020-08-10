@@ -5,10 +5,11 @@ use std::sync::Arc;
 use futures::future;
 use futures::stream::{self, StreamExt, TryStreamExt};
 
+use crate::class::{TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{BTree, BTreeRange};
 use crate::error;
 use crate::transaction::{Txn, TxnId};
-use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
+use crate::value::{Value, ValueId};
 
 use super::index::TableBase;
 use super::schema::{Bounds, Column, Row, Schema};

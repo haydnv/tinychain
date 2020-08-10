@@ -6,10 +6,10 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 
-use crate::class::State;
+use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::transaction::{Transact, Txn};
-use crate::value::{TCResult, TCStream, Value};
+use crate::value::Value;
 
 pub mod btree;
 pub mod graph;

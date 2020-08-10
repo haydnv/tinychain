@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use futures::future::{self, Future};
 use futures::task::{Context, Poll, Waker};
 
+use crate::class::TCResult;
 use crate::error;
-use crate::value::TCResult;
 
 use super::{Transact, TxnId};
 

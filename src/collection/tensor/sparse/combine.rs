@@ -6,7 +6,8 @@ use std::task::{self, Poll};
 use futures::stream::{Fuse, Stream, StreamExt};
 use pin_project::pin_project;
 
-use crate::value::{Number, TCResult};
+use crate::class::TCResult;
+use crate::value::Number;
 
 use super::bounds::compare_coord;
 use super::{SparseRow, SparseStream};

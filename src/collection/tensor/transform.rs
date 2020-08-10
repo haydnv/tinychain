@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::iter;
 
+use crate::class::TCResult;
 use crate::error;
-use crate::value::TCResult;
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 

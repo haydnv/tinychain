@@ -1,13 +1,11 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::{Future, Stream};
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-use crate::class::Instance;
+use crate::class::{Instance, TCResult};
 use crate::error;
 
 pub mod class;
@@ -19,13 +17,9 @@ pub mod string;
 pub mod version;
 
 pub type Number = number::instance::Number;
-pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send + Sync>>;
-pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
-pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + Unpin>>;
+pub type Op = op::Op;
 pub type TCString = string::TCString;
 pub type TCRef = reference::TCRef;
-pub type TCResult<T> = Result<T, error::TCError>;
-pub type TCTryStream<T> = TCStream<TCResult<T>>;
 pub type ValueId = string::ValueId;
 pub type ValueType = class::ValueType;
 

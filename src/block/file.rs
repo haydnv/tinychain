@@ -7,13 +7,13 @@ use async_trait::async_trait;
 use futures::future::join_all;
 use uuid::Uuid;
 
+use crate::class::TCResult;
 use crate::error;
 use crate::internal::hostfs;
 use crate::internal::lock::RwLock;
 use crate::transaction::lock::{Mutable, TxnLock, TxnLockReadGuard};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::PathSegment;
-use crate::value::TCResult;
 
 use super::cache::Cache;
 use super::{Block, BlockData, BlockId, BlockOwned};

@@ -20,7 +20,7 @@ mod value;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const RESERVED: [&str; 1] = ["/sbin"];
 
-fn block_size(flag: &str) -> value::TCResult<usize> {
+fn block_size(flag: &str) -> class::TCResult<usize> {
     let msg = "Unable to parse value of block_size";
     let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
         .map_err(|_| error::bad_request(msg, flag))?;
@@ -93,7 +93,7 @@ async fn configure(
     clusters: Vec<value::link::TCPath>,
     data_dir: Arc<block::dir::Dir>,
     workspace: Arc<block::dir::Dir>,
-) -> value::TCResult<gateway::Hosted> {
+) -> class::TCResult<gateway::Hosted> {
     let txn = gateway::Gateway::new(gateway::Hosted::new(), workspace)
         .transaction()
         .await?;

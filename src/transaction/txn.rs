@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::Auth;
 use crate::block::dir::Dir;
-use crate::class::State;
+use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::collection::GetResult;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};

@@ -7,9 +7,10 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use signature::{Signature, Signer, Verifier};
 
+use crate::class::TCResult;
 use crate::error;
 use crate::value::link::{Link, TCPath};
-use crate::value::{TCResult, Value};
+use crate::value::Value;
 
 pub type Auth = Option<Token>;
 

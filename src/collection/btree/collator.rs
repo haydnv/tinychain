@@ -2,10 +2,10 @@ use std::cmp::Ordering::{self, *};
 use std::convert::TryInto;
 use std::ops::Bound;
 
-use crate::class::Instance;
+use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::value::class::ValueType;
-use crate::value::{Number, TCResult, Value};
+use crate::value::{Number, Value};
 
 pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {
     left.expect(dtype, "for collation")?;

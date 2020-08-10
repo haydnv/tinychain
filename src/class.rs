@@ -1,9 +1,19 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::pin::Pin;
+
+use futures::future::Future;
+use futures::stream::Stream;
 
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::value::{TCResult, Value, ValueId, ValueType};
+use crate::value::{Value, ValueId, ValueType};
+
+pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send + Sync>>;
+pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
+pub type TCResult<T> = Result<T, error::TCError>;
+pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + Unpin>>;
+pub type TCTryStream<T> = TCStream<TCResult<T>>;
 
 pub trait Class: Clone + Eq + fmt::Display {
     type Instance: Instance;

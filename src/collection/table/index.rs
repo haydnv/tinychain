@@ -7,11 +7,12 @@ use futures::future::{self, join_all, try_join_all};
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::block::dir::Dir;
+use crate::class::{TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{self, BTree};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
+use crate::value::{Value, ValueId};
 
 use super::schema::{Bounds, Column, ColumnBound, Row, Schema};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};

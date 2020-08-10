@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::class::{TCBoxTryFuture, TCResult};
 use crate::transaction::{Txn, TxnId};
 use crate::value::number::class::NumberType;
-use crate::value::{Number, TCBoxTryFuture, TCResult};
+use crate::value::Number;
 
 mod bounds;
 mod dense;
