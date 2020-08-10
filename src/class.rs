@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::fmt;
 
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::value::{TCResult, Value, ValueType};
+use crate::value::{TCResult, Value, ValueId, ValueType};
 
 pub trait Class: Clone + Eq + fmt::Display {
     type Instance: Instance;
@@ -39,13 +40,15 @@ pub enum TCType {
     Value(ValueType),
 }
 
-pub enum ClassDef {
+pub enum ClassMember {
     Type(TCType),
-    Class(Box<ClassDef>),
+    Class(Box<ClassMember>),
 }
 
+pub type ClassDef = HashMap<ValueId, ClassMember>;
+
 pub enum State {
-    Class(ClassDef),
+    Class(),
     Collection(Collection),
     Value(Value),
 }

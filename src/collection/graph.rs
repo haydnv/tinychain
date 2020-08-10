@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -6,6 +5,7 @@ use futures::future::{self, join_all};
 use futures::stream::{FuturesOrdered, StreamExt, TryStreamExt};
 use futures::try_join;
 
+use crate::class::ClassDef;
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -25,23 +25,8 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub async fn create(txn: Arc<Txn>, node_schema: Vec<table::Column>) -> TCResult<Graph> {
-        // TODO: replace incrementing numeric IDs with UUIDs
-
-        let key: Vec<table::Column> = vec![("id", NumberType::uint64()).try_into()?];
-        let nodes = table::Table::create(txn.clone(), (key, node_schema).into()).await?;
-
-        let max_id = 0u64;
-        let shape: tensor::Shape = vec![max_id, max_id].into();
-        let edges =
-            tensor::SparseTable::create_table(txn.clone(), shape.len(), NumberType::Bool).await?;
-        let max_id = TxnLock::new(txn.id().clone(), 0u64.into());
-
-        Ok(Graph {
-            nodes,
-            edges,
-            max_id,
-        })
+    pub async fn create(_txn: Arc<Txn>, _class: ClassDef) -> TCResult<Graph> {
+        Err(error::not_implemented())
     }
 
     async fn get_matrix(&self, txn_id: &TxnId) -> TCResult<SparseTensor> {

@@ -6,7 +6,7 @@ pub enum Code {
     // "I know that what you're asking for doesn't make sense"
     BadRequest,
 
-    // "Another caller has reserved this resource so that your request cannot be fulfilled"
+    // "Another caller has this resource reserved, so your request cannot be fulfilled"
     Conflict,
 
     // "I know who you are and you're not allowed to do this!"
