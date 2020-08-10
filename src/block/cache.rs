@@ -24,7 +24,7 @@ impl<T: BlockData> Cache<T> {
     }
 
     pub fn insert(&mut self, txn_id: TxnId, block_id: BlockId, block: T) -> TxnLock<T> {
-        let lock = TxnLock::new(txn_id.clone(), block);
+        let lock = TxnLock::new(txn_id, block);
         self.blocks.insert(block_id, lock.clone());
         lock
     }

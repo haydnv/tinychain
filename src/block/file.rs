@@ -16,8 +16,7 @@ use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
 use super::{Block, BlockData, BlockId, BlockOwned};
-
-mod cache;
+use super::cache::Cache;
 
 const ERR_CORRUPT: &str = "Data corruption error detected! Please file a bug report.";
 const TXN_CACHE: &str = ".pending";
@@ -26,7 +25,7 @@ pub struct File<T: BlockData> {
     dir: RwLock<hostfs::Dir>,
     pending: RwLock<hostfs::Dir>,
     listing: TxnLock<Mutable<HashSet<BlockId>>>,
-    cache: RwLock<cache::Cache<T>>,
+    cache: RwLock<Cache<T>>,
     mutated: TxnLock<Mutable<HashSet<BlockId>>>,
 }
 
@@ -44,7 +43,7 @@ impl<T: BlockData> File<T> {
             dir,
             pending: lock.create_dir(TXN_CACHE.parse()?)?,
             listing: TxnLock::new(txn_id.clone(), HashSet::new().into()),
-            cache: RwLock::new(cache::Cache::new()),
+            cache: RwLock::new(Cache::new()),
             mutated: TxnLock::new(txn_id, HashSet::new().into()),
         }))
     }

@@ -11,6 +11,7 @@ use crate::transaction::TxnId;
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
+mod cache;
 pub mod dir;
 pub mod file;
 
