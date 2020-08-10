@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -11,16 +12,19 @@ use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::number::class::NumberType;
 use crate::value::number::instance::{Number, UInt};
-use crate::value::Value;
+use crate::value::{Value, ValueId};
 
-use super::table;
-use super::tensor::{self, einsum, SparseTensor, TensorBoolean, TensorIO};
+use super::table::{Selection, TableBase};
+use super::tensor::{
+    self, einsum, AxisBounds, SparseTensor, TensorBoolean, TensorIO, TensorTransform,
+};
 
 const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";
+const NODE_ID_COL: &str = "node_id";
 
 pub struct Graph {
-    nodes: table::TableBase,
-    edges: table::TableBase,
+    nodes: TableBase,
+    edges: TableBase,
     max_id: TxnLock<Mutable<u64>>,
 }
 
@@ -88,6 +92,37 @@ impl Graph {
 
         let found: TCTryStream<Vec<Value>> = Box::pin(found.flatten());
         Ok(found)
+    }
+
+    pub async fn remove_edge(&self, txn_id: TxnId, node_from: u64, node_to: u64) -> TCResult<()> {
+        let edges = self.get_matrix(&txn_id).await?;
+        edges
+            .write_value_at(txn_id, vec![node_from, node_to], false.into())
+            .await
+    }
+
+    pub async fn remove_node(&self, txn: Arc<Txn>, node_id: u64) -> TCResult<()> {
+        let edges = self.get_matrix(txn.id()).await?;
+        let max_id = self.max_id.read(txn.id()).await?;
+        if edges
+            .slice(vec![AxisBounds::all(*max_id), AxisBounds::At(node_id)].into())?
+            .any(txn.clone())
+            .await?
+        {
+            return Err(error::bad_request(
+                "Tried to remove a graph node that still has edges",
+                node_id,
+            ));
+        }
+
+        self.nodes
+            .delete_row(
+                txn.id(),
+                vec![(ValueId::from_str(NODE_ID_COL)?, u64_value(node_id))]
+                    .into_iter()
+                    .collect(),
+            )
+            .await
     }
 }
 

@@ -17,6 +17,8 @@ pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
 
 pub type Array = dense::array::Array;
+pub type AxisBounds = bounds::AxisBounds;
+pub type Bounds = bounds::Bounds;
 pub type DenseTensor = dense::DenseTensor;
 pub type Shape = bounds::Shape;
 pub type SparseTable = sparse::SparseTable;
