@@ -5,8 +5,8 @@ use std::ops::{Add, Mul};
 use arrayfire as af;
 use bytes::Bytes;
 
+use crate::block::BlockData;
 use crate::error;
-use crate::state::file::block::BlockData;
 use crate::value::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
 use crate::value::{Boolean, Complex, Float, Int, Number, TCResult, UInt};
 

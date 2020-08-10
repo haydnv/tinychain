@@ -4,16 +4,16 @@ use std::sync::Arc;
 
 use structopt::StructOpt;
 
-#[allow(dead_code)]
 mod auth;
-
+mod block;
+mod class;
 mod cluster;
+mod collection;
 mod error;
 mod gateway;
 mod http;
 mod internal;
 mod kernel;
-mod state;
 mod transaction;
 mod value;
 
@@ -68,9 +68,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let txn_id = transaction::TxnId::new(gateway::Gateway::time());
     let fs_cache_persistent = internal::hostfs::mount(config.data_dir);
-    let data_dir = state::Dir::create(txn_id.clone(), fs_cache_persistent, false);
+    let data_dir = block::dir::Dir::create(txn_id.clone(), fs_cache_persistent, false);
     let fs_cache_temporary = internal::hostfs::mount(config.workspace);
-    let workspace = state::Dir::create(txn_id.clone(), fs_cache_temporary, true);
+    let workspace = block::dir::Dir::create(txn_id.clone(), fs_cache_temporary, true);
 
     use transaction::Transact;
     data_dir.commit(&txn_id).await;
@@ -91,8 +91,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 async fn configure(
     clusters: Vec<value::link::TCPath>,
-    data_dir: Arc<state::Dir>,
-    workspace: Arc<state::Dir>,
+    data_dir: Arc<block::dir::Dir>,
+    workspace: Arc<block::dir::Dir>,
 ) -> value::TCResult<gateway::Hosted> {
     let txn = gateway::Gateway::new(gateway::Hosted::new(), workspace)
         .transaction()

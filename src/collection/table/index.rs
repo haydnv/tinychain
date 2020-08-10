@@ -6,9 +6,9 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all};
 use futures::stream::{StreamExt, TryStreamExt};
 
+use crate::block::dir::Dir;
+use crate::collection::btree::{self, BTree};
 use crate::error;
-use crate::state::btree::{self, BTree};
-use crate::state::dir::Dir;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};

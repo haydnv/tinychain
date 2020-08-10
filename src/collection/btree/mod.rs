@@ -12,9 +12,9 @@ use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block::file::File;
+use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
 use crate::error;
-use crate::state::file::block::*;
-use crate::state::file::File;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::{Instance, ValueClass, ValueType};

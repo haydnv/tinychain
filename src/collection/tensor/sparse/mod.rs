@@ -8,9 +8,9 @@ use futures::future::{self, try_join_all, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 
+use crate::collection::btree;
+use crate::collection::table::{self, Selection, Table, TableBase};
 use crate::error;
-use crate::state::btree;
-use crate::state::table::{self, Selection, Table, TableBase};
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::{Instance, NumberClass, NumberInstance, NumberType, ValueType};
 use crate::value::{Number, TCBoxTryFuture, TCResult, TCTryStream, UInt, Value, ValueId};
@@ -1439,7 +1439,11 @@ impl TensorView for SparseTensor {
 impl TensorBoolean for SparseTensor {
     fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool> {
         Box::pin(async move {
-            let mut coords = self.accessor.clone().filled(txn).await?
+            let mut coords = self
+                .accessor
+                .clone()
+                .filled(txn)
+                .await?
                 .map_ok(|(coord, _)| coord)
                 .zip(stream::iter(Bounds::all(self.shape()).affected()))
                 .map(|(r, expected)| r.map(|actual| (actual, expected)));

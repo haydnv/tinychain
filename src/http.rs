@@ -15,9 +15,9 @@ use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use serde::de::DeserializeOwned;
 
 use crate::auth::Token;
+use crate::class::State;
 use crate::error;
 use crate::gateway::{Gateway, Protocol};
-use crate::state::State;
 use crate::transaction::TxnId;
 use crate::value::link::*;
 use crate::value::{TCResult, TCStream, Value};

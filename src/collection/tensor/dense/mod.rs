@@ -9,9 +9,9 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use itertools::Itertools;
 
+use crate::block::file::File;
+use crate::block::BlockId;
 use crate::error;
-use crate::state::file::block::BlockId;
-use crate::state::file::File;
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::{Instance, NumberClass, NumberInstance, NumberType};
 use crate::value::{Number, TCBoxTryFuture, TCResult, TCStream, TCTryStream};

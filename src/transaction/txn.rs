@@ -8,9 +8,11 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::Auth;
+use crate::block::dir::Dir;
+use crate::class::State;
+use crate::collection::GetResult;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
-use crate::state::{Dir, GetResult, State};
 use crate::value::link::*;
 use crate::value::op::Subject;
 use crate::value::*;

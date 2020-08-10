@@ -7,11 +7,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uuid::Uuid;
 
+use crate::collection::btree;
+use crate::collection::tensor;
 use crate::error;
 use crate::internal::hostfs;
 use crate::internal::lock::RwLock;
-use crate::state::btree;
-use crate::state::tensor;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};

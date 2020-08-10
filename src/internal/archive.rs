@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 
-use crate::state::Dir;
+use crate::block::dir::Dir;
 use crate::transaction::TxnId;
 use crate::value::link::TCPath;
 use crate::value::TCStream;

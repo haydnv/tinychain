@@ -4,8 +4,8 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::ops::Bound;
 
+use crate::collection::btree;
 use crate::error;
-use crate::state::btree;
 use crate::value::class::{Instance, NumberType, ValueType};
 use crate::value::{TCResult, Value, ValueId};
 

@@ -6,7 +6,7 @@ use futures::future::join_all;
 use crate::transaction::lock::TxnLock;
 use crate::transaction::{Transact, TxnId};
 
-use super::block::*;
+use super::{BlockData, BlockId};
 
 pub struct Cache<T: BlockData> {
     blocks: HashMap<BlockId, TxnLock<T>>,

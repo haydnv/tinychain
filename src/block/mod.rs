@@ -11,18 +11,23 @@ use crate::transaction::TxnId;
 use crate::value::link::PathSegment;
 use crate::value::TCResult;
 
-use super::File;
+pub mod dir;
+pub mod file;
 
 pub type BlockId = PathSegment;
 
 pub struct Block<'a, T: BlockData> {
-    file: &'a File<T>,
+    file: &'a file::File<T>,
     block_id: BlockId,
     lock: TxnLockReadGuard<T>,
 }
 
 impl<'a, T: BlockData> Block<'a, T> {
-    pub fn new(file: &'a File<T>, block_id: BlockId, lock: TxnLockReadGuard<T>) -> Block<'a, T> {
+    pub fn new(
+        file: &'a file::File<T>,
+        block_id: BlockId,
+        lock: TxnLockReadGuard<T>,
+    ) -> Block<'a, T> {
         Block {
             file,
             block_id,
@@ -51,7 +56,7 @@ impl<'a, T: BlockData> Deref for Block<'a, T> {
 }
 
 pub struct BlockMut<'a, T: BlockData> {
-    file: &'a File<T>,
+    file: &'a file::File<T>,
     block_id: BlockId,
     lock: TxnLockWriteGuard<T>,
 }
@@ -81,13 +86,17 @@ impl<'a, T: BlockData> DerefMut for BlockMut<'a, T> {
 }
 
 pub struct BlockOwned<T: BlockData> {
-    file: Arc<File<T>>,
+    file: Arc<file::File<T>>,
     block_id: BlockId,
     lock: TxnLockReadGuard<T>,
 }
 
 impl<T: BlockData> BlockOwned<T> {
-    pub fn new(file: Arc<File<T>>, block_id: BlockId, lock: TxnLockReadGuard<T>) -> BlockOwned<T> {
+    pub fn new(
+        file: Arc<file::File<T>>,
+        block_id: BlockId,
+        lock: TxnLockReadGuard<T>,
+    ) -> BlockOwned<T> {
         BlockOwned {
             file,
             block_id,
@@ -117,7 +126,7 @@ impl<T: BlockData> Deref for BlockOwned<T> {
 }
 
 pub struct BlockOwnedMut<T: BlockData> {
-    file: Arc<File<T>>,
+    file: Arc<file::File<T>>,
     block_id: BlockId,
     lock: TxnLockWriteGuard<T>,
 }

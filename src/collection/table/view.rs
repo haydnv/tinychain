@@ -5,8 +5,8 @@ use std::sync::Arc;
 use futures::future;
 use futures::stream::{self, StreamExt, TryStreamExt};
 
+use crate::collection::btree::{BTree, BTreeRange};
 use crate::error;
-use crate::state::btree::{BTree, BTreeRange};
 use crate::transaction::{Txn, TxnId};
 use crate::value::{TCBoxTryFuture, TCResult, TCStream, Value, ValueId};
 

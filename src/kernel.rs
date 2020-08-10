@@ -1,8 +1,8 @@
 use futures::Stream;
 
 use crate::auth::Auth;
+use crate::class::State;
 use crate::error;
-use crate::state::State;
 use crate::transaction::*;
 use crate::value::link::TCPath;
 use crate::value::{TCResult, Value, ValueId};

@@ -6,19 +6,17 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 
+use crate::class::State;
 use crate::error;
 use crate::internal::archive::Archive;
 use crate::transaction::{Transact, Txn};
 use crate::value::{TCResult, TCStream, Value};
 
 pub mod btree;
-mod dir;
-pub mod file;
 pub mod graph;
-mod table;
-mod tensor;
+pub mod table;
+pub mod tensor;
 
-pub type Dir = dir::Dir;
 pub type GetResult = TCResult<TCStream<State>>;
 
 #[async_trait]
@@ -46,28 +44,36 @@ pub trait Collect: Transact + Send + Sync {
 #[async_trait]
 pub trait Persist: Archive + Collect {}
 
-pub enum State {
-    Index(Arc<btree::BTree>),
-    Value(Value),
+pub enum Collection {
+    BTree(Arc<btree::BTree>),
+    Table(table::Table),
+    Tensor(tensor::Tensor),
 }
 
-impl From<Arc<btree::BTree>> for State {
-    fn from(i: Arc<btree::BTree>) -> State {
-        State::Index(i)
+impl From<Arc<btree::BTree>> for Collection {
+    fn from(b: Arc<btree::BTree>) -> Collection {
+        Self::BTree(b)
     }
 }
 
-impl From<Value> for State {
-    fn from(v: Value) -> State {
-        State::Value(v)
+impl From<table::Table> for Collection {
+    fn from(t: table::Table) -> Collection {
+        Self::Table(t)
     }
 }
 
-impl fmt::Display for State {
+impl From<tensor::Tensor> for Collection {
+    fn from(t: tensor::Tensor) -> Collection {
+        Self::Tensor(t)
+    }
+}
+
+impl fmt::Display for Collection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            State::Index(_) => write!(f, "(index)"),
-            State::Value(v) => write!(f, "state: {}", v),
+            Self::BTree(_) => write!(f, "(B-tree)"),
+            Self::Table(_) => write!(f, "(table)"),
+            Self::Tensor(_) => write!(f, "(tensor)"),
         }
     }
 }
