@@ -12,7 +12,6 @@ mod collection;
 mod error;
 mod gateway;
 mod http;
-mod internal;
 mod kernel;
 mod transaction;
 mod value;
@@ -67,9 +66,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!();
 
     let txn_id = transaction::TxnId::new(gateway::Gateway::time());
-    let fs_cache_persistent = internal::hostfs::mount(config.data_dir);
+    let fs_cache_persistent = block::hostfs::mount(config.data_dir);
     let data_dir = block::dir::Dir::create(txn_id.clone(), fs_cache_persistent, false);
-    let fs_cache_temporary = internal::hostfs::mount(config.workspace);
+    let fs_cache_temporary = block::hostfs::mount(config.workspace);
     let workspace = block::dir::Dir::create(txn_id.clone(), fs_cache_temporary, true);
 
     use transaction::Transact;

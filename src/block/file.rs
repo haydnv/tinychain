@@ -9,28 +9,27 @@ use uuid::Uuid;
 
 use crate::class::TCResult;
 use crate::error;
-use crate::internal::hostfs;
-use crate::internal::lock::RwLock;
 use crate::transaction::lock::{Mutable, TxnLock, TxnLockReadGuard};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::PathSegment;
 
 use super::cache::Cache;
+use super::hostfs;
 use super::{Block, BlockData, BlockId, BlockOwned};
 
 const ERR_CORRUPT: &str = "Data corruption error detected! Please file a bug report.";
 const TXN_CACHE: &str = ".pending";
 
 pub struct File<T: BlockData> {
-    dir: RwLock<hostfs::Dir>,
-    pending: RwLock<hostfs::Dir>,
+    dir: hostfs::RwLock<hostfs::Dir>,
+    pending: hostfs::RwLock<hostfs::Dir>,
     listing: TxnLock<Mutable<HashSet<BlockId>>>,
-    cache: RwLock<Cache<T>>,
+    cache: hostfs::RwLock<Cache<T>>,
     mutated: TxnLock<Mutable<HashSet<BlockId>>>,
 }
 
 impl<T: BlockData> File<T> {
-    pub async fn create(txn_id: TxnId, dir: RwLock<hostfs::Dir>) -> TCResult<Arc<File<T>>> {
+    pub async fn create(txn_id: TxnId, dir: hostfs::RwLock<hostfs::Dir>) -> TCResult<Arc<File<T>>> {
         let mut lock = dir.write().await;
         if !lock.is_empty() {
             return Err(error::bad_request(
@@ -43,7 +42,7 @@ impl<T: BlockData> File<T> {
             dir,
             pending: lock.create_dir(TXN_CACHE.parse()?)?,
             listing: TxnLock::new(txn_id.clone(), HashSet::new().into()),
-            cache: RwLock::new(Cache::new()),
+            cache: hostfs::RwLock::new(Cache::new()),
             mutated: TxnLock::new(txn_id, HashSet::new().into()),
         }))
     }

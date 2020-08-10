@@ -14,6 +14,7 @@ use crate::value::link::PathSegment;
 mod cache;
 pub mod dir;
 pub mod file;
+pub mod hostfs;
 
 pub type BlockId = PathSegment;
 

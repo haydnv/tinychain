@@ -21,7 +21,7 @@ pub struct Dir {
 }
 
 impl Dir {
-    fn new(mount_point: PathBuf) -> Dir {
+    pub fn new(mount_point: PathBuf) -> Dir {
         Dir {
             mount_point,
             contents: HashMap::new(),
@@ -171,10 +171,6 @@ impl Dir {
             Err(cause) => Err(cause),
         }
     }
-}
-
-pub fn mount(mount_point: PathBuf) -> RwLock<Dir> {
-    RwLock::new(Dir::new(mount_point))
 }
 
 fn fs_path(mount_point: &PathBuf, name: &PathSegment) -> PathBuf {
