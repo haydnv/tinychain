@@ -137,16 +137,24 @@ impl<'a> TryFrom<&'a Value> for &'a Number {
     }
 }
 
-impl<E: Into<error::TCError>, T: TryFrom<Value, Error = E>> TryFrom<Value> for Vec<T> {
+impl TryFrom<Value> for ValueId {
     type Error = error::TCError;
 
-    fn try_from(v: Value) -> TCResult<Vec<T>> {
+    fn try_from(v: Value) -> TCResult<ValueId> {
         match v {
-            Value::Tuple(mut v) => v
-                .drain(..)
-                .map(|i| i.try_into().map_err(|e: E| e.into()))
-                .collect(),
-            other => Err(error::bad_request("Expected a Tuple but found", other)),
+            Value::TCString(s) => s.try_into(),
+            other => Err(error::bad_request("Expected ValueId, found", other)),
+        }
+    }
+}
+
+impl TryFrom<Value> for Vec<Value> {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<Vec<Value>> {
+        match v {
+            Value::Tuple(t) => Ok(t),
+            other => Err(error::bad_request("Expected Tuple, found", other)),
         }
     }
 }
