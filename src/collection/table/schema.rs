@@ -1,5 +1,4 @@
 use std::collections::{hash_map, HashMap, HashSet};
-use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::ops::Bound;
@@ -41,20 +40,16 @@ impl<Id: Into<ValueId>> From<(Id, NumberType)> for Column {
     }
 }
 
-impl TryFrom<(&str, NumberType)> for Column {
-    type Error = error::TCError;
-
-    fn try_from(column: (&str, NumberType)) -> TCResult<Column> {
+impl From<(ValueId, ValueType)> for Column {
+    fn from(column: (ValueId, ValueType)) -> Column {
         let (name, dtype) = column;
-        let name: ValueId = name.parse()?;
-        let dtype: ValueType = dtype.into();
         let max_len = None;
 
-        Ok(Column {
+        Column {
             name,
             dtype,
             max_len,
-        })
+        }
     }
 }
 

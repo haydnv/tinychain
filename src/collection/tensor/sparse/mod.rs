@@ -16,7 +16,7 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::class::ValueType;
 use crate::value::number::class::{NumberClass, NumberInstance, NumberType};
 use crate::value::number::instance::{Number, UInt};
-use crate::value::{Value, ValueId};
+use crate::value::{label, Label, Value, ValueId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::*;
@@ -24,6 +24,8 @@ use super::*;
 mod combine;
 
 use combine::SparseCombine;
+
+const VALUE: Label = label("value");
 
 pub type SparseRow = (Vec<u64>, Number);
 pub type SparseStream = TCTryStream<SparseRow>;
@@ -1084,7 +1086,7 @@ impl SparseTable {
     ) -> TCResult<TableBase> {
         let key: Vec<table::Column> = Self::key(ndim);
 
-        let value: Vec<table::Column> = vec![("value", dtype).try_into()?];
+        let value: Vec<table::Column> = vec![(VALUE.into(), ValueType::Number(dtype)).into()];
         let table = Table::create(txn.clone(), (key, value).into()).await?;
         try_join_all(
             (0..ndim).map(|axis| table.add_index(txn.clone(), axis.into(), vec![axis.into()])),
@@ -1221,7 +1223,7 @@ impl SparseAccessor for SparseTable {
                 .table
                 .slice(txn.id(), selector.into())
                 .await?
-                .select(vec!["value".parse()?])?
+                .select(vec![VALUE.into()])?
                 .stream(txn.id().clone())
                 .await?;
 
@@ -1248,7 +1250,7 @@ impl SparseAccessor for SparseTable {
                 .map(|(x, v)| (x.into(), Value::Number(Number::UInt(UInt::U64(v)))))
                 .collect();
 
-            row.insert("value".parse()?, value.into());
+            row.insert(VALUE.into(), value.into());
             self.table.upsert(&txn_id, row).await
         })
     }

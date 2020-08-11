@@ -16,12 +16,17 @@ pub mod reference;
 pub mod string;
 pub mod version;
 
+pub type Label = string::Label;
 pub type Number = number::instance::Number;
 pub type Op = op::Op;
 pub type TCString = string::TCString;
 pub type TCRef = reference::TCRef;
 pub type ValueId = string::ValueId;
 pub type ValueType = class::ValueType;
+
+pub const fn label(id: &'static str) -> string::Label {
+    string::label(id)
+}
 
 #[derive(Clone, PartialEq)]
 pub enum Value {

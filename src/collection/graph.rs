@@ -4,7 +4,7 @@ use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{self, join_all, try_join};
+use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{FuturesOrdered, StreamExt, TryStreamExt};
 use futures::try_join;
 
@@ -12,8 +12,9 @@ use crate::class::{TCResult, TCTryStream};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::number::class::NumberType;
-use crate::value::{Value, ValueId};
+use crate::value::number::class::{NumberType, UIntType};
+use crate::value::string::StringType;
+use crate::value::{label, Label, Value, ValueId, ValueType};
 
 use super::table::{self, Selection, TableBase};
 use super::tensor::{
@@ -21,6 +22,12 @@ use super::tensor::{
 };
 
 const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";
+
+const NODE_FROM: Label = label("node_from");
+const NODE_ID: Label = label("node_id");
+const NODE_KEY: Label = label("node_key");
+const NODE_TO: Label = label("node_to");
+const NODE_TYPE: Label = label("node_type");
 
 pub struct Graph {
     edges: TableBase,
@@ -31,10 +38,45 @@ pub struct Graph {
 
 impl Graph {
     pub async fn create(
-        _txn: Arc<Txn>,
-        _schema: HashMap<ValueId, table::Schema>,
+        txn: Arc<Txn>,
+        mut schema: HashMap<ValueId, table::Schema>,
     ) -> TCResult<Graph> {
-        Err(error::not_implemented())
+        let u64_type = ValueType::Number(NumberType::UInt(UIntType::U64));
+        let edges = TableBase::create(
+            txn.clone(),
+            table::Schema::from((
+                vec![(NODE_FROM.into(), u64_type).into()],
+                vec![(NODE_TO.into(), u64_type).into()],
+            )),
+        );
+
+        let max_id = TxnLock::new(txn.id().clone(), 0u64.into());
+
+        let nodes = schema.drain().map(|(node_type, node_schema)| {
+            TableBase::create(txn.clone(), node_schema).map_ok(|table| (node_type, table))
+        });
+        let nodes = try_join_all(nodes);
+
+        let node_ids = TableBase::create(
+            txn,
+            table::Schema::from((
+                vec![
+                    (NODE_TYPE.into(), ValueType::TCString(StringType::Id)).into(),
+                    (NODE_KEY.into(), ValueType::Tuple).into(),
+                ],
+                vec![(NODE_ID.into(), u64_type).into()],
+            )),
+        );
+
+        let (edges, nodes, node_ids) = try_join!(edges, nodes, node_ids)?;
+        let nodes = nodes.into_iter().collect();
+
+        Ok(Graph {
+            edges,
+            max_id,
+            nodes,
+            node_ids,
+        })
     }
 
     async fn get_matrix(&self, txn_id: &TxnId) -> TCResult<SparseTensor> {
@@ -74,7 +116,7 @@ impl Graph {
             let node_id_insert =
                 self.node_ids
                     .insert(txn_id, vec![Value::Tuple(key)], vec![Value::from(*max_id)]);
-            try_join(node_insert, node_id_insert).await?;
+            try_join!(node_insert, node_id_insert)?;
             *max_id += 1;
             Ok(())
         } else {

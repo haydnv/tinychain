@@ -32,6 +32,22 @@ impl Class for StringType {
     type Instance = TCString;
 }
 
+pub struct Label {
+    id: &'static str,
+}
+
+pub const fn label(id: &'static str) -> Label {
+    Label { id }
+}
+
+impl From<Label> for ValueId {
+    fn from(l: Label) -> ValueId {
+        ValueId {
+            id: l.id.to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct ValueId {
     id: String,
