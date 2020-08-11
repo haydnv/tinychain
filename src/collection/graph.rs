@@ -13,7 +13,6 @@ use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::number::class::NumberType;
-use crate::value::number::instance::{Number, UInt};
 use crate::value::{Value, ValueId};
 
 use super::table::{self, Selection, TableBase};
@@ -46,11 +45,19 @@ impl Graph {
 
     async fn get_node_id(
         &self,
-        _txn_id: &TxnId,
-        _node_type: ValueId,
-        _node_key: Vec<Value>,
+        txn_id: TxnId,
+        node_type: ValueId,
+        node_key: Vec<Value>,
     ) -> TCResult<Option<u64>> {
-        Err(error::not_implemented())
+        match self
+            .node_ids
+            .get(txn_id, vec![Value::from(node_type), Value::from(node_key)])
+            .await?
+        {
+            Some(row) if row.len() == 2 => Ok(Some(row[1].clone().try_into()?)),
+            None => Ok(None),
+            _ => Err(error::internal(ERR_CORRUPT)),
+        }
     }
 
     pub async fn add_node(
@@ -66,7 +73,7 @@ impl Graph {
             let node_insert = table.insert(txn_id.clone(), key.to_vec(), value);
             let node_id_insert =
                 self.node_ids
-                    .insert(txn_id, vec![u64_value(*max_id)], vec![Value::Tuple(key)]);
+                    .insert(txn_id, vec![Value::Tuple(key)], vec![Value::from(*max_id)]);
             try_join(node_insert, node_id_insert).await?;
             *max_id += 1;
             Ok(())
@@ -92,7 +99,7 @@ impl Graph {
         node_key: Vec<Value>,
     ) -> TCResult<TCTryStream<Vec<Value>>> {
         let start_node = self
-            .get_node_id(txn.id(), node_type, node_key.to_vec())
+            .get_node_id(txn.id().clone(), node_type, node_key.to_vec())
             .await?
             .ok_or(error::not_found(Value::Tuple(node_key)))?;
 
@@ -126,7 +133,7 @@ impl Graph {
                 .and_then(move |(id, _)| {
                     node_ids
                         .clone()
-                        .get_owned(txn_id.clone(), vec![u64_value(id[0])])
+                        .get_owned(txn_id.clone(), vec![id[0].into()])
                 })
                 .map(|r| match r {
                     Ok(Some(node_key)) if node_key.len() == 3 => {
@@ -179,7 +186,7 @@ impl Graph {
         node_key: Vec<Value>,
     ) -> TCResult<()> {
         let node_id = self
-            .get_node_id(txn.id(), node_type.clone(), node_key.to_vec())
+            .get_node_id(txn.id().clone(), node_type.clone(), node_key.to_vec())
             .await?
             .ok_or_else(|| error::not_found(Value::Tuple(node_key.clone())))?;
 
@@ -226,8 +233,4 @@ impl Transact for Graph {
 
         join_all(commits).await;
     }
-}
-
-fn u64_value(value: u64) -> Value {
-    Value::Number(Number::UInt(UInt::U64(value)))
 }

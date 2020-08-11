@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::{Add, Mul};
 
@@ -1389,6 +1389,15 @@ impl TryFrom<Number> for UInt {
             Number::UInt(u) => Ok(u),
             other => Err(error::bad_request("Expected UInt but found", other)),
         }
+    }
+}
+
+impl TryFrom<Number> for u64 {
+    type Error = error::TCError;
+
+    fn try_from(n: Number) -> TCResult<u64> {
+        let u: UInt = n.try_into()?;
+        u.try_into()
     }
 }
 

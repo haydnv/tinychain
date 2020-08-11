@@ -77,9 +77,24 @@ impl From<Number> for Value {
     }
 }
 
+impl From<u64> for Value {
+    fn from(u: u64) -> Value {
+        let u: number::instance::UInt = u.into();
+        let n: Number = u.into();
+        n.into()
+    }
+}
+
 impl From<TCString> for Value {
     fn from(s: TCString) -> Value {
         Value::TCString(s)
+    }
+}
+
+impl From<ValueId> for Value {
+    fn from(v: ValueId) -> Value {
+        let s: TCString = v.into();
+        s.into()
     }
 }
 
@@ -134,6 +149,15 @@ impl<'a> TryFrom<&'a Value> for &'a Number {
             Value::Number(n) => Ok(n),
             other => Err(error::bad_request("Expected Number but found", other)),
         }
+    }
+}
+
+impl TryFrom<Value> for u64 {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<u64> {
+        let n: Number = v.try_into()?;
+        n.try_into()
     }
 }
 
