@@ -53,6 +53,19 @@ impl From<(ValueId, ValueType)> for Column {
     }
 }
 
+impl From<(ValueId, ValueType, usize)> for Column {
+    fn from(column: (ValueId, ValueType, usize)) -> Column {
+        let (name, dtype, size) = column;
+        let max_len = Some(size);
+
+        Column {
+            name,
+            dtype,
+            max_len,
+        }
+    }
+}
+
 impl fmt::Display for Column {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.max_len {

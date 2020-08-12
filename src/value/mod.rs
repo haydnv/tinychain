@@ -239,13 +239,6 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         self.visit_int(value).map_err(de::Error::custom)
     }
 
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(Value::TCString(TCString::r#String(value.to_string())))
-    }
-
     fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
     where
         M: de::MapAccess<'de>,

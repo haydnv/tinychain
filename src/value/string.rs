@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -25,7 +25,6 @@ pub enum StringType {
     Id,
     Link,
     Ref,
-    r#String,
 }
 
 impl Class for StringType {
@@ -106,6 +105,12 @@ impl Serialize for ValueId {
     }
 }
 
+impl PartialEq<Label> for ValueId {
+    fn eq(&self, other: &Label) -> bool {
+        self.id == other.id
+    }
+}
+
 impl PartialEq<&str> for ValueId {
     fn eq(&self, other: &&str) -> bool {
         &self.id == other
@@ -152,7 +157,6 @@ pub enum TCString {
     Id(ValueId),
     Link(Link),
     Ref(TCRef),
-    r#String(String),
 }
 
 impl Instance for TCString {
@@ -163,7 +167,6 @@ impl Instance for TCString {
             TCString::Id(_) => StringType::Id,
             TCString::Link(_) => StringType::Link,
             TCString::Ref(_) => StringType::Ref,
-            TCString::r#String(_) => StringType::r#String,
         }
     }
 }
@@ -192,12 +195,6 @@ impl From<TCRef> for TCString {
     }
 }
 
-impl From<String> for TCString {
-    fn from(s: String) -> TCString {
-        TCString::r#String(s)
-    }
-}
-
 impl TryFrom<TCString> for Link {
     type Error = error::TCError;
 
@@ -205,17 +202,6 @@ impl TryFrom<TCString> for Link {
         match s {
             TCString::Link(l) => Ok(l),
             other => Err(error::bad_request("Expected Link but found", other)),
-        }
-    }
-}
-
-impl TryFrom<TCString> for String {
-    type Error = error::TCError;
-
-    fn try_from(s: TCString) -> TCResult<String> {
-        match s {
-            TCString::r#String(s) => Ok(s),
-            other => Err(error::bad_request("Expected a String but found", other)),
         }
     }
 }
@@ -241,8 +227,10 @@ impl TryFrom<TCString> for ValueId {
     type Error = error::TCError;
 
     fn try_from(s: TCString) -> TCResult<ValueId> {
-        let s: String = s.try_into()?;
-        s.parse()
+        match s {
+            TCString::Id(v) => Ok(v),
+            other => Err(error::bad_request("Expected ValueId, found", other)),
+        }
     }
 }
 
@@ -259,7 +247,6 @@ impl Serialize for TCString {
             }
             Self::Link(l) => l.serialize(s),
             Self::Ref(r) => r.serialize(s),
-            Self::r#String(v) => s.serialize_str(v),
         }
     }
 }
@@ -270,7 +257,6 @@ impl fmt::Display for TCString {
             TCString::Id(id) => write!(f, "ValueId: {}", id),
             TCString::Link(l) => write!(f, "Link: {}", l),
             TCString::Ref(r) => write!(f, "Ref: {}", r),
-            TCString::r#String(s) => write!(f, "String: {}", s),
         }
     }
 }

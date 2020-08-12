@@ -37,7 +37,6 @@ impl fmt::Display for StringType {
             Id => write!(f, "type Id"),
             Link => write!(f, "type Link"),
             Ref => write!(f, "type Ref"),
-            r#String => write!(f, "type String"),
         }
     }
 }
@@ -50,6 +49,7 @@ pub enum ValueType {
     TCString(StringType),
     Op,
     Tuple,
+    Value, // self
 }
 
 impl ValueType {
@@ -85,6 +85,7 @@ impl fmt::Display for ValueType {
             TCString(s) => write!(f, "type String: {}", s),
             Op => write!(f, "type Op"),
             Tuple => write!(f, "type Tuple"),
+            Value => write!(f, "Value"),
         }
     }
 }

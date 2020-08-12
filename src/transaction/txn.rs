@@ -1,24 +1,32 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
 
 use futures::future;
-use futures::stream::Stream;
+use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::block::dir::Dir;
-use crate::class::{TCBoxTryFuture, TCResult};
+use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::collection::graph::Graph;
+use crate::collection::table;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
-use crate::value::link::*;
-use crate::value::*;
+use crate::value::link::PathSegment;
+use crate::value::string::{StringType, TCString};
+use crate::value::{label, Label, Op, Value, ValueId, ValueType};
 
 use super::Transact;
 
-const GRAPH_NAME: &str = ".graph";
+const DEFAULT_MAX_VALUE_SIZE: usize = 1_000_000;
+const GRAPH_NAME: Label = label(".graph");
+const NAME: Label = label("name");
+const PROVIDED: Label = label("provided");
+const PROVIDER: Label = label("provider");
+const VALUE: Label = label("value");
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct TxnId {
@@ -95,7 +103,7 @@ impl Txn {
     }
 
     pub async fn subcontext(self: Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn>> {
-        if subcontext.as_str() == GRAPH_NAME {
+        if subcontext == GRAPH_NAME {
             return Err(error::bad_request("This name is reserved", subcontext));
         }
 
@@ -130,23 +138,72 @@ impl Txn {
         &self.id
     }
 
-    pub async fn execute<S: Stream<Item = (ValueId, Value)>>(
-        &self,
-        _parameters: S,
+    pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
+        self: Arc<Self>,
+        mut parameters: S,
     ) -> TCResult<Graph> {
-        // instantiate a graph with two node classes: providers (Values) and provided (States)
-        // instantiate a new FuturesUnordered to execute the transaction's sub-tasks
-        // for each parameter:
-        //   if it's already resolved, add it to the graph
-        //   if all its dependencies are resolved, add a resolver future to the collection
-        //   otherwise (if it depends on an unresolved parameter) add it to the graph
+        let graph = create_graph(self.clone()).await?;
 
-        // while there are unresolved futures in the collection:
-        // for each resolved parameter:
-        //   update its status in the graph
-        //   get a list of its unresolved dependents
-        //   for each of them:
-        //     if all its dependencies are resolved, add a resolver future to the collection
+        let mut pending = FuturesUnordered::new();
+
+        while let Some(param) = parameters.next().await {
+            let (name, param) = param;
+            if let Value::TCString(TCString::Ref(id)) = param {
+                return Err(error::bad_request(
+                    "Found reference to nonexistent value",
+                    id,
+                ));
+            } else if let Value::Op(op) = param {
+                graph
+                    .add_node(
+                        self.id.clone(),
+                        PROVIDER.into(),
+                        vec![name.clone().into()],
+                        vec![Value::Op(op.clone())],
+                    )
+                    .await?;
+
+                pending.push(self.clone().resolve(name, *op));
+            } else {
+                graph
+                    .add_node(
+                        self.id.clone(),
+                        PROVIDED.into(),
+                        vec![name.into()],
+                        vec![param],
+                    )
+                    .await?;
+            }
+        }
+
+        while let Some(result) = pending.next().await {
+            let (name, state) = result?;
+
+            //   update its status in the graph
+            graph
+                .remove_node(self.clone(), PROVIDER.into(), vec![name.clone().into()])
+                .await?;
+
+            match state {
+                State::Value(value) => {
+                    graph
+                        .add_node(
+                            self.id.clone(),
+                            PROVIDED.into(),
+                            vec![name.into()],
+                            vec![value],
+                        )
+                        .await?;
+                }
+                _other => {
+                    unimplemented!();
+                }
+            }
+
+            //   get a list of its unresolved dependents
+            //   for each of them:
+            //     if all its dependencies are resolved, add a resolver future to the collection
+        }
 
         // if there are still unresolved parameters in the graph, return an error
         // otherwise, return the graph
@@ -172,7 +229,44 @@ impl Txn {
         .await;
     }
 
+    async fn resolve(self: Arc<Self>, _name: ValueId, _op: Op) -> TCResult<(ValueId, State)> {
+        Err(error::not_implemented())
+    }
+
     fn mutate(self: &Arc<Self>, state: Arc<dyn Transact>) {
         self.mutated.write().unwrap().push(state)
     }
+}
+
+async fn create_graph(txn: Arc<Txn>) -> TCResult<Graph> {
+    let graph_schema: HashMap<ValueId, table::Schema> = vec![
+        (
+            PROVIDED.into(),
+            table::Schema::from((
+                vec![(
+                    NAME.into(),
+                    ValueType::TCString(StringType::Id),
+                    DEFAULT_MAX_VALUE_SIZE,
+                )
+                    .into()],
+                vec![(VALUE.into(), ValueType::Value, DEFAULT_MAX_VALUE_SIZE).into()],
+            )),
+        ),
+        (
+            PROVIDER.into(),
+            table::Schema::from((
+                vec![(
+                    NAME.into(),
+                    ValueType::TCString(StringType::Id),
+                    DEFAULT_MAX_VALUE_SIZE,
+                )
+                    .into()],
+                vec![(VALUE.into(), ValueType::Value, DEFAULT_MAX_VALUE_SIZE).into()],
+            )),
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    Graph::create(txn, graph_schema).await
 }
