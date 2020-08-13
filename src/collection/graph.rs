@@ -16,7 +16,7 @@ use crate::value::{label, Label, Value, ValueId, ValueType};
 
 use super::schema::{GraphSchema, IndexSchema, TableSchema};
 use super::table::TableBase;
-use super::tensor::{self, SparseTensor};
+use super::tensor::{self, SparseTensor, TensorIO};
 
 const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";
 
@@ -134,12 +134,35 @@ impl Graph {
 
     pub async fn add_edge(
         &self,
-        _txn_id: TxnId,
-        _label: ValueId,
-        _node_from: Vec<Value>,
-        _node_to: Vec<Value>,
+        txn_id: TxnId,
+        label: ValueId,
+        node_from: (ValueId, Vec<Value>),
+        node_to: (ValueId, Vec<Value>),
     ) -> TCResult<()> {
-        Err(error::not_implemented())
+        let node_from_key = Value::Tuple(node_from.1);
+        let node_from_id = self
+            .nodes
+            .get(&node_from.0)
+            .ok_or(error::not_found(&node_from.0))?
+            .get(txn_id.clone(), vec![node_from_key.clone()]);
+
+        let node_to_key = Value::Tuple(node_to.1);
+        let node_to_id = self
+            .nodes
+            .get(&node_to.0)
+            .ok_or(error::not_found(&node_to.0))?
+            .get(txn_id.clone(), vec![node_to_key.clone()]);
+
+        let edges = self.get_matrix(&label, &txn_id);
+
+        let (edges, node_from_id, node_to_id) = try_join!(edges, node_from_id, node_to_id)?;
+
+        let node_from_id = try_unwrap_node_id(node_from_id, node_from_key)?;
+        let node_to_id = try_unwrap_node_id(node_to_id, node_to_key)?;
+
+        edges
+            .write_value_at(txn_id, vec![node_from_id, node_to_id], true.into())
+            .await
     }
 
     pub async fn remove_edge(
@@ -185,4 +208,12 @@ impl Transact for Graph {
 
         join_all(rollbacks).await;
     }
+}
+
+fn try_unwrap_node_id(node_id: Option<Vec<Value>>, node_key: Value) -> TCResult<u64> {
+    node_id
+        .ok_or(error::not_found(node_key))?
+        .pop()
+        .ok_or(error::internal(ERR_CORRUPT))?
+        .try_into()
 }
