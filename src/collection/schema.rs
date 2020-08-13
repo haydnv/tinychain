@@ -375,3 +375,13 @@ pub struct GraphSchema {
     nodes: HashMap<ValueId, TableSchema>,
     edges: HashSet<ValueId>,
 }
+
+impl GraphSchema {
+    pub fn nodes(&'_ self) -> &'_ HashMap<ValueId, TableSchema> {
+        &self.nodes
+    }
+
+    pub fn edges(&'_ self) -> &'_ HashSet<ValueId> {
+        &self.edges
+    }
+}

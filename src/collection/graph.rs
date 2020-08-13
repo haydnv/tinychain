@@ -4,16 +4,17 @@ use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all, TryFutureExt};
 use futures::try_join;
 
 use crate::class::TCResult;
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{label, Label, Value, ValueId};
+use crate::value::number::class::{NumberType, UIntType};
+use crate::value::{label, Label, Value, ValueId, ValueType};
 
-use super::schema::GraphSchema;
+use super::schema::{GraphSchema, IndexSchema, TableSchema};
 use super::table::TableBase;
 use super::tensor::{self, SparseTensor};
 
@@ -33,8 +34,50 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub async fn create(_txn: Arc<Txn>, _schema: GraphSchema) -> TCResult<Graph> {
-        Err(error::not_implemented())
+    pub async fn create(txn: Arc<Txn>, schema: GraphSchema) -> TCResult<Graph> {
+        let nodes = try_join_all(schema.nodes().iter().map(|(name, schema)| {
+            TableBase::create(txn.clone(), schema.clone())
+                .map_ok(move |table| (name.clone(), table))
+        }))
+        .await?
+        .into_iter()
+        .collect();
+
+        let u64_type = ValueType::Number(NumberType::UInt(UIntType::U64));
+        let edge_schema: IndexSchema = (
+            vec![(NODE_FROM.into(), u64_type).into()],
+            vec![(NODE_TO.into(), u64_type).into()],
+        )
+            .into();
+        let edge_schema: TableSchema = (
+            edge_schema,
+            iter::once((NODE_TO.into(), vec![NODE_TO.into()])),
+        )
+            .into();
+        let edges = try_join_all(schema.edges().iter().map(|name| {
+            TableBase::create(txn.clone(), edge_schema.clone())
+                .map_ok(move |table| (name.clone(), table))
+        }))
+        .await?
+        .into_iter()
+        .collect();
+
+        let max_id = TxnLock::new(txn.id().clone(), 0u64.into());
+
+        let node_id_schema: IndexSchema = (
+            vec![(NODE_ID.into(), u64_type).into()],
+            vec![(NODE_KEY.into(), ValueType::Tuple).into()],
+        )
+            .into();
+        let node_id_schema: TableSchema = node_id_schema.into();
+        let node_ids = TableBase::create(txn, node_id_schema).await?;
+
+        Ok(Graph {
+            node_ids,
+            nodes,
+            edges,
+            max_id,
+        })
     }
 
     async fn get_matrix(&self, label: &ValueId, txn_id: &TxnId) -> TCResult<SparseTensor> {
