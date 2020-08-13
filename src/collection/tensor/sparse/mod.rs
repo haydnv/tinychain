@@ -4,13 +4,14 @@ use std::iter;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use futures::future::{self, try_join_all, TryFutureExt};
+use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::btree;
-use crate::collection::table::{self, Selection, Table, TableBase};
+use crate::collection::schema::{Column, IndexSchema, RowSchema};
+use crate::collection::table::{self, ColumnBound, Selection, Table, TableBase};
 use crate::error;
 use crate::transaction::{Txn, TxnId};
 use crate::value::class::ValueType;
@@ -1084,32 +1085,32 @@ impl SparseTable {
         ndim: usize,
         dtype: NumberType,
     ) -> TCResult<TableBase> {
-        let key: Vec<table::Column> = Self::key(ndim);
+        let key: Vec<Column> = Self::key(ndim);
+        let value: Vec<Column> = vec![(VALUE.into(), ValueType::Number(dtype)).into()];
+        let indices = (0..ndim).map(|axis| (axis.into(), vec![axis.into()]));
 
-        let value: Vec<table::Column> = vec![(VALUE.into(), ValueType::Number(dtype)).into()];
-        let table = Table::create(txn.clone(), (key, value).into()).await?;
-        try_join_all(
-            (0..ndim).map(|axis| table.add_index(txn.clone(), axis.into(), vec![axis.into()])),
+        Table::create(
+            txn.clone(),
+            (IndexSchema::from((key, value)), indices).into(),
         )
-        .await?;
-
-        Ok(table)
+        .await
     }
 
     pub fn try_from_table(table: TableBase, shape: Shape) -> TCResult<SparseTable> {
         let expected_key = Self::key(shape.len());
-        let actual_key = table.schema().key();
+        let actual_key = table.key();
 
         for (expected, actual) in actual_key.iter().zip(expected_key.iter()) {
             if expected != actual {
+                let key: Vec<String> = table.key().iter().map(|c| c.to_string()).collect();
                 return Err(error::bad_request(
                     "Table has invalid key for SparseTable",
-                    table.schema(),
+                    format!("[{}]", key.join(", ")),
                 ));
             }
         }
 
-        let actual_value = table.schema().value();
+        let actual_value = table.values();
         if actual_value.len() != 1 {
             let actual_value: Vec<String> = actual_value.iter().map(|c| c.to_string()).collect();
             return Err(error::bad_request(
@@ -1118,7 +1119,7 @@ impl SparseTable {
             ));
         }
 
-        let dtype = actual_value[0].dtype;
+        let dtype = *actual_value[0].dtype();
         if let ValueType::Number(dtype) = dtype {
             Ok(SparseTable {
                 table,
@@ -1133,7 +1134,7 @@ impl SparseTable {
         }
     }
 
-    fn key(ndim: usize) -> Vec<table::Column> {
+    fn key(ndim: usize) -> Vec<Column> {
         let u64_type = NumberType::uint64();
         (0..ndim).map(|axis| (axis, u64_type).into()).collect()
     }
@@ -1176,8 +1177,7 @@ impl SparseAccessor for SparseTable {
             let columns: Vec<ValueId> = axes.iter().map(|x| (*x).into()).collect();
             let filled_at = self
                 .table
-                .group_by(txn.id().clone(), columns)
-                .await?
+                .group_by(columns)?
                 .stream(txn.id().clone())
                 .await?
                 .map(|coord| unwrap_coord(&coord));
@@ -1197,7 +1197,7 @@ impl SparseAccessor for SparseTable {
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
-            let source = slice_table(self.table.clone().into(), txn.id(), &bounds).await?;
+            let source = slice_table(self.table.clone().into(), &bounds).await?;
             let filled_in = source.stream(txn.id().clone()).await?.map(unwrap_row);
             let filled_in: SparseStream = Box::pin(filled_in);
             Ok(filled_in)
@@ -1213,16 +1213,15 @@ impl SparseAccessor for SparseTable {
                 ));
             }
 
-            let selector: HashMap<ValueId, Value> = coord
+            let selector: HashMap<ValueId, ColumnBound> = coord
                 .iter()
                 .enumerate()
-                .map(|(axis, at)| (axis.into(), u64_to_value(*at)))
+                .map(|(axis, at)| (axis.into(), u64_to_value(*at).into()))
                 .collect();
 
             let mut slice = self
                 .table
-                .slice(txn.id(), selector.into())
-                .await?
+                .slice(selector)?
                 .select(vec![VALUE.into()])?
                 .stream(txn.id().clone())
                 .await?;
@@ -1742,13 +1741,12 @@ fn group_axes<'a>(
             let right = accessor.clone().filled(txn.clone()).await?.map_ok(map);
             (Box::pin(left), Box::pin(right))
         } else {
-            let schema: btree::Schema = axes
+            let schema: RowSchema = axes
                 .iter()
                 .cloned()
                 .map(ValueId::from)
-                .map(|x| (x, ValueType::uint64(), None).into())
-                .collect::<Vec<btree::Column>>()
-                .into();
+                .map(|x| (x, ValueType::uint64()).into())
+                .collect();
 
             let btree_file = txn
                 .clone()
@@ -1812,33 +1810,23 @@ fn group_axes<'a>(
     })
 }
 
-fn slice_table<'a>(
-    mut table: Table,
-    txn_id: &'a TxnId,
-    bounds: &'a Bounds,
-) -> TCBoxTryFuture<'a, Table> {
+fn slice_table<'a>(mut table: Table, bounds: &'a Bounds) -> TCBoxTryFuture<'a, Table> {
     use AxisBounds::*;
 
     Box::pin(async move {
         for (axis, axis_bound) in bounds.to_vec().into_iter().enumerate() {
             let axis: ValueId = axis.into();
-            table = match axis_bound {
-                At(x) => {
-                    let column_bound = table::ColumnBound::Is(u64_to_value(x));
-                    table
-                        .slice(txn_id, iter::once((axis, column_bound)).collect())
-                        .await?
-                }
+            let column_bound = match axis_bound {
+                At(x) => table::ColumnBound::Is(u64_to_value(x)),
                 In(range) => {
                     let start = Bound::Included(u64_to_value(range.start));
                     let end = Bound::Excluded(u64_to_value(range.end));
-                    let column_bound = table::ColumnBound::In(start, end);
-                    table
-                        .slice(txn_id, iter::once((axis, column_bound)).collect())
-                        .await?
+                    table::ColumnBound::In(start, end)
                 }
                 _ => todo!(),
             };
+
+            table = table.slice(iter::once((axis, column_bound)).collect())?
         }
 
         Ok(table)

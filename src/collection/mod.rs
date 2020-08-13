@@ -13,6 +13,7 @@ use crate::value::Value;
 
 pub mod btree;
 pub mod graph;
+pub mod schema;
 pub mod table;
 pub mod tensor;
 

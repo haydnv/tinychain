@@ -1,27 +1,31 @@
-use std::collections::{hash_map, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
-use std::iter::FromIterator;
-use std::ops::Bound;
 
 use crate::class::{Instance, TCResult};
-use crate::collection::btree;
 use crate::error;
-use crate::value::class::ValueType;
-use crate::value::number::class::NumberType;
-use crate::value::{Value, ValueId};
+use crate::value::number::NumberType;
+use crate::value::{Value, ValueId, ValueType};
 
 pub type Row = HashMap<ValueId, Value>;
 
 #[derive(Clone, PartialEq)]
 pub struct Column {
-    pub name: ValueId,
-    pub dtype: ValueType,
-    pub max_len: Option<usize>,
+    name: ValueId,
+    dtype: ValueType,
+    max_len: Option<usize>,
 }
 
-impl From<Column> for btree::Column {
-    fn from(column: Column) -> btree::Column {
-        (column.name, column.dtype, column.max_len).into()
+impl Column {
+    pub fn name(&'_ self) -> &'_ ValueId {
+        &self.name
+    }
+
+    pub fn dtype(&'_ self) -> &'_ ValueType {
+        &self.dtype
+    }
+
+    pub fn max_len(&'_ self) -> &'_ Option<usize> {
+        &self.max_len
     }
 }
 
@@ -75,179 +79,24 @@ impl fmt::Display for Column {
     }
 }
 
-#[derive(Clone)]
-pub enum ColumnBound {
-    Is(Value),
-    In(Bound<Value>, Bound<Value>),
-}
-
-impl ColumnBound {
-    pub fn expect<M: fmt::Display>(&self, dtype: ValueType, err_context: &M) -> TCResult<()> {
-        match self {
-            Self::Is(value) => value.expect(dtype, err_context),
-            Self::In(start, end) => match start {
-                Bound::Included(value) => value.expect(dtype, err_context),
-                Bound::Excluded(value) => value.expect(dtype, err_context),
-                Bound::Unbounded => Ok(()),
-            }
-            .and_then(|_| match end {
-                Bound::Included(value) => value.expect(dtype, err_context),
-                Bound::Excluded(value) => value.expect(dtype, err_context),
-                Bound::Unbounded => Ok(()),
-            }),
-        }
-    }
-}
-
-impl fmt::Display for ColumnBound {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Is(value) => write!(f, "{}", value),
-            Self::In(Bound::Unbounded, Bound::Unbounded) => write!(f, "[...]"),
-            Self::In(start, end) => {
-                match start {
-                    Bound::Unbounded => write!(f, "[...")?,
-                    Bound::Included(value) => write!(f, "[{},", value)?,
-                    Bound::Excluded(value) => write!(f, "({},", value)?,
-                };
-                match end {
-                    Bound::Unbounded => write!(f, "...]"),
-                    Bound::Included(value) => write!(f, "{}]", value),
-                    Bound::Excluded(value) => write!(f, "{})", value),
-                }
-            }
-        }
-    }
-}
+pub type RowSchema = Vec<Column>;
 
 #[derive(Clone)]
-pub struct Bounds(HashMap<ValueId, ColumnBound>);
-
-impl Bounds {
-    pub fn all() -> Bounds {
-        Bounds(HashMap::new())
-    }
-
-    pub fn get(&'_ self, name: &'_ ValueId) -> Option<&'_ ColumnBound> {
-        self.0.get(name)
-    }
-
-    pub fn try_into_btree_range(mut self, schema: &Schema) -> TCResult<btree::BTreeRange> {
-        let mut start = Vec::with_capacity(self.len());
-        let mut end = Vec::with_capacity(self.len());
-        let column_names: Vec<ValueId> = schema.column_names();
-
-        use Bound::*;
-        for name in &column_names[0..self.len()] {
-            let bound = self.remove(&name).ok_or_else(|| error::not_found(name))?;
-            match bound {
-                ColumnBound::Is(value) => {
-                    start.push(Included(value.clone()));
-                    end.push(Included(value));
-                }
-                ColumnBound::In(s, e) => {
-                    start.push(s);
-                    end.push(e);
-                }
-            }
-        }
-
-        Ok((start, end).into())
-    }
-
-    pub fn iter(&self) -> hash_map::Iter<ValueId, ColumnBound> {
-        self.0.iter()
-    }
-
-    pub fn keys(&self) -> hash_map::Keys<ValueId, ColumnBound> {
-        self.0.keys()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn remove(&mut self, name: &ValueId) -> Option<ColumnBound> {
-        self.0.remove(name)
-    }
+pub struct IndexSchema {
+    key: RowSchema,
+    values: RowSchema,
 }
 
-impl From<HashMap<ValueId, Value>> for Bounds {
-    fn from(mut bounds: HashMap<ValueId, Value>) -> Bounds {
-        Bounds(
-            bounds
-                .drain()
-                .map(|(column, equals)| (column, ColumnBound::Is(equals)))
-                .collect(),
-        )
-    }
-}
-
-impl FromIterator<(ValueId, ColumnBound)> for Bounds {
-    fn from_iter<I: IntoIterator<Item = (ValueId, ColumnBound)>>(iter: I) -> Self {
-        let mut bounds = HashMap::new();
-
-        for (column, bound) in iter {
-            bounds.insert(column, bound);
-        }
-
-        Bounds(bounds)
-    }
-}
-
-impl From<Vec<(ValueId, Value)>> for Bounds {
-    fn from(mut bounds: Vec<(ValueId, Value)>) -> Bounds {
-        Bounds(
-            bounds
-                .drain(..)
-                .map(|(axis, at)| (axis, ColumnBound::Is(at)))
-                .collect(),
-        )
-    }
-}
-
-impl fmt::Display for Bounds {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{{{}}}",
-            self.0
-                .iter()
-                .map(|(k, v)| format!("{}: {}", k, v))
-                .collect::<Vec<String>>()
-                .join(", ")
-        )
-    }
-}
-
-#[derive(Clone)]
-pub struct Schema {
-    key: Vec<Column>,
-    value: Vec<Column>,
-}
-
-impl Schema {
+impl IndexSchema {
     pub fn columns(&self) -> Vec<Column> {
-        [&self.key[..], &self.value[..]]
-            .concat()
-            .into_iter()
-            .collect()
-    }
-
-    pub fn column_names<F: FromIterator<ValueId>>(&self) -> F {
-        self.key
-            .iter()
-            .map(|c| &c.name)
-            .chain(self.value.iter().map(|c| &c.name))
-            .cloned()
-            .collect()
+        [&self.key[..], &self.values[..]].concat()
     }
 
     pub fn data_types(&self) -> Vec<ValueType> {
         self.key
             .iter()
             .map(|c| c.dtype)
-            .chain(self.value.iter().map(|c| c.dtype))
+            .chain(self.values.iter().map(|c| c.dtype))
             .collect()
     }
 
@@ -255,21 +104,15 @@ impl Schema {
         &self.key
     }
 
-    pub fn key_into_bounds(&self, mut key: Vec<Value>) -> Bounds {
-        assert!(key.len() == self.key.len());
-        let key: HashMap<ValueId, Value> = self.key_names().drain(..).zip(key.drain(..)).collect();
-        key.into()
-    }
-
-    pub fn key_names(&self) -> Vec<ValueId> {
-        self.key.iter().map(|c| &c.name).cloned().collect()
+    pub fn values(&'_ self) -> &'_ [Column] {
+        &self.values
     }
 
     pub fn len(&self) -> usize {
-        self.key.len() + self.value.len()
+        self.key.len() + self.values.len()
     }
 
-    pub fn row_as_key(&self, row: &Row) -> TCResult<Vec<Value>> {
+    pub fn key_from_row(&self, row: &Row) -> TCResult<Vec<Value>> {
         let mut key = Vec::with_capacity(self.key.len());
         for column in &self.key {
             if let Some(value) = row.get(&column.name) {
@@ -287,7 +130,7 @@ impl Schema {
     }
 
     pub fn starts_with(&self, expected: &[ValueId]) -> bool {
-        let actual: Vec<ValueId> = self.column_names();
+        let actual: Vec<ValueId> = self.columns().iter().map(|c| c.name()).cloned().collect();
         for (a, e) in actual[0..expected.len()].iter().zip(expected.iter()) {
             if a != e {
                 return false;
@@ -297,7 +140,7 @@ impl Schema {
         true
     }
 
-    pub fn subset(&self, key_columns: HashSet<&ValueId>) -> TCResult<Schema> {
+    pub fn subset(&self, key_columns: HashSet<&ValueId>) -> TCResult<IndexSchema> {
         let key: Vec<Column> = self
             .key
             .iter()
@@ -315,19 +158,9 @@ impl Schema {
         Ok((key, value).into())
     }
 
-    pub fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        let column_names: HashSet<ValueId> = self.column_names();
-        for name in bounds.0.keys() {
-            if !column_names.contains(name) {
-                return Err(error::not_found(name));
-            }
-        }
-
-        Ok(())
-    }
-
     pub fn validate_columns(&self, columns: &[ValueId]) -> TCResult<()> {
-        let valid_columns: HashSet<ValueId> = self.column_names();
+        let valid_columns: HashSet<ValueId> =
+            self.columns().iter().map(|c| c.name()).cloned().collect();
         for column in columns {
             if !valid_columns.contains(column) {
                 return Err(error::not_found(column));
@@ -364,6 +197,7 @@ impl Schema {
             .drain(..)
             .map(|c| (c.name, c.dtype))
             .collect();
+
         for (col_name, value) in row {
             if let Some(dtype) = columns.get(col_name) {
                 value.expect(*dtype, format!("for table with schema {}", self))?;
@@ -376,7 +210,7 @@ impl Schema {
     }
 
     pub fn validate_row(&self, row: &Row) -> TCResult<()> {
-        let expected: HashSet<ValueId> = self.column_names();
+        let expected: HashSet<ValueId> = self.columns().iter().map(|c| c.name()).cloned().collect();
         let actual: HashSet<ValueId> = row.keys().cloned().collect();
         let mut missing: Vec<&ValueId> = expected.difference(&actual).collect();
         let mut extra: Vec<&ValueId> = actual.difference(&expected).collect();
@@ -404,10 +238,6 @@ impl Schema {
         }
 
         self.validate_row_partial(row)
-    }
-
-    pub fn value(&'_ self) -> &'_ [Column] {
-        &self.value
     }
 
     pub fn row_into_values(&self, mut row: Row, reject_extras: bool) -> TCResult<Vec<Value>> {
@@ -454,48 +284,46 @@ impl Schema {
     }
 }
 
-impl From<(Vec<Column>, Vec<Column>)> for Schema {
-    fn from(schema: (Vec<Column>, Vec<Column>)) -> Schema {
-        let (key, value) = schema;
-        Schema { key, value }
+impl From<(Vec<Column>, Vec<Column>)> for IndexSchema {
+    fn from(schema: (Vec<Column>, Vec<Column>)) -> IndexSchema {
+        let (key, values) = schema;
+        IndexSchema { key, values }
     }
 }
 
-impl From<Schema> for HashMap<ValueId, Column> {
-    fn from(mut schema: Schema) -> HashMap<ValueId, Column> {
+impl From<IndexSchema> for HashMap<ValueId, Column> {
+    fn from(mut schema: IndexSchema) -> HashMap<ValueId, Column> {
         schema
             .key
             .drain(..)
-            .chain(schema.value.drain(..))
+            .chain(schema.values.drain(..))
             .map(|c| (c.name.clone(), c))
             .collect()
     }
 }
 
-impl From<Schema> for Vec<ValueId> {
-    fn from(mut schema: Schema) -> Vec<ValueId> {
+impl From<IndexSchema> for Vec<ValueId> {
+    fn from(mut schema: IndexSchema) -> Vec<ValueId> {
         schema
             .key
             .drain(..)
-            .chain(schema.value.drain(..))
+            .chain(schema.values.drain(..))
             .map(|c| c.name)
             .collect()
     }
 }
 
-impl From<Schema> for btree::Schema {
-    fn from(source: Schema) -> btree::Schema {
-        source
-            .columns()
-            .iter()
-            .cloned()
-            .map(|c| c.into())
-            .collect::<Vec<btree::Column>>()
-            .into()
+impl From<IndexSchema> for RowSchema {
+    fn from(mut schema: IndexSchema) -> RowSchema {
+        schema
+            .key
+            .drain(..)
+            .chain(schema.values.drain(..))
+            .collect()
     }
 }
 
-impl fmt::Display for Schema {
+impl fmt::Display for IndexSchema {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -507,4 +335,43 @@ impl fmt::Display for Schema {
                 .join(", ")
         )
     }
+}
+
+#[derive(Clone)]
+pub struct TableSchema {
+    primary: IndexSchema,
+    indices: BTreeMap<ValueId, Vec<ValueId>>,
+}
+
+impl TableSchema {
+    pub fn indices(&'_ self) -> &'_ BTreeMap<ValueId, Vec<ValueId>> {
+        &self.indices
+    }
+
+    pub fn primary(&'_ self) -> &'_ IndexSchema {
+        &self.primary
+    }
+}
+
+impl From<IndexSchema> for TableSchema {
+    fn from(schema: IndexSchema) -> TableSchema {
+        TableSchema {
+            primary: schema,
+            indices: BTreeMap::new(),
+        }
+    }
+}
+
+impl<I: Iterator<Item = (ValueId, Vec<ValueId>)>> From<(IndexSchema, I)> for TableSchema {
+    fn from(schema: (IndexSchema, I)) -> TableSchema {
+        TableSchema {
+            primary: schema.0,
+            indices: schema.1.collect(),
+        }
+    }
+}
+
+pub struct GraphSchema {
+    nodes: HashMap<ValueId, TableSchema>,
+    edges: HashSet<ValueId>,
 }

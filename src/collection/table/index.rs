@@ -3,18 +3,18 @@ use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{self, join_all, try_join_all};
+use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::block::dir::Dir;
 use crate::class::{TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{self, BTree};
+use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::error;
-use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{Value, ValueId};
 
-use super::schema::{Bounds, Column, ColumnBound, Row, Schema};
+use super::bounds::{self, Bounds, ColumnBound};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
 use super::{Selection, Table};
 
@@ -23,11 +23,11 @@ const PRIMARY_INDEX: &str = "primary";
 #[derive(Clone)]
 pub struct Index {
     btree: Arc<BTree>,
-    schema: Schema,
+    schema: IndexSchema,
 }
 
 impl Index {
-    pub async fn create(txn: Arc<Txn>, name: ValueId, schema: Schema) -> TCResult<Index> {
+    pub async fn create(txn: Arc<Txn>, name: ValueId, schema: IndexSchema) -> TCResult<Index> {
         let btree = Arc::new(
             BTree::create(
                 txn.id().clone(),
@@ -57,7 +57,7 @@ impl Index {
     }
 
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
-        self.schema.validate_bounds(&bounds)?;
+        bounds::validate(&bounds, &self.schema().columns())?;
         IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)
     }
 
@@ -73,12 +73,17 @@ impl Index {
         })
     }
 
-    pub fn validate_schema_bounds(&self, outer: Bounds, inner: Bounds) -> TCResult<()> {
-        self.schema.validate_bounds(&outer)?;
-        self.schema.validate_bounds(&inner)?;
+    pub fn schema(&'_ self) -> &'_ IndexSchema {
+        &self.schema
+    }
 
-        let outer = outer.try_into_btree_range(self.schema())?;
-        let inner = inner.try_into_btree_range(self.schema())?;
+    pub fn validate_slice_bounds(&self, outer: Bounds, inner: Bounds) -> TCResult<()> {
+        bounds::validate(&outer, &self.schema().columns())?;
+        bounds::validate(&inner, &self.schema().columns())?;
+
+        let outer = bounds::btree_range(&outer, &self.schema().columns())?;
+        let inner = bounds::btree_range(&inner, &self.schema().columns())?;
+
         let dtypes = self.schema.data_types();
         if outer.contains(&inner, dtypes)? {
             Ok(())
@@ -109,13 +114,16 @@ impl Selection for Index {
         })
     }
 
-    fn order_by<'a>(
-        &'a self,
-        _txn_id: &'a TxnId,
-        order: Vec<ValueId>,
-        reverse: bool,
-    ) -> TCBoxTryFuture<Table> {
-        let table = if self.schema.starts_with(&order) {
+    fn key(&'_ self) -> &'_ [Column] {
+        self.schema.key()
+    }
+
+    fn values(&'_ self) -> &'_ [Column] {
+        self.schema.values()
+    }
+
+    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+        if self.schema.starts_with(&order) {
             if reverse {
                 self.reversed()
             } else {
@@ -127,21 +135,15 @@ impl Selection for Index {
                 &format!("Index with schema {} does not support order", self.schema),
                 order.join(", "),
             ))
-        };
-
-        Box::pin(future::ready(table))
-    }
-
-    fn schema(&'_ self) -> &'_ Schema {
-        &self.schema
+        }
     }
 
     fn reversed(&self) -> TCResult<Table> {
         Ok(IndexSlice::all(self.btree.clone(), self.schema.clone(), true).into())
     }
 
-    fn slice(&self, _txn_id: &TxnId, bounds: Bounds) -> TCBoxTryFuture<Table> {
-        Box::pin(async move { self.index_slice(bounds).map(|is| is.into()) })
+    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+        self.index_slice(bounds).map(|is| is.into())
     }
 
     fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
@@ -153,37 +155,31 @@ impl Selection for Index {
         })
     }
 
-    fn validate_bounds<'a>(&'a self, _txn_id: &'a TxnId, bounds: &'a Bounds) -> TCBoxTryFuture<()> {
-        Box::pin(async move {
-            self.schema.validate_bounds(bounds)?;
+    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        bounds::validate(bounds, &self.schema().columns())?;
 
-            for (column, (bound_column, bound_range)) in self.schema.columns()[0..bounds.len()]
-                .iter()
-                .zip(bounds.iter())
-            {
-                if &column.name != bound_column {
-                    return Err(error::bad_request(
-                        &format!(
-                            "Expected column {} in index range selector but found",
-                            column.name
-                        ),
-                        bound_column,
-                    ));
-                }
-
-                bound_range.expect(column.dtype, &format!("for column {}", column.name))?;
+        for (column, (bound_column, bound_range)) in self.schema.columns()[0..bounds.len()]
+            .iter()
+            .zip(bounds.iter())
+        {
+            if column.name() != bound_column {
+                return Err(error::bad_request(
+                    &format!(
+                        "Expected column {} in index range selector but found",
+                        column.name()
+                    ),
+                    bound_column,
+                ));
             }
 
-            Ok(())
-        })
+            bound_range.expect(*column.dtype(), &format!("for column {}", column.name()))?;
+        }
+
+        Ok(())
     }
 
-    fn validate_order<'a>(
-        &'a self,
-        _txn_id: &'a TxnId,
-        order: &'a [ValueId],
-    ) -> TCBoxTryFuture<'a, ()> {
-        let result = if !self.schema.starts_with(&order) {
+    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+        if !self.schema.starts_with(&order) {
             let order: Vec<String> = order.iter().map(|c| c.to_string()).collect();
             Err(error::bad_request(
                 &format!("Cannot order index with schema {} by", self.schema),
@@ -191,9 +187,7 @@ impl Selection for Index {
             ))
         } else {
             Ok(())
-        };
-
-        Box::pin(future::ready(result))
+        }
     }
 
     fn update<'a>(self, txn: Arc<Txn>, row: Row) -> TCBoxTryFuture<'a, ()> {
@@ -237,9 +231,11 @@ impl ReadOnly {
                 .create_btree(txn.id().clone(), "index".parse()?)
                 .await?;
 
+            let source_schema: IndexSchema =
+                (source.key().to_vec(), source.values().to_vec()).into();
             let (schema, btree) = if let Some(columns) = key_columns {
                 let column_names: HashSet<&ValueId> = columns.iter().collect();
-                let schema = source.schema().subset(column_names)?;
+                let schema = source_schema.subset(column_names)?;
                 let btree =
                     BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
 
@@ -247,12 +243,12 @@ impl ReadOnly {
                 btree.insert_from(txn.id(), rows).await?;
                 (schema, btree)
             } else {
-                let schema = source.schema().clone();
                 let btree =
-                    BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
+                    BTree::create(txn.id().clone(), source_schema.clone().into(), btree_file)
+                        .await?;
                 let rows = source.stream(txn.id().clone()).await?;
                 btree.insert_from(txn.id(), rows).await?;
-                (schema, btree)
+                (source_schema, btree)
             };
 
             let index = Index {
@@ -261,7 +257,7 @@ impl ReadOnly {
             };
 
             index
-                .index_slice(Bounds::all())
+                .index_slice(bounds::all())
                 .map(|index| ReadOnly { index })
         })
     }
@@ -280,54 +276,45 @@ impl Selection for ReadOnly {
         Box::pin(async move { self.index.clone().count(txn_id).await })
     }
 
-    fn order_by<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        order: Vec<ValueId>,
-        reverse: bool,
-    ) -> TCBoxTryFuture<'a, Table> {
-        Box::pin(async move {
-            self.index.validate_order(txn_id, &order).await?;
+    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+        self.index.validate_order(&order)?;
 
-            if reverse {
-                self.reversed()
-            } else {
-                Ok(self.clone().into())
-            }
-        })
+        if reverse {
+            self.reversed()
+        } else {
+            Ok(self.clone().into())
+        }
     }
 
     fn reversed(&self) -> TCResult<Table> {
         Ok(self.clone().into_reversed().into())
     }
 
-    fn schema(&'_ self) -> &'_ Schema {
-        self.index.schema()
+    fn key(&'_ self) -> &'_ [Column] {
+        self.index.key()
     }
 
-    fn slice<'a>(&'a self, txn_id: &'a TxnId, bounds: Bounds) -> TCBoxTryFuture<'a, Table> {
-        Box::pin(async move {
-            self.validate_bounds(txn_id, &bounds).await?;
-            self.index
-                .slice_index(bounds)
-                .map(|index| ReadOnly { index }.into())
-        })
+    fn values(&'_ self) -> &'_ [Column] {
+        self.index.values()
+    }
+
+    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+        self.validate_bounds(&bounds)?;
+        self.index
+            .slice_index(bounds)
+            .map(|index| ReadOnly { index }.into())
     }
 
     fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
         Box::pin(async move { self.index.clone().stream(txn_id).await })
     }
 
-    fn validate_bounds<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        bounds: &'a Bounds,
-    ) -> TCBoxTryFuture<'a, ()> {
-        self.index.validate_bounds(txn_id, bounds)
+    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        self.index.validate_bounds(bounds)
     }
 
-    fn validate_order<'a>(&'a self, txn_id: &'a TxnId, order: &'a [ValueId]) -> TCBoxTryFuture<()> {
-        self.index.validate_order(txn_id, order)
+    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+        self.index.validate_order(order)
     }
 }
 
@@ -335,49 +322,40 @@ impl Selection for ReadOnly {
 pub struct TableBase {
     dir: Arc<Dir>,
     primary: Index,
-    auxiliary: TxnLock<Mutable<BTreeMap<ValueId, Index>>>,
-    schema: Schema,
+    auxiliary: BTreeMap<ValueId, Index>,
 }
 
 impl TableBase {
-    pub async fn create(txn: Arc<Txn>, schema: Schema) -> TCResult<TableBase> {
-        let primary = Index::create(txn.clone(), PRIMARY_INDEX.parse()?, schema.clone()).await?;
-        let auxiliary = TxnLock::new(txn.id().clone(), BTreeMap::new().into());
+    pub async fn create(txn: Arc<Txn>, schema: TableSchema) -> TCResult<TableBase> {
+        let primary = Index::create(
+            txn.clone(),
+            PRIMARY_INDEX.parse()?,
+            schema.primary().clone(),
+        )
+        .await?;
+
+        let auxiliary: BTreeMap<ValueId, Index> =
+            try_join_all(schema.indices().iter().map(|(name, column_names)| {
+                Self::create_index(&txn, schema.primary(), name.clone(), column_names.to_vec())
+                    .map_ok(move |index| (name.clone(), index))
+            }))
+            .await?
+            .into_iter()
+            .collect();
 
         Ok(TableBase {
             dir: txn.context(),
             primary,
             auxiliary,
-            schema,
         })
     }
 
-    pub fn primary(&'_ self) -> &'_ Index {
-        &self.primary
-    }
-
-    pub async fn supporting_index<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        bounds: &'a Bounds,
+    async fn create_index(
+        txn: &Arc<Txn>,
+        primary: &IndexSchema,
+        name: ValueId,
+        key: Vec<ValueId>,
     ) -> TCResult<Index> {
-        if self.primary.validate_bounds(txn_id, bounds).await.is_ok() {
-            return Ok(self.primary.clone());
-        }
-
-        for index in self.auxiliary.read(txn_id).await?.values() {
-            if index.validate_bounds(txn_id, bounds).await.is_ok() {
-                return Ok(index.clone());
-            }
-        }
-
-        Err(error::bad_request(
-            "This table has no index which supports bounds",
-            bounds,
-        ))
-    }
-
-    pub async fn add_index(&self, txn: Arc<Txn>, name: ValueId, key: Vec<ValueId>) -> TCResult<()> {
         if name.as_str() == PRIMARY_INDEX {
             return Err(error::bad_request(
                 "This index name is reserved",
@@ -396,58 +374,55 @@ impl TableBase {
             ));
         }
 
-        let mut auxiliary = self.auxiliary.write(txn.id().clone()).await?;
-
-        let columns: HashMap<ValueId, Column> = self.schema().clone().into();
+        let mut columns: HashMap<ValueId, Column> = primary
+            .columns()
+            .iter()
+            .cloned()
+            .map(|c| (c.name().clone(), c))
+            .collect();
         let key: Vec<Column> = key
             .iter()
-            .map(|c| columns.get(&c).cloned().ok_or_else(|| error::not_found(c)))
+            .map(|c| columns.remove(&c).ok_or_else(|| error::not_found(c)))
             .collect::<TCResult<Vec<Column>>>()?;
-        let values: Vec<Column> = self
-            .schema()
+
+        let values: Vec<Column> = primary
             .key()
             .iter()
-            .filter(|c| !index_key_set.contains(&c.name))
+            .filter(|c| !index_key_set.contains(c.name()))
             .cloned()
             .collect();
-        let schema: Schema = (key, values).into();
+        let schema: IndexSchema = (key, values).into();
 
-        let btree_file = self
-            .dir
+        let btree_file = txn
+            .context()
             .create_btree(txn.id().clone(), name.clone())
             .await?;
-        let btree = Arc::new(
-            btree::BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?,
-        );
-        btree
-            .insert_from(
-                txn.id(),
-                self.clone()
-                    .select(schema.clone().into())?
-                    .stream(txn.id().clone())
-                    .await?,
-            )
+        let btree = btree::BTree::create(txn.id().clone(), schema.clone().into(), btree_file)
+            .map_ok(Arc::new)
             .await?;
 
-        let index = Index { btree, schema };
-        if auxiliary.contains_key(&name) {
-            self.dir.delete_file(txn.id().clone(), &name).await?;
-            Err(error::bad_request(
-                "This table already has an index named",
-                name,
-            ))
-        } else {
-            auxiliary.insert(name, index);
-            Ok(())
-        }
+        Ok(Index { btree, schema })
     }
 
-    pub async fn remove_index(&self, txn_id: TxnId, name: &ValueId) -> TCResult<()> {
-        let mut auxiliary = self.auxiliary.write(txn_id.clone()).await?;
-        match auxiliary.remove(name) {
-            Some(_index) => self.dir.clone().delete_file(txn_id, name).await,
-            None => Err(error::not_found(name)),
+    pub fn primary(&'_ self) -> &'_ Index {
+        &self.primary
+    }
+
+    pub fn supporting_index(&self, bounds: &Bounds) -> TCResult<Index> {
+        if self.primary.validate_bounds(bounds).is_ok() {
+            return Ok(self.primary.clone());
         }
+
+        for index in self.auxiliary.values() {
+            if index.validate_bounds(bounds).is_ok() {
+                return Ok(index.clone());
+            }
+        }
+
+        Err(error::bad_request(
+            "This table has no index which supports bounds",
+            super::bounds::format(bounds),
+        ))
     }
 
     pub fn get<'a>(
@@ -482,8 +457,8 @@ impl TableBase {
             } else {
                 let mut values = key;
                 values.extend(value);
-                self.upsert(&txn_id, self.schema.values_into_row(values)?)
-                    .await
+                let row = self.primary.schema().values_into_row(values)?;
+                self.upsert(&txn_id, row).await
             }
         })
     }
@@ -492,13 +467,11 @@ impl TableBase {
         Box::pin(async move {
             self.delete_row(txn_id, row.clone()).await?;
 
-            let auxiliary = self.auxiliary.read(txn_id).await?;
-
-            let mut inserts = Vec::with_capacity(auxiliary.len() + 1);
-            for index in auxiliary.values() {
+            let mut inserts = Vec::with_capacity(self.auxiliary.len() + 1);
+            inserts.push(self.primary.insert(txn_id, row.clone(), true));
+            for index in self.auxiliary.values() {
                 inserts.push(index.insert(txn_id, row.clone(), false));
             }
-            inserts.push(self.primary.insert(txn_id, row, true));
 
             try_join_all(inserts).await?;
             Ok(())
@@ -515,12 +488,11 @@ impl Selection for TableBase {
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
-            let auxiliary = self.auxiliary.read(&txn_id).await?;
-            let mut deletes = Vec::with_capacity(auxiliary.len() + 1);
-            for index in auxiliary.values() {
+            let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
+            deletes.push(self.primary.delete(txn_id.clone()));
+            for index in self.auxiliary.values() {
                 deletes.push(index.clone().delete(txn_id.clone()));
             }
-            deletes.push(self.primary.delete(txn_id));
 
             try_join_all(deletes).await?;
             Ok(())
@@ -529,11 +501,10 @@ impl Selection for TableBase {
 
     fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
-            self.schema().validate_row(&row)?;
+            self.primary.schema().validate_row(&row)?;
 
-            let auxiliary = self.auxiliary.read(txn_id).await?;
-            let mut deletes = Vec::with_capacity(auxiliary.len() + 1);
-            for index in auxiliary.values() {
+            let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
+            for index in self.auxiliary.values() {
                 deletes.push(index.delete_row(txn_id, row.clone()));
             }
             deletes.push(self.primary.delete_row(txn_id, row));
@@ -543,69 +514,64 @@ impl Selection for TableBase {
         })
     }
 
-    fn order_by<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        columns: Vec<ValueId>,
-        reverse: bool,
-    ) -> TCBoxTryFuture<'a, Table> {
-        Box::pin(async move {
-            self.validate_order(txn_id, &columns).await?;
+    fn order_by(&self, columns: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+        self.validate_order(&columns)?;
 
-            if self.primary.validate_order(txn_id, &columns).await.is_ok() {
-                let ordered = TableSlice::new(self.clone(), txn_id, Bounds::all()).await?;
-                if reverse {
-                    return ordered.reversed();
-                } else {
-                    return Ok(ordered.into());
-                }
+        if self.primary.validate_order(&columns).is_ok() {
+            let ordered = TableSlice::new(self.clone(), bounds::all())?;
+            if reverse {
+                return ordered.reversed();
+            } else {
+                return Ok(ordered.into());
             }
+        }
 
-            let auxiliary = self.auxiliary.read(txn_id).await?;
+        let selection = TableSlice::new(self.clone(), bounds::all())?;
+        let mut merge_source = MergeSource::Table(selection);
 
-            let selection = TableSlice::new(self.clone(), txn_id, Bounds::all()).await?;
-            let mut merge_source = MergeSource::Table(selection);
+        let mut columns = &columns[..];
+        loop {
+            let initial = columns.to_vec();
+            for i in (1..columns.len() + 1).rev() {
+                let subset = &columns[..i];
 
-            let mut columns = &columns[..];
-            loop {
-                let initial = columns.to_vec();
-                for i in (1..columns.len() + 1).rev() {
-                    let subset = &columns[..i];
+                for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
+                    if index.validate_order(subset).is_ok() {
+                        columns = &columns[i..];
 
-                    for index in iter::once(&self.primary).chain(auxiliary.values()) {
-                        if index.validate_order(txn_id, subset).await.is_ok() {
-                            columns = &columns[i..];
+                        let index_slice = self.primary.index_slice(bounds::all())?;
+                        let merged = Merged::new(merge_source, index_slice);
 
-                            let index_slice = self.primary.index_slice(Bounds::all())?;
-                            let merged = Merged::new(merge_source, index_slice);
-
-                            if columns.is_empty() {
-                                if reverse {
-                                    return merged.reversed();
-                                } else {
-                                    return Ok(merged.into());
-                                }
+                        if columns.is_empty() {
+                            if reverse {
+                                return merged.reversed();
+                            } else {
+                                return Ok(merged.into());
                             }
-
-                            merge_source = MergeSource::Merge(Arc::new(merged));
-                            break;
                         }
+
+                        merge_source = MergeSource::Merge(Arc::new(merged));
+                        break;
                     }
                 }
-
-                if columns == &initial[..] {
-                    let order: Vec<String> = columns.iter().map(String::from).collect();
-                    return Err(error::bad_request(
-                        "This table has no index to support the order",
-                        order.join(", "),
-                    ));
-                }
             }
-        })
+
+            if columns == &initial[..] {
+                let order: Vec<String> = columns.iter().map(String::from).collect();
+                return Err(error::bad_request(
+                    "This table has no index to support the order",
+                    order.join(", "),
+                ));
+            }
+        }
     }
 
-    fn schema(&'_ self) -> &'_ Schema {
-        &self.schema
+    fn key(&'_ self) -> &'_ [Column] {
+        self.primary.key()
+    }
+
+    fn values(&'_ self) -> &'_ [Column] {
+        self.primary.key()
     }
 
     fn reversed(&self) -> TCResult<Table> {
@@ -614,139 +580,132 @@ impl Selection for TableBase {
         ))
     }
 
-    fn slice<'a>(&'a self, txn_id: &'a TxnId, bounds: Bounds) -> TCBoxTryFuture<'a, Table> {
-        Box::pin(async move {
-            if self.primary.validate_bounds(txn_id, &bounds).await.is_ok() {
-                return TableSlice::new(self.clone(), txn_id, bounds)
-                    .await
-                    .map(|t| t.into());
-            }
+    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+        if self.primary.validate_bounds(&bounds).is_ok() {
+            return TableSlice::new(self.clone(), bounds).map(|t| t.into());
+        }
 
-            let mut columns: Vec<ValueId> = self.schema().column_names();
-            let bounds: Vec<(ValueId, ColumnBound)> = columns
-                .drain(..)
-                .filter_map(|name| bounds.get(&name).map(|bound| (name, bound.clone())))
-                .collect();
+        let mut columns: Vec<ValueId> = self
+            .primary
+            .schema()
+            .columns()
+            .iter()
+            .map(|c| c.name())
+            .cloned()
+            .collect();
+        let bounds: Vec<(ValueId, ColumnBound)> = columns
+            .drain(..)
+            .filter_map(|name| bounds.get(&name).map(|bound| (name, bound.clone())))
+            .collect();
 
-            let auxiliary = self.auxiliary.read(txn_id).await?;
+        let selection = TableSlice::new(self.clone(), bounds::all())?;
+        let mut merge_source = MergeSource::Table(selection);
 
-            let selection = TableSlice::new(self.clone(), txn_id, Bounds::all()).await?;
-            let mut merge_source = MergeSource::Table(selection);
+        let mut bounds = &bounds[..];
+        loop {
+            let initial = bounds.len();
+            for i in (1..bounds.len() + 1).rev() {
+                let subset: Bounds = bounds[..i].iter().cloned().collect();
 
-            let mut bounds = &bounds[..];
-            loop {
-                let initial = bounds.len();
-                for i in (1..bounds.len() + 1).rev() {
-                    let subset: Bounds = bounds[..i].iter().cloned().collect();
+                for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
+                    if index.validate_bounds(&subset).is_ok() {
+                        bounds = &bounds[i..];
 
-                    for index in iter::once(&self.primary).chain(auxiliary.values()) {
-                        if index.validate_bounds(txn_id, &subset).await.is_ok() {
-                            bounds = &bounds[i..];
+                        let index_slice = self.primary.index_slice(subset)?;
+                        let merged = Merged::new(merge_source, index_slice);
 
-                            let index_slice = self.primary.index_slice(subset)?;
-                            let merged = Merged::new(merge_source, index_slice);
-
-                            if bounds.is_empty() {
-                                return Ok(merged.into());
-                            }
-
-                            merge_source = MergeSource::Merge(Arc::new(merged));
-                            break;
+                        if bounds.is_empty() {
+                            return Ok(merged.into());
                         }
+
+                        merge_source = MergeSource::Merge(Arc::new(merged));
+                        break;
                     }
                 }
-
-                if bounds.len() == initial {
-                    let order: Vec<String> =
-                        bounds.iter().map(|(name, _)| name.to_string()).collect();
-                    return Err(error::bad_request(
-                        "This table has no index to support selection bounds on",
-                        order.join(", "),
-                    ));
-                }
             }
-        })
+
+            if bounds.len() == initial {
+                let order: Vec<String> = bounds.iter().map(|(name, _)| name.to_string()).collect();
+                return Err(error::bad_request(
+                    "This table has no index to support selection bounds on",
+                    order.join(", "),
+                ));
+            }
+        }
     }
 
     fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
         self.primary.stream(txn_id)
     }
 
-    fn validate_bounds<'a>(&'a self, txn_id: &'a TxnId, bounds: &'a Bounds) -> TCBoxTryFuture<()> {
-        Box::pin(async move {
-            let mut columns: Vec<ValueId> = self.schema().column_names();
-            let bounds: Vec<(ValueId, ColumnBound)> = columns
-                .drain(..)
-                .filter_map(|name| bounds.get(&name).map(|bound| (name, bound.clone())))
-                .collect();
+    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        let bounds: Vec<(ValueId, ColumnBound)> = self
+            .primary
+            .schema()
+            .columns()
+            .iter()
+            .filter_map(|c| {
+                bounds
+                    .get(c.name())
+                    .map(|bound| (c.name().clone(), bound.clone()))
+            })
+            .collect();
 
-            let auxiliary = self.auxiliary.read(txn_id).await?;
+        let mut bounds = &bounds[..];
+        while !bounds.is_empty() {
+            let initial = bounds.len();
+            for i in (1..bounds.len() + 1).rev() {
+                let subset: Bounds = bounds[..i].iter().cloned().collect();
 
-            let mut bounds = &bounds[..];
-            while !bounds.is_empty() {
-                let initial = bounds.len();
-                for i in (1..bounds.len() + 1).rev() {
-                    let subset: Bounds = bounds[..i].iter().cloned().collect();
-
-                    for index in iter::once(&self.primary).chain(auxiliary.values()) {
-                        if index.validate_bounds(txn_id, &subset).await.is_ok() {
-                            bounds = &bounds[i..];
-                            break;
-                        }
+                for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
+                    if index.validate_bounds(&subset).is_ok() {
+                        bounds = &bounds[i..];
+                        break;
                     }
-                }
-
-                if bounds.len() == initial {
-                    let order: Vec<String> =
-                        bounds.iter().map(|(name, _)| name.to_string()).collect();
-                    return Err(error::bad_request(
-                        "This table has no index to support selection bounds on",
-                        order.join(", "),
-                    ));
                 }
             }
 
-            Ok(())
-        })
+            if bounds.len() == initial {
+                let order: Vec<String> = bounds.iter().map(|(name, _)| name.to_string()).collect();
+                return Err(error::bad_request(
+                    "This table has no index to support selection bounds on",
+                    order.join(", "),
+                ));
+            }
+        }
+
+        Ok(())
     }
 
-    fn validate_order<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        mut order: &'a [ValueId],
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            let auxiliary = self.auxiliary.read(txn_id).await?;
+    fn validate_order(&self, mut order: &[ValueId]) -> TCResult<()> {
+        while !order.is_empty() {
+            let initial = order.to_vec();
+            for i in (1..order.len() + 1).rev() {
+                let subset = &order[..i];
 
-            while !order.is_empty() {
-                let initial = order.to_vec();
-                for i in (1..order.len() + 1).rev() {
-                    let subset = &order[..i];
-
-                    for index in iter::once(&self.primary).chain(auxiliary.values()) {
-                        if index.validate_order(txn_id, subset).await.is_ok() {
-                            order = &order[i..];
-                            break;
-                        }
+                for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
+                    if index.validate_order(subset).is_ok() {
+                        order = &order[i..];
+                        break;
                     }
-                }
-
-                if order == &initial[..] {
-                    let order: Vec<String> = order.iter().map(String::from).collect();
-                    return Err(error::bad_request(
-                        "This table has no index to support the order",
-                        order.join(", "),
-                    ));
                 }
             }
 
-            Ok(())
-        })
+            if order == &initial[..] {
+                let order: Vec<String> = order.iter().map(String::from).collect();
+                return Err(error::bad_request(
+                    "This table has no index to support the order",
+                    order.join(", "),
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
-            let schema = self.schema().clone();
+            let schema = self.primary.schema();
             schema.validate_row_partial(&value)?;
 
             let index = self.clone().index(txn.clone(), None).await?;
@@ -767,20 +726,18 @@ impl Selection for TableBase {
 #[async_trait]
 impl Transact for TableBase {
     async fn commit(&self, txn_id: &TxnId) {
-        let aux = self.auxiliary.read(txn_id).await.unwrap();
-        let mut commits = Vec::with_capacity(aux.len() + 1);
+        let mut commits = Vec::with_capacity(self.auxiliary.len() + 1);
         commits.push(self.primary.commit(txn_id));
-        for index in aux.values() {
+        for index in self.auxiliary.values() {
             commits.push(index.commit(txn_id));
         }
         join_all(commits).await;
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        let aux = self.auxiliary.read(txn_id).await.unwrap();
-        let mut rollbacks = Vec::with_capacity(aux.len() + 1);
+        let mut rollbacks = Vec::with_capacity(self.auxiliary.len() + 1);
         rollbacks.push(self.primary.rollback(txn_id));
-        for index in aux.values() {
+        for index in self.auxiliary.values() {
             rollbacks.push(index.commit(txn_id));
         }
         join_all(rollbacks).await;

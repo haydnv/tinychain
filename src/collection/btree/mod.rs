@@ -19,8 +19,9 @@ use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::{ValueClass, ValueType};
-use crate::value::{Value, ValueId};
+use crate::value::Value;
 
+use super::schema::{Column, RowSchema};
 use super::{Collect, GetResult, State};
 
 mod collator;
@@ -99,154 +100,110 @@ impl fmt::Display for Node {
 }
 
 pub type Key = Vec<Value>;
-type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Sync + Unpin>>>;
 
-#[derive(Eq, PartialEq)]
-pub struct Column {
-    name: ValueId,
-    dtype: ValueType,
-    max_len: Option<usize>,
+fn format_schema(schema: &[Column]) -> String {
+    let schema: Vec<String> = schema.iter().map(|c| c.to_string()).collect();
+    format!("[{}]", schema.join(", "))
 }
 
-impl From<(ValueId, ValueType, Option<usize>)> for Column {
-    fn from(column: (ValueId, ValueType, Option<usize>)) -> Column {
-        Column {
-            name: column.0,
-            dtype: column.1,
-            max_len: column.2,
-        }
+fn validate_key(key: &[Value], schema: &[Column]) -> TCResult<()> {
+    if key.len() != schema.len() {
+        return Err(error::bad_request(
+            &format!("Invalid key {} for schema", Value::Tuple(key.to_vec())),
+            format_schema(schema),
+        ));
+    }
+
+    validate_prefix(key, schema)
+}
+
+fn validate_selector(selector: &Selector, schema: &[Column]) -> TCResult<()> {
+    match selector {
+        Selector::Key(key) => validate_prefix(key, schema),
+        Selector::Range(range, _) => validate_range(range, schema),
     }
 }
 
-#[derive(Eq, PartialEq)]
-pub struct Schema(Vec<Column>);
-
-impl Schema {
-    fn columns(&'_ self) -> &'_ [Column] {
-        &self.0
+fn validate_prefix(prefix: &[Value], schema: &[Column]) -> TCResult<()> {
+    if prefix.len() > schema.len() {
+        return Err(error::bad_request(
+            &format!(
+                "Invalid selector {} for schema",
+                Value::Tuple(prefix.to_vec())
+            ),
+            format_schema(schema),
+        ));
     }
 
-    fn dtypes(&self) -> Vec<ValueType> {
-        self.0.iter().map(|c| c.dtype).collect()
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    fn validate(&self, selector: &Selector) -> TCResult<()> {
-        match selector {
-            Selector::Key(key) => self.validate_prefix(key),
-            Selector::Range(range, _) => self.validate_range(range),
-        }
-    }
-
-    fn validate_key(&self, key: &[Value]) -> TCResult<()> {
-        if self.len() != key.len() {
+    for (val, col) in prefix.iter().zip(&schema[0..prefix.len()]) {
+        if !val.is_a(*col.dtype()) {
             return Err(error::bad_request(
-                &format!("Invalid key {} for schema", Value::Tuple(key.to_vec())),
-                self,
+                &format!("Expected {} for", col.dtype()),
+                col.name(),
             ));
         }
 
-        self.validate_prefix(key)
-    }
-
-    fn validate_prefix(&self, prefix: &[Value]) -> TCResult<()> {
-        if prefix.len() > self.len() {
-            return Err(error::bad_request(
-                &format!(
-                    "Invalid selector {} for schema",
-                    Value::Tuple(prefix.to_vec())
-                ),
-                self,
-            ));
-        }
-
-        for (val, col) in prefix.iter().zip(&self.columns()[0..prefix.len()]) {
-            if !val.is_a(col.dtype) {
+        let key_size = bincode::serialized_size(&val)?;
+        if let Some(size) = col.max_len() {
+            if key_size as usize > *size {
                 return Err(error::bad_request(
-                    &format!("Expected {} for", col.dtype),
-                    &col.name,
+                    "Column value exceeds the maximum length",
+                    col.name(),
                 ));
             }
-
-            let key_size = bincode::serialized_size(&val)?;
-            if let Some(size) = col.max_len {
-                if key_size as usize > size {
-                    return Err(error::bad_request(
-                        "Column value exceeds the maximum length",
-                        &col.name,
-                    ));
-                }
-            }
         }
-
-        Ok(())
     }
 
-    fn validate_range(&self, range: &BTreeRange) -> TCResult<()> {
-        use Bound::*;
-
-        let expect = |column: &Column, value: &Value| {
-            value.expect(
-                column.dtype,
-                format!("for column {} in BTreeRange", column.name),
-            )
-        };
-
-        for (i, column) in self.columns().iter().enumerate() {
-            if i < range.0.len() {
-                match &range.0[i] {
-                    Unbounded => {}
-                    Included(value) => expect(column, value)?,
-                    Excluded(value) => expect(column, value)?,
-                }
-            }
-
-            if i < range.1.len() {
-                match &range.1[i] {
-                    Unbounded => {}
-                    Included(value) => expect(column, value)?,
-                    Excluded(value) => expect(column, value)?,
-                }
-            }
-        }
-
-        Ok(())
-    }
+    Ok(())
 }
 
-impl From<Vec<Column>> for Schema {
-    fn from(columns: Vec<Column>) -> Schema {
-        Schema(columns)
-    }
-}
+fn validate_range(range: &BTreeRange, schema: &[Column]) -> TCResult<()> {
+    use Bound::*;
 
-impl fmt::Display for Schema {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "[{}]",
-            self.0
-                .iter()
-                .map(|c| c.dtype.to_string())
-                .collect::<Vec<String>>()
-                .join(",")
+    let expect = |column: &Column, value: &Value| {
+        value.expect(
+            *column.dtype(),
+            format!("for column {} in BTreeRange", column.name()),
         )
+    };
+
+    for (i, column) in schema.iter().enumerate() {
+        if i < range.0.len() {
+            match &range.0[i] {
+                Unbounded => {}
+                Included(value) => expect(column, value)?,
+                Excluded(value) => expect(column, value)?,
+            }
+        }
+
+        if i < range.1.len() {
+            match &range.1[i] {
+                Unbounded => {}
+                Included(value) => expect(column, value)?,
+                Excluded(value) => expect(column, value)?,
+            }
+        }
     }
+
+    Ok(())
 }
+
+type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Sync + Unpin>>>;
 
 pub struct BTree {
     file: Arc<File<Node>>,
-    schema: Schema,
+    schema: RowSchema,
     order: usize,
     collator: collator::Collator,
     root: TxnLock<Mutable<NodeId>>,
 }
 
 impl BTree {
-    pub async fn create(txn_id: TxnId, schema: Schema, file: Arc<File<Node>>) -> TCResult<BTree> {
+    pub async fn create(
+        txn_id: TxnId,
+        schema: RowSchema,
+        file: Arc<File<Node>>,
+    ) -> TCResult<BTree> {
         if !file.is_empty(&txn_id).await? {
             return Err(error::internal(
                 "Tried to create a new BTree without a new File",
@@ -254,21 +211,21 @@ impl BTree {
         }
 
         let mut key_size = 0;
-        for col in schema.columns() {
-            if let Some(size) = col.dtype.size() {
+        for col in &schema {
+            if let Some(size) = col.dtype().size() {
                 key_size += size;
-                if col.max_len.is_some() {
+                if col.max_len().is_some() {
                     return Err(error::bad_request(
                         "Found maximum length specified for a scalar type",
-                        &col.dtype,
+                        col.dtype(),
                     ));
                 }
-            } else if let Some(size) = col.max_len {
+            } else if let Some(size) = col.max_len() {
                 key_size += size + 8; // add 8 bytes for bincode to encode the length
             } else {
                 return Err(error::bad_request(
                     "Type requires a maximum length",
-                    &col.dtype,
+                    col.dtype(),
                 ));
             }
         }
@@ -291,7 +248,7 @@ impl BTree {
             .create_block(txn_id.clone(), root.clone(), Node::new(true, None))
             .await?;
 
-        let collator = collator::Collator::new(schema.dtypes())?;
+        let collator = collator::Collator::new(schema.iter().map(|c| *c.dtype()).collect())?;
         Ok(BTree {
             file,
             schema,
@@ -305,7 +262,7 @@ impl BTree {
         &self.collator
     }
 
-    pub fn schema(&'_ self) -> &'_ Schema {
+    pub fn schema(&'_ self) -> &'_ [Column] {
         &self.schema
     }
 
@@ -332,7 +289,7 @@ impl BTree {
         txn_id: TxnId,
         selector: Selector,
     ) -> TCResult<TCStream<Key>> {
-        self.schema.validate(&selector)?;
+        validate_selector(&selector, self.schema())?;
 
         let root_id = self.root.read(&txn_id).await?;
         let root = self
@@ -533,7 +490,7 @@ impl BTree {
         source: S,
     ) -> TCResult<()> {
         source
-            .and_then(|k| future::ready(self.schema.validate_key(&k).map(|()| k)))
+            .and_then(|k| future::ready(validate_key(&k, self.schema()).map(|()| k)))
             .map_ok(|key| self.insert(txn_id, key))
             .try_buffer_unordered(2 * self.order)
             .fold(Ok(()), |_, r| future::ready(r))
@@ -546,7 +503,7 @@ impl BTree {
         source: S,
     ) -> TCResult<()> {
         source
-            .map(|k| self.schema.validate_key(&k).map(|()| k))
+            .map(|k| validate_key(&k, self.schema()).map(|()| k))
             .map_ok(|key| self.insert(txn_id, key))
             .try_buffer_unordered(2 * self.order)
             .fold(Ok(()), |_, r| future::ready(r))
@@ -863,8 +820,8 @@ impl Collect for BTree {
         selector: &Self::Selector,
         key: Self::Item,
     ) -> TCResult<()> {
-        self.schema.validate(selector)?;
-        self.schema.validate_key(&key)?;
+        validate_selector(selector, self.schema())?;
+        validate_key(&key, self.schema())?;
 
         match selector {
             Selector::Key(selector) if self.collator.compare(selector, &key) == Ordering::Equal => {

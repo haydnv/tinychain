@@ -9,8 +9,10 @@ use crate::error;
 use crate::transaction::{Txn, TxnId};
 use crate::value::{Value, ValueId};
 
+use super::schema::{Column, Row, TableSchema};
+
+mod bounds;
 mod index;
-mod schema;
 mod view;
 
 const ERR_DELETE: &str =
@@ -20,9 +22,7 @@ const ERR_SLICE: &str =
 const ERR_UPDATE: &str =
     "This table view does not support updates (consider updating a slice of the source table)";
 
-pub type Column = schema::Column;
-pub type ColumnBound = schema::ColumnBound;
-pub type Schema = schema::Schema;
+pub type ColumnBound = bounds::ColumnBound;
 pub type TableBase = index::TableBase;
 
 pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
@@ -45,16 +45,12 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         Box::pin(future::ready(Err(error::unsupported(ERR_DELETE))))
     }
 
-    fn delete_row<'a>(&'a self, _txn_id: &'a TxnId, _row: schema::Row) -> TCBoxTryFuture<'a, ()> {
+    fn delete_row<'a>(&'a self, _txn_id: &'a TxnId, _row: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(future::ready(Err(error::unsupported(ERR_DELETE))))
     }
 
-    fn group_by<'a>(
-        &'a self,
-        txn_id: TxnId,
-        columns: Vec<ValueId>,
-    ) -> TCBoxTryFuture<'a, view::Aggregate> {
-        Box::pin(view::Aggregate::new(self.clone().into(), txn_id, columns))
+    fn group_by(&self, columns: Vec<ValueId>) -> TCResult<view::Aggregate> {
+        view::Aggregate::new(self.clone().into(), columns)
     }
 
     fn index<'a>(
@@ -69,17 +65,16 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         ))
     }
 
+    fn key(&'_ self) -> &'_ [Column];
+
+    fn values(&'_ self) -> &'_ [Column];
+
     fn limit(&self, limit: u64) -> TCResult<Arc<view::Limited>> {
         let limited = view::Limited::try_from((self.clone().into(), limit))?;
         Ok(Arc::new(limited))
     }
 
-    fn order_by<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        columns: Vec<ValueId>,
-        reverse: bool,
-    ) -> TCBoxTryFuture<'a, Table>;
+    fn order_by(&self, columns: Vec<ValueId>, reverse: bool) -> TCResult<Table>;
 
     fn reversed(&self) -> TCResult<Table>;
 
@@ -88,40 +83,21 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
         Ok(selection)
     }
 
-    fn schema(&'_ self) -> &'_ schema::Schema;
-
-    fn slice<'a>(
-        &'a self,
-        _txn_id: &'a TxnId,
-        _bounds: schema::Bounds,
-    ) -> TCBoxTryFuture<'a, Table> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_SLICE))))
+    fn slice(&self, _bounds: bounds::Bounds) -> TCResult<Table> {
+        Err(error::unsupported(ERR_SLICE))
     }
 
     fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream>;
 
-    fn validate_bounds<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        bounds: &'a schema::Bounds,
-    ) -> TCBoxTryFuture<'a, ()>;
+    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()>;
 
-    fn validate_order<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        order: &'a [ValueId],
-    ) -> TCBoxTryFuture<'a, ()>;
+    fn validate_order(&self, order: &[ValueId]) -> TCResult<()>;
 
-    fn update<'a>(self, _txn: Arc<Txn>, _value: schema::Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, _txn: Arc<Txn>, _value: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(future::ready(Err(error::unsupported(ERR_UPDATE))))
     }
 
-    fn update_row(
-        &self,
-        _txn_id: TxnId,
-        _row: schema::Row,
-        _value: schema::Row,
-    ) -> TCBoxTryFuture<()> {
+    fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(ERR_UPDATE))))
     }
 }
@@ -140,7 +116,7 @@ pub enum Table {
 }
 
 impl Table {
-    pub async fn create(txn: Arc<Txn>, schema: schema::Schema) -> TCResult<TableBase> {
+    pub async fn create(txn: Arc<Txn>, schema: TableSchema) -> TCResult<TableBase> {
         index::TableBase::create(txn, schema).await
     }
 }
@@ -176,7 +152,7 @@ impl Selection for Table {
         }
     }
 
-    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: schema::Row) -> TCBoxTryFuture<'a, ()> {
+    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
         match self {
             Self::Aggregate(aggregate) => aggregate.delete_row(txn_id, row),
             Self::Columns(columns) => columns.delete_row(txn_id, row),
@@ -190,22 +166,17 @@ impl Selection for Table {
         }
     }
 
-    fn order_by<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        order: Vec<ValueId>,
-        reverse: bool,
-    ) -> TCBoxTryFuture<'a, Table> {
+    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.order_by(txn_id, order, reverse),
-            Self::Columns(columns) => columns.order_by(txn_id, order, reverse),
-            Self::Limit(limited) => limited.order_by(txn_id, order, reverse),
-            Self::Index(index) => index.order_by(txn_id, order, reverse),
-            Self::IndexSlice(index_slice) => index_slice.order_by(txn_id, order, reverse),
-            Self::Merge(merged) => merged.order_by(txn_id, order, reverse),
-            Self::ROIndex(ro_index) => ro_index.order_by(txn_id, order, reverse),
-            Self::Table(table) => table.order_by(txn_id, order, reverse),
-            Self::TableSlice(table_slice) => table_slice.order_by(txn_id, order, reverse),
+            Self::Aggregate(aggregate) => aggregate.order_by(order, reverse),
+            Self::Columns(columns) => columns.order_by(order, reverse),
+            Self::Limit(limited) => limited.order_by(order, reverse),
+            Self::Index(index) => index.order_by(order, reverse),
+            Self::IndexSlice(index_slice) => index_slice.order_by(order, reverse),
+            Self::Merge(merged) => merged.order_by(order, reverse),
+            Self::ROIndex(ro_index) => ro_index.order_by(order, reverse),
+            Self::Table(table) => table.order_by(order, reverse),
+            Self::TableSlice(table_slice) => table_slice.order_by(order, reverse),
         }
     }
 
@@ -223,31 +194,45 @@ impl Selection for Table {
         }
     }
 
-    fn schema(&'_ self) -> &'_ schema::Schema {
+    fn key(&'_ self) -> &'_ [Column] {
         match self {
-            Self::Aggregate(aggregate) => aggregate.schema(),
-            Self::Columns(columns) => columns.schema(),
-            Self::Limit(limited) => limited.schema(),
-            Self::Index(index) => index.schema(),
-            Self::IndexSlice(index_slice) => index_slice.schema(),
-            Self::Merge(merged) => merged.schema(),
-            Self::ROIndex(ro_index) => ro_index.schema(),
-            Self::Table(table) => table.schema(),
-            Self::TableSlice(table_slice) => table_slice.schema(),
+            Self::Aggregate(aggregate) => aggregate.key(),
+            Self::Columns(columns) => columns.key(),
+            Self::Limit(limited) => limited.key(),
+            Self::Index(index) => index.key(),
+            Self::IndexSlice(index_slice) => index_slice.key(),
+            Self::Merge(merged) => merged.key(),
+            Self::ROIndex(ro_index) => ro_index.key(),
+            Self::Table(table) => table.key(),
+            Self::TableSlice(table_slice) => table_slice.key(),
         }
     }
 
-    fn slice<'a>(&'a self, txn_id: &'a TxnId, bounds: schema::Bounds) -> TCBoxTryFuture<'a, Table> {
+    fn values(&'_ self) -> &'_ [Column] {
         match self {
-            Self::Aggregate(aggregate) => aggregate.slice(txn_id, bounds),
-            Self::Columns(columns) => columns.slice(txn_id, bounds),
-            Self::Limit(limited) => limited.slice(txn_id, bounds),
-            Self::Index(index) => index.slice(txn_id, bounds),
-            Self::IndexSlice(index_slice) => index_slice.slice(txn_id, bounds),
-            Self::Merge(merged) => merged.slice(txn_id, bounds),
-            Self::ROIndex(ro_index) => ro_index.slice(txn_id, bounds),
-            Self::Table(table) => table.slice(txn_id, bounds),
-            Self::TableSlice(table_slice) => table_slice.slice(txn_id, bounds),
+            Self::Aggregate(aggregate) => aggregate.values(),
+            Self::Columns(columns) => columns.values(),
+            Self::Limit(limited) => limited.values(),
+            Self::Index(index) => index.values(),
+            Self::IndexSlice(index_slice) => index_slice.values(),
+            Self::Merge(merged) => merged.values(),
+            Self::ROIndex(ro_index) => ro_index.values(),
+            Self::Table(table) => table.values(),
+            Self::TableSlice(table_slice) => table_slice.values(),
+        }
+    }
+
+    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Table> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.slice(bounds),
+            Self::Columns(columns) => columns.slice(bounds),
+            Self::Limit(limited) => limited.slice(bounds),
+            Self::Index(index) => index.slice(bounds),
+            Self::IndexSlice(index_slice) => index_slice.slice(bounds),
+            Self::Merge(merged) => merged.slice(bounds),
+            Self::ROIndex(ro_index) => ro_index.slice(bounds),
+            Self::Table(table) => table.slice(bounds),
+            Self::TableSlice(table_slice) => table_slice.slice(bounds),
         }
     }
 
@@ -265,7 +250,7 @@ impl Selection for Table {
         }
     }
 
-    fn update<'a>(self, txn: Arc<Txn>, value: schema::Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
         match self {
             Self::Aggregate(aggregate) => aggregate.update(txn, value),
             Self::Columns(columns) => columns.update(txn, value),
@@ -279,12 +264,7 @@ impl Selection for Table {
         }
     }
 
-    fn update_row(
-        &self,
-        txn_id: TxnId,
-        row: schema::Row,
-        value: schema::Row,
-    ) -> TCBoxTryFuture<()> {
+    fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCBoxTryFuture<()> {
         match self {
             Self::Aggregate(aggregate) => aggregate.update_row(txn_id, row, value),
             Self::Columns(columns) => columns.update_row(txn_id, row, value),
@@ -298,39 +278,31 @@ impl Selection for Table {
         }
     }
 
-    fn validate_bounds<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        bounds: &'a schema::Bounds,
-    ) -> TCBoxTryFuture<'a, ()> {
+    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.validate_bounds(txn_id, bounds),
-            Self::Columns(columns) => columns.validate_bounds(txn_id, bounds),
-            Self::Limit(limited) => limited.validate_bounds(txn_id, bounds),
-            Self::Index(index) => index.validate_bounds(txn_id, bounds),
-            Self::IndexSlice(index_slice) => index_slice.validate_bounds(txn_id, bounds),
-            Self::Merge(merged) => merged.validate_bounds(txn_id, bounds),
-            Self::ROIndex(ro_index) => ro_index.validate_bounds(txn_id, bounds),
-            Self::Table(table) => table.validate_bounds(txn_id, bounds),
-            Self::TableSlice(table_slice) => table_slice.validate_bounds(txn_id, bounds),
+            Self::Aggregate(aggregate) => aggregate.validate_bounds(bounds),
+            Self::Columns(columns) => columns.validate_bounds(bounds),
+            Self::Limit(limited) => limited.validate_bounds(bounds),
+            Self::Index(index) => index.validate_bounds(bounds),
+            Self::IndexSlice(index_slice) => index_slice.validate_bounds(bounds),
+            Self::Merge(merged) => merged.validate_bounds(bounds),
+            Self::ROIndex(ro_index) => ro_index.validate_bounds(bounds),
+            Self::Table(table) => table.validate_bounds(bounds),
+            Self::TableSlice(table_slice) => table_slice.validate_bounds(bounds),
         }
     }
 
-    fn validate_order<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        order: &'a [ValueId],
-    ) -> TCBoxTryFuture<'a, ()> {
+    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.validate_order(txn_id, order),
-            Self::Columns(columns) => columns.validate_order(txn_id, order),
-            Self::Limit(limited) => limited.validate_order(txn_id, order),
-            Self::Index(index) => index.validate_order(txn_id, order),
-            Self::IndexSlice(index_slice) => index_slice.validate_order(txn_id, order),
-            Self::Merge(merged) => merged.validate_order(txn_id, order),
-            Self::ROIndex(ro_index) => ro_index.validate_order(txn_id, order),
-            Self::Table(table) => table.validate_order(txn_id, order),
-            Self::TableSlice(table_slice) => table_slice.validate_order(txn_id, order),
+            Self::Aggregate(aggregate) => aggregate.validate_order(order),
+            Self::Columns(columns) => columns.validate_order(order),
+            Self::Limit(limited) => limited.validate_order(order),
+            Self::Index(index) => index.validate_order(order),
+            Self::IndexSlice(index_slice) => index_slice.validate_order(order),
+            Self::Merge(merged) => merged.validate_order(order),
+            Self::ROIndex(ro_index) => ro_index.validate_order(order),
+            Self::Table(table) => table.validate_order(order),
+            Self::TableSlice(table_slice) => table_slice.validate_order(order),
         }
     }
 }

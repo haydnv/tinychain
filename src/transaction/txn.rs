@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::Hash;
@@ -12,12 +11,11 @@ use serde::{Deserialize, Serialize};
 use crate::block::dir::Dir;
 use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::collection::graph::Graph;
-use crate::collection::table;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::value::link::PathSegment;
-use crate::value::string::{StringType, TCString};
-use crate::value::{label, Label, Op, Value, ValueId, ValueType};
+use crate::value::string::TCString;
+use crate::value::{label, Label, Op, Value, ValueId};
 
 use super::Transact;
 
@@ -238,35 +236,6 @@ impl Txn {
     }
 }
 
-async fn create_graph(txn: Arc<Txn>) -> TCResult<Graph> {
-    let graph_schema: HashMap<ValueId, table::Schema> = vec![
-        (
-            PROVIDED.into(),
-            table::Schema::from((
-                vec![(
-                    NAME.into(),
-                    ValueType::TCString(StringType::Id),
-                    DEFAULT_MAX_VALUE_SIZE,
-                )
-                    .into()],
-                vec![(VALUE.into(), ValueType::Value, DEFAULT_MAX_VALUE_SIZE).into()],
-            )),
-        ),
-        (
-            PROVIDER.into(),
-            table::Schema::from((
-                vec![(
-                    NAME.into(),
-                    ValueType::TCString(StringType::Id),
-                    DEFAULT_MAX_VALUE_SIZE,
-                )
-                    .into()],
-                vec![(VALUE.into(), ValueType::Value, DEFAULT_MAX_VALUE_SIZE).into()],
-            )),
-        ),
-    ]
-    .into_iter()
-    .collect();
-
-    Graph::create(txn, graph_schema).await
+async fn create_graph(_txn: Arc<Txn>) -> TCResult<Graph> {
+    Err(error::not_implemented())
 }
