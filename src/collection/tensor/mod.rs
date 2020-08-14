@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::class::{TCBoxTryFuture, TCResult};
+use crate::error;
 use crate::transaction::{Txn, TxnId};
 use crate::value::number::class::NumberType;
 use crate::value::Number;
@@ -477,21 +478,8 @@ pub fn einsum<T: Clone + TensorView + TensorMath + TensorReduce + TensorTransfor
 }
 
 fn broadcast<L: Clone + TensorTransform, R: Clone + TensorTransform>(
-    left: &L,
-    right: &R,
+    _left: &L,
+    _right: &R,
 ) -> TCResult<(L, R)> {
-    if left.shape() == right.shape() {
-        Ok((left.clone(), right.clone()))
-    } else {
-        let shape: bounds::Shape = left
-            .shape()
-            .to_vec()
-            .iter()
-            .zip(right.shape().to_vec().iter())
-            .map(|(l, r)| Ord::max(l, r))
-            .cloned()
-            .collect::<Vec<u64>>()
-            .into();
-        Ok((left.broadcast(shape.clone())?, right.broadcast(shape)?))
-    }
+    Err(error::not_implemented())
 }

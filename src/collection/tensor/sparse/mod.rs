@@ -5,7 +5,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use futures::future::{self, TryFutureExt};
-use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
@@ -166,117 +166,6 @@ impl SparseAccessor for DenseAccessor {
         value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
         self.source.write_value(txn_id, coord.into(), value)
-    }
-}
-
-struct SparseBroadcast {
-    source: Arc<dyn SparseAccessor>,
-    rebase: transform::Broadcast,
-}
-
-impl SparseBroadcast {
-    fn broadcast(&self, coord: Vec<u64>, value: Number) -> impl Stream<Item = (Vec<u64>, Number)> {
-        let broadcast = self
-            .rebase
-            .map_bounds(coord.into())
-            .affected()
-            .map(move |coord| (coord, value.clone()));
-
-        stream::iter(broadcast)
-    }
-}
-
-impl TensorView for SparseBroadcast {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.source.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.rebase.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.source.size()
-    }
-}
-
-#[async_trait]
-impl SparseAccessor for SparseBroadcast {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
-        Box::pin(async move {
-            let filled = self
-                .source
-                .clone()
-                .filled(txn)
-                .await?
-                .map_ok(move |(coord, value)| self.broadcast(coord, value).map(Ok))
-                .try_flatten();
-
-            let filled: SparseStream = Box::pin(filled);
-            Ok(filled)
-        })
-    }
-
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
-        Box::pin(async move {
-            let filled = self.source.clone().filled(txn).await?;
-            let rebase = self.rebase.clone();
-            filled
-                .try_fold(0u64, |count, (coord, _)| {
-                    future::ready(Ok(count + rebase.map_bounds(coord.into()).size()))
-                })
-                .await
-        })
-    }
-
-    fn filled_at<'a>(
-        self: Arc<Self>,
-        txn: Arc<Txn>,
-        axes: Vec<usize>,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
-        group_axes(self, txn, axes)
-    }
-
-    fn filled_in<'a>(
-        self: Arc<Self>,
-        txn: Arc<Txn>,
-        bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, SparseStream> {
-        Box::pin(async move {
-            let bounds = self.rebase.invert_bounds(bounds);
-            let filled_in = self
-                .source
-                .clone()
-                .filled_in(txn, bounds)
-                .await?
-                .map_ok(move |(coord, value)| self.broadcast(coord, value).map(Ok))
-                .try_flatten();
-
-            let filled_in: SparseStream = Box::pin(filled_in);
-            Ok(filled_in)
-        })
-    }
-
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move {
-            let coord = self.rebase.invert_coord(coord);
-            self.source.read_value(txn, &coord).await
-        })
-    }
-
-    fn write_value<'a>(
-        &'a self,
-        _txn_id: TxnId,
-        _coord: Vec<u64>,
-        _value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
     }
 }
 
@@ -1651,13 +1540,7 @@ impl TensorTransform for SparseTensor {
             return Ok(self.clone());
         }
 
-        let rebase = transform::Broadcast::new(self.shape().clone(), shape)?;
-        let accessor = Arc::new(SparseBroadcast {
-            source: self.accessor.clone(),
-            rebase,
-        });
-
-        Ok(SparseTensor { accessor })
+        Err(error::not_implemented())
     }
 
     fn expand_dims(&self, axis: usize) -> TCResult<Self> {
