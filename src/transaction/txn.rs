@@ -26,6 +26,7 @@ const GRAPH_NAME: Label = label(".graph");
 const DEPENDS: Label = label("depends");
 const NAME: Label = label("name");
 const REQUIRES: Label = label("requires");
+const UNRESOLVED: Label = label("unresolved");
 const VALUE: Label = label("value");
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
@@ -142,9 +143,11 @@ impl Txn {
         self: Arc<Self>,
         _parameters: S,
     ) -> TCResult<Graph> {
-        let _graph = create_graph(self.clone());
+        let graph = create_graph(self.clone()).await?;
 
         loop {
+            graph.select(self.clone(), UNRESOLVED.into(), REQUIRES.into()).await?;
+
             // while there are any unresolved states in the graph whose dependencies are ready:
             // query the graph to resolve those states
 
@@ -187,6 +190,6 @@ impl Txn {
     }
 }
 
-async fn create_graph(_txn: Arc<Txn>) -> TCResult<Graph> {
+async fn create_graph(_txn: Arc<Txn>) -> TCResult<Arc<Graph>> {
     Err(error::not_implemented())
 }

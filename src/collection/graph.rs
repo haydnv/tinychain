@@ -4,11 +4,11 @@ use std::iter;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, TryFutureExt};
-use futures::stream::{Stream, StreamExt};
+use futures::future::{self, join_all, try_join_all, TryFutureExt};
+use futures::stream::{FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 
-use crate::class::TCResult;
+use crate::class::{TCResult, TCTryStream};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -19,7 +19,7 @@ use crate::value::{label, Label, Value, ValueId, ValueType};
 
 use super::schema::{GraphSchema, IndexSchema, TableSchema};
 use super::table::{self, Selection, TableBase};
-use super::tensor::{self, SparseTensor, TensorIO};
+use super::tensor::{self, einsum, SparseTensor, TensorBoolean, TensorIO};
 
 const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";
 
@@ -30,9 +30,10 @@ const NODE_LABEL: Label = label("node_label");
 const NODE_TO: Label = label("node_to");
 const NODE_TYPE: Label = label("node_type");
 
-pub struct Node<'a> {
-    graph: &'a Graph,
+pub struct Node {
+    graph: Arc<Graph>,
     id: u64,
+    edges: HashMap<ValueId, TCTryStream<Node>>,
 }
 
 pub struct Graph {
@@ -106,7 +107,7 @@ impl Graph {
         })
     }
 
-    async fn get_matrix(&self, label: &ValueId, txn_id: &TxnId) -> TCResult<SparseTensor> {
+    async fn get_matrix(&self, txn_id: &TxnId, label: &ValueId) -> TCResult<SparseTensor> {
         if let Some(edges) = self.edges.get(label) {
             let max_id = self.max_id.read(txn_id).await?;
             let shape: tensor::Shape = vec![*max_id, *max_id].into();
@@ -133,20 +134,90 @@ impl Graph {
         }
     }
 
-    pub async fn nodes_with_label<'a>(
-        &'a self,
-        txn_id: TxnId,
-        label: ValueId,
-    ) -> TCResult<impl Stream<Item = Node<'a>>> {
-        let selector: Vec<(ValueId, table::ColumnBound)> =
-            vec![(NODE_LABEL.into(), Value::from(label).into())];
-        let slice = self.node_labels.slice(selector.into_iter().collect())?;
-        let node_ids = slice.stream(txn_id).await?;
+    async fn bft(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        start_node: u64,
+        relation: ValueId,
+        limit: usize,
+    ) -> TCResult<TCTryStream<u64>> {
+        let edges = self.get_matrix(txn.id(), &relation);
+        let max_id = self.max_id.read(txn.id());
+        let (edges, max_id) = try_join!(edges, max_id)?;
 
-        Ok(node_ids.map(move |row: Vec<Value>| Node {
-            graph: &self,
-            id: unwrap_u64(row),
-        }))
+        let visited = SparseTensor::create(txn.clone(), vec![*max_id].into(), NumberType::Bool);
+        let adjacent = SparseTensor::create(txn.clone(), vec![*max_id].into(), NumberType::Bool);
+        let (mut visited, mut adjacent) = try_join!(visited, adjacent)?;
+        adjacent
+            .write_value_at(txn.id().clone(), vec![start_node], true.into())
+            .await?;
+
+        let mut order = 0;
+        // TODO: stream the search itself instead of buffering these futures
+        let mut found = FuturesOrdered::new();
+
+        while order < limit && adjacent.any(txn.clone()).await? {
+            visited = visited.or(&adjacent)?;
+            adjacent = einsum("ji,j->i", vec![edges.clone(), adjacent])?.and(&visited.not()?)?;
+            let nodes = adjacent
+                .clone()
+                .filled(txn.clone())
+                .await?
+                .map_ok(|(id, _)| id[0]);
+
+            found.push(future::ready(nodes));
+            order += 1;
+        }
+
+        Ok(Box::pin(found.flatten()))
+    }
+
+    pub async fn select(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        node_label: ValueId,
+        relation: ValueId,
+    ) -> TCResult<impl Stream<Item = TCResult<Node>>> {
+        let selector: Vec<(ValueId, table::ColumnBound)> =
+            vec![(NODE_LABEL.into(), Value::from(node_label).into())];
+
+        let this = self.clone();
+        let this1 = self.clone();
+        let this2 = self.clone();
+        let relation_clone = relation.clone();
+
+        let nodes = self
+            .node_labels
+            .slice(selector.into_iter().collect())?
+            .stream(txn.id().clone())
+            .await?
+            .map(|row| unwrap_u64(row))
+            .then(move |node_id| {
+                this.clone()
+                    .bft(txn.clone(), node_id, relation.clone(), 1)
+                    .map_ok(move |edges| (node_id, edges))
+            })
+            .map_ok(move |(node_id, edges)| {
+                let this1 = this1.clone();
+                let edges = edges.map_ok(move |node_id| Node {
+                    graph: this1.clone(),
+                    id: node_id,
+                    edges: HashMap::new(),
+                });
+                let edges: TCTryStream<Node> = Box::pin(edges);
+                (node_id, edges)
+            })
+            .map_ok(move |(node_id, edges): (u64, TCTryStream<Node>)| {
+                let mut node_edges = HashMap::new();
+                node_edges.insert(relation_clone.clone(), edges);
+                Node {
+                    graph: this2.clone(),
+                    id: node_id,
+                    edges: node_edges,
+                }
+            });
+
+        Ok(nodes)
     }
 
     pub async fn add_node(
@@ -195,7 +266,7 @@ impl Graph {
             .ok_or(error::not_found(&node_to.0))?
             .get(txn_id.clone(), vec![node_to_key.clone()]);
 
-        let edges = self.get_matrix(&label, &txn_id);
+        let edges = self.get_matrix(&txn_id, &label);
 
         let (edges, node_from_id, node_to_id) = try_join!(edges, node_from_id, node_to_id)?;
 
