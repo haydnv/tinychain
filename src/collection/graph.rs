@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all, TryFutureExt};
+use futures::stream::{Stream, StreamExt};
 use futures::try_join;
 
 use crate::class::TCResult;
@@ -12,11 +13,12 @@ use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::number::class::{NumberType, UIntType};
+use crate::value::number::instance::{Number, UInt};
 use crate::value::string::StringType;
 use crate::value::{label, Label, Value, ValueId, ValueType};
 
 use super::schema::{GraphSchema, IndexSchema, TableSchema};
-use super::table::TableBase;
+use super::table::{self, Selection, TableBase};
 use super::tensor::{self, SparseTensor, TensorIO};
 
 const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";
@@ -27,6 +29,11 @@ const NODE_KEY: Label = label("node_key");
 const NODE_LABEL: Label = label("node_label");
 const NODE_TO: Label = label("node_to");
 const NODE_TYPE: Label = label("node_type");
+
+pub struct Node<'a> {
+    graph: &'a Graph,
+    id: u64,
+}
 
 pub struct Graph {
     node_ids: TableBase,
@@ -124,6 +131,22 @@ impl Graph {
             None => Ok(None),
             _ => Err(error::internal(ERR_CORRUPT)),
         }
+    }
+
+    pub async fn nodes_with_label<'a>(
+        &'a self,
+        txn_id: TxnId,
+        label: ValueId,
+    ) -> TCResult<impl Stream<Item = Node<'a>>> {
+        let selector: Vec<(ValueId, table::ColumnBound)> =
+            vec![(NODE_LABEL.into(), Value::from(label).into())];
+        let slice = self.node_labels.slice(selector.into_iter().collect())?;
+        let node_ids = slice.stream(txn_id).await?;
+
+        Ok(node_ids.map(move |row: Vec<Value>| Node {
+            graph: &self,
+            id: unwrap_u64(row),
+        }))
     }
 
     pub async fn add_node(
@@ -235,4 +258,12 @@ fn try_unwrap_node_id(node_id: Option<Vec<Value>>, node_key: Value) -> TCResult<
         .pop()
         .ok_or(error::internal(ERR_CORRUPT))?
         .try_into()
+}
+
+fn unwrap_u64(row: Vec<Value>) -> u64 {
+    if let &[Value::Number(Number::UInt(UInt::U64(u)))] = row.as_slice() {
+        u
+    } else {
+        panic!(ERR_CORRUPT)
+    }
 }
