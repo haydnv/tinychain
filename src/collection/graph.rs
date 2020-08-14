@@ -12,6 +12,7 @@ use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::number::class::{NumberType, UIntType};
+use crate::value::string::StringType;
 use crate::value::{label, Label, Value, ValueId, ValueType};
 
 use super::schema::{GraphSchema, IndexSchema, TableSchema};
@@ -23,11 +24,13 @@ const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";
 const NODE_FROM: Label = label("node_from");
 const NODE_ID: Label = label("node_id");
 const NODE_KEY: Label = label("node_key");
+const NODE_LABEL: Label = label("node_label");
 const NODE_TO: Label = label("node_to");
 const NODE_TYPE: Label = label("node_type");
 
 pub struct Graph {
     node_ids: TableBase,
+    node_labels: TableBase,
     nodes: HashMap<ValueId, TableBase>,
     edges: HashMap<ValueId, TableBase>,
     max_id: TxnLock<Mutable<u64>>,
@@ -70,10 +73,26 @@ impl Graph {
         )
             .into();
         let node_id_schema: TableSchema = node_id_schema.into();
-        let node_ids = TableBase::create(txn, node_id_schema).await?;
+        let node_ids = TableBase::create(txn.clone(), node_id_schema);
+
+        let label_type = ValueType::TCString(StringType::Id);
+        let node_label_schema: IndexSchema = (
+            vec![(NODE_ID.into(), u64_type).into()],
+            vec![(NODE_LABEL.into(), label_type).into()],
+        )
+            .into();
+        let node_label_schema: TableSchema = (
+            node_label_schema,
+            iter::once((NODE_LABEL.into(), vec![NODE_LABEL.into()])),
+        )
+            .into();
+        let node_labels = TableBase::create(txn, node_label_schema);
+
+        let (node_ids, node_labels) = try_join!(node_ids, node_labels)?;
 
         Ok(Graph {
             node_ids,
+            node_labels,
             nodes,
             edges,
             max_id,

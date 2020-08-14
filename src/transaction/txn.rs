@@ -4,7 +4,7 @@ use std::hash::Hash;
 use std::sync::{Arc, RwLock};
 
 use futures::future;
-use futures::stream::{FuturesUnordered, Stream, StreamExt};
+use futures::stream::Stream;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -14,16 +14,18 @@ use crate::collection::graph::Graph;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::value::link::PathSegment;
-use crate::value::string::TCString;
 use crate::value::{label, Label, Op, Value, ValueId};
 
 use super::Transact;
 
+const ERR_INVALID_REF: &str = "Found reference to nonexistent value";
+
 const DEFAULT_MAX_VALUE_SIZE: usize = 1_000_000;
 const GRAPH_NAME: Label = label(".graph");
+
+const DEPENDS: Label = label("depends");
 const NAME: Label = label("name");
-const PROVIDED: Label = label("provided");
-const PROVIDER: Label = label("provider");
+const REQUIRES: Label = label("requires");
 const VALUE: Label = label("value");
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
@@ -138,73 +140,22 @@ impl Txn {
 
     pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
-        mut parameters: S,
+        _parameters: S,
     ) -> TCResult<Graph> {
-        let graph = create_graph(self.clone()).await?;
+        let _graph = create_graph(self.clone());
 
-        let mut pending = FuturesUnordered::new();
+        loop {
+            // while there are any unresolved states in the graph whose dependencies are ready:
+            // query the graph to resolve those states
 
-        while let Some(param) = parameters.next().await {
-            let (name, param) = param;
-            if let Value::TCString(TCString::Ref(id)) = param {
-                return Err(error::bad_request(
-                    "Found reference to nonexistent value",
-                    id,
-                ));
-            } else if let Value::Op(op) = param {
-                graph
-                    .add_node(
-                        self.id.clone(),
-                        PROVIDER.into(),
-                        vec![name.clone().into()],
-                        vec![Value::Op(op.clone())],
-                    )
-                    .await?;
+            // if there are no more parameters:
+            // if every state is resolved, return the graph
+            // otherwise, return an error
+            // otherwise get the next parameter and add it to the graph
+            // then add edges for its requirements and dependencies
 
-                pending.push(self.clone().resolve(name, *op));
-            } else {
-                graph
-                    .add_node(
-                        self.id.clone(),
-                        PROVIDED.into(),
-                        vec![name.into()],
-                        vec![param],
-                    )
-                    .await?;
-            }
+            todo!();
         }
-
-        while let Some(result) = pending.next().await {
-            let (name, state) = result?;
-
-            //   update its status in the graph
-            graph
-                .remove_node(self.clone(), PROVIDER.into(), vec![name.clone().into()])
-                .await?;
-
-            match state {
-                State::Value(value) => {
-                    graph
-                        .add_node(
-                            self.id.clone(),
-                            PROVIDED.into(),
-                            vec![name.into()],
-                            vec![value],
-                        )
-                        .await?;
-                }
-                _other => {
-                    unimplemented!();
-                }
-            }
-
-            //   get a list of its unresolved dependents
-            //   for each of them:
-            //     if all its dependencies are resolved, add a resolver future to the collection
-        }
-
-        // if there are still unresolved parameters in the graph, return an error
-        // otherwise, return the graph
 
         Err(error::not_implemented())
     }
