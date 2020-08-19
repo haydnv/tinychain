@@ -478,8 +478,44 @@ pub fn einsum<T: Clone + TensorView + TensorMath + TensorReduce + TensorTransfor
 }
 
 fn broadcast<L: Clone + TensorTransform, R: Clone + TensorTransform>(
-    _left: &L,
-    _right: &R,
+    left: &L,
+    right: &R,
 ) -> TCResult<(L, R)> {
-    Err(error::not_implemented())
+    if left.shape() == right.shape() {
+        return Ok((left.clone(), right.clone()));
+    }
+
+    let mut left_shape = left.shape().to_vec();
+    let mut right_shape = right.shape().to_vec();
+
+    match (left_shape.len(), right_shape.len()) {
+        (l, r) if l < r => {
+            for _ in 0..(r - l) {
+                left_shape.insert(0, 1);
+            }
+        }
+        (l, r) if r < l => {
+            for _ in 0..(l - r) {
+                right_shape.insert(0, 1);
+            }
+        }
+        _ => {}
+    }
+
+    let mut shape = Vec::with_capacity(left_shape.len());
+    for (l, r) in left_shape.iter().zip(right_shape.iter()) {
+        if l == r || *l == 1 {
+            shape.push(*r);
+        } else if *r == 1 {
+            shape.push(*l)
+        } else {
+            return Err(error::bad_request(
+                "Cannot broadcast dimension",
+                format!("{} into {}", l, r),
+            ));
+        }
+    }
+    let left = left.broadcast(shape.to_vec().into())?;
+    let right = right.broadcast(shape.into())?;
+    Ok((left, right))
 }

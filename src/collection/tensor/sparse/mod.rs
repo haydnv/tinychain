@@ -182,7 +182,13 @@ impl SparseBroadcast {
         coords: S,
         num_coords: u64,
     ) -> TCResult<SparseStream> {
-        let coords = dense::sort_coords(txn.clone(), coords, num_coords, self.shape()).await?;
+        let coords = dense::sort_coords(
+            txn.clone().subcontext_tmp().await?,
+            coords,
+            num_coords,
+            self.shape(),
+        )
+        .await?;
         let coords = coords.and_then(move |coord| {
             self.clone()
                 .read_value_owned(txn.clone(), coord.to_vec())
@@ -1783,7 +1789,13 @@ fn group_axes<'a>(
                 .await?
                 .map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect::<Vec<u64>>());
 
-            let filled_at = dense::sort_coords(txn, coords, num_coords, accessor.shape()).await?;
+            let filled_at = dense::sort_coords(
+                txn.subcontext_tmp().await?,
+                coords,
+                num_coords,
+                accessor.shape(),
+            )
+            .await?;
             let filled_at: TCTryStream<Vec<u64>> = Box::pin(filled_at);
             Ok(filled_at)
         }
