@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::iter;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -281,6 +281,10 @@ impl BlockListFile {
             file,
             coord_bounds,
         })
+    }
+
+    async fn merge_sort(&self) {
+        todo!()
     }
 }
 
@@ -1619,6 +1623,74 @@ impl TensorTransform for DenseTensor {
 
         Ok(DenseTensor { blocks })
     }
+}
+
+pub async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Sync + Unpin + 'static>(
+    txn: Arc<Txn>,
+    coords: S,
+    num_coords: u64,
+    shape: Shape,
+) -> TCResult<impl Stream<Item = TCResult<Vec<u64>>>> {
+    let ndim = shape.len();
+    let coord_bounds: Vec<u64> = (0..shape.len())
+        .map(|axis| shape[axis + 1..].iter().product())
+        .collect();
+    let coord_bounds: af::Array<u64> =
+        af::Array::new(&coord_bounds, af::Dim4::new(&[ndim as u64, 1, 1, 1]));
+    let coord_bounds_copy = coord_bounds.copy();
+    let shape: af::Array<u64> =
+        af::Array::new(&shape.to_vec(), af::Dim4::new(&[ndim as u64, 1, 1, 1]));
+
+    let blocks = coords
+        .chunks(PER_BLOCK)
+        .map(|block| block.into_iter().collect::<TCResult<Vec<Vec<u64>>>>())
+        .map_ok(move |block| {
+            let num_coords = block.len();
+            let block = block.into_iter().flatten().collect::<Vec<u64>>();
+            af::Array::new(
+                &block,
+                af::Dim4::new(&[ndim as u64, num_coords as u64, 1, 1]),
+            )
+        })
+        .map_ok(move |block| af::sum(&(block * coord_bounds.copy()), 1))
+        .and_then(|block| future::ready(Array::try_from(block)));
+
+    let blocks: TCTryStream<Array> = Box::pin(blocks);
+    let block_list = BlockListFile::from_blocks(
+        txn.clone(),
+        Shape::from(vec![num_coords]),
+        NumberType::uint64(),
+        blocks,
+    )
+    .await
+    .map(Arc::new)?;
+    block_list.merge_sort().await;
+
+    let coords = block_list
+        .block_stream(txn)
+        .await?
+        .map_ok(|block| block.into_af_array::<u64>())
+        .map_ok(|block| af::moddims(&block, af::Dim4::new(&[1, block.elements() as u64, 1, 1])))
+        .map_ok(move |block| {
+            let dims = af::Dim4::new(&[ndim as u64, block.elements() as u64, 1, 1]);
+            let block = af::tile(&block, dims);
+            let coord_bounds = af::tile(&coord_bounds_copy, dims);
+            let shape = af::tile(&shape, dims);
+            (block / coord_bounds) % shape
+        })
+        .map_ok(|coord_block| {
+            let mut coords: Vec<u64> = Vec::with_capacity(coord_block.elements());
+            coord_block.host(&mut coords);
+            coords
+        })
+        .map_ok(move |coords| {
+            stream::iter(coords.into_iter())
+                .chunks(ndim)
+                .map(Result::<Vec<u64>, error::TCError>::Ok)
+        })
+        .try_flatten();
+
+    Ok(coords)
 }
 
 fn block_offsets(

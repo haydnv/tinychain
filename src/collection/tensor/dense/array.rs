@@ -1016,6 +1016,10 @@ impl Array {
         }
     }
 
+    pub fn into_af_array<T: af::HasAfEnum>(self) -> af::Array<T> {
+        self.af_cast().0
+    }
+
     pub fn into_type(self, dtype: NumberType) -> Array {
         use ComplexType::*;
         use FloatType::*;
@@ -1464,6 +1468,22 @@ impl Array {
         let this: ArrayExt<bool> = self.af_cast();
         let that: ArrayExt<bool> = other.af_cast();
         Array::Bool(this.xor(&that))
+    }
+}
+
+impl TryFrom<af::Array<u64>> for Array {
+    type Error = error::TCError;
+
+    fn try_from(arr: af::Array<u64>) -> TCResult<Array> {
+        let size = arr.elements() as u64;
+        if arr.dims() == af::Dim4::new(&[size, 1, 1, 1]) {
+            Ok(Array::U64(ArrayExt(arr)))
+        } else {
+            Err(error::bad_request(
+                "Array only supports a single dimension, found",
+                arr.dims(),
+            ))
+        }
     }
 }
 

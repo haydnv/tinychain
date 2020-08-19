@@ -143,23 +143,6 @@ impl Txn {
         self: Arc<Self>,
         _parameters: S,
     ) -> TCResult<Graph> {
-        let graph = create_graph(self.clone()).await?;
-
-        loop {
-            graph.select(self.clone(), UNRESOLVED.into(), REQUIRES.into()).await?;
-
-            // while there are any unresolved states in the graph whose dependencies are ready:
-            // query the graph to resolve those states
-
-            // if there are no more parameters:
-            // if every state is resolved, return the graph
-            // otherwise, return an error
-            // otherwise get the next parameter and add it to the graph
-            // then add edges for its requirements and dependencies
-
-            todo!();
-        }
-
         Err(error::not_implemented())
     }
 
