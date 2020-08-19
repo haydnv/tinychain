@@ -547,6 +547,92 @@ impl BlockList for BlockListFile {
     }
 }
 
+struct BlockListBroadcast {
+    source: Arc<dyn BlockList>,
+    rebase: transform::Broadcast,
+}
+
+impl TensorView for BlockListBroadcast {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+impl BlockList for BlockListBroadcast {
+    fn value_stream<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
+        let bounds = Bounds::all(self.shape());
+        self.value_stream_slice(txn, bounds)
+    }
+
+    fn value_stream_slice<'a>(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        bounds: Bounds,
+    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
+        Box::pin(async move {
+            let rebase = self.rebase.clone();
+            let num_coords = bounds.size();
+            let source_bounds = self.rebase.invert_bounds(bounds);
+            let source_coords = source_bounds.affected();
+            let coords = source_coords
+                .map(move |coord| rebase.map_coord(coord))
+                .flatten()
+                .map(TCResult::Ok);
+
+            let values = sort_coords(txn.clone(), stream::iter(coords), num_coords, self.shape())
+                .await?
+                .and_then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
+            let values: TCTryStream<Number> = Box::pin(values);
+            Ok(values)
+        })
+    }
+
+    fn read_value_at<'a>(
+        &'a self,
+        txn: &'a Arc<Txn>,
+        coord: &'a [u64],
+    ) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(async move {
+            let coord = self.rebase.invert_coord(coord);
+            self.source.read_value_at(txn, &coord).await
+        })
+    }
+
+    fn write_value<'a>(
+        self: Arc<Self>,
+        _txn_id: TxnId,
+        _bounds: Bounds,
+        _number: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
+    }
+
+    fn write_value_at<'a>(
+        &'a self,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
+    }
+}
+
 struct BlockListCast {
     source: Arc<dyn BlockList>,
     dtype: NumberType,

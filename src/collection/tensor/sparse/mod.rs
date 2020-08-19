@@ -174,10 +174,6 @@ struct SparseBroadcast {
 }
 
 impl SparseBroadcast {
-    fn broadcast(&self, coord: Vec<u64>) -> impl Stream<Item = Vec<u64>> {
-        stream::iter(self.rebase.map_bounds(coord.into()).affected())
-    }
-
     async fn broadcast_coords<
         S: Stream<Item = TCResult<Vec<u64>>> + Send + Sync + Unpin + 'static,
     >(
@@ -219,13 +215,13 @@ impl TensorView for SparseBroadcast {
 impl SparseAccessor for SparseBroadcast {
     fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
-            let this = self.clone();
+            let rebase = self.rebase.clone();
             let filled = self
                 .source
                 .clone()
                 .filled(txn.clone())
                 .await?
-                .map_ok(move |(coord, _)| this.broadcast(coord).map(TCResult::Ok))
+                .map_ok(move |(coord, _)| stream::iter(rebase.map_coord(coord).map(TCResult::Ok)))
                 .try_flatten();
 
             let num_coords = self.clone().filled_count(txn.clone()).await?;
@@ -268,9 +264,9 @@ impl SparseAccessor for SparseBroadcast {
             let (source_filled_in1, source_filled_in2) =
                 try_join!(source_filled_in1, source_filled_in2)?;
 
-            let this = self.clone();
+            let rebase = self.rebase.clone();
             let filled_in = source_filled_in1
-                .map_ok(move |(coord, _)| this.broadcast(coord).map(TCResult::Ok))
+                .map_ok(move |(coord, _)| stream::iter(rebase.map_coord(coord).map(TCResult::Ok)))
                 .try_flatten();
 
             let rebase = self.rebase.clone();

@@ -80,6 +80,10 @@ impl Broadcast {
         source_coord
     }
 
+    pub fn map_coord(&self, coord: Vec<u64>) -> impl Iterator<Item = Vec<u64>> {
+        self.map_bounds(coord.into()).affected()
+    }
+
     pub fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
         assert!(source_bounds.len() == self.source_shape.len());
 
