@@ -43,6 +43,21 @@ pub trait ArrayInstance {
 #[derive(Clone)]
 pub struct ArrayExt<T: af::HasAfEnum>(af::Array<T>);
 
+impl<T: af::HasAfEnum> ArrayExt<T> {
+    fn concatenate(left: &ArrayExt<T>, right: &ArrayExt<T>) -> ArrayExt<T> {
+        af::join(0, left.af(), right.af()).into()
+    }
+
+    fn split(&self, at: usize) -> (ArrayExt<T>, ArrayExt<T>) {
+        let left = af::Seq::new(0.0, at as f32, 1.0);
+        let right = af::Seq::new(at as f32, self.len() as f32, 1.0);
+        (
+            ArrayExt(af::index(self.af(), &[left, af::Seq::default()])),
+            ArrayExt(af::index(self.af(), &[right, af::Seq::default()])),
+        )
+    }
+}
+
 impl<T: af::HasAfEnum> ArrayInstance for ArrayExt<T> {
     type DType = T;
 
@@ -897,6 +912,17 @@ impl Array {
         }
     }
 
+    pub fn concatenate(left: &Array, right: &Array) -> TCResult<Array> {
+        use Array::*;
+        match (left, right) {
+            (U64(l), U64(r)) => Ok(U64(ArrayExt::concatenate(&l, &r))),
+            (l, r) => Err(error::bad_request(
+                "Cannot concatenate arrays with different data types",
+                format!("{}, {}", l.dtype(), r.dtype()),
+            )),
+        }
+    }
+
     pub fn constant(value: Number, len: usize) -> Array {
         let dim = dim4(len);
 
@@ -1462,6 +1488,32 @@ impl Array {
         }
 
         Ok(())
+    }
+
+    pub fn sort(&mut self) {
+        use Array::*;
+        match self {
+            U64(ArrayExt(u)) => *self = Array::U64(ArrayExt(af::sort(u, 0, true))),
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn split(&self, at: usize) -> TCResult<(Array, Array)> {
+        if at < self.len() {
+            use Array::*;
+            match self {
+                U64(u) => {
+                    let (l, r) = u.split(at);
+                    Ok((U64(l), U64(r)))
+                }
+                _ => Err(error::not_implemented()),
+            }
+        } else {
+            Err(error::bad_request(
+                "Invalid pivot for Array of length",
+                self.len(),
+            ))
+        }
     }
 
     pub fn xor(&self, other: &Array) -> Array {

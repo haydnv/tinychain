@@ -8,6 +8,7 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use itertools::Itertools;
+use num::integer::div_ceil;
 
 use crate::block::file::File;
 use crate::block::BlockId;
@@ -283,8 +284,34 @@ impl BlockListFile {
         })
     }
 
-    async fn merge_sort(&self) {
-        todo!()
+    async fn merge_sort(&self, txn_id: &TxnId) -> TCResult<()> {
+        let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
+        if num_blocks == 1 {
+            let mut block = self
+                .file
+                .get_block(txn_id, 0u64.into())
+                .await?
+                .upgrade()
+                .await?;
+            block.sort();
+            return Ok(());
+        }
+
+        for block_id in 0..(num_blocks - 1) {
+            let left = self.file.get_block(txn_id, block_id.into());
+            let right = self.file.get_block(txn_id, (block_id + 1).into());
+            let (left, right) = try_join!(left, right)?;
+            let (mut left, mut right) = try_join!(left.upgrade(), right.upgrade())?;
+
+            let mut block = Array::concatenate(&left, &right)?;
+            block.sort();
+
+            let (left_sorted, right_sorted) = block.split(PER_BLOCK)?;
+            *left = left_sorted;
+            *right = right_sorted;
+        }
+
+        Ok(())
     }
 }
 
@@ -310,7 +337,7 @@ impl BlockList for BlockListFile {
     fn block_stream<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
             let block_stream = Box::pin(
-                stream::iter(0..(self.size() / PER_BLOCK as u64))
+                stream::iter(0..(div_ceil(self.size(), PER_BLOCK as u64)))
                     .map(BlockId::from)
                     .then(move |block_id| {
                         self.file
@@ -1664,7 +1691,7 @@ pub async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Sync + Un
     )
     .await
     .map(Arc::new)?;
-    block_list.merge_sort().await;
+    block_list.merge_sort(txn.id()).await?;
 
     let coords = block_list
         .block_stream(txn)
