@@ -9,8 +9,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
-use crate::collection::btree;
-use crate::collection::schema::{Column, IndexSchema, RowSchema};
+use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Selection, Table, TableBase};
 use crate::error;
 use crate::transaction::{Txn, TxnId};
@@ -1613,83 +1612,50 @@ fn group_axes<'a>(
         };
 
         let sorted_axes: Vec<usize> = itertools::sorted(axes.to_vec()).collect::<Vec<usize>>();
-        let (left, mut right): (TCTryStream<Vec<u64>>, TCTryStream<Vec<u64>>) = if axes
-            == sorted_axes
-        {
+        if axes == sorted_axes {
             let left = accessor
                 .clone()
                 .filled(txn.clone())
                 .await?
                 .map_ok(map.clone());
-            let right = accessor.clone().filled(txn.clone()).await?.map_ok(map);
-            (Box::pin(left), Box::pin(right))
+            let mut right = accessor.clone().filled(txn.clone()).await?.map_ok(map);
+
+            if right.next().await.is_none() {
+                let filled_at: TCTryStream<Vec<u64>> = Box::pin(stream::empty());
+                return Ok(filled_at);
+            }
+
+            let filled_at = left
+                .zip(right)
+                .map(|(lr, rr)| Ok((lr?, rr?)))
+                .try_filter_map(|(l, r)| {
+                    if l == r {
+                        future::ready(Ok(Some(l)))
+                    } else {
+                        future::ready(Ok(None))
+                    }
+                });
+
+            let filled_at: TCTryStream<Vec<u64>> = Box::pin(filled_at);
+            Ok(filled_at)
         } else {
-            let schema: RowSchema = axes
-                .iter()
-                .cloned()
-                .map(ValueId::from)
-                .map(|x| (x, ValueType::uint64()).into())
-                .collect();
-
-            let btree_file = txn
+            let num_coords = accessor
                 .clone()
-                .subcontext_tmp()
+                .filled_at(txn.clone(), sorted_axes.to_vec())
                 .await?
-                .context()
-                .create_btree(txn.id().clone(), "axes".parse()?)
-                .await?;
-            let btree = Arc::new(btree::BTree::create(txn.id().clone(), schema, btree_file).await?);
-
-            btree
-                .try_insert_from(
-                    txn.id(),
-                    accessor
-                        .clone()
-                        .filled(txn.clone())
-                        .await?
-                        .map_ok(map)
-                        .map_ok(|mut coord| {
-                            coord
-                                .drain(..)
-                                .map(|i| Number::UInt(i.into()))
-                                .map(|n| n.into())
-                                .collect::<Vec<Value>>()
-                        }),
-                )
+                .try_fold(0, |count, _| future::ready(Ok(count + 1)))
                 .await?;
 
-            let left = btree
+            let coords = accessor
                 .clone()
-                .slice(txn.id().clone(), btree::Selector::all())
+                .filled_at(txn.clone(), sorted_axes)
                 .await?
-                .map(move |coord| unwrap_coord(&coord));
+                .map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect::<Vec<u64>>());
 
-            let right = btree
-                .slice(txn.id().clone(), btree::Selector::all())
-                .await?
-                .map(move |coord| unwrap_coord(&coord));
-
-            (Box::pin(left), Box::pin(right))
-        };
-
-        if right.next().await.is_none() {
-            let filled_at: TCTryStream<Vec<u64>> = Box::pin(stream::empty());
-            return Ok(filled_at);
+            let filled_at = dense::sort_coords(txn, coords, num_coords, accessor.shape()).await?;
+            let filled_at: TCTryStream<Vec<u64>> = Box::pin(filled_at);
+            Ok(filled_at)
         }
-
-        let filled_at = left
-            .zip(right)
-            .map(|(lr, rr)| Ok((lr?, rr?)))
-            .try_filter_map(|(l, r)| {
-                if l == r {
-                    future::ready(Ok(Some(l)))
-                } else {
-                    future::ready(Ok(None))
-                }
-            });
-
-        let filled_at: TCTryStream<Vec<u64>> = Box::pin(filled_at);
-        Ok(filled_at)
     })
 }
 

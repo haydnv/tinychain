@@ -1656,7 +1656,7 @@ pub async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Sync + Un
     txn: Arc<Txn>,
     coords: S,
     num_coords: u64,
-    shape: Shape,
+    shape: &Shape,
 ) -> TCResult<impl Stream<Item = TCResult<Vec<u64>>>> {
     let ndim = shape.len();
     let coord_bounds: Vec<u64> = (0..shape.len())
