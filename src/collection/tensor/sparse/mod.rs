@@ -5,7 +5,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use futures::future::{self, TryFutureExt};
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
@@ -165,6 +165,141 @@ impl SparseAccessor for DenseAccessor {
         value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
         self.source.write_value(txn_id, coord.into(), value)
+    }
+}
+
+struct SparseBroadcast {
+    source: Arc<dyn SparseAccessor>,
+    rebase: transform::Broadcast,
+}
+
+impl SparseBroadcast {
+    fn broadcast(&self, coord: Vec<u64>) -> impl Stream<Item = Vec<u64>> {
+        stream::iter(self.rebase.map_bounds(coord.into()).affected())
+    }
+
+    async fn broadcast_coords<
+        S: Stream<Item = TCResult<Vec<u64>>> + Send + Sync + Unpin + 'static,
+    >(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        coords: S,
+        num_coords: u64,
+    ) -> TCResult<SparseStream> {
+        let coords = dense::sort_coords(txn.clone(), coords, num_coords, self.shape()).await?;
+        let coords = coords.and_then(move |coord| {
+            self.clone()
+                .read_value_owned(txn.clone(), coord.to_vec())
+                .map_ok(|value| (coord, value))
+        });
+        let coords: SparseStream = Box::pin(coords);
+        Ok(coords)
+    }
+}
+
+impl TensorView for SparseBroadcast {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl SparseAccessor for SparseBroadcast {
+    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(async move {
+            let this = self.clone();
+            let filled = self
+                .source
+                .clone()
+                .filled(txn.clone())
+                .await?
+                .map_ok(move |(coord, _)| this.broadcast(coord).map(TCResult::Ok))
+                .try_flatten();
+
+            let num_coords = self.clone().filled_count(txn.clone()).await?;
+            self.broadcast_coords(txn, filled, num_coords).await
+        })
+    }
+
+    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+        Box::pin(async move {
+            let filled = self.source.clone().filled(txn).await?;
+            let rebase = self.rebase.clone();
+            filled
+                .try_fold(0u64, |count, (coord, _)| {
+                    future::ready(Ok(count + rebase.map_bounds(coord.into()).size()))
+                })
+                .await
+        })
+    }
+
+    fn filled_at<'a>(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        axes: Vec<usize>,
+    ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
+        group_axes(self, txn, axes)
+    }
+
+    fn filled_in<'a>(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        bounds: Bounds,
+    ) -> TCBoxTryFuture<'a, SparseStream> {
+        Box::pin(async move {
+            let source_bounds = self.rebase.invert_bounds(bounds);
+            let source_filled_in1 = self
+                .source
+                .clone()
+                .filled_in(txn.clone(), source_bounds.clone());
+            let source_filled_in2 = self.source.clone().filled_in(txn.clone(), source_bounds);
+            let (source_filled_in1, source_filled_in2) =
+                try_join!(source_filled_in1, source_filled_in2)?;
+
+            let this = self.clone();
+            let filled_in = source_filled_in1
+                .map_ok(move |(coord, _)| this.broadcast(coord).map(TCResult::Ok))
+                .try_flatten();
+
+            let rebase = self.rebase.clone();
+            let num_coords = source_filled_in2
+                .try_fold(0u64, |count, (coord, _)| {
+                    future::ready(Ok(count + rebase.map_bounds(coord.into()).size()))
+                })
+                .await?;
+
+            self.broadcast_coords(txn, filled_in, num_coords).await
+        })
+    }
+
+    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+        Box::pin(async move {
+            let coord = self.rebase.invert_coord(coord);
+            self.source.read_value(txn, &coord).await
+        })
+    }
+
+    fn write_value<'a>(
+        &'a self,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
     }
 }
 
