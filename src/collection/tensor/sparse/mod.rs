@@ -36,6 +36,23 @@ convert to a DenseTensor first.";
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
 trait SparseAccessor: TensorView + 'static {
+    fn copy<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseTable> {
+        Box::pin(async move {
+            let accessor =
+                SparseTable::create(txn.clone(), self.shape().clone(), self.dtype()).await?;
+
+            let txn_id = txn.id().clone();
+            self.filled(txn)
+                .await?
+                .map_ok(|(coord, value)| accessor.write_value(txn_id.clone(), coord, value))
+                .try_buffer_unordered(2)
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await?;
+
+            Ok(accessor)
+        })
+    }
+
     fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream>;
 
     fn filled_at<'a>(
