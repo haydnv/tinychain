@@ -9,7 +9,7 @@ use pin_project::pin_project;
 use crate::class::TCResult;
 use crate::value::Number;
 
-use super::bounds::compare_coord;
+use super::bounds::Shape;
 use super::{SparseRow, SparseStream};
 
 // Based on: https://github.com/rust-lang/futures-rs/blob/master/futures-util/src/stream/select.rs
@@ -20,15 +20,22 @@ pub struct SparseCombine {
     #[pin]
     right: Fuse<SparseStream>,
 
-    pending_left: Option<SparseRow>,
-    pending_right: Option<SparseRow>,
+    coord_bounds: Vec<u64>,
+
+    pending_left: Option<(u64, SparseRow)>,
+    pending_right: Option<(u64, SparseRow)>,
 }
 
 impl SparseCombine {
-    pub fn new(left: SparseStream, right: SparseStream) -> SparseCombine {
+    pub fn new(shape: &Shape, left: SparseStream, right: SparseStream) -> SparseCombine {
+        let coord_bounds = (0..shape.len())
+            .map(|axis| shape[axis + 1..].iter().product())
+            .collect();
+
         SparseCombine {
             left: left.fuse(),
             right: right.fuse(),
+            coord_bounds,
             pending_left: None,
             pending_right: None,
         }
@@ -36,13 +43,15 @@ impl SparseCombine {
 
     fn poll_inner(
         stream: Pin<&mut Fuse<SparseStream>>,
-        pending: &mut Option<SparseRow>,
+        coord_bounds: &[u64],
+        pending: &mut Option<(u64, SparseRow)>,
         cxt: &mut task::Context,
     ) -> TCResult<bool> {
         match stream.poll_next(cxt) {
             Poll::Pending => Ok(false),
-            Poll::Ready(Some(Ok(row))) => {
-                *pending = Some(row);
+            Poll::Ready(Some(Ok((coord, value)))) => {
+                let offset = coord_to_offset(&coord, coord_bounds);
+                *pending = Some((offset, (coord, value)));
                 Ok(false)
             }
             Poll::Ready(Some(Err(cause))) => Err(cause),
@@ -50,12 +59,13 @@ impl SparseCombine {
         }
     }
 
-    fn swap_value(pending: &mut Option<SparseRow>) -> (Vec<u64>, Number) {
+    fn swap_value(pending: &mut Option<(u64, SparseRow)>) -> SparseRow {
         assert!(pending.is_some());
 
-        let mut row: Option<SparseRow> = None;
+        let mut row: Option<(u64, SparseRow)> = None;
         mem::swap(pending, &mut row);
-        row.unwrap()
+        let (_, row) = row.unwrap();
+        row
     }
 }
 
@@ -68,7 +78,7 @@ impl Stream for SparseCombine {
         let left_done = if this.left.is_done() {
             true
         } else {
-            match Self::poll_inner(this.left, this.pending_left, cxt) {
+            match Self::poll_inner(this.left, this.coord_bounds, this.pending_left, cxt) {
                 Err(cause) => return Poll::Ready(Some(Err(cause))),
                 Ok(done) => done,
             }
@@ -77,17 +87,17 @@ impl Stream for SparseCombine {
         let right_done = if this.right.is_done() {
             true
         } else {
-            match Self::poll_inner(this.right, this.pending_right, cxt) {
+            match Self::poll_inner(this.right, this.coord_bounds, this.pending_right, cxt) {
                 Err(cause) => return Poll::Ready(Some(Err(cause))),
                 Ok(done) => done,
             }
         };
 
         if this.pending_left.is_some() && this.pending_right.is_some() {
-            let (l_coord, _) = this.pending_left.as_ref().unwrap();
-            let (r_coord, _) = this.pending_right.as_ref().unwrap();
+            let (l_offset, _) = this.pending_left.as_ref().unwrap();
+            let (r_offset, _) = this.pending_right.as_ref().unwrap();
 
-            match compare_coord(l_coord, r_coord) {
+            match l_offset.cmp(r_offset) {
                 Ordering::Equal => {
                     let (l_coord, l_value) = Self::swap_value(this.pending_left);
                     let (_, r_value) = Self::swap_value(this.pending_right);
@@ -114,4 +124,12 @@ impl Stream for SparseCombine {
             Poll::Pending
         }
     }
+}
+
+fn coord_to_offset(coord: &[u64], coord_bounds: &[u64]) -> u64 {
+    coord_bounds
+        .iter()
+        .zip(coord.iter())
+        .map(|(d, x)| d * x)
+        .sum()
 }

@@ -423,18 +423,19 @@ impl SparseCombinator {
         let left_zero = self.left_zero.clone();
         let right_zero = self.right_zero.clone();
 
-        let combined = SparseCombine::new(left, right).try_filter_map(move |(coord, l, r)| {
-            let l = l.unwrap_or_else(|| left_zero.clone());
-            let r = r.unwrap_or_else(|| right_zero.clone());
-            let value = combinator(l, r);
-            let row = if value == value.class().zero() {
-                None
-            } else {
-                Some((coord, value))
-            };
+        let combined =
+            SparseCombine::new(self.shape(), left, right).try_filter_map(move |(coord, l, r)| {
+                let l = l.unwrap_or_else(|| left_zero.clone());
+                let r = r.unwrap_or_else(|| right_zero.clone());
+                let value = combinator(l, r);
+                let row = if value == value.class().zero() {
+                    None
+                } else {
+                    Some((coord, value))
+                };
 
-            future::ready(Ok(row))
-        });
+                future::ready(Ok(row))
+            });
 
         Box::pin(combined)
     }
