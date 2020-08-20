@@ -31,6 +31,16 @@ impl Class for StringType {
     type Instance = TCString;
 }
 
+impl fmt::Display for StringType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Id => write!(f, "type Id"),
+            Self::Link => write!(f, "type Link"),
+            Self::Ref => write!(f, "type Ref"),
+        }
+    }
+}
+
 pub struct Label {
     id: &'static str,
 }

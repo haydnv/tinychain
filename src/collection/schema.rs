@@ -385,3 +385,10 @@ impl GraphSchema {
         &self.edges
     }
 }
+
+impl From<(HashMap<ValueId, TableSchema>, HashMap<ValueId, NumberType>)> for GraphSchema {
+    fn from(schema: (HashMap<ValueId, TableSchema>, HashMap<ValueId, NumberType>)) -> GraphSchema {
+        let (nodes, edges) = schema;
+        GraphSchema { nodes, edges }
+    }
+}

@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::Hash;
+use std::iter;
 use std::sync::{Arc, RwLock};
 
 use futures::future;
@@ -11,8 +13,10 @@ use serde::{Deserialize, Serialize};
 use crate::block::dir::Dir;
 use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::collection::graph::Graph;
+use crate::collection::schema::{GraphSchema, IndexSchema, RowSchema, TableSchema};
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
+use crate::value::class::{NumberType, StringType, ValueType};
 use crate::value::link::PathSegment;
 use crate::value::{label, Label, Op, Value, ValueId};
 
@@ -20,13 +24,15 @@ use super::Transact;
 
 const ERR_INVALID_REF: &str = "Found reference to nonexistent value";
 
-const DEFAULT_MAX_VALUE_SIZE: usize = 1_000_000;
+const DEFAULT_MAX_VALUE_SIZE: usize = 100_000;
 const GRAPH_NAME: Label = label(".graph");
 
 const DEPENDS: Label = label("depends");
 const NAME: Label = label("name");
+const PRECEDES: Label = label("precedes");
+const PROVIDER: Label = label("provider");
 const REQUIRES: Label = label("requires");
-const UNRESOLVED: Label = label("unresolved");
+const RESOLVED: Label = label("resolved");
 const VALUE: Label = label("value");
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
@@ -143,6 +149,8 @@ impl Txn {
         self: Arc<Self>,
         _parameters: S,
     ) -> TCResult<Graph> {
+        let _graph = create_graph(self).await?;
+
         Err(error::not_implemented())
     }
 
@@ -173,6 +181,32 @@ impl Txn {
     }
 }
 
-async fn create_graph(_txn: Arc<Txn>) -> TCResult<Arc<Graph>> {
-    Err(error::not_implemented())
+async fn create_graph(txn: Arc<Txn>) -> TCResult<Arc<Graph>> {
+    let key: RowSchema = vec![(
+        NAME.into(),
+        ValueType::TCString(StringType::Id),
+        DEFAULT_MAX_VALUE_SIZE,
+    )
+        .into()];
+    let values: RowSchema = vec![
+        (RESOLVED.into(), ValueType::Number(NumberType::Bool)).into(),
+        (VALUE.into(), ValueType::Value, DEFAULT_MAX_VALUE_SIZE).into(),
+    ];
+    let node_schema = IndexSchema::from((key, values));
+    let node_schema = TableSchema::from((
+        node_schema,
+        iter::once((RESOLVED.into(), vec![RESOLVED.into()])),
+    ));
+    let node_schema: HashMap<ValueId, TableSchema> =
+        iter::once((PROVIDER.into(), node_schema)).collect();
+
+    let edge_schema: HashMap<ValueId, NumberType> = vec![
+        (PRECEDES.into(), NumberType::Bool),
+        (REQUIRES.into(), NumberType::Bool),
+    ]
+    .into_iter()
+    .collect();
+
+    let schema = GraphSchema::from((node_schema, edge_schema));
+    Graph::create(txn, schema).await.map(Arc::new)
 }

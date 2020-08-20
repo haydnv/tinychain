@@ -4,9 +4,10 @@ use serde::Serialize;
 
 use crate::class::{Class, Instance};
 
-use super::number::class::NumberType;
-use super::string::StringType;
 use super::Value;
+
+pub type NumberType = super::number::class::NumberType;
+pub type StringType = super::string::StringType;
 
 pub trait ValueInstance: Instance + Serialize {
     type Class: ValueClass;
@@ -27,17 +28,6 @@ impl From<NumberType> for ValueType {
 impl From<StringType> for ValueType {
     fn from(st: StringType) -> ValueType {
         ValueType::TCString(st)
-    }
-}
-
-impl fmt::Display for StringType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use StringType::*;
-        match self {
-            Id => write!(f, "type Id"),
-            Link => write!(f, "type Link"),
-            Ref => write!(f, "type Ref"),
-        }
     }
 }
 
