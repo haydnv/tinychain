@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
-use futures::stream::{FuturesOrdered, Stream, StreamExt, TryStreamExt};
+use futures::stream::{FuturesOrdered, StreamExt, TryStreamExt};
 use futures::try_join;
 
 use crate::class::{TCResult, TCTryStream};
@@ -14,12 +14,11 @@ use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::number::class::{NumberType, UIntType};
 use crate::value::number::instance::{Number, UInt};
-use crate::value::string::StringType;
 use crate::value::{label, Label, Value, ValueId, ValueType};
 
 use super::schema::{GraphSchema, IndexSchema, TableSchema};
-use super::table::{self, Selection, TableBase};
-use super::tensor::{self, einsum, SparseTensor, TensorBoolean, TensorIO};
+use super::table::TableBase;
+use super::tensor::{self, einsum, SparseTable, SparseTensor, TensorBoolean, TensorIO};
 
 const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";
 
@@ -37,10 +36,9 @@ pub struct Node {
 }
 
 pub struct Graph {
-    node_ids: TableBase,
-    node_labels: TableBase,
     nodes: HashMap<ValueId, TableBase>,
     edges: HashMap<ValueId, TableBase>,
+    node_indices: TableBase,
     max_id: TxnLock<Mutable<u64>>,
 }
 
@@ -55,18 +53,9 @@ impl Graph {
         .collect();
 
         let u64_type = ValueType::Number(NumberType::UInt(UIntType::U64));
-        let edge_schema: IndexSchema = (
-            vec![(NODE_FROM.into(), u64_type).into()],
-            vec![(NODE_TO.into(), u64_type).into()],
-        )
-            .into();
-        let edge_schema: TableSchema = (
-            edge_schema,
-            iter::once((NODE_TO.into(), vec![NODE_TO.into()])),
-        )
-            .into();
-        let edges = try_join_all(schema.edges().iter().map(|name| {
-            TableBase::create(txn.clone(), edge_schema.clone())
+
+        let edges = try_join_all(schema.edges().iter().map(|(name, dtype)| {
+            SparseTable::create_table(txn.clone(), 2, *dtype)
                 .map_ok(move |table| (name.clone(), table))
         }))
         .await?
@@ -76,33 +65,17 @@ impl Graph {
         let max_id = TxnLock::new(txn.id().clone(), 0u64.into());
 
         let node_id_schema: IndexSchema = (
-            vec![(NODE_ID.into(), u64_type).into()],
             vec![(NODE_KEY.into(), ValueType::Tuple).into()],
+            vec![(NODE_ID.into(), u64_type).into()],
         )
             .into();
         let node_id_schema: TableSchema = node_id_schema.into();
-        let node_ids = TableBase::create(txn.clone(), node_id_schema);
-
-        let label_type = ValueType::TCString(StringType::Id);
-        let node_label_schema: IndexSchema = (
-            vec![(NODE_ID.into(), u64_type).into()],
-            vec![(NODE_LABEL.into(), label_type).into()],
-        )
-            .into();
-        let node_label_schema: TableSchema = (
-            node_label_schema,
-            iter::once((NODE_LABEL.into(), vec![NODE_LABEL.into()])),
-        )
-            .into();
-        let node_labels = TableBase::create(txn, node_label_schema);
-
-        let (node_ids, node_labels) = try_join!(node_ids, node_labels)?;
+        let node_indices = TableBase::create(txn.clone(), node_id_schema).await?;
 
         Ok(Graph {
-            node_ids,
-            node_labels,
             nodes,
             edges,
+            node_indices,
             max_id,
         })
     }
@@ -124,7 +97,7 @@ impl Graph {
         node_key: Vec<Value>,
     ) -> TCResult<Option<u64>> {
         match self
-            .node_ids
+            .node_indices
             .get(txn_id, vec![Value::from(node_type), Value::from(node_key)])
             .await?
         {
@@ -134,7 +107,7 @@ impl Graph {
         }
     }
 
-    async fn bft(
+    pub async fn bft(
         self: Arc<Self>,
         txn: Arc<Txn>,
         start_node: u64,
@@ -172,54 +145,6 @@ impl Graph {
         Ok(Box::pin(found.flatten()))
     }
 
-    pub async fn select(
-        self: Arc<Self>,
-        txn: Arc<Txn>,
-        node_label: ValueId,
-        relation: ValueId,
-    ) -> TCResult<impl Stream<Item = TCResult<Node>>> {
-        let selector: Vec<(ValueId, table::ColumnBound)> =
-            vec![(NODE_LABEL.into(), Value::from(node_label).into())];
-
-        let this = self.clone();
-        let this1 = self.clone();
-        let this2 = self.clone();
-        let relation_clone = relation.clone();
-
-        let nodes = self
-            .node_labels
-            .slice(selector.into_iter().collect())?
-            .stream(txn.id().clone())
-            .await?
-            .map(|row| unwrap_u64(row))
-            .then(move |node_id| {
-                this.clone()
-                    .bft(txn.clone(), node_id, relation.clone(), 1)
-                    .map_ok(move |edges| (node_id, edges))
-            })
-            .map_ok(move |(node_id, edges)| {
-                let this1 = this1.clone();
-                let edges = edges.map_ok(move |node_id| Node {
-                    graph: this1.clone(),
-                    id: node_id,
-                    edges: HashMap::new(),
-                });
-                let edges: TCTryStream<Node> = Box::pin(edges);
-                (node_id, edges)
-            })
-            .map_ok(move |(node_id, edges): (u64, TCTryStream<Node>)| {
-                let mut node_edges = HashMap::new();
-                node_edges.insert(relation_clone.clone(), edges);
-                Node {
-                    graph: this2.clone(),
-                    id: node_id,
-                    edges: node_edges,
-                }
-            });
-
-        Ok(nodes)
-    }
-
     pub async fn add_node(
         &self,
         txn_id: TxnId,
@@ -231,9 +156,11 @@ impl Graph {
 
         if let Some(table) = self.nodes.get(&node_type) {
             let node_insert = table.insert(txn_id.clone(), key.to_vec(), value);
-            let node_id_insert =
-                self.node_ids
-                    .insert(txn_id, vec![Value::Tuple(key)], vec![Value::from(*max_id)]);
+            let node_id_insert = self.node_indices.insert(
+                txn_id,
+                vec![Value::Tuple(key)],
+                vec![Value::from(*max_id)],
+            );
             try_join!(node_insert, node_id_insert)?;
             *max_id += 1;
             Ok(())
@@ -306,7 +233,7 @@ impl Transact for Graph {
             .values()
             .map(|t| t.commit(txn_id))
             .chain(self.edges.values().map(|t| t.commit(txn_id)))
-            .chain(iter::once(self.node_ids.commit(txn_id)));
+            .chain(iter::once(self.node_indices.commit(txn_id)));
 
         join_all(commits).await;
     }
@@ -317,7 +244,7 @@ impl Transact for Graph {
             .values()
             .map(|t| t.rollback(txn_id))
             .chain(self.edges.values().map(|t| t.rollback(txn_id)))
-            .chain(iter::once(self.node_ids.rollback(txn_id)));
+            .chain(iter::once(self.node_indices.rollback(txn_id)));
 
         join_all(rollbacks).await;
     }

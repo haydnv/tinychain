@@ -373,7 +373,7 @@ impl<I: Iterator<Item = (ValueId, Vec<ValueId>)>> From<(IndexSchema, I)> for Tab
 
 pub struct GraphSchema {
     nodes: HashMap<ValueId, TableSchema>,
-    edges: HashSet<ValueId>,
+    edges: HashMap<ValueId, NumberType>,
 }
 
 impl GraphSchema {
@@ -381,7 +381,7 @@ impl GraphSchema {
         &self.nodes
     }
 
-    pub fn edges(&'_ self) -> &'_ HashSet<ValueId> {
+    pub fn edges(&'_ self) -> &'_ HashMap<ValueId, NumberType> {
         &self.edges
     }
 }
