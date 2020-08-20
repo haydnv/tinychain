@@ -1384,6 +1384,15 @@ pub struct SparseTensor {
 }
 
 impl SparseTensor {
+    pub async fn copy(&self, txn: Arc<Txn>) -> TCResult<SparseTensor> {
+        self.accessor
+            .clone()
+            .copy(txn)
+            .await
+            .map(Arc::new)
+            .map(|accessor| SparseTensor { accessor })
+    }
+
     pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTensor> {
         SparseTable::create(txn, shape, dtype)
             .await

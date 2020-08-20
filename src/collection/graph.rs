@@ -107,44 +107,6 @@ impl Graph {
         }
     }
 
-    pub async fn bft(
-        self: Arc<Self>,
-        txn: Arc<Txn>,
-        start_node: u64,
-        relation: ValueId,
-        limit: usize,
-    ) -> TCResult<TCTryStream<u64>> {
-        let edges = self.get_matrix(txn.id(), &relation);
-        let max_id = self.max_id.read(txn.id());
-        let (edges, max_id) = try_join!(edges, max_id)?;
-
-        let visited = SparseTensor::create(txn.clone(), vec![*max_id].into(), NumberType::Bool);
-        let adjacent = SparseTensor::create(txn.clone(), vec![*max_id].into(), NumberType::Bool);
-        let (mut visited, mut adjacent) = try_join!(visited, adjacent)?;
-        adjacent
-            .write_value_at(txn.id().clone(), vec![start_node], true.into())
-            .await?;
-
-        let mut order = 0;
-        // TODO: stream the search itself instead of buffering these futures
-        let mut found = FuturesOrdered::new();
-
-        while order < limit && adjacent.any(txn.clone()).await? {
-            visited = visited.or(&adjacent)?;
-            adjacent = einsum("ji,j->i", vec![edges.clone(), adjacent])?.and(&visited.not()?)?;
-            let nodes = adjacent
-                .clone()
-                .filled(txn.clone())
-                .await?
-                .map_ok(|(id, _)| id[0]);
-
-            found.push(future::ready(nodes));
-            order += 1;
-        }
-
-        Ok(Box::pin(found.flatten()))
-    }
-
     pub async fn add_node(
         &self,
         txn_id: TxnId,
@@ -205,23 +167,46 @@ impl Graph {
             .await
     }
 
-    pub async fn remove_edge(
-        &self,
-        _txn_id: &TxnId,
-        _label: &ValueId,
-        _node_from: &[Value],
-        _node_to: &[Value],
-    ) -> TCResult<()> {
-        Err(error::not_implemented())
-    }
+    pub async fn bft(
+        self: Arc<Self>,
+        txn: Arc<Txn>,
+        start_node: u64,
+        relation: ValueId,
+        limit: usize,
+    ) -> TCResult<TCTryStream<u64>> {
+        let edges = self.get_matrix(txn.id(), &relation);
+        let max_id = self.max_id.read(txn.id());
+        let (edges, max_id) = try_join!(edges, max_id)?;
 
-    pub async fn remove_node(
-        &self,
-        _txn: Arc<Txn>,
-        _node_type: ValueId,
-        _node_key: Vec<Value>,
-    ) -> TCResult<()> {
-        Err(error::not_implemented())
+        let visited = SparseTensor::create(txn.clone(), vec![*max_id].into(), NumberType::Bool);
+        let adjacent = SparseTensor::create(txn.clone(), vec![*max_id].into(), NumberType::Bool);
+        let (mut visited, mut adjacent) = try_join!(visited, adjacent)?;
+        adjacent
+            .write_value_at(txn.id().clone(), vec![start_node], true.into())
+            .await?;
+
+        let mut order = 0;
+        // TODO: stream the search itself instead of buffering these futures
+        let mut found = FuturesOrdered::new();
+
+        while order < limit && adjacent.any(txn.clone()).await? {
+            visited = visited.or(&adjacent)?;
+            adjacent = einsum("ji,j->i", vec![edges.clone(), adjacent])?
+                .copy(txn.clone().subcontext_tmp().await?)
+                .await?;
+
+            adjacent.mask(&txn, visited.clone()).await?;
+            let nodes = adjacent
+                .clone()
+                .filled(txn.clone())
+                .await?
+                .map_ok(|(id, _)| id[0]);
+
+            found.push(future::ready(nodes));
+            order += 1;
+        }
+
+        Ok(Box::pin(found.flatten()))
     }
 }
 
