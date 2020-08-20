@@ -19,12 +19,6 @@ impl TCRef {
     }
 }
 
-impl fmt::Display for TCRef {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "${}", self.to)
-    }
-}
-
 impl From<ValueId> for TCRef {
     fn from(to: ValueId) -> TCRef {
         TCRef { to }
@@ -42,6 +36,18 @@ impl FromStr for TCRef {
                 to: to[1..].parse()?,
             })
         }
+    }
+}
+
+impl From<TCRef> for ValueId {
+    fn from(r: TCRef) -> ValueId {
+        r.to
+    }
+}
+
+impl fmt::Display for TCRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "${}", self.to)
     }
 }
 
