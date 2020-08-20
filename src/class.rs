@@ -57,6 +57,7 @@ pub enum ClassMember {
 
 pub type ClassDef = HashMap<ValueId, ClassMember>;
 
+#[derive(Clone)]
 pub enum State {
     Class(),
     Collection(Collection),

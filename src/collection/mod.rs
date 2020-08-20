@@ -51,6 +51,7 @@ pub enum CollectionType {
     Tensor,
 }
 
+#[derive(Clone)]
 pub enum Collection {
     BTree(Arc<btree::BTree>),
     Table(table::Table),

@@ -5,8 +5,8 @@ use std::hash::Hash;
 use std::iter;
 use std::sync::{Arc, RwLock};
 
-use futures::future;
-use futures::stream::Stream;
+use futures::future::{self, try_join_all, TryFutureExt};
+use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -14,14 +14,16 @@ use crate::block::dir::Dir;
 use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::collection::graph::Graph;
 use crate::collection::schema::{GraphSchema, IndexSchema, RowSchema, TableSchema};
+use crate::collection::table::{ColumnBound, Selection};
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::value::class::{NumberType, StringType, ValueType};
 use crate::value::link::PathSegment;
-use crate::value::{label, Label, Op, Value, ValueId};
+use crate::value::{label, Label, Number, Value, ValueId};
 
 use super::Transact;
 
+const ERR_CORRUPT: &str = "Transaction corrupted! Please file a bug report.";
 const ERR_INVALID_REF: &str = "Found reference to nonexistent value";
 
 const DEFAULT_MAX_VALUE_SIZE: usize = 100_000;
@@ -147,11 +149,115 @@ impl Txn {
 
     pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
-        _parameters: S,
-    ) -> TCResult<Graph> {
-        let _graph = create_graph(self).await?;
+        mut parameters: S,
+    ) -> TCResult<HashMap<ValueId, State>> {
+        let graph = create_graph(self.clone()).await?;
+        // TODO: replace this with a Cluster when Cluster is implemented
+        let mut resolved = HashMap::new();
 
-        Err(error::not_implemented())
+        // while there are any unresolved parameters
+        let mut done = false;
+        while !done {
+            done = true;
+
+            let providers = graph
+                .clone()
+                .nodes(&PROVIDER.into())
+                .ok_or_else(|| error::internal(ERR_CORRUPT))?
+                .clone();
+
+            // get a stream of parameters remaining to resolve
+            let mut unresolved = providers
+                .slice(
+                    iter::once((
+                        RESOLVED.into(),
+                        ColumnBound::Is(Number::Bool(false.into()).into()),
+                    ))
+                    .collect(),
+                )?
+                .select(vec![NAME.into(), VALUE.into()])?
+                .stream(self.id.clone())
+                .await?;
+
+            // for each one, check if all its dependencies are resolved
+            let mut pending = FuturesUnordered::new();
+            while let Some(mut to_resolve) = unresolved.next().await {
+                let (name, value) = if to_resolve.len() == 2 {
+                    (to_resolve.pop().unwrap(), to_resolve.pop().unwrap())
+                } else {
+                    return Err(error::internal(ERR_CORRUPT));
+                };
+
+                done = false;
+                let mut ready = true;
+                let mut requires = graph
+                    .clone()
+                    .bft(
+                        self.clone(),
+                        (PROVIDER.into(), vec![name.clone()]),
+                        REQUIRES.into(),
+                        1,
+                    )
+                    .await?;
+
+                while let Some(provider) = requires.next().await {
+                    let (_, mut name) = provider?;
+                    let name = name.pop().ok_or_else(|| error::internal(ERR_CORRUPT))?;
+                    let name: ValueId = name.try_into()?;
+                    if !resolved.contains_key(&name) {
+                        ready = false;
+                        break;
+                    }
+                }
+
+                // if so, resolve it
+                if ready {
+                    pending.push(
+                        self.clone()
+                            .resolve(resolved.clone(), value)
+                            .map_ok(|state| (name, state)),
+                    );
+                }
+            }
+
+            // update the graph with the newly resolved states
+            let mut updates = Vec::with_capacity(pending.len());
+            while let Some(state) = pending.next().await {
+                let (name, state) = state?;
+                let update = providers
+                    .slice(
+                        iter::once((
+                            RESOLVED.into(),
+                            ColumnBound::Is(Number::Bool(false.into()).into()),
+                        ))
+                        .collect(),
+                    )?
+                    .update(
+                        self.clone(),
+                        iter::once((RESOLVED.into(), Number::Bool(true.into()).into())).collect(),
+                    );
+                updates.push(update);
+
+                let name: ValueId = name.try_into()?;
+                resolved.insert(name, state);
+            }
+
+            try_join_all(updates).await?;
+
+            // if there are still parameters coming in, repeat the process
+            if let Some(param) = parameters.next().await {
+                let (name, value) = param;
+                graph.add_node(
+                    self.id.clone(),
+                    PROVIDER.into(),
+                    vec![name.into()],
+                    vec![Number::Bool(false.into()).into(), value],
+                ).await?;
+                done = false;
+            }
+        }
+
+        Ok(resolved)
     }
 
     pub async fn commit(&self) {
@@ -172,7 +278,11 @@ impl Txn {
         .await;
     }
 
-    async fn resolve(self: Arc<Self>, _name: ValueId, _op: Op) -> TCResult<(ValueId, State)> {
+    async fn resolve(
+        self: Arc<Self>,
+        _provided: HashMap<ValueId, State>,
+        _value: Value,
+    ) -> TCResult<State> {
         Err(error::not_implemented())
     }
 

@@ -8,7 +8,7 @@ use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{FuturesOrdered, StreamExt, TryStreamExt};
 use futures::try_join;
 
-use crate::class::{TCResult, TCTryStream};
+use crate::class::{TCBoxTryFuture, TCResult, TCTryStream};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -17,7 +17,7 @@ use crate::value::number::instance::{Number, UInt};
 use crate::value::{label, Label, Value, ValueId, ValueType};
 
 use super::schema::{GraphSchema, IndexSchema, TableSchema};
-use super::table::TableBase;
+use super::table::{ColumnBound, Selection, TableBase};
 use super::tensor::{self, einsum, SparseTable, SparseTensor, TensorBoolean, TensorIO};
 
 const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";
@@ -93,9 +93,9 @@ impl Graph {
     async fn get_node_id(
         &self,
         txn_id: TxnId,
-        node_type: ValueId,
-        node_key: Vec<Value>,
+        node: (ValueId, Vec<Value>),
     ) -> TCResult<Option<u64>> {
+        let (node_type, node_key) = node;
         match self
             .node_indices
             .get(txn_id, vec![Value::from(node_type), Value::from(node_key)])
@@ -105,6 +105,44 @@ impl Graph {
             None => Ok(None),
             _ => Err(error::internal(ERR_CORRUPT)),
         }
+    }
+
+    fn get_node_by_id<'a>(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        node_id: u64,
+    ) -> TCBoxTryFuture<'a, (ValueId, Vec<Value>)> {
+        Box::pin(async move {
+            let mut node_keys: Vec<Vec<Value>> = self
+                .node_indices
+                .slice(
+                    iter::once((
+                        NODE_ID.into(),
+                        ColumnBound::Is(Value::Number(node_id.into())),
+                    ))
+                    .collect(),
+                )?
+                .stream(txn_id)
+                .await?
+                .collect()
+                .await;
+            if node_keys.len() == 1 {
+                let mut row = node_keys.pop().unwrap();
+                if row.len() == 3 {
+                    let node_type: ValueId = row.pop().unwrap().try_into()?;
+                    let node_key: Vec<Value> = row.pop().unwrap().try_into()?;
+                    Ok((node_type, node_key))
+                } else {
+                    Err(error::internal(ERR_CORRUPT))
+                }
+            } else {
+                Err(error::internal(ERR_CORRUPT))
+            }
+        })
+    }
+
+    pub fn nodes(&'_ self, node_type: &'_ ValueId) -> Option<&'_ TableBase> {
+        self.nodes.get(node_type)
     }
 
     pub async fn add_node(
@@ -170,10 +208,21 @@ impl Graph {
     pub async fn bft(
         self: Arc<Self>,
         txn: Arc<Txn>,
-        start_node: u64,
+        start_node: (ValueId, Vec<Value>),
         relation: ValueId,
         limit: usize,
-    ) -> TCResult<TCTryStream<u64>> {
+    ) -> TCResult<TCTryStream<(ValueId, Vec<Value>)>> {
+        let start_node_id = self
+            .get_node_id(txn.id().clone(), start_node.clone())
+            .await?
+            .ok_or_else(|| {
+                error::not_found(format!(
+                    "node of type {} with key {}",
+                    start_node.0,
+                    Value::Tuple(start_node.1)
+                ))
+            })?;
+
         let edges = self.get_matrix(txn.id(), &relation);
         let max_id = self.max_id.read(txn.id());
         let (edges, max_id) = try_join!(edges, max_id)?;
@@ -182,7 +231,7 @@ impl Graph {
         let adjacent = SparseTensor::create(txn.clone(), vec![*max_id].into(), NumberType::Bool);
         let (mut visited, mut adjacent) = try_join!(visited, adjacent)?;
         adjacent
-            .write_value_at(txn.id().clone(), vec![start_node], true.into())
+            .write_value_at(txn.id().clone(), vec![start_node_id], true.into())
             .await?;
 
         let mut order = 0;
@@ -195,12 +244,15 @@ impl Graph {
                 .copy(txn.subcontext_tmp().await?)
                 .await?;
 
+            let this = self.clone();
+            let txn_id = txn.id().clone();
             adjacent.mask(&txn, visited.clone()).await?;
             let nodes = adjacent
                 .clone()
                 .filled(txn.clone())
                 .await?
-                .map_ok(|(id, _)| id[0]);
+                .map_ok(|(id, _)| id[0])
+                .and_then(move |node_id| this.clone().get_node_by_id(txn_id.clone(), node_id));
 
             found.push(future::ready(nodes));
             order += 1;

@@ -1307,6 +1307,12 @@ impl From<bool> for Number {
     }
 }
 
+impl From<u64> for Number {
+    fn from(u: u64) -> Number {
+        Number::UInt(u.into())
+    }
+}
+
 impl From<Boolean> for Number {
     fn from(b: Boolean) -> Number {
         Number::Bool(b)
