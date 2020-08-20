@@ -1562,6 +1562,20 @@ impl TensorCompare for SparseTensor {
 }
 
 impl TensorIO for SparseTensor {
+    fn mask<'a>(&'a self, txn: &'a Arc<Txn>, other: Self) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let zero = self.dtype().zero();
+            let txn_id = txn.id().clone();
+            other
+                .filled(txn.clone())
+                .await?
+                .map_ok(|(coord, _)| self.write_value_at(txn_id.clone(), coord, zero.clone()))
+                .try_buffer_unordered(2)
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await
+        })
+    }
+
     fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         self.accessor.read_value(txn, coord)
     }

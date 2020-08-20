@@ -65,6 +65,8 @@ pub trait TensorCompare: Sized + TensorView {
 }
 
 pub trait TensorIO: Sized + TensorView {
+    fn mask<'a>(&'a self, txn: &'a Arc<Txn>, other: Self) -> TCBoxTryFuture<'a, ()>;
+
     fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
 
     fn write<'a>(
@@ -299,6 +301,15 @@ impl TensorCompare for Tensor {
 }
 
 impl TensorIO for Tensor {
+    fn mask<'a>(&'a self, txn: &'a Arc<Txn>, other: Self) -> TCBoxTryFuture<'a, ()> {
+        match (self, &other) {
+            (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()),
+            (Self::Sparse(l), Self::Sparse(r)) => l.mask(txn, r.clone()),
+            (Self::Sparse(l), Self::Dense(r)) => l.mask(txn, SparseTensor::from_dense(r.clone())),
+            (Self::Dense(l), Self::Sparse(r)) => l.mask(txn, DenseTensor::from_sparse(r.clone())),
+        }
+    }
+
     fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         match self {
             Self::Dense(dense) => dense.read_value(txn, coord),

@@ -1582,6 +1582,10 @@ impl TensorMath for DenseTensor {
 }
 
 impl TensorIO for DenseTensor {
+    fn mask<'a>(&'a self, _txn: &'a Arc<Txn>, _other: Self) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move { Err(error::not_implemented()) })
+    }
+
     fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
         self.blocks.read_value_at(txn, coord)
     }
