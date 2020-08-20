@@ -200,7 +200,7 @@ impl SparseBroadcast {
         num_coords: u64,
     ) -> TCResult<SparseStream> {
         let coords = dense::sort_coords(
-            txn.clone().subcontext_tmp().await?,
+            txn.subcontext_tmp().await?,
             coords,
             num_coords,
             self.shape(),

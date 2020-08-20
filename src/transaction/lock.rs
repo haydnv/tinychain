@@ -112,7 +112,7 @@ pub struct TxnLockWriteGuard<T: Mutate> {
 }
 
 impl<T: Mutate> TxnLockWriteGuard<T> {
-    pub fn downgrade<'a>(self, txn_id: &'a TxnId) -> TxnLockReadFuture<'a, T> {
+    pub fn downgrade(self, txn_id: &'_ TxnId) -> TxnLockReadFuture<T> {
         if txn_id != &self.txn_id {
             panic!("Tried to downgrade into a different transaction!");
         }

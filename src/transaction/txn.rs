@@ -103,7 +103,7 @@ impl Txn {
         self.context.clone()
     }
 
-    pub async fn subcontext(self: Arc<Self>, subcontext: ValueId) -> TCResult<Arc<Txn>> {
+    pub async fn subcontext(&self, subcontext: ValueId) -> TCResult<Arc<Txn>> {
         if subcontext == GRAPH_NAME {
             return Err(error::bad_request("This name is reserved", subcontext));
         }
@@ -121,7 +121,7 @@ impl Txn {
         }))
     }
 
-    pub fn subcontext_tmp<'a>(self: Arc<Self>) -> TCBoxTryFuture<'a, Arc<Txn>> {
+    pub fn subcontext_tmp<'a>(&'a self) -> TCBoxTryFuture<'a, Arc<Txn>> {
         Box::pin(async move {
             let id = self.context.unique_id(self.id()).await?;
             let subcontext: Arc<Dir> = self.context.create_dir(&self.id, &id.into()).await?;

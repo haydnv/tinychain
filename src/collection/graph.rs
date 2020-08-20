@@ -192,7 +192,7 @@ impl Graph {
         while order < limit && adjacent.any(txn.clone()).await? {
             visited = visited.or(&adjacent)?;
             adjacent = einsum("ji,j->i", vec![edges.clone(), adjacent])?
-                .copy(txn.clone().subcontext_tmp().await?)
+                .copy(txn.subcontext_tmp().await?)
                 .await?;
 
             adjacent.mask(&txn, visited.clone()).await?;

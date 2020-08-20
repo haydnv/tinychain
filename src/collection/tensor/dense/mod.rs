@@ -592,7 +592,7 @@ impl BlockList for BlockListBroadcast {
                 .map(TCResult::Ok);
 
             let values = sort_coords(
-                txn.clone().subcontext_tmp().await?,
+                txn.subcontext_tmp().await?,
                 stream::iter(coords),
                 num_coords,
                 self.shape(),
