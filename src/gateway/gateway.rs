@@ -1,16 +1,13 @@
 use std::sync::Arc;
 
-use futures::{future, stream, Stream};
-
 use crate::auth::{Auth, Token};
 use crate::block::dir::Dir;
 use crate::class::{State, TCResult};
-use crate::collection::{GetResult, Graph};
 use crate::error;
 use crate::kernel;
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::Link;
-use crate::value::{Value, ValueId};
+use crate::value::Value;
 
 use super::{Hosted, NetworkTime};
 
@@ -42,12 +39,11 @@ impl Gateway {
         selector: Value,
         _auth: &Auth,
         _txn_id: Option<TxnId>,
-    ) -> GetResult {
+    ) -> TCResult<State> {
         if subject.host().is_none() {
             let path = subject.path();
             if path[0] == "sbin" {
-                let state = kernel::get(&path.slice_from(1), selector)?;
-                Ok(Box::pin(stream::once(future::ready(state))))
+                kernel::get(&path.slice_from(1), selector)
             } else {
                 Err(error::not_implemented())
             }
@@ -63,21 +59,9 @@ impl Gateway {
         _subject: &Link,
         _selector: Value,
         _state: State,
+        _txn_id: TxnId,
         _auth: &Auth,
     ) -> TCResult<State> {
         Err(error::not_implemented())
-    }
-
-    pub async fn post<S: Stream<Item = (ValueId, Value)>>(
-        &self,
-        subject: &Link,
-        op: S,
-        auth: &Auth,
-    ) -> TCResult<Graph> {
-        if subject.host().is_none() {
-            kernel::post(subject.path(), op, auth).await
-        } else {
-            Err(error::not_implemented())
-        }
     }
 }

@@ -22,12 +22,18 @@ use crate::value::class::{ValueClass, ValueType};
 use crate::value::Value;
 
 use super::schema::{Column, RowSchema};
-use super::{Collect, GetResult, State};
+use super::{Collect, Collection, State};
 
 mod collator;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
+
+#[derive(Clone)]
+pub enum BTree {
+    Tree(Arc<BTreeFile>),
+    Slice(BTreeSlice),
+}
 
 type NodeId = BlockId;
 
@@ -190,7 +196,25 @@ fn validate_range(range: &BTreeRange, schema: &[Column]) -> TCResult<()> {
 
 type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Sync + Unpin>>>;
 
-pub struct BTree {
+#[derive(Clone)]
+pub struct BTreeSlice {
+    source: Arc<BTreeFile>,
+    bounds: Selector,
+}
+
+impl BTreeSlice {
+    fn new(source: Arc<BTreeFile>, bounds: Selector) -> BTreeSlice {
+        BTreeSlice { source, bounds }
+    }
+}
+
+impl From<BTreeSlice> for State {
+    fn from(btree_slice: BTreeSlice) -> State {
+        State::Collection(Collection::BTree(BTree::Slice(btree_slice)))
+    }
+}
+
+pub struct BTreeFile {
     file: Arc<File<Node>>,
     schema: RowSchema,
     order: usize,
@@ -198,12 +222,12 @@ pub struct BTree {
     root: TxnLock<Mutable<NodeId>>,
 }
 
-impl BTree {
+impl BTreeFile {
     pub async fn create(
         txn_id: TxnId,
         schema: RowSchema,
         file: Arc<File<Node>>,
-    ) -> TCResult<BTree> {
+    ) -> TCResult<BTreeFile> {
         if !file.is_empty(&txn_id).await? {
             return Err(error::internal(
                 "Tried to create a new BTree without a new File",
@@ -249,7 +273,7 @@ impl BTree {
             .await?;
 
         let collator = collator::Collator::new(schema.iter().map(|c| *c.dtype()).collect())?;
-        Ok(BTree {
+        Ok(BTreeFile {
             file,
             schema,
             order,
@@ -801,17 +825,14 @@ impl TryFrom<Value> for Selector {
 }
 
 #[async_trait]
-impl Collect for BTree {
+impl Collect for BTreeFile {
     type Selector = Selector;
     type Item = Key;
+    type Slice = BTreeSlice;
 
-    async fn get(self: Arc<Self>, txn: Arc<Txn>, bounds: Selector) -> GetResult {
-        Ok(Box::pin(
-            self.clone()
-                .slice(txn.id().clone(), bounds)
-                .await?
-                .map(|row| State::Value(row.into())),
-        ))
+    async fn get(self: Arc<Self>, _txn: Arc<Txn>, bounds: Selector) -> TCResult<Self::Slice> {
+        validate_selector(&bounds, self.schema())?;
+        Ok(BTreeSlice::new(self, bounds))
     }
 
     async fn put(
@@ -833,7 +854,7 @@ impl Collect for BTree {
 }
 
 #[async_trait]
-impl Transact for BTree {
+impl Transact for BTreeFile {
     async fn commit(&self, txn_id: &TxnId) {
         join(self.file.commit(txn_id), self.root.commit(txn_id)).await;
     }

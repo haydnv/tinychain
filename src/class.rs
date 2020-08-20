@@ -59,7 +59,6 @@ pub type ClassDef = HashMap<ValueId, ClassMember>;
 
 #[derive(Clone)]
 pub enum State {
-    Class(),
     Collection(Collection),
     Value(Value),
 }
@@ -67,5 +66,14 @@ pub enum State {
 impl From<Value> for State {
     fn from(v: Value) -> State {
         Self::Value(v)
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Collection(c) => write!(f, "{}", c),
+            Self::Value(v) => write!(f, "{}", v),
+        }
     }
 }

@@ -6,7 +6,7 @@ use futures::future;
 use futures::stream::{self, StreamExt, TryStreamExt};
 
 use crate::class::{TCBoxTryFuture, TCResult, TCStream};
-use crate::collection::btree::{BTree, BTreeRange};
+use crate::collection::btree::{BTreeFile, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::error;
 use crate::transaction::{Txn, TxnId};
@@ -255,7 +255,7 @@ impl Selection for ColumnSelection {
 
 #[derive(Clone)]
 pub struct IndexSlice {
-    source: Arc<BTree>,
+    source: Arc<BTreeFile>,
     schema: IndexSchema,
     bounds: Bounds,
     range: BTreeRange,
@@ -263,7 +263,7 @@ pub struct IndexSlice {
 }
 
 impl IndexSlice {
-    pub fn all(source: Arc<BTree>, schema: IndexSchema, reverse: bool) -> IndexSlice {
+    pub fn all(source: Arc<BTreeFile>, schema: IndexSchema, reverse: bool) -> IndexSlice {
         IndexSlice {
             source,
             schema,
@@ -273,7 +273,11 @@ impl IndexSlice {
         }
     }
 
-    pub fn new(source: Arc<BTree>, schema: IndexSchema, bounds: Bounds) -> TCResult<IndexSlice> {
+    pub fn new(
+        source: Arc<BTreeFile>,
+        schema: IndexSchema,
+        bounds: Bounds,
+    ) -> TCResult<IndexSlice> {
         let columns = schema.columns();
 
         assert!(source.schema() == &columns[..]);

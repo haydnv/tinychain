@@ -8,7 +8,7 @@ use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::block::dir::Dir;
 use crate::class::{TCBoxTryFuture, TCResult, TCStream};
-use crate::collection::btree::{self, BTree};
+use crate::collection::btree::{self, BTreeFile};
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
@@ -22,14 +22,14 @@ const PRIMARY_INDEX: &str = "primary";
 
 #[derive(Clone)]
 pub struct Index {
-    btree: Arc<BTree>,
+    btree: Arc<BTreeFile>,
     schema: IndexSchema,
 }
 
 impl Index {
     pub async fn create(txn: Arc<Txn>, name: ValueId, schema: IndexSchema) -> TCResult<Index> {
         let btree = Arc::new(
-            BTree::create(
+            BTreeFile::create(
                 txn.id().clone(),
                 schema.clone().into(),
                 txn.context().create_btree(txn.id().clone(), name).await?,
@@ -237,14 +237,14 @@ impl ReadOnly {
                 let column_names: HashSet<&ValueId> = columns.iter().collect();
                 let schema = source_schema.subset(column_names)?;
                 let btree =
-                    BTree::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
+                    BTreeFile::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
 
                 let rows = source.select(columns)?.stream(txn.id().clone()).await?;
                 btree.insert_from(txn.id(), rows).await?;
                 (schema, btree)
             } else {
                 let btree =
-                    BTree::create(txn.id().clone(), source_schema.clone().into(), btree_file)
+                    BTreeFile::create(txn.id().clone(), source_schema.clone().into(), btree_file)
                         .await?;
                 let rows = source.stream(txn.id().clone()).await?;
                 btree.insert_from(txn.id(), rows).await?;
@@ -397,7 +397,7 @@ impl TableBase {
             .context()
             .create_btree(txn.id().clone(), name.clone())
             .await?;
-        let btree = btree::BTree::create(txn.id().clone(), schema.clone().into(), btree_file)
+        let btree = btree::BTreeFile::create(txn.id().clone(), schema.clone().into(), btree_file)
             .map_ok(Arc::new)
             .await?;
 

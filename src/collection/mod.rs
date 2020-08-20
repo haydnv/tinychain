@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 
-use crate::class::{State, TCResult, TCStream};
+use crate::class::{State, TCResult};
 use crate::error;
 use crate::transaction::{Transact, Txn};
 use crate::value::Value;
@@ -18,7 +18,7 @@ pub mod table;
 pub mod tensor;
 
 pub type BTree = btree::BTree;
-pub type GetResult = TCResult<TCStream<State>>;
+pub type BTreeSlice = btree::BTreeSlice;
 pub type Graph = graph::Graph;
 pub type Table = table::Table;
 pub type Tensor = tensor::Tensor;
@@ -35,7 +35,10 @@ pub trait Collect: Transact + Send + Sync {
         + Sync
         + 'static;
 
-    async fn get(self: Arc<Self>, txn: Arc<Txn>, selector: Self::Selector) -> GetResult;
+    type Slice: Into<State>;
+
+    async fn get(self: Arc<Self>, txn: Arc<Txn>, selector: Self::Selector)
+        -> TCResult<Self::Slice>;
 
     async fn put(
         &self,
@@ -53,13 +56,23 @@ pub enum CollectionType {
 
 #[derive(Clone)]
 pub enum Collection {
-    BTree(Arc<btree::BTree>),
+    BTree(btree::BTree),
     Table(table::Table),
     Tensor(tensor::Tensor),
 }
 
-impl From<Arc<btree::BTree>> for Collection {
-    fn from(b: Arc<btree::BTree>) -> Collection {
+impl Collection {
+    pub async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<State> {
+        Err(error::not_implemented())
+    }
+
+    pub async fn put(&self, _txn: &Arc<Txn>, _selector: &Value, _state: State) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+}
+
+impl From<btree::BTree> for Collection {
+    fn from(b: btree::BTree) -> Collection {
         Self::BTree(b)
     }
 }

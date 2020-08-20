@@ -177,7 +177,7 @@ impl Http {
             &Method::GET => {
                 let id = Http::get_param(&mut params, "key")?
                     .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
-                let data = self
+                let state = self
                     .gateway
                     .get(&path.clone().into(), id, &token, txn_id.clone())
                     .await?;
@@ -185,13 +185,15 @@ impl Http {
                     future::ready(Ok(Bytes::copy_from_slice(b"["))),
                 ));
 
-                let response: TCStream<TCResult<Bytes>> = Box::pin(data.map(|state| match state {
-                    State::Value(value) => match serde_json::to_string_pretty(&value) {
-                        Ok(s) => Ok(Bytes::from(format!("{},", s))),
-                        Err(cause) => Err(cause.into()),
-                    },
-                    _ => Err(error::not_implemented()),
-                }));
+                let response: TCStream<TCResult<Bytes>> = Box::pin(match state {
+                    State::Value(value) => {
+                        stream::once(future::ready(match serde_json::to_string_pretty(&value) {
+                            Ok(s) => Ok(Bytes::from(format!("{},", s))),
+                            Err(cause) => Err(cause.into()),
+                        }))
+                    }
+                    _ => stream::once(future::ready(Err(error::not_implemented()))),
+                });
 
                 let end_delimiter: TCStream<TCResult<Bytes>> = Box::pin(stream::once(
                     future::ready(Ok(Bytes::copy_from_slice(b"]"))),
@@ -205,25 +207,17 @@ impl Http {
                 let reader = StreamReader::new(request.body_mut(), self.request_limit);
                 let reader = BufReader::new(reader);
                 for op in serde_json::from_reader(reader).into_iter() {
-                    let (selector, state): (Value, Value) = op;
-                    self.gateway
-                        .put(&path.clone().into(), selector, state.into(), &token)
-                        .await?;
+                    let (_selector, _state): (Value, Value) = op;
+                    todo!()
                 }
 
                 Ok(Box::pin(stream::empty()))
             }
-            &Method::POST => {
-                let reader = StreamReader::new(request.body_mut(), self.request_limit);
-                let reader = BufReader::new(reader);
-                let op = stream::iter(serde_json::from_reader(reader).into_iter());
-                self.gateway.post(&path.clone().into(), op, &token).await?;
-                Ok(Box::pin(stream::empty()))
-            }
-            other => Err(error::bad_request(
-                "Tinychain does not support this HTTP method",
-                other,
-            )),
+            &Method::POST => Err(error::not_implemented()),
+            other => Err(error::method_not_allowed(format!(
+                "Tinychain does not support {}",
+                other
+            ))),
         }
     }
 }

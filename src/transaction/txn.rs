@@ -9,12 +9,14 @@ use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+use crate::auth::Auth;
 use crate::block::dir::Dir;
 use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::value::link::PathSegment;
-use crate::value::{Op, TCRef, TCString, Value, ValueId};
+use crate::value::op::{Op, Subject};
+use crate::value::{TCRef, TCString, Value, ValueId};
 
 use super::Transact;
 
@@ -121,6 +123,7 @@ impl Txn {
 
     pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
+        auth: Auth,
         mut parameters: S,
     ) -> TCResult<HashMap<ValueId, State>> {
         let mut resolved = HashMap::new();
@@ -168,7 +171,7 @@ impl Txn {
                         awaiting.insert(name.clone());
                         pending.push(
                             self.clone()
-                                .resolve(resolved.clone(), *op)
+                                .resolve(resolved.clone(), *op, auth.clone())
                                 .map_ok(|state| (name, state)),
                         );
                     } else {
@@ -213,10 +216,61 @@ impl Txn {
 
     async fn resolve(
         self: Arc<Self>,
-        _provided: HashMap<ValueId, State>,
-        _provider: Op,
+        provided: HashMap<ValueId, State>,
+        provider: Op,
+        auth: Auth,
     ) -> TCResult<State> {
-        Err(error::not_implemented())
+        match provider {
+            Op::Get(subject, object) => match subject {
+                Subject::Link(link) => {
+                    self.gateway
+                        .get(&link, object, &auth, Some(self.id.clone()))
+                        .await
+                }
+                Subject::Ref(tc_ref) => {
+                    let subject = provided
+                        .get(&tc_ref.clone().into())
+                        .ok_or_else(|| error::not_found(tc_ref))?;
+                    if let State::Collection(collection) = subject {
+                        collection.get(self.clone(), object).await
+                    } else {
+                        Err(error::bad_request("Value does not support GET", subject))
+                    }
+                }
+            },
+            Op::Put(subject, object, value) => {
+                let value: State = if let Value::TCString(TCString::Id(tc_ref)) = value {
+                    provided
+                        .get(&tc_ref.clone().into())
+                        .cloned()
+                        .ok_or_else(|| error::not_found(tc_ref))?
+                } else {
+                    value.into()
+                };
+
+                match subject {
+                    Subject::Link(link) => {
+                        self.gateway
+                            .put(&link, object, value.into(), self.id.clone(), &auth)
+                            .await
+                    }
+                    Subject::Ref(tc_ref) => {
+                        let subject = provided
+                            .get(&tc_ref.clone().into())
+                            .ok_or_else(|| error::not_found(tc_ref))?;
+
+                        if let State::Collection(collection) = subject {
+                            collection
+                                .put(&self, &object, value)
+                                .await
+                                .map(State::Collection)
+                        } else {
+                            Err(error::bad_request("Value does not support GET", subject))
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn mutate(self: &Arc<Self>, state: Arc<dyn Transact>) {
