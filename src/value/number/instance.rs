@@ -8,7 +8,8 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::class::Instance;
 use crate::error;
 use crate::value::class::ValueInstance;
-use crate::value::TCResult;
+use crate::value::link::TCPath;
+use crate::value::{TCResult, Value};
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{CastFrom, CastInto, NumberClass, NumberInstance};
@@ -570,6 +571,19 @@ pub enum Int {
     I64(i64),
 }
 
+impl Int {
+    pub fn get(path: &TCPath, number: Number) -> TCResult<Int> {
+        let int: Int = number.cast_into();
+
+        match path.to_string().as_str() {
+            "/16" => Ok(Int::I16(int.cast_into())),
+            "/32" => Ok(Int::I32(int.cast_into())),
+            "/64" => Ok(Int::I64(int.cast_into())),
+            other => Err(error::not_found(other)),
+        }
+    }
+}
+
 impl Instance for Int {
     type Class = IntType;
 
@@ -651,6 +665,32 @@ impl CastFrom<Int> for Boolean {
         };
 
         Boolean(b)
+    }
+}
+
+impl CastFrom<Int> for i16 {
+    fn cast_from(i: Int) -> i16 {
+        match i {
+            Int::I16(i) => i,
+            Int::I32(i) => i as i16,
+            Int::I64(i) => i as i16,
+        }
+    }
+}
+
+impl CastFrom<Int> for i32 {
+    fn cast_from(i: Int) -> i32 {
+        match i {
+            Int::I16(i) => i as i32,
+            Int::I32(i) => i,
+            Int::I64(i) => i as i32,
+        }
+    }
+}
+
+impl CastFrom<Int> for i64 {
+    fn cast_from(i: Int) -> i64 {
+        i.into()
     }
 }
 
@@ -1097,6 +1137,28 @@ pub enum Number {
     Float(Float),
     Int(Int),
     UInt(UInt),
+}
+
+impl Number {
+    pub fn get(path: &TCPath, value: Value) -> TCResult<Number> {
+        if path.is_empty() {
+            return Err(error::bad_request(
+                "You must specify a type of Number to GET",
+                "",
+            ));
+        }
+
+        let number: Number = value.try_into()?;
+
+        match path[0].as_str() {
+            "bool" => Err(error::not_implemented()),
+            "complex" => Err(error::not_implemented()),
+            "float" => Err(error::not_implemented()),
+            "int" if path.len() > 1 => Int::get(&path.slice_from(1), number).map(Number::Int),
+            "uint" => Err(error::not_implemented()),
+            other => Err(error::not_found(other)),
+        }
+    }
 }
 
 impl PartialOrd for Number {

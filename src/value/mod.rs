@@ -38,6 +38,27 @@ pub enum Value {
     Tuple(Vec<Value>),
 }
 
+impl Value {
+    pub fn get(path: &link::TCPath, id: Value) -> TCResult<Value> {
+        if path.is_empty() {
+            return Err(error::bad_request(
+                "You must specify a Value type to GET",
+                "",
+            ));
+        }
+
+        match path[0].as_str() {
+            "none" => Ok(Value::None),
+            "bytes" => Err(error::not_implemented()),
+            "number" if path.len() > 1 => Number::get(&path.slice_from(1), id).map(Value::Number),
+            "string" => Err(error::not_implemented()),
+            "op" => Err(error::not_implemented()),
+            "tuple" => Err(error::not_implemented()),
+            other => Err(error::not_found(other)),
+        }
+    }
+}
+
 impl Instance for Value {
     type Class = class::ValueType;
 

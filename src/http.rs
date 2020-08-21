@@ -8,8 +8,7 @@ use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::executor::block_on;
 use futures::future;
-use futures::stream::{self, Stream};
-use futures_util::stream::StreamExt;
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use serde::de::DeserializeOwned;
@@ -181,27 +180,18 @@ impl Http {
                     .gateway
                     .get(&path.clone().into(), id, &token, txn_id.clone())
                     .await?;
-                let start_delimiter: TCStream<TCResult<Bytes>> = Box::pin(stream::once(
-                    future::ready(Ok(Bytes::copy_from_slice(b"["))),
-                ));
 
-                let response: TCStream<TCResult<Bytes>> = Box::pin(match state {
+                match state {
                     State::Value(value) => {
-                        stream::once(future::ready(match serde_json::to_string_pretty(&value) {
-                            Ok(s) => Ok(Bytes::from(format!("{},", s))),
-                            Err(cause) => Err(cause.into()),
-                        }))
+                        let value = serde_json::to_string_pretty(&value)
+                            .map(Bytes::from)
+                            .map_err(error::TCError::from);
+                        Ok(Box::pin(stream::once(future::ready(value))))
                     }
-                    _ => stream::once(future::ready(Err(error::not_implemented()))),
-                });
-
-                let end_delimiter: TCStream<TCResult<Bytes>> = Box::pin(stream::once(
-                    future::ready(Ok(Bytes::copy_from_slice(b"]"))),
-                ));
-
-                Ok(Box::pin(
-                    start_delimiter.chain(response).chain(end_delimiter),
-                ))
+                    _other => Ok(Box::pin(stream::once(future::ready(Err(
+                        error::not_implemented(),
+                    ))))),
+                }
             }
             &Method::PUT => {
                 let reader = StreamReader::new(request.body_mut(), self.request_limit);
@@ -220,6 +210,28 @@ impl Http {
             ))),
         }
     }
+}
+
+fn response_stream<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
+    s: S,
+) -> TCResult<TCStream<TCResult<Bytes>>> {
+    let start_delimiter: TCStream<TCResult<Bytes>> = Box::pin(stream::once(future::ready(Ok(
+        Bytes::copy_from_slice(b"["),
+    ))));
+
+    let response = s
+        .map(|v| serde_json::to_string_pretty(&v))
+        .map_ok(Bytes::from)
+        .map_err(error::TCError::from);
+    let response: TCStream<TCResult<Bytes>> = Box::pin(response);
+
+    let end_delimiter: TCStream<TCResult<Bytes>> = Box::pin(stream::once(future::ready(Ok(
+        Bytes::copy_from_slice(b"]"),
+    ))));
+
+    Ok(Box::pin(
+        start_delimiter.chain(response).chain(end_delimiter),
+    ))
 }
 
 #[async_trait]
