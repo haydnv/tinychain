@@ -573,12 +573,19 @@ pub enum Int {
 
 impl Int {
     pub fn get(path: &TCPath, number: Number) -> TCResult<Int> {
-        let int: Int = number.cast_into();
+        let i: Int = number.cast_into();
+        let i: i64 = i.cast_into();
 
         match path.to_string().as_str() {
-            "/16" => Ok(Int::I16(int.cast_into())),
-            "/32" => Ok(Int::I32(int.cast_into())),
-            "/64" => Ok(Int::I64(int.cast_into())),
+            "/16" if i > i16::MAX.into() => {
+                Err(error::bad_request("Value too large for int/16", i))
+            }
+            "/16" => Ok(Int::I16(i as i16)),
+            "/32" if i > i32::MAX.into() => {
+                Err(error::bad_request("Value too large for int/32", i))
+            }
+            "/32" => Ok(Int::I32(i as i32)),
+            "/64" => Ok(Int::I64(i)),
             other => Err(error::not_found(other)),
         }
     }
