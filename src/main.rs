@@ -2,6 +2,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use arrayfire as af;
 use structopt::StructOpt;
 
 mod auth;
@@ -63,6 +64,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Tinychain version {}", VERSION);
     println!("Data directory: {}", &config.data_dir.to_str().unwrap());
     println!("Working directory: {}", &config.workspace.to_str().unwrap());
+    println!();
+
+    af::info();
     println!();
 
     let txn_id = transaction::TxnId::new(gateway::Gateway::time());

@@ -1,4 +1,4 @@
 env \
   PKG_CONFIG_PATH="$HOME/local/lib/pkgconfig" \
-  LD_LIBRARY_PATH="$HOME/local/lib" \
+  LD_LIBRARY_PATH="$HOME/local/lib:$HOME/arrayfire/lib64" \
   $@
