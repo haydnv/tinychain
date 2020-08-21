@@ -199,6 +199,10 @@ impl ValueVisitor {
         self.visit_number(i.into())
     }
 
+    fn visit_uint<U: Into<number::instance::UInt>>(&self, u: U) -> TCResult<Value> {
+        self.visit_number(u.into())
+    }
+
     fn visit_number<N: Into<Number>>(&self, n: N) -> TCResult<Value> {
         Ok(Value::Number(n.into()))
     }
@@ -225,6 +229,13 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         self.visit_float(value).map_err(de::Error::custom)
     }
 
+    fn visit_i16<E>(self, value: i16) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_int(value).map_err(de::Error::custom)
+    }
+
     fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E>
     where
         E: de::Error,
@@ -237,6 +248,34 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         E: de::Error,
     {
         self.visit_int(value).map_err(de::Error::custom)
+    }
+
+    fn visit_u8<E>(self, value: u8) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_uint(value).map_err(de::Error::custom)
+    }
+
+    fn visit_u16<E>(self, value: u16) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_uint(value).map_err(de::Error::custom)
+    }
+
+    fn visit_u32<E>(self, value: u32) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_uint(value).map_err(de::Error::custom)
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_uint(value).map_err(de::Error::custom)
     }
 
     fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
