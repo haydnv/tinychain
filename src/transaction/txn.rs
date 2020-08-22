@@ -193,6 +193,11 @@ impl Txn {
             }
         }
 
+        while let Some(result) = pending.next().await {
+            let (name, state) = result?;
+            resolved.insert(name, state);
+        }
+
         Ok(resolved)
     }
 
