@@ -259,10 +259,7 @@ impl BlockListFile {
         dtype: NumberType,
         blocks: S,
     ) -> TCResult<BlockListFile> {
-        let file = txn
-            .context()
-            .create_tensor(txn.id().clone(), "block_tensor".parse()?)
-            .await?;
+        let file = txn.context().await?;
 
         blocks
             .enumerate()

@@ -1,5 +1,6 @@
 use std::collections::hash_map::{Entry, HashMap};
 use std::collections::HashSet;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -18,13 +19,76 @@ use crate::value::link::{PathSegment, TCPath};
 use super::chain;
 use super::file::File;
 use super::hostfs;
+use super::BlockData;
 
 #[derive(Clone)]
-enum DirEntry {
+pub enum DirEntry {
     Dir(Arc<Dir>),
     BTree(Arc<File<btree::Node>>),
     Chain(Arc<File<chain::ChainBlock>>),
     Tensor(Arc<File<tensor::Array>>),
+}
+
+impl From<Arc<File<btree::Node>>> for DirEntry {
+    fn from(file: Arc<File<btree::Node>>) -> DirEntry {
+        DirEntry::BTree(file)
+    }
+}
+
+impl From<Arc<File<chain::ChainBlock>>> for DirEntry {
+    fn from(file: Arc<File<chain::ChainBlock>>) -> DirEntry {
+        DirEntry::Chain(file)
+    }
+}
+
+impl From<Arc<File<tensor::Array>>> for DirEntry {
+    fn from(file: Arc<File<tensor::Array>>) -> DirEntry {
+        DirEntry::Tensor(file)
+    }
+}
+
+impl TryFrom<DirEntry> for Arc<Dir> {
+    type Error = error::TCError;
+
+    fn try_from(entry: DirEntry) -> TCResult<Arc<Dir>> {
+        match entry {
+            DirEntry::Dir(dir) => Ok(dir),
+            other => Err(error::bad_request("Expected Dir but found", other)),
+        }
+    }
+}
+
+impl TryFrom<DirEntry> for Arc<File<btree::Node>> {
+    type Error = error::TCError;
+
+    fn try_from(entry: DirEntry) -> TCResult<Arc<File<btree::Node>>> {
+        match entry {
+            DirEntry::BTree(btree) => Ok(btree),
+            other => Err(error::bad_request("Expected Dir but found", other)),
+        }
+    }
+}
+
+impl TryFrom<DirEntry> for Arc<File<chain::ChainBlock>> {
+    type Error = error::TCError;
+
+    fn try_from(entry: DirEntry) -> TCResult<Arc<File<chain::ChainBlock>>> {
+        match entry {
+            DirEntry::Chain(chain) => Ok(chain),
+            other => Err(error::bad_request("Expected Dir but found", other)),
+        }
+    }
+}
+
+impl TryFrom<DirEntry> for Arc<File<tensor::Array>> {
+    type Error = error::TCError;
+
+    fn try_from(entry: DirEntry) -> TCResult<Arc<File<tensor::Array>>> {
+        match entry {
+            DirEntry::Tensor(tensor) => Ok(tensor),
+            other => Err(error::bad_request("Expected Dir but found", other)),
+        }
+    }
 }
 
 impl fmt::Display for DirEntry {
@@ -119,46 +183,14 @@ impl Dir {
         })
     }
 
-    pub async fn get_btree(
+    pub async fn get_entry<T: TryFrom<DirEntry, Error = error::TCError>>(
         &self,
         txn_id: &TxnId,
         name: &PathSegment,
-    ) -> TCResult<Option<Arc<File<btree::Node>>>> {
+    ) -> TCResult<Option<T>> {
         if let Some(entry) = self.contents.read(txn_id).await?.deref().get(name) {
-            match entry {
-                DirEntry::BTree(file) => Ok(Some(file.clone())),
-                other => Err(error::bad_request("Not a BTree", other)),
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub async fn get_chain(
-        &self,
-        txn_id: &TxnId,
-        name: &PathSegment,
-    ) -> TCResult<Option<Arc<File<chain::ChainBlock>>>> {
-        if let Some(entry) = self.contents.read(txn_id).await?.deref().get(name) {
-            match entry {
-                DirEntry::Chain(file) => Ok(Some(file.clone())),
-                other => Err(error::bad_request("Not a Chain", other)),
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub async fn get_tensor(
-        &self,
-        txn_id: &TxnId,
-        name: &PathSegment,
-    ) -> TCResult<Option<Arc<File<tensor::Array>>>> {
-        if let Some(entry) = self.contents.read(txn_id).await?.deref().get(name) {
-            match entry {
-                DirEntry::Tensor(file) => Ok(Some(file.clone())),
-                other => Err(error::bad_request("Not a Tensor", other)),
-            }
+            let entry: T = entry.clone().try_into()?;
+            Ok(Some(entry))
         } else {
             Ok(None)
         }
@@ -195,57 +227,20 @@ impl Dir {
         })
     }
 
-    pub async fn create_btree(
+    pub async fn create_file<T: BlockData>(
         &self,
         txn_id: TxnId,
         name: PathSegment,
-    ) -> TCResult<Arc<File<btree::Node>>> {
+    ) -> TCResult<Arc<File<T>>>
+    where
+        Arc<File<T>>: Into<DirEntry>,
+    {
         let mut contents = self.contents.write(txn_id.clone()).await?;
         match contents.entry(name) {
             Entry::Vacant(entry) => {
                 let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
-                let file = File::create(txn_id, fs_cache).await?;
-                entry.insert(DirEntry::BTree(file.clone()));
-                Ok(file)
-            }
-            Entry::Occupied(entry) => Err(error::bad_request(
-                "Tried to create a new File but there is already an entry at",
-                entry.key(),
-            )),
-        }
-    }
-
-    pub async fn create_chain(
-        &self,
-        txn_id: TxnId,
-        name: PathSegment,
-    ) -> TCResult<Arc<File<chain::ChainBlock>>> {
-        let mut contents = self.contents.write(txn_id.clone()).await?;
-        match contents.entry(name) {
-            Entry::Vacant(entry) => {
-                let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
-                let file = File::create(txn_id, fs_cache).await?;
-                entry.insert(DirEntry::Chain(file.clone()));
-                Ok(file)
-            }
-            Entry::Occupied(entry) => Err(error::bad_request(
-                "Tried to create a new File but there is already an entry at",
-                entry.key(),
-            )),
-        }
-    }
-
-    pub async fn create_tensor(
-        &self,
-        txn_id: TxnId,
-        name: PathSegment,
-    ) -> TCResult<Arc<File<tensor::Array>>> {
-        let mut contents = self.contents.write(txn_id.clone()).await?;
-        match contents.entry(name) {
-            Entry::Vacant(entry) => {
-                let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
-                let file = File::create(txn_id, fs_cache).await?;
-                entry.insert(DirEntry::Tensor(file.clone()));
+                let file: Arc<File<T>> = File::create(txn_id, fs_cache).await?;
+                entry.insert(file.clone().into());
                 Ok(file)
             }
             Entry::Occupied(entry) => Err(error::bad_request(

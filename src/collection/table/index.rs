@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
-use crate::block::dir::Dir;
+use crate::block::file::File;
 use crate::class::{TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{self, BTreeFile};
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
@@ -27,15 +27,11 @@ pub struct Index {
 }
 
 impl Index {
-    pub async fn create(txn: Arc<Txn>, name: ValueId, schema: IndexSchema) -> TCResult<Index> {
-        let btree = Arc::new(
-            BTreeFile::create(
-                txn.id().clone(),
-                schema.clone().into(),
-                txn.context().create_btree(txn.id().clone(), name).await?,
-            )
-            .await?,
-        );
+    pub async fn create(txn: Arc<Txn>, schema: IndexSchema) -> TCResult<Index> {
+        let btree_file: Arc<File<btree::Node>> = txn.context().await?;
+
+        let btree =
+            Arc::new(BTreeFile::create(txn.id().clone(), schema.clone().into(), btree_file).await?);
         Ok(Index { btree, schema })
     }
 
@@ -223,13 +219,7 @@ impl ReadOnly {
         key_columns: Option<Vec<ValueId>>,
     ) -> TCBoxTryFuture<'a, ReadOnly> {
         Box::pin(async move {
-            let btree_file = txn
-                .clone()
-                .subcontext_tmp()
-                .await?
-                .context()
-                .create_btree(txn.id().clone(), "index".parse()?)
-                .await?;
+            let btree_file = txn.subcontext_tmp().await?.context().await?;
 
             let source_schema: IndexSchema =
                 (source.key().to_vec(), source.values().to_vec()).into();
@@ -320,7 +310,6 @@ impl Selection for ReadOnly {
 
 #[derive(Clone)]
 pub struct TableBase {
-    dir: Arc<Dir>,
     primary: Index,
     auxiliary: BTreeMap<ValueId, Index>,
 }
@@ -328,8 +317,7 @@ pub struct TableBase {
 impl TableBase {
     pub async fn create(txn: Arc<Txn>, schema: TableSchema) -> TCResult<TableBase> {
         let primary = Index::create(
-            txn.clone(),
-            PRIMARY_INDEX.parse()?,
+            txn.subcontext(PRIMARY_INDEX.parse()?).await?,
             schema.primary().clone(),
         )
         .await?;
@@ -343,11 +331,7 @@ impl TableBase {
             .into_iter()
             .collect();
 
-        Ok(TableBase {
-            dir: txn.context(),
-            primary,
-            auxiliary,
-        })
+        Ok(TableBase { primary, auxiliary })
     }
 
     async fn create_index(
@@ -393,10 +377,7 @@ impl TableBase {
             .collect();
         let schema: IndexSchema = (key, values).into();
 
-        let btree_file = txn
-            .context()
-            .create_btree(txn.id().clone(), name.clone())
-            .await?;
+        let btree_file = txn.subcontext(name.clone()).await?.context().await?;
         let btree = btree::BTreeFile::create(txn.id().clone(), schema.clone().into(), btree_file)
             .map_ok(Arc::new)
             .await?;

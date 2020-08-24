@@ -10,7 +10,9 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::Auth;
-use crate::block::dir::Dir;
+use crate::block::dir::{Dir, DirEntry};
+use crate::block::file::File;
+use crate::block::BlockData;
 use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
@@ -73,7 +75,8 @@ impl fmt::Display for TxnId {
 
 pub struct Txn {
     id: TxnId,
-    context: Arc<Dir>,
+    dir: Arc<Dir>,
+    context: ValueId,
     gateway: Arc<Gateway>,
     mutated: Arc<RwLock<Vec<Arc<dyn Transact>>>>,
 }
@@ -82,28 +85,35 @@ impl Txn {
     pub async fn new(gateway: Arc<Gateway>, workspace: Arc<Dir>) -> TCResult<Arc<Txn>> {
         let id = TxnId::new(Gateway::time());
         let context: PathSegment = id.clone().try_into()?;
-        let context = workspace.create_dir(&id, &context.into()).await?;
+        let dir = workspace.create_dir(&id, &context.clone().into()).await?;
 
         Ok(Arc::new(Txn {
             id,
+            dir,
             context,
             gateway,
             mutated: Arc::new(RwLock::new(vec![])),
         }))
     }
 
-    pub fn context(self: &Arc<Self>) -> Arc<Dir> {
-        self.context.clone()
+    pub async fn context<T: BlockData>(&self) -> TCResult<Arc<File<T>>>
+    where
+        Arc<File<T>>: Into<DirEntry>,
+    {
+        self.dir
+            .create_file(self.id.clone(), self.context.clone())
+            .await
     }
 
     pub async fn subcontext(&self, subcontext: ValueId) -> TCResult<Arc<Txn>> {
-        let subcontext: Arc<Dir> = self
-            .context
-            .create_dir(&self.id, &subcontext.into())
+        let dir = self
+            .dir
+            .get_or_create_dir(&self.id, &self.context.clone().into())
             .await?;
 
         Ok(Arc::new(Txn {
             id: self.id.clone(),
+            dir,
             context: subcontext,
             gateway: self.gateway.clone(),
             mutated: self.mutated.clone(),
@@ -112,7 +122,7 @@ impl Txn {
 
     pub fn subcontext_tmp<'a>(&'a self) -> TCBoxTryFuture<'a, Arc<Txn>> {
         Box::pin(async move {
-            let id = self.context.unique_id(self.id()).await?;
+            let id = self.dir.unique_id(self.id()).await?;
             self.subcontext(id).await
         })
     }
