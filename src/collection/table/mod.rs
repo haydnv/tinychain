@@ -1,12 +1,13 @@
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
 
 use crate::class::{TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
-use crate::transaction::{Txn, TxnId};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{Value, ValueId};
 
 use super::schema::{Column, Row, TableSchema};
@@ -303,6 +304,41 @@ impl Selection for Table {
             Self::ROIndex(ro_index) => ro_index.validate_order(order),
             Self::Table(table) => table.validate_order(order),
             Self::TableSlice(table_slice) => table_slice.validate_order(order),
+        }
+    }
+}
+
+#[async_trait]
+impl Transact for Table {
+    async fn commit(&self, txn_id: &TxnId) {
+        let no_op = ();
+
+        match self {
+            Self::Aggregate(_) => no_op,
+            Self::Columns(_) => no_op,
+            Self::Limit(limited) => limited.commit(txn_id).await,
+            Self::Index(index) => index.commit(txn_id).await,
+            Self::IndexSlice(index_slice) => index_slice.commit(txn_id).await,
+            Self::Merge(merged) => merged.commit(txn_id).await,
+            Self::ROIndex(_) => no_op,
+            Self::Table(table) => table.commit(txn_id).await,
+            Self::TableSlice(table_slice) => table_slice.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        let no_op = ();
+
+        match self {
+            Self::Aggregate(_) => no_op,
+            Self::Columns(_) => no_op,
+            Self::Limit(limited) => limited.rollback(txn_id).await,
+            Self::Index(index) => index.rollback(txn_id).await,
+            Self::IndexSlice(index_slice) => index_slice.rollback(txn_id).await,
+            Self::Merge(merged) => merged.rollback(txn_id).await,
+            Self::ROIndex(_) => no_op,
+            Self::Table(table) => table.rollback(txn_id).await,
+            Self::TableSlice(table_slice) => table_slice.rollback(txn_id).await,
         }
     }
 }

@@ -2,14 +2,15 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
-use futures::future;
+use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::{future, join};
 
 use crate::class::{TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{BTreeFile, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::error;
-use crate::transaction::{Txn, TxnId};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{Value, ValueId};
 
 use super::bounds::{self, Bounds};
@@ -404,6 +405,17 @@ impl Selection for IndexSlice {
     }
 }
 
+#[async_trait]
+impl Transact for IndexSlice {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+}
+
 #[derive(Clone)]
 pub struct Limited {
     source: Box<Table>,
@@ -498,6 +510,17 @@ impl Selection for Limited {
     }
 }
 
+#[async_trait]
+impl Transact for Limited {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+}
+
 #[derive(Clone)]
 pub enum MergeSource {
     Table(TableSlice),
@@ -516,6 +539,23 @@ impl MergeSource {
         match self {
             Self::Table(table) => table.slice(bounds),
             Self::Merge(merged) => merged.slice(bounds),
+        }
+    }
+}
+
+#[async_trait]
+impl Transact for MergeSource {
+    async fn commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::Table(table) => table.commit(txn_id).await,
+            Self::Merge(merged) => merged.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::Table(table) => table.rollback(txn_id).await,
+            Self::Merge(merged) => merged.rollback(txn_id).await,
         }
     }
 }
@@ -660,6 +700,17 @@ impl Selection for Merged {
     }
 }
 
+#[async_trait]
+impl Transact for Merged {
+    async fn commit(&self, txn_id: &TxnId) {
+        join!(self.left.commit(txn_id), self.right.commit(txn_id));
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        join!(self.left.rollback(txn_id), self.right.rollback(txn_id));
+    }
+}
+
 #[derive(Clone)]
 pub struct TableSlice {
     table: TableBase,
@@ -774,5 +825,16 @@ impl Selection for TableSlice {
 
     fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCBoxTryFuture<()> {
         self.table.update_row(txn_id, row, value)
+    }
+}
+
+#[async_trait]
+impl Transact for TableSlice {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.table.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.table.rollback(txn_id).await
     }
 }
