@@ -498,6 +498,21 @@ impl From<SparseTensor> for Tensor {
     }
 }
 
+#[derive(Clone)]
+pub enum TensorBase {
+    Dense(dense::BlockListFile),
+    Sparse(sparse::SparseTable),
+}
+
+impl From<TensorBase> for Tensor {
+    fn from(base: TensorBase) -> Tensor {
+        match base {
+            TensorBase::Dense(blocks) => Self::Dense(blocks.into()),
+            TensorBase::Sparse(table) => Self::Sparse(table.into()),
+        }
+    }
+}
+
 pub fn einsum<T: Clone + TensorView + TensorMath + TensorReduce + TensorTransform>(
     format: &str,
     tensors: Vec<T>,

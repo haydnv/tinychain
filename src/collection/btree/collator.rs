@@ -26,6 +26,7 @@ pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<
     }
 }
 
+#[derive(Clone)]
 pub struct Collator {
     schema: Vec<ValueType>,
 }

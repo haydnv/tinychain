@@ -56,14 +56,43 @@ pub enum CollectionType {
 }
 
 #[derive(Clone)]
-pub enum Collection {
+pub enum CollectionBase {
+    BTree(btree::BTreeFile),
+    Graph(graph::Graph),
+    Table(table::TableBase),
+    Tensor(tensor::TensorBase),
+}
+
+impl fmt::Display for CollectionBase {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::BTree(_) => write!(f, "(B-tree)"),
+            Self::Graph(_) => write!(f, "(graph)"),
+            Self::Table(_) => write!(f, "(table)"),
+            Self::Tensor(_) => write!(f, "(tensor)"),
+        }
+    }
+}
+
+impl CollectionBase {
+    pub async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<State> {
+        Err(error::not_implemented())
+    }
+
+    pub async fn put(&self, _txn: &Arc<Txn>, _selector: &Value, _state: State) -> TCResult<Self> {
+        Err(error::not_implemented())
+    }
+}
+
+#[derive(Clone)]
+pub enum CollectionView {
     BTree(btree::BTree),
     Graph(graph::Graph),
     Table(table::Table),
     Tensor(tensor::Tensor),
 }
 
-impl Collection {
+impl CollectionView {
     pub async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<State> {
         Err(error::not_implemented())
     }
@@ -74,7 +103,7 @@ impl Collection {
 }
 
 #[async_trait]
-impl Transact for Collection {
+impl Transact for CollectionView {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
@@ -94,37 +123,38 @@ impl Transact for Collection {
     }
 }
 
-impl From<btree::BTree> for Collection {
-    fn from(b: btree::BTree) -> Collection {
-        Self::BTree(b)
+impl fmt::Display for CollectionView {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::BTree(_) => write!(f, "(B-tree view)"),
+            Self::Graph(_) => write!(f, "(graph)"),
+            Self::Table(_) => write!(f, "(table view)"),
+            Self::Tensor(_) => write!(f, "(tensor view)"),
+        }
     }
 }
 
-impl From<graph::Graph> for Collection {
-    fn from(g: graph::Graph) -> Collection {
-        Self::Graph(g)
-    }
+#[derive(Clone)]
+pub enum Collection {
+    Base(CollectionBase),
+    View(CollectionView),
 }
 
-impl From<table::Table> for Collection {
-    fn from(t: table::Table) -> Collection {
-        Self::Table(t)
+impl Collection {
+    pub async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<State> {
+        Err(error::not_implemented())
     }
-}
 
-impl From<tensor::Tensor> for Collection {
-    fn from(t: tensor::Tensor) -> Collection {
-        Self::Tensor(t)
+    pub async fn put(&self, _txn: &Arc<Txn>, _selector: &Value, _state: State) -> TCResult<Self> {
+        Err(error::not_implemented())
     }
 }
 
 impl fmt::Display for Collection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::BTree(_) => write!(f, "(B-tree)"),
-            Self::Graph(_) => write!(f, "(graph)"),
-            Self::Table(_) => write!(f, "(table)"),
-            Self::Tensor(_) => write!(f, "(tensor)"),
+            Self::Base(base) => write!(f, "{}", base),
+            Self::View(view) => write!(f, "{}", view),
         }
     }
 }

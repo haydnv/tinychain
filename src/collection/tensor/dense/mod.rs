@@ -241,7 +241,7 @@ impl Transact for BlockListCombine {
 }
 
 #[derive(Clone)]
-struct BlockListFile {
+pub struct BlockListFile {
     file: Arc<File<Array>>,
     dtype: NumberType,
     shape: Shape,
@@ -1873,6 +1873,13 @@ impl Transact for DenseTensor {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.blocks.rollback(txn_id).await
+    }
+}
+
+impl From<BlockListFile> for DenseTensor {
+    fn from(blocks: BlockListFile) -> DenseTensor {
+        let blocks = Arc::new(blocks);
+        DenseTensor { blocks }
     }
 }
 

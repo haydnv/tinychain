@@ -22,7 +22,7 @@ use crate::value::class::{ValueClass, ValueType};
 use crate::value::Value;
 
 use super::schema::{Column, RowSchema};
-use super::{Collect, Collection, State};
+use super::{Collect, Collection, CollectionView, State};
 
 mod collator;
 
@@ -231,10 +231,13 @@ impl BTreeSlice {
 
 impl From<BTreeSlice> for State {
     fn from(btree_slice: BTreeSlice) -> State {
-        State::Collection(Collection::BTree(BTree::Slice(btree_slice)))
+        State::Collection(Collection::View(CollectionView::BTree(BTree::Slice(
+            btree_slice,
+        ))))
     }
 }
 
+#[derive(Clone)]
 pub struct BTreeFile {
     file: Arc<File<Node>>,
     schema: RowSchema,

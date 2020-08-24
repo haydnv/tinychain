@@ -1205,6 +1205,7 @@ impl Transact for SparseTranspose {
     }
 }
 
+#[derive(Clone)]
 pub struct SparseTable {
     table: TableBase,
     shape: Shape,
@@ -1904,6 +1905,13 @@ impl Transact for SparseTensor {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.accessor.rollback(txn_id).await
+    }
+}
+
+impl From<SparseTable> for SparseTensor {
+    fn from(table: SparseTable) -> SparseTensor {
+        let accessor = Arc::new(table);
+        SparseTensor { accessor }
     }
 }
 
