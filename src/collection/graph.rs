@@ -35,6 +35,7 @@ pub struct Node {
     edges: HashMap<ValueId, TCTryStream<Node>>,
 }
 
+#[derive(Clone)]
 pub struct Graph {
     nodes: HashMap<ValueId, TableBase>,
     edges: HashMap<ValueId, TableBase>,

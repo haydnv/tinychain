@@ -8,7 +8,7 @@ use serde::ser::Serialize;
 
 use crate::class::{State, TCResult};
 use crate::error;
-use crate::transaction::{Transact, Txn};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::Value;
 
 pub mod btree;
@@ -50,6 +50,7 @@ pub trait Collect: Transact + Send + Sync {
 
 pub enum CollectionType {
     BTree,
+    Graph,
     Table,
     Tensor,
 }
@@ -57,6 +58,7 @@ pub enum CollectionType {
 #[derive(Clone)]
 pub enum Collection {
     BTree(btree::BTree),
+    Graph(graph::Graph),
     Table(table::Table),
     Tensor(tensor::Tensor),
 }
@@ -71,9 +73,36 @@ impl Collection {
     }
 }
 
+#[async_trait]
+impl Transact for Collection {
+    async fn commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::BTree(btree) => btree.commit(txn_id).await,
+            Self::Graph(graph) => graph.commit(txn_id).await,
+            Self::Table(table) => table.commit(txn_id).await,
+            Self::Tensor(tensor) => tensor.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::BTree(btree) => btree.rollback(txn_id).await,
+            Self::Graph(graph) => graph.rollback(txn_id).await,
+            Self::Table(table) => table.rollback(txn_id).await,
+            Self::Tensor(tensor) => tensor.rollback(txn_id).await,
+        }
+    }
+}
+
 impl From<btree::BTree> for Collection {
     fn from(b: btree::BTree) -> Collection {
         Self::BTree(b)
+    }
+}
+
+impl From<graph::Graph> for Collection {
+    fn from(g: graph::Graph) -> Collection {
+        Self::Graph(g)
     }
 }
 
@@ -93,6 +122,7 @@ impl fmt::Display for Collection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::BTree(_) => write!(f, "(B-tree)"),
+            Self::Graph(_) => write!(f, "(graph)"),
             Self::Table(_) => write!(f, "(table)"),
             Self::Tensor(_) => write!(f, "(tensor)"),
         }
