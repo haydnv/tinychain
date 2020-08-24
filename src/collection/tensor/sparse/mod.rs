@@ -35,7 +35,7 @@ convert to a DenseTensor first.";
 
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
-trait SparseAccessor: TensorView + 'static {
+trait SparseAccessor: TensorView + Transact + 'static {
     fn copy<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseTable> {
         Box::pin(async move {
             let accessor =
@@ -185,6 +185,17 @@ impl SparseAccessor for DenseAccessor {
     }
 }
 
+#[async_trait]
+impl Transact for DenseAccessor {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+}
+
 struct SparseBroadcast {
     source: Arc<dyn SparseAccessor>,
     rebase: transform::Broadcast,
@@ -322,6 +333,17 @@ impl SparseAccessor for SparseBroadcast {
     }
 }
 
+#[async_trait]
+impl Transact for SparseBroadcast {
+    async fn commit(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+}
+
 struct SparseCast {
     source: Arc<dyn SparseAccessor>,
     dtype: NumberType,
@@ -398,6 +420,17 @@ impl SparseAccessor for SparseCast {
         value: Number,
     ) -> TCBoxTryFuture<()> {
         self.source.write_value(txn_id, coord, value)
+    }
+}
+
+#[async_trait]
+impl Transact for SparseCast {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
     }
 }
 
@@ -542,6 +575,17 @@ impl SparseAccessor for SparseCombinator {
     }
 }
 
+#[async_trait]
+impl Transact for SparseCombinator {
+    async fn commit(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+}
+
 struct SparseExpand {
     source: Arc<dyn SparseAccessor>,
     rebase: transform::Expand,
@@ -627,6 +671,17 @@ impl SparseAccessor for SparseExpand {
     ) -> TCBoxTryFuture<'a, ()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value(txn_id, coord, value)
+    }
+}
+
+#[async_trait]
+impl Transact for SparseExpand {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
     }
 }
 
@@ -785,6 +840,17 @@ impl SparseAccessor for SparseReduce {
     }
 }
 
+#[async_trait]
+impl Transact for SparseReduce {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+}
+
 struct SparseReshape {
     source: Arc<dyn SparseAccessor>,
     rebase: transform::Reshape,
@@ -905,6 +971,17 @@ impl SparseAccessor for SparseReshape {
     }
 }
 
+#[async_trait]
+impl Transact for SparseReshape {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+}
+
 struct SparseSlice {
     source: Arc<dyn SparseAccessor>,
     rebase: transform::Slice,
@@ -1001,6 +1078,17 @@ impl SparseAccessor for SparseSlice {
             let coord = self.rebase.invert_coord(&coord);
             self.source.write_value(txn_id, coord, value).await
         })
+    }
+}
+
+#[async_trait]
+impl Transact for SparseSlice {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
     }
 }
 
@@ -1103,6 +1191,17 @@ impl SparseAccessor for SparseTranspose {
     ) -> TCBoxTryFuture<'a, ()> {
         self.source
             .write_value(txn_id, self.rebase.invert_coord(&coord), value)
+    }
+}
+
+#[async_trait]
+impl Transact for SparseTranspose {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
     }
 }
 
@@ -1298,6 +1397,17 @@ impl SparseAccessor for SparseTable {
     }
 }
 
+#[async_trait]
+impl Transact for SparseTable {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.table.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.table.rollback(txn_id).await
+    }
+}
+
 struct SparseUnary {
     source: Arc<dyn SparseAccessor>,
     transform: fn(Number) -> Number,
@@ -1370,11 +1480,24 @@ impl SparseAccessor for SparseUnary {
 
     fn write_value<'a>(
         &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
+        _txn_id: TxnId,
+        _coord: Vec<u64>,
+        _value: Number,
     ) -> TCBoxTryFuture<()> {
-        self.source.write_value(txn_id, coord, value)
+        Box::pin(future::ready(Err(error::unsupported(
+            ERR_NONBIJECTIVE_WRITE,
+        ))))
+    }
+}
+
+#[async_trait]
+impl Transact for SparseUnary {
+    async fn commit(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
     }
 }
 
@@ -1775,12 +1898,12 @@ impl TensorTransform for SparseTensor {
 
 #[async_trait]
 impl Transact for SparseTensor {
-    async fn commit(&self, _txn_id: &TxnId) {
-        todo!()
+    async fn commit(&self, txn_id: &TxnId) {
+        self.accessor.commit(txn_id).await
     }
 
-    async fn rollback(&self, _txn_id: &TxnId) {
-        todo!()
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.accessor.rollback(txn_id).await
     }
 }
 

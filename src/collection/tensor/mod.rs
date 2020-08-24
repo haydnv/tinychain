@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use crate::class::{TCBoxTryFuture, TCResult};
 use crate::error;
-use crate::transaction::{Txn, TxnId};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::number::class::NumberType;
 use crate::value::Number;
 
@@ -465,6 +465,23 @@ impl TensorTransform for Tensor {
         match self {
             Self::Dense(dense) => dense.transpose(permutation).map(Self::from),
             Self::Sparse(sparse) => sparse.transpose(permutation).map(Self::from),
+        }
+    }
+}
+
+#[async_trait]
+impl Transact for Tensor {
+    async fn commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dense(dense) => dense.commit(txn_id).await,
+            Self::Sparse(sparse) => sparse.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dense(dense) => dense.rollback(txn_id).await,
+            Self::Sparse(sparse) => sparse.rollback(txn_id).await,
         }
     }
 }
