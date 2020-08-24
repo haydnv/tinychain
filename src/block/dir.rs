@@ -15,6 +15,7 @@ use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
 
+use super::chain;
 use super::file::File;
 use super::hostfs;
 
@@ -22,6 +23,7 @@ use super::hostfs;
 enum DirEntry {
     Dir(Arc<Dir>),
     BTree(Arc<File<btree::Node>>),
+    Chain(Arc<File<chain::ChainBlock>>),
     Tensor(Arc<File<tensor::Array>>),
 }
 
@@ -30,6 +32,7 @@ impl fmt::Display for DirEntry {
         match self {
             DirEntry::Dir(_) => write!(f, "(directory)"),
             DirEntry::BTree(_) => write!(f, "(BTree file)"),
+            DirEntry::Chain(_) => write!(f, "(Chain file)"),
             DirEntry::Tensor(_) => write!(f, "(Tensor file)"),
         }
     }
@@ -124,7 +127,22 @@ impl Dir {
         if let Some(entry) = self.contents.read(txn_id).await?.deref().get(name) {
             match entry {
                 DirEntry::BTree(file) => Ok(Some(file.clone())),
-                other => Err(error::bad_request("Not a File", other)),
+                other => Err(error::bad_request("Not a BTree", other)),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn get_chain(
+        &self,
+        txn_id: &TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<Arc<File<chain::ChainBlock>>>> {
+        if let Some(entry) = self.contents.read(txn_id).await?.deref().get(name) {
+            match entry {
+                DirEntry::Chain(file) => Ok(Some(file.clone())),
+                other => Err(error::bad_request("Not a Chain", other)),
             }
         } else {
             Ok(None)
@@ -139,7 +157,7 @@ impl Dir {
         if let Some(entry) = self.contents.read(txn_id).await?.deref().get(name) {
             match entry {
                 DirEntry::Tensor(file) => Ok(Some(file.clone())),
-                other => Err(error::bad_request("Not a File", other)),
+                other => Err(error::bad_request("Not a Tensor", other)),
             }
         } else {
             Ok(None)
@@ -188,6 +206,26 @@ impl Dir {
                 let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
                 let file = File::create(txn_id, fs_cache).await?;
                 entry.insert(DirEntry::BTree(file.clone()));
+                Ok(file)
+            }
+            Entry::Occupied(entry) => Err(error::bad_request(
+                "Tried to create a new File but there is already an entry at",
+                entry.key(),
+            )),
+        }
+    }
+
+    pub async fn create_chain(
+        &self,
+        txn_id: TxnId,
+        name: PathSegment,
+    ) -> TCResult<Arc<File<chain::ChainBlock>>> {
+        let mut contents = self.contents.write(txn_id.clone()).await?;
+        match contents.entry(name) {
+            Entry::Vacant(entry) => {
+                let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
+                let file = File::create(txn_id, fs_cache).await?;
+                entry.insert(DirEntry::Chain(file.clone()));
                 Ok(file)
             }
             Entry::Occupied(entry) => Err(error::bad_request(
