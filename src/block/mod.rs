@@ -12,6 +12,7 @@ use crate::transaction::TxnId;
 use crate::value::link::PathSegment;
 
 mod cache;
+pub mod chain;
 pub mod dir;
 pub mod file;
 pub mod hostfs;
