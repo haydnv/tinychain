@@ -35,6 +35,27 @@ pub enum BTree {
     Slice(BTreeSlice),
 }
 
+#[async_trait]
+impl Transact for BTree {
+    async fn commit(&self, txn_id: &TxnId) {
+        let no_op = ();
+
+        match self {
+            Self::Tree(tree) => tree.commit(txn_id).await,
+            Self::Slice(_) => no_op,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        let no_op = ();
+
+        match self {
+            Self::Tree(tree) => tree.rollback(txn_id).await,
+            Self::Slice(_) => no_op,
+        }
+    }
+}
+
 type NodeId = BlockId;
 
 #[derive(Clone, Deserialize, Serialize)]
