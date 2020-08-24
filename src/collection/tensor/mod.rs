@@ -504,6 +504,23 @@ pub enum TensorBase {
     Sparse(sparse::SparseTable),
 }
 
+#[async_trait]
+impl Transact for TensorBase {
+    async fn commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dense(dense) => dense.commit(txn_id).await,
+            Self::Sparse(sparse) => sparse.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dense(dense) => dense.rollback(txn_id).await,
+            Self::Sparse(sparse) => sparse.rollback(txn_id).await,
+        }
+    }
+}
+
 impl From<TensorBase> for Tensor {
     fn from(base: TensorBase) -> Tensor {
         match base {

@@ -63,6 +63,27 @@ pub enum CollectionBase {
     Tensor(tensor::TensorBase),
 }
 
+#[async_trait]
+impl Transact for CollectionBase {
+    async fn commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::BTree(btree) => btree.commit(txn_id).await,
+            Self::Graph(graph) => graph.commit(txn_id).await,
+            Self::Table(table) => table.commit(txn_id).await,
+            Self::Tensor(tensor) => tensor.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::BTree(btree) => btree.rollback(txn_id).await,
+            Self::Graph(graph) => graph.rollback(txn_id).await,
+            Self::Table(table) => table.rollback(txn_id).await,
+            Self::Tensor(tensor) => tensor.rollback(txn_id).await,
+        }
+    }
+}
+
 impl fmt::Display for CollectionBase {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

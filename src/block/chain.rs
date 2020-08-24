@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures::join;
 
 use crate::class::TCResult;
-use crate::collection::Collect;
+use crate::collection::CollectionBase;
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -33,34 +33,34 @@ impl From<ChainBlock> for Bytes {
 
 impl BlockData for ChainBlock {}
 
-pub struct Chain<O: Collect> {
+pub struct Chain {
     file: Arc<File<ChainBlock>>,
-    object: O,
+    collection: CollectionBase,
     latest_block: TxnLock<Mutable<u64>>,
 }
 
-impl<O: Collect> Chain<O> {
-    pub async fn create(txn: Arc<Txn>, object: O) -> TCResult<Chain<O>> {
+impl Chain {
+    pub async fn create(txn: Arc<Txn>, collection: CollectionBase) -> TCResult<Chain> {
         let file = txn.context().await?;
         let latest_block = TxnLock::new(txn.id().clone(), 0.into());
         Ok(Chain {
             file,
-            object,
+            collection,
             latest_block,
         })
     }
 }
 
 #[async_trait]
-impl<O: Collect> Transact for Chain<O> {
+impl Transact for Chain {
     async fn commit(&self, txn_id: &TxnId) {
-        self.object.commit(txn_id).await;
+        self.collection.commit(txn_id).await;
         // don't commit the Chain until the actual changes are committed, for crash recovery
         join!(self.file.commit(txn_id), self.latest_block.commit(txn_id));
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.object.rollback(txn_id).await;
+        self.collection.rollback(txn_id).await;
         join!(
             self.file.rollback(txn_id),
             self.latest_block.rollback(txn_id)
