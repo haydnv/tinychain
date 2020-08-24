@@ -14,7 +14,7 @@ use crate::block::file::File;
 use crate::block::BlockId;
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::error;
-use crate::transaction::{Txn, TxnId};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::number::class::{NumberClass, NumberInstance, NumberType};
 use crate::value::Number;
 
@@ -28,7 +28,7 @@ use array::Array;
 const ERR_CORRUPT: &str = "DenseTensor corrupted! Please file a bug report.";
 const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
-trait BlockList: TensorView + 'static {
+trait BlockList: TensorView + Transact + 'static {
     fn block_stream<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
             let dtype = self.dtype();
@@ -226,6 +226,17 @@ impl BlockList for BlockListCombine {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
+    }
+}
+
+#[async_trait]
+impl Transact for BlockListCombine {
+    async fn commit(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
     }
 }
 
@@ -544,6 +555,17 @@ impl BlockList for BlockListFile {
     }
 }
 
+#[async_trait]
+impl Transact for BlockListFile {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.file.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.file.rollback(txn_id).await
+    }
+}
+
 struct BlockListBroadcast {
     source: Arc<dyn BlockList>,
     rebase: transform::Broadcast,
@@ -635,6 +657,17 @@ impl BlockList for BlockListBroadcast {
     }
 }
 
+#[async_trait]
+impl Transact for BlockListBroadcast {
+    async fn commit(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+}
+
 struct BlockListCast {
     source: Arc<dyn BlockList>,
     dtype: NumberType,
@@ -720,6 +753,17 @@ impl BlockList for BlockListCast {
     }
 }
 
+#[async_trait]
+impl Transact for BlockListCast {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+}
+
 struct BlockListExpand {
     source: Arc<dyn BlockList>,
     rebase: transform::Expand,
@@ -790,6 +834,17 @@ impl BlockList for BlockListExpand {
     ) -> TCBoxTryFuture<'a, ()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
+    }
+}
+
+#[async_trait]
+impl Transact for BlockListExpand {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
     }
 }
 
@@ -892,6 +947,17 @@ impl BlockList for BlockListReduce {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
+    }
+}
+
+#[async_trait]
+impl Transact for BlockListReduce {
+    async fn commit(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
     }
 }
 
@@ -1010,6 +1076,17 @@ impl BlockList for BlockListReshape {
     }
 }
 
+#[async_trait]
+impl Transact for BlockListReshape {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+}
+
 struct BlockListSlice {
     source: Arc<dyn BlockList>,
     rebase: transform::Slice,
@@ -1079,6 +1156,17 @@ impl BlockList for BlockListSlice {
     ) -> TCBoxTryFuture<'a, ()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
+    }
+}
+
+#[async_trait]
+impl Transact for BlockListSlice {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
     }
 }
 
@@ -1202,6 +1290,17 @@ impl BlockList for BlockListSparse {
     }
 }
 
+#[async_trait]
+impl Transact for BlockListSparse {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+}
+
 struct BlockListTranspose {
     source: Arc<dyn BlockList>,
     rebase: transform::Transpose,
@@ -1277,6 +1376,17 @@ impl BlockList for BlockListTranspose {
     ) -> TCBoxTryFuture<'a, ()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
+    }
+}
+
+#[async_trait]
+impl Transact for BlockListTranspose {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
     }
 }
 
@@ -1366,6 +1476,17 @@ impl BlockList for BlockListUnary {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
+    }
+}
+
+#[async_trait]
+impl Transact for BlockListUnary {
+    async fn commit(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
     }
 }
 
@@ -1741,6 +1862,17 @@ impl TensorTransform for DenseTensor {
         });
 
         Ok(DenseTensor { blocks })
+    }
+}
+
+#[async_trait]
+impl Transact for DenseTensor {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.blocks.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.blocks.rollback(txn_id).await
     }
 }
 

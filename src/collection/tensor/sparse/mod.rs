@@ -12,7 +12,7 @@ use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Selection, Table, TableBase};
 use crate::error;
-use crate::transaction::{Txn, TxnId};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::ValueType;
 use crate::value::number::class::{NumberClass, NumberInstance, NumberType};
 use crate::value::number::instance::{Number, UInt};
@@ -1770,6 +1770,17 @@ impl TensorTransform for SparseTensor {
         });
 
         Ok(SparseTensor { accessor })
+    }
+}
+
+#[async_trait]
+impl Transact for SparseTensor {
+    async fn commit(&self, _txn_id: &TxnId) {
+        todo!()
+    }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        todo!()
     }
 }
 
