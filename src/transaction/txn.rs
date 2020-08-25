@@ -87,6 +87,8 @@ impl Txn {
         let context: PathSegment = id.clone().try_into()?;
         let dir = workspace.create_dir(&id, &context.clone().into()).await?;
 
+        println!("new Txn: {}", id);
+
         Ok(Arc::new(Txn {
             id,
             dir,
@@ -133,9 +135,11 @@ impl Txn {
 
     pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
-        auth: Auth,
+        auth: &Auth,
         mut parameters: S,
     ) -> TCResult<HashMap<ValueId, State>> {
+        println!("Txn::execute");
+
         let mut resolved = HashMap::new();
         let mut pending = FuturesUnordered::new();
         let mut awaiting = HashSet::<ValueId>::new();
@@ -143,6 +147,8 @@ impl Txn {
         while let Some((name, value)) = parameters.next().await {
             if resolved.contains_key(&name) || awaiting.contains(&name) {
                 return Err(error::bad_request("Duplicate state identifier", name));
+            } else {
+                println!("param {}: {}", name, value);
             }
 
             match value {
@@ -266,7 +272,7 @@ impl Txn {
                 match subject {
                     Subject::Link(link) => {
                         self.gateway
-                            .put(&link, object, value.into(), self.id.clone(), &auth)
+                            .put(&link, object, value.into(), &auth, Some(self.id.clone()))
                             .await
                     }
                     Subject::Ref(tc_ref) => {

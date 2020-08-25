@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+
+use futures::Stream;
 
 use crate::auth::{Auth, Token};
 use crate::block::dir::Dir;
@@ -7,7 +10,7 @@ use crate::error;
 use crate::kernel;
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::Link;
-use crate::value::Value;
+use crate::value::{Value, ValueId};
 
 use super::{Hosted, NetworkTime};
 
@@ -59,9 +62,36 @@ impl Gateway {
         _subject: &Link,
         _selector: Value,
         _state: State,
-        _txn_id: TxnId,
         _auth: &Auth,
+        _txn_id: Option<TxnId>,
     ) -> TCResult<State> {
         Err(error::not_implemented())
+    }
+
+    pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(
+        self: Arc<Self>,
+        subject: &Link,
+        data: S,
+        auth: &Auth,
+        txn_id: Option<TxnId>,
+    ) -> TCResult<HashMap<ValueId, State>> {
+        println!("Gateway::post {}", subject);
+
+        if subject.host().is_none() {
+            let workspace = self.workspace.clone();
+            let txn = match txn_id {
+                None => Txn::new(self, workspace).await?,
+                Some(_txn_id) => return Err(error::not_implemented()),
+            };
+
+            let path = subject.path();
+            if path[0] == "sbin" {
+                kernel::post(txn, &path.slice_from(1), data, auth).await
+            } else {
+                Err(error::not_found(path))
+            }
+        } else {
+            Err(error::not_implemented())
+        }
     }
 }

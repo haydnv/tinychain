@@ -326,6 +326,30 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
             Err(de::Error::custom("Unable to parse map entry"))
         }
     }
+
+    fn visit_seq<L>(self, mut access: L) -> Result<Self::Value, L::Error>
+    where
+        L: de::SeqAccess<'de>,
+    {
+        let mut items: Vec<Value> = if let Some(size) = access.size_hint() {
+            Vec::with_capacity(size)
+        } else {
+            vec![]
+        };
+
+        while let Some(value) = access.next_element()? {
+            items.push(value)
+        }
+
+        Ok(Value::Tuple(items))
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(Value::TCString(TCString::UString(s.to_string())))
+    }
 }
 
 impl<'de> de::Deserialize<'de> for Value {

@@ -1,12 +1,10 @@
 use std::collections::HashMap;
-use std::convert::Infallible;
-use std::io::{self, BufReader, Write};
+use std::convert::{Infallible, TryFrom};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::{BufMut, Bytes, BytesMut};
-use futures::executor::block_on;
+use bytes::Bytes;
 use futures::future;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
@@ -19,74 +17,8 @@ use crate::error;
 use crate::gateway::{Gateway, Protocol};
 use crate::transaction::TxnId;
 use crate::value::link::*;
-use crate::value::Value;
-
-struct StreamReader<S: Stream<Item = Result<Bytes, hyper::Error>>> {
-    source: S,
-    buffered: Bytes,
-    size_cutoff: usize,
-    total_offset: usize,
-}
-
-impl<S: Stream<Item = Result<Bytes, hyper::Error>>> StreamReader<S> {
-    fn new(source: S, size_cutoff: usize) -> StreamReader<S> {
-        StreamReader {
-            source,
-            buffered: Bytes::from(&[][..]),
-            size_cutoff,
-            total_offset: 0,
-        }
-    }
-}
-
-impl<S: Stream<Item = Result<Bytes, hyper::Error>> + Unpin> io::Read for StreamReader<S> {
-    fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
-        if self.total_offset > self.size_cutoff {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                error::request_too_large(self.size_cutoff),
-            ));
-        }
-
-        if buf.len() < self.buffered.len() {
-            self.buffered = Bytes::copy_from_slice(&self.buffered[buf.len()..]);
-            buf.write(&self.buffered[..buf.len()])
-        } else {
-            let mut buffer = BytesMut::with_capacity(buf.len());
-            buffer.put(&self.buffered[..]);
-
-            loop {
-                if let Some(chunk) = block_on(self.source.next()) {
-                    match chunk {
-                        Ok(chunk) => buffer.put(chunk),
-                        Err(cause) => {
-                            return Err(io::Error::new(io::ErrorKind::InvalidInput, cause))
-                        }
-                    }
-                } else {
-                    break;
-                }
-
-                if buffer.len() > buf.len() {
-                    break;
-                }
-            }
-
-            let buffer = buffer.freeze();
-            if buffer.is_empty() {
-                Ok(0)
-            } else if buffer.len() < buf.len() {
-                self.buffered = Bytes::from(&[][..]);
-                self.total_offset += buffer.len();
-                buf.write(&buffer[..])
-            } else {
-                self.buffered = Bytes::copy_from_slice(&buffer[buf.len()..]);
-                self.total_offset += buf.len();
-                buf.write(&buffer[..buf.len()])
-            }
-        }
-    }
-}
+use crate::value::string::TCString;
+use crate::value::{Value, ValueId};
 
 pub struct Http {
     address: SocketAddr,
@@ -148,8 +80,10 @@ impl Http {
 
     async fn authenticate_and_route(
         self: Arc<Self>,
-        mut request: Request<Body>,
+        request: Request<Body>,
     ) -> TCResult<TCStream<TCResult<Bytes>>> {
+        // TODO: use self.request_limit to restrict request size
+
         let token: Option<Token> = if let Some(header) = request.headers().get("Authorization") {
             let token = header
                 .to_str()
@@ -193,17 +127,58 @@ impl Http {
                     ))))),
                 }
             }
-            &Method::PUT => {
-                let reader = StreamReader::new(request.body_mut(), self.request_limit);
-                let reader = BufReader::new(reader);
-                for op in serde_json::from_reader(reader).into_iter() {
-                    let (_selector, _state): (Value, Value) = op;
-                    todo!()
-                }
+            &Method::PUT => Err(error::not_implemented()),
+            &Method::POST => {
+                println!("POST {}", path);
+                let values = String::from_utf8(hyper::body::to_bytes(request).await?.to_vec())
+                    .map_err(|e| error::bad_request("Unable to parse request body", e))?;
+                let values: HashMap<ValueId, Value> =
+                    serde_json::from_str(&values).map_err(|e| {
+                        error::bad_request(
+                            &format!("Deserialization error {} when parsing", e),
+                            values,
+                        )
+                    })?;
+
+                let capture: Option<Value> = Http::get_param(&mut params, "txn_id")?;
+                let capture: Vec<ValueId> = match capture {
+                    Some(Value::TCString(TCString::Id(id))) => vec![id],
+                    Some(Value::Tuple(ids)) => ids
+                        .into_iter()
+                        .map(ValueId::try_from)
+                        .collect::<TCResult<Vec<ValueId>>>()?,
+                    None => vec![],
+                    Some(other) => {
+                        return Err(error::bad_request(
+                            "Expected a list of ValueIds, found",
+                            other,
+                        ))
+                    }
+                };
+                println!(
+                    "capture {}",
+                    capture
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                );
+
+                let state = self
+                    .gateway
+                    .clone()
+                    .post(
+                        &path.clone().into(),
+                        stream::iter(values.into_iter()),
+                        &token,
+                        txn_id,
+                    )
+                    .await?;
+
+                println!("post context has {} states", state.len());
 
                 Ok(Box::pin(stream::empty()))
             }
-            &Method::POST => Err(error::not_implemented()),
             other => Err(error::method_not_allowed(format!(
                 "Tinychain does not support {}",
                 other

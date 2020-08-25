@@ -220,6 +220,8 @@ impl<T: Mutate> TxnLock<T> {
     }
 
     pub fn try_read(&self, txn_id: &TxnId) -> TCResult<Option<TxnLockReadGuard<T>>> {
+        println!("TxnLock::try_read");
+
         let lock = &mut self.inner.lock().unwrap();
 
         if txn_id < &lock.state.last_commit && !lock.value_at.contains_key(txn_id) {
@@ -253,6 +255,8 @@ impl<T: Mutate> TxnLock<T> {
     }
 
     pub fn try_write<'a>(&self, txn_id: &'a TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
+        println!("TxnLock::try_write");
+
         let lock = &mut self.inner.lock().unwrap();
         let latest_reader = lock.state.readers.keys().max();
 
@@ -265,9 +269,15 @@ impl<T: Mutate> TxnLock<T> {
             // If there's already a writer in the future, there's no point in waiting.
             Some(current_txn) if current_txn > txn_id => Err(error::conflict()),
             // If there's a writer in the past, wait for it to complete.
-            Some(current_txn) if current_txn < txn_id => Ok(None),
+            Some(current_txn) if current_txn < txn_id => {
+                println!("TxnLock::write at {} blocked on {}", txn_id, current_txn);
+                Ok(None)
+            }
             // If there's already a writer for the current transaction, wait for it to complete.
-            Some(_) if lock.state.writer => Ok(None),
+            Some(_) if lock.state.writer => {
+                println!("TxnLock::write waiting on existing write lock");
+                Ok(None)
+            }
             _ => {
                 // Otherwise, copy the value to be mutated in this transaction.
                 lock.state.writer = true;
@@ -296,6 +306,8 @@ impl<T: Mutate> TxnLock<T> {
 #[async_trait]
 impl<T: Mutate> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
+        println!("TxnLock::commit {}", txn_id);
+
         async {
             let _ = self.write(txn_id.clone()).await; // prevent any more writes
             let lock = &mut self.inner.lock().unwrap();
@@ -314,6 +326,8 @@ impl<T: Mutate> Transact for TxnLock<T> {
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
+        println!("TxnLock::rollback {}", txn_id);
+
         let _ = self.write(txn_id.clone()).await; // prevent any more writes
         let lock = &mut self.inner.lock().unwrap();
         lock.value_at.remove(txn_id);

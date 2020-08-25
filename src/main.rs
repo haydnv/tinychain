@@ -97,12 +97,16 @@ async fn configure(
     data_dir: Arc<block::dir::Dir>,
     workspace: Arc<block::dir::Dir>,
 ) -> class::TCResult<gateway::Hosted> {
+    let mut hosted = gateway::Hosted::new();
+    if clusters.is_empty() {
+        return Ok(hosted);
+    }
+
     let txn = gateway::Gateway::new(gateway::Hosted::new(), workspace)
         .transaction()
         .await?;
     let txn_id = txn.id();
 
-    let mut hosted = gateway::Hosted::new();
     for path in clusters {
         for reserved in RESERVED.iter() {
             if path.to_string().starts_with(reserved) {
