@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::convert::{Infallible, TryFrom};
+use std::collections::{HashMap, HashSet};
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -17,8 +17,9 @@ use crate::error;
 use crate::gateway::{Gateway, Protocol};
 use crate::transaction::TxnId;
 use crate::value::link::*;
-use crate::value::string::TCString;
 use crate::value::{Value, ValueId};
+
+const META: &str = "_meta";
 
 pub struct Http {
     address: SocketAddr,
@@ -98,6 +99,7 @@ impl Http {
         let mut params: HashMap<String, String> = uri
             .query()
             .map(|v| {
+                println!("param {}", v);
                 url::form_urlencoded::parse(v.as_bytes())
                     .into_owned()
                     .collect()
@@ -140,29 +142,15 @@ impl Http {
                         )
                     })?;
 
-                let capture: Option<Value> = Http::get_param(&mut params, "txn_id")?;
-                let capture: Vec<ValueId> = match capture {
-                    Some(Value::TCString(TCString::Id(id))) => vec![id],
-                    Some(Value::Tuple(ids)) => ids
+                let capture: Option<Vec<String>> = Http::get_param(&mut params, "capture")?;
+                let capture = if let Some(value_ids) = capture {
+                    value_ids
                         .into_iter()
-                        .map(ValueId::try_from)
-                        .collect::<TCResult<Vec<ValueId>>>()?,
-                    None => vec![],
-                    Some(other) => {
-                        return Err(error::bad_request(
-                            "Expected a list of ValueIds, found",
-                            other,
-                        ))
-                    }
+                        .map(|id| id.parse())
+                        .collect::<TCResult<HashSet<ValueId>>>()?
+                } else {
+                    HashSet::new()
                 };
-                println!(
-                    "capture {}",
-                    capture
-                        .iter()
-                        .map(|v| v.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                );
 
                 let state = self
                     .gateway
@@ -177,7 +165,19 @@ impl Http {
 
                 println!("post context has {} states", state.len());
 
-                Ok(Box::pin(stream::empty()))
+                let response = state
+                    .into_iter()
+                    .filter(move |(name, _)| capture.contains(name))
+                    .map(|(name, state)| {
+                        println!("txn state {}: {}", name, state);
+                        let values: TCStream<Value> = match state {
+                            State::Value(value) => Box::pin(stream::once(future::ready(value))),
+                            _other => Box::pin(stream::empty()),
+                        };
+                        (name, values)
+                    });
+
+                response_map(stream::iter(response))
             }
             other => Err(error::method_not_allowed(format!(
                 "Tinychain does not support {}",
@@ -187,26 +187,53 @@ impl Http {
     }
 }
 
-fn response_stream<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
+fn response_list<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
     s: S,
-) -> TCResult<TCStream<TCResult<Bytes>>> {
-    let start_delimiter: TCStream<TCResult<Bytes>> = Box::pin(stream::once(future::ready(Ok(
-        Bytes::copy_from_slice(b"["),
-    ))));
+) -> TCStream<TCResult<Bytes>> {
+    let start = stream_delimiter(Bytes::copy_from_slice(b"["));
 
-    let response = s
+    let items = s
         .map(|v| serde_json::to_string_pretty(&v))
         .map_ok(Bytes::from)
         .map_err(error::TCError::from);
-    let response: TCStream<TCResult<Bytes>> = Box::pin(response);
+    let items: TCStream<TCResult<Bytes>> = Box::pin(items);
 
-    let end_delimiter: TCStream<TCResult<Bytes>> = Box::pin(stream::once(future::ready(Ok(
-        Bytes::copy_from_slice(b"]"),
-    ))));
+    let end = stream_delimiter(Bytes::copy_from_slice(b"]"));
 
-    Ok(Box::pin(
-        start_delimiter.chain(response).chain(end_delimiter),
-    ))
+    Box::pin(start.chain(items).chain(end))
+}
+
+fn response_map<
+    V: Stream<Item = Value> + Send + Sync + Unpin + 'static,
+    S: Stream<Item = (ValueId, V)> + Send + Sync + Unpin + 'static,
+>(
+    s: S,
+) -> TCResult<TCStream<TCResult<Bytes>>> {
+    let start = stream_delimiter(Bytes::copy_from_slice(b"{"));
+
+    let meta = stream_delimiter(Bytes::copy_from_slice(
+        format!("\"{}\": {{}}", META).as_bytes(), // TODO: include execution metadata
+    ));
+
+    let items = s
+        .map(|(name, values)| {
+            let start = Bytes::copy_from_slice(format!("\"{}\": ", name).as_bytes());
+            let start = stream_delimiter(start);
+            let values = response_list(values);
+            let end = stream_delimiter(Bytes::copy_from_slice(b", "));
+
+            Box::pin(start.chain(values).chain(end))
+        })
+        .flatten();
+    let items: TCStream<TCResult<Bytes>> = Box::pin(items.chain(meta));
+
+    let end = stream_delimiter(Bytes::copy_from_slice(b"}"));
+
+    Ok(Box::pin(start.chain(items).chain(end)))
+}
+
+fn stream_delimiter(token: Bytes) -> TCStream<TCResult<Bytes>> {
+    Box::pin(stream::once(future::ready(Ok(token))))
 }
 
 #[async_trait]
