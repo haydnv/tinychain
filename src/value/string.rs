@@ -25,6 +25,7 @@ pub enum StringType {
     Id,
     Link,
     Ref,
+    UString,
 }
 
 impl Class for StringType {
@@ -37,6 +38,7 @@ impl fmt::Display for StringType {
             Self::Id => write!(f, "type Id"),
             Self::Link => write!(f, "type Link"),
             Self::Ref => write!(f, "type Ref"),
+            Self::UString => write!(f, "type UString"),
         }
     }
 }
@@ -167,6 +169,7 @@ pub enum TCString {
     Id(ValueId),
     Link(Link),
     Ref(TCRef),
+    UString(String),
 }
 
 impl Instance for TCString {
@@ -177,6 +180,7 @@ impl Instance for TCString {
             TCString::Id(_) => StringType::Id,
             TCString::Link(_) => StringType::Link,
             TCString::Ref(_) => StringType::Ref,
+            TCString::UString(_) => StringType::UString,
         }
     }
 }
@@ -257,6 +261,7 @@ impl Serialize for TCString {
             }
             Self::Link(l) => l.serialize(s),
             Self::Ref(r) => r.serialize(s),
+            Self::UString(u) => s.serialize_str(u.as_str()),
         }
     }
 }
@@ -267,6 +272,7 @@ impl fmt::Display for TCString {
             TCString::Id(id) => write!(f, "ValueId: {}", id),
             TCString::Link(l) => write!(f, "Link: {}", l),
             TCString::Ref(r) => write!(f, "Ref: {}", r),
+            TCString::UString(u) => write!(f, "UString: \"{}\"", u),
         }
     }
 }
