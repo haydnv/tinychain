@@ -2,15 +2,18 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::class::{Class, Instance};
+use crate::class::{Class, Instance, TCResult};
 
+use super::link::TCPath;
 use super::Value;
 
 pub type NumberType = super::number::class::NumberType;
 pub type StringType = super::string::StringType;
 
-pub trait ValueInstance: Instance + Serialize {
+pub trait ValueInstance: Instance + Serialize + Sized {
     type Class: ValueClass;
+
+    fn get(path: &TCPath, value: Self) -> TCResult<Self>;
 }
 
 pub trait ValueClass: Class {

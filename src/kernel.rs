@@ -7,6 +7,7 @@ use crate::auth::Auth;
 use crate::class::{State, TCResult};
 use crate::error;
 use crate::transaction::Txn;
+use crate::value::class::ValueInstance;
 use crate::value::link::TCPath;
 use crate::value::{Value, ValueId};
 
