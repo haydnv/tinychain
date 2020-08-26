@@ -10,7 +10,7 @@ use crate::value::class::{ValueClass, ValueInstance};
 use super::instance::{Boolean, Complex, Float, Int, Number, UInt};
 
 pub trait NumberClass: Class + Into<NumberType> + Ord + Send + Sync {
-    type Instance: NumberInstance + Into<Number>;
+    type Instance: NumberInstance;
 
     fn size(self) -> usize;
 

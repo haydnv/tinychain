@@ -21,8 +21,9 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::{ValueClass, ValueType};
 use crate::value::Value;
 
+use super::class::CollectionInstance;
 use super::schema::{Column, RowSchema};
-use super::{Collect, Collection, CollectionView, State};
+use super::{Collection, CollectionBase, CollectionView, State};
 
 mod collator;
 
@@ -219,21 +220,72 @@ type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Sen
 
 #[derive(Clone)]
 pub struct BTreeSlice {
-    source: Arc<BTreeFile>,
+    source: BTreeFile,
     bounds: Selector,
 }
 
 impl BTreeSlice {
-    fn new(source: Arc<BTreeFile>, bounds: Selector) -> BTreeSlice {
+    fn new(source: BTreeFile, bounds: Selector) -> BTreeSlice {
         BTreeSlice { source, bounds }
+    }
+}
+
+#[async_trait]
+impl CollectionInstance for BTreeSlice {
+    type Selector = Selector;
+    type Item = Key;
+    type Slice = BTreeSlice;
+
+    async fn get(&self, txn: Arc<Txn>, bounds: Selector) -> TCResult<Self::Slice> {
+        validate_selector(&bounds, self.source.schema())?;
+
+        let schema: Vec<ValueType> = self.source.schema().iter().map(|c| *c.dtype()).collect();
+        match (&self.bounds, &bounds) {
+            (Selector::Key(this), Selector::Key(that)) if this == that => Ok(self.clone()),
+            (Selector::Range(container, _), Selector::Range(contained, _))
+                if container.contains(contained, &schema)? =>
+            {
+                self.source.get(txn, bounds).await
+            }
+            _ => Err(error::bad_request(
+                &format!("BTreeSlice[{}] does not contain", &self.bounds),
+                &bounds,
+            )),
+        }
+    }
+
+    async fn put(
+        &self,
+        _txn: &Arc<Txn>,
+        _selector: &Self::Selector,
+        _key: Self::Item,
+    ) -> TCResult<()> {
+        Err(error::unsupported(
+            "BTreeSlice is immutable; write to the source BTree instead",
+        ))
+    }
+}
+
+#[async_trait]
+impl Transact for BTreeSlice {
+    async fn commit(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+}
+
+impl From<BTreeSlice> for Collection {
+    fn from(btree_slice: BTreeSlice) -> Collection {
+        Collection::View(CollectionView::BTree(BTree::Slice(btree_slice)))
     }
 }
 
 impl From<BTreeSlice> for State {
     fn from(btree_slice: BTreeSlice) -> State {
-        State::Collection(Collection::View(CollectionView::BTree(BTree::Slice(
-            btree_slice,
-        ))))
+        State::Collection(btree_slice.into())
     }
 }
 
@@ -724,7 +776,7 @@ impl BTreeRange {
         )
     }
 
-    pub fn contains(&self, other: &BTreeRange, schema: Vec<ValueType>) -> TCResult<bool> {
+    pub fn contains(&self, other: &BTreeRange, schema: &[ValueType]) -> TCResult<bool> {
         if other.0.len() < self.0.len() {
             return Ok(false);
         }
@@ -784,6 +836,32 @@ impl BTreeRange {
         }
 
         Ok(true)
+    }
+
+    fn start(&self) -> Value {
+        Value::Tuple(
+            self.0
+                .iter()
+                .map(|b| match b {
+                    Bound::Unbounded => Value::None,
+                    Bound::Excluded(v) => v.clone(),
+                    Bound::Included(v) => v.clone(),
+                })
+                .collect(),
+        )
+    }
+
+    fn end(&self) -> Value {
+        Value::Tuple(
+            self.1
+                .iter()
+                .map(|b| match b {
+                    Bound::Unbounded => Value::None,
+                    Bound::Excluded(v) => v.clone(),
+                    Bound::Included(v) => v.clone(),
+                })
+                .collect(),
+        )
     }
 }
 
@@ -848,15 +926,27 @@ impl TryFrom<Value> for Selector {
     }
 }
 
+impl fmt::Display for Selector {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Key(key) => write!(f, "key: {}", Value::Tuple(key.to_vec())),
+            Self::Range(range, reverse) if *reverse => {
+                write!(f, "range: {}, {}", range.end(), range.start())
+            }
+            Self::Range(range, _) => write!(f, "range: {}, {}", range.start(), range.end()),
+        }
+    }
+}
+
 #[async_trait]
-impl Collect for BTreeFile {
+impl CollectionInstance for BTreeFile {
     type Selector = Selector;
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get(self: Arc<Self>, _txn: Arc<Txn>, bounds: Selector) -> TCResult<Self::Slice> {
+    async fn get(&self, _txn: Arc<Txn>, bounds: Selector) -> TCResult<Self::Slice> {
         validate_selector(&bounds, self.schema())?;
-        Ok(BTreeSlice::new(self, bounds))
+        Ok(BTreeSlice::new(self.clone(), bounds))
     }
 
     async fn put(
@@ -885,5 +975,11 @@ impl Transact for BTreeFile {
 
     async fn rollback(&self, txn_id: &TxnId) {
         join(self.file.rollback(txn_id), self.root.rollback(txn_id)).await;
+    }
+}
+
+impl From<BTreeFile> for Collection {
+    fn from(btree_file: BTreeFile) -> Collection {
+        Collection::Base(CollectionBase::BTree(btree_file))
     }
 }

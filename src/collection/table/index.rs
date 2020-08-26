@@ -81,7 +81,7 @@ impl Index {
         let inner = bounds::btree_range(&inner, &self.schema().columns())?;
 
         let dtypes = self.schema.data_types();
-        if outer.contains(&inner, dtypes)? {
+        if outer.contains(&inner, &dtypes)? {
             Ok(())
         } else {
             Err(error::bad_request(

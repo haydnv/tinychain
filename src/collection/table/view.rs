@@ -309,7 +309,7 @@ impl IndexSlice {
         let outer = bounds::btree_range(&self.bounds, &columns)?;
         let inner = bounds::btree_range(&bounds, &columns)?;
 
-        if outer.contains(&inner, self.schema.data_types())? {
+        if outer.contains(&inner, &self.schema.data_types())? {
             let mut slice = self.clone();
             slice.bounds = bounds;
             Ok(slice)
@@ -389,7 +389,7 @@ impl Selection for IndexSlice {
         let schema = self.schema();
         let outer = bounds::btree_range(&self.bounds, &schema.columns())?;
         let inner = bounds::btree_range(&bounds, &schema.columns())?;
-        outer.contains(&inner, schema.data_types()).map(|_| ())
+        outer.contains(&inner, &schema.data_types()).map(|_| ())
     }
 
     fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {

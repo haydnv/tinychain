@@ -1,10 +1,7 @@
-use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde::de::DeserializeOwned;
-use serde::ser::Serialize;
 
 use crate::class::{State, TCResult};
 use crate::error;
@@ -12,48 +9,19 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::Value;
 
 pub mod btree;
+pub mod class;
 pub mod graph;
 pub mod schema;
 pub mod table;
 pub mod tensor;
+
+pub type CollectionType = class::CollectionType;
 
 pub type BTree = btree::BTree;
 pub type BTreeSlice = btree::BTreeSlice;
 pub type Graph = graph::Graph;
 pub type Table = table::Table;
 pub type Tensor = tensor::Tensor;
-
-#[async_trait]
-pub trait Collect: Transact + Send + Sync {
-    type Selector: Clone + TryFrom<Value, Error = error::TCError> + Send + Sync + 'static;
-
-    type Item: Clone
-        + DeserializeOwned
-        + Serialize
-        + TryFrom<Value, Error = error::TCError>
-        + Send
-        + Sync
-        + 'static;
-
-    type Slice: Into<State>;
-
-    async fn get(self: Arc<Self>, txn: Arc<Txn>, selector: Self::Selector)
-        -> TCResult<Self::Slice>;
-
-    async fn put(
-        &self,
-        txn: &Arc<Txn>,
-        selector: &Self::Selector,
-        value: Self::Item,
-    ) -> TCResult<()>;
-}
-
-pub enum CollectionType {
-    BTree,
-    Graph,
-    Table,
-    Tensor,
-}
 
 #[derive(Clone)]
 pub enum CollectionBase {
