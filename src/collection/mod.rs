@@ -171,6 +171,23 @@ impl Collection {
     }
 }
 
+#[async_trait]
+impl Transact for Collection {
+    async fn commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::Base(base) => base.commit(txn_id).await,
+            Self::View(view) => view.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::Base(base) => base.rollback(txn_id).await,
+            Self::View(view) => view.rollback(txn_id).await,
+        }
+    }
+}
+
 impl fmt::Display for Collection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

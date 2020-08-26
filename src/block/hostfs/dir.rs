@@ -6,9 +6,8 @@ use bytes::Bytes;
 
 use crate::class::TCResult;
 use crate::error;
+use crate::lock::RwLock;
 use crate::value::link::PathSegment;
-
-use super::lock::RwLock;
 
 pub enum DirEntry {
     Block(RwLock<Bytes>),

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::Hash;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use futures::future::{self, TryFutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
@@ -14,8 +14,10 @@ use crate::block::dir::{Dir, DirEntry};
 use crate::block::file::File;
 use crate::block::BlockData;
 use crate::class::{State, TCBoxTryFuture, TCResult};
+use crate::collection::Collection;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
+use crate::lock::RwLock;
 use crate::value::link::PathSegment;
 use crate::value::op::{Op, Subject};
 use crate::value::{TCRef, TCString, Value, ValueId};
@@ -78,7 +80,7 @@ pub struct Txn {
     dir: Arc<Dir>,
     context: ValueId,
     gateway: Arc<Gateway>,
-    mutated: Arc<RwLock<Vec<Arc<dyn Transact>>>>,
+    mutated: RwLock<Vec<Collection>>,
 }
 
 impl Txn {
@@ -94,7 +96,7 @@ impl Txn {
             dir,
             context,
             gateway,
-            mutated: Arc::new(RwLock::new(vec![])),
+            mutated: RwLock::new(vec![]),
         }))
     }
 
@@ -220,7 +222,7 @@ impl Txn {
     pub async fn commit(&self) {
         println!("commit!");
 
-        future::join_all(self.mutated.write().unwrap().drain(..).map(|s| async move {
+        future::join_all(self.mutated.write().await.drain(..).map(|s| async move {
             s.commit(&self.id).await;
         }))
         .await;
@@ -229,7 +231,7 @@ impl Txn {
     pub async fn rollback(&self) {
         println!("rollback!");
 
-        future::join_all(self.mutated.write().unwrap().drain(..).map(|s| async move {
+        future::join_all(self.mutated.write().await.drain(..).map(|s| async move {
             s.rollback(&self.id).await;
         }))
         .await;
@@ -262,7 +264,7 @@ impl Txn {
             Op::Put(subject, object, value) => {
                 let value: State = if let Value::TCString(TCString::Id(tc_ref)) = value {
                     provided
-                        .get(&tc_ref.clone().into())
+                        .get(&tc_ref.clone())
                         .cloned()
                         .ok_or_else(|| error::not_found(tc_ref))?
                 } else {
@@ -272,7 +274,7 @@ impl Txn {
                 match subject {
                     Subject::Link(link) => {
                         self.gateway
-                            .put(&link, object, value.into(), &auth, Some(self.id.clone()))
+                            .put(&link, object, value, &auth, Some(self.id.clone()))
                             .await
                     }
                     Subject::Ref(tc_ref) => {
@@ -281,6 +283,8 @@ impl Txn {
                             .ok_or_else(|| error::not_found(tc_ref))?;
 
                         if let State::Collection(collection) = subject {
+                            self.mutate(collection.clone()).await;
+
                             collection
                                 .put(&self, &object, value)
                                 .await
@@ -294,7 +298,7 @@ impl Txn {
         }
     }
 
-    fn mutate(self: &Arc<Self>, state: Arc<dyn Transact>) {
-        self.mutated.write().unwrap().push(state)
+    async fn mutate(self: &Arc<Self>, state: Collection) {
+        self.mutated.write().await.push(state)
     }
 }

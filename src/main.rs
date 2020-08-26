@@ -14,6 +14,7 @@ mod error;
 mod gateway;
 mod http;
 mod kernel;
+mod lock;
 mod transaction;
 mod value;
 

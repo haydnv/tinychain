@@ -12,6 +12,7 @@ use crate::class::{TCBoxTryFuture, TCResult};
 use crate::collection::btree;
 use crate::collection::tensor;
 use crate::error;
+use crate::lock::RwLock;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, TxnId};
 use crate::value::link::{PathSegment, TCPath};
@@ -118,13 +119,13 @@ impl Mutate for DirContents {
 }
 
 pub struct Dir {
-    cache: hostfs::RwLock<hostfs::Dir>,
+    cache: RwLock<hostfs::Dir>,
     temporary: bool,
     contents: TxnLock<DirContents>,
 }
 
 impl Dir {
-    pub fn create(txn_id: TxnId, cache: hostfs::RwLock<hostfs::Dir>, temporary: bool) -> Arc<Dir> {
+    pub fn create(txn_id: TxnId, cache: RwLock<hostfs::Dir>, temporary: bool) -> Arc<Dir> {
         Arc::new(Dir {
             cache,
             temporary,

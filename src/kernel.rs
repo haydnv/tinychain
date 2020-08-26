@@ -25,10 +25,27 @@ pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(
 ) -> TCResult<HashMap<ValueId, State>> {
     if path[0] == "transact" && path.len() == 2 {
         match path[1].as_str() {
-            "execute" => txn.execute(auth, values).await,
+            "execute" => transact(txn, values, auth).await,
             other => Err(error::not_found(other)),
         }
     } else {
         Err(error::not_found(path))
+    }
+}
+
+async fn transact<S: Stream<Item = (ValueId, Value)> + Unpin>(
+    txn: Arc<Txn>,
+    values: S,
+    auth: &Auth,
+) -> TCResult<HashMap<ValueId, State>> {
+    match txn.clone().execute(auth, values).await {
+        Ok(result) => {
+            txn.commit().await;
+            Ok(result)
+        }
+        Err(cause) => {
+            txn.rollback().await;
+            Err(cause)
+        }
     }
 }
