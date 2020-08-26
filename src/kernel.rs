@@ -7,13 +7,13 @@ use crate::auth::Auth;
 use crate::class::{State, TCResult};
 use crate::error;
 use crate::transaction::Txn;
-use crate::value::class::ValueInstance;
+use crate::value::class::ValueClass;
 use crate::value::link::TCPath;
-use crate::value::{Value, ValueId};
+use crate::value::{Value, ValueId, ValueType};
 
 pub fn get(path: &TCPath, id: Value) -> TCResult<State> {
     match path[0].as_str() {
-        "value" if path.len() > 1 => Value::get(&path.slice_from(1), id).map(State::Value),
+        "value" if path.len() > 1 => ValueType::get(&path.slice_from(1), id).map(State::Value),
         other => Err(error::not_found(other)),
     }
 }

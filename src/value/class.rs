@@ -1,8 +1,10 @@
+use std::convert::TryInto;
 use std::fmt;
 
 use serde::Serialize;
 
 use crate::class::{Class, Instance, TCResult};
+use crate::error;
 
 use super::link::TCPath;
 use super::Value;
@@ -12,12 +14,15 @@ pub type StringType = super::string::StringType;
 
 pub trait ValueInstance: Instance + Serialize + Sized {
     type Class: ValueClass;
-
-    fn get(path: &TCPath, value: Self) -> TCResult<Self>;
 }
 
 pub trait ValueClass: Class {
     type Instance: ValueInstance;
+
+    fn get(
+        path: &TCPath,
+        value: <Self as ValueClass>::Instance,
+    ) -> TCResult<<Self as ValueClass>::Instance>;
 
     fn size(self) -> Option<usize>;
 }
@@ -57,6 +62,22 @@ impl Class for ValueType {
 
 impl ValueClass for ValueType {
     type Instance = Value;
+
+    fn get(path: &TCPath, value: Value) -> TCResult<Value> {
+        if path.is_empty() {
+            return Ok(value);
+        }
+
+        match path[0].as_str() {
+            "none" if path.len() == 1 => Ok(Value::None),
+            "bytes" if path.len() == 1 => Err(error::not_implemented()),
+            "number" => NumberType::get(&path.slice_from(1), value.try_into()?).map(Value::Number),
+            "string" => Err(error::not_implemented()),
+            "op" => Err(error::not_implemented()),
+            "tuple" => Err(error::not_implemented()),
+            other => Err(error::not_found(other)),
+        }
+    }
 
     fn size(self) -> Option<usize> {
         use ValueType::*;

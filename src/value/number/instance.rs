@@ -26,14 +26,6 @@ impl Instance for Boolean {
 
 impl ValueInstance for Boolean {
     type Class = BooleanType;
-
-    fn get(path: &TCPath, value: Self) -> TCResult<Self> {
-        if path.is_empty() {
-            Ok(value)
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 }
 
 impl NumberInstance for Boolean {
@@ -142,22 +134,6 @@ impl Instance for Complex {
 
 impl ValueInstance for Complex {
     type Class = ComplexType;
-
-    fn get(path: &TCPath, value: Self) -> TCResult<Self> {
-        if path.is_empty() {
-            Ok(value)
-        } else if path.len() == 1 {
-            let dtype = match path[0].as_str() {
-                "32" => ComplexType::C32,
-                "64" => ComplexType::C64,
-                _ => return Err(error::not_found(&path[0])),
-            };
-
-            Ok(value.into_type(dtype))
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 }
 
 impl NumberInstance for Complex {
@@ -397,22 +373,6 @@ impl Instance for Float {
 
 impl ValueInstance for Float {
     type Class = FloatType;
-
-    fn get(path: &TCPath, value: Self) -> TCResult<Self> {
-        if path.is_empty() {
-            Ok(value)
-        } else if path.len() == 1 {
-            let dtype = match path[0].as_str() {
-                "32" => FloatType::F32,
-                "64" => FloatType::F64,
-                _ => return Err(error::not_found(&path[0])),
-            };
-
-            Ok(value.into_type(dtype))
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 }
 
 impl NumberInstance for Float {
@@ -644,23 +604,6 @@ impl Instance for Int {
 
 impl ValueInstance for Int {
     type Class = IntType;
-
-    fn get(path: &TCPath, value: Self) -> TCResult<Self> {
-        if path.is_empty() {
-            Ok(value)
-        } else if path.len() == 1 {
-            let dtype = match path[0].as_str() {
-                "16" => IntType::I16,
-                "32" => IntType::I32,
-                "64" => IntType::I64,
-                _ => return Err(error::not_found(&path[0])),
-            };
-
-            Ok(value.into_type(dtype))
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 }
 
 impl NumberInstance for Int {
@@ -930,24 +873,6 @@ impl Instance for UInt {
 
 impl ValueInstance for UInt {
     type Class = UIntType;
-
-    fn get(path: &TCPath, value: Self) -> TCResult<Self> {
-        if path.is_empty() {
-            Ok(value)
-        } else if path.len() == 1 {
-            let dtype = match path[0].as_str() {
-                "8" => UIntType::U8,
-                "16" => UIntType::U16,
-                "32" => UIntType::U32,
-                "64" => UIntType::U64,
-                _ => return Err(error::not_found(&path[0])),
-            };
-
-            Ok(value.into_type(dtype))
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 }
 
 impl NumberInstance for UInt {
@@ -1263,26 +1188,6 @@ impl Instance for Number {
 
 impl ValueInstance for Number {
     type Class = NumberType;
-
-    fn get(path: &TCPath, value: Number) -> TCResult<Number> {
-        if path.is_empty() {
-            return Err(error::bad_request(
-                "You must specify a type of Number to GET",
-                "",
-            ));
-        }
-
-        let number: Number = value.try_into()?;
-
-        match path[0].as_str() {
-            "bool" => Err(error::not_implemented()),
-            "complex" => Err(error::not_implemented()),
-            "float" => Err(error::not_implemented()),
-            "int" if path.len() > 1 => Int::get(&path.slice_from(1), number).map(Number::Int),
-            "uint" => Err(error::not_implemented()),
-            other => Err(error::not_found(other)),
-        }
-    }
 }
 
 impl NumberInstance for Number {

@@ -435,8 +435,14 @@ impl TCPath {
     }
 
     pub fn slice_from(&self, start: usize) -> TCPath {
-        TCPath {
-            segments: self.segments[start..].to_vec(),
+        assert!(start <= self.segments.len());
+
+        if start == self.segments.len() {
+            TCPath { segments: vec![] }
+        } else {
+            TCPath {
+                segments: self.segments[start..].to_vec(),
+            }
         }
     }
 

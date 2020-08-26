@@ -1,15 +1,18 @@
 use std::cmp::Ordering;
+use std::convert::TryInto;
 use std::fmt;
 use std::ops::{Add, Mul};
 
 use serde::{Deserialize, Serialize};
 
-use crate::class::Class;
+use crate::class::{Class, TCResult};
+use crate::error;
 use crate::value::class::{ValueClass, ValueInstance};
+use crate::value::link::TCPath;
 
 use super::instance::{Boolean, Complex, Float, Int, Number, UInt};
 
-pub trait NumberClass: Class + Into<NumberType> + Ord + Send + Sync {
+pub trait NumberClass: Class + ValueClass + Into<NumberType> + Ord + Send + Sync {
     type Instance: NumberInstance;
 
     fn size(self) -> usize;
@@ -22,14 +25,6 @@ pub trait NumberClass: Class + Into<NumberType> + Ord + Send + Sync {
     fn zero(&self) -> <Self as NumberClass>::Instance {
         let b: Boolean = false.into();
         b.into()
-    }
-}
-
-impl<T: NumberClass> ValueClass for T {
-    type Instance = <Self as NumberClass>::Instance;
-
-    fn size(self) -> Option<usize> {
-        Some(NumberClass::size(self))
     }
 }
 
@@ -156,6 +151,30 @@ impl Class for ComplexType {
     type Instance = Complex;
 }
 
+impl ValueClass for ComplexType {
+    type Instance = Complex;
+
+    fn get(path: &TCPath, value: Complex) -> TCResult<Complex> {
+        if path.is_empty() {
+            Ok(value)
+        } else if path.len() == 1 {
+            let dtype = match path[0].as_str() {
+                "32" => ComplexType::C32,
+                "64" => ComplexType::C64,
+                _ => return Err(error::not_found(&path[0])),
+            };
+
+            Ok(value.into_type(dtype))
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
+}
+
 impl NumberClass for ComplexType {
     type Instance = Complex;
 
@@ -207,6 +226,22 @@ impl Class for BooleanType {
     type Instance = Boolean;
 }
 
+impl ValueClass for BooleanType {
+    type Instance = Boolean;
+
+    fn get(path: &TCPath, value: Boolean) -> TCResult<Boolean> {
+        if path.is_empty() {
+            Ok(value)
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
+}
+
 impl NumberClass for BooleanType {
     type Instance = Boolean;
 
@@ -247,6 +282,30 @@ pub enum FloatType {
 
 impl Class for FloatType {
     type Instance = Float;
+}
+
+impl ValueClass for FloatType {
+    type Instance = Float;
+
+    fn get(path: &TCPath, value: Float) -> TCResult<Float> {
+        if path.is_empty() {
+            Ok(value)
+        } else if path.len() == 1 {
+            let dtype = match path[0].as_str() {
+                "32" => FloatType::F32,
+                "64" => FloatType::F64,
+                _ => return Err(error::not_found(&path[0])),
+            };
+
+            Ok(value.into_type(dtype))
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
 }
 
 impl NumberClass for FloatType {
@@ -303,6 +362,31 @@ pub enum IntType {
 
 impl Class for IntType {
     type Instance = Int;
+}
+
+impl ValueClass for IntType {
+    type Instance = Int;
+
+    fn get(path: &TCPath, value: Int) -> TCResult<Int> {
+        if path.is_empty() {
+            Ok(value)
+        } else if path.len() == 1 {
+            let dtype = match path[0].as_str() {
+                "16" => IntType::I16,
+                "32" => IntType::I32,
+                "64" => IntType::I64,
+                _ => return Err(error::not_found(&path[0])),
+            };
+
+            Ok(value.into_type(dtype))
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
 }
 
 impl NumberClass for IntType {
@@ -365,6 +449,32 @@ pub enum UIntType {
 
 impl Class for UIntType {
     type Instance = UInt;
+}
+
+impl ValueClass for UIntType {
+    type Instance = UInt;
+
+    fn get(path: &TCPath, value: UInt) -> TCResult<UInt> {
+        if path.is_empty() {
+            Ok(value)
+        } else if path.len() == 1 {
+            let dtype = match path[0].as_str() {
+                "8" => UIntType::U8,
+                "16" => UIntType::U16,
+                "32" => UIntType::U32,
+                "64" => UIntType::U64,
+                _ => return Err(error::not_found(&path[0])),
+            };
+
+            Ok(value.into_type(dtype))
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
 }
 
 impl NumberClass for UIntType {
@@ -438,6 +548,30 @@ impl NumberType {
 
 impl Class for NumberType {
     type Instance = Number;
+}
+
+impl ValueClass for NumberType {
+    type Instance = Number;
+
+    fn get(path: &TCPath, value: Number) -> TCResult<Number> {
+        if path.is_empty() {
+            return Err(error::bad_request(
+                "You must specify a type of Number to GET",
+                "",
+            ));
+        }
+
+        match path[0].as_str() {
+            "int" if path.len() > 1 => {
+                Int::get(&path.slice_from(1), value.try_into()?).map(Number::Int)
+            }
+            other => Err(error::not_found(other)),
+        }
+    }
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
 }
 
 impl NumberClass for NumberType {
