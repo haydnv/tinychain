@@ -319,8 +319,14 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                 }
             } else if let Ok(link) = key.parse::<link::Link>() {
                 Ok(Value::TCString(TCString::Link(link)))
+            } else if let Ok(value_id) = key.parse::<string::ValueId>() {
+                if value.is_empty() {
+                    Ok(Value::TCString(TCString::Id(value_id)))
+                } else {
+                    Err(de::Error::custom("This functionality is not yet implemented"))
+                }
             } else {
-                unimplemented!();
+                Err(de::Error::custom("This functionality is not yet implemented"))
             }
         } else {
             Err(de::Error::custom("Unable to parse map entry"))
