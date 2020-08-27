@@ -23,45 +23,16 @@ use crate::value::Value;
 
 use super::class::*;
 use super::schema::{Column, RowSchema};
-use super::{Collection, CollectionBase, CollectionView, State};
+use super::{Collection, CollectionBase, CollectionView};
 
+mod class;
 mod collator;
+
+pub type BTree = class::BTree;
+pub type BTreeType = class::BTreeType;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
-
-#[derive(Clone)]
-pub enum BTreeType {
-    Tree,
-    Slice,
-}
-
-#[derive(Clone)]
-pub enum BTree {
-    Tree(Arc<BTreeFile>),
-    Slice(BTreeSlice),
-}
-
-#[async_trait]
-impl Transact for BTree {
-    async fn commit(&self, txn_id: &TxnId) {
-        let no_op = ();
-
-        match self {
-            Self::Tree(tree) => tree.commit(txn_id).await,
-            Self::Slice(_) => no_op,
-        }
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        let no_op = ();
-
-        match self {
-            Self::Tree(tree) => tree.rollback(txn_id).await,
-            Self::Slice(_) => no_op,
-        }
-    }
-}
 
 type NodeId = BlockId;
 
@@ -236,6 +207,14 @@ impl BTreeSlice {
     }
 }
 
+impl Instance for BTreeSlice {
+    type Class = BTreeType;
+
+    fn class(&self) -> BTreeType {
+        BTreeType::Slice
+    }
+}
+
 #[async_trait]
 impl CollectionInstance for BTreeSlice {
     type Selector = Selector;
@@ -287,13 +266,13 @@ impl Transact for BTreeSlice {
 
 impl From<BTreeSlice> for Collection {
     fn from(btree_slice: BTreeSlice) -> Collection {
-        Collection::View(CollectionView::BTree(BTree::Slice(btree_slice)))
+        Collection::View(btree_slice.into())
     }
 }
 
-impl From<BTreeSlice> for State {
-    fn from(btree_slice: BTreeSlice) -> State {
-        State::Collection(btree_slice.into())
+impl From<BTreeSlice> for CollectionView {
+    fn from(btree_slice: BTreeSlice) -> CollectionView {
+        CollectionView::BTree(class::BTree::Slice(btree_slice))
     }
 }
 
@@ -769,6 +748,60 @@ impl BTreeFile {
     }
 }
 
+impl Instance for BTreeFile {
+    type Class = BTreeType;
+
+    fn class(&self) -> BTreeType {
+        BTreeType::Tree
+    }
+}
+
+#[async_trait]
+impl CollectionInstance for BTreeFile {
+    type Selector = Selector;
+    type Item = Key;
+    type Slice = BTreeSlice;
+
+    async fn get(&self, _txn: Arc<Txn>, bounds: Selector) -> TCResult<Self::Slice> {
+        validate_selector(&bounds, self.schema())?;
+        Ok(BTreeSlice::new(self.clone(), bounds))
+    }
+
+    async fn put(
+        &self,
+        txn: &Arc<Txn>,
+        selector: &Self::Selector,
+        key: Self::Item,
+    ) -> TCResult<()> {
+        validate_selector(selector, self.schema())?;
+        validate_key(&key, self.schema())?;
+
+        match selector {
+            Selector::Key(selector) if self.collator.compare(selector, &key) == Ordering::Equal => {
+                self.insert(txn.id(), key).await
+            }
+            selector => self.update(txn.id(), selector, &key).await,
+        }
+    }
+}
+
+#[async_trait]
+impl Transact for BTreeFile {
+    async fn commit(&self, txn_id: &TxnId) {
+        join(self.file.commit(txn_id), self.root.commit(txn_id)).await;
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        join(self.file.rollback(txn_id), self.root.rollback(txn_id)).await;
+    }
+}
+
+impl From<BTreeFile> for Collection {
+    fn from(btree_file: BTreeFile) -> Collection {
+        Collection::Base(CollectionBase::BTree(btree_file))
+    }
+}
+
 #[derive(Clone)]
 pub struct BTreeRange(Vec<Bound<Value>>, Vec<Bound<Value>>);
 
@@ -943,51 +976,5 @@ impl fmt::Display for Selector {
             }
             Self::Range(range, _) => write!(f, "range: {}, {}", range.start(), range.end()),
         }
-    }
-}
-
-#[async_trait]
-impl CollectionInstance for BTreeFile {
-    type Selector = Selector;
-    type Item = Key;
-    type Slice = BTreeSlice;
-
-    async fn get(&self, _txn: Arc<Txn>, bounds: Selector) -> TCResult<Self::Slice> {
-        validate_selector(&bounds, self.schema())?;
-        Ok(BTreeSlice::new(self.clone(), bounds))
-    }
-
-    async fn put(
-        &self,
-        txn: &Arc<Txn>,
-        selector: &Self::Selector,
-        key: Self::Item,
-    ) -> TCResult<()> {
-        validate_selector(selector, self.schema())?;
-        validate_key(&key, self.schema())?;
-
-        match selector {
-            Selector::Key(selector) if self.collator.compare(selector, &key) == Ordering::Equal => {
-                self.insert(txn.id(), key).await
-            }
-            selector => self.update(txn.id(), selector, &key).await,
-        }
-    }
-}
-
-#[async_trait]
-impl Transact for BTreeFile {
-    async fn commit(&self, txn_id: &TxnId) {
-        join(self.file.commit(txn_id), self.root.commit(txn_id)).await;
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        join(self.file.rollback(txn_id), self.root.rollback(txn_id)).await;
-    }
-}
-
-impl From<BTreeFile> for Collection {
-    fn from(btree_file: BTreeFile) -> Collection {
-        Collection::Base(CollectionBase::BTree(btree_file))
     }
 }

@@ -3,20 +3,20 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::class::{Class, TCResult};
+use crate::class::{Class, Instance, TCResult};
 use crate::error;
 use crate::transaction::{Transact, Txn};
 use crate::value::link::TCPath;
 use crate::value::Value;
 
 use super::btree::BTreeType;
-use super::Collection;
+use super::{Collection, CollectionView};
 
 #[async_trait]
-trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
+pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
     type Instance: CollectionInstance;
 
-    fn get(
+    async fn get(
         txn: Arc<Txn>,
         path: &TCPath,
         schema: Value,
@@ -39,7 +39,7 @@ trait CollectionViewClass: CollectionClass + Into<CollectionViewType> + Send + S
 }
 
 #[async_trait]
-pub trait CollectionInstance: Into<Collection> + Transact + Send + Sync {
+pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sync {
     type Selector: Clone + TryFrom<Value, Error = error::TCError> + Send + Sync + 'static;
 
     type Item: Clone + Into<Value> + TryFrom<Value, Error = error::TCError> + Send + Sync + 'static;
@@ -63,7 +63,7 @@ pub trait CollectionBaseInstance: CollectionInstance {
     fn create(txn: Arc<Txn>, schema: Self::Schema) -> TCResult<Self>;
 }
 
-pub trait CollectionViewInstance: CollectionInstance {}
+pub trait CollectionViewInstance: CollectionInstance + Into<CollectionView> {}
 
 pub enum CollectionType {
     Base(CollectionBaseType),
