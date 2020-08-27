@@ -21,7 +21,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::{ValueClass, ValueType};
 use crate::value::Value;
 
-use super::class::CollectionInstance;
+use super::class::*;
 use super::schema::{Column, RowSchema};
 use super::{Collection, CollectionBase, CollectionView, State};
 
@@ -29,6 +29,12 @@ mod collator;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
+
+#[derive(Clone)]
+pub enum BTreeType {
+    Tree,
+    Slice,
+}
 
 #[derive(Clone)]
 pub enum BTree {
@@ -265,6 +271,8 @@ impl CollectionInstance for BTreeSlice {
         ))
     }
 }
+
+impl CollectionViewInstance for BTreeSlice {}
 
 #[async_trait]
 impl Transact for BTreeSlice {
