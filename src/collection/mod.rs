@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::class::{State, TCResult};
+use crate::class::{Instance, State, TCResult};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::Value;
@@ -29,6 +29,19 @@ pub enum CollectionBase {
     Graph(graph::Graph),
     Table(table::TableBase),
     Tensor(tensor::TensorBase),
+}
+
+impl Instance for CollectionBase {
+    type Class = class::CollectionBaseType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::BTree(_) => class::CollectionBaseType::BTree,
+            Self::Graph(_) => class::CollectionBaseType::Graph, // TODO
+            Self::Table(_) => class::CollectionBaseType::Table, // TODO
+            Self::Tensor(_) => class::CollectionBaseType::Tensor, // TODO
+        }
+    }
 }
 
 #[async_trait]
@@ -81,13 +94,14 @@ pub enum CollectionView {
     Tensor(tensor::Tensor),
 }
 
-impl CollectionView {
-    pub async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<State> {
-        Err(error::not_implemented())
-    }
+impl Instance for CollectionView {
+    type Class = class::CollectionViewType;
 
-    pub async fn put(&self, _txn: &Arc<Txn>, _selector: &Value, _state: State) -> TCResult<Self> {
-        Err(error::not_implemented())
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::BTree(btree) => btree.class().into(),
+            _ => unimplemented!(), // TODO
+        }
     }
 }
 
@@ -136,6 +150,17 @@ impl Collection {
 
     pub async fn put(&self, _txn: &Arc<Txn>, _selector: &Value, _state: State) -> TCResult<Self> {
         Err(error::not_implemented())
+    }
+}
+
+impl Instance for Collection {
+    type Class = CollectionType;
+
+    fn class(&self) -> CollectionType {
+        match self {
+            Self::Base(base) => base.class().into(),
+            Self::View(view) => view.class().into(),
+        }
     }
 }
 

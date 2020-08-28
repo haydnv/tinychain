@@ -786,6 +786,16 @@ impl CollectionInstance for BTreeFile {
 }
 
 #[async_trait]
+impl CollectionBaseInstance for BTreeFile {
+    type Schema = RowSchema;
+
+    async fn create(txn: Arc<Txn>, schema: Self::Schema) -> TCResult<Self> {
+        let file = txn.context().await?;
+        BTreeFile::create(txn.id().clone(), schema, file).await
+    }
+}
+
+#[async_trait]
 impl Transact for BTreeFile {
     async fn commit(&self, txn_id: &TxnId) {
         join(self.file.commit(txn_id), self.root.commit(txn_id)).await;

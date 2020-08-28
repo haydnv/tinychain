@@ -5,7 +5,7 @@ use bytes::Bytes;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-use crate::class::{Instance, TCResult};
+use crate::class::{Instance, TCResult, TCType};
 use crate::error;
 
 pub mod class;
@@ -17,8 +17,10 @@ pub mod string;
 pub mod version;
 
 pub type Label = string::Label;
+pub type Link = link::Link;
 pub type Number = number::instance::Number;
 pub type Op = op::Op;
+pub type TCPath = link::TCPath;
 pub type TCString = string::TCString;
 pub type TCRef = reference::TCRef;
 pub type ValueId = string::ValueId;
@@ -32,6 +34,7 @@ pub const fn label(id: &'static str) -> string::Label {
 pub enum Value {
     None,
     Bytes(Bytes),
+    Class(TCType),
     Number(Number),
     TCString(TCString),
     Op(Box<op::Op>),
@@ -46,6 +49,7 @@ impl Instance for Value {
         match self {
             Value::None => ValueType::None,
             Value::Bytes(_) => ValueType::Bytes,
+            Value::Class(_) => ValueType::Class,
             Value::Number(n) => ValueType::Number(n.class()),
             Value::TCString(s) => ValueType::TCString(s.class()),
             Value::Op(_) => ValueType::Op,
@@ -157,12 +161,41 @@ impl<'a> TryFrom<&'a Value> for &'a Number {
     }
 }
 
+impl TryFrom<Value> for usize {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<usize> {
+        let n: Number = v.try_into()?;
+        n.try_into()
+    }
+}
+
 impl TryFrom<Value> for u64 {
     type Error = error::TCError;
 
     fn try_from(v: Value) -> TCResult<u64> {
         let n: Number = v.try_into()?;
         n.try_into()
+    }
+}
+
+impl TryFrom<Value> for TCType {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<TCType> {
+        match v {
+            Value::Class(c) => Ok(c),
+            other => Err(error::bad_request("Expected Class, found", other)),
+        }
+    }
+}
+
+impl TryFrom<Value> for ValueType {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<ValueType> {
+        let class: TCType = v.try_into()?;
+        class.try_into()
     }
 }
 
@@ -185,6 +218,19 @@ impl TryFrom<Value> for Vec<Value> {
             Value::Tuple(t) => Ok(t),
             other => Err(error::bad_request("Expected Tuple, found", other)),
         }
+    }
+}
+
+impl<T: TryFrom<Value, Error = error::TCError>> TryFrom<Value> for Vec<T> {
+    type Error = error::TCError;
+
+    fn try_from(source: Value) -> TCResult<Vec<T>> {
+        let mut source: Vec<Value> = source.try_into()?;
+        let mut values = Vec::with_capacity(source.len());
+        for value in source.drain(..) {
+            values.push(value.try_into()?);
+        }
+        Ok(values)
     }
 }
 
@@ -379,6 +425,10 @@ impl Serialize for Value {
                 map.serialize_entry("/sbin/value/bytes", &[base64::encode(b)])?;
                 map.end()
             }
+            Value::Class(c) => {
+                let c: link::Link = c.clone().into();
+                c.serialize(s)
+            }
             Value::Number(n) => n.serialize(s),
             Value::Op(op) => {
                 let mut map = s.serialize_map(Some(1))?;
@@ -415,6 +465,7 @@ impl fmt::Display for Value {
         match self {
             Value::None => write!(f, "None"),
             Value::Bytes(b) => write!(f, "Bytes({})", b.len()),
+            Value::Class(c) => write!(f, "Class: {}", c),
             Value::Number(n) => write!(f, "Number({})", n),
             Value::TCString(s) => write!(f, "String({})", s),
             Value::Op(op) => write!(f, "Op: {}", op),

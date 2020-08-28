@@ -10,6 +10,7 @@ use serde::de;
 use serde::ser::{SerializeMap, Serializer};
 
 use crate::error;
+use crate::value::string::Label;
 use crate::value::{TCResult, Value, ValueId};
 
 pub type PathSegment = ValueId;
@@ -266,13 +267,24 @@ impl TryFrom<Link> for LinkHost {
     }
 }
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct Link {
     host: Option<LinkHost>,
     path: TCPath,
 }
 
 impl Link {
+    pub fn into_path(self) -> TCPath {
+        self.path
+    }
+
+    pub fn join(self, other: TCPath) -> Link {
+        Link {
+            host: self.host,
+            path: self.path.join(other),
+        }
+    }
+
     pub fn host(&'_ self) -> &'_ Option<LinkHost> {
         &self.host
     }
@@ -430,6 +442,12 @@ impl TCPath {
         self.segments.len()
     }
 
+    pub fn join(self, other: TCPath) -> TCPath {
+        let mut segments = self.segments;
+        segments.extend(other.segments);
+        TCPath { segments }
+    }
+
     pub fn pop(&mut self) -> Option<PathSegment> {
         self.segments.pop()
     }
@@ -542,6 +560,14 @@ impl From<PathSegment> for TCPath {
     fn from(segment: PathSegment) -> TCPath {
         TCPath {
             segments: vec![segment],
+        }
+    }
+}
+
+impl From<Label> for TCPath {
+    fn from(segment: Label) -> TCPath {
+        TCPath {
+            segments: vec![segment.into()],
         }
     }
 }

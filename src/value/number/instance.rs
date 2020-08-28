@@ -1111,6 +1111,21 @@ impl TryFrom<UInt> for u64 {
     }
 }
 
+impl TryFrom<UInt> for usize {
+    type Error = error::TCError;
+
+    fn try_from(u: UInt) -> TCResult<usize> {
+        match u {
+            UInt::U64(u) => Ok(u as usize),
+            UInt::U32(u) => Ok(u as usize),
+            other => Err(error::bad_request(
+                "Expected a UInt64 or UInt32 but found",
+                other,
+            )),
+        }
+    }
+}
+
 impl Serialize for UInt {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
@@ -1448,6 +1463,15 @@ impl TryFrom<Number> for u64 {
     type Error = error::TCError;
 
     fn try_from(n: Number) -> TCResult<u64> {
+        let u: UInt = n.try_into()?;
+        u.try_into()
+    }
+}
+
+impl TryFrom<Number> for usize {
+    type Error = error::TCError;
+
+    fn try_from(n: Number) -> TCResult<usize> {
         let u: UInt = n.try_into()?;
         u.try_into()
     }

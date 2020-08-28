@@ -13,7 +13,7 @@ use crate::error;
 
 use super::link::{Link, TCPath};
 use super::reference::TCRef;
-use super::TCResult;
+use super::{TCResult, ValueType};
 
 const RESERVED_CHARS: [&str; 21] = [
     "/", "..", "~", "$", "`", "^", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":",
@@ -30,6 +30,24 @@ pub enum StringType {
 
 impl Class for StringType {
     type Instance = TCString;
+
+    fn prefix() -> TCPath {
+        ValueType::prefix().join(label("string").into())
+    }
+}
+
+impl From<StringType> for Link {
+    fn from(st: StringType) -> Link {
+        let prefix = StringType::prefix();
+
+        use StringType::*;
+        match st {
+            Id => prefix.join(label("id").into()).into(),
+            Link => prefix.join(label("link").into()).into(),
+            Ref => prefix.join(label("ref").into()).into(),
+            UString => prefix.join(label("ustring").into()).into(),
+        }
+    }
 }
 
 impl fmt::Display for StringType {

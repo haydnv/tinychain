@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use crate::class::{Instance, TCResult};
@@ -67,6 +68,35 @@ impl From<(ValueId, ValueType, usize)> for Column {
             dtype,
             max_len,
         }
+    }
+}
+
+impl TryFrom<Value> for Column {
+    type Error = error::TCError;
+
+    fn try_from(value: Value) -> TCResult<Column> {
+        let mut value: Vec<Value> = value.try_into()?;
+        if value.len() != 2 && value.len() != 3 {
+            return Err(error::bad_request(
+                "Expected Column of the form (name, dtype[, max_len]), found",
+                Value::Tuple(value),
+            ));
+        }
+
+        let name: ValueId = value.pop().unwrap().try_into()?;
+        let dtype: ValueType = value.pop().unwrap().try_into()?;
+        let max_len = if let Some(max_len) = value.pop() {
+            let max_len: usize = max_len.try_into()?;
+            Some(max_len)
+        } else {
+            None
+        };
+
+        Ok(Column {
+            name,
+            dtype,
+            max_len,
+        })
     }
 }
 

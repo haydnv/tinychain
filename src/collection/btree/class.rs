@@ -8,8 +8,8 @@ use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::link::TCPath;
-use crate::value::Value;
+use crate::value::link::{Link, TCPath};
+use crate::value::{label, Value};
 
 use super::{BTreeFile, BTreeSlice, Key, Selector};
 
@@ -21,6 +21,10 @@ pub enum BTreeType {
 
 impl Class for BTreeType {
     type Instance = BTree;
+
+    fn prefix() -> TCPath {
+        CollectionType::prefix().join(label("btree").into())
+    }
 }
 
 #[async_trait]
@@ -39,6 +43,18 @@ impl CollectionClass for BTreeType {
 impl From<BTreeType> for CollectionType {
     fn from(btree_type: BTreeType) -> CollectionType {
         CollectionType::View(CollectionViewType::BTree(btree_type))
+    }
+}
+
+impl From<BTreeType> for Link {
+    fn from(btt: BTreeType) -> Link {
+        let prefix = BTreeType::prefix();
+
+        use BTreeType::*;
+        match btt {
+            Tree => prefix.into(),
+            Slice => prefix.join(label("slice").into()).into(),
+        }
     }
 }
 

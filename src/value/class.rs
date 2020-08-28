@@ -3,11 +3,11 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::class::{Class, Instance, TCResult};
+use crate::class::{Class, Instance, TCResult, TCType};
 use crate::error;
 
 use super::link::TCPath;
-use super::Value;
+use super::{label, Link, Value};
 
 pub type NumberType = super::number::class::NumberType;
 pub type StringType = super::string::StringType;
@@ -42,6 +42,7 @@ impl From<StringType> for ValueType {
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub enum ValueType {
     Bytes,
+    Class,
     None,
     Number(NumberType),
     TCString(StringType),
@@ -58,6 +59,10 @@ impl ValueType {
 
 impl Class for ValueType {
     type Instance = Value;
+
+    fn prefix() -> TCPath {
+        TCType::prefix().join(label("value").into())
+    }
 }
 
 impl ValueClass for ValueType {
@@ -89,12 +94,31 @@ impl ValueClass for ValueType {
     }
 }
 
+impl From<ValueType> for Link {
+    fn from(vt: ValueType) -> Link {
+        let prefix = ValueType::prefix();
+
+        use ValueType::*;
+        match vt {
+            None => prefix.join(label("none").into()).into(),
+            Bytes => prefix.join(label("bytes").into()).into(),
+            Class => prefix.join(label("class").into()).into(),
+            Number(n) => n.into(),
+            TCString(s) => s.into(),
+            Op => prefix.join(label("op").into()).into(),
+            Tuple => prefix.join(label("tuple").into()).into(),
+            Value => prefix.join(label("value").into()).into(),
+        }
+    }
+}
+
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ValueType::*;
         match self {
             None => write!(f, "type None"),
             Bytes => write!(f, "type Bytes"),
+            Class => write!(f, "type Class"),
             Number(n) => write!(f, "type Number: {}", n),
             TCString(s) => write!(f, "type String: {}", s),
             Op => write!(f, "type Op"),

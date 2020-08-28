@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::class::{Class, TCResult};
 use crate::error;
-use crate::value::class::{ValueClass, ValueInstance};
+use crate::value::class::{ValueClass, ValueInstance, ValueType};
 use crate::value::link::TCPath;
+use crate::value::{label, Link};
 
 use super::instance::{Boolean, Complex, Float, Int, Number, UInt};
 
@@ -149,6 +150,10 @@ pub enum ComplexType {
 
 impl Class for ComplexType {
     type Instance = Complex;
+
+    fn prefix() -> TCPath {
+        NumberType::prefix().join(label("complex").into())
+    }
 }
 
 impl ValueClass for ComplexType {
@@ -210,6 +215,18 @@ impl From<ComplexType> for NumberType {
     }
 }
 
+impl From<ComplexType> for Link {
+    fn from(ct: ComplexType) -> Link {
+        let prefix = ComplexType::prefix();
+
+        use ComplexType::*;
+        match ct {
+            C32 => prefix.join(label("32").into()).into(),
+            C64 => prefix.join(label("64").into()).into(),
+        }
+    }
+}
+
 impl fmt::Display for ComplexType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -224,6 +241,10 @@ pub struct BooleanType;
 
 impl Class for BooleanType {
     type Instance = Boolean;
+
+    fn prefix() -> TCPath {
+        NumberType::prefix().join(label("bool").into())
+    }
 }
 
 impl ValueClass for BooleanType {
@@ -268,6 +289,12 @@ impl From<BooleanType> for NumberType {
     }
 }
 
+impl From<BooleanType> for Link {
+    fn from(_: BooleanType) -> Link {
+        BooleanType::prefix().into()
+    }
+}
+
 impl fmt::Display for BooleanType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Boolean")
@@ -282,6 +309,10 @@ pub enum FloatType {
 
 impl Class for FloatType {
     type Instance = Float;
+
+    fn prefix() -> TCPath {
+        NumberType::prefix().join(label("float").into())
+    }
 }
 
 impl ValueClass for FloatType {
@@ -343,6 +374,18 @@ impl From<FloatType> for NumberType {
     }
 }
 
+impl From<FloatType> for Link {
+    fn from(ft: FloatType) -> Link {
+        let prefix = FloatType::prefix();
+
+        use FloatType::*;
+        match ft {
+            F32 => prefix.join(label("32").into()).into(),
+            F64 => prefix.join(label("64").into()).into(),
+        }
+    }
+}
+
 impl fmt::Display for FloatType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use FloatType::*;
@@ -362,6 +405,10 @@ pub enum IntType {
 
 impl Class for IntType {
     type Instance = Int;
+
+    fn prefix() -> TCPath {
+        NumberType::prefix().join(label("int").into())
+    }
 }
 
 impl ValueClass for IntType {
@@ -428,6 +475,19 @@ impl From<IntType> for NumberType {
     }
 }
 
+impl From<IntType> for Link {
+    fn from(it: IntType) -> Link {
+        let prefix = IntType::prefix();
+
+        use IntType::*;
+        match it {
+            I16 => prefix.join(label("16").into()).into(),
+            I32 => prefix.join(label("32").into()).into(),
+            I64 => prefix.join(label("64").into()).into(),
+        }
+    }
+}
+
 impl fmt::Display for IntType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use IntType::*;
@@ -449,6 +509,10 @@ pub enum UIntType {
 
 impl Class for UIntType {
     type Instance = UInt;
+
+    fn prefix() -> TCPath {
+        NumberType::prefix().join(label("uint").into())
+    }
 }
 
 impl ValueClass for UIntType {
@@ -519,6 +583,20 @@ impl From<UIntType> for NumberType {
     }
 }
 
+impl From<UIntType> for Link {
+    fn from(ut: UIntType) -> Link {
+        let prefix = UIntType::prefix();
+
+        use UIntType::*;
+        match ut {
+            U8 => prefix.join(label("8").into()).into(),
+            U16 => prefix.join(label("16").into()).into(),
+            U32 => prefix.join(label("32").into()).into(),
+            U64 => prefix.join(label("64").into()).into(),
+        }
+    }
+}
+
 impl fmt::Display for UIntType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use UIntType::*;
@@ -548,6 +626,10 @@ impl NumberType {
 
 impl Class for NumberType {
     type Instance = Number;
+
+    fn prefix() -> TCPath {
+        ValueType::prefix().join(label("number").into())
+    }
 }
 
 impl ValueClass for NumberType {
@@ -618,15 +700,28 @@ impl PartialOrd for NumberType {
     }
 }
 
+impl From<NumberType> for Link {
+    fn from(nt: NumberType) -> Link {
+        use NumberType::*;
+        match nt {
+            Bool => BooleanType.into(),
+            Complex(ct) => ct.into(),
+            Float(ft) => ft.into(),
+            Int(it) => it.into(),
+            UInt(ut) => ut.into(),
+        }
+    }
+}
+
 impl fmt::Display for NumberType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use NumberType::*;
         match self {
             Bool => write!(f, "Bool"),
-            Complex(c) => write!(f, "Complex: {}", c),
+            Complex(ct) => write!(f, "Complex: {}", ct),
             Float(ft) => write!(f, "Float: {}", ft),
-            Int(i) => write!(f, "Int: {}", i),
-            UInt(u) => write!(f, "UInt: {}", u),
+            Int(it) => write!(f, "Int: {}", it),
+            UInt(ut) => write!(f, "UInt: {}", ut),
         }
     }
 }

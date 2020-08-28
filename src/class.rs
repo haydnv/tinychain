@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt;
 use std::pin::Pin;
 
@@ -7,7 +7,8 @@ use futures::stream::Stream;
 
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::value::{Value, ValueId, ValueType};
+use crate::value::link::{Link, TCPath};
+use crate::value::{label, Value, ValueType};
 
 pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send + Sync>>;
 pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
@@ -15,8 +16,10 @@ pub type TCResult<T> = Result<T, error::TCError>;
 pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + Unpin>>;
 pub type TCTryStream<T> = TCStream<TCResult<T>>;
 
-pub trait Class: Clone + Eq + fmt::Display {
+pub trait Class: Into<Link> + Clone + Eq + fmt::Display {
     type Instance: Instance;
+
+    fn prefix() -> TCPath;
 }
 
 pub trait Instance {
@@ -45,22 +48,76 @@ pub trait Instance {
     }
 }
 
+#[derive(Clone, Eq, PartialEq)]
 pub enum TCType {
     Collection(CollectionType),
     Value(ValueType),
 }
 
-pub enum ClassMember {
-    Type(TCType),
-    Class(Box<ClassMember>),
+impl Class for TCType {
+    type Instance = State;
+
+    fn prefix() -> TCPath {
+        label("sbin").into()
+    }
 }
 
-pub type ClassDef = HashMap<ValueId, ClassMember>;
+impl From<CollectionType> for TCType {
+    fn from(ct: CollectionType) -> TCType {
+        TCType::Collection(ct)
+    }
+}
+
+impl From<ValueType> for TCType {
+    fn from(vt: ValueType) -> TCType {
+        TCType::Value(vt)
+    }
+}
+
+impl TryFrom<TCType> for ValueType {
+    type Error = error::TCError;
+
+    fn try_from(class: TCType) -> TCResult<ValueType> {
+        match class {
+            TCType::Value(class) => Ok(class),
+            other => Err(error::bad_request("Expected ValueType, found", other)),
+        }
+    }
+}
+
+impl From<TCType> for Link {
+    fn from(t: TCType) -> Link {
+        match t {
+            TCType::Collection(ct) => ct.into(),
+            TCType::Value(vt) => vt.into(),
+        }
+    }
+}
+
+impl fmt::Display for TCType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Collection(ctype) => write!(f, "{}", ctype),
+            Self::Value(vtype) => write!(f, "{}", vtype),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub enum State {
     Collection(Collection),
     Value(Value),
+}
+
+impl Instance for State {
+    type Class = TCType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::Collection(collection) => collection.class().into(),
+            Self::Value(value) => value.class().into(),
+        }
+    }
 }
 
 impl From<Value> for State {
