@@ -1701,7 +1701,7 @@ impl TensorMath for DenseTensor {
 
 impl TensorIO for DenseTensor {
     fn mask<'a>(&'a self, _txn: &'a Arc<Txn>, _other: Self) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move { Err(error::not_implemented()) })
+        Box::pin(async move { Err(error::not_implemented("DenseTensor::mask")) })
     }
 
     fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
@@ -1754,7 +1754,7 @@ impl TensorIO for DenseTensor {
 
 impl TensorReduce for DenseTensor {
     fn product(&self, _axis: usize) -> TCResult<Self> {
-        Err(error::not_implemented())
+        Err(error::not_implemented("DenseTensor::product"))
     }
 
     fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
@@ -1772,7 +1772,7 @@ impl TensorReduce for DenseTensor {
     }
 
     fn sum(&self, _axis: usize) -> TCResult<Self> {
-        Err(error::not_implemented())
+        Err(error::not_implemented("DenseTensor::sum"))
     }
 
     fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
@@ -1809,7 +1809,7 @@ impl TensorTransform for DenseTensor {
             return Ok(self.clone());
         }
 
-        Err(error::not_implemented())
+        Err(error::not_implemented("DenseTensor::broadcast"))
     }
 
     fn expand_dims(&self, axis: usize) -> TCResult<Self> {

@@ -21,7 +21,7 @@ impl TryFrom<Bytes> for ChainBlock {
     type Error = error::TCError;
 
     fn try_from(_data: Bytes) -> TCResult<ChainBlock> {
-        Err(error::not_implemented())
+        Err(error::not_implemented("ChainBlock::try_from(Bytes)"))
     }
 }
 

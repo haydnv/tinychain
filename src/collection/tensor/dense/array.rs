@@ -1506,7 +1506,7 @@ impl Array {
                     let (l, r) = u.split(at);
                     Ok((U64(l), U64(r)))
                 }
-                _ => Err(error::not_implemented()),
+                _ => Err(error::not_implemented("Array::split")),
             }
         } else {
             Err(error::bad_request(

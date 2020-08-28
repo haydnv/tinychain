@@ -243,9 +243,12 @@ impl Txn {
         provider: Op,
         auth: Auth,
     ) -> TCResult<State> {
+        println!("Txn::resolve {}", provider);
+
         match provider {
             Op::Get(subject, object) => match subject {
                 Subject::Link(link) => {
+                    let object = resolve_value(&provided, &object)?.clone();
                     self.gateway
                         .get(&link, object, &auth, Some(self.clone()))
                         .await
@@ -300,5 +303,19 @@ impl Txn {
 
     async fn mutate(self: &Arc<Self>, state: Collection) {
         self.mutated.write().await.push(state)
+    }
+}
+
+fn resolve_value<'a>(
+    provided: &'a HashMap<ValueId, State>,
+    object: &'a Value,
+) -> TCResult<&'a Value> {
+    match object {
+        Value::TCString(TCString::Ref(object)) => match provided.get(object.value_id()) {
+            Some(State::Value(object)) => Ok(object),
+            Some(other) => Err(error::bad_request("Expected Value but found", other)),
+            None => Err(error::not_found(object)),
+        },
+        other => Ok(other),
     }
 }

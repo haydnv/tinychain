@@ -29,7 +29,7 @@ impl Gateway {
     }
 
     pub async fn authenticate(&self, _token: &str) -> TCResult<Token> {
-        Err(error::not_implemented())
+        Err(error::not_implemented("Gateway::authenticate"))
     }
 
     pub async fn transaction(self: &Arc<Self>) -> TCResult<Arc<Txn>> {
@@ -48,12 +48,10 @@ impl Gateway {
             if path[0] == "sbin" {
                 kernel::get(&path.slice_from(1), selector, txn).await
             } else {
-                Err(error::not_implemented())
+                Err(error::not_implemented("Gateway::get from Cluster"))
             }
-        } else if let Some((_rel_path, _cluster)) = self.hosted.get(subject.path()) {
-            Err(error::not_implemented())
         } else {
-            Err(error::not_implemented())
+            Err(error::not_implemented("Gateway::get over the network"))
         }
     }
 
@@ -65,7 +63,7 @@ impl Gateway {
         _auth: &Auth,
         _txn_id: Option<TxnId>,
     ) -> TCResult<State> {
-        Err(error::not_implemented())
+        Err(error::not_implemented("Gateway::put"))
     }
 
     pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(
@@ -81,7 +79,7 @@ impl Gateway {
             let workspace = self.workspace.clone();
             let txn = match txn_id {
                 None => Txn::new(self, workspace).await?,
-                Some(_txn_id) => return Err(error::not_implemented()),
+                Some(_txn_id) => return Err(error::not_implemented("Gateway::Post with txn_id")),
             };
 
             let path = subject.path();
@@ -91,7 +89,7 @@ impl Gateway {
                 Err(error::not_found(path))
             }
         } else {
-            Err(error::not_implemented())
+            Err(error::not_implemented("Gateway::post over the network"))
         }
     }
 }

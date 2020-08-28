@@ -1841,7 +1841,7 @@ impl TensorTransform for SparseTensor {
             return Ok(self.clone());
         }
 
-        Err(error::not_implemented())
+        Err(error::not_implemented("SparseTensor::broadcast"))
     }
 
     fn expand_dims(&self, axis: usize) -> TCResult<Self> {

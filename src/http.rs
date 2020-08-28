@@ -122,11 +122,11 @@ impl Http {
                         Ok(Box::pin(stream::once(future::ready(value))))
                     }
                     _other => Ok(Box::pin(stream::once(future::ready(Err(
-                        error::not_implemented(),
+                        error::not_implemented("serializing a State over the network"),
                     ))))),
                 }
             }
-            &Method::PUT => Err(error::not_implemented()),
+            &Method::PUT => Err(error::not_implemented("HTTP PUT")),
             &Method::POST => {
                 println!("POST {}", path);
                 let values = String::from_utf8(hyper::body::to_bytes(request).await?.to_vec())

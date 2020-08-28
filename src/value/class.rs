@@ -96,11 +96,11 @@ impl ValueClass for ValueType {
 
         match path[0].as_str() {
             "none" if path.len() == 1 => Ok(Value::None),
-            "bytes" if path.len() == 1 => Err(error::not_implemented()),
+            "bytes" if path.len() == 1 => Err(error::not_implemented("/sbin/value/bytes")),
             "number" => NumberType::get(&path.slice_from(1), value.try_into()?).map(Value::Number),
-            "string" => Err(error::not_implemented()),
-            "op" => Err(error::not_implemented()),
-            "tuple" => Err(error::not_implemented()),
+            "string" => Err(error::not_implemented("/sbin/value/string")),
+            "op" => Err(error::not_implemented("/sbin/value/op")),
+            "tuple" => Err(error::not_implemented("/sbin/value/tuple")),
             other => Err(error::not_found(other)),
         }
     }

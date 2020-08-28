@@ -145,10 +145,16 @@ impl CollectionClass for CollectionBaseType {
         }
 
         match path[0].as_str() {
-            "btree" if path.len() == 1 => BTreeFile::create(txn, schema.try_into()?)
-                .await
-                .map(CollectionBase::BTree),
-            "graph" | "table" | "tensor" => Err(error::not_implemented()),
+            "btree" if path.len() == 1 => {
+                println!("Creating new BTree with schema {}", schema);
+                BTreeFile::create(txn, schema.try_into()?)
+                    .await
+                    .map(CollectionBase::BTree)
+            }
+            "graph" | "table" | "tensor" => Err(error::not_implemented(&format!(
+                "CollectionBaseType::get {}",
+                path
+            ))),
             other => Err(error::not_found(other)),
         }
     }

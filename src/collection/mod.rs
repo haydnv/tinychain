@@ -56,14 +56,14 @@ impl class::CollectionInstance for CollectionBase {
                 .await
                 .map(BTree::Slice)
                 .map(CollectionView::BTree),
-            _ => Err(error::not_implemented()),
+            _ => Err(error::not_implemented("CollectionBase::get")),
         }
     }
 
     async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()> {
         match self {
             Self::BTree(btree) => btree.put(txn, selector, value.try_into()?).await,
-            _ => Err(error::not_implemented()),
+            _ => Err(error::not_implemented("CollectionBase::put")),
         }
     }
 }
@@ -130,7 +130,7 @@ impl class::CollectionInstance for CollectionView {
                 .await
                 .map(BTree::Slice)
                 .map(CollectionView::BTree),
-            _ => Err(error::not_implemented()),
+            _ => Err(error::not_implemented("CollectionView::get")),
         }
     }
 
@@ -141,7 +141,7 @@ impl class::CollectionInstance for CollectionView {
                     .put(txn, selector.try_into()?, value.try_into()?)
                     .await
             }
-            _ => Err(error::not_implemented()),
+            _ => Err(error::not_implemented("CollectionView::put")),
         }
     }
 }
@@ -186,11 +186,11 @@ pub enum Collection {
 
 impl Collection {
     pub async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<State> {
-        Err(error::not_implemented())
+        Err(error::not_implemented("Collection::get"))
     }
 
     pub async fn put(&self, _txn: &Arc<Txn>, _selector: &Value, _state: State) -> TCResult<Self> {
-        Err(error::not_implemented())
+        Err(error::not_implemented("Collection::put"))
     }
 }
 
