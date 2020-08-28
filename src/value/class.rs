@@ -60,6 +60,26 @@ impl ValueType {
 impl Class for ValueType {
     type Instance = Value;
 
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() {
+            Ok(ValueType::Value.into())
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "none" => Ok(ValueType::None.into()),
+                "bytes" => Ok(ValueType::Bytes.into()),
+                "op" => Ok(ValueType::Op.into()),
+                "tuple" => Ok(ValueType::Tuple.into()),
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            match path[0].as_str() {
+                "number" => NumberType::from_path(&path.slice_from(1)),
+                "string" => StringType::from_path(&path.slice_from(1)),
+                other => Err(error::not_found(other)),
+            }
+        }
+    }
+
     fn prefix() -> TCPath {
         TCType::prefix().join(label("value").into())
     }

@@ -2,10 +2,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
-use crate::class::{Instance, TCResult};
+use crate::class::{Class, Instance, TCResult, TCType};
 use crate::error;
 use crate::value::number::NumberType;
-use crate::value::{Value, ValueId, ValueType};
+use crate::value::{TCString, Value, ValueId, ValueType};
 
 pub type Row = HashMap<ValueId, Value>;
 
@@ -76,18 +76,25 @@ impl TryFrom<Value> for Column {
 
     fn try_from(value: Value) -> TCResult<Column> {
         let mut value: Vec<Value> = value.try_into()?;
-        if value.len() != 2 && value.len() != 3 {
-            return Err(error::bad_request(
-                "Expected Column of the form (name, dtype[, max_len]), found",
-                Value::Tuple(value),
-            ));
-        }
 
-        let name: ValueId = value.pop().unwrap().try_into()?;
-        let dtype: ValueType = value.pop().unwrap().try_into()?;
+        let name: ValueId = value
+            .pop()
+            .ok_or_else(|| error::bad_request("Column missing field", "name"))?
+            .try_into()?;
+
+        let dtype: Value = value
+            .pop()
+            .ok_or_else(|| error::bad_request("Column missing field", "dtype"))?;
+        let dtype: ValueType = match dtype {
+            Value::Class(class) => class.try_into()?,
+            Value::TCString(TCString::Link(link)) if link.host().is_none() => {
+                TCType::from_path(link.path())?.try_into()?
+            }
+            other => return Err(error::bad_request("Expected a Class but found", other)),
+        };
+
         let max_len = if let Some(max_len) = value.pop() {
-            let max_len: usize = max_len.try_into()?;
-            Some(max_len)
+            Some(max_len.try_into()?)
         } else {
             None
         };

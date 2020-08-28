@@ -5,7 +5,7 @@ use std::ops::{Add, Mul};
 
 use serde::{Deserialize, Serialize};
 
-use crate::class::{Class, TCResult};
+use crate::class::{Class, TCResult, TCType};
 use crate::error;
 use crate::value::class::{ValueClass, ValueInstance, ValueType};
 use crate::value::link::TCPath;
@@ -151,6 +151,25 @@ pub enum ComplexType {
 impl Class for ComplexType {
     type Instance = Complex;
 
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() {
+            Err(error::unsupported(
+                "Complex number requires a size, complex/32 or complex/64",
+            ))
+        } else if path.len() > 1 {
+            Err(error::not_found(path))
+        } else {
+            match path[0].as_str() {
+                "32" => Ok(ComplexType::C32),
+                "64" => Ok(ComplexType::C64),
+                other => Err(error::not_found(other)),
+            }
+            .map(NumberType::Complex)
+            .map(ValueType::Number)
+            .map(TCType::Value)
+        }
+    }
+
     fn prefix() -> TCPath {
         NumberType::prefix().join(label("complex").into())
     }
@@ -242,6 +261,14 @@ pub struct BooleanType;
 impl Class for BooleanType {
     type Instance = Boolean;
 
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() {
+            Ok(TCType::Value(ValueType::Number(NumberType::Bool)))
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
     fn prefix() -> TCPath {
         NumberType::prefix().join(label("bool").into())
     }
@@ -309,6 +336,25 @@ pub enum FloatType {
 
 impl Class for FloatType {
     type Instance = Float;
+
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() {
+            Err(error::unsupported(
+                "Float requires a size, float/32 or float/64",
+            ))
+        } else if path.len() > 1 {
+            Err(error::not_found(path))
+        } else {
+            match path[0].as_str() {
+                "32" => Ok(FloatType::F32),
+                "64" => Ok(FloatType::F64),
+                other => Err(error::not_found(other)),
+            }
+            .map(NumberType::Float)
+            .map(ValueType::Number)
+            .map(TCType::Value)
+        }
+    }
 
     fn prefix() -> TCPath {
         NumberType::prefix().join(label("float").into())
@@ -405,6 +451,26 @@ pub enum IntType {
 
 impl Class for IntType {
     type Instance = Int;
+
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() {
+            Err(error::unsupported(
+                "Int requires a size, int/16 or int/32 or int/64",
+            ))
+        } else if path.len() > 1 {
+            Err(error::not_found(path))
+        } else {
+            match path[0].as_str() {
+                "16" => Ok(IntType::I16),
+                "32" => Ok(IntType::I32),
+                "64" => Ok(IntType::I64),
+                other => Err(error::not_found(other)),
+            }
+            .map(NumberType::Int)
+            .map(ValueType::Number)
+            .map(TCType::Value)
+        }
+    }
 
     fn prefix() -> TCPath {
         NumberType::prefix().join(label("int").into())
@@ -509,6 +575,27 @@ pub enum UIntType {
 
 impl Class for UIntType {
     type Instance = UInt;
+
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() {
+            Err(error::unsupported(
+                "UInt requires a size, uint/8 or uint/16 or uint/32 or uint/64",
+            ))
+        } else if path.len() > 1 {
+            Err(error::not_found(path))
+        } else {
+            match path[0].as_str() {
+                "8" => Ok(UIntType::U8),
+                "16" => Ok(UIntType::U16),
+                "32" => Ok(UIntType::U32),
+                "64" => Ok(UIntType::U64),
+                other => Err(error::not_found(other)),
+            }
+            .map(NumberType::UInt)
+            .map(ValueType::Number)
+            .map(TCType::Value)
+        }
+    }
 
     fn prefix() -> TCPath {
         NumberType::prefix().join(label("uint").into())
@@ -626,6 +713,25 @@ impl NumberType {
 
 impl Class for NumberType {
     type Instance = Number;
+
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() {
+            Err(error::unsupported("You must specify a type of Number"))
+        } else if path.len() == 1 && path[0].as_str() == "bool" {
+            BooleanType::from_path(&TCPath::default())
+        } else if path.len() > 1 {
+            let subpath = path.slice_from(1);
+            match path[0].as_str() {
+                "complex" => ComplexType::from_path(&subpath),
+                "float" => FloatType::from_path(&subpath),
+                "int" => IntType::from_path(&subpath),
+                "uint" => IntType::from_path(&subpath),
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            Err(error::not_found(path))
+        }
+    }
 
     fn prefix() -> TCPath {
         ValueType::prefix().join(label("number").into())

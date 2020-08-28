@@ -19,6 +19,8 @@ pub type TCTryStream<T> = TCStream<TCResult<T>>;
 pub trait Class: Into<Link> + Clone + Eq + fmt::Display {
     type Instance: Instance;
 
+    fn from_path(path: &TCPath) -> TCResult<TCType>;
+
     fn prefix() -> TCPath;
 }
 
@@ -56,6 +58,18 @@ pub enum TCType {
 
 impl Class for TCType {
     type Instance = State;
+
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.starts_with(Self::prefix()) && path.len() > 1 {
+            match path[1].as_str() {
+                "collection" => CollectionType::from_path(&path.slice_from(2)),
+                "value" => ValueType::from_path(&path.slice_from(2)),
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            Err(error::not_found(path))
+        }
+    }
 
     fn prefix() -> TCPath {
         label("sbin").into()

@@ -8,7 +8,7 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use uuid::Uuid;
 
-use crate::class::{Class, Instance};
+use crate::class::{Class, Instance, TCType};
 use crate::error;
 
 use super::link::{Link, TCPath};
@@ -30,6 +30,20 @@ pub enum StringType {
 
 impl Class for StringType {
     type Instance = TCString;
+
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() || path.len() > 1 {
+            Err(error::not_found(path))
+        } else {
+            match path[0].as_str() {
+                "id" => Ok(ValueType::TCString(StringType::Id).into()),
+                "link" => Ok(ValueType::TCString(StringType::Link).into()),
+                "ref" => Ok(ValueType::TCString(StringType::Ref).into()),
+                "ustring" => Ok(ValueType::TCString(StringType::UString).into()),
+                other => Err(error::not_found(other)),
+            }
+        }
+    }
 
     fn prefix() -> TCPath {
         ValueType::prefix().join(label("string").into())

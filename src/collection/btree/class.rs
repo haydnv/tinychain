@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::class::{Class, Instance, TCResult};
+use crate::class::{Class, Instance, TCResult, TCType};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
@@ -21,6 +21,16 @@ pub enum BTreeType {
 
 impl Class for BTreeType {
     type Instance = BTree;
+
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() {
+            Ok(TCType::Collection(CollectionType::Base(
+                CollectionBaseType::BTree,
+            )))
+        } else {
+            Err(error::not_found(path))
+        }
+    }
 
     fn prefix() -> TCPath {
         CollectionType::prefix().join(label("btree").into())

@@ -13,6 +13,9 @@ use crate::value::{label, Value};
 use super::btree::BTreeType;
 use super::{Collection, CollectionBase, CollectionView};
 
+const ERR_PROTECTED: &str = "You have accessed a protected class. This should not be possible. \
+Please file a bug report.";
+
 #[async_trait]
 pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
     type Instance: CollectionInstance;
@@ -75,6 +78,10 @@ pub enum CollectionType {
 impl Class for CollectionType {
     type Instance = Collection;
 
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        CollectionBaseType::from_path(path)
+    }
+
     fn prefix() -> TCPath {
         TCType::prefix().join(label("collection").into())
     }
@@ -122,6 +129,25 @@ pub enum CollectionBaseType {
 impl Class for CollectionBaseType {
     type Instance = CollectionBase;
 
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() {
+            Err(error::unsupported("You must specify a type of Collection"))
+        } else if path.len() > 1 {
+            Err(error::not_found(path))
+        } else {
+            use CollectionBaseType::*;
+            match path[0].as_str() {
+                "btree" => Ok(BTree),
+                "graph" => Ok(Graph),
+                "table" => Ok(Table),
+                "tensor" => Ok(Tensor),
+                other => Err(error::not_found(other)),
+            }
+            .map(CollectionType::Base)
+            .map(TCType::Collection)
+        }
+    }
+
     fn prefix() -> TCPath {
         CollectionType::prefix()
     }
@@ -163,6 +189,10 @@ pub enum CollectionViewType {
 
 impl Class for CollectionViewType {
     type Instance = CollectionView;
+
+    fn from_path(_path: &TCPath) -> TCResult<TCType> {
+        Err(error::internal(ERR_PROTECTED))
+    }
 
     fn prefix() -> TCPath {
         CollectionType::prefix()
