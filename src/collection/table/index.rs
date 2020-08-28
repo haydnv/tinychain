@@ -21,15 +21,13 @@ const PRIMARY_INDEX: &str = "primary";
 
 #[derive(Clone)]
 pub struct Index {
-    btree: Arc<BTreeFile>,
+    btree: BTreeFile,
     schema: IndexSchema,
 }
 
 impl Index {
     pub async fn create(txn: Arc<Txn>, schema: IndexSchema) -> TCResult<Index> {
-        let btree = BTreeFile::create(txn, schema.clone().into())
-            .map_ok(Arc::new)
-            .await?;
+        let btree = BTreeFile::create(txn, schema.clone().into()).await?;
         Ok(Index { btree, schema })
     }
 
@@ -236,10 +234,7 @@ impl ReadOnly {
                 (source_schema, btree)
             };
 
-            let index = Index {
-                schema,
-                btree: Arc::new(btree),
-            };
+            let index = Index { schema, btree };
 
             index
                 .index_slice(bounds::all())
@@ -372,9 +367,8 @@ impl TableBase {
             .collect();
         let schema: IndexSchema = (key, values).into();
 
-        let btree = btree::BTreeFile::create(txn.subcontext_tmp().await?, schema.clone().into())
-            .map_ok(Arc::new)
-            .await?;
+        let btree =
+            btree::BTreeFile::create(txn.subcontext_tmp().await?, schema.clone().into()).await?;
 
         Ok(Index { btree, schema })
     }

@@ -1,10 +1,11 @@
-use std::convert::TryInto;
+use std::convert::{Infallible, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::stream::StreamExt;
 
-use crate::class::{Instance, State, TCResult};
+use crate::class::{Instance, State, TCResult, TCStream};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::Value;
@@ -47,6 +48,8 @@ impl Instance for CollectionBase {
 
 #[async_trait]
 impl class::CollectionInstance for CollectionBase {
+    type Error = Infallible;
+    type Item = Value;
     type Slice = CollectionView;
 
     async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
@@ -60,10 +63,20 @@ impl class::CollectionInstance for CollectionBase {
         }
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()> {
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
         match self {
             Self::BTree(btree) => btree.put(txn, selector, value.try_into()?).await,
             _ => Err(error::not_implemented("CollectionBase::put")),
+        }
+    }
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+        match self {
+            Self::BTree(btree) => {
+                let stream = btree.to_stream(txn).await?;
+                Ok(Box::pin(stream.map(Value::from)))
+            }
+            _ => Err(error::not_implemented("CollectionBase::stream")),
         }
     }
 }
@@ -121,6 +134,8 @@ impl Instance for CollectionView {
 
 #[async_trait]
 impl class::CollectionInstance for CollectionView {
+    type Error = Infallible;
+    type Item = Value;
     type Slice = CollectionView;
 
     async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
@@ -134,7 +149,7 @@ impl class::CollectionInstance for CollectionView {
         }
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()> {
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
         match self {
             Self::BTree(btree) => {
                 btree
@@ -142,6 +157,16 @@ impl class::CollectionInstance for CollectionView {
                     .await
             }
             _ => Err(error::not_implemented("CollectionView::put")),
+        }
+    }
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+        match self {
+            Self::BTree(btree) => {
+                let stream = btree.to_stream(txn).await?;
+                Ok(Box::pin(stream.map(Value::from)))
+            }
+            _ => Err(error::not_implemented("CollectionVieW::stream")),
         }
     }
 }
@@ -207,19 +232,28 @@ impl Instance for Collection {
 
 #[async_trait]
 impl class::CollectionInstance for Collection {
+    type Error = Infallible;
+    type Item = Value;
     type Slice = CollectionView;
 
     async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
         match self {
-            Self::Base(base) => class::CollectionInstance::get(base, txn, selector).await,
-            Self::View(view) => class::CollectionInstance::get(view, txn, selector).await,
+            Self::Base(base) => base.get(txn, selector).await,
+            Self::View(view) => view.get(txn, selector).await,
         }
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()> {
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
         match self {
             Self::Base(base) => base.put(txn, selector, value).await,
             Self::View(view) => view.put(txn, selector, value).await,
+        }
+    }
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+        match self {
+            Self::Base(base) => base.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
         }
     }
 }

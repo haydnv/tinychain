@@ -256,7 +256,7 @@ impl Selection for ColumnSelection {
 
 #[derive(Clone)]
 pub struct IndexSlice {
-    source: Arc<BTreeFile>,
+    source: BTreeFile,
     schema: IndexSchema,
     bounds: Bounds,
     range: BTreeRange,
@@ -264,7 +264,7 @@ pub struct IndexSlice {
 }
 
 impl IndexSlice {
-    pub fn all(source: Arc<BTreeFile>, schema: IndexSchema, reverse: bool) -> IndexSlice {
+    pub fn all(source: BTreeFile, schema: IndexSchema, reverse: bool) -> IndexSlice {
         IndexSlice {
             source,
             schema,
@@ -274,11 +274,7 @@ impl IndexSlice {
         }
     }
 
-    pub fn new(
-        source: Arc<BTreeFile>,
-        schema: IndexSchema,
-        bounds: Bounds,
-    ) -> TCResult<IndexSlice> {
+    pub fn new(source: BTreeFile, schema: IndexSchema, bounds: Bounds) -> TCResult<IndexSlice> {
         let columns = schema.columns();
 
         assert!(source.schema() == &columns[..]);

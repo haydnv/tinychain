@@ -224,6 +224,28 @@ impl TryFrom<Value> for u64 {
     }
 }
 
+impl<'a> TryFrom<&'a Value> for &'a String {
+    type Error = error::TCError;
+
+    fn try_from(v: &'a Value) -> TCResult<&'a String> {
+        match v {
+            Value::TCString(s) => s.try_into(),
+            other => Err(error::bad_request("Expected String but found", other)),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a ValueId {
+    type Error = error::TCError;
+
+    fn try_from(v: &'a Value) -> TCResult<&'a ValueId> {
+        match v {
+            Value::TCString(s) => s.try_into(),
+            other => Err(error::bad_request("Expected ValueId but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Value> for TCType {
     type Error = error::TCError;
 

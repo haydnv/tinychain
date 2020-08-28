@@ -252,6 +252,28 @@ impl TryFrom<TCString> for Link {
     }
 }
 
+impl<'a> TryFrom<&'a TCString> for &'a String {
+    type Error = error::TCError;
+
+    fn try_from(s: &'a TCString) -> TCResult<&'a String> {
+        match s {
+            TCString::UString(s) => Ok(s),
+            other => Err(error::bad_request("Expected String but found", other)),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a TCString> for &'a ValueId {
+    type Error = error::TCError;
+
+    fn try_from(s: &'a TCString) -> TCResult<&'a ValueId> {
+        match s {
+            TCString::Id(s) => Ok(s),
+            other => Err(error::bad_request("Expected ValueId but found", other)),
+        }
+    }
+}
+
 impl TryFrom<TCString> for TCPath {
     type Error = error::TCError;
 

@@ -4,8 +4,8 @@ use std::ops::Bound;
 
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::value::class::ValueType;
-use crate::value::{Number, Value};
+use crate::value::class::{StringType, ValueType};
+use crate::value::{Number, Value, ValueId};
 
 pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {
     left.expect(dtype, "for collation")?;
@@ -14,13 +14,22 @@ pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<
         ValueType::Number(_) => {
             let left: &Number = left.try_into()?;
             let right: &Number = right.try_into()?;
-            if left > right {
-                Ok(Greater)
-            } else if left < right {
-                Ok(Less)
-            } else {
-                Ok(Equal)
-            }
+            left.partial_cmp(right)
+                .ok_or_else(|| error::unsupported("Unsupported Number comparison"))
+        }
+        ValueType::TCString(StringType::Id) => {
+            let left: &ValueId = left.try_into()?;
+            let right: &ValueId = right.try_into()?;
+            left.as_str()
+                .partial_cmp(right.as_str())
+                .ok_or_else(|| error::unsupported("Unsupported String comparison"))
+        }
+        ValueType::TCString(StringType::UString) => {
+            // TODO: support localized strings
+            let left: &String = left.try_into()?;
+            let right: &String = right.try_into()?;
+            left.partial_cmp(right)
+                .ok_or_else(|| error::unsupported("Unsupported String comparison"))
         }
         other => Err(error::bad_request("Collator does not support", other)),
     }
@@ -46,6 +55,8 @@ impl Collator {
         use ValueType::*;
         match dtype {
             Number(_) => true,
+            TCString(StringType::Id) => true,
+            TCString(StringType::UString) => true,
             _ => false,
         }
     }

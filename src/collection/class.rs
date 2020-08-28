@@ -1,10 +1,10 @@
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::class::{Class, Instance, TCResult, TCType};
+use crate::class::{Class, Instance, TCResult, TCStream, TCType};
 use crate::error;
 use crate::transaction::{Transact, Txn};
 use crate::value::link::{Link, TCPath};
@@ -29,11 +29,15 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
 
 #[async_trait]
 pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sync {
+    type Error: Into<error::TCError>;
+    type Item: Into<Value> + TryFrom<Value, Error = Self::Error>;
     type Slice: CollectionInstance;
 
     async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice>;
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()>;
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()>;
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>>;
 }
 
 #[derive(Clone, Eq, PartialEq)]

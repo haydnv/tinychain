@@ -220,6 +220,8 @@ impl Instance for BTreeSlice {
 
 #[async_trait]
 impl CollectionInstance for BTreeSlice {
+    type Error = error::TCError;
+    type Item = Key;
     type Slice = BTreeSlice;
 
     async fn get(&self, txn: Arc<Txn>, bounds: Value) -> TCResult<Self::Slice> {
@@ -241,10 +243,17 @@ impl CollectionInstance for BTreeSlice {
         }
     }
 
-    async fn put(&self, _txn: Arc<Txn>, _selector: Value, _key: Value) -> TCResult<()> {
+    async fn put(&self, _txn: Arc<Txn>, _selector: Value, _key: Key) -> TCResult<()> {
         Err(error::unsupported(
             "BTreeSlice is immutable; write to the source BTree instead",
         ))
+    }
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Key>> {
+        self.source
+            .clone()
+            .slice(txn.id().clone(), self.bounds.clone())
+            .await
     }
 }
 
@@ -357,18 +366,14 @@ impl BTreeFile {
         self.get_root(txn_id).await.map(|root| root.keys.is_empty())
     }
 
-    pub fn len<'a>(self: Arc<Self>, txn_id: TxnId, selector: Selector) -> TCBoxTryFuture<'a, u64> {
+    pub fn len<'a>(self, txn_id: TxnId, selector: Selector) -> TCBoxTryFuture<'a, u64> {
         Box::pin(async move {
             let slice = self.slice(txn_id, selector).await?;
             Ok(slice.fold(0u64, |len, _| future::ready(len + 1)).await)
         })
     }
 
-    pub async fn slice(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        selector: Selector,
-    ) -> TCResult<TCStream<Key>> {
+    pub async fn slice(self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>> {
         validate_selector(&selector, self.schema())?;
 
         let root_id = self.root.read(&txn_id).await?;
@@ -385,12 +390,7 @@ impl BTreeFile {
         })
     }
 
-    fn _slice(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        node: BlockOwned<Node>,
-        range: BTreeRange,
-    ) -> TCStream<Key> {
+    fn _slice(self, txn_id: TxnId, node: BlockOwned<Node>, range: BTreeRange) -> TCStream<Key> {
         let keys = node.values();
         let (l, r) = range.bisect(&keys, &self.collator);
 
@@ -443,7 +443,7 @@ impl BTreeFile {
     }
 
     fn _slice_reverse(
-        self: Arc<Self>,
+        self,
         txn_id: TxnId,
         node: BlockOwned<Node>,
         range: BTreeRange,
@@ -751,6 +751,8 @@ impl Instance for BTreeFile {
 
 #[async_trait]
 impl CollectionInstance for BTreeFile {
+    type Error = error::TCError;
+    type Item = Key;
     type Slice = BTreeSlice;
 
     async fn get(&self, _txn: Arc<Txn>, bounds: Value) -> TCResult<Self::Slice> {
@@ -759,7 +761,7 @@ impl CollectionInstance for BTreeFile {
         Ok(BTreeSlice::new(self.clone(), bounds))
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, key: Value) -> TCResult<()> {
+    async fn put(&self, txn: Arc<Txn>, selector: Value, key: Key) -> TCResult<()> {
         let selector: Selector = selector.try_into()?;
         let key: Key = key.try_into()?;
 
@@ -774,6 +776,10 @@ impl CollectionInstance for BTreeFile {
             }
             selector => self.update(txn.id(), &selector, &key).await,
         }
+    }
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+        self.clone().slice(txn.id().clone(), Selector::all()).await
     }
 }
 

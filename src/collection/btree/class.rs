@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::class::{Class, Instance, TCResult, TCType};
+use crate::class::{Class, Instance, TCResult, TCStream, TCType};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
@@ -11,7 +11,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{Link, TCPath};
 use crate::value::{label, Value};
 
-use super::{BTreeFile, BTreeSlice};
+use super::{BTreeFile, BTreeSlice, Key};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum BTreeType {
@@ -79,7 +79,7 @@ impl fmt::Display for BTreeType {
 
 #[derive(Clone)]
 pub enum BTree {
-    Tree(Arc<BTreeFile>),
+    Tree(BTreeFile),
     Slice(BTreeSlice),
 }
 
@@ -96,6 +96,8 @@ impl Instance for BTree {
 
 #[async_trait]
 impl CollectionInstance for BTree {
+    type Error = error::TCError;
+    type Item = Key;
     type Slice = BTreeSlice;
 
     async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<BTreeSlice> {
@@ -105,10 +107,17 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()> {
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Key) -> TCResult<()> {
         match self {
             Self::Tree(tree) => tree.put(txn, selector, value).await,
             Self::Slice(slice) => slice.put(txn, selector, value).await,
+        }
+    }
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+        match self {
+            Self::Tree(tree) => tree.to_stream(txn).await,
+            Self::Slice(slice) => slice.to_stream(txn).await,
         }
     }
 }
