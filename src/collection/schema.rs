@@ -75,12 +75,20 @@ impl TryFrom<Value> for Column {
     type Error = error::TCError;
 
     fn try_from(value: Value) -> TCResult<Column> {
+        println!("parse Column from {}", value);
+
         let mut value: Vec<Value> = value.try_into()?;
 
-        let name: ValueId = value
-            .pop()
-            .ok_or_else(|| error::bad_request("Column missing field", "name"))?
-            .try_into()?;
+        let max_len = if value.len() == 3 {
+            Some(value.pop().unwrap().try_into()?)
+        } else if value.len() == 2 {
+            None
+        } else {
+            return Err(error::bad_request(
+                "Expected a Column but found",
+                Value::Tuple(value),
+            ));
+        };
 
         let dtype: Value = value
             .pop()
@@ -93,11 +101,10 @@ impl TryFrom<Value> for Column {
             other => return Err(error::bad_request("Expected a Class but found", other)),
         };
 
-        let max_len = if let Some(max_len) = value.pop() {
-            Some(max_len.try_into()?)
-        } else {
-            None
-        };
+        let name: ValueId = value
+            .pop()
+            .ok_or_else(|| error::bad_request("Column missing field", "name"))?
+            .try_into()?;
 
         Ok(Column {
             name,
