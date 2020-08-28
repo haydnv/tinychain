@@ -22,6 +22,7 @@ pub type Number = number::instance::Number;
 pub type Op = op::Op;
 pub type TCPath = link::TCPath;
 pub type TCString = string::TCString;
+pub type TCRange = (Box<Value>, Box<Value>, bool);
 pub type TCRef = reference::TCRef;
 pub type ValueId = string::ValueId;
 pub type ValueType = class::ValueType;
@@ -36,6 +37,7 @@ pub enum Value {
     Bytes(Bytes),
     Class(TCType),
     Number(Number),
+    Range(TCRange),
     TCString(TCString),
     Op(Box<op::Op>),
     Tuple(Vec<Value>),
@@ -51,6 +53,7 @@ impl Instance for Value {
             Value::Bytes(_) => ValueType::Bytes,
             Value::Class(_) => ValueType::Class,
             Value::Number(n) => ValueType::Number(n.class()),
+            Value::Range(_) => ValueType::Range,
             Value::TCString(s) => ValueType::TCString(s.class()),
             Value::Op(_) => ValueType::Op,
             Value::Tuple(_) => ValueType::Tuple,
@@ -71,6 +74,12 @@ impl From<()> for Value {
 impl From<&'static [u8]> for Value {
     fn from(b: &'static [u8]) -> Value {
         Value::Bytes(Bytes::from(b))
+    }
+}
+
+impl From<bool> for Value {
+    fn from(b: bool) -> Value {
+        Value::Number(b.into())
     }
 }
 
@@ -442,6 +451,12 @@ impl Serialize for Value {
                 }
                 map.end()
             }
+            Value::Range((start, end, reverse)) => {
+                let reverse = Box::new(Value::from(*reverse));
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry("/sbin/value/range", &[start, end, &reverse])?;
+                map.end()
+            }
             Value::TCString(tc_string) => tc_string.serialize(s),
             Value::Tuple(v) => {
                 let mut seq = s.serialize_seq(Some(v.len()))?;
@@ -467,6 +482,8 @@ impl fmt::Display for Value {
             Value::Bytes(b) => write!(f, "Bytes({})", b.len()),
             Value::Class(c) => write!(f, "Class: {}", c),
             Value::Number(n) => write!(f, "Number({})", n),
+            Value::Range((start, end, reverse)) if *reverse => write!(f, "Range({}, {})", end, start),
+            Value::Range((start, end, _)) => write!(f, "Range({}, {})", start, end),
             Value::TCString(s) => write!(f, "String({})", s),
             Value::Op(op) => write!(f, "Op: {}", op),
             Value::Tuple(v) => write!(

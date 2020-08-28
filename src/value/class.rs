@@ -46,6 +46,7 @@ pub enum ValueType {
     None,
     Number(NumberType),
     TCString(StringType),
+    Range,
     Op,
     Tuple,
     Value, // self
@@ -124,6 +125,7 @@ impl From<ValueType> for Link {
             Bytes => prefix.join(label("bytes").into()).into(),
             Class => prefix.join(label("class").into()).into(),
             Number(n) => n.into(),
+            Range => prefix.join(label("range").into()).into(),
             TCString(s) => s.into(),
             Op => prefix.join(label("op").into()).into(),
             Tuple => prefix.join(label("tuple").into()).into(),
@@ -140,6 +142,7 @@ impl fmt::Display for ValueType {
             Bytes => write!(f, "type Bytes"),
             Class => write!(f, "type Class"),
             Number(n) => write!(f, "type Number: {}", n),
+            Range => write!(f, "type Range"),
             TCString(s) => write!(f, "type String: {}", s),
             Op => write!(f, "type Op"),
             Tuple => write!(f, "type Tuple"),
