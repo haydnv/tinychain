@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ use crate::transaction::{Transact, Txn};
 use crate::value::link::{Link, TCPath};
 use crate::value::{label, Value};
 
-use super::btree::BTreeType;
+use super::btree::{BTreeFile, BTreeType};
 use super::{Collection, CollectionBase, CollectionView};
 
 const ERR_PROTECTED: &str = "You have accessed a protected class. This should not be possible. \
@@ -28,46 +28,13 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
 }
 
 #[async_trait]
-pub trait CollectionBaseClass: CollectionClass + Into<CollectionBaseType> + Send + Sync {
-    type Instance: CollectionBaseInstance;
-
-    fn get(
-        txn: Arc<Txn>,
-        path: &TCPath,
-        schema: Value,
-    ) -> TCResult<<Self as CollectionClass>::Instance>;
-}
-
-pub trait CollectionViewClass: CollectionClass + Into<CollectionViewType> + Send + Sync {
-    type Instance: CollectionViewInstance;
-}
-
-#[async_trait]
 pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sync {
-    type Selector: Clone + TryFrom<Value, Error = error::TCError> + Send + Sync + 'static;
+    type Slice: CollectionInstance;
 
-    type Item: Clone + Into<Value> + TryFrom<Value, Error = error::TCError> + Send + Sync + 'static;
+    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice>;
 
-    type Slice: CollectionViewInstance;
-
-    async fn get(&self, txn: Arc<Txn>, selector: Self::Selector) -> TCResult<Self::Slice>;
-
-    async fn put(
-        &self,
-        txn: &Arc<Txn>,
-        selector: &Self::Selector,
-        value: Self::Item,
-    ) -> TCResult<()>;
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()>;
 }
-
-#[async_trait]
-pub trait CollectionBaseInstance: CollectionInstance {
-    type Schema: TryFrom<Value, Error = error::TCError>;
-
-    async fn create(txn: Arc<Txn>, schema: Self::Schema) -> TCResult<Self>;
-}
-
-pub trait CollectionViewInstance: CollectionInstance + Into<CollectionView> {}
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionType {
@@ -84,6 +51,21 @@ impl Class for CollectionType {
 
     fn prefix() -> TCPath {
         TCType::prefix().join(label("collection").into())
+    }
+}
+
+#[async_trait]
+impl CollectionClass for CollectionType {
+    type Instance = Collection;
+
+    async fn get(
+        txn: Arc<Txn>,
+        path: &TCPath,
+        schema: Value,
+    ) -> TCResult<<Self as CollectionClass>::Instance> {
+        CollectionBaseType::get(txn, path, schema)
+            .await
+            .map(Collection::Base)
     }
 }
 
@@ -150,6 +132,25 @@ impl Class for CollectionBaseType {
 
     fn prefix() -> TCPath {
         CollectionType::prefix()
+    }
+}
+
+#[async_trait]
+impl CollectionClass for CollectionBaseType {
+    type Instance = CollectionBase;
+
+    async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<CollectionBase> {
+        if path.is_empty() {
+            return Err(error::unsupported("You must specify a type of Collection"));
+        }
+
+        match path[0].as_str() {
+            "btree" if path.len() == 1 => BTreeFile::create(txn, schema.try_into()?)
+                .await
+                .map(CollectionBase::BTree),
+            "graph" | "table" | "tensor" => Err(error::not_implemented()),
+            other => Err(error::not_found(other)),
+        }
     }
 }
 

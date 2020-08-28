@@ -322,8 +322,6 @@ impl FromStr for Link {
     type Err = error::TCError;
 
     fn from_str(s: &str) -> TCResult<Link> {
-        println!("Link::from_str({})", s);
-
         if s.starts_with('/') {
             return Ok(Link {
                 host: None,

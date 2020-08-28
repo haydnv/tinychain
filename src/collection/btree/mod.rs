@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Bound;
 use std::pin::Pin;
@@ -19,7 +19,7 @@ use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::{ValueClass, ValueType};
-use crate::value::Value;
+use crate::value::{label, Label, Value};
 
 use super::class::*;
 use super::schema::{Column, RowSchema};
@@ -33,6 +33,9 @@ pub type BTreeType = class::BTreeType;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
+
+const KEY: Label = label("key");
+const RANGE: Label = label("range");
 
 type NodeId = BlockId;
 
@@ -217,11 +220,10 @@ impl Instance for BTreeSlice {
 
 #[async_trait]
 impl CollectionInstance for BTreeSlice {
-    type Selector = Selector;
-    type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get(&self, txn: Arc<Txn>, bounds: Selector) -> TCResult<Self::Slice> {
+    async fn get(&self, txn: Arc<Txn>, bounds: Value) -> TCResult<Self::Slice> {
+        let bounds: Selector = bounds.try_into()?;
         validate_selector(&bounds, self.source.schema())?;
 
         let schema: Vec<ValueType> = self.source.schema().iter().map(|c| *c.dtype()).collect();
@@ -230,7 +232,7 @@ impl CollectionInstance for BTreeSlice {
             (Selector::Range(container, _), Selector::Range(contained, _))
                 if container.contains(contained, &schema)? =>
             {
-                self.source.get(txn, bounds).await
+                self.source.get(txn, bounds.into()).await
             }
             _ => Err(error::bad_request(
                 &format!("BTreeSlice[{}] does not contain", &self.bounds),
@@ -239,19 +241,12 @@ impl CollectionInstance for BTreeSlice {
         }
     }
 
-    async fn put(
-        &self,
-        _txn: &Arc<Txn>,
-        _selector: &Self::Selector,
-        _key: Self::Item,
-    ) -> TCResult<()> {
+    async fn put(&self, _txn: Arc<Txn>, _selector: Value, _key: Value) -> TCResult<()> {
         Err(error::unsupported(
             "BTreeSlice is immutable; write to the source BTree instead",
         ))
     }
 }
-
-impl CollectionViewInstance for BTreeSlice {}
 
 #[async_trait]
 impl Transact for BTreeSlice {
@@ -286,12 +281,10 @@ pub struct BTreeFile {
 }
 
 impl BTreeFile {
-    pub async fn create(
-        txn_id: TxnId,
-        schema: RowSchema,
-        file: Arc<File<Node>>,
-    ) -> TCResult<BTreeFile> {
-        if !file.is_empty(&txn_id).await? {
+    pub async fn create(txn: Arc<Txn>, schema: RowSchema) -> TCResult<Self> {
+        let file = txn.context().await?;
+
+        if !file.is_empty(txn.id()).await? {
             return Err(error::internal(
                 "Tried to create a new BTree without a new File",
             ));
@@ -332,7 +325,7 @@ impl BTreeFile {
 
         let root: BlockId = Uuid::new_v4().into();
         file.clone()
-            .create_block(txn_id.clone(), root.clone(), Node::new(true, None))
+            .create_block(txn.id().clone(), root.clone(), Node::new(true, None))
             .await?;
 
         let collator = collator::Collator::new(schema.iter().map(|c| *c.dtype()).collect())?;
@@ -341,7 +334,7 @@ impl BTreeFile {
             schema,
             order,
             collator,
-            root: TxnLock::new(txn_id, root.into()),
+            root: TxnLock::new(txn.id().clone(), root.into()),
         })
     }
 
@@ -758,40 +751,29 @@ impl Instance for BTreeFile {
 
 #[async_trait]
 impl CollectionInstance for BTreeFile {
-    type Selector = Selector;
-    type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get(&self, _txn: Arc<Txn>, bounds: Selector) -> TCResult<Self::Slice> {
+    async fn get(&self, _txn: Arc<Txn>, bounds: Value) -> TCResult<Self::Slice> {
+        let bounds: Selector = bounds.try_into()?;
         validate_selector(&bounds, self.schema())?;
         Ok(BTreeSlice::new(self.clone(), bounds))
     }
 
-    async fn put(
-        &self,
-        txn: &Arc<Txn>,
-        selector: &Self::Selector,
-        key: Self::Item,
-    ) -> TCResult<()> {
-        validate_selector(selector, self.schema())?;
+    async fn put(&self, txn: Arc<Txn>, selector: Value, key: Value) -> TCResult<()> {
+        let selector: Selector = selector.try_into()?;
+        let key: Key = key.try_into()?;
+
+        validate_selector(&selector, self.schema())?;
         validate_key(&key, self.schema())?;
 
         match selector {
-            Selector::Key(selector) if self.collator.compare(selector, &key) == Ordering::Equal => {
+            Selector::Key(selector)
+                if self.collator.compare(&selector, &key) == Ordering::Equal =>
+            {
                 self.insert(txn.id(), key).await
             }
-            selector => self.update(txn.id(), selector, &key).await,
+            selector => self.update(txn.id(), &selector, &key).await,
         }
-    }
-}
-
-#[async_trait]
-impl CollectionBaseInstance for BTreeFile {
-    type Schema = RowSchema;
-
-    async fn create(txn: Arc<Txn>, schema: Self::Schema) -> TCResult<Self> {
-        let file = txn.context().await?;
-        BTreeFile::create(txn.id().clone(), schema, file).await
     }
 }
 
@@ -954,6 +936,12 @@ impl Selector {
             }
             Selector::Range(range, _) => range.bisect(keys, collator),
         }
+    }
+}
+
+impl From<Selector> for Value {
+    fn from(_selector: Selector) -> Value {
+        unimplemented!()
     }
 }
 

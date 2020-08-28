@@ -41,12 +41,12 @@ impl Gateway {
         subject: &Link,
         selector: Value,
         _auth: &Auth,
-        _txn_id: Option<TxnId>,
+        txn: Option<Arc<Txn>>,
     ) -> TCResult<State> {
         if subject.host().is_none() {
             let path = subject.path();
             if path[0] == "sbin" {
-                kernel::get(&path.slice_from(1), selector)
+                kernel::get(&path.slice_from(1), selector, txn).await
             } else {
                 Err(error::not_implemented())
             }

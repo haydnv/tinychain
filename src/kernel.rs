@@ -5,14 +5,23 @@ use futures::Stream;
 
 use crate::auth::Auth;
 use crate::class::{State, TCResult};
+use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error;
 use crate::transaction::Txn;
 use crate::value::class::ValueClass;
 use crate::value::link::TCPath;
 use crate::value::{Value, ValueId, ValueType};
 
-pub fn get(path: &TCPath, id: Value) -> TCResult<State> {
+pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<State> {
     match path[0].as_str() {
+        "collection" if path.len() > 1 => {
+            let txn = txn.ok_or(error::unsupported(
+                "Collection requires a transaction context",
+            ))?;
+            CollectionType::get(txn, &path.slice_from(1), id)
+                .await
+                .map(State::Collection)
+        }
         "value" if path.len() > 1 => ValueType::get(&path.slice_from(1), id).map(State::Value),
         other => Err(error::not_found(other)),
     }

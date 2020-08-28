@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
-use crate::block::file::File;
 use crate::class::{TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{self, BTreeFile};
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
@@ -28,10 +27,9 @@ pub struct Index {
 
 impl Index {
     pub async fn create(txn: Arc<Txn>, schema: IndexSchema) -> TCResult<Index> {
-        let btree_file: Arc<File<btree::Node>> = txn.context().await?;
-
-        let btree =
-            Arc::new(BTreeFile::create(txn.id().clone(), schema.clone().into(), btree_file).await?);
+        let btree = BTreeFile::create(txn, schema.clone().into())
+            .map_ok(Arc::new)
+            .await?;
         Ok(Index { btree, schema })
     }
 
@@ -219,22 +217,19 @@ impl ReadOnly {
         key_columns: Option<Vec<ValueId>>,
     ) -> TCBoxTryFuture<'a, ReadOnly> {
         Box::pin(async move {
-            let btree_file = txn.subcontext_tmp().await?.context().await?;
-
             let source_schema: IndexSchema =
                 (source.key().to_vec(), source.values().to_vec()).into();
             let (schema, btree) = if let Some(columns) = key_columns {
                 let column_names: HashSet<&ValueId> = columns.iter().collect();
                 let schema = source_schema.subset(column_names)?;
                 let btree =
-                    BTreeFile::create(txn.id().clone(), schema.clone().into(), btree_file).await?;
-
+                    BTreeFile::create(txn.subcontext_tmp().await?, schema.clone().into()).await?;
                 let rows = source.select(columns)?.stream(txn.id().clone()).await?;
                 btree.insert_from(txn.id(), rows).await?;
                 (schema, btree)
             } else {
                 let btree =
-                    BTreeFile::create(txn.id().clone(), source_schema.clone().into(), btree_file)
+                    BTreeFile::create(txn.subcontext_tmp().await?, source_schema.clone().into())
                         .await?;
                 let rows = source.stream(txn.id().clone()).await?;
                 btree.insert_from(txn.id(), rows).await?;
@@ -377,8 +372,7 @@ impl TableBase {
             .collect();
         let schema: IndexSchema = (key, values).into();
 
-        let btree_file = txn.subcontext(name.clone()).await?.context().await?;
-        let btree = btree::BTreeFile::create(txn.id().clone(), schema.clone().into(), btree_file)
+        let btree = btree::BTreeFile::create(txn.subcontext_tmp().await?, schema.clone().into())
             .map_ok(Arc::new)
             .await?;
 

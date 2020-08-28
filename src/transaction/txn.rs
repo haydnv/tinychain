@@ -247,7 +247,7 @@ impl Txn {
             Op::Get(subject, object) => match subject {
                 Subject::Link(link) => {
                     self.gateway
-                        .get(&link, object, &auth, Some(self.id.clone()))
+                        .get(&link, object, &auth, Some(self.clone()))
                         .await
                 }
                 Subject::Ref(tc_ref) => {

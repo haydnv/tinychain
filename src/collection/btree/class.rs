@@ -11,7 +11,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{Link, TCPath};
 use crate::value::{label, Value};
 
-use super::{BTreeFile, BTreeSlice, Key, Selector};
+use super::{BTreeFile, BTreeSlice};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum BTreeType {
@@ -96,23 +96,16 @@ impl Instance for BTree {
 
 #[async_trait]
 impl CollectionInstance for BTree {
-    type Selector = Selector;
-    type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get(&self, txn: Arc<Txn>, selector: Selector) -> TCResult<BTreeSlice> {
+    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<BTreeSlice> {
         match self {
             Self::Tree(tree) => tree.get(txn, selector).await,
             Self::Slice(slice) => slice.get(txn, selector).await,
         }
     }
 
-    async fn put(
-        &self,
-        txn: &Arc<Txn>,
-        selector: &Self::Selector,
-        value: Self::Item,
-    ) -> TCResult<()> {
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()> {
         match self {
             Self::Tree(tree) => tree.put(txn, selector, value).await,
             Self::Slice(slice) => slice.put(txn, selector, value).await,

@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
@@ -45,6 +46,29 @@ impl Instance for CollectionBase {
 }
 
 #[async_trait]
+impl class::CollectionInstance for CollectionBase {
+    type Slice = CollectionView;
+
+    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
+        match self {
+            Self::BTree(btree) => btree
+                .get(txn, selector)
+                .await
+                .map(BTree::Slice)
+                .map(CollectionView::BTree),
+            _ => Err(error::not_implemented()),
+        }
+    }
+
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()> {
+        match self {
+            Self::BTree(btree) => btree.put(txn, selector, value.try_into()?).await,
+            _ => Err(error::not_implemented()),
+        }
+    }
+}
+
+#[async_trait]
 impl Transact for CollectionBase {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
@@ -76,16 +100,6 @@ impl fmt::Display for CollectionBase {
     }
 }
 
-impl CollectionBase {
-    pub async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<State> {
-        Err(error::not_implemented())
-    }
-
-    pub async fn put(&self, _txn: &Arc<Txn>, _selector: &Value, _state: State) -> TCResult<Self> {
-        Err(error::not_implemented())
-    }
-}
-
 #[derive(Clone)]
 pub enum CollectionView {
     BTree(btree::BTree),
@@ -101,6 +115,33 @@ impl Instance for CollectionView {
         match self {
             Self::BTree(btree) => btree.class().into(),
             _ => unimplemented!(), // TODO
+        }
+    }
+}
+
+#[async_trait]
+impl class::CollectionInstance for CollectionView {
+    type Slice = CollectionView;
+
+    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
+        match self {
+            Self::BTree(btree) => btree
+                .get(txn, selector.try_into()?)
+                .await
+                .map(BTree::Slice)
+                .map(CollectionView::BTree),
+            _ => Err(error::not_implemented()),
+        }
+    }
+
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()> {
+        match self {
+            Self::BTree(btree) => {
+                btree
+                    .put(txn, selector.try_into()?, value.try_into()?)
+                    .await
+            }
+            _ => Err(error::not_implemented()),
         }
     }
 }
@@ -165,6 +206,25 @@ impl Instance for Collection {
 }
 
 #[async_trait]
+impl class::CollectionInstance for Collection {
+    type Slice = CollectionView;
+
+    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
+        match self {
+            Self::Base(base) => class::CollectionInstance::get(base, txn, selector).await,
+            Self::View(view) => class::CollectionInstance::get(view, txn, selector).await,
+        }
+    }
+
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Value) -> TCResult<()> {
+        match self {
+            Self::Base(base) => base.put(txn, selector, value).await,
+            Self::View(view) => view.put(txn, selector, value).await,
+        }
+    }
+}
+
+#[async_trait]
 impl Transact for Collection {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
@@ -178,6 +238,18 @@ impl Transact for Collection {
             Self::Base(base) => base.rollback(txn_id).await,
             Self::View(view) => view.rollback(txn_id).await,
         }
+    }
+}
+
+impl From<CollectionBase> for Collection {
+    fn from(base: CollectionBase) -> Collection {
+        Collection::Base(base)
+    }
+}
+
+impl From<CollectionView> for Collection {
+    fn from(view: CollectionView) -> Collection {
+        Collection::View(view)
     }
 }
 

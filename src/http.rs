@@ -15,7 +15,6 @@ use crate::auth::Token;
 use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::gateway::{Gateway, Protocol};
-use crate::transaction::TxnId;
 use crate::value::link::*;
 use crate::value::{Value, ValueId};
 
@@ -106,15 +105,13 @@ impl Http {
             })
             .unwrap_or_else(HashMap::new);
 
-        let txn_id: Option<TxnId> = Http::get_param(&mut params, "txn_id")?;
-
         match request.method() {
             &Method::GET => {
                 let id = Http::get_param(&mut params, "key")?
                     .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
                 let state = self
                     .gateway
-                    .get(&path.clone().into(), id, &token, txn_id.clone())
+                    .get(&path.clone().into(), id, &token, None)
                     .await?;
 
                 match state {
@@ -155,7 +152,7 @@ impl Http {
                         &path.clone().into(),
                         stream::iter(values.into_iter()),
                         &token,
-                        txn_id,
+                        None,
                     )
                     .await?;
 
