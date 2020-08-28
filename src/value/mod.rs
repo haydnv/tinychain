@@ -23,7 +23,6 @@ pub type Number = number::instance::Number;
 pub type Op = op::Op;
 pub type TCPath = link::TCPath;
 pub type TCString = string::TCString;
-pub type TCRange = (Bound<Box<Value>>, Bound<Box<Value>>, bool);
 pub type TCRef = reference::TCRef;
 pub type ValueId = string::ValueId;
 pub type ValueType = class::ValueType;
@@ -39,7 +38,6 @@ pub enum Value {
     Bytes(Bytes),
     Class(TCType),
     Number(Number),
-    Range(TCRange),
     TCString(TCString),
     Op(Box<op::Op>),
     Tuple(Vec<Value>),
@@ -56,7 +54,6 @@ impl Instance for Value {
             Value::Bytes(_) => ValueType::Bytes,
             Value::Class(_) => ValueType::Class,
             Value::Number(n) => ValueType::Number(n.class()),
-            Value::Range(_) => ValueType::Range,
             Value::TCString(s) => ValueType::TCString(s.class()),
             Value::Op(_) => ValueType::Op,
             Value::Tuple(_) => ValueType::Tuple,
@@ -83,6 +80,16 @@ impl From<&'static [u8]> for Value {
 impl From<bool> for Value {
     fn from(b: bool) -> Value {
         Value::Number(b.into())
+    }
+}
+
+impl From<Bound<Value>> for Value {
+    fn from(b: Bound<Value>) -> Value {
+        match b {
+            Bound::Included(v) => Value::Bound(Bound::Included(Box::new(v))),
+            Bound::Excluded(v) => Value::Bound(Bound::Excluded(Box::new(v))),
+            Bound::Unbounded => Value::Bound(Bound::Unbounded),
+        }
     }
 }
 
@@ -137,6 +144,32 @@ impl<T: Into<Value>> From<Option<T>> for Value {
 impl<T: Into<Value>> From<Vec<T>> for Value {
     fn from(mut v: Vec<T>) -> Value {
         Value::Tuple(v.drain(..).map(|i| i.into()).collect())
+    }
+}
+
+impl TryFrom<Value> for bool {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<bool> {
+        match v {
+            Value::Number(n) => n.try_into(),
+            other => Err(error::bad_request("Expected bool but found", other)),
+        }
+    }
+}
+
+impl TryFrom<Value> for Bound<Value> {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<Bound<Value>> {
+        match v {
+            Value::Bound(b) => match b {
+                Bound::Included(b) => Ok(Bound::Included(*b)),
+                Bound::Excluded(b) => Ok(Bound::Excluded(*b)),
+                Bound::Unbounded => Ok(Bound::Unbounded),
+            },
+            other => Err(error::bad_request("Expected Bound but found", other)),
+        }
     }
 }
 
@@ -455,11 +488,6 @@ impl Serialize for Value {
                 }
                 map.end()
             }
-            Value::Range(range) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("/sbin/value/range", &range)?;
-                map.end()
-            }
             Value::TCString(tc_string) => tc_string.serialize(s),
             Value::Tuple(v) => {
                 let mut seq = s.serialize_seq(Some(v.len()))?;
@@ -486,10 +514,6 @@ impl fmt::Display for Value {
             Value::Bound(b) => write!(f, "Bound({:?})", b),
             Value::Class(c) => write!(f, "Class: {}", c),
             Value::Number(n) => write!(f, "Number({})", n),
-            Value::Range((start, end, reverse)) if *reverse => {
-                write!(f, "Range({:?}, {:?})", end, start)
-            }
-            Value::Range((start, end, _)) => write!(f, "Range({:?}, {:?})", start, end),
             Value::TCString(s) => write!(f, "String({})", s),
             Value::Op(op) => write!(f, "Op: {}", op),
             Value::Tuple(v) => write!(

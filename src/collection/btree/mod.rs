@@ -940,8 +940,13 @@ impl Selector {
 }
 
 impl From<Selector> for Value {
-    fn from(_selector: Selector) -> Value {
-        unimplemented!()
+    fn from(selector: Selector) -> Value {
+        match selector {
+            Selector::Key(key) => Value::Tuple(key),
+            Selector::Range(BTreeRange(start, end), reverse) => {
+                Value::Tuple(vec![start.into(), end.into(), reverse.into()])
+            }
+        }
     }
 }
 
@@ -960,8 +965,28 @@ impl From<Key> for Selector {
 impl TryFrom<Value> for Selector {
     type Error = error::TCError;
 
-    fn try_from(_value: Value) -> TCResult<Selector> {
-        Err(error::not_implemented())
+    fn try_from(value: Value) -> TCResult<Selector> {
+        let selector: Vec<Value> = value.try_into()?;
+        match &selector[..] {
+            [start, end] => {
+                let start: TCResult<Vec<Bound<Value>>> = start.clone().try_into();
+                let end: TCResult<Vec<Bound<Value>>> = end.clone().try_into();
+                if start.is_ok() && end.is_ok() {
+                    return Ok(Selector::Range(BTreeRange(start?, end?), false));
+                }
+            }
+            [start, end, reverse] => {
+                let start: TCResult<Vec<Bound<Value>>> = start.clone().try_into();
+                let end: TCResult<Vec<Bound<Value>>> = end.clone().try_into();
+                let reverse: TCResult<bool> = reverse.clone().try_into();
+                if start.is_ok() && end.is_ok() && reverse.is_ok() {
+                    return Ok(Selector::Range(BTreeRange(start?, end?), reverse?));
+                }
+            }
+            _ => {}
+        }
+
+        Ok(Selector::Key(selector))
     }
 }
 

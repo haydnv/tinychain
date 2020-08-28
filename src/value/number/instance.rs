@@ -1404,6 +1404,17 @@ impl From<UInt> for Number {
     }
 }
 
+impl TryFrom<Number> for bool {
+    type Error = error::TCError;
+
+    fn try_from(n: Number) -> TCResult<bool> {
+        match n {
+            Number::Bool(b) => Ok(b.into()),
+            other => Err(error::bad_request("Expected Boolean but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Number> for Boolean {
     type Error = error::TCError;
 
