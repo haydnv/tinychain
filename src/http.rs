@@ -134,13 +134,9 @@ impl Http {
                 println!("POST {}", path);
                 let values = String::from_utf8(hyper::body::to_bytes(request).await?.to_vec())
                     .map_err(|e| error::bad_request("Unable to parse request body", e))?;
-                let values: HashMap<ValueId, Value> =
-                    serde_json::from_str(&values).map_err(|e| {
-                        error::bad_request(
-                            &format!("Deserialization error {} when parsing", e),
-                            values,
-                        )
-                    })?;
+                let values: Vec<(ValueId, Value)> = serde_json::from_str(&values).map_err(|e| {
+                    error::bad_request(&format!("Deserialization error {} when parsing", e), values)
+                })?;
 
                 let capture: Option<Vec<String>> = Http::get_param(&mut params, "capture")?;
                 let capture = if let Some(value_ids) = capture {
