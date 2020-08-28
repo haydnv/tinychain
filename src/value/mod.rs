@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::ops::Bound;
 
 use bytes::Bytes;
 use serde::de;
@@ -22,7 +23,7 @@ pub type Number = number::instance::Number;
 pub type Op = op::Op;
 pub type TCPath = link::TCPath;
 pub type TCString = string::TCString;
-pub type TCRange = (Box<Value>, Box<Value>, bool);
+pub type TCRange = (Bound<Box<Value>>, Bound<Box<Value>>, bool);
 pub type TCRef = reference::TCRef;
 pub type ValueId = string::ValueId;
 pub type ValueType = class::ValueType;
@@ -34,6 +35,7 @@ pub const fn label(id: &'static str) -> string::Label {
 #[derive(Clone, PartialEq)]
 pub enum Value {
     None,
+    Bound(Bound<Box<Value>>),
     Bytes(Bytes),
     Class(TCType),
     Number(Number),
@@ -50,6 +52,7 @@ impl Instance for Value {
         use class::ValueType;
         match self {
             Value::None => ValueType::None,
+            Value::Bound(_) => ValueType::Bound,
             Value::Bytes(_) => ValueType::Bytes,
             Value::Class(_) => ValueType::Class,
             Value::Number(n) => ValueType::Number(n.class()),
@@ -429,6 +432,7 @@ impl Serialize for Value {
     {
         match self {
             Value::None => s.serialize_none(),
+            Value::Bound(b) => b.serialize(s),
             Value::Bytes(b) => {
                 let mut map = s.serialize_map(Some(1))?;
                 map.serialize_entry("/sbin/value/bytes", &[base64::encode(b)])?;
@@ -451,10 +455,9 @@ impl Serialize for Value {
                 }
                 map.end()
             }
-            Value::Range((start, end, reverse)) => {
-                let reverse = Box::new(Value::from(*reverse));
+            Value::Range(range) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("/sbin/value/range", &[start, end, &reverse])?;
+                map.serialize_entry("/sbin/value/range", &range)?;
                 map.end()
             }
             Value::TCString(tc_string) => tc_string.serialize(s),
@@ -480,10 +483,13 @@ impl fmt::Display for Value {
         match self {
             Value::None => write!(f, "None"),
             Value::Bytes(b) => write!(f, "Bytes({})", b.len()),
+            Value::Bound(b) => write!(f, "Bound({:?})", b),
             Value::Class(c) => write!(f, "Class: {}", c),
             Value::Number(n) => write!(f, "Number({})", n),
-            Value::Range((start, end, reverse)) if *reverse => write!(f, "Range({}, {})", end, start),
-            Value::Range((start, end, _)) => write!(f, "Range({}, {})", start, end),
+            Value::Range((start, end, reverse)) if *reverse => {
+                write!(f, "Range({:?}, {:?})", end, start)
+            }
+            Value::Range((start, end, _)) => write!(f, "Range({:?}, {:?})", start, end),
             Value::TCString(s) => write!(f, "String({})", s),
             Value::Op(op) => write!(f, "Op: {}", op),
             Value::Tuple(v) => write!(
