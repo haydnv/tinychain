@@ -145,32 +145,19 @@ impl Http {
                     HashSet::new()
                 };
 
-                let state = self
+                let response = self
                     .gateway
                     .clone()
                     .post(
                         &path.clone().into(),
                         stream::iter(values.into_iter()),
+                        capture,
                         &token,
                         None,
                     )
                     .await?;
 
-                println!("post context has {} states", state.len());
-
-                let response = state
-                    .into_iter()
-                    .filter(move |(name, _)| capture.contains(name))
-                    .map(|(name, state)| {
-                        println!("txn state {}: {}", name, state);
-                        let values: TCStream<Value> = match state {
-                            State::Value(value) => Box::pin(stream::once(future::ready(value))),
-                            _other => Box::pin(stream::empty()),
-                        };
-                        (name, values)
-                    });
-
-                response_map(stream::iter(response))
+                response_map(response)
             }
             other => Err(error::method_not_allowed(format!(
                 "Tinychain does not support {}",

@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::Stream;
 
 use crate::auth::{Auth, Token};
 use crate::block::dir::Dir;
-use crate::class::{State, TCResult};
+use crate::class::{ResponseStream, State, TCResult};
 use crate::error;
 use crate::kernel;
 use crate::transaction::{Txn, TxnId};
@@ -70,9 +70,10 @@ impl Gateway {
         self: Arc<Self>,
         subject: &Link,
         data: S,
+        capture: HashSet<ValueId>,
         auth: &Auth,
         txn_id: Option<TxnId>,
-    ) -> TCResult<HashMap<ValueId, State>> {
+    ) -> TCResult<ResponseStream> {
         println!("Gateway::post {}", subject);
 
         if subject.host().is_none() {
@@ -84,7 +85,7 @@ impl Gateway {
 
             let path = subject.path();
             if path[0] == "sbin" {
-                kernel::post(txn, &path.slice_from(1), data, auth).await
+                kernel::post(txn, &path.slice_from(1), data, capture, auth).await
             } else {
                 Err(error::not_found(path))
             }

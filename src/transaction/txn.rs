@@ -4,8 +4,8 @@ use std::fmt;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use futures::future::{self, TryFutureExt};
-use futures::stream::{FuturesUnordered, Stream, StreamExt};
+use futures::future::{self, try_join_all, TryFutureExt};
+use futures::stream::{self, FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,8 @@ use crate::auth::Auth;
 use crate::block::dir::{Dir, DirEntry};
 use crate::block::file::File;
 use crate::block::BlockData;
-use crate::class::{State, TCBoxTryFuture, TCResult};
+use crate::class::{ResponseStream, State, TCBoxTryFuture, TCResult, TCStream};
+use crate::collection::class::CollectionInstance;
 use crate::collection::Collection;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
@@ -23,8 +24,6 @@ use crate::value::op::{Op, Subject};
 use crate::value::{TCRef, TCString, Value, ValueId};
 
 use super::Transact;
-
-const ERR_CORRUPT: &str = "Transaction corrupted! Please file a bug report.";
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct TxnId {
@@ -217,6 +216,39 @@ impl Txn {
         }
 
         Ok(resolved)
+    }
+
+    pub async fn execute_and_stream<S: Stream<Item = (ValueId, Value)> + Unpin>(
+        self: Arc<Self>,
+        auth: &Auth,
+        parameters: S,
+        mut capture: HashSet<ValueId>,
+    ) -> TCResult<ResponseStream> {
+        let mut txn_state = self.clone().execute(auth, parameters).await?;
+        let mut streams = Vec::with_capacity(capture.len());
+        for value_id in capture.drain() {
+            let this = self.clone();
+            let state = txn_state
+                .remove(&value_id)
+                .ok_or_else(|| error::not_found(&value_id))?;
+
+            streams.push(async move {
+                match state {
+                    State::Collection(collection) => {
+                        let stream: TCStream<Value> = collection.to_stream(this).await?;
+                        TCResult::Ok((value_id, stream))
+                    }
+                    State::Value(value) => {
+                        let stream: TCStream<Value> = Box::pin(stream::once(future::ready(value)));
+                        TCResult::Ok((value_id, stream))
+                    }
+                }
+            });
+        }
+
+        let response = try_join_all(streams).await?;
+        let response: ResponseStream = Box::pin(stream::iter(response));
+        Ok(response)
     }
 
     pub async fn commit(&self) {

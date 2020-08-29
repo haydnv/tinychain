@@ -8,8 +8,9 @@ use futures::stream::Stream;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
 use crate::value::link::{Link, TCPath};
-use crate::value::{label, Value, ValueType};
+use crate::value::{label, Value, ValueId, ValueType};
 
+pub type ResponseStream = TCStream<(ValueId, TCStream<Value>)>;
 pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send + Sync>>;
 pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
 pub type TCResult<T> = Result<T, error::TCError>;
