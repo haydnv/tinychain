@@ -1,8 +1,7 @@
-use std::collections::HashSet;
 use std::fmt;
 
 use super::link::Link;
-use super::{TCRef, TCString, Value};
+use super::{TCRef, Value};
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub enum Subject {
@@ -50,24 +49,6 @@ impl Op {
             Self::Get(_, object) => object,
             Self::Put(_, object, _) => object,
         }
-    }
-
-    pub fn requires(&self) -> HashSet<TCRef> {
-        let mut requires = HashSet::with_capacity(3);
-
-        if let Subject::Ref(subject) = self.subject() {
-            requires.insert(subject.clone());
-        }
-
-        if let Value::TCString(TCString::Ref(object)) = self.object() {
-            requires.insert(object.clone());
-        }
-
-        if let Self::Put(_, _, Value::TCString(TCString::Ref(value))) = self {
-            requires.insert(value.clone());
-        }
-
-        requires
     }
 }
 

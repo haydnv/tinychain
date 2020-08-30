@@ -136,82 +136,87 @@ impl Txn {
 
     pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
-        auth: &Auth,
         mut parameters: S,
+        capture: &HashSet<ValueId>,
+        auth: &Auth,
     ) -> TCResult<HashMap<ValueId, State>> {
         println!("Txn::execute");
 
+        let mut providers = HashMap::new();
+        let mut pending = vec![];
+        let mut ongoing = FuturesUnordered::new();
+        let mut awaiting = HashSet::new();
         let mut resolved = HashMap::new();
-        let mut pending = FuturesUnordered::new();
-        let mut awaiting = HashSet::<ValueId>::new();
 
         while let Some((name, value)) = parameters.next().await {
-            if resolved.contains_key(&name) || awaiting.contains(&name) {
+            if providers.contains_key(&name) {
                 return Err(error::bad_request("Duplicate state identifier", name));
             } else {
                 println!("param {}: {}", name, value);
             }
 
-            match value {
-                Value::TCString(TCString::Ref(tc_ref)) => {
-                    return Err(error::bad_request("Cannot assign to a reference", tc_ref));
+            if capture.contains(&name) {
+                if let Value::Op(provider) = value {
+                    pending.push((name, *provider));
+                } else if let Value::TCString(TCString::Ref(tc_ref)) = value {
+                    return Err(error::bad_request("Cannot assign a reference", tc_ref));
+                } else {
+                    resolved.insert(name, State::Value(value));
                 }
-                Value::Op(op) => {
-                    let mut unresolved: HashSet<ValueId> = op
-                        .requires()
-                        .difference(&resolved.keys().cloned().map(TCRef::from).collect())
-                        .cloned()
-                        .map(ValueId::from)
-                        .collect();
+            } else {
+                providers.insert(name, value);
+            }
 
-                    while !unresolved.is_empty() && !awaiting.is_empty() {
-                        if let Some(result) = pending.next().await {
-                            let (name, state) = result?;
-                            awaiting.remove(&name);
-                            unresolved.remove(&name);
-                            resolved.insert(name, state);
+            while let Some((name, provider)) = pending.pop() {
+                while awaiting.contains(&name) {
+                    if let Some(result) = ongoing.next().await {
+                        let (name, state) = result?;
+                        awaiting.remove(&name);
+                        resolved.insert(name, state);
+                    } else {
+                        return Err(error::not_found(name));
+                    }
+                }
+
+                if resolved.contains_key(&name) {
+                    continue;
+                }
+
+                let resolved_ids: HashSet<ValueId> = resolved.keys().cloned().collect();
+                let mut required: HashSet<ValueId> =
+                    requires(&provider).drain().map(ValueId::from).collect();
+                if required.is_subset(&resolved_ids) {
+                    awaiting.insert(name.clone());
+                    ongoing.push(
+                        self.clone()
+                            .resolve(resolved.clone(), provider, auth.clone())
+                            .map_ok(|state| (name, state)),
+                    );
+                } else {
+                    pending.push((name, provider));
+
+                    for dep in required.drain() {
+                        if resolved.contains_key(&dep) {
+                            continue;
+                        }
+
+                        if let Some(provider) = providers.remove(&dep) {
+                            if let Value::Op(provider) = provider {
+                                pending.push((dep, *provider));
+                            } else {
+                                resolved.insert(dep, State::Value(provider));
+                            }
                         } else {
-                            return Err(error::bad_request(
-                                "Some dependencies could not be resolved",
-                                Value::Tuple(
-                                    unresolved
-                                        .into_iter()
-                                        .map(TCString::from)
-                                        .map(Value::from)
-                                        .collect(),
-                                ),
-                            ));
+                            return Err(error::not_found(dep));
                         }
                     }
-
-                    if unresolved.is_empty() {
-                        awaiting.insert(name.clone());
-                        pending.push(
-                            self.clone()
-                                .resolve(resolved.clone(), *op, auth.clone())
-                                .map_ok(|state| (name, state)),
-                        );
-                    } else {
-                        return Err(error::bad_request(
-                            "Some dependencies could not be resolved",
-                            Value::Tuple(
-                                unresolved
-                                    .into_iter()
-                                    .map(TCString::from)
-                                    .map(Value::from)
-                                    .collect(),
-                            ),
-                        ));
-                    }
-                }
-                value => {
-                    resolved.insert(name, value.into());
                 }
             }
         }
 
-        while let Some(result) = pending.next().await {
+        while let Some(result) = ongoing.next().await {
             let (name, state) = result?;
+            awaiting.remove(&name);
             resolved.insert(name, state);
         }
 
@@ -220,11 +225,11 @@ impl Txn {
 
     pub async fn execute_and_stream<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
-        auth: &Auth,
         parameters: S,
         mut capture: HashSet<ValueId>,
+        auth: &Auth,
     ) -> TCResult<ResponseStream> {
-        let mut txn_state = self.clone().execute(auth, parameters).await?;
+        let mut txn_state = self.clone().execute(parameters, &capture, auth).await?;
         let mut streams = Vec::with_capacity(capture.len());
         for value_id in capture.drain() {
             let this = self.clone();
@@ -350,4 +355,22 @@ fn resolve_value<'a>(
         },
         other => Ok(other),
     }
+}
+
+fn requires(op: &Op) -> HashSet<TCRef> {
+    let mut requires = HashSet::with_capacity(3);
+
+    if let Subject::Ref(subject) = op.subject() {
+        requires.insert(subject.clone());
+    }
+
+    if let Value::TCString(TCString::Ref(object)) = op.object() {
+        requires.insert(object.clone());
+    }
+
+    if let Op::Put(_, _, Value::TCString(TCString::Ref(value))) = op {
+        requires.insert(value.clone());
+    }
+
+    requires
 }

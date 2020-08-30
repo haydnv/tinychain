@@ -50,7 +50,7 @@ async fn transact<S: Stream<Item = (ValueId, Value)> + Unpin>(
     capture: HashSet<ValueId>,
     auth: &Auth,
 ) -> TCResult<ResponseStream> {
-    match txn.clone().execute_and_stream(auth, values, capture).await {
+    match txn.clone().execute_and_stream(values, capture, auth).await {
         Ok(response) => {
             txn.commit().await;
             Ok(response)
