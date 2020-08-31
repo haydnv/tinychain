@@ -161,6 +161,28 @@ impl Collator {
                         return Greater;
                     }
                 }
+                ValueType::TCString(st) => match st {
+                    StringType::Id => {
+                        let left: &ValueId = (&key1[i]).try_into().unwrap();
+                        let right: &ValueId = (&key2[i]).try_into().unwrap();
+                        match left.cmp(&right) {
+                            Less => return Less,
+                            Greater => return Greater,
+                            _ => {}
+                        }
+                    }
+                    StringType::UString => {
+                        // TODO: add support for localized collation
+                        let left: &String = (&key1[i]).try_into().unwrap();
+                        let right: &String = (&key2[i]).try_into().unwrap();
+                        match left.cmp(&right) {
+                            Less => return Less,
+                            Greater => return Greater,
+                            _ => {}
+                        }
+                    }
+                    _ => panic!("Collator::compare does not support {}", self.schema[i]),
+                }
                 _ => panic!("Collator::compare does not support {}", self.schema[i]),
             }
         }

@@ -315,7 +315,10 @@ impl Txn {
                         .get(&tc_ref.clone().into())
                         .ok_or_else(|| error::not_found(tc_ref))?;
                     if let State::Collection(collection) = subject {
-                        collection.get(self.clone(), object).await
+                        collection
+                            .get(self.clone(), object)
+                            .map_ok(|view| State::Collection(view.into()))
+                            .await
                     } else {
                         Err(error::bad_request("Value does not support GET", subject))
                     }
@@ -346,9 +349,9 @@ impl Txn {
                             self.mutate(collection.clone()).await;
 
                             collection
-                                .put(&self, &object, value)
-                                .await
-                                .map(State::Collection)
+                                .put(self.clone(), object, value.try_into()?)
+                                .await?;
+                            Ok(State::Value(Value::None))
                         } else {
                             Err(error::bad_request("Value does not support GET", subject))
                         }

@@ -146,8 +146,8 @@ fn validate_prefix(prefix: &[Value], schema: &[Column]) -> TCResult<()> {
     for (val, col) in prefix.iter().zip(&schema[0..prefix.len()]) {
         if !val.is_a(*col.dtype()) {
             return Err(error::bad_request(
-                &format!("Expected {} for", col.dtype()),
-                col.name(),
+                &format!("Expected {} for {}, found", col.dtype(), col.name()),
+                val,
             ));
         }
 

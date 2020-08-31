@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::StreamExt;
 
-use crate::class::{Instance, State, TCResult, TCStream};
+use crate::class::{Instance, TCResult, TCStream};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::Value;
@@ -207,16 +207,6 @@ impl fmt::Display for CollectionView {
 pub enum Collection {
     Base(CollectionBase),
     View(CollectionView),
-}
-
-impl Collection {
-    pub async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<State> {
-        Err(error::not_implemented("Collection::get"))
-    }
-
-    pub async fn put(&self, _txn: &Arc<Txn>, _selector: &Value, _state: State) -> TCResult<Self> {
-        Err(error::not_implemented("Collection::put"))
-    }
 }
 
 impl Instance for Collection {

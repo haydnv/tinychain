@@ -141,6 +141,17 @@ impl From<Value> for State {
     }
 }
 
+impl TryFrom<State> for Value {
+    type Error = error::TCError;
+
+    fn try_from(state: State) -> TCResult<Value> {
+        match state {
+            State::Value(value) => Ok(value),
+            other => Err(error::bad_request("Expected Value but found", other)),
+        }
+    }
+}
+
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

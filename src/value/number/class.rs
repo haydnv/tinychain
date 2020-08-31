@@ -725,7 +725,7 @@ impl Class for NumberType {
                 "complex" => ComplexType::from_path(&subpath),
                 "float" => FloatType::from_path(&subpath),
                 "int" => IntType::from_path(&subpath),
-                "uint" => IntType::from_path(&subpath),
+                "uint" => UIntType::from_path(&subpath),
                 other => Err(error::not_found(other)),
             }
         } else {
