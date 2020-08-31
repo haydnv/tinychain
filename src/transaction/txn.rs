@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::Hash;
@@ -21,7 +21,7 @@ use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
 use crate::value::link::PathSegment;
 use crate::value::op::{Op, Subject};
-use crate::value::{TCRef, TCString, Value, ValueId};
+use crate::value::{TCString, Value, ValueId};
 
 use super::Transact;
 
@@ -140,87 +140,90 @@ impl Txn {
         capture: &HashSet<ValueId>,
         auth: &Auth,
     ) -> TCResult<HashMap<ValueId, State>> {
+        // TODO: use a Graph here and queue every op absolutely as soon as it's ready
+
         println!("Txn::execute");
 
-        let mut providers = HashMap::new();
-        let mut pending = vec![];
-        let mut ongoing = FuturesUnordered::new();
-        let mut awaiting = HashSet::new();
-        let mut resolved = HashMap::new();
-
+        let mut graph = HashMap::new();
         while let Some((name, value)) = parameters.next().await {
-            if providers.contains_key(&name) {
-                return Err(error::bad_request("Duplicate state identifier", name));
-            } else {
-                println!("param {}: {}", name, value);
+            if let Value::TCString(TCString::Ref(tc_ref)) = value {
+                return Err(error::bad_request("Cannot assign a Ref", tc_ref));
             }
 
-            if capture.contains(&name) {
-                if let Value::Op(provider) = value {
-                    pending.push((name, *provider));
-                } else if let Value::TCString(TCString::Ref(tc_ref)) = value {
-                    return Err(error::bad_request("Cannot assign a reference", tc_ref));
-                } else {
-                    resolved.insert(name, State::Value(value));
-                }
-            } else {
-                providers.insert(name, value);
+            graph.insert(name, State::Value(value));
+        }
+
+        for name in capture {
+            if !graph.contains_key(&name) {
+                return Err(error::not_found(&name));
             }
+        }
 
-            while let Some((name, provider)) = pending.pop() {
-                while awaiting.contains(&name) {
-                    if let Some(result) = ongoing.next().await {
-                        let (name, state) = result?;
-                        awaiting.remove(&name);
-                        resolved.insert(name, state);
-                    } else {
-                        return Err(error::not_found(name));
-                    }
-                }
+        let mut pending = FuturesUnordered::new();
 
-                if resolved.contains_key(&name) {
-                    continue;
-                }
+        loop {
+            let mut visited = HashSet::new();
+            let mut unvisited = Vec::with_capacity(graph.len());
 
-                let resolved_ids: HashSet<ValueId> = resolved.keys().cloned().collect();
-                let mut required: HashSet<ValueId> =
-                    requires(&provider).drain().map(ValueId::from).collect();
-                if required.is_subset(&resolved_ids) {
-                    awaiting.insert(name.clone());
-                    ongoing.push(
-                        self.clone()
-                            .resolve(resolved.clone(), provider, auth.clone())
-                            .map_ok(|state| (name, state)),
-                    );
-                } else {
-                    pending.push((name, provider));
+            let start = capture
+                .iter()
+                .filter_map(|name| graph.get_key_value(name))
+                .filter_map(|(name, state)| match state {
+                    State::Value(Value::Op(_)) => Some(name),
+                    _ => None,
+                })
+                .next();
 
-                    for dep in required.drain() {
-                        if resolved.contains_key(&dep) {
-                            continue;
-                        }
+            let start = if let Some(start) = start {
+                start
+            } else {
+                break;
+            };
 
-                        if let Some(provider) = providers.remove(&dep) {
-                            if let Value::Op(provider) = provider {
-                                pending.push((dep, *provider));
-                            } else {
-                                resolved.insert(dep, State::Value(provider));
-                            }
+            unvisited.push(start.clone());
+            while let Some(name) = unvisited.pop() {
+                visited.insert(name.clone());
+
+                let state = graph.get(&name).ok_or_else(|| error::not_found(&name))?;
+                if let State::Value(Value::Op(op)) = state {
+                    let mut ready = true;
+                    for dep in requires(op) {
+                        let dep_state =
+                            graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
+                        let resolved = if let State::Value(Value::Op(_)) = dep_state {
+                            false
                         } else {
-                            return Err(error::not_found(dep));
+                            true
+                        };
+
+                        if !resolved {
+                            ready = false;
+                            if !visited.contains(&dep) {
+                                unvisited.push(dep);
+                            }
                         }
+                    }
+
+                    if ready {
+                        pending.push(
+                            self.clone()
+                                .resolve(graph.clone(), *op.clone(), auth.clone())
+                                .map_ok(|state| (name, state)),
+                        );
                     }
                 }
             }
+
+            while let Some(result) = pending.next().await {
+                let (name, state) = result?;
+                graph.insert(name, state);
+            }
         }
 
-        while let Some(result) = ongoing.next().await {
-            let (name, state) = result?;
-            awaiting.remove(&name);
-            resolved.insert(name, state);
-        }
-
-        Ok(resolved)
+        Ok(graph
+            .drain()
+            .filter(|(name, _state)| capture.contains(name))
+            .collect())
     }
 
     pub async fn execute_and_stream<S: Stream<Item = (ValueId, Value)> + Unpin>(
@@ -357,19 +360,19 @@ fn resolve_value<'a>(
     }
 }
 
-fn requires(op: &Op) -> HashSet<TCRef> {
-    let mut requires = HashSet::with_capacity(3);
+fn requires(op: &Op) -> BTreeSet<ValueId> {
+    let mut requires = BTreeSet::new();
 
     if let Subject::Ref(subject) = op.subject() {
-        requires.insert(subject.clone());
+        requires.insert(subject.value_id().clone());
     }
 
     if let Value::TCString(TCString::Ref(object)) = op.object() {
-        requires.insert(object.clone());
+        requires.insert(object.value_id().clone());
     }
 
     if let Op::Put(_, _, Value::TCString(TCString::Ref(value))) = op {
-        requires.insert(value.clone());
+        requires.insert(value.value_id().clone());
     }
 
     requires
