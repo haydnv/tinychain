@@ -343,7 +343,7 @@ impl BTreeFile {
             schema,
             order,
             collator,
-            root: TxnLock::new(txn.id().clone(), root.into()),
+            root: TxnLock::new("BTree root".to_string(), root.into()),
         })
     }
 

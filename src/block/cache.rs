@@ -23,8 +23,8 @@ impl<T: BlockData> Cache<T> {
         self.blocks.get(block_id).cloned()
     }
 
-    pub fn insert(&mut self, txn_id: TxnId, block_id: BlockId, block: T) -> TxnLock<T> {
-        let lock = TxnLock::new(txn_id, block);
+    pub fn insert(&mut self, block_id: BlockId, block: T) -> TxnLock<T> {
+        let lock = TxnLock::new(format!("Block {}", &block_id), block);
         self.blocks.insert(block_id, lock.clone());
         lock
     }

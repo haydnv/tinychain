@@ -125,11 +125,11 @@ pub struct Dir {
 }
 
 impl Dir {
-    pub fn create(txn_id: TxnId, cache: RwLock<hostfs::Dir>, temporary: bool) -> Arc<Dir> {
+    pub fn create(cache: RwLock<hostfs::Dir>, temporary: bool) -> Arc<Dir> {
         Arc::new(Dir {
             cache,
             temporary,
-            contents: TxnLock::new(txn_id, DirContents(HashMap::new())),
+            contents: TxnLock::new("Dir".to_string(), DirContents(HashMap::new())),
         })
     }
 
@@ -210,7 +210,7 @@ impl Dir {
                 match contents.entry(path[0].clone()) {
                     Entry::Vacant(entry) => {
                         let fs_dir = self.cache.write().await.create_dir(path[0].clone())?;
-                        let new_dir = Dir::create(txn_id.clone(), fs_dir, self.temporary);
+                        let new_dir = Dir::create(fs_dir, self.temporary);
                         entry.insert(DirEntry::Dir(new_dir.clone()));
                         Ok(new_dir)
                     }
@@ -240,7 +240,7 @@ impl Dir {
         match contents.entry(name) {
             Entry::Vacant(entry) => {
                 let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
-                let file: Arc<File<T>> = File::create(txn_id, fs_cache).await?;
+                let file: Arc<File<T>> = File::create(entry.key().as_str(), fs_cache).await?;
                 entry.insert(file.clone().into());
                 Ok(file)
             }

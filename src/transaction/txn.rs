@@ -39,6 +39,13 @@ impl TxnId {
             nonce: rand::thread_rng().gen(),
         }
     }
+
+    pub fn zero() -> TxnId {
+        TxnId {
+            timestamp: 0,
+            nonce: 0,
+        }
+    }
 }
 
 impl Ord for TxnId {

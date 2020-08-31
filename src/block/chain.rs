@@ -42,7 +42,7 @@ pub struct Chain {
 impl Chain {
     pub async fn create(txn: Arc<Txn>, collection: CollectionBase) -> TCResult<Chain> {
         let file = txn.context().await?;
-        let latest_block = TxnLock::new(txn.id().clone(), 0.into());
+        let latest_block = TxnLock::new(format!("Chain: {}", &collection), 0.into());
         Ok(Chain {
             file,
             collection,

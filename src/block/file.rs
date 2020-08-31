@@ -30,7 +30,7 @@ pub struct File<T: BlockData> {
 }
 
 impl<T: BlockData> File<T> {
-    pub async fn create(txn_id: TxnId, dir: RwLock<hostfs::Dir>) -> TCResult<Arc<File<T>>> {
+    pub async fn create(name: &str, dir: RwLock<hostfs::Dir>) -> TCResult<Arc<File<T>>> {
         let mut lock = dir.write().await;
         if !lock.is_empty() {
             return Err(error::bad_request(
@@ -42,9 +42,9 @@ impl<T: BlockData> File<T> {
         Ok(Arc::new(File {
             dir,
             pending: lock.create_dir(TXN_CACHE.parse()?)?,
-            listing: TxnLock::new(txn_id.clone(), HashSet::new().into()),
+            listing: TxnLock::new(format!("File listing for {}", name), HashSet::new().into()),
             cache: RwLock::new(Cache::new()),
-            mutated: TxnLock::new(txn_id, HashSet::new().into()),
+            mutated: TxnLock::new("File mutated contents".to_string(), HashSet::new().into()),
         }))
     }
 
@@ -88,11 +88,8 @@ impl<T: BlockData> File<T> {
             ));
         }
         listing.insert(block_id.clone());
-        let txn_lock = self
-            .cache
-            .write()
-            .await
-            .insert(txn_id.clone(), block_id.clone(), data);
+
+        let txn_lock = self.cache.write().await.insert(block_id.clone(), data);
         let lock = txn_lock.read(&txn_id).await?;
         Ok(Block::new(self, block_id, lock))
     }
@@ -143,11 +140,7 @@ impl<T: BlockData> File<T> {
                 };
 
             let block: T = block.read().await.deref().clone().try_into()?;
-            let txn_lock = self
-                .cache
-                .write()
-                .await
-                .insert(txn_id.clone(), block_id.clone(), block);
+            let txn_lock = self.cache.write().await.insert(block_id.clone(), block);
             txn_lock.read(txn_id).await
         } else {
             Err(error::not_found(block_id))

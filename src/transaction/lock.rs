@@ -158,7 +158,7 @@ impl<T: Mutate> DerefMut for TxnLockWriteGuard<T> {
 impl<T: Mutate> Drop for TxnLockWriteGuard<T> {
     fn drop(&mut self) {
         let lock = &mut self.lock.inner.lock().unwrap();
-        lock.state.writer = false;
+        lock.state.reserved = None;
 
         while let Some(waker) = lock.state.wakers.pop_front() {
             waker.wake()
@@ -169,10 +169,9 @@ impl<T: Mutate> Drop for TxnLockWriteGuard<T> {
 }
 
 struct LockState {
-    last_commit: TxnId,
+    last_commit: Option<TxnId>,
     readers: BTreeMap<TxnId, usize>,
     reserved: Option<TxnId>,
-    writer: bool,
     wakers: VecDeque<Waker>,
 }
 
@@ -183,24 +182,25 @@ struct Inner<T: Mutate> {
 }
 
 pub struct TxnLock<T: Mutate> {
+    name: String,
     inner: Arc<Mutex<Inner<T>>>,
 }
 
 impl<T: Mutate> Clone for TxnLock<T> {
     fn clone(&self) -> Self {
         TxnLock {
+            name: self.name.clone(),
             inner: self.inner.clone(),
         }
     }
 }
 
 impl<T: Mutate> TxnLock<T> {
-    pub fn new(last_commit: TxnId, value: T) -> TxnLock<T> {
+    pub fn new(name: String, value: T) -> TxnLock<T> {
         let state = LockState {
-            last_commit,
+            last_commit: None,
             readers: BTreeMap::new(),
             reserved: None,
-            writer: false,
             wakers: VecDeque::new(),
         };
 
@@ -211,6 +211,7 @@ impl<T: Mutate> TxnLock<T> {
         };
 
         TxnLock {
+            name,
             inner: Arc::new(Mutex::new(inner)),
         }
     }
@@ -220,20 +221,28 @@ impl<T: Mutate> TxnLock<T> {
     }
 
     pub fn try_read(&self, txn_id: &TxnId) -> TCResult<Option<TxnLockReadGuard<T>>> {
-        println!("TxnLock::try_read");
+        println!("TxnLock::try_read {} at {}", &self.name, txn_id);
 
         let lock = &mut self.inner.lock().unwrap();
 
-        if txn_id < &lock.state.last_commit && !lock.value_at.contains_key(txn_id) {
+        if !lock.value_at.contains_key(txn_id)
+            && txn_id < lock.state.last_commit.as_ref().unwrap_or(&TxnId::zero())
+        {
             // If the requested time is too old, just return an error.
             // We can't keep track of every historical version here.
             Err(error::conflict())
         } else if lock.state.reserved.is_some() && txn_id >= lock.state.reserved.as_ref().unwrap() {
+            println!(
+                "TxnLock {} is already reserved for writing at {}",
+                &self.name,
+                lock.state.reserved.as_ref().unwrap()
+            );
             // If a writer can mutate the locked value at the requested time, wait it out.
             Ok(None)
         } else {
             // Otherwise, return a ReadGuard.
             if !lock.value_at.contains_key(txn_id) {
+                println!("setting lock value for TxnLock {} at {}", &self.name, txn_id);
                 let value_at_txn_id =
                     UnsafeCell::new(unsafe { (&*lock.value.get()).diverge(txn_id) });
                 lock.value_at.insert(txn_id.clone(), value_at_txn_id);
@@ -255,7 +264,7 @@ impl<T: Mutate> TxnLock<T> {
     }
 
     pub fn try_write<'a>(&self, txn_id: &'a TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
-        println!("TxnLock::try_write");
+        println!("TxnLock::try_write {} at {}", &self.name, txn_id);
 
         let lock = &mut self.inner.lock().unwrap();
         let latest_reader = lock.state.readers.keys().max();
@@ -270,17 +279,24 @@ impl<T: Mutate> TxnLock<T> {
             Some(current_txn) if current_txn > txn_id => Err(error::conflict()),
             // If there's a writer in the past, wait for it to complete.
             Some(current_txn) if current_txn < txn_id => {
-                println!("TxnLock::write at {} blocked on {}", txn_id, current_txn);
+                println!(
+                    "TxnLock::write {} at {} blocked on {}",
+                    &self.name, txn_id, current_txn
+                );
                 Ok(None)
             }
             // If there's already a writer for the current transaction, wait for it to complete.
-            Some(_) if lock.state.writer => {
-                println!("TxnLock::write waiting on existing write lock");
+            Some(_) => {
+                println!(
+                    "TxnLock::write {} at {} waiting on existing write lock",
+                    &self.name,
+                    txn_id,
+                );
                 Ok(None)
             }
             _ => {
+                println!("reserving write lock for {} at {}", &self.name, txn_id);
                 // Otherwise, copy the value to be mutated in this transaction.
-                lock.state.writer = true;
                 lock.state.reserved = Some(txn_id.clone());
                 if !lock.value_at.contains_key(txn_id) {
                     let mutation = UnsafeCell::new(unsafe { (&*lock.value.get()).diverge(txn_id) });
@@ -306,14 +322,21 @@ impl<T: Mutate> TxnLock<T> {
 #[async_trait]
 impl<T: Mutate> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
-        println!("TxnLock::commit {}", txn_id);
+        println!("TxnLock::commit {} at {}", &self.name, txn_id);
 
         async {
-            let _ = self.write(txn_id.clone()).await; // prevent any more writes
+            println!("TxnLock::commit {} getting read lock at {}...", &self.name, txn_id);
+            self.read(txn_id).await.unwrap(); // make sure there's no active write lock
             let lock = &mut self.inner.lock().unwrap();
-            lock.state.last_commit = txn_id.clone();
-            lock.state.reserved = None;
+            assert!(lock.state.reserved.is_none());
+            if let Some(last_commit) = &lock.state.last_commit {
+                assert!(last_commit < txn_id);
+            }
+            println!("got inner lock for {}: {}", &self.name, txn_id);
+            lock.state.last_commit = Some(txn_id.clone());
+            println!("freed write lock reservation {} at {}", &self.name, txn_id);
 
+            println!("updating value of {}", &self.name);
             if let Some(new_value) = lock.value_at.remove(txn_id) {
                 let value = unsafe { &mut *lock.value.get() };
                 value.converge(new_value.into_inner())
@@ -322,13 +345,20 @@ impl<T: Mutate> Transact for TxnLock<T> {
             }
         }
         .await
-        .await
+        .await;
+
+        let lock = &mut self.inner.lock().unwrap();
+
+        while let Some(waker) = lock.state.wakers.pop_front() {
+            waker.wake()
+        }
+
+        lock.state.wakers.shrink_to_fit()
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        println!("TxnLock::rollback {}", txn_id);
-
-        let _ = self.write(txn_id.clone()).await; // prevent any more writes
+        println!("TxnLock::rollback {}: {}", &self.name, txn_id);
+        self.read(txn_id).await.unwrap(); // make sure there's no active write lock
         let lock = &mut self.inner.lock().unwrap();
         lock.value_at.remove(txn_id);
     }

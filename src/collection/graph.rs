@@ -63,7 +63,7 @@ impl Graph {
         .into_iter()
         .collect();
 
-        let max_id = TxnLock::new(txn.id().clone(), 0u64.into());
+        let max_id = TxnLock::new("Graph max id".to_string(), 0u64.into());
 
         let node_id_schema: IndexSchema = (
             vec![(NODE_KEY.into(), ValueType::Tuple).into()],

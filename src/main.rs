@@ -72,9 +72,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let txn_id = transaction::TxnId::new(gateway::Gateway::time());
     let fs_cache_persistent = block::hostfs::mount(config.data_dir);
-    let data_dir = block::dir::Dir::create(txn_id.clone(), fs_cache_persistent, false);
+    let data_dir = block::dir::Dir::create(fs_cache_persistent, false);
     let fs_cache_temporary = block::hostfs::mount(config.workspace);
-    let workspace = block::dir::Dir::create(txn_id.clone(), fs_cache_temporary, true);
+    let workspace = block::dir::Dir::create(fs_cache_temporary, true);
 
     use transaction::Transact;
     data_dir.commit(&txn_id).await;

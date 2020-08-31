@@ -182,7 +182,7 @@ impl Collator {
                         }
                     }
                     _ => panic!("Collator::compare does not support {}", self.schema[i]),
-                }
+                },
                 _ => panic!("Collator::compare does not support {}", self.schema[i]),
             }
         }
