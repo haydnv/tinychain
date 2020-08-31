@@ -32,29 +32,19 @@ impl From<Link> for Subject {
 
 #[derive(Clone, PartialEq)]
 pub enum Op {
+    If(TCRef, Value, Value),
     Get(Subject, Value),
     Put(Subject, Value, Value),
-}
-
-impl Op {
-    pub fn subject(&'_ self) -> &'_ Subject {
-        match self {
-            Self::Get(subject, _) => subject,
-            Self::Put(subject, _, _) => subject,
-        }
-    }
-
-    pub fn object(&'_ self) -> &'_ Value {
-        match self {
-            Self::Get(_, object) => object,
-            Self::Put(_, object, _) => object,
-        }
-    }
 }
 
 impl fmt::Display for Op {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Op::If(cond, then, or_else) => write!(
+                f,
+                "Op::If({} then {{ {} }} else {{ {} }})",
+                cond, then, or_else
+            ),
             Op::Get(subject, id) => write!(f, "Op::Get {}: {}", subject, id),
             Op::Put(subject, id, val) => write!(f, "Op::Put {}: {} <- {}", subject, id, val),
         }

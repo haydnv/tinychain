@@ -69,6 +69,12 @@ impl From<Boolean> for bool {
     }
 }
 
+impl From<&Boolean> for bool {
+    fn from(b: &Boolean) -> bool {
+        b.0
+    }
+}
+
 impl Eq for Boolean {}
 
 impl Add for Boolean {

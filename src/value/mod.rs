@@ -119,6 +119,13 @@ impl From<TCString> for Value {
     }
 }
 
+impl From<TCRef> for Value {
+    fn from(r: TCRef) -> Value {
+        let s: TCString = r.into();
+        s.into()
+    }
+}
+
 impl From<ValueId> for Value {
     fn from(v: ValueId) -> Value {
         let s: TCString = v.into();
@@ -501,6 +508,10 @@ impl Serialize for Value {
             Value::Op(op) => {
                 let mut map = s.serialize_map(Some(1))?;
                 match &**op {
+                    op::Op::If(cond, then, or_else) => map.serialize_entry(
+                        "/sbin/value/op/if",
+                        &[&Value::from(cond.clone()), then, or_else],
+                    )?,
                     op::Op::Get(subject, selector) => {
                         map.serialize_entry(&subject.to_string(), &[selector])?
                     }

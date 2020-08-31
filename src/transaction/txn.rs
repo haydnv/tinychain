@@ -1,7 +1,8 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::Hash;
+use std::iter;
 use std::sync::Arc;
 
 use futures::future::{self, try_join_all, TryFutureExt};
@@ -21,7 +22,7 @@ use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
 use crate::value::link::PathSegment;
 use crate::value::op::{Op, Subject};
-use crate::value::{TCString, Value, ValueId};
+use crate::value::{Number, TCString, Value, ValueId};
 
 use super::Transact;
 
@@ -187,9 +188,8 @@ impl Txn {
                 let state = graph.get(&name).ok_or_else(|| error::not_found(&name))?;
                 if let State::Value(Value::Op(op)) = state {
                     let mut ready = true;
-                    for dep in requires(op) {
-                        let dep_state =
-                            graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
+                    for dep in requires(op, &graph)? {
+                        let dep_state = graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
                         let resolved = if let State::Value(Value::Op(_)) = dep_state {
                             false
                         } else {
@@ -286,6 +286,23 @@ impl Txn {
         println!("Txn::resolve {}", provider);
 
         match provider {
+            Op::If(cond, then, or_else) => {
+                let cond = provided
+                    .get(cond.value_id())
+                    .ok_or_else(|| error::not_found(cond))?;
+                if let State::Value(Value::Number(Number::Bool(cond))) = cond {
+                    if cond.into() {
+                        Ok(State::Value(then))
+                    } else {
+                        Ok(State::Value(or_else))
+                    }
+                } else {
+                    Err(error::bad_request(
+                        "Expected a boolean condition but found",
+                        cond,
+                    ))
+                }
+            }
             Op::Get(subject, object) => match subject {
                 Subject::Link(link) => {
                     let object = resolve_value(&provided, &object)?.clone();
@@ -360,20 +377,48 @@ fn resolve_value<'a>(
     }
 }
 
-fn requires(op: &Op) -> BTreeSet<ValueId> {
-    let mut requires = BTreeSet::new();
+fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<ValueId>> {
+    let mut deps = HashSet::new();
 
-    if let Subject::Ref(subject) = op.subject() {
-        requires.insert(subject.value_id().clone());
+    match op {
+        Op::If(cond, then, or_else) => {
+            let cond_state = txn_state
+                .get(cond.value_id())
+                .ok_or_else(|| error::not_found(cond))?;
+            if let State::Value(Value::Op(cond_op)) = cond_state {
+                deps.extend(requires(cond_op, txn_state)?);
+            } else {
+                deps.extend(value_requires(then, txn_state)?);
+                deps.extend(value_requires(or_else, txn_state)?);
+            }
+        }
+        Op::Get(subject, object) => {
+            if let Subject::Ref(tc_ref) = subject {
+                deps.insert(tc_ref.value_id().clone());
+            }
+            deps.extend(value_requires(object, txn_state)?);
+        }
+        Op::Put(subject, object, value) => {
+            if let Subject::Ref(tc_ref) = subject {
+                deps.insert(tc_ref.value_id().clone());
+            }
+            deps.extend(value_requires(object, txn_state)?);
+            deps.extend(value_requires(value, txn_state)?);
+        }
     }
 
-    if let Value::TCString(TCString::Ref(object)) = op.object() {
-        requires.insert(object.value_id().clone());
-    }
+    Ok(deps)
+}
 
-    if let Op::Put(_, _, Value::TCString(TCString::Ref(value))) = op {
-        requires.insert(value.value_id().clone());
+fn value_requires(
+    value: &Value,
+    txn_state: &HashMap<ValueId, State>,
+) -> TCResult<HashSet<ValueId>> {
+    match value {
+        Value::Op(op) => requires(op, txn_state),
+        Value::TCString(TCString::Ref(tc_ref)) => {
+            Ok(iter::once(tc_ref.value_id().clone()).collect())
+        }
+        _ => Ok(HashSet::new()),
     }
-
-    requires
 }
