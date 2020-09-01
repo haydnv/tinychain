@@ -1,21 +1,22 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, join};
 
-use crate::class::{TCBoxTryFuture, TCResult, TCStream};
+use crate::class::*;
 use crate::collection::btree::{BTreeFile, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{Value, ValueId};
+use crate::value::{label, Link, TCPath, Value, ValueId};
 
 use super::bounds::{self, Bounds};
 use super::index::TableIndex;
-use super::{Table, TableInstance};
+use super::{Table, TableInstance, TableType};
 
 const ERR_AGGREGATE_SLICE: &str = "Table aggregate does not support slicing. \
 Consider aggregating a slice of the source table.";
@@ -36,6 +37,37 @@ pub enum TableViewType {
     TableSlice,
 }
 
+impl Class for TableViewType {
+    type Instance = TableView;
+
+    fn from_path(_path: &TCPath) -> TCResult<TCType> {
+        Err(error::internal(crate::class::ERR_PROTECTED))
+    }
+
+    fn prefix() -> TCPath {
+        TableType::prefix()
+    }
+}
+
+impl From<TableViewType> for Link {
+    fn from(_tvt: TableViewType) -> Link {
+        TableViewType::prefix().join(label("index").into()).into()
+    }
+}
+
+impl fmt::Display for TableViewType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Aggregate => write!(f, "Table or Index Aggregate"),
+            Self::IndexSlice => write!(f, "Index Slice"),
+            Self::Limit => write!(f, "Table or Index Limit Selection"),
+            Self::Merge => write!(f, "Table Merge Selection"),
+            Self::Selection => write!(f, "Table or Index Column Selection"),
+            Self::TableSlice => write!(f, "Table Slice"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum TableView {
     Aggregate(Aggregate),
@@ -44,6 +76,22 @@ pub enum TableView {
     Merge(Merged),
     Selection(Selection),
     TableSlice(TableSlice),
+}
+
+impl Instance for TableView {
+    type Class = TableViewType;
+
+    fn class(&self) -> Self::Class {
+        use TableViewType::*;
+        match self {
+            Self::Aggregate(_) => Aggregate,
+            Self::IndexSlice(_) => IndexSlice,
+            Self::Limit(_) => Limit,
+            Self::Merge(_) => Merge,
+            Self::Selection(_) => Selection,
+            Self::TableSlice(_) => TableSlice,
+        }
+    }
 }
 
 impl TableInstance for TableView {

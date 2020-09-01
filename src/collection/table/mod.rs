@@ -1,14 +1,15 @@
 use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
 
-use crate::class::{TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream, TCType};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{Value, ValueId};
+use crate::value::{Link, TCPath, Value, ValueId};
 
 use super::schema::{Column, Row, TableSchema};
 
@@ -30,6 +31,49 @@ pub type TableIndex = index::TableIndex;
 pub enum TableType {
     Base(index::TableBaseType),
     View(view::TableViewType),
+}
+
+impl Class for TableType {
+    type Instance = Table;
+
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        index::TableBaseType::from_path(path)
+    }
+
+    fn prefix() -> TCPath {
+        index::TableBaseType::prefix()
+    }
+}
+
+impl From<index::TableBaseType> for TableType {
+    fn from(tbt: index::TableBaseType) -> TableType {
+        TableType::Base(tbt)
+    }
+}
+
+impl From<view::TableViewType> for TableType {
+    fn from(tvt: view::TableViewType) -> TableType {
+        TableType::View(tvt)
+    }
+}
+
+impl From<TableType> for Link {
+    fn from(tt: TableType) -> Link {
+        use TableType::*;
+        match tt {
+            Base(base) => base.into(),
+            View(view) => view.into(),
+        }
+    }
+}
+
+impl fmt::Display for TableType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Base(base) => write!(f, "{}", base),
+            Self::View(view) => write!(f, "{}", view),
+        }
+    }
 }
 
 pub trait TableInstance: Clone + Into<Table> + Sized + Send + Sync + 'static {
@@ -118,6 +162,17 @@ pub enum Table {
 impl Table {
     pub async fn create(txn: Arc<Txn>, schema: TableSchema) -> TCResult<TableIndex> {
         index::TableIndex::create(txn, schema).await
+    }
+}
+
+impl Instance for Table {
+    type Class = TableType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::Base(base) => base.class().into(),
+            Self::View(view) => view.class().into(),
+        }
     }
 }
 

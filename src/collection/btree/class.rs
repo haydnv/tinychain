@@ -57,14 +57,8 @@ impl From<BTreeType> for CollectionType {
 }
 
 impl From<BTreeType> for Link {
-    fn from(btt: BTreeType) -> Link {
-        let prefix = BTreeType::prefix();
-
-        use BTreeType::*;
-        match btt {
-            Tree => prefix.into(),
-            Slice => prefix.join(label("slice").into()).into(),
-        }
+    fn from(_btt: BTreeType) -> Link {
+        BTreeType::prefix().into()
     }
 }
 

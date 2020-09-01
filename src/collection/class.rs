@@ -13,9 +13,6 @@ use crate::value::{label, Value};
 use super::btree::{BTreeFile, BTreeType};
 use super::{Collection, CollectionBase, CollectionView};
 
-const ERR_PROTECTED: &str = "You have accessed a protected class. This should not be possible. \
-Please file a bug report.";
-
 #[async_trait]
 pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
     type Instance: CollectionInstance;
@@ -204,7 +201,7 @@ impl Class for CollectionViewType {
     type Instance = CollectionView;
 
     fn from_path(_path: &TCPath) -> TCResult<TCType> {
-        Err(error::internal(ERR_PROTECTED))
+        Err(error::internal(crate::class::ERR_PROTECTED))
     }
 
     fn prefix() -> TCPath {

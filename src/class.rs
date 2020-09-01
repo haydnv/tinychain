@@ -10,6 +10,10 @@ use crate::error;
 use crate::value::link::{Link, TCPath};
 use crate::value::{label, Value, ValueId, ValueType};
 
+pub const ERR_PROTECTED: &str =
+    "You have accessed a protected class. This should not be possible. \
+Please file a bug report.";
+
 pub type ResponseStream = TCStream<(ValueId, TCStream<Value>)>;
 pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send + Sync>>;
 pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;

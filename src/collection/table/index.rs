@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt;
 use std::iter;
 use std::sync::Arc;
 
@@ -6,23 +7,66 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
-use crate::class::{TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream, TCType};
 use crate::collection::btree::{self, BTreeFile};
+use crate::collection::class::{CollectionBaseType, CollectionType};
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{Value, ValueId};
+use crate::value::{label, Link, TCPath, Value, ValueId};
 
 use super::bounds::{self, Bounds, ColumnBound};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
-use super::{Table, TableInstance};
+use super::{Table, TableInstance, TableType};
 
 const PRIMARY_INDEX: &str = "primary";
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum TableBaseType {
     Index,
+    ReadOnly,
     Table,
+}
+
+impl Class for TableBaseType {
+    type Instance = TableBase;
+
+    fn from_path(path: &TCPath) -> TCResult<TCType> {
+        if path.is_empty() {
+            Ok(TCType::Collection(CollectionType::Base(
+                CollectionBaseType::Table,
+            )))
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
+    fn prefix() -> TCPath {
+        CollectionType::prefix().join(label("table").into())
+    }
+}
+
+impl From<TableBaseType> for Link {
+    fn from(tbt: TableBaseType) -> Link {
+        let prefix = TableType::prefix();
+
+        use TableBaseType::*;
+        match tbt {
+            Index => prefix.join(label("index").into()).into(),
+            ReadOnly => prefix.join(label("ro_index").into()).into(),
+            Table => prefix.into(),
+        }
+    }
+}
+
+impl fmt::Display for TableBaseType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Index => write!(f, "Index"),
+            Self::ReadOnly => write!(f, "Index (read-only)"),
+            Self::Table => write!(f, "Table"),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -30,6 +74,18 @@ pub enum TableBase {
     Index(Index),
     ROIndex(ReadOnly),
     Table(TableIndex),
+}
+
+impl Instance for TableBase {
+    type Class = TableBaseType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::Index(_) => TableBaseType::Index,
+            Self::ROIndex(_) => TableBaseType::ReadOnly,
+            Self::Table(_) => TableBaseType::Table,
+        }
+    }
 }
 
 impl TableInstance for TableBase {
