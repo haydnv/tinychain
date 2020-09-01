@@ -250,6 +250,15 @@ impl CollectionInstance for BTreeSlice {
         }
     }
 
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        let count = self
+            .source
+            .clone()
+            .len(txn.id().clone(), self.bounds.clone())
+            .await?;
+        Ok(count == 0)
+    }
+
     async fn put(&self, _txn: Arc<Txn>, _selector: Value, _key: Key) -> TCResult<()> {
         Err(error::unsupported(
             "BTreeSlice is immutable; write to the source BTree instead",
@@ -367,10 +376,6 @@ impl BTreeFile {
             .read(txn_id)
             .and_then(|root_id| self.file.get_block(txn_id, (*root_id).clone()))
             .await
-    }
-
-    pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
-        self.get_root(txn_id).await.map(|root| root.keys.is_empty())
     }
 
     pub fn len<'a>(self, txn_id: TxnId, selector: Selector) -> TCBoxTryFuture<'a, u64> {
@@ -782,6 +787,12 @@ impl CollectionInstance for BTreeFile {
         let bounds: Selector = bounds.try_into()?;
         validate_selector(&bounds, self.schema())?;
         Ok(BTreeSlice::new(self.clone(), bounds))
+    }
+
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        self.get_root(txn.id())
+            .await
+            .map(|root| root.keys.is_empty())
     }
 
     async fn put(&self, txn: Arc<Txn>, selector: Value, key: Key) -> TCResult<()> {

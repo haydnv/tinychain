@@ -35,6 +35,8 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sy
 
     async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice>;
 
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool>;
+
     async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()>;
 
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>>;

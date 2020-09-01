@@ -107,6 +107,13 @@ impl CollectionInstance for BTree {
         }
     }
 
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        match self {
+            Self::Tree(tree) => tree.is_empty(txn).await,
+            Self::Slice(slice) => slice.is_empty(txn).await,
+        }
+    }
+
     async fn put(&self, txn: Arc<Txn>, selector: Value, value: Key) -> TCResult<()> {
         match self {
             Self::Tree(tree) => tree.put(txn, selector, value).await,

@@ -63,6 +63,13 @@ impl class::CollectionInstance for CollectionBase {
         }
     }
 
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        match self {
+            Self::BTree(btree) => btree.is_empty(txn).await,
+            _ => Err(error::not_implemented("CollectionBase::is_empty")),
+        }
+    }
+
     async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
         match self {
             Self::BTree(btree) => btree.put(txn, selector, value.try_into()?).await,
@@ -149,6 +156,13 @@ impl class::CollectionInstance for CollectionView {
         }
     }
 
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        match self {
+            Self::BTree(btree) => btree.is_empty(txn).await,
+            _ => Err(error::not_implemented("CollectionView::is_empty")),
+        }
+    }
+
     async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
         match self {
             Self::BTree(btree) => {
@@ -230,6 +244,13 @@ impl class::CollectionInstance for Collection {
         match self {
             Self::Base(base) => base.get(txn, selector).await,
             Self::View(view) => view.get(txn, selector).await,
+        }
+    }
+
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        match self {
+            Self::Base(base) => base.is_empty(txn).await,
+            Self::View(view) => view.is_empty(txn).await,
         }
     }
 
