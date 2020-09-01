@@ -15,7 +15,7 @@ use crate::value::{Value, ValueId};
 
 use super::bounds::{self, Bounds};
 use super::index::TableIndex;
-use super::{Selection, Table};
+use super::{Table, TableInstance};
 
 const ERR_AGGREGATE_SLICE: &str = "Table aggregate does not support slicing. \
 Consider aggregating a slice of the source table.";
@@ -42,11 +42,11 @@ pub enum TableView {
     IndexSlice(IndexSlice),
     Limit(Limited),
     Merge(Merged),
-    Selection(ColumnSelection),
+    Selection(Selection),
     TableSlice(TableSlice),
 }
 
-impl Selection for TableView {
+impl TableInstance for TableView {
     type Stream = TCStream<Vec<Value>>;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
@@ -228,8 +228,8 @@ impl From<Aggregate> for TableView {
     }
 }
 
-impl From<ColumnSelection> for TableView {
-    fn from(selection: ColumnSelection) -> Self {
+impl From<Selection> for TableView {
+    fn from(selection: Selection) -> Self {
         Self::Selection(selection)
     }
 }
@@ -271,7 +271,7 @@ impl Aggregate {
     }
 }
 
-impl Selection for Aggregate {
+impl TableInstance for Aggregate {
     type Stream = TCStream<Vec<Value>>;
 
     fn key(&'_ self) -> &'_ [Column] {
@@ -353,152 +353,6 @@ impl From<Aggregate> for Table {
 }
 
 #[derive(Clone)]
-pub struct ColumnSelection {
-    source: Box<Table>,
-    schema: IndexSchema,
-    columns: Vec<ValueId>,
-    indices: Vec<usize>,
-}
-
-impl<T: Into<Table>> TryFrom<(T, Vec<ValueId>)> for ColumnSelection {
-    type Error = error::TCError;
-
-    fn try_from(params: (T, Vec<ValueId>)) -> TCResult<ColumnSelection> {
-        let (source, columns) = params;
-        let source: Table = source.into();
-
-        let column_set: HashSet<&ValueId> = columns.iter().collect();
-        if column_set.len() != columns.len() {
-            return Err(error::bad_request(
-                "Tried to select duplicate column",
-                columns
-                    .iter()
-                    .map(|name| name.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
-            ));
-        }
-
-        let mut indices: Vec<usize> = Vec::with_capacity(columns.len());
-        let mut schema: Vec<Column> = Vec::with_capacity(columns.len());
-        let source_schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
-        let mut source_columns: HashMap<ValueId, Column> = source_schema.into();
-
-        for (i, name) in columns.iter().enumerate() {
-            let column = source_columns
-                .remove(name)
-                .ok_or_else(|| error::not_found(name))?;
-            indices.push(i);
-            schema.push(column);
-        }
-
-        Ok(ColumnSelection {
-            source: Box::new(source),
-            schema: (vec![], schema).into(),
-            columns,
-            indices,
-        })
-    }
-}
-
-impl Selection for ColumnSelection {
-    type Stream = TCStream<Vec<Value>>;
-
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        Box::pin(async move { self.source.clone().count(txn_id).await })
-    }
-
-    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
-        self.validate_order(&order)?;
-
-        let source = self.source.order_by(order, reverse).map(Box::new)?;
-
-        Ok(ColumnSelection {
-            source,
-            schema: self.schema.clone(),
-            columns: self.columns.to_vec(),
-            indices: self.indices.to_vec(),
-        }
-        .into())
-    }
-
-    fn reversed(&self) -> TCResult<Table> {
-        self.source
-            .reversed()?
-            .select(self.columns.to_vec())
-            .map(|s| s.into())
-    }
-
-    fn key(&'_ self) -> &'_ [Column] {
-        self.schema.key()
-    }
-
-    fn values(&'_ self) -> &'_ [Column] {
-        self.schema.values()
-    }
-
-    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
-        Box::pin(async move {
-            let indices = self.indices.to_vec();
-            let selected = self.source.clone().stream(txn_id).await?.map(move |row| {
-                let selection: Vec<Value> = indices.iter().map(|i| row[*i].clone()).collect();
-                selection
-            });
-            let selected: TCStream<Vec<Value>> = Box::pin(selected);
-            Ok(selected)
-        })
-    }
-
-    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        let bounds_columns: HashSet<ValueId> = bounds.keys().cloned().collect();
-        let selected: HashSet<ValueId> = self
-            .schema
-            .columns()
-            .iter()
-            .map(|c| c.name())
-            .cloned()
-            .collect();
-        let mut unknown: HashSet<&ValueId> = selected.difference(&bounds_columns).collect();
-        if !unknown.is_empty() {
-            let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
-            return Err(error::bad_request(
-                "Tried to slice by unselected columns",
-                unknown.join(", "),
-            ));
-        }
-
-        self.source.validate_bounds(bounds)
-    }
-
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
-        let order_columns: HashSet<ValueId> = order.iter().cloned().collect();
-        let selected: HashSet<ValueId> = self
-            .schema
-            .columns()
-            .iter()
-            .map(|c| c.name())
-            .cloned()
-            .collect();
-        let mut unknown: HashSet<&ValueId> = selected.difference(&order_columns).collect();
-        if !unknown.is_empty() {
-            let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
-            return Err(error::bad_request(
-                "Tried to order by unselected columns",
-                unknown.join(", "),
-            ));
-        }
-
-        self.source.validate_order(order)
-    }
-}
-
-impl From<ColumnSelection> for Table {
-    fn from(selection: ColumnSelection) -> Self {
-        Self::View(selection.into())
-    }
-}
-
-#[derive(Clone)]
 pub struct IndexSlice {
     source: BTreeFile,
     schema: IndexSchema,
@@ -565,7 +419,7 @@ impl IndexSlice {
     }
 }
 
-impl Selection for IndexSlice {
+impl TableInstance for IndexSlice {
     type Stream = TCStream<Vec<Value>>;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
@@ -684,7 +538,7 @@ impl TryFrom<(Table, u64)> for Limited {
     }
 }
 
-impl Selection for Limited {
+impl TableInstance for Limited {
     type Stream = TCStream<Vec<Value>>;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
@@ -831,7 +685,7 @@ impl Merged {
     }
 }
 
-impl Selection for Merged {
+impl TableInstance for Merged {
     type Stream = TCStream<Vec<Value>>;
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
@@ -970,6 +824,152 @@ impl Transact for Merged {
 }
 
 #[derive(Clone)]
+pub struct Selection {
+    source: Box<Table>,
+    schema: IndexSchema,
+    columns: Vec<ValueId>,
+    indices: Vec<usize>,
+}
+
+impl<T: Into<Table>> TryFrom<(T, Vec<ValueId>)> for Selection {
+    type Error = error::TCError;
+
+    fn try_from(params: (T, Vec<ValueId>)) -> TCResult<Selection> {
+        let (source, columns) = params;
+        let source: Table = source.into();
+
+        let column_set: HashSet<&ValueId> = columns.iter().collect();
+        if column_set.len() != columns.len() {
+            return Err(error::bad_request(
+                "Tried to select duplicate column",
+                columns
+                    .iter()
+                    .map(|name| name.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "),
+            ));
+        }
+
+        let mut indices: Vec<usize> = Vec::with_capacity(columns.len());
+        let mut schema: Vec<Column> = Vec::with_capacity(columns.len());
+        let source_schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
+        let mut source_columns: HashMap<ValueId, Column> = source_schema.into();
+
+        for (i, name) in columns.iter().enumerate() {
+            let column = source_columns
+                .remove(name)
+                .ok_or_else(|| error::not_found(name))?;
+            indices.push(i);
+            schema.push(column);
+        }
+
+        Ok(Selection {
+            source: Box::new(source),
+            schema: (vec![], schema).into(),
+            columns,
+            indices,
+        })
+    }
+}
+
+impl TableInstance for Selection {
+    type Stream = TCStream<Vec<Value>>;
+
+    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+        Box::pin(async move { self.source.clone().count(txn_id).await })
+    }
+
+    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+        self.validate_order(&order)?;
+
+        let source = self.source.order_by(order, reverse).map(Box::new)?;
+
+        Ok(Selection {
+            source,
+            schema: self.schema.clone(),
+            columns: self.columns.to_vec(),
+            indices: self.indices.to_vec(),
+        }
+        .into())
+    }
+
+    fn reversed(&self) -> TCResult<Table> {
+        self.source
+            .reversed()?
+            .select(self.columns.to_vec())
+            .map(|s| s.into())
+    }
+
+    fn key(&'_ self) -> &'_ [Column] {
+        self.schema.key()
+    }
+
+    fn values(&'_ self) -> &'_ [Column] {
+        self.schema.values()
+    }
+
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        Box::pin(async move {
+            let indices = self.indices.to_vec();
+            let selected = self.source.clone().stream(txn_id).await?.map(move |row| {
+                let selection: Vec<Value> = indices.iter().map(|i| row[*i].clone()).collect();
+                selection
+            });
+            let selected: TCStream<Vec<Value>> = Box::pin(selected);
+            Ok(selected)
+        })
+    }
+
+    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        let bounds_columns: HashSet<ValueId> = bounds.keys().cloned().collect();
+        let selected: HashSet<ValueId> = self
+            .schema
+            .columns()
+            .iter()
+            .map(|c| c.name())
+            .cloned()
+            .collect();
+        let mut unknown: HashSet<&ValueId> = selected.difference(&bounds_columns).collect();
+        if !unknown.is_empty() {
+            let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
+            return Err(error::bad_request(
+                "Tried to slice by unselected columns",
+                unknown.join(", "),
+            ));
+        }
+
+        self.source.validate_bounds(bounds)
+    }
+
+    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+        let order_columns: HashSet<ValueId> = order.iter().cloned().collect();
+        let selected: HashSet<ValueId> = self
+            .schema
+            .columns()
+            .iter()
+            .map(|c| c.name())
+            .cloned()
+            .collect();
+        let mut unknown: HashSet<&ValueId> = selected.difference(&order_columns).collect();
+        if !unknown.is_empty() {
+            let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
+            return Err(error::bad_request(
+                "Tried to order by unselected columns",
+                unknown.join(", "),
+            ));
+        }
+
+        self.source.validate_order(order)
+    }
+}
+
+impl From<Selection> for Table {
+    fn from(selection: Selection) -> Self {
+        Self::View(selection.into())
+    }
+}
+
+#[derive(Clone)]
 pub struct TableSlice {
     table: TableIndex,
     bounds: Bounds,
@@ -996,7 +996,7 @@ impl TableSlice {
     }
 }
 
-impl Selection for TableSlice {
+impl TableInstance for TableSlice {
     type Stream = TCStream<Vec<Value>>;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {

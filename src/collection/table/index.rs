@@ -15,7 +15,7 @@ use crate::value::{Value, ValueId};
 
 use super::bounds::{self, Bounds, ColumnBound};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
-use super::{Selection, Table};
+use super::{Table, TableInstance};
 
 const PRIMARY_INDEX: &str = "primary";
 
@@ -32,7 +32,7 @@ pub enum TableBase {
     Table(TableIndex),
 }
 
-impl Selection for TableBase {
+impl TableInstance for TableBase {
     type Stream = TCStream<Vec<Value>>;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
@@ -246,7 +246,7 @@ impl Index {
     }
 }
 
-impl Selection for Index {
+impl TableInstance for Index {
     type Stream = TCStream<Vec<Value>>;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
@@ -413,8 +413,8 @@ impl ReadOnly {
     }
 }
 
-impl Selection for ReadOnly {
-    type Stream = <Index as Selection>::Stream;
+impl TableInstance for ReadOnly {
+    type Stream = <Index as TableInstance>::Stream;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
         Box::pin(async move { self.index.clone().count(txn_id).await })
@@ -618,8 +618,8 @@ impl TableIndex {
     }
 }
 
-impl Selection for TableIndex {
-    type Stream = <Index as Selection>::Stream;
+impl TableInstance for TableIndex {
+    type Stream = <Index as TableInstance>::Stream;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
         self.primary.count(txn_id)

@@ -10,7 +10,7 @@ use futures::try_join;
 
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::schema::{Column, IndexSchema};
-use crate::collection::table::{self, ColumnBound, Selection, Table, TableIndex};
+use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::ValueType;

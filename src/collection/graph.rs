@@ -17,7 +17,7 @@ use crate::value::number::instance::{Number, UInt};
 use crate::value::{label, Label, Value, ValueId, ValueType};
 
 use super::schema::{GraphSchema, IndexSchema, TableSchema};
-use super::table::{ColumnBound, Selection, TableIndex};
+use super::table::{ColumnBound, TableIndex, TableInstance};
 use super::tensor::{self, einsum, SparseTable, SparseTensor, TensorBoolean, TensorIO};
 
 const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";

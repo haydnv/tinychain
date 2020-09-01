@@ -32,7 +32,7 @@ pub enum TableType {
     View(view::TableViewType),
 }
 
-pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
+pub trait TableInstance: Clone + Into<Table> + Sized + Send + Sync + 'static {
     type Stream: Stream<Item = Vec<Value>> + Send + Sync + Unpin;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
@@ -85,7 +85,7 @@ pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
 
     fn reversed(&self) -> TCResult<Table>;
 
-    fn select(&self, columns: Vec<ValueId>) -> TCResult<view::ColumnSelection> {
+    fn select(&self, columns: Vec<ValueId>) -> TCResult<view::Selection> {
         let selection = (self.clone().into(), columns).try_into()?;
         Ok(selection)
     }
@@ -121,7 +121,7 @@ impl Table {
     }
 }
 
-impl Selection for Table {
+impl TableInstance for Table {
     type Stream = TCStream<Vec<Value>>;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
@@ -198,7 +198,7 @@ impl Selection for Table {
         }
     }
 
-    fn select(&self, columns: Vec<ValueId>) -> TCResult<view::ColumnSelection> {
+    fn select(&self, columns: Vec<ValueId>) -> TCResult<view::Selection> {
         match self {
             Self::Base(base) => base.select(columns),
             Self::View(view) => view.select(columns),
