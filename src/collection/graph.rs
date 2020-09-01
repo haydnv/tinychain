@@ -17,7 +17,7 @@ use crate::value::number::instance::{Number, UInt};
 use crate::value::{label, Label, Value, ValueId, ValueType};
 
 use super::schema::{GraphSchema, IndexSchema, TableSchema};
-use super::table::{ColumnBound, Selection, TableBase};
+use super::table::{ColumnBound, Selection, TableIndex};
 use super::tensor::{self, einsum, SparseTable, SparseTensor, TensorBoolean, TensorIO};
 
 const ERR_CORRUPT: &str = "Graph corrupted! Please file a bug report.";
@@ -37,16 +37,16 @@ pub struct Node {
 
 #[derive(Clone)]
 pub struct Graph {
-    nodes: HashMap<ValueId, TableBase>,
-    edges: HashMap<ValueId, TableBase>,
-    node_indices: TableBase,
+    nodes: HashMap<ValueId, TableIndex>,
+    edges: HashMap<ValueId, TableIndex>,
+    node_indices: TableIndex,
     max_id: TxnLock<Mutable<u64>>,
 }
 
 impl Graph {
     pub async fn create(txn: Arc<Txn>, schema: GraphSchema) -> TCResult<Graph> {
         let nodes = try_join_all(schema.nodes().iter().map(|(name, schema)| {
-            TableBase::create(txn.clone(), schema.clone())
+            TableIndex::create(txn.clone(), schema.clone())
                 .map_ok(move |table| (name.clone(), table))
         }))
         .await?
@@ -71,7 +71,7 @@ impl Graph {
         )
             .into();
         let node_id_schema: TableSchema = node_id_schema.into();
-        let node_indices = TableBase::create(txn.clone(), node_id_schema).await?;
+        let node_indices = TableIndex::create(txn.clone(), node_id_schema).await?;
 
         Ok(Graph {
             nodes,
@@ -142,7 +142,7 @@ impl Graph {
         })
     }
 
-    pub fn nodes(&'_ self, node_type: &'_ ValueId) -> Option<&'_ TableBase> {
+    pub fn nodes(&'_ self, node_type: &'_ ValueId) -> Option<&'_ TableIndex> {
         self.nodes.get(node_type)
     }
 

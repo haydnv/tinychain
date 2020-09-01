@@ -29,7 +29,7 @@ pub type Tensor = tensor::Tensor;
 pub enum CollectionBase {
     BTree(btree::BTreeFile),
     Graph(graph::Graph),
-    Table(table::TableBase),
+    Table(table::TableIndex),
     Tensor(tensor::TensorBase),
 }
 

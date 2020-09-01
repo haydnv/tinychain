@@ -24,7 +24,7 @@ const ERR_UPDATE: &str =
     "This table view does not support updates (consider updating a slice of the source table)";
 
 pub type ColumnBound = bounds::ColumnBound;
-pub type TableBase = index::TableBase;
+pub type TableIndex = index::TableIndex;
 
 pub trait Selection: Clone + Into<Table> + Sized + Send + Sync + 'static {
     type Stream: Stream<Item = Vec<Value>> + Send + Sync + Unpin;
@@ -112,13 +112,13 @@ pub enum Table {
     IndexSlice(view::IndexSlice),
     Merge(view::Merged),
     ROIndex(index::ReadOnly),
-    Table(index::TableBase),
+    Table(index::TableIndex),
     TableSlice(view::TableSlice),
 }
 
 impl Table {
-    pub async fn create(txn: Arc<Txn>, schema: TableSchema) -> TCResult<TableBase> {
-        index::TableBase::create(txn, schema).await
+    pub async fn create(txn: Arc<Txn>, schema: TableSchema) -> TCResult<TableIndex> {
+        index::TableIndex::create(txn, schema).await
     }
 }
 
@@ -379,8 +379,8 @@ impl From<view::Merged> for Table {
     }
 }
 
-impl From<index::TableBase> for Table {
-    fn from(table: index::TableBase) -> Table {
+impl From<index::TableIndex> for Table {
+    fn from(table: index::TableIndex) -> Table {
         Table::Table(table)
     }
 }

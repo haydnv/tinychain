@@ -10,7 +10,7 @@ use futures::try_join;
 
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::schema::{Column, IndexSchema};
-use crate::collection::table::{self, ColumnBound, Selection, Table, TableBase};
+use crate::collection::table::{self, ColumnBound, Selection, Table, TableIndex};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::ValueType;
@@ -1207,7 +1207,7 @@ impl Transact for SparseTranspose {
 
 #[derive(Clone)]
 pub struct SparseTable {
-    table: TableBase,
+    table: TableIndex,
     shape: Shape,
     dtype: NumberType,
 }
@@ -1227,7 +1227,7 @@ impl SparseTable {
         txn: Arc<Txn>,
         ndim: usize,
         dtype: NumberType,
-    ) -> TCResult<TableBase> {
+    ) -> TCResult<TableIndex> {
         let key: Vec<Column> = Self::key(ndim);
         let value: Vec<Column> = vec![(VALUE.into(), ValueType::Number(dtype)).into()];
         let indices = (0..ndim).map(|axis| (axis.into(), vec![axis.into()]));
@@ -1239,7 +1239,7 @@ impl SparseTable {
         .await
     }
 
-    pub fn try_from_table(table: TableBase, shape: Shape) -> TCResult<SparseTable> {
+    pub fn try_from_table(table: TableIndex, shape: Shape) -> TCResult<SparseTable> {
         let expected_key = Self::key(shape.len());
         let actual_key = table.key();
 
@@ -1524,7 +1524,7 @@ impl SparseTensor {
             .map(|accessor| SparseTensor { accessor })
     }
 
-    pub fn try_from_table(table: TableBase, shape: Shape) -> TCResult<SparseTensor> {
+    pub fn try_from_table(table: TableIndex, shape: Shape) -> TCResult<SparseTensor> {
         SparseTable::try_from_table(table, shape)
             .map(Arc::new)
             .map(|accessor| SparseTensor { accessor })

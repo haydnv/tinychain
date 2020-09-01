@@ -14,7 +14,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{Value, ValueId};
 
 use super::bounds::{self, Bounds};
-use super::index::TableBase;
+use super::index::TableIndex;
 use super::{Selection, Table};
 
 const ERR_AGGREGATE_SLICE: &str = "Table aggregate does not support slicing. \
@@ -709,13 +709,13 @@ impl Transact for Merged {
 
 #[derive(Clone)]
 pub struct TableSlice {
-    table: TableBase,
+    table: TableIndex,
     bounds: Bounds,
     reversed: bool,
 }
 
 impl TableSlice {
-    pub fn new(table: TableBase, bounds: Bounds) -> TCResult<TableSlice> {
+    pub fn new(table: TableIndex, bounds: Bounds) -> TCResult<TableSlice> {
         table.validate_bounds(&bounds)?;
 
         Ok(TableSlice {

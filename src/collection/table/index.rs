@@ -299,13 +299,13 @@ impl Selection for ReadOnly {
 }
 
 #[derive(Clone)]
-pub struct TableBase {
+pub struct TableIndex {
     primary: Index,
     auxiliary: BTreeMap<ValueId, Index>,
 }
 
-impl TableBase {
-    pub async fn create(txn: Arc<Txn>, schema: TableSchema) -> TCResult<TableBase> {
+impl TableIndex {
+    pub async fn create(txn: Arc<Txn>, schema: TableSchema) -> TCResult<TableIndex> {
         let primary = Index::create(
             txn.subcontext(PRIMARY_INDEX.parse()?).await?,
             schema.primary().clone(),
@@ -321,7 +321,7 @@ impl TableBase {
             .into_iter()
             .collect();
 
-        Ok(TableBase { primary, auxiliary })
+        Ok(TableIndex { primary, auxiliary })
     }
 
     async fn create_index(
@@ -448,7 +448,7 @@ impl TableBase {
     }
 }
 
-impl Selection for TableBase {
+impl Selection for TableIndex {
     type Stream = <Index as Selection>::Stream;
 
     fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
@@ -693,7 +693,7 @@ impl Selection for TableBase {
 }
 
 #[async_trait]
-impl Transact for TableBase {
+impl Transact for TableIndex {
     async fn commit(&self, txn_id: &TxnId) {
         let mut commits = Vec::with_capacity(self.auxiliary.len() + 1);
         commits.push(self.primary.commit(txn_id));
