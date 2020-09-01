@@ -19,6 +19,164 @@ use super::{Selection, Table};
 
 const PRIMARY_INDEX: &str = "primary";
 
+#[derive(Clone, Eq, PartialEq)]
+pub enum TableBaseType {
+    Index,
+    Table,
+}
+
+#[derive(Clone)]
+pub enum TableBase {
+    Index(Index),
+    ROIndex(ReadOnly),
+    Table(TableIndex),
+}
+
+impl Selection for TableBase {
+    type Stream = TCStream<Vec<Value>>;
+
+    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+        match self {
+            Self::Index(index) => index.count(txn_id),
+            Self::ROIndex(index) => index.count(txn_id),
+            Self::Table(table) => table.count(txn_id),
+        }
+    }
+
+    fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
+        match self {
+            Self::Index(index) => index.delete(txn_id),
+            Self::ROIndex(index) => index.delete(txn_id),
+            Self::Table(table) => table.delete(txn_id),
+        }
+    }
+
+    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
+        match self {
+            Self::Index(index) => index.delete_row(txn_id, row),
+            Self::ROIndex(index) => index.delete_row(txn_id, row),
+            Self::Table(table) => table.delete_row(txn_id, row),
+        }
+    }
+
+    fn key(&'_ self) -> &'_ [Column] {
+        match self {
+            Self::Index(index) => index.key(),
+            Self::ROIndex(index) => index.key(),
+            Self::Table(table) => table.key(),
+        }
+    }
+
+    fn values(&'_ self) -> &'_ [Column] {
+        match self {
+            Self::Index(index) => index.values(),
+            Self::ROIndex(index) => index.values(),
+            Self::Table(table) => table.values(),
+        }
+    }
+
+    fn order_by(&self, columns: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+        match self {
+            Self::Index(index) => index.order_by(columns, reverse),
+            Self::ROIndex(index) => index.order_by(columns, reverse),
+            Self::Table(table) => table.order_by(columns, reverse),
+        }
+    }
+
+    fn reversed(&self) -> TCResult<Table> {
+        match self {
+            Self::Index(index) => index.reversed(),
+            Self::ROIndex(index) => index.reversed(),
+            Self::Table(table) => table.reversed(),
+        }
+    }
+
+    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Table> {
+        match self {
+            Self::Index(index) => index.slice(bounds),
+            Self::ROIndex(index) => index.slice(bounds),
+            Self::Table(table) => table.slice(bounds),
+        }
+    }
+
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        match self {
+            Self::Index(index) => index.stream(txn_id),
+            Self::ROIndex(index) => index.stream(txn_id),
+            Self::Table(table) => table.stream(txn_id),
+        }
+    }
+
+    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.validate_bounds(bounds),
+            Self::ROIndex(index) => index.validate_bounds(bounds),
+            Self::Table(table) => table.validate_bounds(bounds),
+        }
+    }
+
+    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.validate_order(order),
+            Self::ROIndex(index) => index.validate_order(order),
+            Self::Table(table) => table.validate_order(order),
+        }
+    }
+
+    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+        match self {
+            Self::Index(index) => index.update(txn, value),
+            Self::ROIndex(index) => index.update(txn, value),
+            Self::Table(table) => table.update(txn, value),
+        }
+    }
+
+    fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCBoxTryFuture<()> {
+        match self {
+            Self::Index(index) => index.update_row(txn_id, row, value),
+            Self::ROIndex(index) => index.update_row(txn_id, row, value),
+            Self::Table(table) => table.update_row(txn_id, row, value),
+        }
+    }
+}
+
+#[async_trait]
+impl Transact for TableBase {
+    async fn commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::Index(index) => index.commit(txn_id).await,
+            Self::ROIndex(_) => (), // no-op
+            Self::Table(table) => table.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::Index(index) => index.rollback(txn_id).await,
+            Self::ROIndex(_) => (), // no-op
+            Self::Table(table) => table.rollback(txn_id).await,
+        }
+    }
+}
+
+impl From<Index> for TableBase {
+    fn from(index: Index) -> Self {
+        Self::Index(index)
+    }
+}
+
+impl From<ReadOnly> for TableBase {
+    fn from(index: ReadOnly) -> Self {
+        Self::ROIndex(index)
+    }
+}
+
+impl From<TableIndex> for TableBase {
+    fn from(index: TableIndex) -> Self {
+        Self::Table(index)
+    }
+}
+
 #[derive(Clone)]
 pub struct Index {
     btree: BTreeFile,
@@ -192,6 +350,12 @@ impl Selection for Index {
     }
 }
 
+impl From<Index> for Table {
+    fn from(index: Index) -> Table {
+        Table::Base(index.into())
+    }
+}
+
 #[async_trait]
 impl Transact for Index {
     async fn commit(&self, txn_id: &TxnId) {
@@ -295,6 +459,12 @@ impl Selection for ReadOnly {
 
     fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
         self.index.validate_order(order)
+    }
+}
+
+impl From<ReadOnly> for Table {
+    fn from(index: ReadOnly) -> Table {
+        Table::Base(index.into())
     }
 }
 
@@ -689,6 +859,12 @@ impl Selection for TableIndex {
                 .try_fold((), |_, _| future::ready(Ok(())))
                 .await
         })
+    }
+}
+
+impl From<TableIndex> for Table {
+    fn from(index: TableIndex) -> Table {
+        Table::Base(index.into())
     }
 }
 

@@ -26,6 +26,238 @@ Consider ordering the source or indexing the selection.";
 const ERR_LIMITED_REVERSE: &str = "Cannot reverse a limited selection. \
 Consider reversing a slice before limiting";
 
+#[derive(Clone, Eq, PartialEq)]
+pub enum TableViewType {
+    Aggregate,
+    IndexSlice,
+    Limit,
+    Merge,
+    Selection,
+    TableSlice,
+}
+
+#[derive(Clone)]
+pub enum TableView {
+    Aggregate(Aggregate),
+    IndexSlice(IndexSlice),
+    Limit(Limited),
+    Merge(Merged),
+    Selection(ColumnSelection),
+    TableSlice(TableSlice),
+}
+
+impl Selection for TableView {
+    type Stream = TCStream<Vec<Value>>;
+
+    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.count(txn_id),
+            Self::IndexSlice(index_slice) => index_slice.count(txn_id),
+            Self::Limit(limited) => limited.count(txn_id),
+            Self::Merge(merged) => merged.count(txn_id),
+            Self::Selection(columns) => columns.count(txn_id),
+            Self::TableSlice(table_slice) => table_slice.count(txn_id),
+        }
+    }
+
+    fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.delete(txn_id),
+            Self::IndexSlice(index_slice) => index_slice.delete(txn_id),
+            Self::Limit(limited) => limited.delete(txn_id),
+            Self::Merge(merged) => merged.delete(txn_id),
+            Self::Selection(columns) => columns.delete(txn_id),
+            Self::TableSlice(table_slice) => table_slice.delete(txn_id),
+        }
+    }
+
+    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.delete_row(txn_id, row),
+            Self::IndexSlice(index_slice) => index_slice.delete_row(txn_id, row),
+            Self::Limit(limited) => limited.delete_row(txn_id, row),
+            Self::Merge(merged) => merged.delete_row(txn_id, row),
+            Self::Selection(columns) => columns.delete_row(txn_id, row),
+            Self::TableSlice(table_slice) => table_slice.delete_row(txn_id, row),
+        }
+    }
+
+    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.order_by(order, reverse),
+            Self::IndexSlice(index_slice) => index_slice.order_by(order, reverse),
+            Self::Limit(limited) => limited.order_by(order, reverse),
+            Self::Merge(merged) => merged.order_by(order, reverse),
+            Self::Selection(columns) => columns.order_by(order, reverse),
+            Self::TableSlice(table_slice) => table_slice.order_by(order, reverse),
+        }
+    }
+
+    fn reversed(&self) -> TCResult<Table> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.reversed(),
+            Self::IndexSlice(index_slice) => index_slice.reversed(),
+            Self::Limit(limited) => limited.reversed(),
+            Self::Merge(merged) => merged.reversed(),
+            Self::Selection(columns) => columns.reversed(),
+            Self::TableSlice(table_slice) => table_slice.reversed(),
+        }
+    }
+
+    fn key(&'_ self) -> &'_ [Column] {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.key(),
+            Self::IndexSlice(index_slice) => index_slice.key(),
+            Self::Limit(limited) => limited.key(),
+            Self::Merge(merged) => merged.key(),
+            Self::Selection(columns) => columns.key(),
+            Self::TableSlice(table_slice) => table_slice.key(),
+        }
+    }
+
+    fn values(&'_ self) -> &'_ [Column] {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.values(),
+            Self::IndexSlice(index_slice) => index_slice.values(),
+            Self::Limit(limited) => limited.values(),
+            Self::Merge(merged) => merged.values(),
+            Self::Selection(columns) => columns.values(),
+            Self::TableSlice(table_slice) => table_slice.values(),
+        }
+    }
+
+    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Table> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.slice(bounds),
+            Self::Limit(limited) => limited.slice(bounds),
+            Self::IndexSlice(index_slice) => index_slice.slice(bounds),
+            Self::Merge(merged) => merged.slice(bounds),
+            Self::Selection(columns) => columns.slice(bounds),
+            Self::TableSlice(table_slice) => table_slice.slice(bounds),
+        }
+    }
+
+    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.stream(txn_id),
+            Self::IndexSlice(index_slice) => index_slice.stream(txn_id),
+            Self::Limit(limited) => limited.stream(txn_id),
+            Self::Merge(merged) => merged.stream(txn_id),
+            Self::Selection(columns) => columns.stream(txn_id),
+            Self::TableSlice(table_slice) => table_slice.stream(txn_id),
+        }
+    }
+
+    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.update(txn, value),
+            Self::IndexSlice(index_slice) => index_slice.update(txn, value),
+            Self::Limit(limited) => limited.update(txn, value),
+            Self::Merge(merged) => merged.update(txn, value),
+            Self::Selection(columns) => columns.update(txn, value),
+            Self::TableSlice(table_slice) => table_slice.update(txn, value),
+        }
+    }
+
+    fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCBoxTryFuture<()> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.update_row(txn_id, row, value),
+            Self::IndexSlice(index_slice) => index_slice.update_row(txn_id, row, value),
+            Self::Limit(limited) => limited.update_row(txn_id, row, value),
+            Self::Merge(merged) => merged.update_row(txn_id, row, value),
+            Self::Selection(columns) => columns.update_row(txn_id, row, value),
+            Self::TableSlice(table_slice) => table_slice.update_row(txn_id, row, value),
+        }
+    }
+
+    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.validate_bounds(bounds),
+            Self::IndexSlice(index_slice) => index_slice.validate_bounds(bounds),
+            Self::Limit(limited) => limited.validate_bounds(bounds),
+            Self::Merge(merged) => merged.validate_bounds(bounds),
+            Self::Selection(columns) => columns.validate_bounds(bounds),
+            Self::TableSlice(table_slice) => table_slice.validate_bounds(bounds),
+        }
+    }
+
+    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+        match self {
+            Self::Aggregate(aggregate) => aggregate.validate_order(order),
+            Self::IndexSlice(index_slice) => index_slice.validate_order(order),
+            Self::Limit(limited) => limited.validate_order(order),
+            Self::Merge(merged) => merged.validate_order(order),
+            Self::Selection(columns) => columns.validate_order(order),
+            Self::TableSlice(table_slice) => table_slice.validate_order(order),
+        }
+    }
+}
+
+#[async_trait]
+impl Transact for TableView {
+    async fn commit(&self, txn_id: &TxnId) {
+        let no_op = ();
+
+        match self {
+            Self::Aggregate(_) => no_op,
+            Self::IndexSlice(index_slice) => index_slice.commit(txn_id).await,
+            Self::Limit(limited) => limited.commit(txn_id).await,
+            Self::Merge(merged) => merged.commit(txn_id).await,
+            Self::Selection(_) => no_op,
+            Self::TableSlice(table_slice) => table_slice.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        let no_op = ();
+
+        match self {
+            Self::Aggregate(_) => no_op,
+            Self::IndexSlice(index_slice) => index_slice.rollback(txn_id).await,
+            Self::Limit(limited) => limited.rollback(txn_id).await,
+            Self::Merge(merged) => merged.rollback(txn_id).await,
+            Self::Selection(_) => no_op,
+            Self::TableSlice(table_slice) => table_slice.rollback(txn_id).await,
+        }
+    }
+}
+
+impl From<Aggregate> for TableView {
+    fn from(aggregate: Aggregate) -> Self {
+        Self::Aggregate(aggregate)
+    }
+}
+
+impl From<ColumnSelection> for TableView {
+    fn from(selection: ColumnSelection) -> Self {
+        Self::Selection(selection)
+    }
+}
+
+impl From<Limited> for TableView {
+    fn from(limited: Limited) -> Self {
+        Self::Limit(limited)
+    }
+}
+
+impl From<IndexSlice> for TableView {
+    fn from(index_slice: IndexSlice) -> Self {
+        Self::IndexSlice(index_slice)
+    }
+}
+
+impl From<Merged> for TableView {
+    fn from(merged: Merged) -> Self {
+        Self::Merge(merged)
+    }
+}
+
+impl From<TableSlice> for TableView {
+    fn from(table_slice: TableSlice) -> Self {
+        Self::TableSlice(table_slice)
+    }
+}
+
 #[derive(Clone)]
 pub struct Aggregate {
     source: Box<Table>,
@@ -111,6 +343,12 @@ impl Selection for Aggregate {
 
     fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
         self.source.validate_order(order)
+    }
+}
+
+impl From<Aggregate> for Table {
+    fn from(aggregate: Aggregate) -> Self {
+        Self::View(aggregate.into())
     }
 }
 
@@ -251,6 +489,12 @@ impl Selection for ColumnSelection {
         }
 
         self.source.validate_order(order)
+    }
+}
+
+impl From<ColumnSelection> for Table {
+    fn from(selection: ColumnSelection) -> Self {
+        Self::View(selection.into())
     }
 }
 
@@ -401,6 +645,12 @@ impl Selection for IndexSlice {
     }
 }
 
+impl From<IndexSlice> for Table {
+    fn from(index_slice: IndexSlice) -> Self {
+        Self::View(index_slice.into())
+    }
+}
+
 #[async_trait]
 impl Transact for IndexSlice {
     async fn commit(&self, txn_id: &TxnId) {
@@ -503,6 +753,12 @@ impl Selection for Limited {
                 .try_fold((), |_, _| future::ready(Ok(())))
                 .await
         })
+    }
+}
+
+impl From<Limited> for Table {
+    fn from(limited: Limited) -> Table {
+        Table::View(limited.into())
     }
 }
 
@@ -696,6 +952,12 @@ impl Selection for Merged {
     }
 }
 
+impl From<Merged> for Table {
+    fn from(merged: Merged) -> Table {
+        Table::View(merged.into())
+    }
+}
+
 #[async_trait]
 impl Transact for Merged {
     async fn commit(&self, txn_id: &TxnId) {
@@ -821,6 +1083,12 @@ impl Selection for TableSlice {
 
     fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCBoxTryFuture<()> {
         self.table.update_row(txn_id, row, value)
+    }
+}
+
+impl From<TableSlice> for Table {
+    fn from(table_slice: TableSlice) -> Table {
+        Table::View(table_slice.into())
     }
 }
 
