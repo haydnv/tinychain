@@ -19,6 +19,10 @@ impl<T: BlockData> Cache<T> {
         }
     }
 
+    pub fn block_ids(&self) -> impl Iterator<Item = &BlockId> {
+        self.blocks.keys()
+    }
+
     pub fn get(&self, block_id: &BlockId) -> Option<TxnLock<T>> {
         self.blocks.get(block_id).cloned()
     }
@@ -27,6 +31,10 @@ impl<T: BlockData> Cache<T> {
         let lock = TxnLock::new(format!("Block {}", &block_id), block);
         self.blocks.insert(block_id, lock.clone());
         lock
+    }
+
+    pub fn len(&self) -> usize {
+        self.blocks.len()
     }
 }
 

@@ -242,7 +242,10 @@ impl<T: Mutate> TxnLock<T> {
         } else {
             // Otherwise, return a ReadGuard.
             if !lock.value_at.contains_key(txn_id) {
-                println!("setting lock value for TxnLock {} at {}", &self.name, txn_id);
+                println!(
+                    "setting lock value for TxnLock {} at {}",
+                    &self.name, txn_id
+                );
                 let value_at_txn_id =
                     UnsafeCell::new(unsafe { (&*lock.value.get()).diverge(txn_id) });
                 lock.value_at.insert(txn_id.clone(), value_at_txn_id);
@@ -289,8 +292,7 @@ impl<T: Mutate> TxnLock<T> {
             Some(_) => {
                 println!(
                     "TxnLock::write {} at {} waiting on existing write lock",
-                    &self.name,
-                    txn_id,
+                    &self.name, txn_id,
                 );
                 Ok(None)
             }
@@ -325,7 +327,10 @@ impl<T: Mutate> Transact for TxnLock<T> {
         println!("TxnLock::commit {} at {}", &self.name, txn_id);
 
         async {
-            println!("TxnLock::commit {} getting read lock at {}...", &self.name, txn_id);
+            println!(
+                "TxnLock::commit {} getting read lock at {}...",
+                &self.name, txn_id
+            );
             self.read(txn_id).await.unwrap(); // make sure there's no active write lock
             let lock = &mut self.inner.lock().unwrap();
             assert!(lock.state.reserved.is_none());

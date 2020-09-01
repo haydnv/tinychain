@@ -100,7 +100,9 @@ impl<T: BlockData> File<T> {
         block_id: BlockId,
     ) -> TCResult<Block<'a, T>> {
         let lock = self.lock_block(txn_id, &block_id).await?;
-        Ok(Block::new(self, block_id, lock))
+        let block = Block::new(self, block_id, lock);
+        println!("got block {}", &block);
+        Ok(block)
     }
 
     pub async fn get_block_owned(
@@ -175,6 +177,7 @@ impl<T: BlockData> Transact for File<T> {
         self.mutated.commit(txn_id).await;
 
         let cache = self.cache.read().await;
+        println!("File::commit! cache has {} blocks", cache.len());
         let mut pending = self.pending.write().await;
         let txn_dir_id: PathSegment = txn_id.clone().into();
         if mutated.is_empty() {
@@ -192,6 +195,11 @@ impl<T: BlockData> Transact for File<T> {
                 let dir_lock = txn_dir.write();
                 async move {
                     let data = lock.read(txn_id).await.unwrap().deref().clone().into();
+                    println!(
+                        "moving block {} from cache to Txn dir ({} bytes)",
+                        &block_id,
+                        data.len()
+                    );
                     dir_lock
                         .await
                         .create_or_get_block(block_id, data)
@@ -202,8 +210,14 @@ impl<T: BlockData> Transact for File<T> {
 
         join_all(copy_ops).await;
         cache.commit(txn_id).await;
+        println!("emptied cache");
         dir.move_all(txn_dir.write().await.deref_mut()).unwrap();
+        println!("moved all blocks to main Dir");
         pending.delete_dir(&txn_dir_id).unwrap();
+
+        for block_id in dir.block_ids() {
+            println!("dir contents: {}", block_id);
+        }
     }
 
     async fn rollback(&self, txn_id: &TxnId) {

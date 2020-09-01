@@ -27,11 +27,11 @@ impl Dir {
         }
     }
 
-    pub fn block_ids(&'_ self) -> impl Iterator<Item = PathSegment> + '_ {
+    pub fn block_ids(&'_ self) -> impl Iterator<Item = &'_ PathSegment> + '_ {
         self.contents
             .iter()
             .filter_map(|(name, entry)| match entry {
-                DirEntry::Block(_) => Some(name.clone()),
+                DirEntry::Block(_) => Some(name),
                 _ => None,
             })
     }
@@ -153,7 +153,7 @@ impl Dir {
     }
 
     pub fn move_all(&mut self, source: &mut Dir) -> TCResult<()> {
-        let mut block_ids: Vec<PathSegment> = source.block_ids().collect();
+        let mut block_ids: Vec<PathSegment> = source.block_ids().cloned().collect();
         for block_id in block_ids.drain(..) {
             self.move_block(block_id, source)?;
         }

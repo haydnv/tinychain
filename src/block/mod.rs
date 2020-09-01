@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -42,6 +43,7 @@ impl<'a, T: BlockData> Block<'a, T> {
         self.file
             .mutate(self.lock.txn_id().clone(), self.block_id.clone())
             .await?;
+
         Ok(BlockMut {
             file: self.file,
             block_id: self.block_id,
@@ -55,6 +57,17 @@ impl<'a, T: BlockData> Deref for Block<'a, T> {
 
     fn deref(&self) -> &T {
         self.lock.deref()
+    }
+}
+
+impl<'a, T: BlockData> fmt::Display for Block<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "block {} with size {}",
+            &self.block_id,
+            &self.lock.size()
+        )
     }
 }
 
@@ -149,8 +162,9 @@ impl<T: BlockData> DerefMut for BlockOwnedMut<T> {
 }
 
 pub trait BlockData:
-    Clone + Send + Sync + TryFrom<Bytes, Error = error::TCError> + Into<Bytes>
+    Clone + TryFrom<Bytes, Error = error::TCError> + Into<Bytes> + Send + Sync + fmt::Display
 {
+    fn size(&self) -> usize;
 }
 
 #[async_trait]

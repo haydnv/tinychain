@@ -19,7 +19,7 @@ use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::{ValueClass, ValueType};
-use crate::value::{label, Label, Value};
+use crate::value::Value;
 
 use super::class::*;
 use super::schema::{Column, RowSchema};
@@ -33,9 +33,6 @@ pub type BTreeType = class::BTreeType;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
-
-const KEY: Label = label("key");
-const RANGE: Label = label("range");
 
 type NodeId = BlockId;
 
@@ -57,6 +54,12 @@ impl From<Vec<Value>> for NodeKey {
             value,
             deleted: false,
         }
+    }
+}
+
+impl fmt::Display for NodeKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BTree node key: {}", Value::Tuple(self.value.to_vec()))
     }
 }
 
@@ -99,11 +102,15 @@ impl From<Node> for Bytes {
     }
 }
 
-impl BlockData for Node {}
+impl BlockData for Node {
+    fn size(&self) -> usize {
+        self.keys.len() + self.children.len()
+    }
+}
 
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "(BTree node)")
+        write!(f, "(BTree node with {} keys)", self.keys.len())
     }
 }
 
@@ -395,12 +402,27 @@ impl BTreeFile {
         let (l, r) = range.bisect(&keys, &self.collator);
 
         if node.leaf {
-            let keys: Vec<Key> = node.keys[l..r]
-                .iter()
-                .filter(|k| !k.deleted)
-                .map(|k| k.value.to_vec())
-                .collect();
-            Box::pin(stream::iter(keys))
+            println!(
+                "_slice BTree node with {} keys from {} to {}",
+                keys.len(),
+                l,
+                r
+            );
+            if l == r && l < node.keys.len() {
+                if node.keys[l].deleted {
+                    Box::pin(stream::empty())
+                } else {
+                    Box::pin(stream::once(future::ready(keys[l].to_vec())))
+                }
+            } else {
+                let keys: Vec<Key> = node.keys[l..r]
+                    .iter()
+                    .filter(|k| !k.deleted)
+                    .map(|k| k.value.to_vec())
+                    .collect();
+                println!("_slice BTree node with {} keys not deleted", keys.len());
+                Box::pin(stream::iter(keys))
+            }
         } else {
             let mut selected: Selection = FuturesOrdered::new();
             for i in l..r {
@@ -632,6 +654,7 @@ impl BTreeFile {
                 {
                     let mut node = node.upgrade().await?;
                     node.keys.insert(i, key.into());
+                    println!("BTree node now has {} keys", node.keys.len());
                 } else if keys[i].value == key && keys[i].deleted {
                     let mut node = node.upgrade().await?;
                     node.keys[i].deleted = false;
@@ -763,7 +786,6 @@ impl CollectionInstance for BTreeFile {
 
     async fn put(&self, txn: Arc<Txn>, selector: Value, key: Key) -> TCResult<()> {
         let selector: Selector = selector.try_into()?;
-        let key: Key = key.try_into()?;
 
         validate_selector(&selector, self.schema())?;
         validate_key(&key, self.schema())?;

@@ -1602,7 +1602,12 @@ impl From<Array> for Bytes {
     }
 }
 
-impl BlockData for Array {}
+impl BlockData for Array {
+    fn size(&self) -> usize {
+        let data: ArrayExt<bool> = self.af_cast();
+        data.af().elements()
+    }
+}
 
 impl From<Vec<bool>> for Array {
     fn from(b: Vec<bool>) -> Array {

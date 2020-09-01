@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -31,7 +32,17 @@ impl From<ChainBlock> for Bytes {
     }
 }
 
-impl BlockData for ChainBlock {}
+impl BlockData for ChainBlock {
+    fn size(&self) -> usize {
+        0
+    }
+}
+
+impl fmt::Display for ChainBlock {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ChainBlock")
+    }
+}
 
 pub struct Chain {
     file: Arc<File<ChainBlock>>,
