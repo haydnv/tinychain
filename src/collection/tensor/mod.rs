@@ -124,12 +124,12 @@ pub trait TensorTransform: Sized + TensorInstance {
 }
 
 #[derive(Clone)]
-pub enum Tensor {
+pub enum TensorView {
     Dense(DenseTensor),
     Sparse(SparseTensor),
 }
 
-impl TensorInstance for Tensor {
+impl TensorInstance for TensorView {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Dense(dense) => dense.dtype(),
@@ -159,7 +159,7 @@ impl TensorInstance for Tensor {
     }
 }
 
-impl TensorBoolean for Tensor {
+impl TensorBoolean for TensorView {
     fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool> {
         match self {
             Self::Dense(dense) => dense.all(txn),
@@ -175,7 +175,7 @@ impl TensorBoolean for Tensor {
     }
 
     fn and(&self, other: &Self) -> TCResult<Self> {
-        use Tensor::*;
+        use TensorView::*;
         match (self, other) {
             (Dense(left), Dense(right)) => left.and(right).map(Self::from),
             (Sparse(left), Sparse(right)) => left.and(right).map(Self::from),
@@ -195,7 +195,7 @@ impl TensorBoolean for Tensor {
     }
 
     fn or(&self, other: &Self) -> TCResult<Self> {
-        use Tensor::*;
+        use TensorView::*;
         match (self, other) {
             (Dense(left), Dense(right)) => left.or(right).map(Self::from),
             (Sparse(left), Sparse(right)) => left.or(right).map(Self::from),
@@ -208,7 +208,7 @@ impl TensorBoolean for Tensor {
     }
 
     fn xor(&self, other: &Self) -> TCResult<Self> {
-        use Tensor::*;
+        use TensorView::*;
         match (self, other) {
             (Dense(left), Dense(right)) => left.xor(right).map(Self::from),
             (Sparse(left), _) => Dense(DenseTensor::from_sparse(left.clone())).xor(other),
@@ -218,7 +218,7 @@ impl TensorBoolean for Tensor {
 }
 
 #[async_trait]
-impl TensorCompare for Tensor {
+impl TensorCompare for TensorView {
     async fn eq(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.eq(right, txn).await,
@@ -300,7 +300,7 @@ impl TensorCompare for Tensor {
     }
 }
 
-impl TensorIO for Tensor {
+impl TensorIO for TensorView {
     fn mask<'a>(&'a self, txn: &'a Arc<Txn>, other: Self) -> TCBoxTryFuture<'a, ()> {
         match (self, &other) {
             (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()),
@@ -360,7 +360,7 @@ impl TensorIO for Tensor {
     }
 }
 
-impl TensorMath for Tensor {
+impl TensorMath for TensorView {
     fn abs(&self) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.abs().map(Self::from),
@@ -395,7 +395,7 @@ impl TensorMath for Tensor {
     }
 }
 
-impl TensorReduce for Tensor {
+impl TensorReduce for TensorView {
     fn product(&self, axis: usize) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.product(axis).map(Self::from),
@@ -425,7 +425,7 @@ impl TensorReduce for Tensor {
     }
 }
 
-impl TensorTransform for Tensor {
+impl TensorTransform for TensorView {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.as_type(dtype).map(Self::from),
@@ -470,7 +470,7 @@ impl TensorTransform for Tensor {
 }
 
 #[async_trait]
-impl Transact for Tensor {
+impl Transact for TensorView {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::Dense(dense) => dense.commit(txn_id).await,
@@ -486,14 +486,14 @@ impl Transact for Tensor {
     }
 }
 
-impl From<DenseTensor> for Tensor {
-    fn from(dense: DenseTensor) -> Tensor {
+impl From<DenseTensor> for TensorView {
+    fn from(dense: DenseTensor) -> TensorView {
         Self::Dense(dense)
     }
 }
 
-impl From<SparseTensor> for Tensor {
-    fn from(sparse: SparseTensor) -> Tensor {
+impl From<SparseTensor> for TensorView {
+    fn from(sparse: SparseTensor) -> TensorView {
         Self::Sparse(sparse)
     }
 }
@@ -521,8 +521,8 @@ impl Transact for TensorBase {
     }
 }
 
-impl From<TensorBase> for Tensor {
-    fn from(base: TensorBase) -> Tensor {
+impl From<TensorBase> for TensorView {
+    fn from(base: TensorBase) -> TensorView {
         match base {
             TensorBase::Dense(blocks) => Self::Dense(blocks.into()),
             TensorBase::Sparse(table) => Self::Sparse(table.into()),

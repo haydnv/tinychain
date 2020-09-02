@@ -23,7 +23,7 @@ pub type BTree = btree::BTree;
 pub type BTreeSlice = btree::BTreeSlice;
 pub type Graph = graph::Graph;
 pub type Table = table::Table;
-pub type Tensor = tensor::Tensor;
+pub type TensorView = tensor::TensorView;
 
 #[derive(Clone)]
 pub enum CollectionBase {
@@ -125,7 +125,7 @@ pub enum CollectionView {
     BTree(btree::BTree),
     Graph(graph::Graph),
     Table(table::Table),
-    Tensor(tensor::Tensor),
+    Tensor(tensor::TensorView),
 }
 
 impl Instance for CollectionView {
