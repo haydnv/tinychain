@@ -354,14 +354,55 @@ impl From<TensorView> for Collection {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum TensorType {
-    Base,
-    View,
+    Base(TensorBaseType),
+    View(TensorViewType),
+}
+
+impl Class for TensorType {
+    type Instance = Tensor;
+
+    fn from_path(path: &TCPath) -> TCResult<Self> {
+        TensorBaseType::from_path(path).map(TensorType::Base)
+    }
+
+    fn prefix() -> TCPath {
+        TensorBaseType::prefix()
+    }
+}
+
+impl From<TensorType> for Link {
+    fn from(tt: TensorType) -> Link {
+        match tt {
+            TensorType::Base(base) => base.into(),
+            TensorType::View(view) => view.into(),
+        }
+    }
+}
+
+impl fmt::Display for TensorType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Base(base) => write!(f, "{}", base),
+            Self::View(view) => write!(f, "{}", view),
+        }
+    }
 }
 
 #[derive(Clone)]
 pub enum Tensor {
     Base(TensorBase),
     View(TensorView),
+}
+
+impl Instance for Tensor {
+    type Class = TensorType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::Base(base) => TensorType::Base(base.class()),
+            Self::View(view) => TensorType::View(view.class()),
+        }
+    }
 }
 
 impl TensorInstance for Tensor {
