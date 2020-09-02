@@ -420,7 +420,12 @@ pub struct TCPath {
 
 impl TCPath {
     pub fn from_path(&self, other: &TCPath) -> TCResult<TCPath> {
-        if self.segments[..other.len()] == other.segments[..] {
+        if other.len() > self.len() {
+            Err(error::bad_request(
+                &format!("Expected {}/..., found", other),
+                self,
+            ))
+        } else if self.segments[..other.len()] == other.segments[..] {
             Ok(TCPath {
                 segments: self.segments[other.len()..].to_vec(),
             })

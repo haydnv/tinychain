@@ -49,8 +49,8 @@ pub enum CollectionType {
 impl Class for CollectionType {
     type Instance = Collection;
 
-    fn from_path(path: &TCPath) -> TCResult<TCType> {
-        CollectionBaseType::from_path(path)
+    fn from_path(path: &TCPath) -> TCResult<Self> {
+        CollectionBaseType::from_path(path).map(CollectionType::Base)
     }
 
     fn prefix() -> TCPath {
@@ -115,18 +115,18 @@ pub enum CollectionBaseType {
 impl Class for CollectionBaseType {
     type Instance = CollectionBase;
 
-    fn from_path(path: &TCPath) -> TCResult<TCType> {
-        if path.is_empty() {
+    fn from_path(path: &TCPath) -> TCResult<Self> {
+        let suffix = path.from_path(&Self::prefix())?;
+
+        if suffix.is_empty() {
             Err(error::unsupported("You must specify a type of Collection"))
-        } else if path.len() > 1 {
-            Err(error::not_found(path))
         } else {
             use CollectionBaseType::*;
-            match path[0].as_str() {
-                "btree" => Ok(CollectionType::Base(BTree).into()),
-                "graph" => Ok(CollectionType::Base(Graph).into()),
-                "table" => TableBaseType::from_path(&path.slice_from(0)),
-                "tensor" => Ok(CollectionType::Base(Tensor).into()),
+            match suffix[0].as_str() {
+                "btree" if suffix.len() == 1 => Ok(BTree),
+                "graph" if suffix.len() == 1 => Ok(Graph),
+                "table" => TableBaseType::from_path(path).map(Table),
+                "tensor" if suffix.len() == 1 => Ok(Tensor),
                 other => Err(error::not_found(other)),
             }
         }
@@ -199,7 +199,7 @@ pub enum CollectionViewType {
 impl Class for CollectionViewType {
     type Instance = CollectionView;
 
-    fn from_path(_path: &TCPath) -> TCResult<TCType> {
+    fn from_path(_path: &TCPath) -> TCResult<Self> {
         Err(error::internal(crate::class::ERR_PROTECTED))
     }
 

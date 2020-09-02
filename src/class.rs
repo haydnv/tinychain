@@ -10,6 +10,9 @@ use crate::error;
 use crate::value::link::{Link, TCPath};
 use crate::value::{label, Value, ValueId, ValueType};
 
+const ERR_EMPTY_CLASSPATH: &str = "Expected a class path, \
+e.g. /sbin/value/number/int/64 or /sbin/collection/table, but found: ";
+
 pub const ERR_PROTECTED: &str =
     "You have accessed a protected class. This should not be possible. \
 Please file a bug report.";
@@ -24,7 +27,7 @@ pub type TCTryStream<T> = TCStream<TCResult<T>>;
 pub trait Class: Into<Link> + Clone + Eq + fmt::Display {
     type Instance: Instance;
 
-    fn from_path(path: &TCPath) -> TCResult<TCType>;
+    fn from_path(path: &TCPath) -> TCResult<Self>;
 
     fn prefix() -> TCPath;
 }
@@ -65,14 +68,18 @@ impl Class for TCType {
     type Instance = State;
 
     fn from_path(path: &TCPath) -> TCResult<TCType> {
-        if path.starts_with(Self::prefix()) && path.len() > 1 {
+        let path = path.from_path(&Self::prefix())?;
+
+        if path.len() > 1 {
             match path[1].as_str() {
-                "collection" => CollectionType::from_path(&path.slice_from(2)),
-                "value" => ValueType::from_path(&path.slice_from(2)),
+                "collection" => {
+                    CollectionType::from_path(&path.slice_from(2)).map(TCType::Collection)
+                }
+                "value" => ValueType::from_path(&path.slice_from(2)).map(TCType::Value),
                 other => Err(error::not_found(other)),
             }
         } else {
-            Err(error::not_found(path))
+            Err(error::bad_request(ERR_EMPTY_CLASSPATH, path))
         }
     }
 

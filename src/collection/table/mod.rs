@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
 
-use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{Link, TCPath, Value, ValueId};
@@ -40,8 +40,8 @@ pub enum TableType {
 impl Class for TableType {
     type Instance = Table;
 
-    fn from_path(path: &TCPath) -> TCResult<TCType> {
-        TableBaseType::from_path(path)
+    fn from_path(path: &TCPath) -> TCResult<Self> {
+        TableBaseType::from_path(path).map(TableType::Base)
     }
 
     fn prefix() -> TCPath {

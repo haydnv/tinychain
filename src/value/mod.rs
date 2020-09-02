@@ -6,7 +6,7 @@ use bytes::Bytes;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-use crate::class::{Instance, TCResult, TCType};
+use crate::class::{Class, Instance, TCResult, TCType};
 use crate::error;
 
 pub mod class;
@@ -242,17 +242,6 @@ impl<'a> TryFrom<&'a Value> for &'a String {
     }
 }
 
-impl<'a> TryFrom<&'a Value> for &'a ValueId {
-    type Error = error::TCError;
-
-    fn try_from(v: &'a Value) -> TCResult<&'a ValueId> {
-        match v {
-            Value::TCString(s) => s.try_into(),
-            other => Err(error::bad_request("Expected ValueId but found", other)),
-        }
-    }
-}
-
 impl TryFrom<Value> for TCType {
     type Error = error::TCError;
 
@@ -268,8 +257,13 @@ impl TryFrom<Value> for ValueType {
     type Error = error::TCError;
 
     fn try_from(v: Value) -> TCResult<ValueType> {
-        let class: TCType = v.try_into()?;
-        class.try_into()
+        match v {
+            Value::Class(t) => t.try_into(),
+            Value::TCString(TCString::Link(l)) if l.host().is_none() => {
+                ValueType::from_path(l.path())
+            }
+            other => Err(error::bad_request("Expected ValueType, found", other)),
+        }
     }
 }
 
@@ -280,6 +274,17 @@ impl TryFrom<Value> for ValueId {
         match v {
             Value::TCString(s) => s.try_into(),
             other => Err(error::bad_request("Expected ValueId, found", other)),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a ValueId {
+    type Error = error::TCError;
+
+    fn try_from(v: &'a Value) -> TCResult<&'a ValueId> {
+        match v {
+            Value::TCString(s) => s.try_into(),
+            other => Err(error::bad_request("Expected ValueId but found", other)),
         }
     }
 }

@@ -7,11 +7,9 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
-use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{self, BTreeFile};
-use crate::collection::class::{
-    CollectionBaseType, CollectionClass, CollectionInstance, CollectionType,
-};
+use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
@@ -34,15 +32,13 @@ pub enum TableBaseType {
 impl Class for TableBaseType {
     type Instance = TableBase;
 
-    fn from_path(path: &TCPath) -> TCResult<TCType> {
+    fn from_path(path: &TCPath) -> TCResult<Self> {
+        let path = path.from_path(&Self::prefix())?;
+
         if path.is_empty() {
-            Ok(TCType::Collection(CollectionType::Base(
-                CollectionBaseType::Table(TableBaseType::Table),
-            )))
-        } else if path == "/index" {
-            Ok(TCType::Collection(CollectionType::Base(
-                CollectionBaseType::Table(TableBaseType::Index),
-            )))
+            Ok(TableBaseType::Table)
+        } else if path.len() == 1 && path[0].as_str() == "/index" {
+            Ok(TableBaseType::Index)
         } else {
             Err(error::not_found(path))
         }

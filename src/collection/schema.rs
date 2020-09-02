@@ -2,10 +2,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
-use crate::class::{Class, Instance, TCResult, TCType};
+use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::value::number::NumberType;
-use crate::value::{TCString, Value, ValueId, ValueType};
+use crate::value::{Value, ValueId, ValueType};
+
+const ERR_BAD_COLUMN: &str = "Expected a Column in the form \
+[<name: ValueId>, <dtype: Link>, (<max_len: U64>)], found";
 
 pub type Row = HashMap<ValueId, Value>;
 
@@ -75,42 +78,25 @@ impl TryFrom<Value> for Column {
     type Error = error::TCError;
 
     fn try_from(value: Value) -> TCResult<Column> {
-        println!("parse Column from {}", value);
-
-        let mut value: Vec<Value> = value.try_into()?;
-
-        let max_len = if value.len() == 3 {
-            Some(value.pop().unwrap().try_into()?)
-        } else if value.len() == 2 {
-            None
-        } else {
-            return Err(error::bad_request(
-                "Expected a Column but found",
-                Value::Tuple(value),
-            ));
-        };
-
-        let dtype: Value = value
-            .pop()
-            .ok_or_else(|| error::bad_request("Column missing field", "dtype"))?;
-        let dtype: ValueType = match dtype {
-            Value::Class(class) => class.try_into()?,
-            Value::TCString(TCString::Link(link)) if link.host().is_none() => {
-                TCType::from_path(link.path())?.try_into()?
+        match &value {
+            Value::Tuple(tuple) if tuple.len() == 2 => {
+                let (name, dtype) = value.try_into()?;
+                Ok(Column {
+                    name,
+                    dtype,
+                    max_len: None,
+                })
             }
-            other => return Err(error::bad_request("Expected a Class but found", other)),
-        };
-
-        let name: ValueId = value
-            .pop()
-            .ok_or_else(|| error::bad_request("Column missing field", "name"))?
-            .try_into()?;
-
-        Ok(Column {
-            name,
-            dtype,
-            max_len,
-        })
+            Value::Tuple(tuple) if tuple.len() == 3 => {
+                let (name, dtype, max_len) = value.try_into()?;
+                Ok(Column {
+                    name,
+                    dtype,
+                    max_len: Some(max_len),
+                })
+            }
+            other => Err(error::bad_request(ERR_BAD_COLUMN, other)),
+        }
     }
 }
 
@@ -335,6 +321,16 @@ impl From<(Vec<Column>, Vec<Column>)> for IndexSchema {
     }
 }
 
+impl TryFrom<Value> for IndexSchema {
+    type Error = error::TCError;
+
+    fn try_from(value: Value) -> TCResult<IndexSchema> {
+        value
+            .try_into()
+            .map(|(key, values)| IndexSchema { key, values })
+    }
+}
+
 impl From<IndexSchema> for HashMap<ValueId, Column> {
     fn from(mut schema: IndexSchema) -> HashMap<ValueId, Column> {
         schema
@@ -412,6 +408,18 @@ impl<I: Iterator<Item = (ValueId, Vec<ValueId>)>> From<(IndexSchema, I)> for Tab
             primary: schema.0,
             indices: schema.1.collect(),
         }
+    }
+}
+
+impl TryFrom<Value> for TableSchema {
+    type Error = error::TCError;
+
+    fn try_from(value: Value) -> TCResult<TableSchema> {
+        let (primary, indices): (IndexSchema, Vec<(ValueId, Vec<ValueId>)>) = value.try_into()?;
+        Ok(TableSchema {
+            primary,
+            indices: indices.into_iter().collect(),
+        })
     }
 }
 
