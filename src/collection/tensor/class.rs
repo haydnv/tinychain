@@ -3,15 +3,55 @@ use async_trait::async_trait;
 use crate::transaction::{Transact, TxnId};
 use crate::value::class::NumberType;
 
-use super::bounds;
+use super::bounds::Shape;
 use super::dense::BlockListFile;
 use super::sparse::SparseTable;
 use super::{DenseTensor, SparseTensor};
+
+pub trait TensorInstance: Send + Sync {
+    fn dtype(&self) -> NumberType;
+
+    fn ndim(&self) -> usize;
+
+    fn shape(&'_ self) -> &'_ Shape;
+
+    fn size(&self) -> u64;
+}
 
 #[derive(Clone)]
 pub enum TensorBase {
     Dense(BlockListFile),
     Sparse(SparseTable),
+}
+
+impl TensorInstance for TensorBase {
+    fn dtype(&self) -> NumberType {
+        match self {
+            Self::Dense(dense) => dense.dtype(),
+            Self::Sparse(sparse) => sparse.dtype(),
+        }
+    }
+
+    fn ndim(&self) -> usize {
+        match self {
+            Self::Dense(dense) => dense.ndim(),
+            Self::Sparse(sparse) => sparse.ndim(),
+        }
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        match self {
+            Self::Dense(dense) => dense.shape(),
+            Self::Sparse(sparse) => sparse.shape(),
+        }
+    }
+
+    fn size(&self) -> u64 {
+        match self {
+            Self::Dense(dense) => dense.size(),
+            Self::Sparse(sparse) => sparse.size(),
+        }
+    }
 }
 
 #[async_trait]
@@ -40,16 +80,6 @@ impl From<TensorBase> for TensorView {
     }
 }
 
-pub trait TensorInstance: Send + Sync {
-    fn dtype(&self) -> NumberType;
-
-    fn ndim(&self) -> usize;
-
-    fn shape(&'_ self) -> &'_ bounds::Shape;
-
-    fn size(&self) -> u64;
-}
-
 #[derive(Clone)]
 pub enum TensorView {
     Dense(DenseTensor),
@@ -71,7 +101,7 @@ impl TensorInstance for TensorView {
         }
     }
 
-    fn shape(&'_ self) -> &'_ bounds::Shape {
+    fn shape(&'_ self) -> &'_ Shape {
         match self {
             Self::Dense(dense) => dense.shape(),
             Self::Sparse(sparse) => sparse.shape(),
@@ -119,6 +149,36 @@ impl From<SparseTensor> for TensorView {
 pub enum Tensor {
     Base(TensorBase),
     View(TensorView),
+}
+
+impl TensorInstance for Tensor {
+    fn dtype(&self) -> NumberType {
+        match self {
+            Self::Base(base) => base.dtype(),
+            Self::View(view) => view.dtype(),
+        }
+    }
+
+    fn ndim(&self) -> usize {
+        match self {
+            Self::Base(base) => base.ndim(),
+            Self::View(view) => view.ndim(),
+        }
+    }
+
+    fn shape(&'_ self) -> &'_ Shape {
+        match self {
+            Self::Base(base) => base.shape(),
+            Self::View(view) => view.shape(),
+        }
+    }
+
+    fn size(&self) -> u64 {
+        match self {
+            Self::Base(base) => base.size(),
+            Self::View(view) => view.size(),
+        }
+    }
 }
 
 #[async_trait]
