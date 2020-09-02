@@ -25,7 +25,7 @@ pub type Shape = bounds::Shape;
 pub type SparseTable = sparse::SparseTable;
 pub type SparseTensor = sparse::SparseTensor;
 
-pub trait TensorView: Send + Sync {
+pub trait TensorInstance: Send + Sync {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;
@@ -35,7 +35,7 @@ pub trait TensorView: Send + Sync {
     fn size(&self) -> u64;
 }
 
-pub trait TensorBoolean: Sized + TensorView {
+pub trait TensorBoolean: Sized + TensorInstance {
     fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
 
     fn any(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
@@ -50,7 +50,7 @@ pub trait TensorBoolean: Sized + TensorView {
 }
 
 #[async_trait]
-pub trait TensorCompare: Sized + TensorView {
+pub trait TensorCompare: Sized + TensorInstance {
     async fn eq(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor>;
 
     fn gt(&self, other: &Self) -> TCResult<Self>;
@@ -64,7 +64,7 @@ pub trait TensorCompare: Sized + TensorView {
     fn ne(&self, other: &Self) -> TCResult<Self>;
 }
 
-pub trait TensorIO: Sized + TensorView {
+pub trait TensorIO: Sized + TensorInstance {
     fn mask<'a>(&'a self, txn: &'a Arc<Txn>, other: Self) -> TCBoxTryFuture<'a, ()>;
 
     fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
@@ -91,7 +91,7 @@ pub trait TensorIO: Sized + TensorView {
     ) -> TCBoxTryFuture<'a, ()>;
 }
 
-pub trait TensorMath: Sized + TensorView {
+pub trait TensorMath: Sized + TensorInstance {
     fn abs(&self) -> TCResult<Self>;
 
     fn add(&self, other: &Self) -> TCResult<Self>;
@@ -99,7 +99,7 @@ pub trait TensorMath: Sized + TensorView {
     fn multiply(&self, other: &Self) -> TCResult<Self>;
 }
 
-pub trait TensorReduce: Sized + TensorView {
+pub trait TensorReduce: Sized + TensorInstance {
     fn product(&self, axis: usize) -> TCResult<Self>;
 
     fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
@@ -109,7 +109,7 @@ pub trait TensorReduce: Sized + TensorView {
     fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
 }
 
-pub trait TensorTransform: Sized + TensorView {
+pub trait TensorTransform: Sized + TensorInstance {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self>;
 
     fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self>;
@@ -129,7 +129,7 @@ pub enum Tensor {
     Sparse(SparseTensor),
 }
 
-impl TensorView for Tensor {
+impl TensorInstance for Tensor {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Dense(dense) => dense.dtype(),
@@ -530,7 +530,7 @@ impl From<TensorBase> for Tensor {
     }
 }
 
-pub fn einsum<T: Clone + TensorView + TensorMath + TensorReduce + TensorTransform>(
+pub fn einsum<T: Clone + TensorInstance + TensorMath + TensorReduce + TensorTransform>(
     format: &str,
     tensors: Vec<T>,
 ) -> TCResult<T> {

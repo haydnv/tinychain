@@ -28,7 +28,7 @@ use array::Array;
 const ERR_CORRUPT: &str = "DenseTensor corrupted! Please file a bug report.";
 const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
-trait BlockList: TensorView + Transact + 'static {
+trait BlockList: TensorInstance + Transact + 'static {
     fn block_stream<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
             let dtype = self.dtype();
@@ -128,7 +128,7 @@ impl BlockListCombine {
     }
 }
 
-impl TensorView for BlockListCombine {
+impl TensorInstance for BlockListCombine {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -323,7 +323,7 @@ impl BlockListFile {
     }
 }
 
-impl TensorView for BlockListFile {
+impl TensorInstance for BlockListFile {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -571,7 +571,7 @@ struct BlockListBroadcast {
     rebase: transform::Broadcast,
 }
 
-impl TensorView for BlockListBroadcast {
+impl TensorInstance for BlockListBroadcast {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -673,7 +673,7 @@ struct BlockListCast {
     dtype: NumberType,
 }
 
-impl TensorView for BlockListCast {
+impl TensorInstance for BlockListCast {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -769,7 +769,7 @@ struct BlockListExpand {
     rebase: transform::Expand,
 }
 
-impl TensorView for BlockListExpand {
+impl TensorInstance for BlockListExpand {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -866,7 +866,7 @@ impl BlockListReduce {
     }
 }
 
-impl TensorView for BlockListReduce {
+impl TensorInstance for BlockListReduce {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -966,7 +966,7 @@ struct BlockListReshape {
     rebase: transform::Reshape,
 }
 
-impl TensorView for BlockListReshape {
+impl TensorInstance for BlockListReshape {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -1092,7 +1092,7 @@ struct BlockListSlice {
     rebase: transform::Slice,
 }
 
-impl TensorView for BlockListSlice {
+impl TensorInstance for BlockListSlice {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -1180,7 +1180,7 @@ impl BlockListSparse {
     }
 }
 
-impl TensorView for BlockListSparse {
+impl TensorInstance for BlockListSparse {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -1306,7 +1306,7 @@ struct BlockListTranspose {
     rebase: transform::Transpose,
 }
 
-impl TensorView for BlockListTranspose {
+impl TensorInstance for BlockListTranspose {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -1397,7 +1397,7 @@ pub struct BlockListUnary {
     dtype: NumberType,
 }
 
-impl TensorView for BlockListUnary {
+impl TensorInstance for BlockListUnary {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -1535,7 +1535,7 @@ impl DenseTensor {
     }
 }
 
-impl TensorView for DenseTensor {
+impl TensorInstance for DenseTensor {
     fn dtype(&self) -> NumberType {
         self.blocks.dtype()
     }
