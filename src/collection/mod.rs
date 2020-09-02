@@ -18,6 +18,8 @@ pub mod table;
 pub mod tensor;
 
 pub type CollectionType = class::CollectionType;
+pub type CollectionBaseType = class::CollectionBaseType;
+pub type CollectionViewType = class::CollectionViewType;
 
 pub type BTree = btree::BTree;
 pub type BTreeSlice = btree::BTreeSlice;
