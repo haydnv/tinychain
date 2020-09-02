@@ -11,7 +11,7 @@ use crate::class::*;
 use crate::collection::btree::{BTreeFile, BTreeRange};
 use crate::collection::class::CollectionInstance;
 use crate::collection::schema::{Column, IndexSchema, Row};
-use crate::collection::{Collection, CollectionView};
+use crate::collection::{Collection, CollectionItem, CollectionView};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{label, Link, TCPath, Value, ValueId};
@@ -98,11 +98,14 @@ impl Instance for TableView {
 
 #[async_trait]
 impl CollectionInstance for TableView {
-    type Error = error::TCError;
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<Self::Slice> {
+    async fn get(
+        &self,
+        _txn: Arc<Txn>,
+        _selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::not_implemented("TableBase::get"))
     }
 
@@ -110,11 +113,16 @@ impl CollectionInstance for TableView {
         Err(error::not_implemented("TableBase::is_empty"))
     }
 
-    async fn put(&self, _txn: Arc<Txn>, _selector: Value, _value: Self::Item) -> TCResult<()> {
+    async fn put(
+        &self,
+        _txn: Arc<Txn>,
+        _selector: Value,
+        _value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
         Err(error::not_implemented("TableBase::put"))
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
         Err(error::not_implemented("TableBase::to_stream"))
     }
 }

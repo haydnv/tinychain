@@ -1,4 +1,4 @@
-use std::convert::{Infallible, TryInto};
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
@@ -19,6 +19,7 @@ pub mod tensor;
 
 pub type CollectionType = class::CollectionType;
 pub type CollectionBaseType = class::CollectionBaseType;
+pub type CollectionItem<I, S> = class::CollectionItem<I, S>;
 pub type CollectionViewType = class::CollectionViewType;
 
 pub type BTree = btree::BTree;
@@ -50,19 +51,16 @@ impl Instance for CollectionBase {
 
 #[async_trait]
 impl class::CollectionInstance for CollectionBase {
-    type Error = Infallible;
     type Item = Value;
     type Slice = CollectionView;
 
-    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
-        match self {
-            Self::BTree(btree) => btree
-                .get(txn, selector)
-                .await
-                .map(BTree::Slice)
-                .map(CollectionView::BTree),
-            _ => Err(error::not_implemented("CollectionBase::get")),
-        }
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        let view: CollectionView = self.clone().into();
+        view.get(txn, selector).await
     }
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
@@ -72,11 +70,14 @@ impl class::CollectionInstance for CollectionBase {
         }
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
-        match self {
-            Self::BTree(btree) => btree.put(txn, selector, value.try_into()?).await,
-            _ => Err(error::not_implemented("CollectionBase::put")),
-        }
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
+        let view: CollectionView = self.clone().into();
+        view.put(txn, selector, value).await
     }
 
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
@@ -107,6 +108,17 @@ impl Transact for CollectionBase {
             Self::Graph(graph) => graph.rollback(txn_id).await,
             Self::Table(table) => table.rollback(txn_id).await,
             Self::Tensor(tensor) => tensor.rollback(txn_id).await,
+        }
+    }
+}
+
+impl From<CollectionBase> for CollectionView {
+    fn from(base: CollectionBase) -> CollectionView {
+        match base {
+            CollectionBase::BTree(btree) => CollectionView::BTree(btree.into()),
+            CollectionBase::Graph(graph) => CollectionView::Graph(graph.into()),
+            CollectionBase::Table(table) => CollectionView::Table(table.into()),
+            CollectionBase::Tensor(tensor) => CollectionView::Tensor(tensor.into()),
         }
     }
 }
@@ -143,17 +155,22 @@ impl Instance for CollectionView {
 
 #[async_trait]
 impl class::CollectionInstance for CollectionView {
-    type Error = Infallible;
     type Item = Value;
     type Slice = CollectionView;
 
-    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::BTree(btree) => btree
-                .get(txn, selector.try_into()?)
-                .await
-                .map(BTree::Slice)
-                .map(CollectionView::BTree),
+            Self::BTree(btree) => {
+                let item = match btree.get(txn, selector).await? {
+                    CollectionItem::Value(key) => CollectionItem::Value(Value::Tuple(key)),
+                    CollectionItem::Slice(slice) => CollectionItem::Slice(slice.into()),
+                };
+                Ok(item)
+            }
             _ => Err(error::not_implemented("CollectionView::get")),
         }
     }
@@ -165,14 +182,24 @@ impl class::CollectionInstance for CollectionView {
         }
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
         match self {
-            Self::BTree(btree) => {
-                btree
-                    .put(txn, selector.try_into()?, value.try_into()?)
-                    .await
-            }
-            _ => Err(error::not_implemented("CollectionView::put")),
+            Self::BTree(btree) => match value {
+                CollectionItem::Value(value) => {
+                    let value = value.try_into()?;
+                    btree.put(txn, selector, CollectionItem::Value(value)).await
+                }
+                CollectionItem::Slice(slice) => {
+                    let slice = slice.try_into()?;
+                    btree.put(txn, selector, CollectionItem::Slice(slice)).await
+                }
+            },
+            _ => Err(error::not_implemented("CollectionBase::put")),
         }
     }
 
@@ -208,6 +235,28 @@ impl Transact for CollectionView {
     }
 }
 
+impl TryFrom<CollectionView> for BTree {
+    type Error = error::TCError;
+
+    fn try_from(view: CollectionView) -> TCResult<BTree> {
+        match view {
+            CollectionView::BTree(btree) => Ok(btree),
+            other => Err(error::bad_request("Expected BTree but found", other)),
+        }
+    }
+}
+
+impl TryFrom<CollectionView> for BTreeSlice {
+    type Error = error::TCError;
+
+    fn try_from(view: CollectionView) -> TCResult<BTreeSlice> {
+        match view {
+            CollectionView::BTree(btree) => Ok(btree.into()),
+            other => Err(error::bad_request("Expected BTree but found", other)),
+        }
+    }
+}
+
 impl fmt::Display for CollectionView {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -238,11 +287,14 @@ impl Instance for Collection {
 
 #[async_trait]
 impl class::CollectionInstance for Collection {
-    type Error = Infallible;
     type Item = Value;
     type Slice = CollectionView;
 
-    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
             Self::Base(base) => base.get(txn, selector).await,
             Self::View(view) => view.get(txn, selector).await,
@@ -256,7 +308,12 @@ impl class::CollectionInstance for Collection {
         }
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
         match self {
             Self::Base(base) => base.put(txn, selector, value).await,
             Self::View(view) => view.put(txn, selector, value).await,

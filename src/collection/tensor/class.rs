@@ -95,11 +95,14 @@ impl Instance for TensorBase {
 
 #[async_trait]
 impl CollectionInstance for TensorBase {
-    type Error = error::TCError;
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         TensorView::from(self.clone()).get(txn, selector).await
     }
 
@@ -107,13 +110,18 @@ impl CollectionInstance for TensorBase {
         TensorView::from(self.clone()).is_empty(txn).await
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
         TensorView::from(self.clone())
             .put(txn, selector, value)
             .await
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
         TensorView::from(self.clone()).to_stream(txn).await
     }
 }
@@ -238,25 +246,43 @@ impl Instance for TensorView {
 
 #[async_trait]
 impl CollectionInstance for TensorView {
-    type Error = error::TCError;
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get(&self, _txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         let bounds: Bounds = selector.try_into()?;
-        self.slice(bounds).map(TensorView::from)
+        if bounds.is_coord() {
+            let coord: Vec<u64> = bounds.try_into()?;
+            let value = self.read_value(&txn, &coord).await?;
+            Ok(CollectionItem::Value(value))
+        } else {
+            let slice = self.slice(bounds)?;
+            Ok(CollectionItem::Slice(slice))
+        }
     }
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
         self.any(txn).map_ok(|any| !any).await
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
         let bounds: Bounds = selector.try_into()?;
-        self.write_value(txn.id().clone(), bounds, value).await
+        match value {
+            CollectionItem::Value(value) => self.write_value(txn.id().clone(), bounds, value).await,
+            CollectionItem::Slice(slice) => self.write(txn, bounds, slice).await,
+        }
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
         Err(error::not_implemented("TensorView::to_stream"))
     }
 }

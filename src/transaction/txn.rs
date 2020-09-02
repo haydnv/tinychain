@@ -16,7 +16,7 @@ use crate::block::file::File;
 use crate::block::BlockData;
 use crate::class::{ResponseStream, State, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
-use crate::collection::Collection;
+use crate::collection::{Collection, CollectionItem};
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
@@ -324,7 +324,12 @@ impl Txn {
                     if let State::Collection(collection) = subject {
                         collection
                             .get(self.clone(), object)
-                            .map_ok(|view| State::Collection(view.into()))
+                            .map_ok(|view| match view {
+                                CollectionItem::Value(value) => State::Value(value),
+                                CollectionItem::Slice(view) => {
+                                    State::Collection(Collection::View(view))
+                                }
+                            })
                             .await
                     } else {
                         Err(error::bad_request("Value does not support GET", subject))
@@ -355,9 +360,20 @@ impl Txn {
                         if let State::Collection(collection) = subject {
                             self.mutate(collection.clone()).await;
 
-                            collection
-                                .put(self.clone(), object, value.try_into()?)
-                                .await?;
+                            let value = match value {
+                                State::Value(value) => CollectionItem::Value(value),
+                                State::Collection(Collection::View(slice)) => {
+                                    CollectionItem::Slice(slice)
+                                }
+                                other => {
+                                    return Err(error::bad_request(
+                                        "Expected collection view but found",
+                                        other,
+                                    ))
+                                }
+                            };
+
+                            collection.put(self.clone(), object, value).await?;
                             Ok(State::Value(Value::None))
                         } else {
                             Err(error::bad_request("Value does not support GET", subject))

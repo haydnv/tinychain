@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
@@ -14,6 +14,11 @@ use super::btree::{BTreeFile, BTreeType};
 use super::table::TableBaseType;
 use super::{Collection, CollectionBase, CollectionView};
 
+pub enum CollectionItem<I: Into<Value>, S: CollectionInstance> {
+    Value(I),
+    Slice(S),
+}
+
 #[async_trait]
 pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
     type Instance: CollectionInstance;
@@ -27,17 +32,25 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
 
 #[async_trait]
 pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sync {
-    type Error: Into<error::TCError>;
-    type Item: Into<Value> + TryFrom<Value, Error = Self::Error>;
+    type Item: Into<Value>;
     type Slice: CollectionInstance;
 
-    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice>;
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>>;
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool>;
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()>;
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()>;
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>>;
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
 }
 
 #[derive(Clone, Eq, PartialEq)]

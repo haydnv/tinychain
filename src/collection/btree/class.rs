@@ -11,7 +11,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{Link, TCPath};
 use crate::value::{label, Value};
 
-use super::{BTreeFile, BTreeSlice, Key};
+use super::{BTreeFile, BTreeSlice, Key, Selector};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum BTreeType {
@@ -74,7 +74,7 @@ impl fmt::Display for BTreeType {
 #[derive(Clone)]
 pub enum BTree {
     Tree(BTreeFile),
-    Slice(BTreeSlice),
+    View(BTreeSlice),
 }
 
 impl Instance for BTree {
@@ -83,42 +83,50 @@ impl Instance for BTree {
     fn class(&self) -> BTreeType {
         match self {
             Self::Tree(tree) => tree.class(),
-            Self::Slice(slice) => slice.class(),
+            Self::View(view) => view.class(),
         }
     }
 }
 
 #[async_trait]
 impl CollectionInstance for BTree {
-    type Error = error::TCError;
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<BTreeSlice> {
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
             Self::Tree(tree) => tree.get(txn, selector).await,
-            Self::Slice(slice) => slice.get(txn, selector).await,
+            Self::View(view) => view.get(txn, selector).await,
         }
     }
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
         match self {
             Self::Tree(tree) => tree.is_empty(txn).await,
-            Self::Slice(slice) => slice.is_empty(txn).await,
+            Self::View(view) => view.is_empty(txn).await,
         }
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Key) -> TCResult<()> {
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
         match self {
             Self::Tree(tree) => tree.put(txn, selector, value).await,
-            Self::Slice(slice) => slice.put(txn, selector, value).await,
+            Self::View(view) => view.put(txn, selector, value).await,
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
         match self {
             Self::Tree(tree) => tree.to_stream(txn).await,
-            Self::Slice(slice) => slice.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
         }
     }
 }
@@ -130,7 +138,7 @@ impl Transact for BTree {
 
         match self {
             Self::Tree(tree) => tree.commit(txn_id).await,
-            Self::Slice(_) => no_op,
+            Self::View(_) => no_op,
         }
     }
 
@@ -139,13 +147,37 @@ impl Transact for BTree {
 
         match self {
             Self::Tree(tree) => tree.rollback(txn_id).await,
-            Self::Slice(_) => no_op,
+            Self::View(_) => no_op,
         }
+    }
+}
+
+impl From<BTreeFile> for BTree {
+    fn from(btree: BTreeFile) -> BTree {
+        BTree::Tree(btree)
+    }
+}
+
+impl From<BTreeSlice> for BTree {
+    fn from(slice: BTreeSlice) -> BTree {
+        BTree::View(slice)
     }
 }
 
 impl From<BTree> for Collection {
     fn from(btree: BTree) -> Collection {
         Collection::View(CollectionView::BTree(btree))
+    }
+}
+
+impl From<BTree> for BTreeSlice {
+    fn from(btree: BTree) -> BTreeSlice {
+        match btree {
+            BTree::View(slice) => slice,
+            BTree::Tree(btree) => BTreeSlice {
+                source: btree,
+                bounds: Selector::all(),
+            },
+        }
     }
 }

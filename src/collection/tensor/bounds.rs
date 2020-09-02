@@ -312,6 +312,24 @@ impl TryFrom<Value> for Bounds {
     }
 }
 
+impl TryFrom<Bounds> for Vec<u64> {
+    type Error = error::TCError;
+
+    fn try_from(mut bounds: Bounds) -> TCResult<Vec<u64>> {
+        let mut coord = Vec::with_capacity(bounds.len());
+        for bound in bounds.axes.drain(..) {
+            match bound {
+                AxisBounds::At(x) => coord.push(x),
+                other => {
+                    return Err(error::bad_request("Not a coordinate", other));
+                }
+            }
+        }
+
+        Ok(coord)
+    }
+}
+
 impl fmt::Display for Bounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

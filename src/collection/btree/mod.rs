@@ -227,17 +227,22 @@ impl Instance for BTreeSlice {
 
 #[async_trait]
 impl CollectionInstance for BTreeSlice {
-    type Error = error::TCError;
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get(&self, txn: Arc<Txn>, bounds: Value) -> TCResult<Self::Slice> {
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        bounds: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         let bounds: Selector = bounds.try_into()?;
         validate_selector(&bounds, self.source.schema())?;
 
         let schema: Vec<ValueType> = self.source.schema().iter().map(|c| *c.dtype()).collect();
         match (&self.bounds, &bounds) {
-            (Selector::Key(this), Selector::Key(that)) if this == that => Ok(self.clone()),
+            (Selector::Key(this), Selector::Key(that)) if this == that => {
+                Ok(CollectionItem::Slice(self.clone()))
+            }
             (Selector::Range(container, _), Selector::Range(contained, _))
                 if container.contains(contained, &schema)? =>
             {
@@ -259,17 +264,25 @@ impl CollectionInstance for BTreeSlice {
         Ok(count == 0)
     }
 
-    async fn put(&self, _txn: Arc<Txn>, _selector: Value, _key: Key) -> TCResult<()> {
+    async fn put(
+        &self,
+        _txn: Arc<Txn>,
+        _selector: Value,
+        _value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
         Err(error::unsupported(
             "BTreeSlice is immutable; write to the source BTree instead",
         ))
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Key>> {
-        self.source
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        let rows = self
+            .source
             .clone()
             .slice(txn.id().clone(), self.bounds.clone())
-            .await
+            .await?;
+
+        Ok(Box::pin(rows.map(Value::Tuple)))
     }
 }
 
@@ -292,7 +305,7 @@ impl From<BTreeSlice> for Collection {
 
 impl From<BTreeSlice> for CollectionView {
     fn from(btree_slice: BTreeSlice) -> CollectionView {
-        CollectionView::BTree(class::BTree::Slice(btree_slice))
+        CollectionView::BTree(class::BTree::View(btree_slice))
     }
 }
 
@@ -779,14 +792,30 @@ impl Instance for BTreeFile {
 
 #[async_trait]
 impl CollectionInstance for BTreeFile {
-    type Error = error::TCError;
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get(&self, _txn: Arc<Txn>, bounds: Value) -> TCResult<Self::Slice> {
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        bounds: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         let bounds: Selector = bounds.try_into()?;
         validate_selector(&bounds, self.schema())?;
-        Ok(BTreeSlice::new(self.clone(), bounds))
+
+        if let Selector::Key(key) = bounds {
+            let mut slice = self
+                .clone()
+                .slice(txn.id().clone(), Selector::Key(key.to_vec()))
+                .await?;
+            if let Some(key) = slice.next().await {
+                Ok(CollectionItem::Value(key))
+            } else {
+                Err(error::not_found(Value::Tuple(key)))
+            }
+        } else {
+            Ok(CollectionItem::Slice(BTreeSlice::new(self.clone(), bounds)))
+        }
     }
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
@@ -795,7 +824,19 @@ impl CollectionInstance for BTreeFile {
             .map(|root| root.keys.is_empty())
     }
 
-    async fn put(&self, txn: Arc<Txn>, selector: Value, key: Key) -> TCResult<()> {
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        key: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
+        let key = match key {
+            CollectionItem::Value(key) => key,
+            CollectionItem::Slice(_) => {
+                return Err(error::unsupported("BTree::put(<slice>) is not supported"));
+            }
+        };
+
         let selector: Selector = selector.try_into()?;
 
         validate_selector(&selector, self.schema())?;
@@ -811,8 +852,13 @@ impl CollectionInstance for BTreeFile {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
-        self.clone().slice(txn.id().clone(), Selector::all()).await
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        let stream = self
+            .clone()
+            .slice(txn.id().clone(), Selector::all())
+            .await?
+            .map(Value::Tuple);
+        Ok(Box::pin(stream))
     }
 }
 

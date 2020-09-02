@@ -115,11 +115,14 @@ impl Instance for TableBase {
 
 #[async_trait]
 impl CollectionInstance for TableBase {
-    type Error = error::TCError;
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<Self::Slice> {
+    async fn get(
+        &self,
+        _txn: Arc<Txn>,
+        _selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::not_implemented("TableBase::get"))
     }
 
@@ -127,11 +130,16 @@ impl CollectionInstance for TableBase {
         Err(error::not_implemented("TableBase::is_empty"))
     }
 
-    async fn put(&self, _txn: Arc<Txn>, _selector: Value, _value: Self::Item) -> TCResult<()> {
+    async fn put(
+        &self,
+        _txn: Arc<Txn>,
+        _selector: Value,
+        _value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
         Err(error::not_implemented("TableBase::put"))
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
         Err(error::not_implemented("TableBase::to_stream"))
     }
 }
