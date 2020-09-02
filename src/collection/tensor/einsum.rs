@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::class::TCResult;
 use crate::error;
 
-use super::{TensorInstance, TensorMath, TensorReduce, TensorTransform};
+use super::class::TensorInstance;
+use super::{TensorMath, TensorReduce, TensorTransform};
 
 const VALID_LABELS: [char; 52] = [
     'a', 'A', 'b', 'B', 'c', 'C', 'd', 'D', 'e', 'E', 'f', 'F', 'g', 'G', 'h', 'H', 'i', 'I', 'j',

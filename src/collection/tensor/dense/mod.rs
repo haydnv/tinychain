@@ -19,6 +19,7 @@ use crate::value::number::class::{NumberClass, NumberInstance, NumberType};
 use crate::value::Number;
 
 use super::bounds::{AxisBounds, Bounds, Shape};
+use super::class::TensorInstance;
 use super::*;
 
 pub mod array;

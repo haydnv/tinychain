@@ -19,6 +19,7 @@ use crate::value::number::instance::{Number, UInt};
 use crate::value::{label, Label, Value, ValueId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
+use super::class::TensorInstance;
 use super::*;
 
 mod combine;

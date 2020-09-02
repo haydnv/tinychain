@@ -4,15 +4,17 @@ use async_trait::async_trait;
 
 use crate::class::{TCBoxTryFuture, TCResult};
 use crate::error;
-use crate::transaction::{Transact, Txn, TxnId};
+use crate::transaction::{Txn, TxnId};
 use crate::value::number::class::NumberType;
 use crate::value::Number;
 
-mod bounds;
-mod dense;
 mod einsum;
-mod sparse;
 mod transform;
+
+pub mod bounds;
+pub mod class;
+pub mod dense;
+pub mod sparse;
 
 pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
@@ -24,18 +26,9 @@ pub type DenseTensor = dense::DenseTensor;
 pub type Shape = bounds::Shape;
 pub type SparseTable = sparse::SparseTable;
 pub type SparseTensor = sparse::SparseTensor;
+pub type TensorView = class::TensorView;
 
-pub trait TensorInstance: Send + Sync {
-    fn dtype(&self) -> NumberType;
-
-    fn ndim(&self) -> usize;
-
-    fn shape(&'_ self) -> &'_ bounds::Shape;
-
-    fn size(&self) -> u64;
-}
-
-pub trait TensorBoolean: Sized + TensorInstance {
+pub trait TensorBoolean: class::TensorInstance + Sized {
     fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
 
     fn any(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
@@ -50,7 +43,7 @@ pub trait TensorBoolean: Sized + TensorInstance {
 }
 
 #[async_trait]
-pub trait TensorCompare: Sized + TensorInstance {
+pub trait TensorCompare: class::TensorInstance + Sized {
     async fn eq(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor>;
 
     fn gt(&self, other: &Self) -> TCResult<Self>;
@@ -64,7 +57,7 @@ pub trait TensorCompare: Sized + TensorInstance {
     fn ne(&self, other: &Self) -> TCResult<Self>;
 }
 
-pub trait TensorIO: Sized + TensorInstance {
+pub trait TensorIO: class::TensorInstance + Sized {
     fn mask<'a>(&'a self, txn: &'a Arc<Txn>, other: Self) -> TCBoxTryFuture<'a, ()>;
 
     fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
@@ -91,7 +84,7 @@ pub trait TensorIO: Sized + TensorInstance {
     ) -> TCBoxTryFuture<'a, ()>;
 }
 
-pub trait TensorMath: Sized + TensorInstance {
+pub trait TensorMath: class::TensorInstance + Sized {
     fn abs(&self) -> TCResult<Self>;
 
     fn add(&self, other: &Self) -> TCResult<Self>;
@@ -99,7 +92,7 @@ pub trait TensorMath: Sized + TensorInstance {
     fn multiply(&self, other: &Self) -> TCResult<Self>;
 }
 
-pub trait TensorReduce: Sized + TensorInstance {
+pub trait TensorReduce: class::TensorInstance + Sized {
     fn product(&self, axis: usize) -> TCResult<Self>;
 
     fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
@@ -109,7 +102,7 @@ pub trait TensorReduce: Sized + TensorInstance {
     fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
 }
 
-pub trait TensorTransform: Sized + TensorInstance {
+pub trait TensorTransform: class::TensorInstance + Sized {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self>;
 
     fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self>;
@@ -121,42 +114,6 @@ pub trait TensorTransform: Sized + TensorInstance {
     fn reshape(&self, shape: bounds::Shape) -> TCResult<Self>;
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
-}
-
-#[derive(Clone)]
-pub enum TensorView {
-    Dense(DenseTensor),
-    Sparse(SparseTensor),
-}
-
-impl TensorInstance for TensorView {
-    fn dtype(&self) -> NumberType {
-        match self {
-            Self::Dense(dense) => dense.dtype(),
-            Self::Sparse(sparse) => sparse.dtype(),
-        }
-    }
-
-    fn ndim(&self) -> usize {
-        match self {
-            Self::Dense(dense) => dense.ndim(),
-            Self::Sparse(sparse) => sparse.ndim(),
-        }
-    }
-
-    fn shape(&'_ self) -> &'_ bounds::Shape {
-        match self {
-            Self::Dense(dense) => dense.shape(),
-            Self::Sparse(sparse) => sparse.shape(),
-        }
-    }
-
-    fn size(&self) -> u64 {
-        match self {
-            Self::Dense(dense) => dense.size(),
-            Self::Sparse(sparse) => sparse.size(),
-        }
-    }
 }
 
 impl TensorBoolean for TensorView {
@@ -175,7 +132,7 @@ impl TensorBoolean for TensorView {
     }
 
     fn and(&self, other: &Self) -> TCResult<Self> {
-        use TensorView::*;
+        use class::TensorView::*;
         match (self, other) {
             (Dense(left), Dense(right)) => left.and(right).map(Self::from),
             (Sparse(left), Sparse(right)) => left.and(right).map(Self::from),
@@ -195,7 +152,7 @@ impl TensorBoolean for TensorView {
     }
 
     fn or(&self, other: &Self) -> TCResult<Self> {
-        use TensorView::*;
+        use class::TensorView::*;
         match (self, other) {
             (Dense(left), Dense(right)) => left.or(right).map(Self::from),
             (Sparse(left), Sparse(right)) => left.or(right).map(Self::from),
@@ -208,7 +165,7 @@ impl TensorBoolean for TensorView {
     }
 
     fn xor(&self, other: &Self) -> TCResult<Self> {
-        use TensorView::*;
+        use class::TensorView::*;
         match (self, other) {
             (Dense(left), Dense(right)) => left.xor(right).map(Self::from),
             (Sparse(left), _) => Dense(DenseTensor::from_sparse(left.clone())).xor(other),
@@ -469,68 +426,7 @@ impl TensorTransform for TensorView {
     }
 }
 
-#[async_trait]
-impl Transact for TensorView {
-    async fn commit(&self, txn_id: &TxnId) {
-        match self {
-            Self::Dense(dense) => dense.commit(txn_id).await,
-            Self::Sparse(sparse) => sparse.commit(txn_id).await,
-        }
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        match self {
-            Self::Dense(dense) => dense.rollback(txn_id).await,
-            Self::Sparse(sparse) => sparse.rollback(txn_id).await,
-        }
-    }
-}
-
-impl From<DenseTensor> for TensorView {
-    fn from(dense: DenseTensor) -> TensorView {
-        Self::Dense(dense)
-    }
-}
-
-impl From<SparseTensor> for TensorView {
-    fn from(sparse: SparseTensor) -> TensorView {
-        Self::Sparse(sparse)
-    }
-}
-
-#[derive(Clone)]
-pub enum TensorBase {
-    Dense(dense::BlockListFile),
-    Sparse(sparse::SparseTable),
-}
-
-#[async_trait]
-impl Transact for TensorBase {
-    async fn commit(&self, txn_id: &TxnId) {
-        match self {
-            Self::Dense(dense) => dense.commit(txn_id).await,
-            Self::Sparse(sparse) => sparse.commit(txn_id).await,
-        }
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        match self {
-            Self::Dense(dense) => dense.rollback(txn_id).await,
-            Self::Sparse(sparse) => sparse.rollback(txn_id).await,
-        }
-    }
-}
-
-impl From<TensorBase> for TensorView {
-    fn from(base: TensorBase) -> TensorView {
-        match base {
-            TensorBase::Dense(blocks) => Self::Dense(blocks.into()),
-            TensorBase::Sparse(table) => Self::Sparse(table.into()),
-        }
-    }
-}
-
-pub fn einsum<T: Clone + TensorInstance + TensorMath + TensorReduce + TensorTransform>(
+pub fn einsum<T: Clone + class::TensorInstance + TensorMath + TensorReduce + TensorTransform>(
     format: &str,
     tensors: Vec<T>,
 ) -> TCResult<T> {

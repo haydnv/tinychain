@@ -30,7 +30,7 @@ pub enum CollectionBase {
     BTree(btree::BTreeFile),
     Graph(graph::Graph),
     Table(table::TableBase),
-    Tensor(tensor::TensorBase),
+    Tensor(tensor::class::TensorBase),
 }
 
 impl Instance for CollectionBase {
