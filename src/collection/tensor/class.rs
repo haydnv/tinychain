@@ -1,18 +1,22 @@
+use std::convert::TryInto;
 use std::fmt;
+use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, TCResult};
+use crate::class::{Class, Instance, TCResult, TCStream};
 use crate::collection::class::*;
+use crate::collection::{Collection, CollectionBase, CollectionView};
 use crate::error;
-use crate::transaction::{Transact, TxnId};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::NumberType;
-use crate::value::{label, Link, TCPath};
+use crate::value::{label, Link, Number, TCPath, Value};
 
-use super::bounds::Shape;
+use super::bounds::{Bounds, Shape};
 use super::dense::BlockListFile;
 use super::sparse::SparseTable;
-use super::{DenseTensor, SparseTensor};
+use super::{DenseTensor, SparseTensor, TensorBoolean, TensorIO, TensorTransform};
 
 pub trait TensorInstance: Send + Sync {
     fn dtype(&self) -> NumberType;
@@ -89,6 +93,31 @@ impl Instance for TensorBase {
     }
 }
 
+#[async_trait]
+impl CollectionInstance for TensorBase {
+    type Error = error::TCError;
+    type Item = Number;
+    type Slice = TensorView;
+
+    async fn get(&self, txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
+        TensorView::from(self.clone()).get(txn, selector).await
+    }
+
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        TensorView::from(self.clone()).is_empty(txn).await
+    }
+
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
+        TensorView::from(self.clone())
+            .put(txn, selector, value)
+            .await
+    }
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+        TensorView::from(self.clone()).to_stream(txn).await
+    }
+}
+
 impl TensorInstance for TensorBase {
     fn dtype(&self) -> NumberType {
         match self {
@@ -133,6 +162,12 @@ impl Transact for TensorBase {
             Self::Dense(dense) => dense.rollback(txn_id).await,
             Self::Sparse(sparse) => sparse.rollback(txn_id).await,
         }
+    }
+}
+
+impl From<TensorBase> for Collection {
+    fn from(base: TensorBase) -> Collection {
+        Collection::Base(CollectionBase::Tensor(base))
     }
 }
 
@@ -201,6 +236,31 @@ impl Instance for TensorView {
     }
 }
 
+#[async_trait]
+impl CollectionInstance for TensorView {
+    type Error = error::TCError;
+    type Item = Number;
+    type Slice = TensorView;
+
+    async fn get(&self, _txn: Arc<Txn>, selector: Value) -> TCResult<Self::Slice> {
+        let bounds: Bounds = selector.try_into()?;
+        self.slice(bounds).map(TensorView::from)
+    }
+
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        self.any(txn).map_ok(|any| !any).await
+    }
+
+    async fn put(&self, txn: Arc<Txn>, selector: Value, value: Self::Item) -> TCResult<()> {
+        let bounds: Bounds = selector.try_into()?;
+        self.write_value(txn.id().clone(), bounds, value).await
+    }
+
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+        Err(error::not_implemented("TensorView::to_stream"))
+    }
+}
+
 impl TensorInstance for TensorView {
     fn dtype(&self) -> NumberType {
         match self {
@@ -257,6 +317,12 @@ impl From<DenseTensor> for TensorView {
 impl From<SparseTensor> for TensorView {
     fn from(sparse: SparseTensor) -> TensorView {
         Self::Sparse(sparse)
+    }
+}
+
+impl From<TensorView> for Collection {
+    fn from(view: TensorView) -> Collection {
+        Collection::View(CollectionView::Tensor(view))
     }
 }
 

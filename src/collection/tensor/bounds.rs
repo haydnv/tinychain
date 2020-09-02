@@ -1,8 +1,13 @@
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter;
 use std::ops;
 
 use itertools::{Itertools, MultiProduct};
+
+use crate::class::TCResult;
+use crate::error;
+use crate::value::Value;
 
 pub type Coords = MultiProduct<AxisIter>;
 
@@ -75,6 +80,23 @@ impl From<ops::Range<u64>> for AxisBounds {
     }
 }
 
+impl TryFrom<Value> for AxisBounds {
+    type Error = error::TCError;
+
+    fn try_from(value: Value) -> TCResult<AxisBounds> {
+        // TODO: figure out how to do this without calling .clone
+        if let Ok(x) = value.clone().try_into() {
+            Ok(AxisBounds::At(x))
+        } else if let Ok((start, end)) = value.clone().try_into() {
+            // TODO: remove ambiguity between In(range) and Of(x1, x2)
+            Ok(AxisBounds::In(start..end))
+        } else {
+            let at: Vec<u64> = value.try_into()?;
+            Ok(AxisBounds::Of(at))
+        }
+    }
+}
+
 impl fmt::Display for AxisBounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use AxisBounds::*;
@@ -139,6 +161,13 @@ impl Bounds {
         }
 
         true
+    }
+
+    pub fn is_coord(&self) -> bool {
+        self.axes.iter().all(|bound| match bound {
+            AxisBounds::At(_) => true,
+            _ => false,
+        })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -271,6 +300,15 @@ impl From<(AxisBounds, Vec<u64>)> for Bounds {
             axes.push(axis.into());
         }
         Bounds { axes }
+    }
+}
+
+impl TryFrom<Value> for Bounds {
+    type Error = error::TCError;
+
+    fn try_from(value: Value) -> TCResult<Bounds> {
+        let bounds: Vec<AxisBounds> = value.try_into()?;
+        Ok(bounds.into())
     }
 }
 
