@@ -308,6 +308,51 @@ impl<T: TryFrom<Value, Error = error::TCError>> TryFrom<Value> for Vec<T> {
     }
 }
 
+impl<
+        E1: Into<error::TCError>,
+        T1: TryFrom<Value, Error = E1>,
+        E2: Into<error::TCError>,
+        T2: TryFrom<Value, Error = E2>,
+    > TryFrom<Value> for (T1, T2)
+{
+    type Error = error::TCError;
+
+    fn try_from(source: Value) -> TCResult<(T1, T2)> {
+        match source {
+            Value::Tuple(mut source) if source.len() == 2 => {
+                let second: T2 = source.pop().unwrap().try_into().map_err(|e: E2| e.into())?;
+                let first: T1 = source.pop().unwrap().try_into().map_err(|e: E1| e.into())?;
+                Ok((first, second))
+            }
+            other => Err(error::bad_request("Expected a 2-Tuple but found", other)),
+        }
+    }
+}
+
+impl<
+        E1: Into<error::TCError>,
+        T1: TryFrom<Value, Error = E1>,
+        E2: Into<error::TCError>,
+        T2: TryFrom<Value, Error = E2>,
+        E3: Into<error::TCError>,
+        T3: TryFrom<Value, Error = E3>,
+    > TryFrom<Value> for (T1, T2, T3)
+{
+    type Error = error::TCError;
+
+    fn try_from(source: Value) -> TCResult<(T1, T2, T3)> {
+        match source {
+            Value::Tuple(mut source) if source.len() == 3 => {
+                let third: T3 = source.pop().unwrap().try_into().map_err(|e: E3| e.into())?;
+                let second: T2 = source.pop().unwrap().try_into().map_err(|e: E2| e.into())?;
+                let first: T1 = source.pop().unwrap().try_into().map_err(|e: E1| e.into())?;
+                Ok((first, second, third))
+            }
+            other => Err(error::bad_request("Expected a 3-Tuple but found", other)),
+        }
+    }
+}
+
 struct ValueVisitor;
 
 impl ValueVisitor {
