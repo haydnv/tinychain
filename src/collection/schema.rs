@@ -444,3 +444,17 @@ impl From<(HashMap<ValueId, TableSchema>, HashMap<ValueId, NumberType>)> for Gra
         GraphSchema { nodes, edges }
     }
 }
+
+impl TryFrom<Value> for GraphSchema {
+    type Error = error::TCError;
+
+    fn try_from(value: Value) -> TCResult<GraphSchema> {
+        let (nodes, edges): (Vec<(ValueId, TableSchema)>, Vec<(ValueId, NumberType)>) =
+            value.try_into()?;
+
+        Ok(GraphSchema {
+            nodes: nodes.into_iter().collect(),
+            edges: edges.into_iter().collect(),
+        })
+    }
+}
