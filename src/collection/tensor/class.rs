@@ -151,10 +151,54 @@ pub enum TensorViewType {
     Sparse,
 }
 
+impl Class for TensorViewType {
+    type Instance = TensorView;
+
+    fn from_path(path: &TCPath) -> TCResult<Self> {
+        Err(error::bad_request(crate::class::ERR_PROTECTED, path))
+    }
+
+    fn prefix() -> TCPath {
+        TensorBaseType::prefix()
+    }
+}
+
+impl From<TensorViewType> for Link {
+    fn from(tvt: TensorViewType) -> Link {
+        let prefix = TensorViewType::prefix();
+
+        use TensorViewType::*;
+        match tvt {
+            Dense => prefix.join(label("dense").into()).into(),
+            Sparse => prefix.join(label("sparse").into()).into(),
+        }
+    }
+}
+
+impl fmt::Display for TensorViewType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Dense => write!(f, "type: DenseTensorView"),
+            Self::Sparse => write!(f, "type: SparseTensorView"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum TensorView {
     Dense(DenseTensor),
     Sparse(SparseTensor),
+}
+
+impl Instance for TensorView {
+    type Class = TensorViewType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::Dense(_) => Self::Class::Dense,
+            Self::Sparse(_) => Self::Class::Sparse,
+        }
+    }
 }
 
 impl TensorInstance for TensorView {
