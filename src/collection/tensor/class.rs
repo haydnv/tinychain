@@ -405,6 +405,49 @@ impl Instance for Tensor {
     }
 }
 
+#[async_trait]
+impl CollectionInstance for Tensor {
+    type Item = Number;
+    type Slice = TensorView;
+
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        match self {
+            Self::Base(base) => base.get(txn, selector).await,
+            Self::View(view) => view.get(txn, selector).await,
+        }
+    }
+
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        match self {
+            Self::Base(base) => base.is_empty(txn).await,
+            Self::View(view) => view.is_empty(txn).await,
+        }
+    }
+
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
+        match self {
+            Self::Base(base) => base.put(txn, selector, value).await,
+            Self::View(view) => view.put(txn, selector, value).await,
+        }
+    }
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        match self {
+            Self::Base(base) => base.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
+        }
+    }
+}
+
 impl TensorInstance for Tensor {
     fn dtype(&self) -> NumberType {
         match self {
@@ -448,6 +491,15 @@ impl Transact for Tensor {
         match self {
             Self::Base(base) => base.rollback(txn_id).await,
             Self::View(view) => view.rollback(txn_id).await,
+        }
+    }
+}
+
+impl From<Tensor> for Collection {
+    fn from(tensor: Tensor) -> Collection {
+        match tensor {
+            Tensor::Base(base) => Collection::Base(CollectionBase::Tensor(base)),
+            Tensor::View(view) => Collection::View(CollectionView::Tensor(view)),
         }
     }
 }
