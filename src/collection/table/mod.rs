@@ -25,34 +25,38 @@ const ERR_UPDATE: &str =
     "This table view does not support updates (consider updating a slice of the source table)";
 
 pub type ColumnBound = bounds::ColumnBound;
+pub type TableBase = index::TableBase;
+pub type TableBaseType = index::TableBaseType;
 pub type TableIndex = index::TableIndex;
+pub type TableView = view::TableView;
+pub type TableViewType = view::TableViewType;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum TableType {
-    Base(index::TableBaseType),
-    View(view::TableViewType),
+    Base(TableBaseType),
+    View(TableViewType),
 }
 
 impl Class for TableType {
     type Instance = Table;
 
     fn from_path(path: &TCPath) -> TCResult<TCType> {
-        index::TableBaseType::from_path(path)
+        TableBaseType::from_path(path)
     }
 
     fn prefix() -> TCPath {
-        index::TableBaseType::prefix()
+        TableBaseType::prefix()
     }
 }
 
-impl From<index::TableBaseType> for TableType {
-    fn from(tbt: index::TableBaseType) -> TableType {
+impl From<TableBaseType> for TableType {
+    fn from(tbt: TableBaseType) -> TableType {
         TableType::Base(tbt)
     }
 }
 
-impl From<view::TableViewType> for TableType {
-    fn from(tvt: view::TableViewType) -> TableType {
+impl From<TableViewType> for TableType {
+    fn from(tvt: TableViewType) -> TableType {
         TableType::View(tvt)
     }
 }
@@ -155,8 +159,8 @@ pub trait TableInstance: Clone + Into<Table> + Sized + Send + Sync + 'static {
 
 #[derive(Clone)]
 pub enum Table {
-    Base(index::TableBase),
-    View(view::TableView),
+    Base(TableBase),
+    View(TableView),
 }
 
 impl Table {
@@ -320,14 +324,14 @@ impl Transact for Table {
     }
 }
 
-impl From<index::TableBase> for Table {
-    fn from(base: index::TableBase) -> Table {
+impl From<TableBase> for Table {
+    fn from(base: TableBase) -> Table {
         Table::Base(base)
     }
 }
 
-impl From<view::TableView> for Table {
-    fn from(view: view::TableView) -> Table {
+impl From<TableView> for Table {
+    fn from(view: TableView) -> Table {
         Table::View(view)
     }
 }

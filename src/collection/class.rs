@@ -11,6 +11,7 @@ use crate::value::link::{Link, TCPath};
 use crate::value::{label, Value};
 
 use super::btree::{BTreeFile, BTreeType};
+use super::table::TableBaseType;
 use super::{Collection, CollectionBase, CollectionView};
 
 #[async_trait]
@@ -107,7 +108,7 @@ impl fmt::Display for CollectionType {
 pub enum CollectionBaseType {
     BTree,
     Graph,
-    Table,
+    Table(TableBaseType),
     Tensor,
 }
 
@@ -122,14 +123,12 @@ impl Class for CollectionBaseType {
         } else {
             use CollectionBaseType::*;
             match path[0].as_str() {
-                "btree" => Ok(BTree),
-                "graph" => Ok(Graph),
-                "table" => Ok(Table),
-                "tensor" => Ok(Tensor),
+                "btree" => Ok(CollectionType::Base(BTree).into()),
+                "graph" => Ok(CollectionType::Base(Graph).into()),
+                "table" => TableBaseType::from_path(&path.slice_from(0)),
+                "tensor" => Ok(CollectionType::Base(Tensor).into()),
                 other => Err(error::not_found(other)),
             }
-            .map(CollectionType::Base)
-            .map(TCType::Collection)
         }
     }
 
@@ -171,7 +170,7 @@ impl From<CollectionBaseType> for Link {
         match ct {
             BTree => BTreeType::Tree.into(),
             Graph => prefix.join(label("graph").into()).into(), // TODO
-            Table => prefix.join(label("table").into()).into(), // TODO
+            Table(tbt) => tbt.into(),
             Tensor => prefix.join(label("tensor").into()).into(), // TODO
         }
     }
@@ -183,7 +182,7 @@ impl fmt::Display for CollectionBaseType {
         match self {
             BTree => write!(f, "class BTree"),
             Graph => write!(f, "class Graph"),
-            Table => write!(f, "class Table"),
+            Table(tbt) => write!(f, "{}", tbt),
             Tensor => write!(f, "class Tensor"),
         }
     }

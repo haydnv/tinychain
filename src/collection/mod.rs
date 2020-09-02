@@ -29,7 +29,7 @@ pub type Tensor = tensor::Tensor;
 pub enum CollectionBase {
     BTree(btree::BTreeFile),
     Graph(graph::Graph),
-    Table(table::TableIndex),
+    Table(table::TableBase),
     Tensor(tensor::TensorBase),
 }
 
@@ -40,7 +40,7 @@ impl Instance for CollectionBase {
         match self {
             Self::BTree(_) => class::CollectionBaseType::BTree,
             Self::Graph(_) => class::CollectionBaseType::Graph, // TODO
-            Self::Table(_) => class::CollectionBaseType::Table, // TODO
+            Self::Table(tbt) => class::CollectionBaseType::Table(tbt.class()),
             Self::Tensor(_) => class::CollectionBaseType::Tensor, // TODO
         }
     }

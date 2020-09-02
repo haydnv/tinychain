@@ -9,15 +9,18 @@ use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream, TCType};
 use crate::collection::btree::{self, BTreeFile};
-use crate::collection::class::{CollectionBaseType, CollectionType};
+use crate::collection::class::{
+    CollectionBaseType, CollectionClass, CollectionInstance, CollectionType,
+};
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
+use crate::collection::{Collection, CollectionBase};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{label, Link, TCPath, Value, ValueId};
 
 use super::bounds::{self, Bounds, ColumnBound};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
-use super::{Table, TableInstance, TableType};
+use super::{Table, TableInstance, TableType, TableView};
 
 const PRIMARY_INDEX: &str = "primary";
 
@@ -34,7 +37,11 @@ impl Class for TableBaseType {
     fn from_path(path: &TCPath) -> TCResult<TCType> {
         if path.is_empty() {
             Ok(TCType::Collection(CollectionType::Base(
-                CollectionBaseType::Table,
+                CollectionBaseType::Table(TableBaseType::Table),
+            )))
+        } else if path == "/index" {
+            Ok(TCType::Collection(CollectionType::Base(
+                CollectionBaseType::Table(TableBaseType::Index),
             )))
         } else {
             Err(error::not_found(path))
@@ -43,6 +50,21 @@ impl Class for TableBaseType {
 
     fn prefix() -> TCPath {
         CollectionType::prefix().join(label("table").into())
+    }
+}
+
+#[async_trait]
+impl CollectionClass for TableBaseType {
+    type Instance = TableBase;
+
+    async fn get(_txn: Arc<Txn>, _path: &TCPath, _schema: Value) -> TCResult<TableBase> {
+        Err(error::not_implemented("TableBaseType::get")) // TODO
+    }
+}
+
+impl From<TableBaseType> for CollectionType {
+    fn from(tbt: TableBaseType) -> CollectionType {
+        CollectionType::Base(CollectionBaseType::Table(tbt))
     }
 }
 
@@ -85,6 +107,29 @@ impl Instance for TableBase {
             Self::ROIndex(_) => TableBaseType::ReadOnly,
             Self::Table(_) => TableBaseType::Table,
         }
+    }
+}
+
+#[async_trait]
+impl CollectionInstance for TableBase {
+    type Error = error::TCError;
+    type Item = Vec<Value>;
+    type Slice = TableView;
+
+    async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<Self::Slice> {
+        Err(error::not_implemented("TableBase::get"))
+    }
+
+    async fn is_empty(&self, _txn: Arc<Txn>) -> TCResult<bool> {
+        Err(error::not_implemented("TableBase::is_empty"))
+    }
+
+    async fn put(&self, _txn: Arc<Txn>, _selector: Value, _value: Self::Item) -> TCResult<()> {
+        Err(error::not_implemented("TableBase::put"))
+    }
+
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+        Err(error::not_implemented("TableBase::to_stream"))
     }
 }
 
@@ -230,6 +275,12 @@ impl From<ReadOnly> for TableBase {
 impl From<TableIndex> for TableBase {
     fn from(index: TableIndex) -> Self {
         Self::Table(index)
+    }
+}
+
+impl From<TableBase> for Collection {
+    fn from(table: TableBase) -> Collection {
+        Collection::Base(CollectionBase::Table(table))
     }
 }
 

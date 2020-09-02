@@ -9,7 +9,9 @@ use futures::{future, join};
 
 use crate::class::*;
 use crate::collection::btree::{BTreeFile, BTreeRange};
+use crate::collection::class::CollectionInstance;
 use crate::collection::schema::{Column, IndexSchema, Row};
+use crate::collection::{Collection, CollectionView};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{label, Link, TCPath, Value, ValueId};
@@ -91,6 +93,29 @@ impl Instance for TableView {
             Self::Selection(_) => Selection,
             Self::TableSlice(_) => TableSlice,
         }
+    }
+}
+
+#[async_trait]
+impl CollectionInstance for TableView {
+    type Error = error::TCError;
+    type Item = Vec<Value>;
+    type Slice = TableView;
+
+    async fn get(&self, _txn: Arc<Txn>, _selector: Value) -> TCResult<Self::Slice> {
+        Err(error::not_implemented("TableBase::get"))
+    }
+
+    async fn is_empty(&self, _txn: Arc<Txn>) -> TCResult<bool> {
+        Err(error::not_implemented("TableBase::is_empty"))
+    }
+
+    async fn put(&self, _txn: Arc<Txn>, _selector: Value, _value: Self::Item) -> TCResult<()> {
+        Err(error::not_implemented("TableBase::put"))
+    }
+
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+        Err(error::not_implemented("TableBase::to_stream"))
     }
 }
 
@@ -303,6 +328,12 @@ impl From<Merged> for TableView {
 impl From<TableSlice> for TableView {
     fn from(table_slice: TableSlice) -> Self {
         Self::TableSlice(table_slice)
+    }
+}
+
+impl From<TableView> for Collection {
+    fn from(view: TableView) -> Collection {
+        Collection::View(CollectionView::Table(Table::View(view)))
     }
 }
 
