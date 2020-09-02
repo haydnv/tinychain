@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::convert::TryInto;
 use std::fmt;
 use std::iter;
 use std::sync::Arc;
@@ -53,8 +54,14 @@ impl Class for TableBaseType {
 impl CollectionClass for TableBaseType {
     type Instance = TableBase;
 
-    async fn get(_txn: Arc<Txn>, _path: &TCPath, _schema: Value) -> TCResult<TableBase> {
-        Err(error::not_implemented("TableBaseType::get")) // TODO
+    async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<TableBase> {
+        if path.is_empty() {
+            TableIndex::create(txn, schema.try_into()?)
+                .map_ok(TableBase::from)
+                .await
+        } else {
+            Err(error::not_found(path))
+        }
     }
 }
 
