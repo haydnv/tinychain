@@ -7,16 +7,20 @@ use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, TCResult, TCStream};
 use crate::collection::class::*;
-use crate::collection::{Collection, CollectionBase, CollectionView};
+use crate::collection::{
+    Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
+};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::class::NumberType;
+use crate::value::number::class::{NumberClass, NumberType};
 use crate::value::{label, Link, Number, TCPath, Value};
 
 use super::bounds::{Bounds, Shape};
 use super::dense::BlockListFile;
 use super::sparse::SparseTable;
 use super::{DenseTensor, SparseTensor, TensorBoolean, TensorIO, TensorTransform};
+
+const ERR_SPECIFY_TYPE: &str = "You must specify a type of tensor (tensor/dense or tensor/sparse)";
 
 pub trait TensorInstance: Send + Sync {
     fn dtype(&self) -> NumberType;
@@ -52,6 +56,33 @@ impl Class for TensorBaseType {
 
     fn prefix() -> TCPath {
         CollectionBaseType::prefix().join(label("tensor").into())
+    }
+}
+
+#[async_trait]
+impl CollectionClass for TensorBaseType {
+    type Instance = TensorBase;
+
+    async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<TensorBase> {
+        if path.is_empty() {
+            return Err(error::unsupported(ERR_SPECIFY_TYPE));
+        }
+
+        match path[0].as_str() {
+            "dense" if path.len() == 1 => {
+                let (dtype, shape): (NumberType, Shape) = schema.try_into()?;
+                let block_list = BlockListFile::constant(txn, shape, dtype.zero()).await?;
+                Ok(TensorBase::Dense(block_list))
+            }
+            "sparse" if path.len() == 1 => todo!(),
+            other => Err(error::not_found(other)),
+        }
+    }
+}
+
+impl From<TensorBaseType> for CollectionType {
+    fn from(tbt: TensorBaseType) -> CollectionType {
+        CollectionType::Base(CollectionBaseType::Tensor(tbt))
     }
 }
 

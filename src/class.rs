@@ -8,6 +8,7 @@ use futures::stream::Stream;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
 use crate::value::link::{Link, TCPath};
+use crate::value::number::NumberType;
 use crate::value::{label, Value, ValueId, ValueType};
 
 const ERR_EMPTY_CLASSPATH: &str = "Expected a class path, \
@@ -97,6 +98,17 @@ impl From<CollectionType> for TCType {
 impl From<ValueType> for TCType {
     fn from(vt: ValueType) -> TCType {
         TCType::Value(vt)
+    }
+}
+
+impl TryFrom<TCType> for NumberType {
+    type Error = error::TCError;
+
+    fn try_from(class: TCType) -> TCResult<NumberType> {
+        match class {
+            TCType::Value(ValueType::Number(nt)) => Ok(nt),
+            other => Err(error::bad_request("Expected ValueType, found", other)),
+        }
     }
 }
 

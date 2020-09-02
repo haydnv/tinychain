@@ -26,7 +26,9 @@ pub type DenseTensor = dense::DenseTensor;
 pub type Shape = bounds::Shape;
 pub type SparseTable = sparse::SparseTable;
 pub type SparseTensor = sparse::SparseTensor;
+pub type TensorBaseType = class::TensorBaseType;
 pub type TensorView = class::TensorView;
+pub type Tensor = class::Tensor;
 
 pub trait TensorBoolean: class::TensorInstance + Sized {
     fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;

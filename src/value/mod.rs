@@ -213,6 +213,20 @@ impl<'a> TryFrom<&'a Value> for &'a Number {
     }
 }
 
+impl TryFrom<Value> for number::NumberType {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<number::NumberType> {
+        match v {
+            Value::Class(t) => t.try_into(),
+            Value::TCString(TCString::Link(l)) if l.host().is_none() => {
+                number::NumberType::from_path(l.path())
+            }
+            other => Err(error::bad_request("Expected NumberType, found", other)),
+        }
+    }
+}
+
 impl TryFrom<Value> for usize {
     type Error = error::TCError;
 

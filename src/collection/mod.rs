@@ -42,9 +42,9 @@ impl Instance for CollectionBase {
     fn class(&self) -> Self::Class {
         match self {
             Self::BTree(_) => class::CollectionBaseType::BTree,
-            Self::Graph(_) => class::CollectionBaseType::Graph, // TODO
-            Self::Table(tbt) => class::CollectionBaseType::Table(tbt.class()),
-            Self::Tensor(_) => class::CollectionBaseType::Tensor, // TODO
+            Self::Graph(_) => class::CollectionBaseType::Graph,
+            Self::Table(table) => class::CollectionBaseType::Table(table.class()),
+            Self::Tensor(tensor) => class::CollectionBaseType::Tensor(tensor.class()),
         }
     }
 }

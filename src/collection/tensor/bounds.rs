@@ -440,6 +440,15 @@ impl From<Vec<u64>> for Shape {
     }
 }
 
+impl TryFrom<Value> for Shape {
+    type Error = error::TCError;
+
+    fn try_from(value: Value) -> TCResult<Shape> {
+        let shape = value.try_into()?;
+        Ok(Shape(shape))
+    }
+}
+
 impl fmt::Display for Shape {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

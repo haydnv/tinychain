@@ -12,6 +12,7 @@ use crate::value::{label, Value};
 
 use super::btree::{BTreeFile, BTreeType};
 use super::table::TableBaseType;
+use super::tensor::TensorBaseType;
 use super::{Collection, CollectionBase, CollectionView};
 
 pub enum CollectionItem<I: Into<Value>, S: CollectionInstance> {
@@ -122,7 +123,7 @@ pub enum CollectionBaseType {
     BTree,
     Graph,
     Table(TableBaseType),
-    Tensor,
+    Tensor(TensorBaseType),
 }
 
 impl Class for CollectionBaseType {
@@ -139,7 +140,7 @@ impl Class for CollectionBaseType {
                 "btree" if suffix.len() == 1 => Ok(BTree),
                 "graph" if suffix.len() == 1 => Ok(Graph),
                 "table" => TableBaseType::from_path(path).map(Table),
-                "tensor" if suffix.len() == 1 => Ok(Tensor),
+                "tensor" => TensorBaseType::from_path(path).map(Tensor),
                 other => Err(error::not_found(other)),
             }
         }
@@ -184,7 +185,7 @@ impl From<CollectionBaseType> for Link {
             BTree => BTreeType::Tree.into(),
             Graph => prefix.join(label("graph").into()).into(), // TODO
             Table(tbt) => tbt.into(),
-            Tensor => prefix.join(label("tensor").into()).into(), // TODO
+            Tensor(tbt) => tbt.into(), // TODO
         }
     }
 }
@@ -196,7 +197,7 @@ impl fmt::Display for CollectionBaseType {
             BTree => write!(f, "class BTree"),
             Graph => write!(f, "class Graph"),
             Table(tbt) => write!(f, "{}", tbt),
-            Tensor => write!(f, "class Tensor"),
+            Tensor(tbt) => write!(f, "{}", tbt),
         }
     }
 }
