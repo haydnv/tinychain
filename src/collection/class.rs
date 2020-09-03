@@ -3,6 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, TCResult, TCStream, TCType};
 use crate::error;
@@ -11,8 +12,9 @@ use crate::value::link::{Link, TCPath};
 use crate::value::{label, Value};
 
 use super::btree::{BTreeFile, BTreeType};
-use super::table::TableBaseType;
-use super::tensor::TensorBaseType;
+use super::graph::Graph;
+use super::table::{TableBaseType, TableType};
+use super::tensor::{TensorBaseType, TensorType};
 use super::{Collection, CollectionBase, CollectionView};
 
 pub enum CollectionItem<I: Into<Value>, S: CollectionInstance> {
@@ -156,21 +158,33 @@ impl CollectionClass for CollectionBaseType {
     type Instance = CollectionBase;
 
     async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<CollectionBase> {
-        if path.is_empty() {
+        let suffix = path.from_path(&Self::prefix())?;
+
+        if suffix.is_empty() {
             return Err(error::unsupported("You must specify a type of Collection"));
         }
 
-        match path[0].as_str() {
-            "btree" if path.len() == 1 => {
-                println!("Creating new BTree with schema {}", schema);
+        match suffix[0].as_str() {
+            "btree" if suffix.len() == 1 => {
                 BTreeFile::create(txn, schema.try_into()?)
+                    .map_ok(CollectionBase::BTree)
                     .await
-                    .map(CollectionBase::BTree)
             }
-            "graph" | "table" | "tensor" => Err(error::not_implemented(&format!(
-                "CollectionBaseType::get {}",
-                path
-            ))),
+            "graph" if suffix.len() == 1 => {
+                Graph::create(txn, schema.try_into()?)
+                    .map_ok(CollectionBase::Graph)
+                    .await
+            }
+            "table" => {
+                TableBaseType::get(txn, path, schema)
+                    .map_ok(CollectionBase::Table)
+                    .await
+            }
+            "tensor" => {
+                TensorBaseType::get(txn, path, schema)
+                    .map_ok(CollectionBase::Tensor)
+                    .await
+            }
             other => Err(error::not_found(other)),
         }
     }
@@ -183,9 +197,9 @@ impl From<CollectionBaseType> for Link {
         use CollectionBaseType::*;
         match ct {
             BTree => BTreeType::Tree.into(),
-            Graph => prefix.join(label("graph").into()).into(), // TODO
+            Graph => prefix.join(label("graph").into()).into(),
             Table(tbt) => tbt.into(),
-            Tensor(tbt) => tbt.into(), // TODO
+            Tensor(tbt) => tbt.into(),
         }
     }
 }
@@ -205,9 +219,8 @@ impl fmt::Display for CollectionBaseType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionViewType {
     BTree(BTreeType),
-    Graph,
-    Table,
-    Tensor,
+    Table(TableType),
+    Tensor(TensorType),
 }
 
 impl Class for CollectionViewType {
@@ -230,14 +243,11 @@ impl From<BTreeType> for CollectionViewType {
 
 impl From<CollectionViewType> for Link {
     fn from(cvt: CollectionViewType) -> Link {
-        let prefix = CollectionViewType::prefix();
-
         use CollectionViewType::*;
         match cvt {
             BTree(btt) => btt.into(),
-            Graph => prefix.join(label("graph").into()).into(), // TODO
-            Table => prefix.join(label("table").into()).into(), // TODO
-            Tensor => prefix.join(label("tensor").into()).into(), // TODO
+            Table(tt) => tt.into(),
+            Tensor(tt) => tt.into(),
         }
     }
 }
@@ -247,9 +257,8 @@ impl fmt::Display for CollectionViewType {
         use CollectionViewType::*;
         match self {
             BTree(btree_type) => write!(f, "{}", btree_type),
-            Graph => write!(f, "class Graph"),       // TODO
-            Table => write!(f, "class TableView"),   // TODO
-            Tensor => write!(f, "class TensorView"), // TODO
+            Table(table_type) => write!(f, "{}", table_type),
+            Tensor(tensor_type) => write!(f, "{}", tensor_type),
         }
     }
 }

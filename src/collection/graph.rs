@@ -8,12 +8,12 @@ use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{FuturesOrdered, StreamExt, TryStreamExt};
 use futures::try_join;
 
-use crate::class::{TCBoxTryFuture, TCResult, TCTryStream};
+use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
+use crate::collection::CollectionBaseType;
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::number::class::{NumberType, UIntType};
-use crate::value::number::instance::{Number, UInt};
 use crate::value::{label, Label, Value, ValueId, ValueType};
 
 use super::schema::{GraphSchema, IndexSchema, TableSchema};
@@ -263,6 +263,14 @@ impl Graph {
     }
 }
 
+impl Instance for Graph {
+    type Class = CollectionBaseType;
+
+    fn class(&self) -> CollectionBaseType {
+        CollectionBaseType::Graph
+    }
+}
+
 #[async_trait]
 impl Transact for Graph {
     async fn commit(&self, txn_id: &TxnId) {
@@ -290,16 +298,8 @@ impl Transact for Graph {
 
 fn try_unwrap_node_id(node_id: Option<Vec<Value>>, node_key: Value) -> TCResult<u64> {
     node_id
-        .ok_or(error::not_found(node_key))?
+        .ok_or_else(|| error::not_found(node_key))?
         .pop()
-        .ok_or(error::internal(ERR_CORRUPT))?
+        .ok_or_else(|| error::internal(ERR_CORRUPT))?
         .try_into()
-}
-
-fn unwrap_u64(row: Vec<Value>) -> u64 {
-    if let &[Value::Number(Number::UInt(UInt::U64(u)))] = row.as_slice() {
-        u
-    } else {
-        panic!(ERR_CORRUPT)
-    }
 }

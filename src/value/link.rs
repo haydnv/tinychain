@@ -431,7 +431,10 @@ impl TCPath {
             })
         } else {
             Err(error::bad_request(
-                "Tried to calculate the path of {} from an incorrect root",
+                &format!(
+                    "Tried to calculate the path of {} from an incorrect root",
+                    self
+                ),
                 other,
             ))
         }

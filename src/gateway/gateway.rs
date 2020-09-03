@@ -46,7 +46,7 @@ impl Gateway {
         if subject.host().is_none() {
             let path = subject.path();
             if path[0] == "sbin" {
-                kernel::get(&path.slice_from(1), selector, txn).await
+                kernel::get(path, selector, txn).await
             } else {
                 Err(error::not_implemented("Gateway::get from Cluster"))
             }

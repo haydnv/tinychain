@@ -10,19 +10,24 @@ use crate::error;
 use crate::transaction::Txn;
 use crate::value::class::ValueClass;
 use crate::value::link::TCPath;
-use crate::value::{Value, ValueId, ValueType};
+use crate::value::{label, Value, ValueId, ValueType};
 
 const ERR_TXN_REQUIRED: &str = "Collection requires a transaction context";
 
 pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<State> {
-    match path[0].as_str() {
+    let suffix = path.from_path(&label("sbin").into())?;
+    if suffix.is_empty() {
+        return Err(error::unsupported("Cannot access /sbin directly"));
+    }
+
+    match suffix[0].as_str() {
         "collection" if path.len() > 1 => {
             let txn = txn.ok_or_else(|| error::unsupported(ERR_TXN_REQUIRED))?;
-            CollectionType::get(txn, &path.slice_from(1), id)
+            CollectionType::get(txn, path, id)
                 .await
                 .map(State::Collection)
         }
-        "value" if path.len() > 1 => ValueType::get(&path.slice_from(1), id).map(State::Value),
+        "value" if path.len() > 1 => ValueType::get(path, id).map(State::Value),
         other => Err(error::not_found(other)),
     }
 }
