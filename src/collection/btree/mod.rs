@@ -391,6 +391,13 @@ impl BTreeFile {
             .await
     }
 
+    pub fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+        Box::pin(async move {
+            let root = self.get_root(txn.id()).await?;
+            Ok(root.keys.is_empty())
+        })
+    }
+
     pub fn len<'a>(self, txn_id: TxnId, selector: Selector) -> TCBoxTryFuture<'a, u64> {
         Box::pin(async move {
             let slice = self.slice(txn_id, selector).await?;

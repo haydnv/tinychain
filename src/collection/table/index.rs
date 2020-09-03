@@ -320,6 +320,10 @@ impl Index {
         })
     }
 
+    pub fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+        self.btree.is_empty(txn)
+    }
+
     pub fn len(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
         self.btree.clone().len(txn_id, btree::Selector::all())
     }
@@ -659,6 +663,10 @@ impl TableIndex {
             btree::BTreeFile::create(txn.subcontext_tmp().await?, schema.clone().into()).await?;
 
         Ok(Index { btree, schema })
+    }
+
+    pub fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+        self.primary.is_empty(txn)
     }
 
     pub fn primary(&'_ self) -> &'_ Index {
