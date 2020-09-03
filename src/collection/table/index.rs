@@ -128,17 +128,29 @@ impl CollectionInstance for TableBase {
         Err(error::not_implemented("TableBase::get"))
     }
 
-    async fn is_empty(&self, _txn: Arc<Txn>) -> TCResult<bool> {
-        Err(error::not_implemented("TableBase::is_empty"))
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        match self {
+            Self::Index(index) => index.is_empty(txn).await,
+            Self::ROIndex(index) => index.is_empty(txn).await,
+            Self::Table(table) => table.is_empty(txn).await,
+        }
     }
 
     async fn put(
         &self,
-        _txn: Arc<Txn>,
-        _selector: Value,
-        _value: CollectionItem<Self::Item, Self::Slice>,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
-        Err(error::not_implemented("TableBase::put"))
+        let key: Vec<Value> = selector.try_into()?;
+        match value {
+            CollectionItem::Value(value) => match self {
+                Self::Index(_) => Err(error::not_implemented("Index::put")),
+                Self::ROIndex(_) => Err(error::unsupported("Cannot write to a read-only index")),
+                Self::Table(table) => table.insert(txn.id().clone(), key, value).await,
+            },
+            _ => Err(error::not_implemented("TableBase::put")),
+        }
     }
 
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
@@ -542,6 +554,10 @@ impl ReadOnly {
         ReadOnly {
             index: self.index.into_reversed(),
         }
+    }
+
+    pub fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+        self.index.is_empty(txn)
     }
 }
 

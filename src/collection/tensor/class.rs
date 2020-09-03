@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
@@ -374,6 +374,17 @@ impl From<DenseTensor> for TensorView {
 impl From<SparseTensor> for TensorView {
     fn from(sparse: SparseTensor) -> TensorView {
         Self::Sparse(sparse)
+    }
+}
+
+impl TryFrom<CollectionView> for TensorView {
+    type Error = error::TCError;
+
+    fn try_from(view: CollectionView) -> TCResult<TensorView> {
+        match view {
+            CollectionView::Tensor(tensor) => Ok(tensor),
+            other => Err(error::bad_request("Expected TensorView but found", other)),
+        }
     }
 }
 

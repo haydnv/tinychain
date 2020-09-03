@@ -198,7 +198,31 @@ impl class::CollectionInstance for CollectionView {
                     btree.put(txn, selector, CollectionItem::Slice(slice)).await
                 }
             },
-            _ => Err(error::not_implemented("CollectionBase::put")),
+            Self::Table(table) => match value {
+                CollectionItem::Value(value) => {
+                    let value = value.try_into()?;
+                    table.put(txn, selector, CollectionItem::Value(value)).await
+                }
+                CollectionItem::Slice(slice) => {
+                    let slice = slice.try_into()?;
+                    table.put(txn, selector, CollectionItem::Slice(slice)).await
+                }
+            },
+            Self::Tensor(tensor) => match value {
+                CollectionItem::Value(value) => {
+                    let value = value.try_into()?;
+                    tensor
+                        .put(txn, selector, CollectionItem::Value(value))
+                        .await
+                }
+                CollectionItem::Slice(slice) => {
+                    let slice = slice.try_into()?;
+                    tensor
+                        .put(txn, selector, CollectionItem::Slice(slice))
+                        .await
+                }
+            },
+            _ => Err(error::not_implemented("CollectionView::put")),
         }
     }
 
@@ -208,7 +232,7 @@ impl class::CollectionInstance for CollectionView {
                 let stream = btree.to_stream(txn).await?;
                 Ok(Box::pin(stream.map(Value::from)))
             }
-            _ => Err(error::not_implemented("CollectionVieW::stream")),
+            _ => Err(error::not_implemented("CollectionView::stream")),
         }
     }
 }

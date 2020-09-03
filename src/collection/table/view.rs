@@ -339,6 +339,17 @@ impl From<TableSlice> for TableView {
     }
 }
 
+impl TryFrom<CollectionView> for TableView {
+    type Error = error::TCError;
+
+    fn try_from(view: CollectionView) -> TCResult<TableView> {
+        match view {
+            CollectionView::Table(Table::View(view)) => Ok(view),
+            other => Err(error::bad_request("Expected TableView but found", other)),
+        }
+    }
+}
+
 impl From<TableView> for Collection {
     fn from(view: TableView) -> Collection {
         Collection::View(CollectionView::Table(Table::View(view)))
@@ -483,6 +494,13 @@ impl IndexSlice {
     pub fn into_reversed(mut self) -> IndexSlice {
         self.reverse = !self.reverse;
         self
+    }
+
+    pub fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+        Box::pin(async move {
+            let count = self.count(txn.id().clone()).await?;
+            Ok(count == 0)
+        })
     }
 
     pub fn slice_index(&self, bounds: Bounds) -> TCResult<IndexSlice> {

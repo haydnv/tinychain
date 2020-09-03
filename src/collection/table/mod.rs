@@ -7,6 +7,8 @@ use futures::future;
 use futures::{Stream, StreamExt};
 
 use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream};
+use crate::collection::class::CollectionInstance;
+use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{Link, TCPath, Value, ValueId};
@@ -180,6 +182,49 @@ impl Instance for Table {
     }
 }
 
+#[async_trait]
+impl CollectionInstance for Table {
+    type Item = Vec<Value>;
+    type Slice = TableView;
+
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        match self {
+            Self::Base(base) => base.get(txn, selector).await,
+            Self::View(view) => view.get(txn, selector).await,
+        }
+    }
+
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        match self {
+            Self::Base(base) => base.is_empty(txn).await,
+            Self::View(view) => view.is_empty(txn).await,
+        }
+    }
+
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
+        match self {
+            Self::Base(base) => base.put(txn, selector, value).await,
+            Self::View(view) => view.put(txn, selector, value).await,
+        }
+    }
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        match self {
+            Self::Base(base) => base.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
+        }
+    }
+}
+
 impl TableInstance for Table {
     type Stream = TCStream<Vec<Value>>;
 
@@ -333,5 +378,14 @@ impl From<TableBase> for Table {
 impl From<TableView> for Table {
     fn from(view: TableView) -> Table {
         Table::View(view)
+    }
+}
+
+impl From<Table> for Collection {
+    fn from(table: Table) -> Collection {
+        match table {
+            Table::Base(base) => Collection::Base(CollectionBase::Table(base)),
+            _ => Collection::View(CollectionView::Table(table)),
+        }
     }
 }
