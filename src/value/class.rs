@@ -102,7 +102,7 @@ impl ValueClass for ValueType {
             "none" if suffix.len() == 1 => Ok(Value::None),
             "bytes" if suffix.len() == 1 => Err(error::not_implemented("/sbin/value/bytes")),
             "number" => NumberType::get(path, value.try_into()?).map(Value::Number),
-            "string" => Err(error::not_implemented("/sbin/value/string")),
+            "string" => StringType::get(path, value.try_into()?).map(Value::TCString),
             "op" => Err(error::not_implemented("/sbin/value/op")),
             "tuple" => Err(error::not_implemented("/sbin/value/tuple")),
             other => Err(error::not_found(other)),

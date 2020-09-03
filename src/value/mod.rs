@@ -256,6 +256,17 @@ impl<'a> TryFrom<&'a Value> for &'a String {
     }
 }
 
+impl TryFrom<Value> for TCString {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<TCString> {
+        match v {
+            Value::TCString(s) => Ok(s),
+            other => Err(error::bad_request("Expected String but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Value> for TCType {
     type Error = error::TCError;
 

@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::class::{Class, Instance};
 use crate::error;
 
+use super::class::{ValueClass, ValueInstance};
 use super::link::{Link, TCPath};
 use super::reference::TCRef;
 use super::{TCResult, ValueType};
@@ -49,6 +50,30 @@ impl Class for StringType {
 
     fn prefix() -> TCPath {
         ValueType::prefix().join(label("string").into())
+    }
+}
+
+impl ValueClass for StringType {
+    type Instance = TCString;
+
+    fn get(path: &TCPath, value: TCString) -> TCResult<TCString> {
+        let suffix = path.from_path(&Self::prefix())?;
+
+        if suffix.is_empty() {
+            return Ok(value);
+        }
+
+        match suffix[0].as_str() {
+            "id" => value.try_into().map(TCString::Id),
+            "link" => value.try_into().map(TCString::Link),
+            "ref" => value.try_into().map(TCString::Ref),
+            "ustring" => value.try_into().map(TCString::UString),
+            other => Err(error::not_found(other)),
+        }
+    }
+
+    fn size(self) -> Option<usize> {
+        None
     }
 }
 
@@ -219,6 +244,10 @@ impl Instance for TCString {
     }
 }
 
+impl ValueInstance for TCString {
+    type Class = StringType;
+}
+
 impl From<Link> for TCString {
     fn from(l: Link) -> TCString {
         TCString::Link(l)
@@ -254,6 +283,17 @@ impl TryFrom<TCString> for Link {
     }
 }
 
+impl TryFrom<TCString> for String {
+    type Error = error::TCError;
+
+    fn try_from(s: TCString) -> TCResult<String> {
+        match s {
+            TCString::UString(s) => Ok(s),
+            other => Err(error::bad_request("Expected String but found", other)),
+        }
+    }
+}
+
 impl<'a> TryFrom<&'a TCString> for &'a String {
     type Error = error::TCError;
 
@@ -265,12 +305,23 @@ impl<'a> TryFrom<&'a TCString> for &'a String {
     }
 }
 
+impl TryFrom<TCString> for ValueId {
+    type Error = error::TCError;
+
+    fn try_from(s: TCString) -> TCResult<ValueId> {
+        match s {
+            TCString::Id(id) => Ok(id),
+            other => Err(error::bad_request("Expected ValueId but found", other)),
+        }
+    }
+}
+
 impl<'a> TryFrom<&'a TCString> for &'a ValueId {
     type Error = error::TCError;
 
     fn try_from(s: &'a TCString) -> TCResult<&'a ValueId> {
         match s {
-            TCString::Id(s) => Ok(s),
+            TCString::Id(id) => Ok(id),
             other => Err(error::bad_request("Expected ValueId but found", other)),
         }
     }
@@ -293,13 +344,13 @@ impl TryFrom<TCString> for TCPath {
     }
 }
 
-impl TryFrom<TCString> for ValueId {
+impl TryFrom<TCString> for TCRef {
     type Error = error::TCError;
 
-    fn try_from(s: TCString) -> TCResult<ValueId> {
+    fn try_from(s: TCString) -> TCResult<TCRef> {
         match s {
-            TCString::Id(v) => Ok(v),
-            other => Err(error::bad_request("Expected ValueId, found", other)),
+            TCString::Ref(tc_ref) => Ok(tc_ref),
+            other => Err(error::bad_request("Expected ValueId but found", other)),
         }
     }
 }

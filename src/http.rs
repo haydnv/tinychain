@@ -117,6 +117,7 @@ impl Http {
                 match state {
                     State::Value(value) => {
                         let value = serde_json::to_string_pretty(&value)
+                            .map(|json| format!("{}\r\n", json))
                             .map(Bytes::from)
                             .map_err(error::TCError::from);
                         Ok(Box::pin(stream::once(future::ready(value))))
