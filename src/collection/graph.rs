@@ -8,8 +8,9 @@ use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{FuturesOrdered, StreamExt, TryStreamExt};
 use futures::try_join;
 
-use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
-use crate::collection::CollectionBaseType;
+use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
+use crate::collection::class::CollectionInstance;
+use crate::collection::{Collection, CollectionBase, CollectionBaseType, CollectionItem};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -272,6 +273,40 @@ impl Instance for Graph {
 }
 
 #[async_trait]
+impl CollectionInstance for Graph {
+    type Item = Vec<Value>;
+    type Slice = Graph; // TODO: Subgraph?
+
+    async fn get(
+        &self,
+        _txn: Arc<Txn>,
+        _selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        Err(error::not_implemented("Graph::get"))
+    }
+
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        let nodes = self.nodes.values().map(|table| table.is_empty(txn.clone()));
+        try_join_all(nodes)
+            .map_ok(|nodes| nodes.iter().all(|empty| *empty))
+            .await
+    }
+
+    async fn put(
+        &self,
+        _txn: Arc<Txn>,
+        _selector: Value,
+        _value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
+        Err(error::not_implemented("Graph::put"))
+    }
+
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        Err(error::not_implemented("Graph::to_stream"))
+    }
+}
+
+#[async_trait]
 impl Transact for Graph {
     async fn commit(&self, txn_id: &TxnId) {
         let commits = self
@@ -293,6 +328,12 @@ impl Transact for Graph {
             .chain(iter::once(self.node_indices.rollback(txn_id)));
 
         join_all(rollbacks).await;
+    }
+}
+
+impl From<Graph> for Collection {
+    fn from(graph: Graph) -> Collection {
+        Collection::Base(CollectionBase::Graph(graph))
     }
 }
 

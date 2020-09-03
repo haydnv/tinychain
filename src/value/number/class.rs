@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::convert::TryInto;
 use std::fmt;
 use std::ops::{Add, Mul};
 
@@ -480,6 +479,8 @@ impl ValueClass for IntType {
     type Instance = Int;
 
     fn get(path: &TCPath, value: Int) -> TCResult<Int> {
+        let path = path.from_path(&Self::prefix())?;
+
         if path.is_empty() {
             Ok(value)
         } else if path.len() == 1 {
@@ -741,17 +742,19 @@ impl ValueClass for NumberType {
     type Instance = Number;
 
     fn get(path: &TCPath, value: Number) -> TCResult<Number> {
-        if path.is_empty() {
+        println!("NumberType::get {}", path);
+        let suffix = path.from_path(&Self::prefix())?;
+        println!("suffix {}", suffix);
+
+        if suffix.is_empty() {
             return Err(error::bad_request(
                 "You must specify a type of Number to GET",
                 "",
             ));
         }
 
-        match path[0].as_str() {
-            "int" if path.len() > 1 => {
-                Int::get(&path.slice_from(1), value.try_into()?).map(Number::Int)
-            }
+        match suffix[0].as_str() {
+            "int" if suffix.len() > 1 => IntType::get(path, value.cast_into()).map(Number::Int),
             other => Err(error::not_found(other)),
         }
     }

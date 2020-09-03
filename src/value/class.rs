@@ -92,14 +92,16 @@ impl ValueClass for ValueType {
     type Instance = Value;
 
     fn get(path: &TCPath, value: Value) -> TCResult<Value> {
-        if path.is_empty() {
+        let suffix = path.from_path(&Self::prefix())?;
+
+        if suffix.is_empty() {
             return Ok(value);
         }
 
-        match path[0].as_str() {
-            "none" if path.len() == 1 => Ok(Value::None),
-            "bytes" if path.len() == 1 => Err(error::not_implemented("/sbin/value/bytes")),
-            "number" => NumberType::get(&path.slice_from(1), value.try_into()?).map(Value::Number),
+        match suffix[0].as_str() {
+            "none" if suffix.len() == 1 => Ok(Value::None),
+            "bytes" if suffix.len() == 1 => Err(error::not_implemented("/sbin/value/bytes")),
+            "number" => NumberType::get(path, value.try_into()?).map(Value::Number),
             "string" => Err(error::not_implemented("/sbin/value/string")),
             "op" => Err(error::not_implemented("/sbin/value/op")),
             "tuple" => Err(error::not_implemented("/sbin/value/tuple")),

@@ -8,7 +8,6 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::value::class::ValueInstance;
-use crate::value::link::TCPath;
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{CastFrom, CastInto, NumberClass, NumberInstance};
@@ -574,26 +573,6 @@ pub enum Int {
     I16(i16),
     I32(i32),
     I64(i64),
-}
-
-impl Int {
-    pub fn get(path: &TCPath, number: Number) -> TCResult<Int> {
-        let i: Int = number.cast_into();
-        let i: i64 = i.cast_into();
-
-        match path.to_string().as_str() {
-            "/16" if i > i16::MAX.into() => {
-                Err(error::bad_request("Value too large for int/16", i))
-            }
-            "/16" => Ok(Int::I16(i as i16)),
-            "/32" if i > i32::MAX.into() => {
-                Err(error::bad_request("Value too large for int/32", i))
-            }
-            "/32" => Ok(Int::I32(i as i32)),
-            "/64" => Ok(Int::I64(i)),
-            other => Err(error::not_found(other)),
-        }
-    }
 }
 
 impl Instance for Int {
