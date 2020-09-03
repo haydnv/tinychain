@@ -55,12 +55,14 @@ impl CollectionClass for TableBaseType {
     type Instance = TableBase;
 
     async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<TableBase> {
-        if path.is_empty() {
+        let suffix = path.from_path(&Self::prefix())?;
+
+        if suffix.is_empty() {
             TableIndex::create(txn, schema.try_into()?)
                 .map_ok(TableBase::from)
                 .await
         } else {
-            Err(error::not_found(path))
+            Err(error::not_found(suffix))
         }
     }
 }
@@ -139,8 +141,16 @@ impl CollectionInstance for TableBase {
         Err(error::not_implemented("TableBase::put"))
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
-        Err(error::not_implemented("TableBase::to_stream"))
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        let txn_id = txn.id().clone();
+
+        let stream = match self {
+            Self::Index(index) => index.clone().stream(txn_id).await?,
+            Self::ROIndex(index) => index.clone().stream(txn_id).await?,
+            Self::Table(table) => table.clone().stream(txn_id).await?,
+        };
+
+        Ok(Box::pin(stream.map(Value::from)))
     }
 }
 

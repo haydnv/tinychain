@@ -80,13 +80,12 @@ impl class::CollectionInstance for CollectionBase {
         view.put(txn, selector, value).await
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
         match self {
-            Self::BTree(btree) => {
-                let stream = btree.to_stream(txn).await?;
-                Ok(Box::pin(stream.map(Value::from)))
-            }
-            _ => Err(error::not_implemented("CollectionBase::stream")),
+            Self::BTree(btree) => btree.to_stream(txn).await,
+            Self::Graph(graph) => graph.to_stream(txn).await,
+            Self::Table(table) => table.to_stream(txn).await,
+            Self::Tensor(tensor) => tensor.to_stream(txn).await,
         }
     }
 }

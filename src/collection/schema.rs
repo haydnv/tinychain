@@ -325,9 +325,19 @@ impl TryFrom<Value> for IndexSchema {
     type Error = error::TCError;
 
     fn try_from(value: Value) -> TCResult<IndexSchema> {
-        value
-            .try_into()
-            .map(|(key, values)| IndexSchema { key, values })
+        if let Value::Tuple(schema) = value {
+            if schema.len() == 2 {
+                let (key, values) = Value::Tuple(schema).try_into()?;
+                Ok(IndexSchema { key, values })
+            } else {
+                Err(error::bad_request(
+                    "Expected 2-tuple of column lists, found",
+                    Value::Tuple(schema),
+                ))
+            }
+        } else {
+            Err(error::bad_request("Expected IndexSchema, found", value))
+        }
     }
 }
 
@@ -416,6 +426,7 @@ impl TryFrom<Value> for TableSchema {
 
     fn try_from(value: Value) -> TCResult<TableSchema> {
         let (primary, indices): (IndexSchema, Vec<(ValueId, Vec<ValueId>)>) = value.try_into()?;
+        println!("TableSchema primary: {}", primary);
         Ok(TableSchema {
             primary,
             indices: indices.into_iter().collect(),
