@@ -1,7 +1,8 @@
 use std::collections::HashSet;
+use std::net::IpAddr;
 use std::sync::Arc;
 
-use futures::Stream;
+use futures::stream::Stream;
 
 use crate::auth::{Auth, Token};
 use crate::block::dir::Dir;
@@ -12,7 +13,7 @@ use crate::transaction::{Txn, TxnId};
 use crate::value::link::{Link, LinkHost};
 use crate::value::{Value, ValueId};
 
-use super::{Hosted, NetworkTime};
+use super::{Hosted, NetworkTime, Server};
 
 pub struct Gateway {
     peers: Vec<LinkHost>,
@@ -25,12 +26,12 @@ impl Gateway {
         NetworkTime::now()
     }
 
-    pub fn new(peers: Vec<LinkHost>, hosted: Hosted, workspace: Arc<Dir>) -> Arc<Gateway> {
-        Arc::new(Gateway {
+    pub fn new(peers: Vec<LinkHost>, hosted: Hosted, workspace: Arc<Dir>) -> Gateway {
+        Gateway {
             peers,
             hosted,
             workspace,
-        })
+        }
     }
 
     pub async fn authenticate(&self, _token: &str) -> TCResult<Token> {
@@ -41,6 +42,15 @@ impl Gateway {
         Txn::new(self.clone(), self.workspace.clone()).await
     }
 
+    pub async fn http_listen(
+        self: Arc<Self>,
+        address: IpAddr,
+        port: u16,
+    ) -> Result<(), hyper::Error> {
+        let server = Arc::new(super::HttpServer::new((address, port).into()));
+        server.listen(self).await
+    }
+
     pub async fn get(
         &self,
         subject: &Link,
@@ -48,15 +58,15 @@ impl Gateway {
         _auth: &Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<State> {
-        if subject.host().is_none() {
+        if let Some(_) = subject.host() {
+            Err(error::not_implemented("Gateway::get over the network"))
+        } else {
             let path = subject.path();
             if path[0] == "sbin" {
                 kernel::get(path, selector, txn).await
             } else {
-                Err(error::not_implemented("Gateway::get from Cluster"))
+                Err(error::not_implemented("Gateway::get over the network"))
             }
-        } else {
-            Err(error::not_implemented("Gateway::get over the network"))
         }
     }
 

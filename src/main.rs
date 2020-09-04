@@ -11,7 +11,6 @@ mod class;
 mod collection;
 mod error;
 mod gateway;
-mod http;
 mod kernel;
 mod lock;
 mod transaction;
@@ -36,9 +35,6 @@ fn block_size(flag: &str) -> class::TCResult<usize> {
 struct Config {
     #[structopt(long = "address", default_value = "127.0.0.1")]
     pub address: IpAddr,
-
-    #[structopt(long = "block_size", default_value = "4K", parse(try_from_str = block_size))]
-    pub block_size: usize,
 
     #[structopt(long = "data_dir", default_value = "/tmp/tc/data")]
     pub data_dir: PathBuf,
@@ -80,15 +76,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let hosted = configure(config.hosted, data_dir.clone(), workspace.clone()).await?;
     let gateway = gateway::Gateway::new(config.peers, hosted, workspace.clone());
-
-    let http_server = http::Http::new(
-        (config.address, config.http_port).into(),
-        gateway,
-        config.block_size,
-    );
-
-    use gateway::Protocol;
-    http_server.listen().await.map_err(|e| e.into())
+    Arc::new(gateway)
+        .http_listen(config.address, config.http_port)
+        .await
+        .map_err(|e| e.into())
 }
 
 async fn configure(
