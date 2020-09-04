@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::cluster::Cluster;
+use crate::collection::Cluster;
 use crate::value::link::{PathSegment, TCPath};
 
 #[derive(Clone)]

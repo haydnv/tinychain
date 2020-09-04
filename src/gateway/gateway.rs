@@ -9,12 +9,13 @@ use crate::class::{ResponseStream, State, TCResult};
 use crate::error;
 use crate::kernel;
 use crate::transaction::{Txn, TxnId};
-use crate::value::link::Link;
+use crate::value::link::{Link, LinkHost};
 use crate::value::{Value, ValueId};
 
 use super::{Hosted, NetworkTime};
 
 pub struct Gateway {
+    peers: Vec<LinkHost>,
     hosted: Hosted,
     workspace: Arc<Dir>,
 }
@@ -24,8 +25,12 @@ impl Gateway {
         NetworkTime::now()
     }
 
-    pub fn new(hosted: Hosted, workspace: Arc<Dir>) -> Arc<Gateway> {
-        Arc::new(Gateway { hosted, workspace })
+    pub fn new(peers: Vec<LinkHost>, hosted: Hosted, workspace: Arc<Dir>) -> Arc<Gateway> {
+        Arc::new(Gateway {
+            peers,
+            hosted,
+            workspace,
+        })
     }
 
     pub async fn authenticate(&self, _token: &str) -> TCResult<Token> {

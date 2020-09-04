@@ -12,6 +12,7 @@ use crate::value::Value;
 
 pub mod btree;
 pub mod class;
+pub mod cluster;
 pub mod graph;
 pub mod schema;
 pub mod table;
@@ -24,6 +25,7 @@ pub type CollectionViewType = class::CollectionViewType;
 
 pub type BTree = btree::BTree;
 pub type BTreeSlice = btree::BTreeSlice;
+pub type Cluster = cluster::Cluster;
 pub type Graph = graph::Graph;
 pub type Table = table::Table;
 pub type TensorView = tensor::TensorView;

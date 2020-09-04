@@ -8,7 +8,6 @@ use structopt::StructOpt;
 mod auth;
 mod block;
 mod class;
-mod cluster;
 mod collection;
 mod error;
 mod gateway;
@@ -19,7 +18,6 @@ mod transaction;
 mod value;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const RESERVED: [&str; 1] = ["/sbin"];
 
 fn block_size(flag: &str) -> class::TCResult<usize> {
     let msg = "Unable to parse value of block_size";
@@ -81,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     workspace.commit(&txn_id).await;
 
     let hosted = configure(config.hosted, data_dir.clone(), workspace.clone()).await?;
-    let gateway = gateway::Gateway::new(hosted, workspace.clone());
+    let gateway = gateway::Gateway::new(config.peers, hosted, workspace.clone());
 
     let http_server = http::Http::new(
         (config.address, config.http_port).into(),
@@ -95,45 +93,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 async fn configure(
     clusters: Vec<value::link::TCPath>,
-    data_dir: Arc<block::dir::Dir>,
-    workspace: Arc<block::dir::Dir>,
+    _data_dir: Arc<block::dir::Dir>,
+    _workspace: Arc<block::dir::Dir>,
 ) -> class::TCResult<gateway::Hosted> {
-    let mut hosted = gateway::Hosted::new();
+    let hosted = gateway::Hosted::new();
     if clusters.is_empty() {
         return Ok(hosted);
     }
 
-    let txn = gateway::Gateway::new(gateway::Hosted::new(), workspace)
-        .transaction()
-        .await?;
-    let txn_id = txn.id();
-
-    for path in clusters {
-        for reserved in RESERVED.iter() {
-            if path.to_string().starts_with(reserved) {
-                return Err(error::bad_request("Attempt to host a reserved path", path));
-            }
-
-            if hosted.get(&path).is_some() {
-                return Err(error::bad_request(
-                    "Cannot host a subdirectory of a hosted directory",
-                    path,
-                ));
-            }
-
-            let hosted_cluster = if let Some(_dir) = data_dir.get_dir(txn_id, &path).await? {
-                //                use internal::file::File;
-                //                cluster::Cluster::from_dir(txn_id, dir).await
-                panic!("NOT IMPLEMENTED")
-            } else {
-                cluster::Cluster::new(txn_id, data_dir.create_dir(&txn_id, &path).await?)
-            };
-
-            hosted.push(path.clone(), hosted_cluster);
-        }
-    }
-
-    txn.commit().await;
-
-    Ok(hosted)
+    unimplemented!(); // TODO: load hosted cluster data from disk
 }

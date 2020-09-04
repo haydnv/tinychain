@@ -44,6 +44,7 @@ impl fmt::Display for ChainBlock {
     }
 }
 
+#[derive(Clone)]
 pub struct Chain {
     file: Arc<File<ChainBlock>>,
     collection: CollectionBase,
