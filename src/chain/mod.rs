@@ -1,48 +1,18 @@
-use std::convert::TryFrom;
-use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::join;
 
+use crate::block::BlockData;
+use crate::block::File;
 use crate::class::TCResult;
 use crate::collection::CollectionBase;
-use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::file::File;
-use super::BlockData;
+mod block;
 
-#[derive(Clone)]
-pub struct ChainBlock {}
-
-impl TryFrom<Bytes> for ChainBlock {
-    type Error = error::TCError;
-
-    fn try_from(_data: Bytes) -> TCResult<ChainBlock> {
-        Err(error::not_implemented("ChainBlock::try_from(Bytes)"))
-    }
-}
-
-impl From<ChainBlock> for Bytes {
-    fn from(_block: ChainBlock) -> Bytes {
-        unimplemented!()
-    }
-}
-
-impl BlockData for ChainBlock {
-    fn size(&self) -> usize {
-        0
-    }
-}
-
-impl fmt::Display for ChainBlock {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ChainBlock")
-    }
-}
+pub type ChainBlock = block::ChainBlock;
 
 #[derive(Clone)]
 pub struct Chain {

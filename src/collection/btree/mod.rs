@@ -12,7 +12,7 @@ use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::block::file::File;
+use crate::block::File;
 use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;

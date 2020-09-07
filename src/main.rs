@@ -7,6 +7,7 @@ use structopt::StructOpt;
 
 mod auth;
 mod block;
+mod chain;
 mod class;
 mod collection;
 mod error;
@@ -66,9 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let txn_id = transaction::TxnId::new(gateway::Gateway::time());
     let fs_cache_persistent = block::hostfs::mount(config.data_dir);
-    let data_dir = block::dir::Dir::create(fs_cache_persistent, false);
+    let data_dir = block::Dir::create(fs_cache_persistent, false);
     let fs_cache_temporary = block::hostfs::mount(config.workspace);
-    let workspace = block::dir::Dir::create(fs_cache_temporary, true);
+    let workspace = block::Dir::create(fs_cache_temporary, true);
 
     use transaction::Transact;
     data_dir.commit(&txn_id).await;
@@ -84,8 +85,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 async fn configure(
     clusters: Vec<value::link::TCPath>,
-    _data_dir: Arc<block::dir::Dir>,
-    _workspace: Arc<block::dir::Dir>,
+    _data_dir: Arc<block::Dir>,
+    _workspace: Arc<block::Dir>,
 ) -> class::TCResult<gateway::Hosted> {
     let hosted = gateway::Hosted::new();
     if clusters.is_empty() {

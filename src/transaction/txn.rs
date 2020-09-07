@@ -11,9 +11,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::Auth;
-use crate::block::dir::{Dir, DirEntry};
-use crate::block::file::File;
-use crate::block::BlockData;
+use crate::block::{BlockData, Dir, DirEntry, File};
 use crate::class::{ResponseStream, State, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionItem};

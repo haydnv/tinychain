@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::block::chain::Chain;
+use crate::chain::Chain;
 use crate::class::TCResult;
 use crate::error;
 use crate::transaction::Txn;

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use futures::stream::Stream;
 
 use crate::auth::{Auth, Token};
-use crate::block::dir::Dir;
+use crate::block::Dir;
 use crate::class::{ResponseStream, State, TCResult};
 use crate::error;
 use crate::kernel;

@@ -10,8 +10,8 @@ use futures::try_join;
 use itertools::Itertools;
 use num::integer::div_ceil;
 
-use crate::block::file::File;
 use crate::block::BlockId;
+use crate::block::File;
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
