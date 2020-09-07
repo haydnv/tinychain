@@ -9,7 +9,7 @@ use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::Value;
 
-use super::{Chain, ChainType};
+use super::{Chain, ChainInstance, ChainType};
 
 const ERR_NULL_STREAM: &str = "NullChain does not support to_stream. \
 Consider using a different Chain.";
@@ -59,9 +59,9 @@ impl CollectionInstance for NullChain {
     }
 }
 
-impl From<NullChain> for Collection {
-    fn from(nc: NullChain) -> Collection {
-        Chain::from(nc).into()
+impl ChainInstance for NullChain {
+    fn object(&'_ self) -> &'_ CollectionBase {
+        &self.collection
     }
 }
 
@@ -73,5 +73,11 @@ impl Transact for NullChain {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.collection.rollback(txn_id).await;
+    }
+}
+
+impl From<NullChain> for Collection {
+    fn from(nc: NullChain) -> Collection {
+        Chain::from(nc).into()
     }
 }

@@ -58,6 +58,13 @@ impl fmt::Display for ChainType {
     }
 }
 
+pub trait ChainInstance: Instance + CollectionInstance
+where
+    <Self as Instance>::Class: Into<ChainType>,
+{
+    fn object(&'_ self) -> &'_ CollectionBase;
+}
+
 #[derive(Clone)]
 pub enum Chain {
     Null(Box<null::NullChain>),
@@ -108,6 +115,14 @@ impl CollectionInstance for Chain {
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
         match self {
             Self::Null(nc) => nc.to_stream(txn).await,
+        }
+    }
+}
+
+impl ChainInstance for Chain {
+    fn object(&self) -> &CollectionBase {
+        match self {
+            Self::Null(nc) => nc.object(),
         }
     }
 }
