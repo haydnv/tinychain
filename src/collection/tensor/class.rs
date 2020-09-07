@@ -382,7 +382,10 @@ impl TryFrom<CollectionView> for TensorView {
 
     fn try_from(view: CollectionView) -> TCResult<TensorView> {
         match view {
-            CollectionView::Tensor(tensor) => Ok(tensor),
+            CollectionView::Tensor(tensor) => match tensor {
+                Tensor::Base(tb) => Ok(tb.into()),
+                Tensor::View(tv) => Ok(tv),
+            },
             other => Err(error::bad_request("Expected TensorView but found", other)),
         }
     }
@@ -390,7 +393,7 @@ impl TryFrom<CollectionView> for TensorView {
 
 impl From<TensorView> for Collection {
     fn from(view: TensorView) -> Collection {
-        Collection::View(CollectionView::Tensor(view))
+        Collection::View(CollectionView::Tensor(view.into()))
     }
 }
 
@@ -537,11 +540,23 @@ impl Transact for Tensor {
     }
 }
 
+impl From<TensorBase> for Tensor {
+    fn from(tb: TensorBase) -> Tensor {
+        Tensor::Base(tb)
+    }
+}
+
+impl From<TensorView> for Tensor {
+    fn from(tv: TensorView) -> Tensor {
+        Tensor::View(tv)
+    }
+}
+
 impl From<Tensor> for Collection {
     fn from(tensor: Tensor) -> Collection {
         match tensor {
             Tensor::Base(base) => Collection::Base(CollectionBase::Tensor(base)),
-            Tensor::View(view) => Collection::View(CollectionView::Tensor(view)),
+            Tensor::View(view) => Collection::View(CollectionView::Tensor(view.into())),
         }
     }
 }

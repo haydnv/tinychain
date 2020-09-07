@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::fmt;
 use std::iter;
 use std::sync::Arc;
 
@@ -8,14 +9,14 @@ use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{FuturesOrdered, StreamExt, TryStreamExt};
 use futures::try_join;
 
-use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
+use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::collection::class::CollectionInstance;
-use crate::collection::{Collection, CollectionBase, CollectionBaseType, CollectionItem};
+use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionType};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::number::class::{NumberType, UIntType};
-use crate::value::{label, Label, Value, ValueId, ValueType};
+use crate::value::{label, Label, Link, TCPath, Value, ValueId, ValueType};
 
 use super::schema::{GraphSchema, IndexSchema, TableSchema};
 use super::table::{ColumnBound, TableIndex, TableInstance};
@@ -29,6 +30,43 @@ const NODE_KEY: Label = label("node_key");
 const NODE_LABEL: Label = label("node_label");
 const NODE_TO: Label = label("node_to");
 const NODE_TYPE: Label = label("node_type");
+
+#[derive(Clone, Eq, PartialEq)]
+pub enum GraphType {
+    Graph,
+}
+
+impl Class for GraphType {
+    type Instance = Graph;
+
+    fn from_path(path: &TCPath) -> TCResult<Self> {
+        let suffix = path.from_path(&Self::prefix())?;
+
+        if suffix.is_empty() {
+            Ok(GraphType::Graph)
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
+    fn prefix() -> TCPath {
+        CollectionType::prefix().join(label("graph").into())
+    }
+}
+
+impl From<GraphType> for Link {
+    fn from(_gt: GraphType) -> Link {
+        GraphType::prefix().into()
+    }
+}
+
+impl fmt::Display for GraphType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Graph => write!(f, "type: Graph"),
+        }
+    }
+}
 
 pub struct Node {
     graph: Arc<Graph>,
@@ -265,10 +303,10 @@ impl Graph {
 }
 
 impl Instance for Graph {
-    type Class = CollectionBaseType;
+    type Class = GraphType;
 
-    fn class(&self) -> CollectionBaseType {
-        CollectionBaseType::Graph
+    fn class(&self) -> GraphType {
+        GraphType::Graph
     }
 }
 

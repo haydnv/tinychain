@@ -1,11 +1,68 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 
-use crate::collection::CollectionBase;
-use crate::transaction::{Transact, TxnId};
+use crate::class::{Instance, TCResult, TCStream};
+use crate::collection::class::CollectionInstance;
+use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
+use crate::error;
+use crate::transaction::{Transact, Txn, TxnId};
+use crate::value::Value;
+
+use super::{Chain, ChainType};
+
+const ERR_NULL_STREAM: &str = "NullChain does not support to_stream. \
+Consider using a different Chain.";
 
 #[derive(Clone)]
 pub struct NullChain {
     collection: CollectionBase,
+}
+
+impl Instance for NullChain {
+    type Class = ChainType;
+
+    fn class(&self) -> Self::Class {
+        ChainType::Null
+    }
+}
+
+#[async_trait]
+impl CollectionInstance for NullChain {
+    type Item = Value;
+    type Slice = CollectionView;
+
+    async fn get(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        self.collection.get(txn, selector).await
+    }
+
+    async fn is_empty(&self, _txn: Arc<Txn>) -> TCResult<bool> {
+        // NullChain itself is always empty by definition
+        Ok(true)
+    }
+
+    async fn put(
+        &self,
+        txn: Arc<Txn>,
+        selector: Value,
+        value: CollectionItem<Self::Item, Self::Slice>,
+    ) -> TCResult<()> {
+        self.collection.put(txn, selector, value).await
+    }
+
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        Err(error::unsupported(ERR_NULL_STREAM))
+    }
+}
+
+impl From<NullChain> for Collection {
+    fn from(nc: NullChain) -> Collection {
+        Chain::from(nc).into()
+    }
 }
 
 #[async_trait]
