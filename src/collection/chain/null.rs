@@ -3,11 +3,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::class::{Instance, TCResult, TCStream};
-use crate::collection::class::CollectionInstance;
-use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
+use crate::collection::class::{CollectionClass, CollectionInstance};
+use crate::collection::*;
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::Value;
+use crate::value::{TCPath, Value};
 
 use super::{Chain, ChainInstance, ChainType};
 
@@ -17,6 +17,13 @@ Consider using a different Chain.";
 #[derive(Clone)]
 pub struct NullChain {
     collection: CollectionBase,
+}
+
+impl NullChain {
+    pub async fn create(txn: Arc<Txn>, ctype: &TCPath, schema: Value) -> TCResult<NullChain> {
+        let collection = CollectionBaseType::get(txn, ctype, schema).await?;
+        Ok(NullChain { collection })
+    }
 }
 
 impl Instance for NullChain {

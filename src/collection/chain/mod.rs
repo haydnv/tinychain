@@ -2,13 +2,14 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, TCResult, TCStream};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{label, Link, TCPath, Value};
 
-use super::class::CollectionInstance;
+use super::class::{CollectionClass, CollectionInstance};
 use super::*;
 
 mod block;
@@ -28,17 +29,46 @@ impl Class for ChainType {
         let suffix = path.from_path(&Self::prefix())?;
 
         if suffix.is_empty() {
-            Err(error::unsupported("You must specify a type of Chain"))
-        } else {
-            match suffix[0].as_str() {
-                "null" if suffix.len() == 1 => Ok(ChainType::Null),
-                other => Err(error::not_found(other)),
-            }
+            return Err(error::unsupported("You must specify a type of Chain"));
+        }
+
+        match suffix[0].as_str() {
+            "null" if suffix.len() == 1 => Ok(ChainType::Null),
+            other => Err(error::not_found(other)),
         }
     }
 
     fn prefix() -> TCPath {
         CollectionType::prefix().join(label("chain").into())
+    }
+}
+
+#[async_trait]
+impl CollectionClass for ChainType {
+    type Instance = Chain;
+
+    async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<Chain> {
+        let suffix = path.from_path(&Self::prefix())?;
+
+        if suffix.is_empty() {
+            return Err(error::unsupported("You must specify a type of Chain"));
+        }
+
+        match suffix[0].as_str() {
+            "null" if suffix.len() == 1 => {
+                let (collection_type, schema): (TCPath, Value) = schema.try_into()?;
+                null::NullChain::create(txn, &collection_type, schema)
+                    .map_ok(Chain::from)
+                    .await
+            }
+            other => Err(error::not_found(other)),
+        }
+    }
+}
+
+impl From<ChainType> for CollectionType {
+    fn from(ct: ChainType) -> CollectionType {
+        CollectionType::Base(CollectionBaseType::Chain(ct))
     }
 }
 
