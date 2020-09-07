@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::chain::Chain;
 use crate::class::TCResult;
 use crate::error;
 use crate::transaction::Txn;
 use crate::value::link::{LinkHost, TCPath};
 use crate::value::ValueId;
 
+use super::chain::Chain;
 use super::schema::GraphSchema;
 use super::Graph;
 

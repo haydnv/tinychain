@@ -8,9 +8,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::chain::ChainBlock;
 use crate::class::{TCBoxTryFuture, TCResult};
 use crate::collection::btree;
+use crate::collection::chain;
 use crate::collection::tensor;
 use crate::error;
 use crate::lock::RwLock;
@@ -26,7 +26,7 @@ use super::BlockData;
 pub enum DirEntry {
     Dir(Arc<Dir>),
     BTree(Arc<File<btree::Node>>),
-    Chain(Arc<File<ChainBlock>>),
+    Chain(Arc<File<chain::ChainBlock>>),
     Tensor(Arc<File<tensor::Array>>),
 }
 
@@ -36,8 +36,8 @@ impl From<Arc<File<btree::Node>>> for DirEntry {
     }
 }
 
-impl From<Arc<File<ChainBlock>>> for DirEntry {
-    fn from(file: Arc<File<ChainBlock>>) -> DirEntry {
+impl From<Arc<File<chain::ChainBlock>>> for DirEntry {
+    fn from(file: Arc<File<chain::ChainBlock>>) -> DirEntry {
         DirEntry::Chain(file)
     }
 }
@@ -70,10 +70,10 @@ impl TryFrom<DirEntry> for Arc<File<btree::Node>> {
     }
 }
 
-impl TryFrom<DirEntry> for Arc<File<ChainBlock>> {
+impl TryFrom<DirEntry> for Arc<File<chain::ChainBlock>> {
     type Error = error::TCError;
 
-    fn try_from(entry: DirEntry) -> TCResult<Arc<File<ChainBlock>>> {
+    fn try_from(entry: DirEntry) -> TCResult<Arc<File<chain::ChainBlock>>> {
         match entry {
             DirEntry::Chain(chain) => Ok(chain),
             other => Err(error::bad_request("Expected Dir but found", other)),

@@ -11,6 +11,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::Value;
 
 pub mod btree;
+pub mod chain;
 pub mod class;
 pub mod cluster;
 pub mod graph;
