@@ -187,14 +187,14 @@ impl CollectionInstance for Table {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get(txn, selector).await,
-            Self::View(view) => view.get(txn, selector).await,
+            Self::Base(base) => base.get_item(txn, selector).await,
+            Self::View(view) => view.get_item(txn, selector).await,
         }
     }
 
@@ -205,15 +205,15 @@ impl CollectionInstance for Table {
         }
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.put(txn, selector, value).await,
-            Self::View(view) => view.put(txn, selector, value).await,
+            Self::Base(base) => base.put_item(txn, selector, value).await,
+            Self::View(view) => view.put_item(txn, selector, value).await,
         }
     }
 

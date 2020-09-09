@@ -101,7 +101,7 @@ impl CollectionInstance for TableView {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get(
+    async fn get_item(
         &self,
         _txn: Arc<Txn>,
         _selector: Value,
@@ -113,7 +113,7 @@ impl CollectionInstance for TableView {
         Err(error::not_implemented("TableBase::is_empty"))
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         _txn: Arc<Txn>,
         _selector: Value,

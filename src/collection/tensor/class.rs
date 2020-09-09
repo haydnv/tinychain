@@ -129,26 +129,26 @@ impl CollectionInstance for TensorBase {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        TensorView::from(self.clone()).get(txn, selector).await
+        TensorView::from(self.clone()).get_item(txn, selector).await
     }
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
         TensorView::from(self.clone()).is_empty(txn).await
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         TensorView::from(self.clone())
-            .put(txn, selector, value)
+            .put_item(txn, selector, value)
             .await
     }
 
@@ -280,7 +280,7 @@ impl CollectionInstance for TensorView {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
@@ -300,7 +300,7 @@ impl CollectionInstance for TensorView {
         self.any(txn).map_ok(|any| !any).await
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
@@ -455,14 +455,14 @@ impl CollectionInstance for Tensor {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get(txn, selector).await,
-            Self::View(view) => view.get(txn, selector).await,
+            Self::Base(base) => base.get_item(txn, selector).await,
+            Self::View(view) => view.get_item(txn, selector).await,
         }
     }
 
@@ -473,15 +473,15 @@ impl CollectionInstance for Tensor {
         }
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.put(txn, selector, value).await,
-            Self::View(view) => view.put(txn, selector, value).await,
+            Self::Base(base) => base.put_item(txn, selector, value).await,
+            Self::View(view) => view.put_item(txn, selector, value).await,
         }
     }
 

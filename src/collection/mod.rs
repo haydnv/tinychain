@@ -64,13 +64,13 @@ impl class::CollectionInstance for CollectionBase {
     type Item = Value;
     type Slice = CollectionView;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         let view: CollectionView = self.clone().into();
-        view.get(txn, selector).await
+        view.get_item(txn, selector).await
     }
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
@@ -84,14 +84,14 @@ impl class::CollectionInstance for CollectionBase {
         }
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         let view: CollectionView = self.clone().into();
-        view.put(txn, selector, value).await
+        view.put_item(txn, selector, value).await
     }
 
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
@@ -187,14 +187,14 @@ impl class::CollectionInstance for CollectionView {
     type Item = Value;
     type Slice = CollectionView;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
             Self::BTree(btree) => {
-                let item = match btree.get(txn, selector).await? {
+                let item = match btree.get_item(txn, selector).await? {
                     CollectionItem::Value(key) => CollectionItem::Value(Value::Tuple(key)),
                     CollectionItem::Slice(slice) => CollectionItem::Slice(slice.into()),
                 };
@@ -215,7 +215,7 @@ impl class::CollectionInstance for CollectionView {
         }
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
@@ -225,35 +225,43 @@ impl class::CollectionInstance for CollectionView {
             Self::BTree(btree) => match value {
                 CollectionItem::Value(value) => {
                     let value = value.try_into()?;
-                    btree.put(txn, selector, CollectionItem::Value(value)).await
+                    btree
+                        .put_item(txn, selector, CollectionItem::Value(value))
+                        .await
                 }
                 CollectionItem::Slice(slice) => {
                     let slice = slice.try_into()?;
-                    btree.put(txn, selector, CollectionItem::Slice(slice)).await
+                    btree
+                        .put_item(txn, selector, CollectionItem::Slice(slice))
+                        .await
                 }
             },
             Self::Null(_) => Err(error::unsupported("Cannot modify a Null Collection")),
             Self::Table(table) => match value {
                 CollectionItem::Value(value) => {
                     let value = value.try_into()?;
-                    table.put(txn, selector, CollectionItem::Value(value)).await
+                    table
+                        .put_item(txn, selector, CollectionItem::Value(value))
+                        .await
                 }
                 CollectionItem::Slice(slice) => {
                     let slice = slice.try_into()?;
-                    table.put(txn, selector, CollectionItem::Slice(slice)).await
+                    table
+                        .put_item(txn, selector, CollectionItem::Slice(slice))
+                        .await
                 }
             },
             Self::Tensor(tensor) => match value {
                 CollectionItem::Value(value) => {
                     let value = value.try_into()?;
                     tensor
-                        .put(txn, selector, CollectionItem::Value(value))
+                        .put_item(txn, selector, CollectionItem::Value(value))
                         .await
                 }
                 CollectionItem::Slice(slice) => {
                     let slice = slice.try_into()?;
                     tensor
-                        .put(txn, selector, CollectionItem::Slice(slice))
+                        .put_item(txn, selector, CollectionItem::Slice(slice))
                         .await
                 }
             },
@@ -355,14 +363,14 @@ impl class::CollectionInstance for Collection {
     type Item = Value;
     type Slice = CollectionView;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get(txn, selector).await,
-            Self::View(view) => view.get(txn, selector).await,
+            Self::Base(base) => base.get_item(txn, selector).await,
+            Self::View(view) => view.get_item(txn, selector).await,
         }
     }
 
@@ -373,15 +381,15 @@ impl class::CollectionInstance for Collection {
         }
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.put(txn, selector, value).await,
-            Self::View(view) => view.put(txn, selector, value).await,
+            Self::Base(base) => base.put_item(txn, selector, value).await,
+            Self::View(view) => view.put_item(txn, selector, value).await,
         }
     }
 

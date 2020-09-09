@@ -40,7 +40,7 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sy
     type Item: Into<Value>;
     type Slice: CollectionInstance;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
@@ -48,7 +48,7 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sy
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool>;
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,

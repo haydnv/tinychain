@@ -238,6 +238,17 @@ impl TryFrom<Value> for number::NumberType {
     }
 }
 
+impl TryFrom<Value> for Op {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<Op> {
+        match v {
+            Value::Op(op) => Ok(*op),
+            other => Err(error::bad_request("Expected Op but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Value> for usize {
     type Error = error::TCError;
 

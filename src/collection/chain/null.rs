@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,7 +8,7 @@ use crate::collection::class::{CollectionClass, CollectionInstance};
 use crate::collection::*;
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{TCPath, Value};
+use crate::value::{Op, TCPath, Value, ValueId};
 
 use super::{Chain, ChainInstance, ChainType};
 
@@ -17,12 +18,18 @@ Consider using a different Chain.";
 #[derive(Clone)]
 pub struct NullChain {
     collection: CollectionBase,
+    ops: HashMap<ValueId, Op>,
 }
 
 impl NullChain {
-    pub async fn create(txn: Arc<Txn>, ctype: &TCPath, schema: Value) -> TCResult<NullChain> {
+    pub async fn create(
+        txn: Arc<Txn>,
+        ctype: &TCPath,
+        schema: Value,
+        ops: HashMap<ValueId, Op>,
+    ) -> TCResult<NullChain> {
         let collection = CollectionBaseType::get(txn, ctype, schema).await?;
-        Ok(NullChain { collection })
+        Ok(NullChain { collection, ops })
     }
 }
 
@@ -39,12 +46,12 @@ impl CollectionInstance for NullChain {
     type Item = Value;
     type Slice = CollectionView;
 
-    async fn get(
+    async fn get_item(
         &self,
-        txn: Arc<Txn>,
-        selector: Value,
+        _txn: Arc<Txn>,
+        _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        self.collection.get(txn, selector).await
+        Err(error::not_implemented("NullChain::get"))
     }
 
     async fn is_empty(&self, _txn: Arc<Txn>) -> TCResult<bool> {
@@ -52,13 +59,13 @@ impl CollectionInstance for NullChain {
         Ok(true)
     }
 
-    async fn put(
+    async fn put_item(
         &self,
-        txn: Arc<Txn>,
-        selector: Value,
-        value: CollectionItem<Self::Item, Self::Slice>,
+        _txn: Arc<Txn>,
+        _selector: Value,
+        _value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
-        self.collection.put(txn, selector, value).await
+        Err(error::not_implemented("NullChain::put"))
     }
 
     async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {

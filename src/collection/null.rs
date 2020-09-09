@@ -72,7 +72,7 @@ impl CollectionInstance for Null {
     type Item = Value;
     type Slice = Null;
 
-    async fn get(
+    async fn get_item(
         &self,
         _txn: Arc<Txn>,
         _selector: Value,
@@ -84,7 +84,7 @@ impl CollectionInstance for Null {
         Ok(true)
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         _txn: Arc<Txn>,
         _selector: Value,

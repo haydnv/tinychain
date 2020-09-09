@@ -315,7 +315,7 @@ impl CollectionInstance for Graph {
     type Item = Vec<Value>;
     type Slice = Graph; // TODO: Subgraph?
 
-    async fn get(
+    async fn get_item(
         &self,
         _txn: Arc<Txn>,
         _selector: Value,
@@ -330,7 +330,7 @@ impl CollectionInstance for Graph {
             .await
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         _txn: Arc<Txn>,
         _selector: Value,

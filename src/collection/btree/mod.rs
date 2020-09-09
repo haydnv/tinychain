@@ -230,7 +230,7 @@ impl CollectionInstance for BTreeSlice {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         bounds: Value,
@@ -246,7 +246,7 @@ impl CollectionInstance for BTreeSlice {
             (Selector::Range(container, _), Selector::Range(contained, _))
                 if container.contains(contained, &schema)? =>
             {
-                self.source.get(txn, bounds.into()).await
+                self.source.get_item(txn, bounds.into()).await
             }
             _ => Err(error::bad_request(
                 &format!("BTreeSlice[{}] does not contain", &self.bounds),
@@ -264,7 +264,7 @@ impl CollectionInstance for BTreeSlice {
         Ok(count == 0)
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         _txn: Arc<Txn>,
         _selector: Value,
@@ -802,7 +802,7 @@ impl CollectionInstance for BTreeFile {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         bounds: Value,
@@ -831,7 +831,7 @@ impl CollectionInstance for BTreeFile {
             .map(|root| root.keys.is_empty())
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,

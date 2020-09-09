@@ -321,7 +321,7 @@ impl Txn {
                         .ok_or_else(|| error::not_found(tc_ref))?;
                     if let State::Collection(collection) = subject {
                         collection
-                            .get(self.clone(), object)
+                            .get_item(self.clone(), object)
                             .map_ok(|view| match view {
                                 CollectionItem::Value(value) => State::Value(value),
                                 CollectionItem::Slice(view) => {
@@ -371,7 +371,7 @@ impl Txn {
                                 }
                             };
 
-                            collection.put(self.clone(), object, value).await?;
+                            collection.put_item(self.clone(), object, value).await?;
                             Ok(State::Value(Value::None))
                         } else {
                             Err(error::bad_request("Value does not support GET", subject))

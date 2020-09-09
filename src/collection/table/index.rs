@@ -120,7 +120,7 @@ impl CollectionInstance for TableBase {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get(
+    async fn get_item(
         &self,
         _txn: Arc<Txn>,
         _selector: Value,
@@ -136,7 +136,7 @@ impl CollectionInstance for TableBase {
         }
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,

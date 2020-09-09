@@ -7,7 +7,7 @@ use futures::TryFutureExt;
 use crate::class::{Class, Instance, TCResult, TCStream};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{label, Link, TCPath, Value};
+use crate::value::{label, Link, Op, TCPath, Value, ValueId};
 
 use super::class::{CollectionClass, CollectionInstance};
 use super::*;
@@ -56,8 +56,9 @@ impl CollectionClass for ChainType {
 
         match suffix[0].as_str() {
             "null" if suffix.len() == 1 => {
-                let (collection_type, schema): (TCPath, Value) = schema.try_into()?;
-                null::NullChain::create(txn, &collection_type, schema)
+                let (collection_type, schema, ops): (TCPath, Value, Vec<(ValueId, Op)>) =
+                    schema.try_into()?;
+                null::NullChain::create(txn, &collection_type, schema, ops.into_iter().collect())
                     .map_ok(Chain::from)
                     .await
             }
@@ -115,13 +116,13 @@ impl CollectionInstance for Chain {
     type Item = Value;
     type Slice = CollectionView;
 
-    async fn get(
+    async fn get_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Null(nc) => nc.get(txn, selector).await,
+            Self::Null(nc) => nc.get_item(txn, selector).await,
         }
     }
 
@@ -131,14 +132,14 @@ impl CollectionInstance for Chain {
         }
     }
 
-    async fn put(
+    async fn put_item(
         &self,
         txn: Arc<Txn>,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Null(nc) => nc.put(txn, selector, value).await,
+            Self::Null(nc) => nc.put_item(txn, selector, value).await,
         }
     }
 
