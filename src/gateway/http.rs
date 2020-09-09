@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -11,24 +12,107 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, StatusCode};
 use serde::de::DeserializeOwned;
 
-use crate::auth::Token;
+use crate::auth::{Auth, Token};
 use crate::class::{State, TCResult, TCStream};
 use crate::error;
+use crate::transaction::Txn;
 use crate::value::link::*;
 use crate::value::{Value, ValueId};
 
 use super::Gateway;
 
 const META: &str = "_meta";
+const TIMEOUT: Duration = Duration::from_secs(30);
+const ERR_DECODE: &str = "(unable to decode error message)";
+
+pub struct Client {
+    client: hyper::Client<hyper::client::HttpConnector, Body>,
+    response_limit: usize,
+}
+
+impl Client {
+    pub fn new(response_limit: usize) -> Client {
+        let client = hyper::Client::builder()
+            .pool_idle_timeout(TIMEOUT)
+            .http2_only(true)
+            .build_http();
+
+        Client {
+            client,
+            response_limit,
+        }
+    }
+
+    pub async fn get(
+        &self,
+        link: Link,
+        key: &Value,
+        auth: &Auth,
+        txn: Option<Arc<Txn>>,
+    ) -> TCResult<Value> {
+        if auth.is_some() {
+            return Err(error::not_implemented("Authorization"));
+        }
+
+        if txn.is_some() {
+            return Err(error::not_implemented("Cross-service transactions"));
+        }
+
+        let host = link
+            .host()
+            .as_ref()
+            .ok_or_else(|| error::bad_request("No host to resolve", &link))?;
+
+        let host = if let Some(port) = host.port() {
+            format!("{}:{}", host.address(), port)
+        } else {
+            host.address().to_string()
+        };
+
+        let path_and_query = if key == &Value::None {
+            link.path().to_string()
+        } else {
+            let key: String = serde_json::to_string(key).map_err(error::TCError::from)?;
+            format!("{}?key={}", link.path(), key)
+        };
+
+        let uri = format!("http://{}{}", host, path_and_query)
+            .parse()
+            .map_err(|err| error::bad_request("Unable to encode link URI", err))?;
+
+        match self.client.get(uri).await {
+            Err(cause) => Err(error::transport(cause)),
+            Ok(response) if response.status() != 200 => {
+                let status = response.status().as_u16();
+                let msg = if let Ok(msg) = hyper::body::to_bytes(response).await {
+                    if let Ok(msg) = String::from_utf8(msg.to_vec()) {
+                        msg
+                    } else {
+                        ERR_DECODE.to_string()
+                    }
+                } else {
+                    ERR_DECODE.to_string()
+                };
+
+                Err(error::TCError::of(status.into(), msg))
+            }
+            Ok(mut response) => deserialize_body(response.body_mut(), self.response_limit).await,
+        }
+    }
+}
 
 // TODO: implement request size limit
 pub struct Server {
     address: SocketAddr,
+    request_limit: usize,
 }
 
 impl Server {
-    pub fn new(address: SocketAddr) -> Server {
-        Server { address }
+    pub fn new(address: SocketAddr, request_limit: usize) -> Server {
+        Server {
+            address,
+            request_limit,
+        }
     }
 
     async fn handle(
@@ -45,7 +129,7 @@ impl Server {
     async fn authenticate_and_route(
         self: Arc<Self>,
         gateway: Arc<Gateway>,
-        request: Request<Body>,
+        mut request: Request<Body>,
     ) -> TCResult<TCStream<TCResult<Bytes>>> {
         let token: Option<Token> = if let Some(header) = request.headers().get("Authorization") {
             let token = header
@@ -90,11 +174,8 @@ impl Server {
             &Method::PUT => Err(error::not_implemented("HTTP PUT")),
             &Method::POST => {
                 println!("POST {}", path);
-                let values = String::from_utf8(hyper::body::to_bytes(request).await?.to_vec())
-                    .map_err(|e| error::bad_request("Unable to parse request body", e))?;
-                let values: Vec<(ValueId, Value)> = serde_json::from_str(&values).map_err(|e| {
-                    error::bad_request(&format!("Deserialization error {} when parsing", e), values)
-                })?;
+                let values: Vec<(ValueId, Value)> =
+                    deserialize_body(request.body_mut(), self.request_limit).await?;
 
                 let capture: Option<Vec<String>> = get_param(&mut params, "capture")?;
                 let capture = if let Some(value_ids) = capture {
@@ -125,6 +206,26 @@ impl Server {
             ))),
         }
     }
+}
+
+async fn deserialize_body<D: DeserializeOwned>(
+    body: &mut hyper::Body,
+    max_size: usize,
+) -> TCResult<D> {
+    let mut buffer = vec![];
+    while let Some(chunk) = body.next().await {
+        buffer.extend(chunk?.to_vec());
+
+        if buffer.len() > max_size {
+            return Err(error::too_large(max_size));
+        }
+    }
+
+    let data = String::from_utf8(buffer)
+        .map_err(|e| error::bad_request("Unable to parse request body", e))?;
+
+    serde_json::from_str(&data)
+        .map_err(|e| error::bad_request(&format!("Deserialization error {} when parsing", e), data))
 }
 
 fn response_list<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
@@ -214,6 +315,7 @@ fn transform_error(err: error::TCError) -> Response<Body> {
 
     use error::Code::*;
     *response.status_mut() = match err.reason() {
+        Ok => StatusCode::OK,
         BadRequest => StatusCode::BAD_REQUEST,
         Conflict => StatusCode::CONFLICT,
         Forbidden => StatusCode::FORBIDDEN,
@@ -221,8 +323,10 @@ fn transform_error(err: error::TCError) -> Response<Body> {
         MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
         NotFound => StatusCode::NOT_FOUND,
         NotImplemented => StatusCode::NOT_IMPLEMENTED,
-        RequestTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        Transport => StatusCode::from_u16(499).unwrap(), // custom status code
         Unauthorized => StatusCode::UNAUTHORIZED,
+        Unknown => StatusCode::INTERNAL_SERVER_ERROR,
     };
 
     response

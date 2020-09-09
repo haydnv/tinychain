@@ -3,6 +3,9 @@ use std::fmt;
 
 #[derive(Clone)]
 pub enum Code {
+    // "No problem"
+    Ok,
+
     // "I know that what you're asking for doesn't make sense"
     BadRequest,
 
@@ -24,16 +27,44 @@ pub enum Code {
     // "This is marked for implementation in the future"
     NotImplemented,
 
-    // "The request payload itself is dangerously large"
-    RequestTooLarge,
+    // "The payload itself is dangerously large"
+    TooLarge,
+
+    // "There was an error at the transport protocol layer while handling your request"
+    Transport,
 
     // "This resource requires authorization but your credentials are absent or nonsensical"
     Unauthorized,
+
+    // "A downstream dependency responded with an unrecognized status code"
+    Unknown,
+}
+
+impl From<u16> for Code {
+    fn from(code: u16) -> Code {
+        use Code::*;
+
+        match code {
+            200 => Ok,
+            400 => BadRequest,
+            401 => Unauthorized,
+            403 => Forbidden,
+            404 => NotFound,
+            405 => MethodNotAllowed,
+            409 => Conflict,
+            413 => TooLarge,
+            499 => Transport,
+            500 => Internal,
+            501 => NotImplemented,
+            _ => Unknown,
+        }
+    }
 }
 
 impl fmt::Display for Code {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Code::Ok => write!(f, "Ok"),
             Code::BadRequest => write!(f, "Bad request"),
             Code::Conflict => write!(f, "Conflict"),
             Code::Forbidden => write!(f, "Forbidden"),
@@ -41,8 +72,10 @@ impl fmt::Display for Code {
             Code::MethodNotAllowed => write!(f, "Method not allowed"),
             Code::NotFound => write!(f, "Not found"),
             Code::NotImplemented => write!(f, "Not implemented"),
-            Code::RequestTooLarge => write!(f, "Request too large"),
+            Code::TooLarge => write!(f, "Request too large"),
+            Code::Transport => write!(f, "Transport protocol error"),
             Code::Unauthorized => write!(f, "Unauthorized"),
+            Code::Unknown => write!(f, "Unrecognized error code"),
         }
     }
 }
@@ -81,7 +114,7 @@ impl From<Infallible> for TCError {
 
 impl From<hyper::Error> for TCError {
     fn from(e: hyper::Error) -> TCError {
-        internal(format!("HTTP interface error: {}", e))
+        transport(format!("HTTP interface error: {}", e))
     }
 }
 
@@ -150,14 +183,18 @@ pub fn unsupported<I: fmt::Display>(hint: I) -> TCError {
     TCError::of(Code::BadRequest, hint.to_string())
 }
 
-pub fn request_too_large(max_size: usize) -> TCError {
+pub fn too_large(max_size: usize) -> TCError {
     TCError::of(
-        Code::RequestTooLarge,
+        Code::TooLarge,
         format!(
-            "This request exceeds the maximum allowed size of {} bytes",
-            max_size
+            "Payload exceeded the maximum allowed size of {} bytes",
+            max_size,
         ),
     )
+}
+
+pub fn transport<I: fmt::Display>(info: I) -> TCError {
+    TCError::of(Code::Transport, info.to_string())
 }
 
 pub fn unauthorized(message: &str) -> TCError {

@@ -18,8 +18,12 @@ mod value;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn block_size(flag: &str) -> class::TCResult<usize> {
-    let msg = "Unable to parse value of block_size";
+fn data_size(flag: &str) -> class::TCResult<usize> {
+    if flag.is_empty() {
+        return Err(error::bad_request("Invalid size specified", flag));
+    }
+
+    let msg = "Unable to parse value";
     let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
         .map_err(|_| error::bad_request(msg, flag))?;
     if flag.ends_with('K') {
@@ -45,11 +49,17 @@ struct Config {
     #[structopt(long = "http_port", default_value = "8702")]
     pub http_port: u16,
 
+    #[structopt(long = "ext")]
+    pub adapters: Vec<value::link::Link>,
+
     #[structopt(long = "host")]
     pub hosted: Vec<value::link::TCPath>,
 
     #[structopt(long = "peer")]
     pub peers: Vec<value::link::LinkHost>,
+
+    #[structopt(long = "request_limit", default_value = "10M", parse(try_from_str = data_size))]
+    pub request_limit: usize,
 }
 
 #[tokio::main]
@@ -75,7 +85,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     workspace.commit(&txn_id).await;
 
     let hosted = configure(config.hosted, data_dir.clone(), workspace.clone()).await?;
-    let gateway = gateway::Gateway::new(config.peers, hosted, workspace.clone());
+    let gateway = gateway::Gateway::new(
+        config.peers,
+        config.adapters,
+        hosted,
+        workspace.clone(),
+        config.request_limit,
+    )
+    .map_err(Box::new)?;
+
     Arc::new(gateway)
         .http_listen(config.address, config.http_port)
         .await

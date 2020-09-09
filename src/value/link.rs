@@ -318,6 +318,16 @@ impl From<TCPath> for Link {
     }
 }
 
+impl From<(LinkHost, TCPath)> for Link {
+    fn from(tuple: (LinkHost, TCPath)) -> Link {
+        let (host, path) = tuple;
+        Link {
+            host: Some(host),
+            path,
+        }
+    }
+}
+
 impl FromStr for Link {
     type Err = error::TCError;
 
@@ -476,7 +486,7 @@ impl TCPath {
         }
     }
 
-    pub fn starts_with(&self, other: TCPath) -> bool {
+    pub fn starts_with(&self, other: &TCPath) -> bool {
         if self.len() < other.len() {
             false
         } else {
