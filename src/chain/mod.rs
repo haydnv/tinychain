@@ -105,3 +105,11 @@ impl From<null::NullChain> for Chain {
         Chain::Null(Box::new(nc))
     }
 }
+
+impl fmt::Display for Chain {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Null(_) => write!(f, "(null chain)"),
+        }
+    }
+}

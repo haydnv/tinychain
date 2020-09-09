@@ -5,6 +5,7 @@ use std::pin::Pin;
 use futures::future::Future;
 use futures::stream::Stream;
 
+use crate::chain::{Chain, ChainType};
 use crate::collection::{Collection, CollectionType};
 use crate::error;
 use crate::value::link::{Link, TCPath};
@@ -61,6 +62,7 @@ pub trait Instance {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCType {
+    Chain(ChainType),
     Collection(CollectionType),
     Value(ValueType),
 }
@@ -69,14 +71,13 @@ impl Class for TCType {
     type Instance = State;
 
     fn from_path(path: &TCPath) -> TCResult<TCType> {
-        let path = path.from_path(&Self::prefix())?;
+        let suffix = path.from_path(&Self::prefix())?;
 
-        if path.len() > 1 {
-            match path[1].as_str() {
-                "collection" => {
-                    CollectionType::from_path(&path.slice_from(2)).map(TCType::Collection)
-                }
-                "value" => ValueType::from_path(&path.slice_from(2)).map(TCType::Value),
+        if suffix.len() > 1 {
+            match suffix[0].as_str() {
+                "chain" => ChainType::from_path(path).map(TCType::Chain),
+                "collection" => CollectionType::from_path(path).map(TCType::Collection),
+                "value" => ValueType::from_path(path).map(TCType::Value),
                 other => Err(error::not_found(other)),
             }
         } else {
@@ -86,6 +87,12 @@ impl Class for TCType {
 
     fn prefix() -> TCPath {
         label("sbin").into()
+    }
+}
+
+impl From<ChainType> for TCType {
+    fn from(ct: ChainType) -> TCType {
+        TCType::Chain(ct)
     }
 }
 
@@ -126,6 +133,7 @@ impl TryFrom<TCType> for ValueType {
 impl From<TCType> for Link {
     fn from(t: TCType) -> Link {
         match t {
+            TCType::Chain(ct) => ct.into(),
             TCType::Collection(ct) => ct.into(),
             TCType::Value(vt) => vt.into(),
         }
@@ -135,14 +143,16 @@ impl From<TCType> for Link {
 impl fmt::Display for TCType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Collection(ctype) => write!(f, "{}", ctype),
-            Self::Value(vtype) => write!(f, "{}", vtype),
+            Self::Chain(ct) => write!(f, "{}", ct),
+            Self::Collection(ct) => write!(f, "{}", ct),
+            Self::Value(vt) => write!(f, "{}", vt),
         }
     }
 }
 
 #[derive(Clone)]
 pub enum State {
+    Chain(Chain),
     Collection(Collection),
     Value(Value),
 }
@@ -152,6 +162,7 @@ impl Instance for State {
 
     fn class(&self) -> Self::Class {
         match self {
+            Self::Chain(chain) => chain.class().into(),
             Self::Collection(collection) => collection.class().into(),
             Self::Value(value) => value.class().into(),
         }
@@ -178,6 +189,7 @@ impl TryFrom<State> for Value {
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Chain(c) => write!(f, "{}", c),
             Self::Collection(c) => write!(f, "{}", c),
             Self::Value(v) => write!(f, "{}", v),
         }
