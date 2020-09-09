@@ -14,6 +14,7 @@ use crate::value::{label, Value};
 use super::btree::{BTreeFile, BTreeType};
 use super::chain::ChainType;
 use super::graph::{Graph, GraphType};
+use super::null::{Null, NullType};
 use super::table::{TableBaseType, TableType};
 use super::tensor::{TensorBaseType, TensorType};
 use super::{Collection, CollectionBase, CollectionView};
@@ -126,6 +127,7 @@ pub enum CollectionBaseType {
     BTree,
     Chain(ChainType),
     Graph,
+    Null,
     Table(TableBaseType),
     Tensor(TensorBaseType),
 }
@@ -143,6 +145,7 @@ impl Class for CollectionBaseType {
             match suffix[0].as_str() {
                 "btree" if suffix.len() == 1 => Ok(BTree),
                 "graph" if suffix.len() == 1 => Ok(Graph),
+                "null" if suffix.len() == 1 => Ok(Null),
                 "table" => TableBaseType::from_path(path).map(Table),
                 "tensor" => TensorBaseType::from_path(path).map(Tensor),
                 other => Err(error::not_found(other)),
@@ -177,6 +180,16 @@ impl CollectionClass for CollectionBaseType {
                     .map_ok(CollectionBase::Graph)
                     .await
             }
+            "null" if suffix.len() == 1 => {
+                if schema == Value::None {
+                    Ok(CollectionBase::Null(Null::create()))
+                } else {
+                    Err(error::bad_request(
+                        "Null Collection has no schema; found",
+                        schema,
+                    ))
+                }
+            }
             "table" => {
                 TableBaseType::get(txn, path, schema)
                     .map_ok(CollectionBase::Table)
@@ -201,6 +214,7 @@ impl From<CollectionBaseType> for Link {
             BTree => BTreeType::Tree.into(),
             Chain(ct) => ct.into(),
             Graph => prefix.join(label("graph").into()).into(),
+            Null => prefix.join(label("null").into()).into(),
             Table(tbt) => tbt.into(),
             Tensor(tbt) => tbt.into(),
         }
@@ -211,9 +225,10 @@ impl fmt::Display for CollectionBaseType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use CollectionBaseType::*;
         match self {
-            BTree => write!(f, "class BTree"),
+            BTree => write!(f, "{}", BTreeType::Tree),
             Chain(ct) => write!(f, "{}", ct),
-            Graph => write!(f, "class Graph"),
+            Graph => write!(f, "{}", GraphType::Graph),
+            Null => write!(f, "{}", NullType),
             Table(tbt) => write!(f, "{}", tbt),
             Tensor(tbt) => write!(f, "{}", tbt),
         }
@@ -225,6 +240,7 @@ pub enum CollectionViewType {
     BTree(BTreeType),
     Chain(ChainType),
     Graph(GraphType),
+    Null(NullType),
     Table(TableType),
     Tensor(TensorType),
 }
@@ -259,6 +275,12 @@ impl From<GraphType> for CollectionViewType {
     }
 }
 
+impl From<NullType> for CollectionViewType {
+    fn from(nt: NullType) -> CollectionViewType {
+        Self::Null(nt)
+    }
+}
+
 impl From<TableType> for CollectionViewType {
     fn from(tt: TableType) -> CollectionViewType {
         Self::Table(tt)
@@ -278,6 +300,7 @@ impl From<CollectionViewType> for Link {
             BTree(btt) => btt.into(),
             Chain(ct) => ct.into(),
             Graph(gt) => gt.into(),
+            Null(nt) => nt.into(),
             Table(tt) => tt.into(),
             Tensor(tt) => tt.into(),
         }
@@ -291,6 +314,7 @@ impl fmt::Display for CollectionViewType {
             BTree(btree_type) => write!(f, "{}", btree_type),
             Chain(chain_type) => write!(f, "{}", chain_type),
             Graph(graph_type) => write!(f, "{}", graph_type),
+            Null(null_type) => write!(f, "{}", null_type),
             Table(table_type) => write!(f, "{}", table_type),
             Tensor(tensor_type) => write!(f, "{}", tensor_type),
         }
