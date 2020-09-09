@@ -7,6 +7,7 @@ use structopt::StructOpt;
 
 mod auth;
 mod block;
+mod chain;
 mod class;
 mod collection;
 mod error;

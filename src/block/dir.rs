@@ -8,9 +8,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uuid::Uuid;
 
+use crate::chain;
 use crate::class::{TCBoxTryFuture, TCResult};
 use crate::collection::btree;
-use crate::collection::chain;
 use crate::collection::tensor;
 use crate::error;
 use crate::lock::RwLock;

@@ -10,7 +10,6 @@ use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::Value;
 
 pub mod btree;
-pub mod chain;
 pub mod class;
 pub mod cluster;
 pub mod graph;
@@ -26,7 +25,6 @@ pub type CollectionViewType = class::CollectionViewType;
 
 pub type BTree = btree::BTree;
 pub type BTreeSlice = btree::BTreeSlice;
-pub type Chain = chain::Chain;
 pub type Cluster = cluster::Cluster;
 pub type Graph = graph::Graph;
 pub type Null = null::Null;
@@ -37,7 +35,6 @@ pub type TensorView = tensor::TensorView;
 #[derive(Clone)]
 pub enum CollectionBase {
     BTree(btree::BTreeFile),
-    Chain(chain::Chain),
     Graph(graph::Graph),
     Null(null::Null),
     Table(table::TableBase),
@@ -50,7 +47,6 @@ impl Instance for CollectionBase {
     fn class(&self) -> Self::Class {
         match self {
             Self::BTree(_) => class::CollectionBaseType::BTree,
-            Self::Chain(chain) => class::CollectionBaseType::Chain(chain.class()),
             Self::Graph(_) => class::CollectionBaseType::Graph,
             Self::Null(_) => class::CollectionBaseType::Null,
             Self::Table(table) => class::CollectionBaseType::Table(table.class()),
@@ -76,7 +72,6 @@ impl class::CollectionInstance for CollectionBase {
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
         match self {
             Self::BTree(btree) => btree.is_empty(txn).await,
-            Self::Chain(chain) => chain.is_empty(txn).await,
             Self::Graph(graph) => graph.is_empty(txn).await,
             Self::Null(null) => null.is_empty(txn).await,
             Self::Table(table) => table.is_empty(txn).await,
@@ -97,7 +92,6 @@ impl class::CollectionInstance for CollectionBase {
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
         match self {
             Self::BTree(btree) => btree.to_stream(txn).await,
-            Self::Chain(chain) => chain.to_stream(txn).await,
             Self::Graph(graph) => graph.to_stream(txn).await,
             Self::Null(null) => null.to_stream(txn).await,
             Self::Table(table) => table.to_stream(txn).await,
@@ -111,7 +105,6 @@ impl Transact for CollectionBase {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
-            Self::Chain(chain) => chain.commit(txn_id).await,
             Self::Graph(graph) => graph.commit(txn_id).await,
             Self::Null(_) => (), // no-op
             Self::Table(table) => table.commit(txn_id).await,
@@ -122,7 +115,6 @@ impl Transact for CollectionBase {
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.rollback(txn_id).await,
-            Self::Chain(chain) => chain.rollback(txn_id).await,
             Self::Graph(graph) => graph.rollback(txn_id).await,
             Self::Null(_) => (), // no-op
             Self::Table(table) => table.rollback(txn_id).await,
@@ -135,7 +127,6 @@ impl From<CollectionBase> for CollectionView {
     fn from(base: CollectionBase) -> CollectionView {
         match base {
             CollectionBase::BTree(btree) => CollectionView::BTree(btree.into()),
-            CollectionBase::Chain(chain) => CollectionView::Chain(chain),
             CollectionBase::Graph(graph) => CollectionView::Graph(graph),
             CollectionBase::Null(null) => CollectionView::Null(null),
             CollectionBase::Table(table) => CollectionView::Table(table.into()),
@@ -148,7 +139,6 @@ impl fmt::Display for CollectionBase {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::BTree(_) => write!(f, "(B-tree)"),
-            Self::Chain(_) => write!(f, "(chain)"),
             Self::Graph(_) => write!(f, "(graph)"),
             Self::Null(_) => write!(f, "(null)"),
             Self::Table(_) => write!(f, "(table)"),
@@ -160,7 +150,6 @@ impl fmt::Display for CollectionBase {
 #[derive(Clone)]
 pub enum CollectionView {
     BTree(btree::BTree),
-    Chain(chain::Chain),
     Graph(graph::Graph),
     Null(null::Null),
     Table(table::Table),
@@ -173,7 +162,6 @@ impl Instance for CollectionView {
     fn class(&self) -> Self::Class {
         match self {
             Self::BTree(btree) => btree.class().into(),
-            Self::Chain(chain) => chain.class().into(),
             Self::Graph(graph) => graph.class().into(),
             Self::Null(null) => null.class().into(),
             Self::Table(table) => table.class().into(),
@@ -207,7 +195,6 @@ impl class::CollectionInstance for CollectionView {
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
         match self {
             Self::BTree(btree) => btree.is_empty(txn).await,
-            Self::Chain(chain) => chain.is_empty(txn).await,
             Self::Graph(graph) => graph.is_empty(txn).await,
             Self::Null(null) => null.is_empty(txn).await,
             Self::Table(table) => table.is_empty(txn).await,
@@ -272,7 +259,6 @@ impl class::CollectionInstance for CollectionView {
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
         match self {
             Self::BTree(btree) => btree.to_stream(txn).await,
-            Self::Chain(chain) => chain.to_stream(txn).await,
             Self::Graph(graph) => graph.to_stream(txn).await,
             Self::Null(null) => null.to_stream(txn).await,
             Self::Table(table) => table.to_stream(txn).await,
@@ -286,7 +272,6 @@ impl Transact for CollectionView {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
-            Self::Chain(chain) => chain.commit(txn_id).await,
             Self::Graph(graph) => graph.commit(txn_id).await,
             Self::Null(null) => null.commit(txn_id).await, // no-op
             Self::Table(table) => table.commit(txn_id).await,
@@ -297,7 +282,6 @@ impl Transact for CollectionView {
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.rollback(txn_id).await,
-            Self::Chain(chain) => chain.rollback(txn_id).await,
             Self::Graph(graph) => graph.rollback(txn_id).await,
             Self::Null(null) => null.rollback(txn_id).await, // no-op
             Self::Table(table) => table.rollback(txn_id).await,
@@ -332,7 +316,6 @@ impl fmt::Display for CollectionView {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::BTree(_) => write!(f, "(B-tree view)"),
-            Self::Chain(_) => write!(f, "(chain)"),
             Self::Graph(_) => write!(f, "(graph)"),
             Self::Null(_) => write!(f, "(null collection)"),
             Self::Table(_) => write!(f, "(table view)"),

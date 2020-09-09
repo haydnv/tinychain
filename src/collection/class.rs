@@ -12,7 +12,6 @@ use crate::value::link::{Link, TCPath};
 use crate::value::{label, Value};
 
 use super::btree::{BTreeFile, BTreeType};
-use super::chain::ChainType;
 use super::graph::{Graph, GraphType};
 use super::null::{Null, NullType};
 use super::table::{TableBaseType, TableType};
@@ -125,7 +124,6 @@ impl fmt::Display for CollectionType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionBaseType {
     BTree,
-    Chain(ChainType),
     Graph,
     Null,
     Table(TableBaseType),
@@ -212,7 +210,6 @@ impl From<CollectionBaseType> for Link {
         use CollectionBaseType::*;
         match ct {
             BTree => BTreeType::Tree.into(),
-            Chain(ct) => ct.into(),
             Graph => prefix.join(label("graph").into()).into(),
             Null => prefix.join(label("null").into()).into(),
             Table(tbt) => tbt.into(),
@@ -226,7 +223,6 @@ impl fmt::Display for CollectionBaseType {
         use CollectionBaseType::*;
         match self {
             BTree => write!(f, "{}", BTreeType::Tree),
-            Chain(ct) => write!(f, "{}", ct),
             Graph => write!(f, "{}", GraphType::Graph),
             Null => write!(f, "{}", NullType),
             Table(tbt) => write!(f, "{}", tbt),
@@ -238,7 +234,6 @@ impl fmt::Display for CollectionBaseType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionViewType {
     BTree(BTreeType),
-    Chain(ChainType),
     Graph(GraphType),
     Null(NullType),
     Table(TableType),
@@ -260,12 +255,6 @@ impl Class for CollectionViewType {
 impl From<BTreeType> for CollectionViewType {
     fn from(btt: BTreeType) -> CollectionViewType {
         Self::BTree(btt)
-    }
-}
-
-impl From<ChainType> for CollectionViewType {
-    fn from(ct: ChainType) -> CollectionViewType {
-        Self::Chain(ct)
     }
 }
 
@@ -298,7 +287,6 @@ impl From<CollectionViewType> for Link {
         use CollectionViewType::*;
         match cvt {
             BTree(btt) => btt.into(),
-            Chain(ct) => ct.into(),
             Graph(gt) => gt.into(),
             Null(nt) => nt.into(),
             Table(tt) => tt.into(),
@@ -312,7 +300,6 @@ impl fmt::Display for CollectionViewType {
         use CollectionViewType::*;
         match self {
             BTree(btree_type) => write!(f, "{}", btree_type),
-            Chain(chain_type) => write!(f, "{}", chain_type),
             Graph(graph_type) => write!(f, "{}", graph_type),
             Null(null_type) => write!(f, "{}", null_type),
             Table(table_type) => write!(f, "{}", table_type),
