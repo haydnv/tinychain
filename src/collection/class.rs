@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::transaction::{Transact, Txn};
 use crate::value::link::{Link, TCPath};
@@ -21,6 +21,15 @@ use super::{Collection, CollectionBase, CollectionView};
 pub enum CollectionItem<I: Into<Value>, S: CollectionInstance> {
     Value(I),
     Slice(S),
+}
+
+impl<I: Into<Value>, S: CollectionInstance> From<CollectionItem<I, S>> for State {
+    fn from(ci: CollectionItem<I, S>) -> State {
+        match ci {
+            CollectionItem::Value(v) => State::Value(v.into()),
+            CollectionItem::Slice(s) => State::Collection(s.into()),
+        }
+    }
 }
 
 #[async_trait]

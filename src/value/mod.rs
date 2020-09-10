@@ -387,7 +387,11 @@ impl<
                 let first: T1 = source.pop().unwrap().try_into().map_err(|e: E1| e.into())?;
                 Ok((first, second))
             }
-            other => Err(error::bad_request("Expected a 2-Tuple but found", other)),
+            Value::Tuple(other) => {
+                let len = other.len();
+                Err(error::unsupported(format!("Expected a 2-Tuple but found {} (of length {})", Value::Tuple(other), len)))
+            }
+            other => Err(error::bad_request("Expected a 2-Tuple but found {}", other)),
         }
     }
 }

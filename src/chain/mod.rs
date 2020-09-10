@@ -1,12 +1,13 @@
 use std::fmt;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::class::{Class, Instance, TCResult};
+use crate::class::{Class, Instance, State, TCResult};
 use crate::collection::{CollectionBase, CollectionType};
 use crate::error;
-use crate::transaction::{Transact, TxnId};
-use crate::value::{label, Link, TCPath};
+use crate::transaction::{Transact, Txn, TxnId};
+use crate::value::{label, Link, TCPath, Value};
 
 mod block;
 mod null;
@@ -55,10 +56,13 @@ impl fmt::Display for ChainType {
     }
 }
 
+#[async_trait]
 pub trait ChainInstance: Instance
 where
     <Self as Instance>::Class: Into<ChainType>,
 {
+    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value) -> TCResult<State>;
+
     fn object(&'_ self) -> &'_ CollectionBase;
 }
 
@@ -77,7 +81,14 @@ impl Instance for Chain {
     }
 }
 
+#[async_trait]
 impl ChainInstance for Chain {
+    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value) -> TCResult<State> {
+        match self {
+            Self::Null(nc) => nc.get(txn, path, key).await,
+        }
+    }
+
     fn object(&self) -> &CollectionBase {
         match self {
             Self::Null(nc) => nc.object(),

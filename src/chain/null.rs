@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::TryFutureExt;
 
-use crate::class::{Instance, TCResult};
-use crate::collection::class::CollectionClass;
+use crate::class::{Instance, State, TCResult};
+use crate::collection::class::*;
 use crate::collection::{CollectionBase, CollectionBaseType};
+use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::{Op, TCPath, Value, ValueId};
 
@@ -40,7 +42,22 @@ impl Instance for NullChain {
     }
 }
 
+#[async_trait]
 impl ChainInstance for NullChain {
+    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value) -> TCResult<State> {
+        if path.is_empty() {
+            self.object().get_item(txn, key).map_ok(State::from).await
+        } else if path.len() == 1 {
+            if let Some(_op) = self.ops.get(&path[0]) {
+                Err(error::not_implemented("NullChain::get"))
+            } else {
+                Err(error::not_found(path))
+            }
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
     fn object(&'_ self) -> &'_ CollectionBase {
         &self.collection
     }
