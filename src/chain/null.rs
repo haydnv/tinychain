@@ -4,12 +4,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
+use crate::auth::Auth;
 use crate::class::{Instance, State, TCResult};
 use crate::collection::class::*;
 use crate::collection::{CollectionBase, CollectionBaseType};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{Op, TCPath, Value, ValueId};
+use crate::value::{Op, TCPath, TCString, Value, ValueId};
 
 use super::{ChainInstance, ChainType};
 
@@ -44,12 +45,27 @@ impl Instance for NullChain {
 
 #[async_trait]
 impl ChainInstance for NullChain {
-    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value) -> TCResult<State> {
+    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
         if path.is_empty() {
             self.object().get_item(txn, key).map_ok(State::from).await
         } else if path.len() == 1 {
-            if let Some(_op) = self.ops.get(&path[0]) {
-                Err(error::not_implemented("NullChain::get"))
+            if let Some(op) = self.ops.get(&path[0]) {
+                if let Op::Get(subject, object) = op {
+                    let mut op_state = HashMap::new();
+                    if let Value::TCString(TCString::Ref(tc_ref)) = object {
+                        op_state.insert(tc_ref.clone().into(), State::Value(key));
+                    } else if key != Value::None {
+                        return Err(error::bad_request(
+                            &format!("{} got unused argument", &path[0]),
+                            key,
+                        ));
+                    }
+
+                    txn.resolve(op_state, Op::Get(subject.clone(), object.clone()), auth)
+                        .await
+                } else {
+                    Err(error::method_not_allowed(path))
+                }
             } else {
                 Err(error::not_found(path))
             }

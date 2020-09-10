@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::Auth;
 use crate::block::{BlockData, Dir, DirEntry, File};
+use crate::chain::ChainInstance;
 use crate::class::{ResponseStream, State, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionItem};
@@ -20,7 +21,7 @@ use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
 use crate::value::link::PathSegment;
 use crate::value::op::{Op, Subject};
-use crate::value::{Number, TCString, Value, ValueId};
+use crate::value::{Number, TCString, TCPath, Value, ValueId};
 
 use super::Transact;
 
@@ -283,7 +284,7 @@ impl Txn {
         .await;
     }
 
-    async fn resolve(
+    pub async fn resolve(
         self: Arc<Self>,
         provided: HashMap<ValueId, State>,
         provider: Op,
@@ -320,15 +321,13 @@ impl Txn {
                     let subject = provided
                         .get(&tc_ref.clone().into())
                         .ok_or_else(|| error::not_found(tc_ref))?;
-                    if let State::Collection(collection) = subject {
+
+                    if let State::Chain(chain) = subject {
+                        chain.get(self, &TCPath::default(), object, auth).await
+                    } else if let State::Collection(collection) = subject {
                         collection
                             .get_item(self.clone(), object)
-                            .map_ok(|view| match view {
-                                CollectionItem::Value(value) => State::Value(value),
-                                CollectionItem::Slice(view) => {
-                                    State::Collection(Collection::View(view))
-                                }
-                            })
+                            .map_ok(State::from)
                             .await
                     } else {
                         Err(error::bad_request("Value does not support GET", subject))

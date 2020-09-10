@@ -389,7 +389,11 @@ impl<
             }
             Value::Tuple(other) => {
                 let len = other.len();
-                Err(error::unsupported(format!("Expected a 2-Tuple but found {} (of length {})", Value::Tuple(other), len)))
+                Err(error::unsupported(format!(
+                    "Expected a 2-Tuple but found {} (of length {})",
+                    Value::Tuple(other),
+                    len
+                )))
             }
             other => Err(error::bad_request("Expected a 2-Tuple but found {}", other)),
         }

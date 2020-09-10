@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::auth::Auth;
 use crate::class::{Class, Instance, State, TCResult};
 use crate::collection::{CollectionBase, CollectionType};
 use crate::error;
@@ -61,7 +62,7 @@ pub trait ChainInstance: Instance
 where
     <Self as Instance>::Class: Into<ChainType>,
 {
-    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value) -> TCResult<State>;
+    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State>;
 
     fn object(&'_ self) -> &'_ CollectionBase;
 }
@@ -83,9 +84,9 @@ impl Instance for Chain {
 
 #[async_trait]
 impl ChainInstance for Chain {
-    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value) -> TCResult<State> {
+    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
         match self {
-            Self::Null(nc) => nc.get(txn, path, key).await,
+            Self::Null(nc) => nc.get(txn, path, key, auth).await,
         }
     }
 
