@@ -223,7 +223,7 @@ impl From<&ValueId> for String {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum TCString {
     Id(ValueId),
     Link(Link),

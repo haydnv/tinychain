@@ -21,6 +21,8 @@ pub type Label = string::Label;
 pub type Link = link::Link;
 pub type Number = number::instance::Number;
 pub type Op = op::Op;
+pub type OpRef = op::OpRef;
+pub type OpType = op::OpType;
 pub type TCPath = link::TCPath;
 pub type TCString = string::TCString;
 pub type TCRef = reference::TCRef;
@@ -31,7 +33,7 @@ pub const fn label(id: &'static str) -> string::Label {
     string::label(id)
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Value {
     None,
     Bound(Bound<Box<Value>>),
@@ -105,6 +107,18 @@ impl From<Number> for Value {
     }
 }
 
+impl From<Op> for Value {
+    fn from(op: Op) -> Value {
+        Value::Op(Box::new(op))
+    }
+}
+
+impl From<OpRef> for Value {
+    fn from(op_ref: OpRef) -> Value {
+        Op::from(op_ref).into()
+    }
+}
+
 impl From<u64> for Value {
     fn from(u: u64) -> Value {
         let u: number::instance::UInt = u.into();
@@ -130,12 +144,6 @@ impl From<ValueId> for Value {
     fn from(v: ValueId) -> Value {
         let s: TCString = v.into();
         s.into()
-    }
-}
-
-impl From<op::Op> for Value {
-    fn from(op: op::Op) -> Value {
-        Value::Op(Box::new(op))
     }
 }
 
@@ -525,8 +533,8 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                 let subject = key.parse::<TCRef>().map_err(de::Error::custom)?;
                 match value.len() {
                     0 => Ok(Value::TCString(TCString::Ref(subject))),
-                    1 => Ok(op::Op::Get(subject.into(), value.remove(0)).into()),
-                    2 => Ok(op::Op::Put(subject.into(), value.remove(0), value.remove(0)).into()),
+                    1 => Ok(OpRef::Get(subject.into(), value.remove(0)).into()),
+                    2 => Ok(OpRef::Put(subject.into(), value.remove(0), value.remove(0)).into()),
                     _ => Err(de::Error::custom(format!(
                         "Expected a Get or Put op, found {}",
                         Value::Tuple(value)
@@ -536,16 +544,9 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                 if value.is_empty() {
                     Ok(Value::TCString(TCString::Link(link)))
                 } else if value.len() == 1 {
-                    Ok(Value::Op(Box::new(Op::Get(
-                        link.into(),
-                        value.pop().unwrap(),
-                    ))))
+                    Ok(OpRef::Get(link.into(), value.pop().unwrap()).into())
                 } else if value.len() == 2 {
-                    Ok(Value::Op(Box::new(Op::Put(
-                        link.into(),
-                        value.pop().unwrap(),
-                        value.pop().unwrap(),
-                    ))))
+                    Ok(OpRef::Put(link.into(), value.pop().unwrap(), value.pop().unwrap()).into())
                 } else {
                     Err(de::Error::custom(
                         "This functionality is not yet implemented",
@@ -613,7 +614,7 @@ impl Serialize for Value {
             Value::Bound(b) => b.serialize(s),
             Value::Bytes(b) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("/sbin/value/bytes", &[base64::encode(b)])?;
+                map.serialize_entry(Link::from(ValueType::Bytes).path(), &[base64::encode(b)])?;
                 map.end()
             }
             Value::Class(c) => {
@@ -624,14 +625,14 @@ impl Serialize for Value {
             Value::Op(op) => {
                 let mut map = s.serialize_map(Some(1))?;
                 match &**op {
-                    op::Op::If(cond, then, or_else) => map.serialize_entry(
-                        "/sbin/value/op/if",
+                    Op::If((cond, then, or_else)) => map.serialize_entry(
+                        Link::from(OpType::If).path(),
                         &[&Value::from(cond.clone()), then, or_else],
                     )?,
-                    op::Op::Get(subject, selector) => {
+                    Op::Ref(OpRef::Get(subject, selector)) => {
                         map.serialize_entry(&subject.to_string(), &[selector])?
                     }
-                    op::Op::Put(subject, selector, value) => {
+                    Op::Ref(OpRef::Put(subject, selector, value)) => {
                         map.serialize_entry(&subject.to_string(), &[selector, value])?
                     }
                 }

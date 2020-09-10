@@ -1136,7 +1136,7 @@ impl fmt::Display for UInt {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Number {
     Bool(Boolean),
     Complex(Complex),

@@ -20,7 +20,7 @@ use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
 use crate::value::link::PathSegment;
-use crate::value::op::{Op, Subject};
+use crate::value::op::{Op, OpRef, Subject};
 use crate::value::{Number, TCPath, TCString, Value, ValueId};
 
 use super::Transact;
@@ -291,7 +291,7 @@ impl Txn {
         println!("Txn::resolve {}", provider);
 
         match provider {
-            Op::If(cond, then, or_else) => {
+            Op::If((cond, then, or_else)) => {
                 let cond = provided
                     .get(cond.value_id())
                     .ok_or_else(|| error::not_found(cond))?;
@@ -308,7 +308,7 @@ impl Txn {
                     ))
                 }
             }
-            Op::Get(subject, object) => match subject {
+            Op::Ref(OpRef::Get(subject, object)) => match subject {
                 Subject::Link(link) => {
                     let object = resolve_value(&provided, &object)?.clone();
                     self.gateway
@@ -332,7 +332,7 @@ impl Txn {
                     }
                 }
             },
-            Op::Put(subject, object, value) => {
+            Op::Ref(OpRef::Put(subject, object, value)) => {
                 let value: State = if let Value::TCString(TCString::Id(tc_ref)) = value {
                     provided
                         .get(&tc_ref.clone())
@@ -403,7 +403,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
     let mut deps = HashSet::new();
 
     match op {
-        Op::If(cond, then, or_else) => {
+        Op::If((cond, then, or_else)) => {
             let cond_state = txn_state
                 .get(cond.value_id())
                 .ok_or_else(|| error::not_found(cond))?;
@@ -414,13 +414,13 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(or_else, txn_state)?);
             }
         }
-        Op::Get(subject, object) => {
+        Op::Ref(OpRef::Get(subject, object)) => {
             if let Subject::Ref(tc_ref) = subject {
                 deps.insert(tc_ref.value_id().clone());
             }
             deps.extend(value_requires(object, txn_state)?);
         }
-        Op::Put(subject, object, value) => {
+        Op::Ref(OpRef::Put(subject, object, value)) => {
             if let Subject::Ref(tc_ref) = subject {
                 deps.insert(tc_ref.value_id().clone());
             }

@@ -22,11 +22,7 @@ pub struct NullChain {
 }
 
 impl NullChain {
-    pub async fn create(
-        txn: Arc<Txn>,
-        ctype: &TCPath,
-        schema: Value,
-    ) -> TCResult<NullChain> {
+    pub async fn create(txn: Arc<Txn>, ctype: &TCPath, schema: Value) -> TCResult<NullChain> {
         let collection = CollectionBaseType::get(txn, ctype, schema).await?;
         Ok(NullChain { collection })
     }
