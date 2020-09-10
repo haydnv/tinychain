@@ -1,10 +1,9 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::Stream;
 
 use crate::auth::Auth;
-use crate::class::{ResponseStream, State, TCResult};
+use crate::class::{State, TCResult, TCStream};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error;
 use crate::transaction::Txn;
@@ -36,9 +35,9 @@ pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(
     txn: Arc<Txn>,
     path: &TCPath,
     values: S,
-    capture: HashSet<ValueId>,
+    capture: &[ValueId],
     auth: &Auth,
-) -> TCResult<ResponseStream> {
+) -> TCResult<Vec<TCStream<Value>>> {
     if path[0] == "transact" && path.len() == 2 {
         match path[1].as_str() {
             "execute" => transact(txn, values, capture, auth).await,
@@ -52,9 +51,9 @@ pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(
 async fn transact<S: Stream<Item = (ValueId, Value)> + Unpin>(
     txn: Arc<Txn>,
     values: S,
-    capture: HashSet<ValueId>,
+    capture: &[ValueId],
     auth: &Auth,
-) -> TCResult<ResponseStream> {
+) -> TCResult<Vec<TCStream<Value>>> {
     match txn.clone().execute_and_stream(values, capture, auth).await {
         Ok(response) => {
             txn.commit().await;

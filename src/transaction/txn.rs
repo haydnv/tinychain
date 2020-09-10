@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::auth::Auth;
 use crate::block::{BlockData, Dir, DirEntry, File};
 use crate::chain::ChainInstance;
-use crate::class::{ResponseStream, State, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{State, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionItem};
 use crate::error;
@@ -21,7 +21,7 @@ use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
 use crate::value::link::PathSegment;
 use crate::value::op::{Op, Subject};
-use crate::value::{Number, TCString, TCPath, Value, ValueId};
+use crate::value::{Number, TCPath, TCString, Value, ValueId};
 
 use super::Transact;
 
@@ -144,7 +144,7 @@ impl Txn {
     pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
         mut parameters: S,
-        capture: &HashSet<ValueId>,
+        capture: &[ValueId],
         auth: &Auth,
     ) -> TCResult<HashMap<ValueId, State>> {
         // TODO: use a Graph here and queue every op absolutely as soon as it's ready
@@ -235,35 +235,33 @@ impl Txn {
     pub async fn execute_and_stream<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
         parameters: S,
-        mut capture: HashSet<ValueId>,
+        capture: &[ValueId],
         auth: &Auth,
-    ) -> TCResult<ResponseStream> {
+    ) -> TCResult<Vec<TCStream<Value>>> {
         let mut txn_state = self.clone().execute(parameters, &capture, auth).await?;
         let mut streams = Vec::with_capacity(capture.len());
-        for value_id in capture.drain() {
+        for value_id in capture {
             let this = self.clone();
             let state = txn_state
-                .remove(&value_id)
-                .ok_or_else(|| error::not_found(&value_id))?;
+                .remove(value_id)
+                .ok_or_else(|| error::not_found(value_id))?;
 
             streams.push(async move {
                 match state {
                     State::Chain(_chain) => Err(error::not_implemented("Serializing a Chain")),
                     State::Collection(collection) => {
                         let stream: TCStream<Value> = collection.to_stream(this).await?;
-                        TCResult::Ok((value_id, stream))
+                        TCResult::Ok(stream)
                     }
                     State::Value(value) => {
                         let stream: TCStream<Value> = Box::pin(stream::once(future::ready(value)));
-                        TCResult::Ok((value_id, stream))
+                        TCResult::Ok(stream)
                     }
                 }
             });
         }
 
-        let response = try_join_all(streams).await?;
-        let response: ResponseStream = Box::pin(stream::iter(response));
-        Ok(response)
+        try_join_all(streams).await
     }
 
     pub async fn commit(&self) {

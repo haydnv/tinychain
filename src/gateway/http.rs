@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
-use std::convert::Infallible;
+use std::collections::HashMap;
+use std::convert::{Infallible, TryInto};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,7 +17,7 @@ use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::transaction::Txn;
 use crate::value::link::*;
-use crate::value::{Value, ValueId};
+use crate::value::{TCString, Value, ValueId};
 
 use super::Gateway;
 
@@ -177,28 +177,36 @@ impl Server {
                 let values: Vec<(ValueId, Value)> =
                     deserialize_body(request.body_mut(), self.request_limit).await?;
 
-                let capture: Option<Vec<String>> = get_param(&mut params, "capture")?;
-                let capture = if let Some(value_ids) = capture {
-                    value_ids
-                        .into_iter()
-                        .map(|id| id.parse())
-                        .collect::<TCResult<HashSet<ValueId>>>()?
-                } else {
-                    HashSet::new()
-                };
+                let capture: Option<Value> = get_param(&mut params, "capture")?;
+                let capture_ids: Vec<ValueId> =
+                    if let Some(Value::TCString(TCString::Id(id))) = &capture {
+                        vec![id.clone()]
+                    } else if let Some(capture) = &capture {
+                        capture.clone().try_into()?
+                    } else {
+                        vec![]
+                    };
 
-                let response = gateway
+                let mut response = gateway
                     .clone()
                     .post(
                         &path.clone().into(),
                         stream::iter(values.into_iter()),
-                        capture,
+                        &capture_ids,
                         &token,
                         None,
                     )
                     .await?;
 
-                response_map(response)
+                if capture.is_none() {
+                    Ok(Box::pin(stream::empty()))
+                } else if let Some(Value::TCString(TCString::Id(_))) = capture {
+                    assert!(response.len() == 1);
+                    Ok(response_value_stream(response.pop().unwrap()))
+                } else {
+                    assert!(response.len() == capture_ids.len());
+                    response_list(response)
+                }
             }
             other => Err(error::method_not_allowed(format!(
                 "Tinychain does not support {}",
@@ -228,10 +236,11 @@ async fn deserialize_body<D: DeserializeOwned>(
         .map_err(|e| error::bad_request(&format!("Deserialization error {} when parsing", e), data))
 }
 
-fn response_list<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
+fn response_value_stream<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
     s: S,
 ) -> TCStream<TCResult<Bytes>> {
-    let start = stream_delimiter(Bytes::copy_from_slice(b"["));
+    let start = stream_delimiter(b"[");
+    let end = stream_delimiter(b"]");
 
     let items = s
         .map(|v| serde_json::to_string_pretty(&v))
@@ -239,41 +248,31 @@ fn response_list<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
         .map_err(error::TCError::from);
     let items: TCStream<TCResult<Bytes>> = Box::pin(items);
 
-    let end = stream_delimiter(Bytes::copy_from_slice(b"]"));
-
     Box::pin(start.chain(items).chain(end))
 }
 
-fn response_map<
-    V: Stream<Item = Value> + Send + Sync + Unpin + 'static,
-    S: Stream<Item = (ValueId, V)> + Send + Sync + Unpin + 'static,
->(
-    s: S,
+fn response_list<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
+    data: Vec<S>,
 ) -> TCResult<TCStream<TCResult<Bytes>>> {
-    let start = stream_delimiter(Bytes::copy_from_slice(b"{"));
+    let start = stream_delimiter(b"[");
+    let end = stream_delimiter(b"]");
 
-    let meta = stream_delimiter(Bytes::copy_from_slice(
-        format!("\"{}\": {{}}", META).as_bytes(), // TODO: include execution metadata
-    ));
-
-    let items = s
-        .map(|(name, values)| {
-            let start = Bytes::copy_from_slice(format!("\"{}\": ", name).as_bytes());
-            let start = stream_delimiter(start);
-            let values = response_list(values);
-            let end = stream_delimiter(Bytes::copy_from_slice(b", "));
-
-            Box::pin(start.chain(values).chain(end))
+    let len = data.len();
+    let items = stream::iter(data.into_iter().enumerate())
+        .map(move |(i, items)| {
+            if i == len - 1 {
+                response_value_stream(items)
+            } else {
+                Box::pin(response_value_stream(items).chain(stream_delimiter(b", ")))
+            }
         })
         .flatten();
-    let items: TCStream<TCResult<Bytes>> = Box::pin(items.chain(meta));
-
-    let end = stream_delimiter(Bytes::copy_from_slice(b"}"));
 
     Ok(Box::pin(start.chain(items).chain(end)))
 }
 
-fn stream_delimiter(token: Bytes) -> TCStream<TCResult<Bytes>> {
+fn stream_delimiter(token: &[u8]) -> TCStream<TCResult<Bytes>> {
+    let token = Bytes::copy_from_slice(token);
     Box::pin(stream::once(future::ready(Ok(token))))
 }
 

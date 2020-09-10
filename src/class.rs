@@ -10,7 +10,7 @@ use crate::collection::{Collection, CollectionType};
 use crate::error;
 use crate::value::link::{Link, TCPath};
 use crate::value::number::NumberType;
-use crate::value::{label, Value, ValueId, ValueType};
+use crate::value::{label, Value, ValueType};
 
 const ERR_EMPTY_CLASSPATH: &str = "Expected a class path, \
 e.g. /sbin/value/number/int/64 or /sbin/collection/table, but found: ";
@@ -19,7 +19,6 @@ pub const ERR_PROTECTED: &str =
     "You have accessed a protected class. This should not be possible. \
 Please file a bug report.";
 
-pub type ResponseStream = TCStream<(ValueId, TCStream<Value>)>;
 pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send + Sync>>;
 pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
 pub type TCResult<T> = Result<T, error::TCError>;

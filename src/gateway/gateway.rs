@@ -7,7 +7,7 @@ use futures::stream::Stream;
 
 use crate::auth::{Auth, Token};
 use crate::block::Dir;
-use crate::class::{ResponseStream, State, TCResult};
+use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::kernel;
 use crate::transaction::{Txn, TxnId};
@@ -136,10 +136,10 @@ impl Gateway {
         self: Arc<Self>,
         subject: &Link,
         data: S,
-        capture: HashSet<ValueId>,
+        capture: &[ValueId],
         auth: &Auth,
         txn_id: Option<TxnId>,
-    ) -> TCResult<ResponseStream> {
+    ) -> TCResult<Vec<TCStream<Value>>> {
         println!("Gateway::post {}", subject);
 
         if subject.host().is_none() {
