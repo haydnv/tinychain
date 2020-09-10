@@ -20,7 +20,7 @@ use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
 use crate::value::link::PathSegment;
-use crate::value::op::{Op, OpRef, Subject};
+use crate::value::op::{Op, OpDef, OpRef, Subject};
 use crate::value::{Number, TCPath, TCString, Value, ValueId};
 
 use super::Transact;
@@ -291,6 +291,7 @@ impl Txn {
         println!("Txn::resolve {}", provider);
 
         match provider {
+            Op::Def(_) => Err(error::not_implemented("Txn::resolve OpDef")),
             Op::If((cond, then, or_else)) => {
                 let cond = provided
                     .get(cond.value_id())
@@ -403,6 +404,9 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
     let mut deps = HashSet::new();
 
     match op {
+        Op::Def(OpDef::Get((tc_ref, _, _))) => {
+            deps.insert(tc_ref.clone().into());
+        }
         Op::If((cond, then, or_else)) => {
             let cond_state = txn_state
                 .get(cond.value_id())

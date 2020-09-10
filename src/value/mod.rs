@@ -625,6 +625,7 @@ impl Serialize for Value {
             Value::Op(op) => {
                 let mut map = s.serialize_map(Some(1))?;
                 match &**op {
+                    Op::Def(_) => unimplemented!(),
                     Op::If((cond, then, or_else)) => map.serialize_entry(
                         Link::from(OpType::If).path(),
                         &[&Value::from(cond.clone()), then, or_else],

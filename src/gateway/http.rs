@@ -21,7 +21,6 @@ use crate::value::{TCString, Value, ValueId};
 
 use super::Gateway;
 
-const META: &str = "_meta";
 const TIMEOUT: Duration = Duration::from_secs(30);
 const ERR_DECODE: &str = "(unable to decode error message)";
 
