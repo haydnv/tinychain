@@ -293,6 +293,35 @@ impl BlockListFile {
         })
     }
 
+    pub async fn from_values<S: Stream<Item = Number> + Send + Sync + Unpin>(
+        txn: Arc<Txn>,
+        shape: Shape,
+        dtype: NumberType,
+        values: S,
+    ) -> TCResult<BlockListFile> {
+        let file = txn.context().await?;
+
+        let mut i = 0u64;
+        let mut values = values.chunks(PER_BLOCK);
+        while let Some(chunk) = values.next().await {
+            let block_id = BlockId::from(i);
+            let block = Array::try_from_values(chunk, dtype)?;
+            file.create_block(txn.id().clone(), block_id, block).await?;
+            i += 1;
+        }
+
+        let coord_bounds = (0..shape.len())
+            .map(|axis| shape[axis + 1..].iter().product())
+            .collect();
+
+        Ok(BlockListFile {
+            dtype,
+            shape,
+            file,
+            coord_bounds,
+        })
+    }
+
     async fn merge_sort(&self, txn_id: &TxnId) -> TCResult<()> {
         let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
         if num_blocks == 1 {

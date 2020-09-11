@@ -10,6 +10,7 @@ use crate::class::{Class, Instance, TCResult, TCType};
 use crate::error;
 
 pub mod class;
+pub mod json;
 pub mod link;
 pub mod number;
 pub mod op;
@@ -144,6 +145,12 @@ impl From<ValueId> for Value {
     fn from(v: ValueId) -> Value {
         let s: TCString = v.into();
         s.into()
+    }
+}
+
+impl<T1: Into<Value>, T2: Into<Value>> From<(T1, T2)> for Value {
+    fn from(tuple: (T1, T2)) -> Value {
+        Value::Tuple(vec![tuple.0.into(), tuple.1.into()])
     }
 }
 

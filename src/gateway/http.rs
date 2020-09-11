@@ -16,6 +16,7 @@ use crate::auth::{Auth, Token};
 use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::transaction::Txn;
+use crate::value::json::JsonListStream;
 use crate::value::link::*;
 use crate::value::op::Capture;
 use crate::value::{Value, ValueId};
@@ -230,16 +231,8 @@ async fn deserialize_body<D: DeserializeOwned>(
 fn response_value_stream<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
     s: S,
 ) -> TCStream<TCResult<Bytes>> {
-    let start = stream_delimiter(b"[");
-    let end = stream_delimiter(b"]");
-
-    let items = s
-        .map(|v| serde_json::to_string_pretty(&v))
-        .map_ok(Bytes::from)
-        .map_err(error::TCError::from);
-    let items: TCStream<TCResult<Bytes>> = Box::pin(items);
-
-    Box::pin(start.chain(items).chain(end))
+    let json = JsonListStream::from(s);
+    Box::pin(json.map_ok(Bytes::from))
 }
 
 fn response_list<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(

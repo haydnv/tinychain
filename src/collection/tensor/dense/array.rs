@@ -66,9 +66,11 @@ impl<T: af::HasAfEnum> ArrayInstance for ArrayExt<T> {
     }
 }
 
-impl<T: af::HasAfEnum> From<ArrayExt<T>> for Vec<T> {
+impl<T: af::HasAfEnum + Clone + Default> From<ArrayExt<T>> for Vec<T> {
     fn from(array: ArrayExt<T>) -> Vec<T> {
-        let mut v: Vec<T> = Vec::with_capacity(array.0.elements());
+        let len = array.0.elements();
+        let mut v: Vec<T> = Vec::with_capacity(len);
+        v.resize(len, T::default());
         array.0.host(&mut v);
         v
     }

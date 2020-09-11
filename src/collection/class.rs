@@ -170,6 +170,8 @@ impl CollectionClass for CollectionBaseType {
     type Instance = CollectionBase;
 
     async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<CollectionBase> {
+        println!("CollectionBaseType::get {}", path);
+
         let suffix = path.from_path(&Self::prefix())?;
 
         if suffix.is_empty() {

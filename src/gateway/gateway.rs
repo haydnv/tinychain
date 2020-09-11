@@ -95,6 +95,8 @@ impl Gateway {
         auth: Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<State> {
+        println!("Gateway::get {}", subject);
+
         if subject.host().is_some() {
             Err(error::not_implemented("Gateway::get over the network"))
         } else if subject.path().len() > 1 {

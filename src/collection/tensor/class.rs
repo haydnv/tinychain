@@ -3,6 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::stream::{self, StreamExt};
 use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, TCResult, TCStream};
@@ -64,18 +65,36 @@ impl CollectionClass for TensorBaseType {
     type Instance = TensorBase;
 
     async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<TensorBase> {
-        if path.is_empty() {
+        println!("TensorBaseType::get {}", path);
+        let suffix = path.from_path(&Self::prefix())?;
+
+        if suffix.is_empty() {
             return Err(error::unsupported(ERR_SPECIFY_TYPE));
         }
 
-        match path[0].as_str() {
-            "dense" if path.len() == 1 => {
-                let (dtype, shape): (NumberType, Shape) = schema.try_into()?;
-                let block_list = BlockListFile::constant(txn, shape, dtype.zero()).await?;
-                Ok(TensorBase::Dense(block_list))
+        match suffix[0].as_str() {
+            "dense" if suffix.len() == 1 => {
+                if let Ok(schema) = schema.clone().try_into() {
+                    let (dtype, shape): (NumberType, Shape) = schema;
+                    let block_list = BlockListFile::constant(txn, shape, dtype.zero()).await?;
+                    Ok(TensorBase::Dense(block_list))
+                } else if let Ok(data) = schema.clone().try_into() {
+                    let mut data: Vec<Number> = data;
+                    let shape = vec![data.len() as u64].into();
+                    let dtype = data
+                        .iter()
+                        .map(|n| n.class())
+                        .fold(NumberType::Bool, Ord::max);
+                    let block_list =
+                        BlockListFile::from_values(txn, shape, dtype, stream::iter(data.drain(..)))
+                            .await?;
+                    Ok(TensorBase::Dense(block_list))
+                } else {
+                    Err(error::bad_request("DenseTensor can be constructed with (NumberType, Shape) or (Number, ...), not", schema))
+                }
             }
-            "sparse" if path.len() == 1 => todo!(),
-            other => Err(error::not_found(other)),
+            "sparse" if suffix.len() == 1 => todo!(),
+            _ => Err(error::not_found(suffix)),
         }
     }
 }
@@ -313,8 +332,20 @@ impl CollectionInstance for TensorView {
         }
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
-        Err(error::not_implemented("TensorView::to_stream"))
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        match self {
+            // TODO: Forward errors, don't panic!
+            Self::Dense(dense) => {
+                let result_stream = dense.value_stream(txn).await?;
+                let values: TCStream<Value> = Box::pin(result_stream.map(|r| r.unwrap().into()));
+                Ok(values)
+            }
+            Self::Sparse(sparse) => {
+                let result_stream = sparse.filled(txn).await?;
+                let values: TCStream<Value> = Box::pin(result_stream.map(|r| r.unwrap().into()));
+                Ok(values)
+            }
+        }
     }
 }
 
