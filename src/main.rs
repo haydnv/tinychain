@@ -104,12 +104,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 async fn configure(
     clusters: Vec<value::link::TCPath>,
-    _data_dir: Arc<block::Dir>,
-    _workspace: Arc<block::Dir>,
+    data_dir: Arc<block::Dir>,
+    workspace: Arc<block::Dir>,
 ) -> class::TCResult<gateway::Hosted> {
     let mut hosted = gateway::Hosted::new();
     for path in clusters {
-        let cluster = cluster::Cluster::create(path.clone())?;
+        let cluster = cluster::Cluster::create(path.clone(), data_dir.clone(), workspace.clone())?;
         hosted.push(path, cluster);
     }
 

@@ -47,7 +47,7 @@ impl Client {
         &self,
         link: Link,
         key: &Value,
-        auth: &Auth,
+        auth: Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<Value> {
         if auth.is_some() {
@@ -156,7 +156,7 @@ impl Server {
             &Method::GET => {
                 let id = get_param(&mut params, "key")?
                     .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
-                let state = gateway.get(&path.clone().into(), id, &token, None).await?;
+                let state = gateway.get(&path.clone().into(), id, token, None).await?;
 
                 match state {
                     State::Value(value) => {

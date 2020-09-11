@@ -5,11 +5,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::auth::Auth;
-use crate::chain::Chain;
-use crate::class::TCResult;
+use crate::block::Dir;
+use crate::chain::{Chain, ChainInstance};
+use crate::class::{State, TCResult};
+use crate::error;
+use crate::gateway::Gateway;
 use crate::transaction::lock::{Mutable, TxnLock};
-use crate::transaction::{Transact, TxnId};
+use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{LinkHost, PathSegment, TCPath};
+use crate::value::Value;
 
 enum ClusterReplica {
     Director(HashSet<LinkHost>), // set of all hosts replicating this cluster
@@ -30,18 +34,51 @@ struct ClusterState {
 #[derive(Clone)]
 pub struct Cluster {
     path: TCPath,
+    data_dir: Arc<Dir>,
+    workspace: Arc<Dir>,
     state: Arc<ClusterState>,
 }
 
 impl Cluster {
-    pub fn create(path: TCPath) -> TCResult<Cluster> {
+    pub fn create(path: TCPath, data_dir: Arc<Dir>, workspace: Arc<Dir>) -> TCResult<Cluster> {
         let replica = ClusterReplica::default();
         let state = Arc::new(ClusterState {
             replica,
             data: TxnLock::new(format!("Cluster {} data", &path), HashMap::new().into()),
         });
 
-        Ok(Cluster { path, state })
+        Ok(Cluster {
+            path,
+            data_dir,
+            workspace,
+            state,
+        })
+    }
+
+    pub async fn get(
+        &self,
+        gateway: Arc<Gateway>,
+        txn: Option<Arc<Txn>>,
+        path: TCPath,
+        key: Value,
+        auth: Auth,
+    ) -> TCResult<State> {
+        if path.is_empty() {
+            Ok(self.clone().into())
+        } else {
+            let txn = if let Some(txn) = txn {
+                txn
+            } else {
+                Txn::new(gateway.clone(), self.workspace.clone()).await?
+            };
+
+            let data = self.state.data.read(txn.id()).await?;
+            if let Some(chain) = data.get(&path[0]) {
+                chain.get(txn, &path.slice_from(1), key, auth).await
+            } else {
+                Err(error::not_found(path))
+            }
+        }
     }
 
     pub async fn put(

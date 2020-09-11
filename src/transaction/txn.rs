@@ -321,7 +321,8 @@ impl Txn {
                 Subject::Link(link) => {
                     let object = resolve_value(&provided, &object)?.clone();
                     self.gateway
-                        .get(&link, object, &auth, Some(self.clone()))
+                        .clone()
+                        .get(&link, object, auth, Some(self.clone()))
                         .await
                 }
                 Subject::Ref(tc_ref) => {

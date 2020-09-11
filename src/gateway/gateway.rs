@@ -89,34 +89,36 @@ impl Gateway {
     }
 
     pub async fn get(
-        &self,
+        self: Arc<Self>,
         subject: &Link,
         key: Value,
-        auth: &Auth,
+        auth: Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<State> {
         if subject.host().is_some() {
             Err(error::not_implemented("Gateway::get over the network"))
         } else if subject.path().len() > 1 {
             let path = subject.path();
-            match path[0].as_str() {
-                "sbin" => kernel::get(path, key, txn).await,
-                "ext" => {
-                    for adapter in &self.adapters {
-                        if path.starts_with(adapter.path()) {
-                            let host = adapter.host().as_ref().unwrap();
-                            let dest: Link = (host.clone(), path.clone()).into();
-                            return self
-                                .client
-                                .get(dest, &key, auth, txn)
-                                .map_ok(State::Value)
-                                .await;
-                        }
+            if path[0] == "sbin" {
+                kernel::get(path, key, txn).await
+            } else if path[0] == "ext" {
+                for adapter in &self.adapters {
+                    if path.starts_with(adapter.path()) {
+                        let host = adapter.host().as_ref().unwrap();
+                        let dest: Link = (host.clone(), path.clone()).into();
+                        return self
+                            .client
+                            .get(dest, &key, auth, txn)
+                            .map_ok(State::Value)
+                            .await;
                     }
-
-                    Err(error::not_found(subject))
                 }
-                _ => Err(error::not_implemented("Gateway::get over the network")),
+
+                Err(error::not_found(subject))
+            } else if let Some((suffix, cluster)) = self.hosted.get(path) {
+                cluster.get(self.clone(), txn, suffix, key, auth).await
+            } else {
+                Err(error::not_found(path))
             }
         } else {
             Err(error::not_found(subject))
