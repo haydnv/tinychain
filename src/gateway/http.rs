@@ -17,7 +17,8 @@ use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::transaction::Txn;
 use crate::value::link::*;
-use crate::value::{TCString, Value, ValueId};
+use crate::value::op::Capture;
+use crate::value::{Value, ValueId};
 
 use super::Gateway;
 
@@ -177,33 +178,24 @@ impl Server {
                     deserialize_body(request.body_mut(), self.request_limit).await?;
 
                 let capture: Option<Value> = get_param(&mut params, "capture")?;
-                let capture_ids: Vec<ValueId> =
-                    if let Some(Value::TCString(TCString::Id(id))) = &capture {
-                        vec![id.clone()]
-                    } else if let Some(capture) = &capture {
-                        capture.clone().try_into()?
-                    } else {
-                        vec![]
-                    };
+                let capture = capture.try_into()?;
 
                 let mut response = gateway
                     .clone()
                     .post(
                         &path.clone().into(),
                         stream::iter(values.into_iter()),
-                        &capture_ids,
-                        &token,
+                        &capture,
+                        token,
                         None,
                     )
                     .await?;
 
-                if capture.is_none() {
-                    Ok(Box::pin(stream::empty()))
-                } else if let Some(Value::TCString(TCString::Id(_))) = capture {
+                if let Capture::Id(_) = capture {
                     assert!(response.len() == 1);
                     Ok(response_value_stream(response.pop().unwrap()))
                 } else {
-                    assert!(response.len() == capture_ids.len());
+                    assert!(response.len() == capture.len());
                     response_list(response)
                 }
             }

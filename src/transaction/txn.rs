@@ -20,7 +20,7 @@ use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
 use crate::value::link::PathSegment;
-use crate::value::op::{Op, OpDef, OpRef, Subject};
+use crate::value::op::{Capture, Op, OpDef, OpRef, Subject};
 use crate::value::{Number, TCPath, TCString, Value, ValueId};
 
 use super::Transact;
@@ -144,8 +144,8 @@ impl Txn {
     pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
         mut parameters: S,
-        capture: &[ValueId],
-        auth: &Auth,
+        capture: &Capture,
+        auth: Auth,
     ) -> TCResult<HashMap<ValueId, State>> {
         // TODO: use a Graph here and queue every op absolutely as soon as it's ready
 
@@ -160,7 +160,7 @@ impl Txn {
             graph.insert(name, State::Value(value));
         }
 
-        for name in capture {
+        for name in &capture.to_vec() {
             if !graph.contains_key(&name) {
                 return Err(error::not_found(&name));
             }
@@ -173,6 +173,7 @@ impl Txn {
             let mut unvisited = Vec::with_capacity(graph.len());
 
             let start = capture
+                .to_vec()
                 .iter()
                 .filter_map(|name| graph.get_key_value(name))
                 .filter_map(|(name, state)| match state {
@@ -235,12 +236,12 @@ impl Txn {
     pub async fn execute_and_stream<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
         parameters: S,
-        capture: &[ValueId],
-        auth: &Auth,
+        capture: &Capture,
+        auth: Auth,
     ) -> TCResult<Vec<TCStream<Value>>> {
         let mut txn_state = self.clone().execute(parameters, &capture, auth).await?;
         let mut streams = Vec::with_capacity(capture.len());
-        for value_id in capture {
+        for value_id in &capture.to_vec() {
             let this = self.clone();
             let state = txn_state
                 .remove(value_id)

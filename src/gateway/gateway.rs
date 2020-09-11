@@ -12,6 +12,7 @@ use crate::error;
 use crate::kernel;
 use crate::transaction::{Txn, TxnId};
 use crate::value::link::{Link, LinkHost};
+use crate::value::op::Capture;
 use crate::value::{Value, ValueId};
 
 use super::http;
@@ -136,8 +137,8 @@ impl Gateway {
         self: Arc<Self>,
         subject: &Link,
         data: S,
-        capture: &[ValueId],
-        auth: &Auth,
+        capture: &Capture,
+        auth: Auth,
         txn_id: Option<TxnId>,
     ) -> TCResult<Vec<TCStream<Value>>> {
         println!("Gateway::post {}", subject);

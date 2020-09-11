@@ -147,6 +147,29 @@ pub enum Capture {
     Ids(Vec<ValueId>),
 }
 
+impl Capture {
+    pub fn contains(&self, other: &ValueId) -> bool {
+        match self {
+            Self::Id(this) => this == other,
+            Self::Ids(these) => these.contains(other),
+        }
+    }
+
+    pub fn to_vec(&self) -> Vec<ValueId> {
+        match self {
+            Capture::Id(id) => vec![id.clone()],
+            Capture::Ids(ids) => ids.to_vec(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Id(_) => 1,
+            Self::Ids(ids) => ids.len(),
+        }
+    }
+}
+
 impl TryFrom<Value> for Capture {
     type Error = error::TCError;
 
@@ -155,6 +178,17 @@ impl TryFrom<Value> for Capture {
             Ok(Capture::Id(id))
         } else {
             v.try_into().map(Capture::Ids)
+        }
+    }
+}
+
+impl TryFrom<Option<Value>> for Capture {
+    type Error = error::TCError;
+
+    fn try_from(v: Option<Value>) -> TCResult<Capture> {
+        match v {
+            Some(value) => value.try_into(),
+            None => Ok(Capture::Ids(vec![])),
         }
     }
 }
@@ -185,7 +219,7 @@ impl fmt::Display for Capture {
 }
 
 pub type Cond = (TCRef, Value, Value);
-pub type GetOp = (TCRef, Vec<(ValueId, Value)>, Capture);
+pub type GetOp = (TCRef, Vec<(ValueId, Value)>, TCRef);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDef {
