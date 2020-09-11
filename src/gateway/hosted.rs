@@ -28,15 +28,14 @@ impl Hosted {
         let mut node = &self.root;
         let mut found_path = TCPath::default();
         for segment in path.clone() {
+            println!("checking for segment {}", segment);
+
             if let Some(child) = node.children.get(&segment) {
                 found_path.push(segment);
                 node = child;
-                println!("found {}", found_path);
-            } else if found_path != TCPath::default() {
-                return Some((
-                    path.from_path(&found_path).unwrap(),
-                    self.hosted.get(&found_path).unwrap().clone(),
-                ));
+                println!("found segment: {}", found_path);
+            } else if let Some(cluster) = self.hosted.get(&found_path) {
+                return Some((path.from_path(&found_path).unwrap(), cluster.clone()));
             } else {
                 println!("couldn't find {}", segment);
                 return None;

@@ -86,7 +86,7 @@ pub struct Txn {
     dir: Arc<Dir>,
     context: ValueId,
     gateway: Arc<Gateway>,
-    mutated: RwLock<Vec<Collection>>,
+    mutated: RwLock<Vec<Box<dyn Transact>>>,
 }
 
 impl Txn {
@@ -253,7 +253,9 @@ impl Txn {
                 match state {
                     State::Chain(chain) => chain.to_stream(this).await,
                     State::Cluster(_cluster) => {
-                        Err(error::not_implemented("Cluster::to_stream from Txn"))
+                        // TODO
+                        let stream: TCStream<Value> = Box::pin(stream::empty());
+                        TCResult::Ok(stream)
                     }
                     State::Collection(collection) => {
                         let stream: TCStream<Value> = collection.to_stream(this).await?;
@@ -351,9 +353,12 @@ impl Txn {
 
                 match subject {
                     Subject::Link(link) => {
-                        self.gateway
+                        let state = self
+                            .gateway
                             .put(&link, object, value, &auth, Some(self.clone()))
-                            .await
+                            .await?;
+                        self.mutate(state.clone()).await;
+                        Ok(state)
                     }
                     Subject::Ref(tc_ref) => {
                         let subject = provided
@@ -361,8 +366,6 @@ impl Txn {
                             .ok_or_else(|| error::not_found(tc_ref))?;
 
                         if let State::Collection(collection) = subject {
-                            self.mutate(collection.clone()).await;
-
                             let value = match value {
                                 State::Value(value) => CollectionItem::Value(value),
                                 State::Collection(Collection::View(slice)) => {
@@ -377,7 +380,8 @@ impl Txn {
                             };
 
                             collection.put_item(self.clone(), object, value).await?;
-                            Ok(State::Value(Value::None))
+                            self.mutate(collection.clone().into()).await;
+                            Ok(State::Collection(collection.clone()))
                         } else {
                             Err(error::bad_request("Value does not support GET", subject))
                         }
@@ -387,7 +391,14 @@ impl Txn {
         }
     }
 
-    async fn mutate(self: &Arc<Self>, state: Collection) {
+    async fn mutate(self: &Arc<Self>, state: State) {
+        let state: Box<dyn Transact> = match state {
+            State::Chain(chain) => Box::new(chain),
+            State::Cluster(cluster) => Box::new(cluster),
+            State::Collection(collection) => Box::new(collection),
+            State::Value(_) => panic!("Value does not support transaction-specific mutations!"),
+        };
+
         self.mutated.write().await.push(state)
     }
 }

@@ -174,6 +174,24 @@ impl Instance for State {
     }
 }
 
+impl From<Chain> for State {
+    fn from(c: Chain) -> State {
+        Self::Chain(c)
+    }
+}
+
+impl From<Cluster> for State {
+    fn from(c: Cluster) -> State {
+        Self::Cluster(c)
+    }
+}
+
+impl From<Collection> for State {
+    fn from(c: Collection) -> State {
+        Self::Collection(c)
+    }
+}
+
 impl From<Value> for State {
     fn from(v: Value) -> State {
         Self::Value(v)

@@ -129,9 +129,9 @@ impl Gateway {
         selector: Value,
         state: State,
         auth: &Auth,
-        _txn: Option<Arc<Txn>>,
+        txn: Option<Arc<Txn>>,
     ) -> TCResult<State> {
-        if let Some(_) = subject.host() {
+        if subject.host().is_some() {
             Err(error::not_implemented("Gateway::put over the network"))
         } else {
             let path = subject.path();
@@ -140,10 +140,19 @@ impl Gateway {
             }
 
             if let Some((suffix, cluster)) = self.hosted.get(path) {
+                let txn =
+                    txn.ok_or_else(|| error::unsupported("Cluster::put requires a Transaction"))?;
+
                 if suffix.is_empty() {
                     cluster
-                        .put(selector.try_into()?, state.try_into()?, auth)
-                        .map(State::Cluster)
+                        .put(
+                            txn.id().clone(),
+                            selector.try_into()?,
+                            state.try_into()?,
+                            auth,
+                        )
+                        .map_ok(State::Cluster)
+                        .await
                 } else {
                     Err(error::not_found(suffix))
                 }

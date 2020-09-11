@@ -2,10 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+
 use crate::auth::Auth;
 use crate::chain::Chain;
 use crate::class::TCResult;
-use crate::error;
+use crate::transaction::lock::{Mutable, TxnLock};
+use crate::transaction::{Transact, TxnId};
 use crate::value::link::{LinkHost, PathSegment, TCPath};
 
 enum ClusterReplica {
@@ -21,7 +24,7 @@ impl Default for ClusterReplica {
 
 struct ClusterState {
     replica: ClusterReplica,
-    data: HashMap<PathSegment, Chain>,
+    data: TxnLock<Mutable<HashMap<PathSegment, Chain>>>,
 }
 
 #[derive(Clone)]
@@ -35,13 +38,33 @@ impl Cluster {
         let replica = ClusterReplica::default();
         let state = Arc::new(ClusterState {
             replica,
-            data: HashMap::new(),
+            data: TxnLock::new(format!("Cluster {} data", &path), HashMap::new().into()),
         });
+
         Ok(Cluster { path, state })
     }
 
-    pub fn put(self, _name: PathSegment, _chain: Chain, _auth: &Auth) -> TCResult<Self> {
-        Err(error::not_implemented("Cluster::put"))
+    pub async fn put(
+        self,
+        txn_id: TxnId,
+        name: PathSegment,
+        chain: Chain,
+        _auth: &Auth,
+    ) -> TCResult<Self> {
+        let mut data = self.state.data.write(txn_id).await?;
+        data.insert(name, chain);
+        Ok(self)
+    }
+}
+
+#[async_trait]
+impl Transact for Cluster {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.state.data.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.state.data.rollback(txn_id).await
     }
 }
 
