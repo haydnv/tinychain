@@ -15,6 +15,7 @@ pub struct JsonListStream<S: Stream<Item = Value>> {
     #[pin]
     source: Fuse<S>,
 
+    started: bool,
     next: Option<TCResult<String>>,
 }
 
@@ -27,12 +28,16 @@ impl<S: Stream<Item = Value>> Stream for JsonListStream<S> {
         match this.source.poll_next(cxt) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Some(value)) if this.next.is_none() => {
+                *this.started = true;
+
                 let mut json =
                     Some(serde_json::to_string_pretty(&value).map_err(error::TCError::from));
                 mem::swap(this.next, &mut json);
                 Poll::Ready(Some(Ok("[".to_string())))
             }
             Poll::Ready(Some(value)) => {
+                *this.started = true;
+
                 let mut json =
                     Some(serde_json::to_string_pretty(&value).map_err(error::TCError::from));
                 mem::swap(this.next, &mut json);
@@ -53,6 +58,10 @@ impl<S: Stream<Item = Value>> Stream for JsonListStream<S> {
                     Poll::Ready(json)
                 }
             }
+            Poll::Ready(None) if !*this.started => {
+                *this.started = true;
+                Poll::Ready(Some(Ok("[]".to_string())))
+            }
             Poll::Ready(None) => Poll::Ready(None),
         }
     }
@@ -62,6 +71,7 @@ impl<S: Stream<Item = Value>> From<S> for JsonListStream<S> {
     fn from(s: S) -> JsonListStream<S> {
         JsonListStream {
             source: s.fuse(),
+            started: false,
             next: None,
         }
     }
