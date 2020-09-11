@@ -6,7 +6,7 @@ use futures::stream;
 use futures::TryFutureExt;
 
 use crate::auth::Auth;
-use crate::class::{Instance, State, TCResult};
+use crate::class::{Instance, State, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{CollectionBase, CollectionBaseType};
 use crate::error;
@@ -25,11 +25,11 @@ pub struct NullChain {
 impl NullChain {
     pub async fn create(
         txn: Arc<Txn>,
-        ctype: &TCPath,
+        ctype: TCPath,
         schema: Value,
         get_ops: HashMap<ValueId, GetOp>,
     ) -> TCResult<NullChain> {
-        let collection = CollectionBaseType::get(txn, ctype, schema).await?;
+        let collection = CollectionBaseType::get(txn, &ctype, schema).await?;
         Ok(NullChain {
             collection,
             get_ops,
@@ -47,6 +47,8 @@ impl Instance for NullChain {
 
 #[async_trait]
 impl ChainInstance for NullChain {
+    type Class = ChainType;
+
     async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
         if path.is_empty() {
             self.object().get_item(txn, key).map_ok(State::from).await
@@ -71,6 +73,10 @@ impl ChainInstance for NullChain {
 
     fn object(&'_ self) -> &'_ CollectionBase {
         &self.collection
+    }
+
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        Ok(Box::pin(stream::empty()))
     }
 }
 

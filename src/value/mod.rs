@@ -297,6 +297,17 @@ impl TryFrom<Value> for TCPath {
     }
 }
 
+impl TryFrom<Value> for TCRef {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<TCRef> {
+        match v {
+            Value::TCString(s) => s.try_into(),
+            other => Err(error::bad_request("Expected Ref but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Value> for TCString {
     type Error = error::TCError;
 
@@ -403,7 +414,7 @@ impl<
                     len
                 )))
             }
-            other => Err(error::bad_request("Expected a 2-Tuple but found {}", other)),
+            other => Err(error::bad_request("Expected a 2-Tuple but found", other)),
         }
     }
 }
@@ -540,6 +551,9 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                         Value::Tuple(value)
                     ))),
                 }
+            } else if key == "/sbin/value/none" {
+                 // TODO: figure out a better way to handle null values
+                Ok(Value::None)
             } else if let Ok(link) = key.parse::<link::Link>() {
                 if value.is_empty() {
                     Ok(Value::TCString(TCString::Link(link)))
@@ -568,6 +582,13 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         } else {
             Err(de::Error::custom("Unable to parse map entry"))
         }
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(Value::None)
     }
 
     fn visit_seq<L>(self, mut access: L) -> Result<Self::Value, L::Error>

@@ -1,19 +1,35 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::TryFutureExt;
 
 use crate::auth::Auth;
-use crate::class::{Class, Instance, State, TCResult};
-use crate::collection::{CollectionBase, CollectionType};
+use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
+use crate::collection::CollectionBase;
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{label, Link, TCPath, Value};
+use crate::value::op::GetOp;
+use crate::value::{label, Link, TCPath, Value, ValueId};
 
 mod block;
 mod null;
 
 pub type ChainBlock = block::ChainBlock;
+
+#[async_trait]
+pub trait ChainClass: Class + Into<ChainType> + Send + Sync {
+    type Instance: ChainInstance;
+
+    async fn get(
+        txn: Arc<Txn>,
+        path: &TCPath,
+        ctype: TCPath,
+        schema: Value,
+        ops: HashMap<ValueId, GetOp>,
+    ) -> TCResult<<Self as ChainClass>::Instance>;
+}
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum ChainType {
@@ -37,7 +53,7 @@ impl Class for ChainType {
     }
 
     fn prefix() -> TCPath {
-        CollectionType::prefix().join(label("chain").into())
+        TCType::prefix().join(label("chain").into())
     }
 }
 
@@ -58,13 +74,40 @@ impl fmt::Display for ChainType {
 }
 
 #[async_trait]
-pub trait ChainInstance: Instance
-where
-    <Self as Instance>::Class: Into<ChainType>,
-{
+impl ChainClass for ChainType {
+    type Instance = Chain;
+
+    async fn get(
+        txn: Arc<Txn>,
+        path: &TCPath,
+        ctype: TCPath,
+        schema: Value,
+        ops: HashMap<ValueId, GetOp>,
+    ) -> TCResult<Chain> {
+        let suffix = path.from_path(&Self::prefix())?;
+
+        if suffix.is_empty() {
+            Err(error::unsupported("You must specify a type of Chain"))
+        } else if suffix.len() > 1 {
+            Err(error::not_found(suffix))
+        } else {
+            match suffix[0].as_str() {
+                "null" => null::NullChain::create(txn, ctype, schema, ops).map_ok(Box::new).map_ok(Chain::Null).await,
+                other => Err(error::not_found(other))
+            }
+        }
+    }
+}
+
+#[async_trait]
+pub trait ChainInstance: Instance {
+    type Class: ChainClass;
+
     async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State>;
 
     fn object(&'_ self) -> &'_ CollectionBase;
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
 }
 
 #[derive(Clone)]
@@ -75,7 +118,7 @@ pub enum Chain {
 impl Instance for Chain {
     type Class = ChainType;
 
-    fn class(&self) -> Self::Class {
+    fn class(&self) -> <Self as Instance>::Class {
         match self {
             Self::Null(nc) => nc.class(),
         }
@@ -84,6 +127,8 @@ impl Instance for Chain {
 
 #[async_trait]
 impl ChainInstance for Chain {
+    type Class = ChainType;
+
     async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
         match self {
             Self::Null(nc) => nc.get(txn, path, key, auth).await,
@@ -93,6 +138,12 @@ impl ChainInstance for Chain {
     fn object(&self) -> &CollectionBase {
         match self {
             Self::Null(nc) => nc.object(),
+        }
+    }
+
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        match self {
+            Self::Null(nc) => nc.to_stream(txn).await,
         }
     }
 }

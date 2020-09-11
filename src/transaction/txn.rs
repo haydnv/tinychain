@@ -249,7 +249,7 @@ impl Txn {
 
             streams.push(async move {
                 match state {
-                    State::Chain(_chain) => Err(error::not_implemented("Serializing a Chain")),
+                    State::Chain(chain) => chain.to_stream(this).await,
                     State::Collection(collection) => {
                         let stream: TCStream<Value> = collection.to_stream(this).await?;
                         TCResult::Ok(stream)

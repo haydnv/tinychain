@@ -1,15 +1,18 @@
+use std::collections::HashMap;
+use std::convert::TryInto;
 use std::sync::Arc;
 
-use futures::Stream;
+use futures::{Stream, TryFutureExt};
 
 use crate::auth::Auth;
+use crate::chain::{ChainClass, ChainType};
 use crate::class::{State, TCResult, TCStream};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error;
 use crate::transaction::Txn;
 use crate::value::class::ValueClass;
 use crate::value::link::TCPath;
-use crate::value::op::Capture;
+use crate::value::op::{Capture, GetOp};
 use crate::value::{label, Value, ValueId, ValueType};
 
 const ERR_TXN_REQUIRED: &str = "Collection requires a transaction context";
@@ -21,11 +24,19 @@ pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<St
     }
 
     match suffix[0].as_str() {
+        "chain" => {
+            let txn = txn.ok_or_else(|| error::unsupported(ERR_TXN_REQUIRED))?;
+            let ((ctype, schema), ops): ((TCPath, Value), Vec<(ValueId, GetOp)>) = id.try_into()?;
+            let ops: HashMap<ValueId, GetOp> = ops.into_iter().collect();
+            ChainType::get(txn, path, ctype, schema, ops)
+                .map_ok(State::Chain)
+                .await
+        }
         "collection" if path.len() > 1 => {
             let txn = txn.ok_or_else(|| error::unsupported(ERR_TXN_REQUIRED))?;
             CollectionType::get(txn, path, id)
+                .map_ok(State::Collection)
                 .await
-                .map(State::Collection)
         }
         "value" if path.len() > 1 => ValueType::get(path, id).map(State::Value),
         other => Err(error::not_found(other)),

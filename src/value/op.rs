@@ -322,6 +322,17 @@ impl From<OpRef> for Op {
     }
 }
 
+impl TryFrom<Op> for GetOp {
+    type Error = error::TCError;
+
+    fn try_from(op: Op) -> TCResult<GetOp> {
+        match op {
+            Op::Def(OpDef::Get(get_op)) => Ok(get_op),
+            other => Err(error::bad_request("Expected GetOp but found", other)),
+        }
+    }
+}
+
 impl fmt::Display for Op {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
