@@ -9,6 +9,7 @@ mod auth;
 mod block;
 mod chain;
 mod class;
+mod cluster;
 mod collection;
 mod error;
 mod gateway;
@@ -106,10 +107,11 @@ async fn configure(
     _data_dir: Arc<block::Dir>,
     _workspace: Arc<block::Dir>,
 ) -> class::TCResult<gateway::Hosted> {
-    let hosted = gateway::Hosted::new();
-    if clusters.is_empty() {
-        return Ok(hosted);
+    let mut hosted = gateway::Hosted::new();
+    for path in clusters {
+        let cluster = cluster::Cluster::create(path.clone()).map(Arc::new)?;
+        hosted.push(path, cluster);
     }
 
-    unimplemented!(); // TODO: load hosted cluster data from disk
+    Ok(hosted)
 }
