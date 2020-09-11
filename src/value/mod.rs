@@ -560,7 +560,9 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                 } else if value.len() == 1 {
                     Ok(OpRef::Get(link.into(), value.pop().unwrap()).into())
                 } else if value.len() == 2 {
-                    Ok(OpRef::Put(link.into(), value.pop().unwrap(), value.pop().unwrap()).into())
+                    let modifier = value.pop().unwrap();
+                    let object = value.pop().unwrap();
+                    Ok(OpRef::Put(link.into(), object, modifier).into())
                 } else {
                     Err(de::Error::custom(
                         "This functionality is not yet implemented",

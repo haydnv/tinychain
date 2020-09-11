@@ -194,6 +194,8 @@ impl Txn {
 
                 let state = graph.get(&name).ok_or_else(|| error::not_found(&name))?;
                 if let State::Value(Value::Op(op)) = state {
+                    println!("Provider: {}", &op);
+
                     let mut ready = true;
                     for dep in requires(op, &graph)? {
                         let dep_state = graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
@@ -338,9 +340,9 @@ impl Txn {
                 }
             },
             Op::Ref(OpRef::Put(subject, object, value)) => {
-                let value: State = if let Value::TCString(TCString::Id(tc_ref)) = value {
+                let value: State = if let Value::TCString(TCString::Ref(tc_ref)) = value {
                     provided
-                        .get(&tc_ref.clone())
+                        .get(tc_ref.value_id())
                         .cloned()
                         .ok_or_else(|| error::not_found(tc_ref))?
                 } else {
