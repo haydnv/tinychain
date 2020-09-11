@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::cluster::Cluster;
 use crate::value::link::{PathSegment, TCPath};
@@ -11,7 +10,7 @@ struct HostedNode {
 
 pub struct Hosted {
     root: HostedNode,
-    hosted: HashMap<TCPath, Arc<Cluster>>,
+    hosted: HashMap<TCPath, Cluster>,
 }
 
 impl Hosted {
@@ -24,7 +23,7 @@ impl Hosted {
         }
     }
 
-    pub fn get(&self, path: &TCPath) -> Option<(TCPath, Arc<Cluster>)> {
+    pub fn get(&self, path: &TCPath) -> Option<(TCPath, Cluster)> {
         println!("checking for hosted cluster {}", path);
         let mut node = &self.root;
         let mut found_path = TCPath::default();
@@ -51,7 +50,7 @@ impl Hosted {
         }
     }
 
-    pub fn push(&mut self, path: TCPath, cluster: Arc<Cluster>) -> Option<Arc<Cluster>> {
+    pub fn push(&mut self, path: TCPath, cluster: Cluster) -> Option<Cluster> {
         let mut node = &mut self.root;
         for segment in path.clone() {
             node = node.children.entry(segment).or_insert(HostedNode {

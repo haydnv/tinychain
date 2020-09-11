@@ -250,6 +250,9 @@ impl Txn {
             streams.push(async move {
                 match state {
                     State::Chain(chain) => chain.to_stream(this).await,
+                    State::Cluster(_cluster) => {
+                        Err(error::not_implemented("Cluster::to_stream from Txn"))
+                    }
                     State::Collection(collection) => {
                         let stream: TCStream<Value> = collection.to_stream(this).await?;
                         TCResult::Ok(stream)
@@ -347,7 +350,7 @@ impl Txn {
                 match subject {
                     Subject::Link(link) => {
                         self.gateway
-                            .put(&link, object, value, &auth, Some(self.id.clone()))
+                            .put(&link, object, value, &auth, Some(self.clone()))
                             .await
                     }
                     Subject::Ref(tc_ref) => {

@@ -92,8 +92,13 @@ impl ChainClass for ChainType {
             Err(error::not_found(suffix))
         } else {
             match suffix[0].as_str() {
-                "null" => null::NullChain::create(txn, ctype, schema, ops).map_ok(Box::new).map_ok(Chain::Null).await,
-                other => Err(error::not_found(other))
+                "null" => {
+                    null::NullChain::create(txn, ctype, schema, ops)
+                        .map_ok(Box::new)
+                        .map_ok(Chain::Null)
+                        .await
+                }
+                other => Err(error::not_found(other)),
             }
         }
     }

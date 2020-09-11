@@ -189,7 +189,10 @@ impl CollectionClass for CollectionBaseType {
             }
             "null" if suffix.len() == 1 => {
                 if schema != Value::None {
-                    Err(error::bad_request("Null Collection has no schema, found", schema))
+                    Err(error::bad_request(
+                        "Null Collection has no schema, found",
+                        schema,
+                    ))
                 } else {
                     Ok(CollectionBase::Null(Null::create()))
                 }

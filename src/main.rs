@@ -109,7 +109,7 @@ async fn configure(
 ) -> class::TCResult<gateway::Hosted> {
     let mut hosted = gateway::Hosted::new();
     for path in clusters {
-        let cluster = cluster::Cluster::create(path.clone()).map(Arc::new)?;
+        let cluster = cluster::Cluster::create(path.clone())?;
         hosted.push(path, cluster);
     }
 

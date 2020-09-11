@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::convert::TryInto;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -124,13 +125,32 @@ impl Gateway {
 
     pub async fn put(
         &self,
-        _subject: &Link,
-        _selector: Value,
-        _state: State,
-        _auth: &Auth,
-        _txn_id: Option<TxnId>,
+        subject: &Link,
+        selector: Value,
+        state: State,
+        auth: &Auth,
+        _txn: Option<Arc<Txn>>,
     ) -> TCResult<State> {
-        Err(error::not_implemented("Gateway::put"))
+        if let Some(_) = subject.host() {
+            Err(error::not_implemented("Gateway::put over the network"))
+        } else {
+            let path = subject.path();
+            if path[0] == "sbin" {
+                return Err(error::method_not_allowed("/sbin is immutable"));
+            }
+
+            if let Some((suffix, cluster)) = self.hosted.get(path) {
+                if suffix.is_empty() {
+                    cluster
+                        .put(selector.try_into()?, state.try_into()?, auth)
+                        .map(State::Cluster)
+                } else {
+                    Err(error::not_found(suffix))
+                }
+            } else {
+                Err(error::not_implemented("Peer cluster discovery"))
+            }
+        }
     }
 
     pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(

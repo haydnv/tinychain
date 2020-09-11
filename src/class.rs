@@ -6,6 +6,7 @@ use futures::future::Future;
 use futures::stream::Stream;
 
 use crate::chain::{Chain, ChainType};
+use crate::cluster::Cluster;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
 use crate::value::link::{Link, TCPath};
@@ -62,6 +63,7 @@ pub trait Instance {
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCType {
     Chain(ChainType),
+    Cluster,
     Collection(CollectionType),
     Value(ValueType),
 }
@@ -133,6 +135,7 @@ impl From<TCType> for Link {
     fn from(t: TCType) -> Link {
         match t {
             TCType::Chain(ct) => ct.into(),
+            TCType::Cluster => TCType::prefix().join(label("cluster").into()).into(),
             TCType::Collection(ct) => ct.into(),
             TCType::Value(vt) => vt.into(),
         }
@@ -143,6 +146,7 @@ impl fmt::Display for TCType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Chain(ct) => write!(f, "{}", ct),
+            Self::Cluster => write!(f, "type Cluster"),
             Self::Collection(ct) => write!(f, "{}", ct),
             Self::Value(vt) => write!(f, "{}", vt),
         }
@@ -152,6 +156,7 @@ impl fmt::Display for TCType {
 #[derive(Clone)]
 pub enum State {
     Chain(Chain),
+    Cluster(Cluster),
     Collection(Collection),
     Value(Value),
 }
@@ -162,6 +167,7 @@ impl Instance for State {
     fn class(&self) -> Self::Class {
         match self {
             Self::Chain(chain) => chain.class().into(),
+            Self::Cluster(_) => TCType::Cluster,
             Self::Collection(collection) => collection.class().into(),
             Self::Value(value) => value.class().into(),
         }
@@ -171,6 +177,17 @@ impl Instance for State {
 impl From<Value> for State {
     fn from(v: Value) -> State {
         Self::Value(v)
+    }
+}
+
+impl TryFrom<State> for Chain {
+    type Error = error::TCError;
+
+    fn try_from(state: State) -> TCResult<Chain> {
+        match state {
+            State::Chain(chain) => Ok(chain),
+            other => Err(error::bad_request("Expected Chain but found", other)),
+        }
     }
 }
 
@@ -189,6 +206,7 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Chain(c) => write!(f, "{}", c),
+            Self::Cluster(c) => write!(f, "{}", c),
             Self::Collection(c) => write!(f, "{}", c),
             Self::Value(v) => write!(f, "{}", v),
         }
