@@ -198,6 +198,12 @@ impl From<Value> for State {
     }
 }
 
+impl From<()> for State {
+    fn from(_: ()) -> State {
+        Self::Value(Value::None)
+    }
+}
+
 impl TryFrom<State> for Chain {
     type Error = error::TCError;
 

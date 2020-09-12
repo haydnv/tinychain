@@ -15,13 +15,12 @@ use crate::block::{BlockData, Dir, DirEntry, File};
 use crate::chain::ChainInstance;
 use crate::class::{State, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
-use crate::collection::{Collection, CollectionItem};
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
 use crate::value::link::PathSegment;
-use crate::value::op::{Capture, Op, OpDef, OpRef, Subject};
-use crate::value::{Number, TCPath, TCString, Value, ValueId};
+use crate::value::op::{Method, Op, OpDef, OpRef};
+use crate::value::{Number, TCString, Value, ValueId};
 
 use super::Transact;
 
@@ -144,7 +143,7 @@ impl Txn {
     pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
         mut parameters: S,
-        capture: &Capture,
+        capture: &[ValueId],
         auth: Auth,
     ) -> TCResult<HashMap<ValueId, State>> {
         // TODO: use a Graph here and queue every op absolutely as soon as it's ready
@@ -238,7 +237,7 @@ impl Txn {
     pub async fn execute_and_stream<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
         parameters: S,
-        capture: &Capture,
+        capture: &[ValueId],
         auth: Auth,
     ) -> TCResult<Vec<TCStream<Value>>> {
         let mut txn_state = self.clone().execute(parameters, &capture, auth).await?;
@@ -317,77 +316,35 @@ impl Txn {
                     ))
                 }
             }
-            Op::Ref(OpRef::Get(subject, object)) => match subject {
-                Subject::Link(link) => {
-                    let object = resolve_value(&provided, &object)?.clone();
-                    self.gateway
-                        .clone()
-                        .get(&link, object, auth, Some(self.clone()))
-                        .await
-                }
-                Subject::Ref(tc_ref) => {
-                    let subject = provided
-                        .get(&tc_ref.clone().into())
-                        .ok_or_else(|| error::not_found(tc_ref))?;
+            Op::Ref(OpRef::Get(link, key)) => {
+                let _object = resolve_value(&provided, &key)?.clone();
+                self.gateway
+                    .clone()
+                    .get(&link, key, auth, Some(self.clone()))
+                    .await
+            }
+            Op::Method(Method::Get(tc_ref, _path, _key)) => {
+                let _subject = provided
+                    .get(tc_ref.value_id())
+                    .ok_or_else(|| error::not_found(tc_ref))?;
 
-                    if let State::Chain(chain) = subject {
-                        chain.get(self, &TCPath::default(), object, auth).await
-                    } else if let State::Collection(collection) = subject {
-                        collection
-                            .get_item(self.clone(), object)
-                            .map_ok(State::from)
-                            .await
-                    } else {
-                        Err(error::bad_request("Value does not support GET", subject))
-                    }
-                }
-            },
-            Op::Ref(OpRef::Put(subject, object, value)) => {
-                let value: State = if let Value::TCString(TCString::Ref(tc_ref)) = value {
-                    provided
-                        .get(tc_ref.value_id())
-                        .cloned()
-                        .ok_or_else(|| error::not_found(tc_ref))?
-                } else {
-                    value.into()
-                };
+                Err(error::not_implemented("Txn::resolve Method::Get"))
+            }
+            Op::Ref(OpRef::Put(link, key, value)) => {
+                let value = resolve_state(&provided, &value)?;
+                self.gateway
+                    .put(&link, key, value, &auth, Some(self.clone()))
+                    .await?;
 
-                match subject {
-                    Subject::Link(link) => {
-                        let state = self
-                            .gateway
-                            .put(&link, object, value, &auth, Some(self.clone()))
-                            .await?;
-                        self.mutate(state.clone()).await;
-                        Ok(state)
-                    }
-                    Subject::Ref(tc_ref) => {
-                        let subject = provided
-                            .get(&tc_ref.clone().into())
-                            .ok_or_else(|| error::not_found(tc_ref))?;
+                Ok(().into())
+            }
+            Op::Method(Method::Put(tc_ref, _path, _key, value)) => {
+                let _subject = provided
+                    .get(&tc_ref.clone().into())
+                    .ok_or_else(|| error::not_found(tc_ref))?;
+                let _value = resolve_state(&provided, &value)?;
 
-                        if let State::Collection(collection) = subject {
-                            let value = match value {
-                                State::Value(value) => CollectionItem::Value(value),
-                                State::Collection(Collection::View(slice)) => {
-                                    CollectionItem::Slice(slice)
-                                }
-                                other => {
-                                    return Err(error::bad_request(
-                                        "Expected collection view but found",
-                                        other,
-                                    ))
-                                }
-                            };
-
-                            collection.put_item(self.clone(), object, value).await?;
-                            self.mutate(collection.clone().into()).await;
-                            Ok(State::Collection(collection.clone()))
-                        } else {
-                            Err(error::bad_request("Value does not support GET", subject))
-                        }
-                    }
-                }
+                Err(error::not_implemented("Txn::resolve Method::Put"))
             }
         }
     }
@@ -401,6 +358,16 @@ impl Txn {
         };
 
         self.mutated.write().await.push(state)
+    }
+}
+
+fn resolve_state(provided: &HashMap<ValueId, State>, object: &Value) -> TCResult<State> {
+    match object {
+        Value::TCString(TCString::Ref(object)) => match provided.get(object.value_id()) {
+            Some(state) => Ok(state.clone()),
+            None => Err(error::not_found(object)),
+        },
+        other => Ok(State::Value(other.clone())),
     }
 }
 
@@ -436,19 +403,26 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(or_else, txn_state)?);
             }
         }
-        Op::Ref(OpRef::Get(subject, object)) => {
-            if let Subject::Ref(tc_ref) = subject {
-                deps.insert(tc_ref.value_id().clone());
+        Op::Method(method) => match method {
+            Method::Get(subject, _path, key) => {
+                deps.insert(subject.value_id().clone());
+                deps.extend(value_requires(key, txn_state)?);
             }
-            deps.extend(value_requires(object, txn_state)?);
-        }
-        Op::Ref(OpRef::Put(subject, object, value)) => {
-            if let Subject::Ref(tc_ref) = subject {
-                deps.insert(tc_ref.value_id().clone());
+            Method::Put(subject, _path, key, value) => {
+                deps.insert(subject.value_id().clone());
+                deps.extend(value_requires(key, txn_state)?);
+                deps.extend(value_requires(value, txn_state)?);
             }
-            deps.extend(value_requires(object, txn_state)?);
-            deps.extend(value_requires(value, txn_state)?);
-        }
+        },
+        Op::Ref(op_ref) => match op_ref {
+            OpRef::Get(_path, key) => {
+                deps.extend(value_requires(key, txn_state)?);
+            }
+            OpRef::Put(_path, key, value) => {
+                deps.extend(value_requires(key, txn_state)?);
+                deps.extend(value_requires(value, txn_state)?);
+            }
+        },
     }
 
     Ok(deps)

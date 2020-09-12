@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::{Infallible, TryInto};
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,12 +18,12 @@ use crate::error;
 use crate::transaction::Txn;
 use crate::value::json::JsonListStream;
 use crate::value::link::*;
-use crate::value::op::Capture;
 use crate::value::{Value, ValueId};
 
 use super::Gateway;
 
 const TIMEOUT: Duration = Duration::from_secs(30);
+const ERR_NO_CAPTURE: &str = "You must specify what state to capture (i.e. with ?capture=[\"foo\", \"bar\", ...])";
 const ERR_DECODE: &str = "(unable to decode error message)";
 
 pub struct Client {
@@ -178,10 +178,10 @@ impl Server {
                 let values: Vec<(ValueId, Value)> =
                     deserialize_body(request.body_mut(), self.request_limit).await?;
 
-                let capture: Option<Value> = get_param(&mut params, "capture")?;
-                let capture = capture.try_into()?;
+                let capture: Option<Vec<ValueId>> = get_param(&mut params, "capture")?;
+                let capture: Vec<ValueId> = capture.ok_or_else(|| error::unsupported(ERR_NO_CAPTURE))?;
 
-                let mut response = gateway
+                let response = gateway
                     .clone()
                     .post(
                         &path.clone().into(),
@@ -192,13 +192,7 @@ impl Server {
                     )
                     .await?;
 
-                if let Capture::Id(_) = capture {
-                    assert!(response.len() == 1);
-                    Ok(response_value_stream(response.pop().unwrap()))
-                } else {
-                    assert!(response.len() == capture.len());
-                    response_list(response)
-                }
+                response_list(response)
             }
             other => Err(error::method_not_allowed(format!(
                 "Tinychain does not support {}",
@@ -224,8 +218,12 @@ async fn deserialize_body<D: DeserializeOwned>(
     let data = String::from_utf8(buffer)
         .map_err(|e| error::bad_request("Unable to parse request body", e))?;
 
-    serde_json::from_str(&data)
-        .map_err(|e| error::bad_request(&format!("Deserialization error {} when parsing", e), data))
+    serde_json::from_str(&data).map_err(|e| {
+        error::bad_request(
+            &format!("Deserialization error \"{}\" when parsing", e),
+            data,
+        )
+    })
 }
 
 fn response_value_stream<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(

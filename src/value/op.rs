@@ -1,11 +1,11 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 
 use crate::class::{Class, Instance, TCResult};
 use crate::error;
 
 use super::link::{Link, TCPath};
-use super::{label, TCRef, TCString, Value, ValueId, ValueType};
+use super::{label, TCRef, Value, ValueId, ValueType};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDefType {
@@ -42,6 +42,50 @@ impl fmt::Display for OpDefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Get => write!(f, "type: GET Op definition"),
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub enum MethodType {
+    Get,
+    Put,
+}
+
+impl Class for MethodType {
+    type Instance = Method;
+
+    fn from_path(path: &TCPath) -> TCResult<Self> {
+        let suffix = path.from_path(&Self::prefix())?;
+        if &suffix == "/get" {
+            Ok(MethodType::Get)
+        } else if &suffix == "/put" {
+            Ok(MethodType::Put)
+        } else {
+            Err(error::not_found(suffix))
+        }
+    }
+
+    fn prefix() -> TCPath {
+        OpType::prefix().join(label("method").into())
+    }
+}
+
+impl From<MethodType> for Link {
+    fn from(mt: MethodType) -> Link {
+        let prefix = MethodType::prefix();
+        match mt {
+            MethodType::Get => prefix.join(label("get").into()).into(),
+            MethodType::Put => prefix.join(label("put").into()).into(),
+        }
+    }
+}
+
+impl fmt::Display for MethodType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Get => write!(f, "type: GET method"),
+            Self::Put => write!(f, "type: PUT method"),
         }
     }
 }
@@ -94,6 +138,7 @@ impl fmt::Display for OpRefType {
 pub enum OpType {
     Def(OpDefType),
     If,
+    Method(MethodType),
     Ref(OpRefType),
 }
 
@@ -126,6 +171,7 @@ impl From<OpType> for Link {
         match ot {
             OpType::Def(odt) => odt.into(),
             OpType::If => prefix.join(label("if").into()).into(),
+            OpType::Method(mt) => mt.into(),
             OpType::Ref(ort) => ort.into(),
         }
     }
@@ -136,84 +182,8 @@ impl fmt::Display for OpType {
         match self {
             Self::Def(odt) => write!(f, "{}", odt),
             Self::If => write!(f, "type: Conditional Op"),
+            Self::Method(mt) => write!(f, "{}", mt),
             Self::Ref(ort) => write!(f, "{}", ort),
-        }
-    }
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum Capture {
-    Id(ValueId),
-    Ids(Vec<ValueId>),
-}
-
-impl Capture {
-    pub fn contains(&self, other: &ValueId) -> bool {
-        match self {
-            Self::Id(this) => this == other,
-            Self::Ids(these) => these.contains(other),
-        }
-    }
-
-    pub fn to_vec(&self) -> Vec<ValueId> {
-        match self {
-            Capture::Id(id) => vec![id.clone()],
-            Capture::Ids(ids) => ids.to_vec(),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        match self {
-            Self::Id(_) => 1,
-            Self::Ids(ids) => ids.len(),
-        }
-    }
-}
-
-impl TryFrom<Value> for Capture {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<Capture> {
-        if let Value::TCString(TCString::Id(id)) = v {
-            Ok(Capture::Id(id))
-        } else {
-            v.try_into().map(Capture::Ids)
-        }
-    }
-}
-
-impl TryFrom<Option<Value>> for Capture {
-    type Error = error::TCError;
-
-    fn try_from(v: Option<Value>) -> TCResult<Capture> {
-        match v {
-            Some(value) => value.try_into(),
-            None => Ok(Capture::Ids(vec![])),
-        }
-    }
-}
-
-impl From<Capture> for Vec<ValueId> {
-    fn from(c: Capture) -> Vec<ValueId> {
-        match c {
-            Capture::Id(id) => vec![id],
-            Capture::Ids(ids) => ids,
-        }
-    }
-}
-
-impl fmt::Display for Capture {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Id(id) => write!(f, "{}", id),
-            Self::Ids(ids) => write!(
-                f,
-                "({})",
-                ids.iter()
-                    .map(String::from)
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
         }
     }
 }
@@ -244,37 +214,36 @@ impl fmt::Display for OpDef {
     }
 }
 
-#[derive(Clone, Hash, Eq, PartialEq)]
-pub enum Subject {
-    Ref(TCRef),
-    Link(Link),
+#[derive(Clone, Eq, PartialEq)]
+pub enum Method {
+    Get(TCRef, TCPath, Value),
+    Put(TCRef, TCPath, Value, Value),
 }
 
-impl fmt::Display for Subject {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Instance for Method {
+    type Class = MethodType;
+
+    fn class(&self) -> MethodType {
         match self {
-            Subject::Ref(r) => write!(f, "{}", r),
-            Subject::Link(l) => write!(f, "{}", l),
+            Self::Get(_, _, _) => MethodType::Get,
+            Self::Put(_, _, _, _) => MethodType::Put,
         }
     }
 }
 
-impl From<TCRef> for Subject {
-    fn from(r: TCRef) -> Subject {
-        Subject::Ref(r)
-    }
-}
-
-impl From<Link> for Subject {
-    fn from(link: Link) -> Subject {
-        Subject::Link(link)
+impl fmt::Display for Method {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Get(subject, path, _) => write!(f, "GET {}{}", subject, path),
+            Self::Put(subject, path, _, _) => write!(f, "PUT {}{}", subject, path),
+        }
     }
 }
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {
-    Get(Subject, Value),
-    Put(Subject, Value, Value),
+    Get(Link, Value),
+    Put(Link, Value, Value),
 }
 
 impl Instance for OpRef {
@@ -291,8 +260,8 @@ impl Instance for OpRef {
 impl fmt::Display for OpRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            OpRef::Get(subject, id) => write!(f, "OpRef::Get {}: {}", subject, id),
-            OpRef::Put(subject, id, val) => write!(f, "OpRef::Put {}: {} <- {}", subject, id, val),
+            OpRef::Get(link, id) => write!(f, "OpRef::Get {}: {}", link, id),
+            OpRef::Put(path, id, val) => write!(f, "OpRef::Put {}: {} <- {}", path, id, val),
         }
     }
 }
@@ -301,6 +270,7 @@ impl fmt::Display for OpRef {
 pub enum Op {
     Def(OpDef),
     If(Cond),
+    Method(Method),
     Ref(OpRef),
 }
 
@@ -311,8 +281,15 @@ impl Instance for Op {
         match self {
             Self::Def(op_def) => OpType::Def(op_def.class()),
             Self::If(_) => OpType::If,
+            Self::Method(method) => OpType::Method(method.class()),
             Self::Ref(op_ref) => OpType::Ref(op_ref.class()),
         }
+    }
+}
+
+impl From<Method> for Op {
+    fn from(method: Method) -> Op {
+        Op::Method(method)
     }
 }
 
@@ -342,6 +319,7 @@ impl fmt::Display for Op {
                 "Op::If({} then {{ {} }} else {{ {} }})",
                 cond, then, or_else
             ),
+            Op::Method(method) => write!(f, "{}", method),
             Op::Ref(op_ref) => write!(f, "{}", op_ref),
         }
     }

@@ -605,6 +605,8 @@ impl ValueClass for UIntType {
     type Instance = UInt;
 
     fn get(path: &TCPath, value: UInt) -> TCResult<UInt> {
+        let path = path.from_path(&Self::prefix())?;
+
         if path.is_empty() {
             Ok(value)
         } else if path.len() == 1 {
@@ -643,6 +645,7 @@ impl NumberClass for UIntType {
 impl Ord for UIntType {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
+            (Self::U8, Self::U8) => Ordering::Equal,
             (Self::U16, Self::U16) => Ordering::Equal,
             (Self::U32, Self::U32) => Ordering::Equal,
             (Self::U64, Self::U64) => Ordering::Equal,
@@ -754,7 +757,10 @@ impl ValueClass for NumberType {
         }
 
         match suffix[0].as_str() {
-            "int" if suffix.len() > 1 => IntType::get(path, value.cast_into()).map(Number::Int),
+            "complex" => ComplexType::get(path, value.cast_into()).map(Number::Complex),
+            "float" => FloatType::get(path, value.cast_into()).map(Number::Float),
+            "int" => IntType::get(path, value.cast_into()).map(Number::Int),
+            "uint" => UIntType::get(path, value.cast_into()).map(Number::UInt),
             other => Err(error::not_found(other)),
         }
     }

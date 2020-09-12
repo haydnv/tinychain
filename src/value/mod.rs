@@ -1,6 +1,7 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Bound;
+use std::str::FromStr;
 
 use bytes::Bytes;
 use serde::de;
@@ -99,6 +100,12 @@ impl From<Bound<Value>> for Value {
 impl From<Bytes> for Value {
     fn from(b: Bytes) -> Value {
         Value::Bytes(b)
+    }
+}
+
+impl From<op::Method> for Value {
+    fn from(m: op::Method) -> Value {
+        Value::Op(Box::new(m.into()))
     }
 }
 
@@ -548,11 +555,24 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
             let mut value: Vec<Value> = access.next_value()?;
 
             if key.starts_with('$') {
-                let subject = key.parse::<TCRef>().map_err(de::Error::custom)?;
+                let (subject, path) = if let Some(i) = key.find('/') {
+                    let (subject, path) = key.split_at(i);
+                    let subject = TCRef::from_str(subject).map_err(de::Error::custom)?;
+                    let path = TCPath::from_str(path).map_err(de::Error::custom)?;
+                    (subject, path)
+                } else {
+                    (
+                        TCRef::from_str(key).map_err(de::Error::custom)?,
+                        TCPath::default(),
+                    )
+                };
+
                 match value.len() {
-                    0 => Ok(Value::TCString(TCString::Ref(subject))),
-                    1 => Ok(OpRef::Get(subject.into(), value.remove(0)).into()),
-                    2 => Ok(OpRef::Put(subject.into(), value.remove(0), value.remove(0)).into()),
+                    0 if &path == "/" => Ok(Value::TCString(TCString::Ref(subject))),
+                    1 => Ok(op::Method::Get(subject, path, value.remove(0)).into()),
+                    2 => {
+                        Ok(op::Method::Put(subject, path, value.remove(0), value.remove(0)).into())
+                    }
                     _ => Err(de::Error::custom(format!(
                         "Expected a Get or Put op, found {}",
                         Value::Tuple(value)
@@ -565,11 +585,11 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                 if value.is_empty() {
                     Ok(Value::TCString(TCString::Link(link)))
                 } else if value.len() == 1 {
-                    Ok(OpRef::Get(link.into(), value.pop().unwrap()).into())
+                    Ok(OpRef::Get(link, value.pop().unwrap()).into())
                 } else if value.len() == 2 {
                     let modifier = value.pop().unwrap();
                     let object = value.pop().unwrap();
-                    Ok(OpRef::Put(link.into(), object, modifier).into())
+                    Ok(OpRef::Put(link, object, modifier).into())
                 } else {
                     Err(de::Error::custom(
                         "This functionality is not yet implemented",
@@ -660,12 +680,20 @@ impl Serialize for Value {
                         Link::from(OpType::If).path(),
                         &[&Value::from(cond.clone()), then, or_else],
                     )?,
-                    Op::Ref(OpRef::Get(subject, selector)) => {
-                        map.serialize_entry(&subject.to_string(), &[selector])?
-                    }
-                    Op::Ref(OpRef::Put(subject, selector, value)) => {
-                        map.serialize_entry(&subject.to_string(), &[selector, value])?
-                    }
+                    Op::Method(method) => match method {
+                        op::Method::Get(subject, path, key) => {
+                            map.serialize_entry(&format!("{}{}", subject, path), &[key])?
+                        }
+                        op::Method::Put(subject, path, key, value) => {
+                            map.serialize_entry(&format!("{}{}", subject, path), &[key, value])?
+                        }
+                    },
+                    Op::Ref(op_ref) => match op_ref {
+                        OpRef::Get(link, key) => map.serialize_entry(&link.to_string(), &[key])?,
+                        OpRef::Put(link, key, value) => {
+                            map.serialize_entry(&link.to_string(), &[key, value])?
+                        }
+                    },
                 }
                 map.end()
             }

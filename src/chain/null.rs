@@ -11,7 +11,7 @@ use crate::collection::class::*;
 use crate::collection::{CollectionBase, CollectionBaseType};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::op::{Capture, GetOp};
+use crate::value::op::GetOp;
 use crate::value::{TCPath, Value, ValueId};
 
 use super::{ChainInstance, ChainType};
@@ -58,7 +58,7 @@ impl ChainInstance for NullChain {
                 params.push((in_ref.value_id().clone(), key));
                 params.extend(def.to_vec());
 
-                let capture = Capture::Id(out_ref.value_id().clone());
+                let capture = [out_ref.value_id().clone()];
                 let mut txn_state = txn.execute(stream::iter(params), &capture, auth).await?;
                 txn_state
                     .remove(out_ref.value_id())
