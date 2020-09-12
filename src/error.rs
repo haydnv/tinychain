@@ -172,7 +172,7 @@ pub fn not_found<T: fmt::Display>(id: T) -> TCError {
 }
 
 #[allow(dead_code)]
-pub fn not_implemented(feature: &str) -> TCError {
+pub fn not_implemented<I: fmt::Display>(feature: I) -> TCError {
     TCError::of(
         Code::NotImplemented,
         format!("This feature is not yet implemented: {}", feature),

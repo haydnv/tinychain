@@ -67,6 +67,19 @@ impl Instance for Value {
 
 impl class::ValueInstance for Value {
     type Class = class::ValueType;
+
+    fn get(&self, path: TCPath, key: Value) -> TCResult<Self> {
+        match self {
+            Value::None => Err(error::not_found(path)),
+            Value::Bound(_) => Err(error::method_not_allowed("GET Bound")),
+            Value::Bytes(_) => Err(error::method_not_allowed("GET Bytes")),
+            Value::Class(class) => Err(error::method_not_allowed(format!("GET {}", class))),
+            Value::Number(number) => number.get(path, key).map(Value::Number),
+            Value::TCString(string) => string.get(path, key).map(Value::TCString),
+            Value::Op(op) => (**op).get(path, key).map(Box::new).map(Value::Op),
+            Value::Tuple(_) => Err(error::method_not_allowed("GET Tuple")),
+        }
+    }
 }
 
 impl From<()> for Value {

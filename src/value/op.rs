@@ -4,6 +4,7 @@ use std::fmt;
 use crate::class::{Class, Instance, TCResult};
 use crate::error;
 
+use super::class::{ValueClass, ValueInstance};
 use super::link::{Link, TCPath};
 use super::{label, TCRef, Value, ValueId, ValueType};
 
@@ -165,6 +166,21 @@ impl Class for OpType {
     }
 }
 
+impl ValueClass for OpType {
+    type Instance = Op;
+
+    fn get(
+        _path: &TCPath,
+        _value: <Self as ValueClass>::Instance,
+    ) -> TCResult<<Self as ValueClass>::Instance> {
+        Err(error::unsupported("Op does not support casting"))
+    }
+
+    fn size(self) -> Option<usize> {
+        None
+    }
+}
+
 impl From<OpType> for Link {
     fn from(ot: OpType) -> Link {
         let prefix = OpType::prefix();
@@ -285,6 +301,10 @@ impl Instance for Op {
             Self::Ref(op_ref) => OpType::Ref(op_ref.class()),
         }
     }
+}
+
+impl ValueInstance for Op {
+    type Class = OpType;
 }
 
 impl From<Method> for Op {

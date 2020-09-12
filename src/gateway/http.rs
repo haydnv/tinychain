@@ -23,7 +23,8 @@ use crate::value::{Value, ValueId};
 use super::Gateway;
 
 const TIMEOUT: Duration = Duration::from_secs(30);
-const ERR_NO_CAPTURE: &str = "You must specify what state to capture (i.e. with ?capture=[\"foo\", \"bar\", ...])";
+const ERR_NO_CAPTURE: &str =
+    "You must specify what state to capture (i.e. with ?capture=[\"foo\", \"bar\", ...])";
 const ERR_DECODE: &str = "(unable to decode error message)";
 
 pub struct Client {
@@ -179,7 +180,8 @@ impl Server {
                     deserialize_body(request.body_mut(), self.request_limit).await?;
 
                 let capture: Option<Vec<ValueId>> = get_param(&mut params, "capture")?;
-                let capture: Vec<ValueId> = capture.ok_or_else(|| error::unsupported(ERR_NO_CAPTURE))?;
+                let capture: Vec<ValueId> =
+                    capture.ok_or_else(|| error::unsupported(ERR_NO_CAPTURE))?;
 
                 let response = gateway
                     .clone()

@@ -1,8 +1,6 @@
 use std::convert::TryInto;
 use std::fmt;
 
-use serde::Serialize;
-
 use crate::class::{Class, Instance, TCResult, TCType};
 use crate::error;
 
@@ -12,8 +10,12 @@ use super::{label, Link, Value};
 pub type NumberType = super::number::class::NumberType;
 pub type StringType = super::string::StringType;
 
-pub trait ValueInstance: Instance + Serialize + Sized {
+pub trait ValueInstance: Instance + Sized {
     type Class: ValueClass;
+
+    fn get(&self, _path: TCPath, _key: Value) -> TCResult<Self> {
+        Err(error::method_not_allowed(format!("GET {}", self.class())))
+    }
 }
 
 pub trait ValueClass: Class {

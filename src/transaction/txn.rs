@@ -13,11 +13,12 @@ use serde::{Deserialize, Serialize};
 use crate::auth::Auth;
 use crate::block::{BlockData, Dir, DirEntry, File};
 use crate::chain::ChainInstance;
-use crate::class::{State, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Instance, State, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
+use crate::value::class::ValueInstance;
 use crate::value::link::PathSegment;
 use crate::value::op::{Method, Op, OpDef, OpRef};
 use crate::value::{Number, TCString, Value, ValueId};
@@ -323,12 +324,22 @@ impl Txn {
                     .get(&link, key, auth, Some(self.clone()))
                     .await
             }
-            Op::Method(Method::Get(tc_ref, _path, _key)) => {
-                let _subject = provided
+            Op::Method(Method::Get(tc_ref, path, key)) => {
+                let subject = provided
                     .get(tc_ref.value_id())
                     .ok_or_else(|| error::not_found(tc_ref))?;
+                let key = resolve_state(&provided, &key)?;
 
-                Err(error::not_implemented("Txn::resolve Method::Get"))
+                match subject {
+                    State::Value(value) => value.get(path, key.try_into()?).map(State::Value),
+                    other => {
+                        self.mutate(subject.clone()).await;
+                        Err(error::not_implemented(format!(
+                            "Txn::resolve Method::Get {}",
+                            other.class()
+                        )))
+                    }
+                }
             }
             Op::Ref(OpRef::Put(link, key, value)) => {
                 let value = resolve_state(&provided, &value)?;

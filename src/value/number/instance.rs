@@ -8,6 +8,7 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::value::class::ValueInstance;
+use crate::value::{TCPath, Value};
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{CastFrom, CastInto, NumberClass, NumberInstance};
@@ -1188,6 +1189,18 @@ impl Instance for Number {
 
 impl ValueInstance for Number {
     type Class = NumberType;
+
+    fn get(&self, path: TCPath, key: Value) -> TCResult<Self> {
+        if path.len() == 1 {
+            match path[0].as_str() {
+                "add" => Ok(Add::add(self.clone(), key.try_into()?)),
+                "mul" => Ok(Mul::mul(self.clone(), key.try_into()?)),
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            Err(error::not_found(path))
+        }
+    }
 }
 
 impl NumberInstance for Number {
