@@ -157,13 +157,45 @@ impl fmt::Display for ValueId {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for ValueId {
-    fn deserialize<D>(deserializer: D) -> Result<ValueId, D::Error>
+impl<'de> de::Deserialize<'de> for ValueId {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
     where
         D: de::Deserializer<'de>,
     {
-        let s: &str = de::Deserialize::deserialize(deserializer)?;
-        s.parse().map_err(de::Error::custom)
+        d.deserialize_any(ValueIdVisitor)
+    }
+}
+
+struct ValueIdVisitor;
+
+impl<'de> de::Visitor<'de> for ValueIdVisitor {
+    type Value = ValueId;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a Tinychain ValueId like {\"foo\": []}")
+    }
+
+    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+    where
+        M: de::MapAccess<'de>,
+    {
+        if let Some(key) = access.next_key::<&str>()? {
+            let mut value: Vec<super::Value> = access.next_value()?;
+            if value.len() == 0 {
+                ValueId::from_str(key).map_err(de::Error::custom)
+            } else {
+                Err(de::Error::custom("Expected ValueId but found OpRef"))
+            }
+        } else {
+            Err(de::Error::custom("Unable to parse ValueId"))
+        }
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        ValueId::from_str(s).map_err(de::Error::custom)
     }
 }
 
@@ -311,6 +343,7 @@ impl TryFrom<TCString> for ValueId {
     fn try_from(s: TCString) -> TCResult<ValueId> {
         match s {
             TCString::Id(id) => Ok(id),
+            TCString::UString(s) => ValueId::from_str(&s),
             other => Err(error::bad_request("Expected ValueId but found", other)),
         }
     }
