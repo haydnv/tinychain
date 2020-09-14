@@ -359,6 +359,12 @@ impl ValueInstance for Op {
     type Class = OpType;
 }
 
+impl Default for Op {
+    fn default() -> Op {
+        Op::Ref(OpRef::Get(Link::default(), Value::default()))
+    }
+}
+
 impl From<Method> for Op {
     fn from(method: Method) -> Op {
         Op::Method(method)

@@ -280,6 +280,12 @@ impl ValueInstance for TCString {
     type Class = StringType;
 }
 
+impl Default for TCString {
+    fn default() -> TCString {
+        TCString::UString(String::default())
+    }
+}
+
 impl From<Link> for TCString {
     fn from(l: Link) -> TCString {
         TCString::Link(l)

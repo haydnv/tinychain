@@ -110,8 +110,6 @@ pub trait ChainInstance: Instance {
 
     async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State>;
 
-    fn object(&'_ self) -> &'_ CollectionBase;
-
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
 }
 
@@ -137,12 +135,6 @@ impl ChainInstance for Chain {
     async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
         match self {
             Self::Null(nc) => nc.get(txn, path, key, auth).await,
-        }
-    }
-
-    fn object(&self) -> &CollectionBase {
-        match self {
-            Self::Null(nc) => nc.object(),
         }
     }
 

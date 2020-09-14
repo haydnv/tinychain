@@ -1,5 +1,6 @@
 use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, VecDeque};
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -196,7 +197,7 @@ impl<T: Mutate> Clone for TxnLock<T> {
 }
 
 impl<T: Mutate> TxnLock<T> {
-    pub fn new(name: String, value: T) -> TxnLock<T> {
+    pub fn new<I: fmt::Display>(name: I, value: T) -> TxnLock<T> {
         let state = LockState {
             last_commit: None,
             readers: BTreeMap::new(),
@@ -211,7 +212,7 @@ impl<T: Mutate> TxnLock<T> {
         };
 
         TxnLock {
-            name,
+            name: name.to_string(),
             inner: Arc::new(Mutex::new(inner)),
         }
     }

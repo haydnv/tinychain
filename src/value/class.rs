@@ -10,7 +10,7 @@ use super::{label, Link, Value};
 pub type NumberType = super::number::class::NumberType;
 pub type StringType = super::string::StringType;
 
-pub trait ValueInstance: Instance + Sized {
+pub trait ValueInstance: Instance + Default + Sized {
     type Class: ValueClass;
 
     fn get(&self, _path: TCPath, _key: Value) -> TCResult<Self> {
@@ -20,6 +20,10 @@ pub trait ValueInstance: Instance + Sized {
 
 pub trait ValueClass: Class {
     type Instance: ValueInstance;
+
+    fn default(&self) -> <Self as ValueClass>::Instance {
+        <Self as ValueClass>::Instance::default()
+    }
 
     fn get(
         path: &TCPath,

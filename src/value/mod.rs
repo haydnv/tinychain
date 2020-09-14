@@ -82,6 +82,12 @@ impl class::ValueInstance for Value {
     }
 }
 
+impl Default for Value {
+    fn default() -> Value {
+        Value::None
+    }
+}
+
 impl From<()> for Value {
     fn from(_: ()) -> Value {
         Value::None

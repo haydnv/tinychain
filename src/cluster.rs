@@ -10,11 +10,12 @@ use crate::chain::{Chain, ChainInstance};
 use crate::class::{State, TCResult};
 use crate::error;
 use crate::gateway::Gateway;
-use crate::transaction::lock::{Mutable, TxnLock};
+use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{LinkHost, PathSegment, TCPath};
 use crate::value::Value;
 
+#[derive(Clone)]
 enum ClusterReplica {
     Director(HashSet<LinkHost>), // set of all hosts replicating this cluster
     Actor(LinkHost),             // link to the director
@@ -26,9 +27,23 @@ impl Default for ClusterReplica {
     }
 }
 
+#[derive(Clone)]
 struct ClusterState {
     replica: ClusterReplica,
-    data: TxnLock<Mutable<HashMap<PathSegment, Chain>>>,
+    data: HashMap<PathSegment, Chain>,
+}
+
+#[async_trait]
+impl Mutate for ClusterState {
+    type Pending = Self;
+
+    fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
+        self.clone()
+    }
+
+    async fn converge(&mut self, new_value: Self::Pending) {
+        *self = new_value
+    }
 }
 
 #[derive(Clone)]
@@ -36,16 +51,19 @@ pub struct Cluster {
     path: TCPath,
     data_dir: Arc<Dir>,
     workspace: Arc<Dir>,
-    state: Arc<ClusterState>,
+    state: TxnLock<ClusterState>,
 }
 
 impl Cluster {
     pub fn create(path: TCPath, data_dir: Arc<Dir>, workspace: Arc<Dir>) -> TCResult<Cluster> {
         let replica = ClusterReplica::default();
-        let state = Arc::new(ClusterState {
-            replica,
-            data: TxnLock::new(format!("Cluster {} data", &path), HashMap::new().into()),
-        });
+        let state = TxnLock::new(
+            format!("State of Cluster at {}", &path),
+            ClusterState {
+                replica,
+                data: HashMap::new(),
+            },
+        );
 
         Ok(Cluster {
             path,
@@ -72,9 +90,8 @@ impl Cluster {
                 Txn::new(gateway.clone(), self.workspace.clone()).await?
             };
 
-            let data = self.state.data.read(txn.id()).await?;
-            println!("Cluster hosts {} chains at txn {}", data.len(), txn.id());
-            if let Some(chain) = data.get(&path[0]) {
+            let state = self.state.read(txn.id()).await?;
+            if let Some(chain) = state.data.get(&path[0]) {
                 println!(
                     "Cluster::get chain {}/{}: {}",
                     &path[0],
@@ -98,8 +115,8 @@ impl Cluster {
     ) -> TCResult<Self> {
         println!("Cluster will now host a chain called {}", name);
         txn.mutate(self.clone().into()).await;
-        let mut data = self.state.data.write(txn.id().clone()).await?;
-        data.insert(name, chain);
+        let mut state = self.state.write(txn.id().clone()).await?;
+        state.data.insert(name, chain);
         Ok(self)
     }
 }
@@ -108,12 +125,12 @@ impl Cluster {
 impl Transact for Cluster {
     async fn commit(&self, txn_id: &TxnId) {
         println!("Cluster::commit!");
-        self.state.data.commit(txn_id).await
+        self.state.commit(txn_id).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
         println!("Cluster::rollback!");
-        self.state.data.rollback(txn_id).await
+        self.state.rollback(txn_id).await
     }
 }
 

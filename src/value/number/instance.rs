@@ -57,6 +57,12 @@ impl NumberInstance for Boolean {
     }
 }
 
+impl Default for Boolean {
+    fn default() -> Boolean {
+        Boolean(false)
+    }
+}
+
 impl From<bool> for Boolean {
     fn from(b: bool) -> Boolean {
         Boolean(b)
@@ -233,6 +239,12 @@ impl PartialOrd for Complex {
             (Complex::C64(l), Complex::C64(r)) => l.norm_sqr().partial_cmp(&r.norm_sqr()),
             _ => None,
         }
+    }
+}
+
+impl Default for Complex {
+    fn default() -> Complex {
+        Complex::C32(num::Complex::<f32>::default())
     }
 }
 
@@ -465,6 +477,12 @@ impl PartialOrd for Float {
             (Float::F64(l), Float::F64(r)) => l.partial_cmp(r),
             _ => None,
         }
+    }
+}
+
+impl Default for Float {
+    fn default() -> Float {
+        Float::F32(f32::default())
     }
 }
 
@@ -728,6 +746,12 @@ impl PartialOrd for Int {
             (Int::I64(l), Int::I64(r)) => l.partial_cmp(r),
             _ => None,
         }
+    }
+}
+
+impl Default for Int {
+    fn default() -> Int {
+        Int::I16(i16::default())
     }
 }
 
@@ -1011,6 +1035,12 @@ impl Ord for UInt {
 impl PartialOrd for UInt {
     fn partial_cmp(&self, other: &UInt) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl Default for UInt {
+    fn default() -> UInt {
+        UInt::U8(u8::default())
     }
 }
 
@@ -1357,6 +1387,12 @@ impl Mul for Number {
                 (this * other.cast_into()).into()
             }
         }
+    }
+}
+
+impl Default for Number {
+    fn default() -> Number {
+        Number::Bool(Boolean::default())
     }
 }
 
