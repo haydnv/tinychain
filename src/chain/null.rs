@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream::{self, Stream};
+use futures::stream::{self, Stream, StreamExt};
 use futures::TryFutureExt;
 
 use crate::auth::Auth;
@@ -87,6 +87,7 @@ impl NullChain {
             other => return Err(error::not_implemented(format!("Chain({})", other))),
         };
 
+        println!("new chain with {} ops", ops.len());
         Ok(NullChain { state, ops })
     }
 }
@@ -119,10 +120,15 @@ impl ChainInstance for NullChain {
                 ))),
             }
         } else if path.len() == 1 {
+            println!("looking up {} in collection of {} ops...", path, self.ops.len());
+            for name in self.ops.keys() {
+                println!("available op: {}", name);
+            }
+
             if let Some(op) = self.ops.get(&path[0]) {
-                if let OpDef::Get((in_ref, def)) = op {
+                if let OpDef::Get((key_name, def)) = op {
                     let mut params = Vec::with_capacity(def.len() + 1);
-                    params.push((in_ref.value_id().clone(), key));
+                    params.push((key_name.clone(), key));
                     params.extend(def.to_vec());
 
                     let capture = &params.last().unwrap().0.clone();
@@ -143,19 +149,20 @@ impl ChainInstance for NullChain {
         }
     }
 
-    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync>(
+    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
         &self,
-        _txn: Arc<Txn>,
+        txn: Arc<Txn>,
         path: TCPath,
-        _data: S,
-        _capture: &[ValueId],
-        _auth: Auth,
+        data: S,
+        capture: &[ValueId],
+        auth: Auth,
     ) -> TCResult<Vec<TCStream<Value>>> {
         if path.is_empty() {
             Err(error::method_not_allowed("NullChain::post"))
         } else if path.len() == 1 {
-            if let Some(OpDef::Post(_op)) = self.ops.get(&path[0]) {
-                Err(error::not_implemented(&path[0]))
+            if let Some(OpDef::Post((param_names, def))) = self.ops.get(&path[0]) {
+                let data = data.chain(stream::iter(def.to_vec()));
+                txn.execute_and_stream(data, capture, auth).await
             } else {
                 Err(error::not_found(path))
             }

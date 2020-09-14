@@ -110,7 +110,7 @@ pub trait ChainInstance: Instance {
 
     async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State>;
 
-    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync>(
+    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
         &self,
         txn: Arc<Txn>,
         path: TCPath,
@@ -147,7 +147,7 @@ impl ChainInstance for Chain {
         }
     }
 
-    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync>(
+    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
         &self,
         txn: Arc<Txn>,
         path: TCPath,

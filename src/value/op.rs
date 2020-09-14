@@ -229,9 +229,9 @@ impl fmt::Display for OpType {
 }
 
 pub type Cond = (TCRef, Value, Value);
-pub type GetOp = (TCRef, Vec<(ValueId, Value)>);
-pub type PutOp = (TCRef, TCRef, Vec<(ValueId, Value)>);
-pub type PostOp = (Vec<TCRef>, Vec<(ValueId, Value)>);
+pub type GetOp = (ValueId, Vec<(ValueId, Value)>);
+pub type PutOp = (ValueId, ValueId, Vec<(ValueId, Value)>);
+pub type PostOp = (Vec<ValueId>, Vec<(ValueId, Value)>);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDef {
@@ -258,6 +258,10 @@ impl TryFrom<Value> for OpDef {
     fn try_from(value: Value) -> TCResult<OpDef> {
         if let Ok(get_op) = value.clone().try_into() {
             Ok(OpDef::Get(get_op))
+        } else if let Ok(put_op) = value.clone().try_into() {
+            Ok(OpDef::Put(put_op))
+        } else if let Ok(post_op) = value.clone().try_into() {
+            Ok(OpDef::Post(post_op))
         } else {
             Err(error::bad_request("Expected OpDef but found", value))
         }

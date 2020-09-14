@@ -412,13 +412,13 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
 
     match op {
         Op::Def(OpDef::Get((tc_ref, _))) => {
-            deps.insert(tc_ref.clone().into());
+            deps.insert(tc_ref.clone());
         }
         Op::Def(OpDef::Put((tc_ref, _, _))) => {
-            deps.insert(tc_ref.clone().into());
+            deps.insert(tc_ref.clone());
         }
         Op::Def(OpDef::Post((tc_refs, _))) => {
-            deps.extend(tc_refs.into_iter().cloned().map(ValueId::from));
+            deps.extend(tc_refs.iter().cloned().map(ValueId::from));
         }
         Op::If((cond, then, or_else)) => {
             let cond_state = txn_state

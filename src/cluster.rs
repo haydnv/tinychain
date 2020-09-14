@@ -94,7 +94,7 @@ impl Cluster {
             let state = self.state.read(txn.id()).await?;
             if let Some(chain) = state.data.get(&path[0]) {
                 println!(
-                    "Cluster::get chain {}/{}: {}",
+                    "Cluster::get chain {}{}: {}",
                     &path[0],
                     path.slice_from(1),
                     &key
@@ -121,7 +121,7 @@ impl Cluster {
         Ok(self)
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync>(
+    pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
         self,
         txn: Arc<Txn>,
         path: TCPath,
