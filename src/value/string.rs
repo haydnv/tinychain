@@ -180,7 +180,7 @@ impl<'de> de::Visitor<'de> for ValueIdVisitor {
         M: de::MapAccess<'de>,
     {
         if let Some(key) = access.next_key::<&str>()? {
-            let mut value: Vec<super::Value> = access.next_value()?;
+            let value: Vec<super::Value> = access.next_value()?;
             if value.len() == 0 {
                 ValueId::from_str(key).map_err(de::Error::custom)
             } else {

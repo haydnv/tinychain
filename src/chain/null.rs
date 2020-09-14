@@ -11,7 +11,7 @@ use crate::collection::class::*;
 use crate::collection::{CollectionBase, CollectionBaseType};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::op::GetOp;
+use crate::value::op::OpDef;
 use crate::value::{TCPath, Value, ValueId};
 
 use super::{ChainInstance, ChainType};
@@ -19,7 +19,7 @@ use super::{ChainInstance, ChainType};
 #[derive(Clone)]
 pub struct NullChain {
     collection: CollectionBase,
-    get_ops: HashMap<ValueId, GetOp>,
+    get_ops: HashMap<ValueId, OpDef>,
 }
 
 impl NullChain {
@@ -27,7 +27,7 @@ impl NullChain {
         txn: Arc<Txn>,
         ctype: TCPath,
         schema: Value,
-        get_ops: HashMap<ValueId, GetOp>,
+        get_ops: HashMap<ValueId, OpDef>,
     ) -> TCResult<NullChain> {
         let collection = CollectionBaseType::get(txn, &ctype, schema).await?;
         Ok(NullChain {
@@ -53,18 +53,24 @@ impl ChainInstance for NullChain {
         if path.is_empty() {
             self.object().get_item(txn, key).map_ok(State::from).await
         } else if path.len() == 1 {
-            if let Some((in_ref, def, out_ref)) = self.get_ops.get(&path[0]) {
-                let mut params = Vec::with_capacity(def.len() + 1);
-                params.push((in_ref.value_id().clone(), key));
-                params.extend(def.to_vec());
+            if let Some(op) = self.get_ops.get(&path[0]) {
+                if let OpDef::Get((in_ref, def)) = op {
+                    let mut params = Vec::with_capacity(def.len() + 1);
+                    params.push((in_ref.value_id().clone(), key));
+                    params.extend(def.to_vec());
 
-                let capture = [out_ref.value_id().clone()];
-                let mut txn_state = txn.execute(stream::iter(params), &capture, auth).await?;
-                txn_state
-                    .remove(out_ref.value_id())
-                    .ok_or_else(|| error::not_found(out_ref))
+                    let capture = &params.last().unwrap().0.clone();
+                    let mut txn_state = txn
+                        .execute(stream::iter(params), &[capture.clone()], auth)
+                        .await?;
+                    txn_state
+                        .remove(capture)
+                        .ok_or_else(|| error::not_found(capture))
+                } else {
+                    Err(error::method_not_allowed(path))
+                }
             } else {
-                Err(error::not_found(&path[0]))
+                Err(error::not_found(path))
             }
         } else {
             Err(error::not_found(path))

@@ -700,12 +700,14 @@ impl Serialize for Value {
                         op::Method::Put(subject, path, key, value) => {
                             map.serialize_entry(&format!("{}{}", subject, path), &[key, value])?
                         }
+                        op::Method::Post(_subject, _path, _data) => unimplemented!(),
                     },
                     Op::Ref(op_ref) => match op_ref {
                         OpRef::Get(link, key) => map.serialize_entry(&link.to_string(), &[key])?,
                         OpRef::Put(link, key, value) => {
                             map.serialize_entry(&link.to_string(), &[key, value])?
                         }
+                        OpRef::Post(_link, _data) => unimplemented!(),
                     },
                 }
                 map.end()

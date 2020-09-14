@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use crate::class::{Class, Instance, TCResult};
@@ -11,6 +11,8 @@ use super::{label, TCRef, Value, ValueId, ValueType};
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDefType {
     Get,
+    Put,
+    Post,
 }
 
 impl Class for OpDefType {
@@ -18,8 +20,13 @@ impl Class for OpDefType {
 
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
-        if &suffix == "/get" {
-            Ok(OpDefType::Get)
+        if suffix.len() == 1 {
+            match suffix[0].as_str() {
+                "get" => Ok(OpDefType::Get),
+                "put" => Ok(OpDefType::Put),
+                "post" => Ok(OpDefType::Post),
+                other => Err(error::not_found(other)),
+            }
         } else {
             Err(error::not_found(suffix))
         }
@@ -35,6 +42,8 @@ impl From<OpDefType> for Link {
         let prefix = OpDefType::prefix();
         match odt {
             OpDefType::Get => prefix.join(label("get").into()).into(),
+            OpDefType::Put => prefix.join(label("put").into()).into(),
+            OpDefType::Post => prefix.join(label("post").into()).into(),
         }
     }
 }
@@ -43,6 +52,8 @@ impl fmt::Display for OpDefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Get => write!(f, "type: GET Op definition"),
+            Self::Put => write!(f, "type: PUT Op definition"),
+            Self::Post => write!(f, "type: POST Op definition"),
         }
     }
 }
@@ -51,6 +62,7 @@ impl fmt::Display for OpDefType {
 pub enum MethodType {
     Get,
     Put,
+    Post,
 }
 
 impl Class for MethodType {
@@ -58,10 +70,13 @@ impl Class for MethodType {
 
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
-        if &suffix == "/get" {
-            Ok(MethodType::Get)
-        } else if &suffix == "/put" {
-            Ok(MethodType::Put)
+        if suffix.len() == 1 {
+            match suffix[0].as_str() {
+                "get" => Ok(MethodType::Get),
+                "put" => Ok(MethodType::Put),
+                "post" => Ok(MethodType::Post),
+                other => Err(error::not_found(other)),
+            }
         } else {
             Err(error::not_found(suffix))
         }
@@ -78,6 +93,7 @@ impl From<MethodType> for Link {
         match mt {
             MethodType::Get => prefix.join(label("get").into()).into(),
             MethodType::Put => prefix.join(label("put").into()).into(),
+            MethodType::Post => prefix.join(label("post").into()).into(),
         }
     }
 }
@@ -87,6 +103,7 @@ impl fmt::Display for MethodType {
         match self {
             Self::Get => write!(f, "type: GET method"),
             Self::Put => write!(f, "type: PUT method"),
+            Self::Post => write!(f, "type: POST method"),
         }
     }
 }
@@ -95,6 +112,7 @@ impl fmt::Display for MethodType {
 pub enum OpRefType {
     Get,
     Put,
+    Post,
 }
 
 impl Class for OpRefType {
@@ -102,10 +120,13 @@ impl Class for OpRefType {
 
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
-        if &suffix == "/get" {
-            Ok(OpRefType::Get)
-        } else if &suffix == "/put" {
-            Ok(OpRefType::Put)
+        if suffix.len() == 1 {
+            match suffix[0].as_str() {
+                "get" => Ok(OpRefType::Get),
+                "put" => Ok(OpRefType::Put),
+                "post" => Ok(OpRefType::Post),
+                other => Err(error::not_found(other)),
+            }
         } else {
             Err(error::not_found(suffix))
         }
@@ -122,6 +143,7 @@ impl From<OpRefType> for Link {
         match ort {
             OpRefType::Get => prefix.join(label("get").into()).into(),
             OpRefType::Put => prefix.join(label("put").into()).into(),
+            OpRefType::Post => prefix.join(label("post").into()).into(),
         }
     }
 }
@@ -131,6 +153,7 @@ impl fmt::Display for OpRefType {
         match self {
             Self::Get => write!(f, "type: GET Op ref"),
             Self::Put => write!(f, "type: PUT Op ref"),
+            Self::Post => write!(f, "type: POST Op ref"),
         }
     }
 }
@@ -155,6 +178,7 @@ impl Class for OpType {
             match suffix[0].as_str() {
                 "def" => OpDefType::from_path(path).map(OpType::Def),
                 "if" if suffix.len() == 1 => Ok(OpType::If),
+                "method" => MethodType::from_path(path).map(OpType::Method),
                 "ref" => OpRefType::from_path(path).map(OpType::Ref),
                 other => Err(error::not_found(other)),
             }
@@ -205,11 +229,15 @@ impl fmt::Display for OpType {
 }
 
 pub type Cond = (TCRef, Value, Value);
-pub type GetOp = (TCRef, Vec<(ValueId, Value)>, TCRef);
+pub type GetOp = (TCRef, Vec<(ValueId, Value)>);
+pub type PutOp = (TCRef, TCRef, Vec<(ValueId, Value)>);
+pub type PostOp = (Vec<TCRef>, Vec<(ValueId, Value)>);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDef {
     Get(GetOp),
+    Put(PutOp),
+    Post(PostOp),
 }
 
 impl Instance for OpDef {
@@ -218,6 +246,20 @@ impl Instance for OpDef {
     fn class(&self) -> OpDefType {
         match self {
             Self::Get(_) => OpDefType::Get,
+            Self::Put(_) => OpDefType::Put,
+            Self::Post(_) => OpDefType::Post,
+        }
+    }
+}
+
+impl TryFrom<Value> for OpDef {
+    type Error = error::TCError;
+
+    fn try_from(value: Value) -> TCResult<OpDef> {
+        if let Ok(get_op) = value.clone().try_into() {
+            Ok(OpDef::Get(get_op))
+        } else {
+            Err(error::bad_request("Expected OpDef but found", value))
         }
     }
 }
@@ -225,7 +267,9 @@ impl Instance for OpDef {
 impl fmt::Display for OpDef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Get((input, _def, output)) => write!(f, "GET Op {} -> {}", input, output),
+            Self::Get(_) => write!(f, "GET Op"),
+            Self::Put(_) => write!(f, "PUT Op"),
+            Self::Post(_) => write!(f, "POST"),
         }
     }
 }
@@ -234,6 +278,7 @@ impl fmt::Display for OpDef {
 pub enum Method {
     Get(TCRef, TCPath, Value),
     Put(TCRef, TCPath, Value, Value),
+    Post(TCRef, TCPath, Vec<Value>),
 }
 
 impl Instance for Method {
@@ -243,6 +288,7 @@ impl Instance for Method {
         match self {
             Self::Get(_, _, _) => MethodType::Get,
             Self::Put(_, _, _, _) => MethodType::Put,
+            Self::Post(_, _, _) => MethodType::Post,
         }
     }
 }
@@ -252,6 +298,7 @@ impl fmt::Display for Method {
         match self {
             Self::Get(subject, path, _) => write!(f, "GET {}{}", subject, path),
             Self::Put(subject, path, _, _) => write!(f, "PUT {}{}", subject, path),
+            Self::Post(subject, path, _) => write!(f, "PUT {}{}", subject, path),
         }
     }
 }
@@ -260,6 +307,7 @@ impl fmt::Display for Method {
 pub enum OpRef {
     Get(Link, Value),
     Put(Link, Value, Value),
+    Post(Link, Vec<Value>),
 }
 
 impl Instance for OpRef {
@@ -269,6 +317,7 @@ impl Instance for OpRef {
         match self {
             Self::Get(_, _) => OpRefType::Get,
             Self::Put(_, _, _) => OpRefType::Put,
+            Self::Post(_, _) => OpRefType::Post,
         }
     }
 }
@@ -278,6 +327,9 @@ impl fmt::Display for OpRef {
         match self {
             OpRef::Get(link, id) => write!(f, "OpRef::Get {}: {}", link, id),
             OpRef::Put(path, id, val) => write!(f, "OpRef::Put {}: {} <- {}", path, id, val),
+            OpRef::Post(path, data) => {
+                write!(f, "OpRef::Post {}({})", path, Value::Tuple(data.to_vec()))
+            }
         }
     }
 }

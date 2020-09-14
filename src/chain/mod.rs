@@ -10,7 +10,7 @@ use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
 use crate::collection::CollectionBase;
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::op::GetOp;
+use crate::value::op::OpDef;
 use crate::value::{label, Link, TCPath, Value, ValueId};
 
 mod block;
@@ -27,7 +27,7 @@ pub trait ChainClass: Class + Into<ChainType> + Send + Sync {
         path: &TCPath,
         ctype: TCPath,
         schema: Value,
-        ops: HashMap<ValueId, GetOp>,
+        ops: HashMap<ValueId, OpDef>,
     ) -> TCResult<<Self as ChainClass>::Instance>;
 }
 
@@ -82,7 +82,7 @@ impl ChainClass for ChainType {
         path: &TCPath,
         ctype: TCPath,
         schema: Value,
-        ops: HashMap<ValueId, GetOp>,
+        ops: HashMap<ValueId, OpDef>,
     ) -> TCResult<Chain> {
         let suffix = path.from_path(&Self::prefix())?;
 

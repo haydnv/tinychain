@@ -162,6 +162,10 @@ impl Txn {
 
         for name in &capture.to_vec() {
             if !graph.contains_key(&name) {
+                println!(
+                    "Txn::execute cannot capture {} since it was not defined",
+                    &name
+                );
                 return Err(error::not_found(&name));
             }
         }
@@ -191,6 +195,7 @@ impl Txn {
             unvisited.push(start.clone());
             while let Some(name) = unvisited.pop() {
                 visited.insert(name.clone());
+                println!("Txn::execute {}", &name);
 
                 let state = graph.get(&name).ok_or_else(|| error::not_found(&name))?;
                 if let State::Value(Value::Op(op)) = state {
@@ -357,10 +362,16 @@ impl Txn {
 
                 Err(error::not_implemented("Txn::resolve Method::Put"))
             }
+            Op::Ref(OpRef::Post(_link, _data)) => {
+                Err(error::not_implemented("Txn::resolve OpRef::Post"))
+            }
+            Op::Method(Method::Post(_subject, _path, _data)) => {
+                Err(error::not_implemented("Txn::resolve Method::Post"))
+            }
         }
     }
 
-    async fn mutate(self: &Arc<Self>, state: State) {
+    pub async fn mutate(self: &Arc<Self>, state: State) {
         let state: Box<dyn Transact> = match state {
             State::Chain(chain) => Box::new(chain),
             State::Cluster(cluster) => Box::new(cluster),
@@ -400,8 +411,14 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
     let mut deps = HashSet::new();
 
     match op {
-        Op::Def(OpDef::Get((tc_ref, _, _))) => {
+        Op::Def(OpDef::Get((tc_ref, _))) => {
             deps.insert(tc_ref.clone().into());
+        }
+        Op::Def(OpDef::Put((tc_ref, _, _))) => {
+            deps.insert(tc_ref.clone().into());
+        }
+        Op::Def(OpDef::Post((tc_refs, _))) => {
+            deps.extend(tc_refs.into_iter().cloned().map(ValueId::from));
         }
         Op::If((cond, then, or_else)) => {
             let cond_state = txn_state
@@ -424,6 +441,12 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(key, txn_state)?);
                 deps.extend(value_requires(value, txn_state)?);
             }
+            Method::Post(subject, _path, data) => {
+                deps.insert(subject.value_id().clone());
+                for value in data {
+                    deps.extend(value_requires(value, txn_state)?);
+                }
+            }
         },
         Op::Ref(op_ref) => match op_ref {
             OpRef::Get(_path, key) => {
@@ -432,6 +455,11 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
             OpRef::Put(_path, key, value) => {
                 deps.extend(value_requires(key, txn_state)?);
                 deps.extend(value_requires(value, txn_state)?);
+            }
+            OpRef::Post(_path, data) => {
+                for value in data {
+                    deps.extend(value_requires(value, txn_state)?);
+                }
             }
         },
     }

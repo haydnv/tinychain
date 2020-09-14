@@ -73,9 +73,17 @@ impl Cluster {
             };
 
             let data = self.state.data.read(txn.id()).await?;
+            println!("Cluster hosts {} chains at txn {}", data.len(), txn.id());
             if let Some(chain) = data.get(&path[0]) {
+                println!(
+                    "Cluster::get chain {}/{}: {}",
+                    &path[0],
+                    path.slice_from(1),
+                    &key
+                );
                 chain.get(txn, &path.slice_from(1), key, auth).await
             } else {
+                println!("Cluster has no chain at {}", path[0]);
                 Err(error::not_found(path))
             }
         }
@@ -83,12 +91,14 @@ impl Cluster {
 
     pub async fn put(
         self,
-        txn_id: TxnId,
+        txn: Arc<Txn>,
         name: PathSegment,
         chain: Chain,
         _auth: &Auth,
     ) -> TCResult<Self> {
-        let mut data = self.state.data.write(txn_id).await?;
+        println!("Cluster will now host a chain called {}", name);
+        txn.mutate(self.clone().into()).await;
+        let mut data = self.state.data.write(txn.id().clone()).await?;
         data.insert(name, chain);
         Ok(self)
     }
@@ -97,10 +107,12 @@ impl Cluster {
 #[async_trait]
 impl Transact for Cluster {
     async fn commit(&self, txn_id: &TxnId) {
+        println!("Cluster::commit!");
         self.state.data.commit(txn_id).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
+        println!("Cluster::rollback!");
         self.state.data.rollback(txn_id).await
     }
 }
