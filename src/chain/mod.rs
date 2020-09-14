@@ -7,7 +7,6 @@ use futures::TryFutureExt;
 
 use crate::auth::Auth;
 use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
-use crate::collection::CollectionBase;
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::op::OpDef;

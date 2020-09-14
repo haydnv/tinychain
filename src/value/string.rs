@@ -181,7 +181,7 @@ impl<'de> de::Visitor<'de> for ValueIdVisitor {
     {
         if let Some(key) = access.next_key::<&str>()? {
             let value: Vec<super::Value> = access.next_value()?;
-            if value.len() == 0 {
+            if value.is_empty() {
                 ValueId::from_str(key).map_err(de::Error::custom)
             } else {
                 Err(de::Error::custom("Expected ValueId but found OpRef"))
@@ -316,6 +316,7 @@ impl TryFrom<TCString> for Link {
     fn try_from(s: TCString) -> TCResult<Link> {
         match s {
             TCString::Link(l) => Ok(l),
+            TCString::UString(s) => Link::from_str(&s),
             other => Err(error::bad_request("Expected Link but found", other)),
         }
     }
