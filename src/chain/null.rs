@@ -8,7 +8,7 @@ use futures::TryFutureExt;
 use crate::auth::Auth;
 use crate::class::*;
 use crate::collection::class::*;
-use crate::collection::CollectionBaseType;
+use crate::collection::{CollectionBase, CollectionBaseType};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
