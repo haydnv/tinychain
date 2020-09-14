@@ -159,7 +159,7 @@ pub fn internal<T: fmt::Display>(cause: T) -> TCError {
 
 pub fn method_not_allowed<T: fmt::Display>(id: T) -> TCError {
     TCError::of(
-        Code::Internal,
+        Code::MethodNotAllowed,
         format!("This resource does not support this request method: {}", id),
     )
 }

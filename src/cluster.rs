@@ -3,17 +3,18 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::stream::Stream;
 
 use crate::auth::Auth;
 use crate::block::Dir;
 use crate::chain::{Chain, ChainInstance};
-use crate::class::{State, TCResult};
+use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::gateway::Gateway;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{LinkHost, PathSegment, TCPath};
-use crate::value::Value;
+use crate::value::{Value, ValueId};
 
 #[derive(Clone)]
 enum ClusterReplica {
@@ -118,6 +119,26 @@ impl Cluster {
         let mut state = self.state.write(txn.id().clone()).await?;
         state.data.insert(name, chain);
         Ok(self)
+    }
+
+    pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync>(
+        self,
+        txn: Arc<Txn>,
+        path: TCPath,
+        data: S,
+        capture: &[ValueId],
+        auth: Auth,
+    ) -> TCResult<Vec<TCStream<Value>>> {
+        if path.is_empty() {
+            Err(error::method_not_allowed("Cluster::post"))
+        } else if let Some(chain) = self.state.read(txn.id()).await?.data.get(&path[0]) {
+            println!("Cluster::post to chain {}", &path[0]);
+            chain
+                .post(txn, path.slice_from(1), data, capture, auth)
+                .await
+        } else {
+            Err(error::not_found(path))
+        }
     }
 }
 

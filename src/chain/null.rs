@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream;
+use futures::stream::{self, Stream};
 use futures::TryFutureExt;
 
 use crate::auth::Auth;
@@ -59,7 +59,7 @@ impl From<Value> for ChainState {
 #[derive(Clone)]
 pub struct NullChain {
     state: ChainState,
-    get_ops: HashMap<ValueId, OpDef>,
+    ops: HashMap<ValueId, OpDef>,
 }
 
 impl NullChain {
@@ -67,13 +67,13 @@ impl NullChain {
         txn: Arc<Txn>,
         dtype: TCPath,
         schema: Value,
-        get_ops: HashMap<ValueId, OpDef>,
+        ops: HashMap<ValueId, OpDef>,
     ) -> TCResult<NullChain> {
         let dtype = TCType::from_path(&dtype)?;
         let state = match dtype {
             TCType::Collection(ct) => match ct {
                 CollectionType::Base(ct) => {
-                    // TODO: figure out a bettern way than "Link::from(ct).path()"
+                    // TODO: figure out a better way than "Link::from(ct).path()"
                     let collection =
                         CollectionBaseType::get(txn, Link::from(ct).path(), schema).await?;
                     collection.into()
@@ -87,7 +87,7 @@ impl NullChain {
             other => return Err(error::not_implemented(format!("Chain({})", other))),
         };
 
-        Ok(NullChain { state, get_ops })
+        Ok(NullChain { state, ops })
     }
 }
 
@@ -119,7 +119,7 @@ impl ChainInstance for NullChain {
                 ))),
             }
         } else if path.len() == 1 {
-            if let Some(op) = self.get_ops.get(&path[0]) {
+            if let Some(op) = self.ops.get(&path[0]) {
                 if let OpDef::Get((in_ref, def)) = op {
                     let mut params = Vec::with_capacity(def.len() + 1);
                     params.push((in_ref.value_id().clone(), key));
@@ -135,6 +135,27 @@ impl ChainInstance for NullChain {
                 } else {
                     Err(error::method_not_allowed(path))
                 }
+            } else {
+                Err(error::not_found(path))
+            }
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
+    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync>(
+        &self,
+        _txn: Arc<Txn>,
+        path: TCPath,
+        _data: S,
+        _capture: &[ValueId],
+        _auth: Auth,
+    ) -> TCResult<Vec<TCStream<Value>>> {
+        if path.is_empty() {
+            Err(error::method_not_allowed("NullChain::post"))
+        } else if path.len() == 1 {
+            if let Some(OpDef::Post(_op)) = self.ops.get(&path[0]) {
+                Err(error::not_implemented(&path[0]))
             } else {
                 Err(error::not_found(path))
             }

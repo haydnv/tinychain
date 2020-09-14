@@ -3,6 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::stream::Stream;
 use futures::TryFutureExt;
 
 use crate::auth::Auth;
@@ -109,6 +110,15 @@ pub trait ChainInstance: Instance {
 
     async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State>;
 
+    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync>(
+        &self,
+        txn: Arc<Txn>,
+        path: TCPath,
+        data: S,
+        capture: &[ValueId],
+        auth: Auth,
+    ) -> TCResult<Vec<TCStream<Value>>>;
+
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
 }
 
@@ -134,6 +144,19 @@ impl ChainInstance for Chain {
     async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
         match self {
             Self::Null(nc) => nc.get(txn, path, key, auth).await,
+        }
+    }
+
+    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync>(
+        &self,
+        txn: Arc<Txn>,
+        path: TCPath,
+        data: S,
+        capture: &[ValueId],
+        auth: Auth,
+    ) -> TCResult<Vec<TCStream<Value>>> {
+        match self {
+            Self::Null(nc) => nc.post(txn, path, data, capture, auth).await,
         }
     }
 

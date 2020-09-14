@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::{Stream, TryFutureExt};
@@ -52,8 +53,14 @@ pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(
     capture: &[ValueId],
     auth: Auth,
 ) -> TCResult<Vec<TCStream<Value>>> {
-    if path[0] == "transact" && path.len() == 2 {
-        match path[1].as_str() {
+    let suffix = path.from_path(&TCPath::from_str("sbin")?)?;
+
+    if path.is_empty() {
+        return Err(error::method_not_allowed(path));
+    }
+
+    if suffix[0] == "transact" && suffix.len() == 2 {
+        match suffix[1].as_str() {
             "execute" => transact(txn, values, capture, auth.clone()).await,
             other => Err(error::not_found(other)),
         }

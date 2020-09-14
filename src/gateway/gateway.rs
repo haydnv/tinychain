@@ -11,7 +11,7 @@ use crate::block::Dir;
 use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::kernel;
-use crate::transaction::{Txn, TxnId};
+use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost};
 use crate::value::{Value, ValueId};
 
@@ -165,26 +165,28 @@ impl Gateway {
         }
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(
+    pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
         self: Arc<Self>,
         subject: &Link,
         data: S,
         capture: &[ValueId],
         auth: Auth,
-        txn_id: Option<TxnId>,
+        txn: Option<Arc<Txn>>,
     ) -> TCResult<Vec<TCStream<Value>>> {
         println!("Gateway::post {}", subject);
 
-        if subject.host().is_none() {
-            let workspace = self.workspace.clone();
-            let txn = match txn_id {
-                None => Txn::new(self, workspace).await?,
-                Some(_txn_id) => return Err(error::not_implemented("Gateway::Post with txn_id")),
-            };
+        let txn = if let Some(txn) = txn {
+            txn
+        } else {
+            Txn::new(self.clone(), self.workspace.clone()).await?
+        };
 
+        if subject.host().is_none() {
             let path = subject.path();
             if path[0] == "sbin" {
-                kernel::post(txn, &path.slice_from(1), data, capture, auth).await
+                kernel::post(txn, path, data, capture, auth).await
+            } else if let Some((suffix, cluster)) = self.hosted.get(path) {
+                cluster.post(txn, suffix, data, capture, auth).await
             } else {
                 Err(error::not_found(path))
             }
