@@ -3,16 +3,17 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::TryFutureExt;
 use futures::stream::{self, Stream, StreamExt};
 
 use crate::auth::Auth;
 use crate::class::*;
 use crate::collection::class::*;
-use crate::collection::{CollectionBase, CollectionBaseType};
+use crate::collection::{Collection, CollectionBase, CollectionBaseType};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::class::{ValueClass, ValueInstance};
+use crate::value::class::ValueClass;
 use crate::value::op::OpDef;
 use crate::value::{Link, TCPath, Value, ValueId, ValueType};
 
@@ -110,6 +111,11 @@ impl ChainInstance for NullChain {
 
         if path.is_empty() {
             Ok(Chain::Null(Box::new(self.clone())).into())
+        } else if path == "/object" {
+            match &self.state {
+                ChainState::Collection(collection) => Ok(Collection::Base(collection.clone()).into()),
+                ChainState::Value(value) => value.read(txn.id()).map_ok(|v| State::Value(v.clone())).await,
+            }
         } else if path.len() == 1 {
             println!(
                 "looking up {} in collection of {} ops...",

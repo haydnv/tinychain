@@ -334,12 +334,16 @@ impl Txn {
                 let subject = provided
                     .get(tc_ref.value_id())
                     .ok_or_else(|| error::not_found(tc_ref))?;
-                let key = resolve_state(&provided, &key)?;
+                let key = resolve_value(&provided, &key)?;
 
                 println!("Method::Get subject {}: {}", subject, key);
 
                 match subject {
-                    State::Value(value) => value.get(path, key.try_into()?).map(State::Value),
+                    State::Value(value) => value.get(path, key.clone()).map(State::Value),
+                    State::Chain(chain) => {
+                        println!("Txn::resolve Chain {}: {}", path, key);
+                        chain.get(self.clone(), &path, key.clone(), auth).await
+                    },
                     State::Cluster(cluster) => {
                         println!("Txn::resolve Cluster {}: {}", path, key);
                         cluster
@@ -347,7 +351,7 @@ impl Txn {
                                 self.gateway.clone(),
                                 Some(self.clone()),
                                 path,
-                                key.try_into()?,
+                                key.clone(),
                                 auth,
                             )
                             .await
