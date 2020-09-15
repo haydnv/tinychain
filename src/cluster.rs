@@ -125,11 +125,11 @@ impl Cluster {
             Txn::new(gateway.clone(), self.workspace.clone()).await?
         };
 
-        txn.mutate(self.clone().into()).await;
-
         if path == &self.path {
             let name: ValueId = key.try_into()?;
             let chain: Chain = state.try_into()?;
+
+            txn.mutate(self.clone().into()).await;
 
             println!("Cluster will now host a chain called {}", name);
             let mut state = self.state.write(txn.id().clone()).await?;
@@ -143,6 +143,7 @@ impl Cluster {
                 println!("Cluster::put {}: {} <- {}", path, key, state);
                 let cluster_state = self.state.read(txn.id()).await?;
                 if let Some(chain) = cluster_state.chains.get(&suffix[0]) {
+                    txn.mutate(chain.clone().into()).await;
                     chain.put(txn, suffix.slice_from(1), key, state).await
                 } else {
                     Err(error::not_found(suffix))

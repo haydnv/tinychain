@@ -272,7 +272,7 @@ impl TryFrom<Value> for OpDef {
         } else if let Value::Op(op) = value {
             match *op {
                 Op::Def(op_def) => Ok(op_def),
-                other => Err(error::bad_request("Expected OpDef but found", other))
+                other => Err(error::bad_request("Expected OpDef but found", other)),
             }
         } else {
             Err(error::bad_request("Expected OpDef but found", value))

@@ -174,6 +174,7 @@ impl ChainInstance for NullChain {
             let new_value: Value = new_value.try_into()?;
             let op: OpDef = new_value.try_into()?;
             let mut ops = self.ops.write(txn.id().clone()).await?;
+            println!("updating definition of {} to {}", key, op);
             ops.insert(key, op);
             Ok(())
         }
@@ -218,9 +219,11 @@ impl ChainInstance for NullChain {
 impl Transact for NullChain {
     async fn commit(&self, txn_id: &TxnId) {
         self.state.commit(txn_id).await;
+        self.ops.commit(txn_id).await;
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.state.rollback(txn_id).await;
+        self.ops.rollback(txn_id).await;
     }
 }
