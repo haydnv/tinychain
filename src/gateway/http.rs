@@ -254,7 +254,7 @@ impl Server {
 
                 let response = gateway
                     .clone()
-                    .post(
+                    .handle_post(
                         &path.clone().into(),
                         stream::iter(values.into_iter()),
                         &capture,

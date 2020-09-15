@@ -425,10 +425,10 @@ impl Txn {
                     ))),
                 }
             }
-            Op::Ref(OpRef::Post(_link, _data)) => {
+            Op::Ref(OpRef::Post(_link, _data, _capture)) => {
                 Err(error::not_implemented("Txn::resolve OpRef::Post"))
             }
-            Op::Method(Method::Post(_subject, _path, _data)) => {
+            Op::Method(Method::Post(_subject, _path, _data, _capture)) => {
                 Err(error::not_implemented("Txn::resolve Method::Post"))
             }
         }
@@ -502,7 +502,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(key, txn_state)?);
                 deps.extend(value_requires(value, txn_state)?);
             }
-            Method::Post(_subject, _path, _data) => {}
+            Method::Post(_subject, _path, _data, _capture) => {}
         },
         Op::Ref(op_ref) => match op_ref {
             OpRef::Get(_path, key) => {
@@ -512,7 +512,11 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(key, txn_state)?);
                 deps.extend(value_requires(value, txn_state)?);
             }
-            OpRef::Post(_path, _data) => {}
+            OpRef::Post(_path, data, _capture) => {
+                for (_id, provider) in data {
+                    deps.extend(value_requires(provider, txn_state)?);
+                }
+            }
         },
     }
 

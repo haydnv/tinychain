@@ -185,7 +185,7 @@ impl Gateway {
         }
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
+    pub async fn handle_post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
         self: Arc<Self>,
         subject: &Link,
         data: S,

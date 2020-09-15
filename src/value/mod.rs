@@ -575,16 +575,20 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                     )
                 };
 
-                match value.len() {
-                    0 if &path == "/" => Ok(Value::TCString(TCString::Ref(subject))),
-                    1 => Ok(op::Method::Get(subject, path, value.remove(0)).into()),
-                    2 => Ok(
-                        op::Method::Put(subject, path, value.remove(0), value.remove(0)).into(),
-                    ),
-                    _ => Err(de::Error::custom(format!(
-                        "Expected a Get or Put op, found {}",
-                        Value::Tuple(value)
-                    ))),
+                if let Ok((def, capture)) = Value::Tuple(value.to_vec()).try_into() {
+                    Ok(op::Method::Post(subject, path, def, capture).into())
+                } else {
+                    match value.len() {
+                        0 if &path == "/" => Ok(Value::TCString(TCString::Ref(subject))),
+                        1 => Ok(op::Method::Get(subject, path, value.remove(0)).into()),
+                        2 => {
+                            Ok(op::Method::Put(subject, path, value.remove(0), value.remove(0)).into())
+                        }
+                        _ => Err(de::Error::custom(format!(
+                            "Expected a Get or Put op, found {}",
+                            Value::Tuple(value)
+                        ))),
+                    }
                 }
             } else if value.len() == 1 && key.starts_with("/sbin/value/") {
                 use class::ValueClass;
@@ -593,19 +597,23 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
             } else if let Ok(link) = key.parse::<link::Link>() {
                 println!("Deserialized key {}, value len {}", link, value.len());
 
-                if value.is_empty() {
-                    Ok(Value::TCString(TCString::Link(link)))
-                } else if value.len() == 1 {
-                    let key = value.pop().unwrap();
-                    Ok(OpRef::Get(link, key).into())
-                } else if value.len() == 2 {
-                    let modifier = value.pop().unwrap();
-                    let object = value.pop().unwrap();
-                    Ok(OpRef::Put(link, object, modifier).into())
+                if let Ok((def, capture)) = Value::Tuple(value.to_vec()).try_into() {
+                    Ok(OpRef::Post(link, def, capture).into())
                 } else {
-                    Err(de::Error::custom(
-                        "This functionality is not yet implemented",
-                    ))
+                    if value.is_empty() {
+                        Ok(Value::TCString(TCString::Link(link)))
+                    } else if value.len() == 1 {
+                        let key = value.pop().unwrap();
+                        Ok(OpRef::Get(link, key).into())
+                    } else if value.len() == 2 {
+                        let modifier = value.pop().unwrap();
+                        let object = value.pop().unwrap();
+                        Ok(OpRef::Put(link, object, modifier).into())
+                    } else {
+                        Err(de::Error::custom(
+                            "This functionality is not yet implemented",
+                        ))
+                    }
                 }
             } else if let Ok(value_id) = key.parse::<string::ValueId>() {
                 if value.is_empty() {
@@ -704,14 +712,14 @@ impl Serialize for Value {
                         op::Method::Put(subject, path, key, value) => {
                             map.serialize_entry(&format!("{}{}", subject, path), &[key, value])?
                         }
-                        op::Method::Post(_subject, _path, _data) => unimplemented!(),
+                        op::Method::Post(_subject, _path, _data, _capture) => unimplemented!(),
                     },
                     Op::Ref(op_ref) => match op_ref {
                         OpRef::Get(link, key) => map.serialize_entry(&link.to_string(), &[key])?,
                         OpRef::Put(link, key, value) => {
                             map.serialize_entry(&link.to_string(), &[key, value])?
                         }
-                        OpRef::Post(_link, _data) => unimplemented!(),
+                        OpRef::Post(_link, _data, _capture) => unimplemented!(),
                     },
                 }
                 map.end()
