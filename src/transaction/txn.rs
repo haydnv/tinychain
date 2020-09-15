@@ -154,7 +154,7 @@ impl Txn {
         let mut graph = HashMap::new();
         while let Some((name, value)) = parameters.next().await {
             if let Value::TCString(TCString::Ref(tc_ref)) = value {
-                return Err(error::bad_request("Cannot assign a Ref", tc_ref));
+                return Err(error::bad_request(&format!("Tried to assign {} to a reference", name), tc_ref));
             }
 
             graph.insert(name, State::Value(value));
@@ -323,10 +323,11 @@ impl Txn {
                 }
             }
             Op::Ref(OpRef::Get(link, key)) => {
-                let _object = resolve_value(&provided, &key)?.clone();
+                let object = resolve_value(&provided, &key)?.clone();
+                println!("object {}", object);
                 self.gateway
                     .clone()
-                    .get(&link, key, auth, Some(self.clone()))
+                    .get(&link, object, auth, Some(self.clone()))
                     .await
             }
             Op::Method(Method::Get(tc_ref, path, key)) => {
@@ -335,8 +336,22 @@ impl Txn {
                     .ok_or_else(|| error::not_found(tc_ref))?;
                 let key = resolve_state(&provided, &key)?;
 
+                println!("Method::Get subject {}: {}", subject, key);
+
                 match subject {
                     State::Value(value) => value.get(path, key.try_into()?).map(State::Value),
+                    State::Cluster(cluster) => {
+                        println!("Txn::resolve Cluster {}: {}", path, key);
+                        cluster
+                            .get(
+                                self.gateway.clone(),
+                                Some(self.clone()),
+                                path,
+                                key.try_into()?,
+                                auth,
+                            )
+                            .await
+                    }
                     other => {
                         self.mutate(subject.clone()).await;
                         Err(error::not_implemented(format!(
@@ -354,13 +369,19 @@ impl Txn {
 
                 Ok(().into())
             }
-            Op::Method(Method::Put(tc_ref, _path, _key, value)) => {
-                let _subject = provided
+            Op::Method(Method::Put(tc_ref, path, key, value)) => {
+                let subject = provided
                     .get(&tc_ref.clone().into())
                     .ok_or_else(|| error::not_found(tc_ref))?;
-                let _value = resolve_state(&provided, &value)?;
+                let value = resolve_state(&provided, &value)?;
 
-                Err(error::not_implemented("Txn::resolve Method::Put"))
+                println!("Txn::resolve Method::Put {}{}: {} <- {}", subject, path, key, value);
+
+                match subject {
+                    State::Value(_) => Err(error::unsupported("Value is immutable (doesn't support PUT)")),
+                    State::Chain(chain) => chain.put(self.clone(), path, key, value).map_ok(State::from).await,
+                    other => Err(error::not_implemented(format!("Txn::resolve Method::Put for {}", other)))
+                }
             }
             Op::Ref(OpRef::Post(_link, _data)) => {
                 Err(error::not_implemented("Txn::resolve OpRef::Post"))
@@ -417,9 +438,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
         Op::Def(OpDef::Put((tc_ref, _, _))) => {
             deps.insert(tc_ref.clone());
         }
-        Op::Def(OpDef::Post((tc_refs, _))) => {
-            deps.extend(tc_refs.iter().cloned().map(ValueId::from));
-        }
+        Op::Def(OpDef::Post(_)) => {},
         Op::If((cond, then, or_else)) => {
             let cond_state = txn_state
                 .get(cond.value_id())

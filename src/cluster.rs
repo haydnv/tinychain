@@ -3,7 +3,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream::Stream;
+use futures::future;
+use futures::stream::{self, Stream, StreamExt};
 
 use crate::auth::Auth;
 use crate::block::Dir;
@@ -14,7 +15,8 @@ use crate::gateway::Gateway;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{LinkHost, PathSegment, TCPath};
-use crate::value::{Value, ValueId};
+use crate::value::op::OpRef;
+use crate::value::{label, Link, Value, ValueId};
 
 #[derive(Clone)]
 enum ClusterReplica {
@@ -133,6 +135,14 @@ impl Cluster {
             Err(error::method_not_allowed("Cluster::post"))
         } else if let Some(chain) = self.state.read(txn.id()).await?.data.get(&path[0]) {
             println!("Cluster::post to chain {}", &path[0]);
+            let get_chain = OpRef::Get(self.path.clone().join(path[0].clone().into()).into(), Value::None);
+            let data =
+                stream::once(future::ready((label("self").into(), get_chain.into()))).chain(data).map(|(name, value)| {
+                    println!("Cluster::post data {} = {}", name, value);
+                    (name, value)
+                });
+
+            println!("POST to chain {}{}", chain, path.slice_from(1));
             chain
                 .post(txn, path.slice_from(1), data, capture, auth)
                 .await

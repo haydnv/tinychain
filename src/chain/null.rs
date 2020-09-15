@@ -1,9 +1,9 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::{self, Stream, StreamExt};
-use futures::TryFutureExt;
 
 use crate::auth::Auth;
 use crate::class::*;
@@ -12,11 +12,11 @@ use crate::collection::{CollectionBase, CollectionBaseType};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::class::ValueClass;
+use crate::value::class::{ValueClass, ValueInstance};
 use crate::value::op::OpDef;
-use crate::value::{Link, TCPath, Value, ValueId};
+use crate::value::{Link, TCPath, Value, ValueId, ValueType};
 
-use super::{ChainInstance, ChainType};
+use super::{Chain, ChainInstance, ChainType};
 
 const ERR_COLLECTION_VIEW: &str = "Chain does not support CollectionView; \
 consider making a copy of the Collection first";
@@ -81,7 +81,8 @@ impl NullChain {
                 _ => return Err(error::unsupported(ERR_COLLECTION_VIEW)),
             },
             TCType::Value(vt) => {
-                let value = vt.default();
+                let value = ValueType::get(Link::from(vt).path(), schema)?;
+                println!("NullChain::create({}) wraps value {}", vt, value);
                 value.into()
             }
             other => return Err(error::not_implemented(format!("Chain({})", other))),
@@ -105,20 +106,10 @@ impl ChainInstance for NullChain {
     type Class = ChainType;
 
     async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
+        println!("NullChain::get {}: {}", path, &key);
+
         if path.is_empty() {
-            match &self.state {
-                ChainState::Collection(collection) => {
-                    collection.get_item(txn, key).map_ok(State::from).await
-                }
-                ChainState::Value(value) if key == Value::None => {
-                    let value = value.read(txn.id()).await?;
-                    Ok(State::Value(value.clone()))
-                }
-                ChainState::Value(_) => Err(error::not_found(format!(
-                    "Value has no such property {}",
-                    key
-                ))),
-            }
+            Ok(Chain::Null(Box::new(self.clone())).into())
         } else if path.len() == 1 {
             println!(
                 "looking up {} in collection of {} ops...",
@@ -153,6 +144,26 @@ impl ChainInstance for NullChain {
         }
     }
 
+    async fn put(&self, txn: Arc<Txn>, path: TCPath, key: Value, new_value: State) -> TCResult<()> {
+        match &self.state {
+            ChainState::Collection(_) => Err(error::not_implemented("NullChain::put")),
+            ChainState::Value(value) => {
+                if path.is_empty() {
+                    if key == Value::None {
+                        let mut value = value.write(txn.id().clone()).await?;
+                        new_value.expect(value.class().into(), format!("Chain wraps {}", value.class()))?;
+                        *value = new_value.try_into()?;
+                        Ok(())
+                    } else {
+                        Err(error::bad_request("Value has no such attribute", key))
+                    }
+                } else {
+                    Err(error::bad_request("Value contains no such resource", path))
+                }
+            }
+        }
+    }
+
     async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
         &self,
         txn: Arc<Txn>,
@@ -164,7 +175,8 @@ impl ChainInstance for NullChain {
         if path.is_empty() {
             Err(error::method_not_allowed("NullChain::post"))
         } else if path.len() == 1 {
-            if let Some(OpDef::Post((_param_names, def))) = self.ops.get(&path[0]) {
+            if let Some(OpDef::Post(def)) = self.ops.get(&path[0]) {
+                println!("Chain::post {} def: {}", path, def.iter().map(|(name, op)| format!("{}: {}", name, op)).collect::<Vec<String>>().join(", "));
                 let data = data.chain(stream::iter(def.to_vec()));
                 txn.execute_and_stream(data, capture, auth).await
             } else {

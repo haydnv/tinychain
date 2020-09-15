@@ -231,7 +231,7 @@ impl fmt::Display for OpType {
 pub type Cond = (TCRef, Value, Value);
 pub type GetOp = (ValueId, Vec<(ValueId, Value)>);
 pub type PutOp = (ValueId, ValueId, Vec<(ValueId, Value)>);
-pub type PostOp = (Vec<ValueId>, Vec<(ValueId, Value)>); // TODO: are param names necessary here?
+pub type PostOp = Vec<(ValueId, Value)>;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDef {

@@ -21,10 +21,6 @@ pub trait ValueInstance: Instance + Default + Sized {
 pub trait ValueClass: Class {
     type Instance: ValueInstance;
 
-    fn default(&self) -> <Self as ValueClass>::Instance {
-        <Self as ValueClass>::Instance::default()
-    }
-
     fn get(
         path: &TCPath,
         value: <Self as ValueClass>::Instance,
