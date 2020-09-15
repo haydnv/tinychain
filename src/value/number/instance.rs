@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::ops::{Add, Mul};
+use std::ops::{Add, Mul, Sub};
 
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
@@ -100,6 +100,17 @@ impl Mul for Boolean {
     fn mul(self, other: Boolean) -> Self {
         match (self, other) {
             (Boolean(true), Boolean(true)) => Boolean(true),
+            _ => Boolean(false),
+        }
+    }
+}
+
+impl Sub for Boolean {
+    type Output = Self;
+
+    fn sub(self, other: Boolean) -> Self::Output {
+        match (self, other) {
+            (left, Boolean(false)) => left,
             _ => Boolean(false),
         }
     }
@@ -228,6 +239,21 @@ impl Mul for Complex {
                 Self::C64(l * r)
             }
             (l, r) => r * l,
+        }
+    }
+}
+
+impl Sub for Complex {
+    type Output = Self;
+
+    fn sub(self, other: Complex) -> Self {
+        match (self, other) {
+            (Self::C32(l), Self::C32(r)) => Self::C32(l - r),
+            (l, r) => {
+                let l: num::Complex<f64> = l.into();
+                let r: num::Complex<f64> = r.into();
+                Self::C64(l - r)
+            }
         }
     }
 }
@@ -466,6 +492,21 @@ impl Mul for Float {
             (Self::F64(l), Self::F64(r)) => Self::F64(l * r),
             (Self::F64(l), Self::F32(r)) => Self::F64(l * r as f64),
             (l, r) => (r * l),
+        }
+    }
+}
+
+impl Sub for Float {
+    type Output = Self;
+
+    fn sub(self, other: Float) -> Self {
+        match (self, other) {
+            (Self::F32(l), Self::F32(r)) => Self::F32(l - r),
+            (l, r) => {
+                let l: f64 = l.into();
+                let r: f64 = r.into();
+                Self::F64(l - r)
+            }
         }
     }
 }
@@ -734,6 +775,24 @@ impl Mul for Int {
             (Self::I32(l), Self::I16(r)) => Self::I32(l * r as i32),
             (Self::I16(l), Self::I16(r)) => Self::I16(l * r),
             (l, r) => r * l,
+        }
+    }
+}
+
+impl Sub for Int {
+    type Output = Self;
+
+    fn sub(self, other: Int) -> Self {
+        match (self, other) {
+            (Self::I64(l), Self::I64(r)) => Self::I64(l - r),
+            (Self::I64(l), Self::I32(r)) => Self::I64(l - r as i64),
+            (Self::I64(l), Self::I16(r)) => Self::I64(l - r as i64),
+            (Self::I32(l), Self::I32(r)) => Self::I32(l - r),
+            (Self::I32(l), Self::I16(r)) => Self::I32(l - r as i32),
+            (Self::I16(l), Self::I16(r)) => Self::I16(l - r),
+            (Self::I16(l), Self::I32(r)) => Self::I32(l as i32 - r),
+            (Self::I16(l), Self::I64(r)) => Self::I64(l as i64 - r),
+            (Self::I32(l), Self::I64(r)) => Self::I64(l as i64 - r),
         }
     }
 }
@@ -1008,6 +1067,36 @@ impl Mul for UInt {
     }
 }
 
+impl Sub for UInt {
+    type Output = Self;
+
+    fn sub(self, other: UInt) -> Self {
+        match (self, other) {
+            (UInt::U64(l), UInt::U64(r)) => UInt::U64(l - r),
+            (UInt::U64(l), UInt::U32(r)) => UInt::U64(l - r as u64),
+            (UInt::U64(l), UInt::U16(r)) => UInt::U64(l - r as u64),
+            (UInt::U64(l), UInt::U8(r)) => UInt::U64(l - r as u64),
+            (UInt::U32(l), UInt::U32(r)) => UInt::U32(l - r),
+            (UInt::U32(l), UInt::U16(r)) => UInt::U32(l - r as u32),
+            (UInt::U32(l), UInt::U8(r)) => UInt::U32(l - r as u32),
+            (UInt::U16(l), UInt::U16(r)) => UInt::U16(l - r),
+            (UInt::U16(l), UInt::U8(r)) => UInt::U16(l - r as u16),
+            (UInt::U8(l), UInt::U8(r)) => UInt::U8(l - r),
+            (UInt::U8(l), UInt::U16(r)) => UInt::U16(l as u16 - r),
+            (UInt::U8(l), UInt::U32(r)) => UInt::U32(l as u32 - r),
+            (UInt::U8(l), UInt::U64(r)) => UInt::U64(l as u64 - r),
+            (UInt::U16(l), r) => {
+                let r: u64 = r.into();
+                UInt::U16(l - r as u16)
+            }
+            (UInt::U32(l), r) => {
+                let r: u64 = r.into();
+                UInt::U32(l - r as u32)
+            }
+        }
+    }
+}
+
 impl Eq for UInt {}
 
 impl Ord for UInt {
@@ -1116,13 +1205,13 @@ impl TryFrom<UInt> for u32 {
     }
 }
 
-impl TryFrom<UInt> for u64 {
-    type Error = error::TCError;
-
-    fn try_from(u: UInt) -> TCResult<u64> {
+impl From<UInt> for u64 {
+    fn from(u: UInt) -> u64 {
         match u {
-            UInt::U64(u) => Ok(u),
-            other => Err(error::bad_request("Expected a UInt64 but found", other)),
+            UInt::U64(u) => u,
+            UInt::U32(u) => u as u64,
+            UInt::U16(u) => u as u64,
+            UInt::U8(u) => u as u64,
         }
     }
 }
@@ -1225,6 +1314,7 @@ impl ValueInstance for Number {
             match path[0].as_str() {
                 "add" => Ok(Add::add(self.clone(), key.try_into()?)),
                 "mul" => Ok(Mul::mul(self.clone(), key.try_into()?)),
+                "sub" => Ok(Sub::sub(self.clone(), key.try_into()?)),
                 other => Err(error::not_found(other)),
             }
         } else {
@@ -1390,6 +1480,39 @@ impl Mul for Number {
     }
 }
 
+impl Sub for Number {
+    type Output = Self;
+
+    fn sub(self, other: Number) -> Self {
+        let dtype = Ord::max(self.class(), other.class());
+
+        use NumberType as NT;
+
+        match dtype {
+            NT::Bool => {
+                let this: Boolean = self.cast_into();
+                (this - other.cast_into()).into()
+            }
+            NT::Complex(_) => {
+                let this: Complex = self.cast_into();
+                (this - other.cast_into()).into()
+            }
+            NT::Float(_) => {
+                let this: Float = self.cast_into();
+                (this - other.cast_into()).into()
+            }
+            NT::Int(_) => {
+                let this: Int = self.cast_into();
+                (this - other.cast_into()).into()
+            }
+            NT::UInt(_) => {
+                let this: UInt = self.cast_into();
+                (this - other.cast_into()).into()
+            }
+        }
+    }
+}
+
 impl Default for Number {
     fn default() -> Number {
         Number::Bool(Boolean::default())
@@ -1509,7 +1632,7 @@ impl TryFrom<Number> for u64 {
 
     fn try_from(n: Number) -> TCResult<u64> {
         let u: UInt = n.try_into()?;
-        u.try_into()
+        Ok(u.into())
     }
 }
 

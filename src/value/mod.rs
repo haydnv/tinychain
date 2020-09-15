@@ -591,9 +591,9 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                     match value.len() {
                         0 if &path == "/" => Ok(Value::TCString(TCString::Ref(subject))),
                         1 => Ok(op::Method::Get(subject, path, value.remove(0)).into()),
-                        2 => {
-                            Ok(op::Method::Put(subject, path, value.remove(0), value.remove(0)).into())
-                        }
+                        2 => Ok(
+                            op::Method::Put(subject, path, value.remove(0), value.remove(0)).into(),
+                        ),
                         _ => Err(de::Error::custom(format!(
                             "Expected a Get or Put op, found {}",
                             Value::Tuple(value)
@@ -646,7 +646,9 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
 
                     Ok(op::Method::Post(subject, path, value.into_iter().collect()).into())
                 } else {
-                    Err(de::Error::custom(error::not_implemented("Post deserialization")))
+                    Err(de::Error::custom(error::not_implemented(
+                        "Post deserialization",
+                    )))
                 }
             } else {
                 Err(de::Error::custom("Unable to parse map entry"))

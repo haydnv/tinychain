@@ -1018,7 +1018,7 @@ impl Array {
                     UIntType::U8 => U8(vec_try_into(values)?.into()),
                     UIntType::U16 => U16(vec_try_into(values)?.into()),
                     UIntType::U32 => U32(vec_try_into(values)?.into()),
-                    UIntType::U64 => U64(vec_try_into(values)?.into()),
+                    UIntType::U64 => U64(vec_into(values).into()),
                 }
             }
         };

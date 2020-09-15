@@ -120,7 +120,11 @@ impl ChainInstance for NullChain {
                 ))),
             }
         } else if path.len() == 1 {
-            println!("looking up {} in collection of {} ops...", path, self.ops.len());
+            println!(
+                "looking up {} in collection of {} ops...",
+                path,
+                self.ops.len()
+            );
             for name in self.ops.keys() {
                 println!("available op: {}", name);
             }

@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::{Add, Mul};
+use std::ops::{Add, Mul, Sub};
 
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +32,7 @@ pub trait NumberInstance:
     ValueInstance
     + Add<Output = Self>
     + Mul<Output = Self>
+    + Sub<Output = Self>
     + Sized
     + PartialOrd
     + From<Boolean>
@@ -100,6 +101,10 @@ pub trait NumberInstance:
     {
         let this: Boolean = self.cast_into();
         this.not().into()
+    }
+
+    fn sub(self, other: Self) -> Self {
+        self - other
     }
 
     fn or(self, other: Self) -> Self

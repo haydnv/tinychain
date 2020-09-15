@@ -331,7 +331,7 @@ impl fmt::Display for OpRef {
         match self {
             OpRef::Get(link, id) => write!(f, "OpRef::Get {}: {}", link, id),
             OpRef::Put(path, id, val) => write!(f, "OpRef::Put {}: {} <- {}", path, id, val),
-            OpRef::Post(path, _) => write!(f, "OpRef::Post {}", path)
+            OpRef::Post(path, _) => write!(f, "OpRef::Post {}", path),
         }
     }
 }
