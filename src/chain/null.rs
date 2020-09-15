@@ -3,8 +3,8 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::TryFutureExt;
 use futures::stream::{self, Stream, StreamExt};
+use futures::TryFutureExt;
 
 use crate::auth::Auth;
 use crate::class::*;
@@ -60,7 +60,7 @@ impl From<Value> for ChainState {
 #[derive(Clone)]
 pub struct NullChain {
     state: ChainState,
-    ops: HashMap<ValueId, OpDef>,
+    ops: TxnLock<Mutable<HashMap<ValueId, OpDef>>>,
 }
 
 impl NullChain {
@@ -90,7 +90,10 @@ impl NullChain {
         };
 
         println!("new chain with {} ops", ops.len());
-        Ok(NullChain { state, ops })
+        Ok(NullChain {
+            state,
+            ops: TxnLock::new("NullChain ops", ops.into()),
+        })
     }
 }
 
@@ -113,20 +116,18 @@ impl ChainInstance for NullChain {
             Ok(Chain::Null(Box::new(self.clone())).into())
         } else if path == "/object" {
             match &self.state {
-                ChainState::Collection(collection) => Ok(Collection::Base(collection.clone()).into()),
-                ChainState::Value(value) => value.read(txn.id()).map_ok(|v| State::Value(v.clone())).await,
+                ChainState::Collection(collection) => {
+                    Ok(Collection::Base(collection.clone()).into())
+                }
+                ChainState::Value(value) => {
+                    value
+                        .read(txn.id())
+                        .map_ok(|v| State::Value(v.clone()))
+                        .await
+                }
             }
         } else if path.len() == 1 {
-            println!(
-                "looking up {} in collection of {} ops...",
-                path,
-                self.ops.len()
-            );
-            for name in self.ops.keys() {
-                println!("available op: {}", name);
-            }
-
-            if let Some(op) = self.ops.get(&path[0]) {
+            if let Some(op) = self.ops.read(txn.id()).await?.get(&path[0]) {
                 if let OpDef::Get((key_name, def)) = op {
                     let mut params = Vec::with_capacity(def.len() + 1);
                     params.push((key_name.clone(), key));
@@ -157,7 +158,10 @@ impl ChainInstance for NullChain {
                 ChainState::Value(value) => {
                     if key == Value::None {
                         let mut value = value.write(txn.id().clone()).await?;
-                        new_value.expect(value.class().into(), format!("Chain wraps {}", value.class()))?;
+                        new_value.expect(
+                            value.class().into(),
+                            format!("Chain wraps {}", value.class()),
+                        )?;
                         *value = new_value.try_into()?;
                         Ok(())
                     } else {
@@ -166,7 +170,12 @@ impl ChainInstance for NullChain {
                 }
             }
         } else {
-            Err(error::not_implemented("NullChain::put"))
+            let key: ValueId = key.try_into()?;
+            let new_value: Value = new_value.try_into()?;
+            let op: OpDef = new_value.try_into()?;
+            let mut ops = self.ops.write(txn.id().clone()).await?;
+            ops.insert(key, op);
+            Ok(())
         }
     }
 
@@ -181,8 +190,15 @@ impl ChainInstance for NullChain {
         if path.is_empty() {
             Err(error::method_not_allowed("NullChain::post"))
         } else if path.len() == 1 {
-            if let Some(OpDef::Post(def)) = self.ops.get(&path[0]) {
-                println!("Chain::post {} def: {}", path, def.iter().map(|(name, op)| format!("{}: {}", name, op)).collect::<Vec<String>>().join(", "));
+            if let Some(OpDef::Post(def)) = self.ops.read(txn.id()).await?.get(&path[0]) {
+                println!(
+                    "Chain::post {} def: {}",
+                    path,
+                    def.iter()
+                        .map(|(name, op)| format!("{}: {}", name, op))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                );
                 let data = data.chain(stream::iter(def.to_vec()));
                 txn.execute_and_stream(data, capture, auth).await
             } else {

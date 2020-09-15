@@ -135,9 +135,13 @@ impl Cluster {
             Err(error::method_not_allowed("Cluster::post"))
         } else if let Some(chain) = self.state.read(txn.id()).await?.data.get(&path[0]) {
             println!("Cluster::post to chain {}", &path[0]);
-            let get_chain = OpRef::Get(self.path.clone().join(path[0].clone().into()).into(), Value::None);
-            let data =
-                stream::once(future::ready((label("self").into(), get_chain.into()))).chain(data).map(|(name, value)| {
+            let get_chain = OpRef::Get(
+                self.path.clone().join(path[0].clone().into()).into(),
+                Value::None,
+            );
+            let data = stream::once(future::ready((label("self").into(), get_chain.into())))
+                .chain(data)
+                .map(|(name, value)| {
                     println!("Cluster::post data {} = {}", name, value);
                     (name, value)
                 });
