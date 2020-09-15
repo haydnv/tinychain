@@ -231,7 +231,7 @@ impl fmt::Display for OpType {
 pub type Cond = (TCRef, Value, Value);
 pub type GetOp = (ValueId, Vec<(ValueId, Value)>);
 pub type PutOp = (ValueId, ValueId, Vec<(ValueId, Value)>);
-pub type PostOp = (Vec<ValueId>, Vec<(ValueId, Value)>);
+pub type PostOp = (Vec<ValueId>, Vec<(ValueId, Value)>); // TODO: are param names necessary here?
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDef {
@@ -282,7 +282,7 @@ impl fmt::Display for OpDef {
 pub enum Method {
     Get(TCRef, TCPath, Value),
     Put(TCRef, TCPath, Value, Value),
-    Post(TCRef, TCPath, Vec<Value>),
+    Post(TCRef, TCPath, Vec<(ValueId, Value)>),
 }
 
 impl Instance for Method {
@@ -311,7 +311,7 @@ impl fmt::Display for Method {
 pub enum OpRef {
     Get(Link, Value),
     Put(Link, Value, Value),
-    Post(Link, Vec<Value>),
+    Post(Link, Vec<(ValueId, Value)>),
 }
 
 impl Instance for OpRef {
@@ -331,9 +331,7 @@ impl fmt::Display for OpRef {
         match self {
             OpRef::Get(link, id) => write!(f, "OpRef::Get {}: {}", link, id),
             OpRef::Put(path, id, val) => write!(f, "OpRef::Put {}: {} <- {}", path, id, val),
-            OpRef::Post(path, data) => {
-                write!(f, "OpRef::Post {}({})", path, Value::Tuple(data.to_vec()))
-            }
+            OpRef::Post(path, _) => write!(f, "OpRef::Post {}", path)
         }
     }
 }

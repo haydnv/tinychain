@@ -441,12 +441,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(key, txn_state)?);
                 deps.extend(value_requires(value, txn_state)?);
             }
-            Method::Post(subject, _path, data) => {
-                deps.insert(subject.value_id().clone());
-                for value in data {
-                    deps.extend(value_requires(value, txn_state)?);
-                }
-            }
+            Method::Post(_subject, _path, _data) => {}
         },
         Op::Ref(op_ref) => match op_ref {
             OpRef::Get(_path, key) => {
@@ -456,11 +451,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(key, txn_state)?);
                 deps.extend(value_requires(value, txn_state)?);
             }
-            OpRef::Post(_path, data) => {
-                for value in data {
-                    deps.extend(value_requires(value, txn_state)?);
-                }
-            }
+            OpRef::Post(_path, _data) => {}
         },
     }
 

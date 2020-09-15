@@ -160,7 +160,7 @@ impl ChainInstance for NullChain {
         if path.is_empty() {
             Err(error::method_not_allowed("NullChain::post"))
         } else if path.len() == 1 {
-            if let Some(OpDef::Post((param_names, def))) = self.ops.get(&path[0]) {
+            if let Some(OpDef::Post((_param_names, def))) = self.ops.get(&path[0]) {
                 let data = data.chain(stream::iter(def.to_vec()));
                 txn.execute_and_stream(data, capture, auth).await
             } else {
