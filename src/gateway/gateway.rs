@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use futures::future::TryFutureExt;
-use futures::stream::Stream;
+use futures::future::{FutureExt, TryFutureExt};
+use futures::stream::{FuturesUnordered, Stream, StreamExt};
 
 use crate::auth::{Auth, Token};
 use crate::block::Dir;
@@ -86,6 +86,32 @@ impl Gateway {
         server.clone().listen(self).await
     }
 
+    pub async fn discover(
+        self: Arc<Self>,
+        subject: &Link,
+        auth: Auth,
+        txn: Option<Arc<Txn>>,
+    ) -> TCResult<Vec<LinkHost>> {
+        let mut requests = FuturesUnordered::new();
+        for peer in &self.peers {
+            requests.push(
+                self.client
+                    .get(subject, &Value::None, &auth, &txn)
+                    .map(move |response| (peer.clone(), response)),
+            );
+        }
+
+        let mut found = Vec::with_capacity(self.peers.len());
+        while let Some((peer, response)) = requests.next().await {
+            match (peer, response) {
+                (peer, Ok(_)) => found.push(peer),
+                (peer, Err(cause)) => println!("GET {}{}: {}", peer, subject, cause),
+            }
+        }
+
+        Err(error::not_implemented("Gateway::discover"))
+    }
+
     pub async fn get(
         self: Arc<Self>,
         subject: &Link,
@@ -108,7 +134,7 @@ impl Gateway {
                         let dest: Link = (host.clone(), path.clone()).into();
                         return self
                             .client
-                            .get(dest, &key, auth, txn)
+                            .get(&dest, &key, &auth, &txn)
                             .map_ok(State::Value)
                             .await;
                     }

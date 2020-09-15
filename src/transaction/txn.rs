@@ -184,7 +184,12 @@ impl Txn {
                 .iter()
                 .filter_map(|name| graph.get_key_value(name))
                 .filter_map(|(name, state)| match state {
-                    State::Value(Value::Op(_)) => Some(name),
+                    State::Value(Value::Op(op)) => match **op {
+                        Op::Def(OpDef::Get(_)) => None,
+                        Op::Def(OpDef::Put(_)) => None,
+                        Op::Def(OpDef::Post(_)) => None,
+                        _ => Some(name),
+                    },
                     _ => None,
                 })
                 .next();
@@ -197,12 +202,26 @@ impl Txn {
 
             unvisited.push(start.clone());
             while let Some(name) = unvisited.pop() {
-                visited.insert(name.clone());
-                println!("Txn::execute {}", &name);
+                if visited.contains(&name) {
+                    println!("Already visited {}", name);
+                    continue;
+                } else {
+                    visited.insert(name.clone());
+                }
+
+                println!("Txn::execute {} (#{})", &name, visited.len());
 
                 let state = graph.get(&name).ok_or_else(|| error::not_found(&name))?;
                 if let State::Value(Value::Op(op)) = state {
                     println!("Provider: {}", &op);
+
+                    if let Op::Def(_) = **op {
+                        if let Op::Def(OpDef::If(_)) = **op {
+                            // pass
+                        } else {
+                            continue;
+                        }
+                    }
 
                     let mut ready = true;
                     for dep in requires(op, &graph)? {
@@ -307,24 +326,26 @@ impl Txn {
         println!("Txn::resolve {}", provider);
 
         match provider {
-            Op::Def(OpDef::If((cond, then, or_else))) => {
-                let cond = provided
-                    .get(cond.value_id())
-                    .ok_or_else(|| error::not_found(cond))?;
-                if let State::Value(Value::Number(Number::Bool(cond))) = cond {
-                    if cond.into() {
-                        Ok(State::Value(then))
+            Op::Def(op_def) => match op_def {
+                OpDef::If((cond, then, or_else)) => {
+                    let cond = provided
+                        .get(cond.value_id())
+                        .ok_or_else(|| error::not_found(cond))?;
+                    if let State::Value(Value::Number(Number::Bool(cond))) = cond {
+                        if cond.into() {
+                            Ok(State::Value(then))
+                        } else {
+                            Ok(State::Value(or_else))
+                        }
                     } else {
-                        Ok(State::Value(or_else))
+                        Err(error::bad_request(
+                            "Expected a boolean condition but found",
+                            cond,
+                        ))
                     }
-                } else {
-                    Err(error::bad_request(
-                        "Expected a boolean condition but found",
-                        cond,
-                    ))
                 }
-            }
-            Op::Def(_) => Err(error::not_implemented("Txn::resolve OpDef")),
+                other => Err(error::not_implemented(format!("Txn::resolve {}", other))),
+            },
             Op::Ref(OpRef::Get(link, key)) => {
                 let object = resolve_value(&provided, &key)?.clone();
                 println!("object {}", object);

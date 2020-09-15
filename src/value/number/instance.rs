@@ -1313,6 +1313,7 @@ impl ValueInstance for Number {
         if path.len() == 1 {
             match path[0].as_str() {
                 "add" => Ok(Add::add(self.clone(), key.try_into()?)),
+                "eq" => Ok(Number::Bool(Boolean(self == &Number::try_from(key)?))),
                 "mul" => Ok(Mul::mul(self.clone(), key.try_into()?)),
                 "sub" => Ok(Sub::sub(self.clone(), key.try_into()?)),
                 other => Err(error::not_found(other)),

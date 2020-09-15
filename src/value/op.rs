@@ -195,11 +195,18 @@ impl Class for OpType {
 impl ValueClass for OpType {
     type Instance = Op;
 
-    fn get(
-        _path: &TCPath,
-        _value: <Self as ValueClass>::Instance,
-    ) -> TCResult<<Self as ValueClass>::Instance> {
-        Err(error::unsupported("Op does not support casting"))
+    fn get(path: &TCPath, op: Op) -> TCResult<Op> {
+        let class = Link::from(op.class());
+        if path == class.path() {
+            Ok(op)
+        } else {
+            Err(error::unsupported(format!(
+                "Cannot cast {} to {}; class is {}",
+                op,
+                path,
+                class.path()
+            )))
+        }
     }
 
     fn size(self) -> Option<usize> {
@@ -397,6 +404,18 @@ impl TryFrom<Op> for GetOp {
         match op {
             Op::Def(OpDef::Get(get_op)) => Ok(get_op),
             other => Err(error::bad_request("Expected GetOp but found", other)),
+        }
+    }
+}
+
+impl TryFrom<Value> for Op {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<Op> {
+        match v {
+            Value::Op(op) => Ok(*op),
+            Value::Tuple(data) => OpDef::try_from(Value::Tuple(data)).map(Op::Def),
+            other => Err(error::bad_request("Expected Op but found", other)),
         }
     }
 }

@@ -267,6 +267,16 @@ impl TryFrom<Link> for LinkHost {
     }
 }
 
+impl fmt::Display for LinkHost {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(port) = self.port() {
+            write!(f, "{}://{}:{}", self.protocol, self.address, port)
+        } else {
+            write!(f, "{}://{}", self.protocol, self.address)
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct Link {
     host: Option<LinkHost>,
@@ -374,10 +384,7 @@ impl FromStr for Link {
 impl fmt::Display for Link {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(host) = &self.host {
-            write!(f, "{}://{}", host.protocol(), host.address())?;
-            if let Some(port) = host.port() {
-                write!(f, ":{}", port)?;
-            }
+            write!(f, "{}", host)?;
         }
 
         write!(f, "{}", self.path)

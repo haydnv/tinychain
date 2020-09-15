@@ -4,14 +4,13 @@ use std::task::{self, Poll};
 
 use futures::stream::{Fuse, Stream, StreamExt};
 use pin_project::pin_project;
+use serde::Serialize;
 
 use crate::class::TCResult;
 use crate::error;
 
-use super::Value;
-
 #[pin_project]
-pub struct JsonListStream<S: Stream<Item = Value>> {
+pub struct JsonListStream<I: Serialize, S: Stream<Item = I>> {
     #[pin]
     source: Fuse<S>,
 
@@ -19,7 +18,7 @@ pub struct JsonListStream<S: Stream<Item = Value>> {
     next: Option<TCResult<String>>,
 }
 
-impl<S: Stream<Item = Value>> Stream for JsonListStream<S> {
+impl<I: Serialize, S: Stream<Item = I>> Stream for JsonListStream<I, S> {
     type Item = TCResult<String>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut task::Context) -> Poll<Option<Self::Item>> {
@@ -67,8 +66,8 @@ impl<S: Stream<Item = Value>> Stream for JsonListStream<S> {
     }
 }
 
-impl<S: Stream<Item = Value>> From<S> for JsonListStream<S> {
-    fn from(s: S) -> JsonListStream<S> {
+impl<I: Serialize, S: Stream<Item = I>> From<S> for JsonListStream<I, S> {
+    fn from(s: S) -> JsonListStream<I, S> {
         JsonListStream {
             source: s.fuse(),
             started: false,

@@ -47,10 +47,10 @@ impl Client {
 
     pub async fn get(
         &self,
-        link: Link,
+        link: &Link,
         key: &Value,
-        auth: Auth,
-        txn: Option<Arc<Txn>>,
+        auth: &Auth,
+        txn: &Option<Arc<Txn>>,
     ) -> TCResult<Value> {
         if auth.is_some() {
             return Err(error::not_implemented("Authorization"));
@@ -83,6 +83,65 @@ impl Client {
             .map_err(|err| error::bad_request("Unable to encode link URI", err))?;
 
         match self.client.get(uri).await {
+            Err(cause) => Err(error::transport(cause)),
+            Ok(response) if response.status() != 200 => {
+                let status = response.status().as_u16();
+                let msg = if let Ok(msg) = hyper::body::to_bytes(response).await {
+                    if let Ok(msg) = String::from_utf8(msg.to_vec()) {
+                        msg
+                    } else {
+                        ERR_DECODE.to_string()
+                    }
+                } else {
+                    ERR_DECODE.to_string()
+                };
+
+                Err(error::TCError::of(status.into(), msg))
+            }
+            Ok(mut response) => deserialize_body(response.body_mut(), self.response_limit).await,
+        }
+    }
+
+    pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + 'static>(
+        &self,
+        link: Link,
+        data: S,
+        capture: &[ValueId],
+        auth: Auth,
+        txn: Option<Arc<Txn>>,
+    ) -> TCResult<Value> {
+        if auth.is_some() {
+            return Err(error::not_implemented("Authorization"));
+        }
+
+        if txn.is_some() {
+            return Err(error::not_implemented("Cross-service transactions"));
+        }
+
+        let host = link
+            .host()
+            .as_ref()
+            .ok_or_else(|| error::bad_request("No host to resolve", &link))?;
+
+        let host = if let Some(port) = host.port() {
+            format!("{}:{}", host.address(), port)
+        } else {
+            host.address().to_string()
+        };
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "http://{}{}?capture={}",
+                host,
+                link.path().to_string(),
+                serde_json::to_string(capture)?
+            ))
+            .header("content-type", "application/json")
+            .body(Body::wrap_stream(JsonListStream::from(data)))
+            .map_err(error::internal)?;
+
+        match self.client.request(req).await {
             Err(cause) => Err(error::transport(cause)),
             Ok(response) if response.status() != 200 => {
                 let status = response.status().as_u16();

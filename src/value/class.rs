@@ -8,6 +8,7 @@ use super::link::TCPath;
 use super::{label, Link, Value};
 
 pub type NumberType = super::number::class::NumberType;
+pub type OpType = super::op::OpType;
 pub type StringType = super::string::StringType;
 
 pub trait ValueInstance: Instance + Default + Sized {
@@ -105,7 +106,9 @@ impl ValueClass for ValueType {
             "bytes" if suffix.len() == 1 => Err(error::not_implemented("/sbin/value/bytes")),
             "number" => NumberType::get(path, value.try_into()?).map(Value::Number),
             "string" => StringType::get(path, value.try_into()?).map(Value::TCString),
-            "op" => Err(error::not_implemented("/sbin/value/op")),
+            "op" => OpType::get(path, value.try_into()?)
+                .map(Box::new)
+                .map(Value::Op),
             "tuple" => Err(error::not_implemented("/sbin/value/tuple")),
             other => Err(error::not_found(other)),
         }

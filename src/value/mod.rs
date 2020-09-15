@@ -279,17 +279,6 @@ impl TryFrom<Value> for number::NumberType {
     }
 }
 
-impl TryFrom<Value> for Op {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<Op> {
-        match v {
-            Value::Op(op) => Ok(*op),
-            other => Err(error::bad_request("Expected Op but found", other)),
-        }
-    }
-}
-
 impl TryFrom<Value> for usize {
     type Error = error::TCError;
 
@@ -598,13 +587,10 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                             Value::Tuple(value)
                         ))),
                     }
-                } else if key == "/sbin/value/none" {
-                    // TODO: figure out a better way to handle null values
-                    Ok(Value::None)
-                } else if key == "/sbin/value/op/if" {
-                    let (cond, then, or_else) =
-                        Value::Tuple(value).try_into().map_err(de::Error::custom)?;
-                    Ok(Op::Def(op::OpDef::If((cond, then, or_else))).into())
+                } else if value.len() == 1 && key.starts_with("/sbin/value/") {
+                    use class::ValueClass;
+                    let vt = TCPath::from_str(key).map_err(de::Error::custom)?;
+                    ValueType::get(&vt, value.pop().unwrap()).map_err(de::Error::custom)
                 } else if let Ok(link) = key.parse::<link::Link>() {
                     if value.is_empty() {
                         Ok(Value::TCString(TCString::Link(link)))
@@ -633,10 +619,13 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                     ))
                 }
             } else {
-                Err(de::Error::custom("Unable to parse map entry"))
+                Err(de::Error::custom(format!(
+                    "Unable to parse map entry: not a list of Values for key {}",
+                    key
+                )))
             }
         } else {
-            Err(de::Error::custom("Unable to parse map entry"))
+            Err(de::Error::custom("Unable to parse map entry: invalid key"))
         }
     }
 
@@ -702,11 +691,16 @@ impl Serialize for Value {
             Value::Op(op) => {
                 let mut map = s.serialize_map(Some(1))?;
                 match &**op {
-                    Op::Def(op::OpDef::If((cond, then, or_else))) => map.serialize_entry(
-                        Link::from(op::OpDefType::If).path(),
-                        &[&Value::from(cond.clone()), then, or_else],
-                    )?,
-                    Op::Def(_) => unimplemented!(),
+                    Op::Def(op_def) => match op_def {
+                        op::OpDef::If((cond, then, or_else)) => map.serialize_entry(
+                            Link::from(op::OpDefType::If).path(),
+                            &[&Value::from(cond.clone()), then, or_else],
+                        )?,
+                        op::OpDef::Post(form) => {
+                            map.serialize_entry(Link::from(op::OpDefType::Post).path(), &form)?
+                        }
+                        _ => unimplemented!(),
+                    },
                     Op::Method(method) => match method {
                         op::Method::Get(subject, path, key) => {
                             map.serialize_entry(&format!("{}{}", subject, path), &[key])?
