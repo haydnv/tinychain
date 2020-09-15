@@ -139,6 +139,7 @@ impl fmt::Display for TCError {
 }
 
 pub fn bad_request<T: fmt::Display>(message: &str, info: T) -> TCError {
+    println!("error! {}: {}", message, info);
     TCError::of(Code::BadRequest, format!("{}: {}", message, info))
 }
 

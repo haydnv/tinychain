@@ -27,7 +27,8 @@ impl Clone for LinkAddress {
         use LinkAddress::*;
         match self {
             DomainName(n) => DomainName(n.to_string().parse().unwrap()),
-            other => other.clone(),
+            IPv4(addr) => IPv4(*addr),
+            IPv6(addr) => IPv6(*addr),
         }
     }
 }
@@ -130,6 +131,11 @@ impl fmt::Display for LinkProtocol {
     }
 }
 
+fn is_ipv4(s: &str) -> bool {
+    let segments: Vec<&str> = s.split('.').collect();
+    segments.len() == 4 && !segments.iter().any(|s| s.parse::<u16>().is_err())
+}
+
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct LinkHost {
     protocol: LinkProtocol,
@@ -151,11 +157,6 @@ impl LinkHost {
     }
 }
 
-fn is_ipv4(s: &str) -> bool {
-    let segments: Vec<&str> = s.split('.').collect();
-    segments.len() == 4 && !segments.iter().any(|s| s.parse::<u16>().is_err())
-}
-
 impl FromStr for LinkHost {
     type Err = error::TCError;
 
@@ -167,6 +168,7 @@ impl FromStr for LinkHost {
         let protocol = LinkProtocol::HTTP;
 
         let s = &s[7..];
+
         let (address, port): (LinkAddress, Option<u16>) = if s.contains("::") {
             let mut segments: Vec<&str> = s.split("::").collect();
             let port: Option<u16> = if segments.last().unwrap().contains(':') {
@@ -362,17 +364,14 @@ impl FromStr for Link {
         }
 
         let host: LinkHost = segments[..3].join("/").parse()?;
+
         let segments = &segments[3..];
 
-        let path: TCPath = if segments.len() > 1 {
-            segments[1..]
-                .iter()
-                .map(|s| s.parse())
-                .collect::<TCResult<Vec<PathSegment>>>()?
-                .try_into()?
-        } else {
-            TCPath::default()
-        };
+        let path: TCPath = segments
+            .iter()
+            .map(|s| s.parse())
+            .collect::<TCResult<Vec<PathSegment>>>()?
+            .try_into()?;
 
         Ok(Link {
             host: Some(host),

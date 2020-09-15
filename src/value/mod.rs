@@ -560,69 +560,65 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         M: de::MapAccess<'de>,
     {
         if let Some(key) = access.next_key::<&str>()? {
-            if let Ok(value) = access.next_value() {
-                let mut value: Vec<Value> = value;
+            let mut value: Vec<Value> = access.next_value()?;
 
-                if key.starts_with('$') {
-                    let (subject, path) = if let Some(i) = key.find('/') {
-                        let (subject, path) = key.split_at(i);
-                        let subject = TCRef::from_str(subject).map_err(de::Error::custom)?;
-                        let path = TCPath::from_str(path).map_err(de::Error::custom)?;
-                        (subject, path)
-                    } else {
-                        (
-                            TCRef::from_str(key).map_err(de::Error::custom)?,
-                            TCPath::default(),
-                        )
-                    };
+            if key.starts_with('$') {
+                let (subject, path) = if let Some(i) = key.find('/') {
+                    let (subject, path) = key.split_at(i);
+                    let subject = TCRef::from_str(subject).map_err(de::Error::custom)?;
+                    let path = TCPath::from_str(path).map_err(de::Error::custom)?;
+                    (subject, path)
+                } else {
+                    (
+                        TCRef::from_str(key).map_err(de::Error::custom)?,
+                        TCPath::default(),
+                    )
+                };
 
-                    match value.len() {
-                        0 if &path == "/" => Ok(Value::TCString(TCString::Ref(subject))),
-                        1 => Ok(op::Method::Get(subject, path, value.remove(0)).into()),
-                        2 => Ok(
-                            op::Method::Put(subject, path, value.remove(0), value.remove(0)).into(),
-                        ),
-                        _ => Err(de::Error::custom(format!(
-                            "Expected a Get or Put op, found {}",
-                            Value::Tuple(value)
-                        ))),
-                    }
-                } else if value.len() == 1 && key.starts_with("/sbin/value/") {
-                    use class::ValueClass;
-                    let vt = TCPath::from_str(key).map_err(de::Error::custom)?;
-                    ValueType::get(&vt, value.pop().unwrap()).map_err(de::Error::custom)
-                } else if let Ok(link) = key.parse::<link::Link>() {
-                    if value.is_empty() {
-                        Ok(Value::TCString(TCString::Link(link)))
-                    } else if value.len() == 1 {
-                        Ok(OpRef::Get(link, value.pop().unwrap()).into())
-                    } else if value.len() == 2 {
-                        let modifier = value.pop().unwrap();
-                        let object = value.pop().unwrap();
-                        Ok(OpRef::Put(link, object, modifier).into())
-                    } else {
-                        Err(de::Error::custom(
-                            "This functionality is not yet implemented",
-                        ))
-                    }
-                } else if let Ok(value_id) = key.parse::<string::ValueId>() {
-                    if value.is_empty() {
-                        Ok(Value::TCString(TCString::Id(value_id)))
-                    } else {
-                        Err(de::Error::custom(
-                            "This functionality is not yet implemented",
-                        ))
-                    }
+                match value.len() {
+                    0 if &path == "/" => Ok(Value::TCString(TCString::Ref(subject))),
+                    1 => Ok(op::Method::Get(subject, path, value.remove(0)).into()),
+                    2 => Ok(
+                        op::Method::Put(subject, path, value.remove(0), value.remove(0)).into(),
+                    ),
+                    _ => Err(de::Error::custom(format!(
+                        "Expected a Get or Put op, found {}",
+                        Value::Tuple(value)
+                    ))),
+                }
+            } else if value.len() == 1 && key.starts_with("/sbin/value/") {
+                use class::ValueClass;
+                let vt = TCPath::from_str(key).map_err(de::Error::custom)?;
+                ValueType::get(&vt, value.pop().unwrap()).map_err(de::Error::custom)
+            } else if let Ok(link) = key.parse::<link::Link>() {
+                println!("Deserialized key {}, value len {}", link, value.len());
+
+                if value.is_empty() {
+                    Ok(Value::TCString(TCString::Link(link)))
+                } else if value.len() == 1 {
+                    let key = value.pop().unwrap();
+                    Ok(OpRef::Get(link, key).into())
+                } else if value.len() == 2 {
+                    let modifier = value.pop().unwrap();
+                    let object = value.pop().unwrap();
+                    Ok(OpRef::Put(link, object, modifier).into())
+                } else {
+                    Err(de::Error::custom(
+                        "This functionality is not yet implemented",
+                    ))
+                }
+            } else if let Ok(value_id) = key.parse::<string::ValueId>() {
+                if value.is_empty() {
+                    Ok(Value::TCString(TCString::Id(value_id)))
                 } else {
                     Err(de::Error::custom(
                         "This functionality is not yet implemented",
                     ))
                 }
             } else {
-                Err(de::Error::custom(format!(
-                    "Unable to parse map entry: not a list of Values for key {}",
-                    key
-                )))
+                Err(de::Error::custom(
+                    "This functionality is not yet implemented",
+                ))
             }
         } else {
             Err(de::Error::custom("Unable to parse map entry: invalid key"))
