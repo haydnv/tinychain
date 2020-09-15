@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::convert::TryInto;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -128,13 +127,13 @@ impl Gateway {
     }
 
     pub async fn put(
-        &self,
+        self: Arc<Self>,
         subject: &Link,
         selector: Value,
         state: State,
         auth: &Auth,
         txn: Option<Arc<Txn>>,
-    ) -> TCResult<State> {
+    ) -> TCResult<()> {
         println!("Gateway::put {}: {} <- {}", subject, selector, state);
 
         if subject.host().is_some() {
@@ -146,19 +145,14 @@ impl Gateway {
             }
 
             if let Some((suffix, cluster)) = self.hosted.get(path) {
-                let txn =
-                    txn.ok_or_else(|| error::unsupported("Cluster::put requires a Transaction"))?;
+                println!(
+                    "Gateway::put {}{}: {} <- {}",
+                    cluster, suffix, selector, state
+                );
 
-                println!("Gateway::put {}: {} <- {}", cluster, selector, state);
-
-                if suffix.is_empty() {
-                    cluster
-                        .put(txn, selector.try_into()?, state.try_into()?, auth)
-                        .map_ok(State::Cluster)
-                        .await
-                } else {
-                    Err(error::not_found(suffix))
-                }
+                cluster
+                    .put(self.clone(), txn, path, selector, state, auth)
+                    .await
             } else {
                 Err(error::not_implemented("Peer cluster discovery"))
             }

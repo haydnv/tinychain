@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Bound;
@@ -602,6 +601,10 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                 } else if key == "/sbin/value/none" {
                     // TODO: figure out a better way to handle null values
                     Ok(Value::None)
+                } else if key == "/sbin/value/op/if" {
+                    let (cond, then, or_else) =
+                        Value::Tuple(value).try_into().map_err(de::Error::custom)?;
+                    Ok(Op::If((cond, then, or_else)).into())
                 } else if let Ok(link) = key.parse::<link::Link>() {
                     if value.is_empty() {
                         Ok(Value::TCString(TCString::Link(link)))

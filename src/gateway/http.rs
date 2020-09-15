@@ -173,7 +173,17 @@ impl Server {
                     ))))),
                 }
             }
-            &Method::PUT => Err(error::not_implemented("HTTP PUT")),
+            &Method::PUT => {
+                println!("PUT {}", path);
+                let id = get_param(&mut params, "key")?
+                    .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
+                let value: Value = deserialize_body(request.body_mut(), self.request_limit).await?;
+                gateway
+                    .clone()
+                    .put(&path.clone().into(), id, value.into(), &token, None)
+                    .await?;
+                Ok(Box::pin(stream::empty()))
+            }
             &Method::POST => {
                 println!("POST {}", path);
                 let values: Vec<(ValueId, Value)> =

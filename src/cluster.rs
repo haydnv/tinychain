@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
@@ -16,7 +17,7 @@ use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::link::{LinkHost, PathSegment, TCPath};
 use crate::value::op::OpRef;
-use crate::value::{label, Link, Value, ValueId};
+use crate::value::{label, Value, ValueId};
 
 #[derive(Clone)]
 enum ClusterReplica {
@@ -33,7 +34,7 @@ impl Default for ClusterReplica {
 #[derive(Clone)]
 struct ClusterState {
     replica: ClusterReplica,
-    data: HashMap<PathSegment, Chain>,
+    chains: HashMap<PathSegment, Chain>,
 }
 
 #[async_trait]
@@ -64,7 +65,7 @@ impl Cluster {
             format!("State of Cluster at {}", &path),
             ClusterState {
                 replica,
-                data: HashMap::new(),
+                chains: HashMap::new(),
             },
         );
 
@@ -94,7 +95,7 @@ impl Cluster {
             };
 
             let state = self.state.read(txn.id()).await?;
-            if let Some(chain) = state.data.get(&path[0]) {
+            if let Some(chain) = state.chains.get(&path[0]) {
                 println!(
                     "Cluster::get chain {}{}: {}",
                     &path[0],
@@ -111,16 +112,42 @@ impl Cluster {
 
     pub async fn put(
         self,
-        txn: Arc<Txn>,
-        name: PathSegment,
-        chain: Chain,
+        gateway: Arc<Gateway>,
+        txn: Option<Arc<Txn>>,
+        path: &TCPath,
+        key: Value,
+        state: State,
         _auth: &Auth,
-    ) -> TCResult<Self> {
-        println!("Cluster will now host a chain called {}", name);
-        txn.mutate(self.clone().into()).await;
-        let mut state = self.state.write(txn.id().clone()).await?;
-        state.data.insert(name, chain);
-        Ok(self)
+    ) -> TCResult<()> {
+        let txn = if let Some(txn) = txn {
+            txn
+        } else {
+            Txn::new(gateway.clone(), self.workspace.clone()).await?
+        };
+
+        if path == &self.path {
+            let name: ValueId = key.try_into()?;
+            let chain: Chain = state.try_into()?;
+
+            println!("Cluster will now host a chain called {}", name);
+            txn.mutate(self.clone().into()).await;
+            let mut state = self.state.write(txn.id().clone()).await?;
+            state.chains.insert(name, chain);
+            Ok(())
+        } else {
+            let suffix = path.from_path(&self.path)?;
+            if path.is_empty() {
+                Err(error::not_found(path))
+            } else {
+                println!("Cluster::put {}: {} <- {}", path, key, state);
+                let cluster_state = self.state.read(txn.id()).await?;
+                if let Some(chain) = cluster_state.chains.get(&suffix[0]) {
+                    chain.put(txn, suffix.slice_from(1), key, state).await
+                } else {
+                    Err(error::not_found(suffix))
+                }
+            }
+        }
     }
 
     pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
@@ -133,7 +160,7 @@ impl Cluster {
     ) -> TCResult<Vec<TCStream<Value>>> {
         if path.is_empty() {
             Err(error::method_not_allowed("Cluster::post"))
-        } else if let Some(chain) = self.state.read(txn.id()).await?.data.get(&path[0]) {
+        } else if let Some(chain) = self.state.read(txn.id()).await?.chains.get(&path[0]) {
             println!("Cluster::post to chain {}", &path[0]);
             let get_chain = OpRef::Get(
                 self.path.clone().join(path[0].clone().into()).into(),

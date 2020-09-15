@@ -371,6 +371,7 @@ impl Txn {
             Op::Ref(OpRef::Put(link, key, value)) => {
                 let value = resolve_state(&provided, &value)?;
                 self.gateway
+                    .clone()
                     .put(&link, key, value, &auth, Some(self.clone()))
                     .await?;
 
