@@ -10,6 +10,7 @@ use super::{label, TCRef, Value, ValueId, ValueType};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDefType {
+    If,
     Get,
     Put,
     Post,
@@ -22,6 +23,7 @@ impl Class for OpDefType {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.len() == 1 {
             match suffix[0].as_str() {
+                "if" => Ok(OpDefType::If),
                 "get" => Ok(OpDefType::Get),
                 "put" => Ok(OpDefType::Put),
                 "post" => Ok(OpDefType::Post),
@@ -41,6 +43,7 @@ impl From<OpDefType> for Link {
     fn from(odt: OpDefType) -> Link {
         let prefix = OpDefType::prefix();
         match odt {
+            OpDefType::If => prefix.join(label("if").into()).into(),
             OpDefType::Get => prefix.join(label("get").into()).into(),
             OpDefType::Put => prefix.join(label("put").into()).into(),
             OpDefType::Post => prefix.join(label("post").into()).into(),
@@ -51,6 +54,7 @@ impl From<OpDefType> for Link {
 impl fmt::Display for OpDefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::If => write!(f, "type: conditional Op definition"),
             Self::Get => write!(f, "type: GET Op definition"),
             Self::Put => write!(f, "type: PUT Op definition"),
             Self::Post => write!(f, "type: POST Op definition"),
@@ -161,7 +165,6 @@ impl fmt::Display for OpRefType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpType {
     Def(OpDefType),
-    If,
     Method(MethodType),
     Ref(OpRefType),
 }
@@ -177,7 +180,6 @@ impl Class for OpType {
         } else {
             match suffix[0].as_str() {
                 "def" => OpDefType::from_path(path).map(OpType::Def),
-                "if" if suffix.len() == 1 => Ok(OpType::If),
                 "method" => MethodType::from_path(path).map(OpType::Method),
                 "ref" => OpRefType::from_path(path).map(OpType::Ref),
                 other => Err(error::not_found(other)),
@@ -207,10 +209,8 @@ impl ValueClass for OpType {
 
 impl From<OpType> for Link {
     fn from(ot: OpType) -> Link {
-        let prefix = OpType::prefix();
         match ot {
             OpType::Def(odt) => odt.into(),
-            OpType::If => prefix.join(label("if").into()).into(),
             OpType::Method(mt) => mt.into(),
             OpType::Ref(ort) => ort.into(),
         }
@@ -221,7 +221,6 @@ impl fmt::Display for OpType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Def(odt) => write!(f, "{}", odt),
-            Self::If => write!(f, "type: Conditional Op"),
             Self::Method(mt) => write!(f, "{}", mt),
             Self::Ref(ort) => write!(f, "{}", ort),
         }
@@ -235,6 +234,7 @@ pub type PostOp = Vec<(ValueId, Value)>;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDef {
+    If(Cond),
     Get(GetOp),
     Put(PutOp),
     Post(PostOp),
@@ -245,6 +245,7 @@ impl Instance for OpDef {
 
     fn class(&self) -> OpDefType {
         match self {
+            Self::If(_) => OpDefType::If,
             Self::Get(_) => OpDefType::Get,
             Self::Put(_) => OpDefType::Put,
             Self::Post(_) => OpDefType::Post,
@@ -256,12 +257,23 @@ impl TryFrom<Value> for OpDef {
     type Error = error::TCError;
 
     fn try_from(value: Value) -> TCResult<OpDef> {
-        if let Ok(get_op) = value.clone().try_into() {
-            Ok(OpDef::Get(get_op))
-        } else if let Ok(put_op) = value.clone().try_into() {
-            Ok(OpDef::Put(put_op))
-        } else if let Ok(post_op) = value.clone().try_into() {
-            Ok(OpDef::Post(post_op))
+        if let Value::Tuple(_) = value {
+            if let Ok(cond) = value.clone().try_into() {
+                Ok(OpDef::If(cond))
+            } else if let Ok(get_op) = value.clone().try_into() {
+                Ok(OpDef::Get(get_op))
+            } else if let Ok(put_op) = value.clone().try_into() {
+                Ok(OpDef::Put(put_op))
+            } else if let Ok(post_op) = value.clone().try_into() {
+                Ok(OpDef::Post(post_op))
+            } else {
+                Err(error::bad_request("Expected OpDef but found", value))
+            }
+        } else if let Value::Op(op) = value {
+            match *op {
+                Op::Def(op_def) => Ok(op_def),
+                other => Err(error::bad_request("Expected OpDef but found", other))
+            }
         } else {
             Err(error::bad_request("Expected OpDef but found", value))
         }
@@ -271,6 +283,7 @@ impl TryFrom<Value> for OpDef {
 impl fmt::Display for OpDef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::If(_) => write!(f, "conditional Op"),
             Self::Get(_) => write!(f, "GET Op"),
             Self::Put(_) => write!(f, "PUT Op"),
             Self::Post(_) => write!(f, "POST"),
@@ -339,7 +352,6 @@ impl fmt::Display for OpRef {
 #[derive(Clone, Eq, PartialEq)]
 pub enum Op {
     Def(OpDef),
-    If(Cond),
     Method(Method),
     Ref(OpRef),
 }
@@ -350,7 +362,6 @@ impl Instance for Op {
     fn class(&self) -> OpType {
         match self {
             Self::Def(op_def) => OpType::Def(op_def.class()),
-            Self::If(_) => OpType::If,
             Self::Method(method) => OpType::Method(method.class()),
             Self::Ref(op_ref) => OpType::Ref(op_ref.class()),
         }
@@ -394,11 +405,6 @@ impl fmt::Display for Op {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Op::Def(op_def) => write!(f, "{}", op_def),
-            Op::If((cond, then, or_else)) => write!(
-                f,
-                "Op::If({} then {{ {} }} else {{ {} }})",
-                cond, then, or_else
-            ),
             Op::Method(method) => write!(f, "{}", method),
             Op::Ref(op_ref) => write!(f, "{}", op_ref),
         }

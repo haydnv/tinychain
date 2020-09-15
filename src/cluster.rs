@@ -125,12 +125,13 @@ impl Cluster {
             Txn::new(gateway.clone(), self.workspace.clone()).await?
         };
 
+        txn.mutate(self.clone().into()).await;
+
         if path == &self.path {
             let name: ValueId = key.try_into()?;
             let chain: Chain = state.try_into()?;
 
             println!("Cluster will now host a chain called {}", name);
-            txn.mutate(self.clone().into()).await;
             let mut state = self.state.write(txn.id().clone()).await?;
             state.chains.insert(name, chain);
             Ok(())

@@ -604,7 +604,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                 } else if key == "/sbin/value/op/if" {
                     let (cond, then, or_else) =
                         Value::Tuple(value).try_into().map_err(de::Error::custom)?;
-                    Ok(Op::If((cond, then, or_else)).into())
+                    Ok(Op::Def(op::OpDef::If((cond, then, or_else))).into())
                 } else if let Ok(link) = key.parse::<link::Link>() {
                     if value.is_empty() {
                         Ok(Value::TCString(TCString::Link(link)))
@@ -702,11 +702,11 @@ impl Serialize for Value {
             Value::Op(op) => {
                 let mut map = s.serialize_map(Some(1))?;
                 match &**op {
-                    Op::Def(_) => unimplemented!(),
-                    Op::If((cond, then, or_else)) => map.serialize_entry(
-                        Link::from(OpType::If).path(),
+                    Op::Def(op::OpDef::If((cond, then, or_else))) => map.serialize_entry(
+                        Link::from(op::OpDefType::If).path(),
                         &[&Value::from(cond.clone()), then, or_else],
                     )?,
+                    Op::Def(_) => unimplemented!(),
                     Op::Method(method) => match method {
                         op::Method::Get(subject, path, key) => {
                             map.serialize_entry(&format!("{}{}", subject, path), &[key])?

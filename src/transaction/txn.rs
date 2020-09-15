@@ -307,8 +307,7 @@ impl Txn {
         println!("Txn::resolve {}", provider);
 
         match provider {
-            Op::Def(_) => Err(error::not_implemented("Txn::resolve OpDef")),
-            Op::If((cond, then, or_else)) => {
+            Op::Def(OpDef::If((cond, then, or_else))) => {
                 let cond = provided
                     .get(cond.value_id())
                     .ok_or_else(|| error::not_found(cond))?;
@@ -325,6 +324,7 @@ impl Txn {
                     ))
                 }
             }
+            Op::Def(_) => Err(error::not_implemented("Txn::resolve OpDef")),
             Op::Ref(OpRef::Get(link, key)) => {
                 let object = resolve_value(&provided, &key)?.clone();
                 println!("object {}", object);
@@ -460,7 +460,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
             deps.insert(tc_ref.clone());
         }
         Op::Def(OpDef::Post(_)) => {}
-        Op::If((cond, then, or_else)) => {
+        Op::Def(OpDef::If((cond, then, or_else))) => {
             let cond_state = txn_state
                 .get(cond.value_id())
                 .ok_or_else(|| error::not_found(cond))?;
