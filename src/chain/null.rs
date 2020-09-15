@@ -151,10 +151,10 @@ impl ChainInstance for NullChain {
     }
 
     async fn put(&self, txn: Arc<Txn>, path: TCPath, key: Value, new_value: State) -> TCResult<()> {
-        match &self.state {
-            ChainState::Collection(_) => Err(error::not_implemented("NullChain::put")),
-            ChainState::Value(value) => {
-                if path.is_empty() {
+        if &path == "/object" {
+            match &self.state {
+                ChainState::Collection(_) => Err(error::not_implemented("NullChain::put")),
+                ChainState::Value(value) => {
                     if key == Value::None {
                         let mut value = value.write(txn.id().clone()).await?;
                         new_value.expect(value.class().into(), format!("Chain wraps {}", value.class()))?;
@@ -163,10 +163,10 @@ impl ChainInstance for NullChain {
                     } else {
                         Err(error::bad_request("Value has no such attribute", key))
                     }
-                } else {
-                    Err(error::bad_request("Value contains no such resource", path))
                 }
             }
+        } else {
+            Err(error::not_implemented("NullChain::put"))
         }
     }
 

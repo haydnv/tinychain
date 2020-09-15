@@ -629,27 +629,6 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                         "This functionality is not yet implemented",
                     ))
                 }
-            } else if let Ok(value) = access.next_value() {
-                let value: HashMap<ValueId, Value> = value;
-                if key.starts_with('$') {
-                    let (subject, path) = if let Some(i) = key.find('/') {
-                        let (subject, path) = key.split_at(i);
-                        let subject = TCRef::from_str(subject).map_err(de::Error::custom)?;
-                        let path = TCPath::from_str(path).map_err(de::Error::custom)?;
-                        (subject, path)
-                    } else {
-                        (
-                            TCRef::from_str(key).map_err(de::Error::custom)?,
-                            TCPath::default(),
-                        )
-                    };
-
-                    Ok(op::Method::Post(subject, path, value.into_iter().collect()).into())
-                } else {
-                    Err(de::Error::custom(error::not_implemented(
-                        "Post deserialization",
-                    )))
-                }
             } else {
                 Err(de::Error::custom("Unable to parse map entry"))
             }
