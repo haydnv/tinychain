@@ -9,7 +9,7 @@ use bytes::Bytes;
 use futures::future;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response, StatusCode};
+use hyper::{Body, Method, Request, Response, StatusCode, Uri};
 use serde::de::DeserializeOwned;
 
 use crate::auth::{Auth, Token};
@@ -104,7 +104,7 @@ impl Client {
 
     pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + 'static>(
         &self,
-        link: Link,
+        link: &Link,
         data: S,
         capture: &[ValueId],
         auth: Auth,
@@ -123,20 +123,20 @@ impl Client {
             .as_ref()
             .ok_or_else(|| error::bad_request("No host to resolve", &link))?;
 
-        let host = if let Some(port) = host.port() {
-            format!("{}:{}", host.address(), port)
-        } else {
-            host.address().to_string()
-        };
+        let query_string = encode_query_string(vec![("capture", &serde_json::to_string(capture)?)]);
+
+        let uri = Uri::builder()
+            .scheme(host.protocol().to_string().as_str())
+            .authority(host.authority().as_str())
+            .path_and_query(format!("{}?{}", link.path(), query_string).as_str())
+            .build()
+            .map_err(error::internal)?;
+
+        println!("POST to {}", uri);
 
         let req = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "http://{}{}?capture={}",
-                host,
-                link.path().to_string(),
-                serde_json::to_string(capture)?
-            ))
+            .uri(uri)
             .header("content-type", "application/json")
             .body(Body::wrap_stream(JsonListStream::from(data)))
             .map_err(error::internal)?;
@@ -346,6 +346,14 @@ impl super::Server for Server {
             }))
             .await
     }
+}
+
+fn encode_query_string(mut data: Vec<(&str, &str)>) -> String {
+    let mut query_string = url::form_urlencoded::Serializer::new(String::new());
+    for (name, value) in data.drain(..) {
+        query_string.append_pair(name, value);
+    }
+    query_string.finish()
 }
 
 fn get_param<T: DeserializeOwned>(

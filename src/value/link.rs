@@ -148,6 +148,14 @@ impl LinkHost {
         &self.address
     }
 
+    pub fn authority(&self) -> String {
+        if let Some(port) = self.port {
+            format!("{}:{}", self.address, port)
+        } else {
+            self.address.to_string()
+        }
+    }
+
     pub fn port(&'_ self) -> &'_ Option<u16> {
         &self.port
     }

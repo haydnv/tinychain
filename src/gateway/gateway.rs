@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use futures::future::{FutureExt, TryFutureExt};
-use futures::stream::{FuturesUnordered, Stream, StreamExt};
+use futures::future::{self, FutureExt, TryFutureExt};
+use futures::stream::{self, FuturesUnordered, Stream, StreamExt};
 
 use crate::auth::{Auth, Token};
 use crate::block::Dir;
@@ -185,7 +185,7 @@ impl Gateway {
         }
     }
 
-    pub async fn handle_post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
+    pub async fn handle_post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin + 'static>(
         self: Arc<Self>,
         subject: &Link,
         data: S,
@@ -211,7 +211,26 @@ impl Gateway {
                 Err(error::not_found(path))
             }
         } else {
-            Err(error::not_implemented("Gateway::post over the network"))
+            // TODO: handle txn_id
+            // TODO: harmonize POST return type across the network
+            self.post(subject, data, capture, auth)
+                .map_ok(|value| {
+                    let value_stream: TCStream<Value> =
+                        Box::pin(stream::once(future::ready(value)));
+                    vec![value_stream]
+                })
+                .await
         }
+    }
+
+    pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin + 'static>(
+        &self,
+        subject: &Link,
+        data: S,
+        capture: &[ValueId],
+        auth: Auth,
+    ) -> TCResult<Value> {
+        // TODO: optionally include a txn_id
+        self.client.post(subject, data, capture, auth, None).await
     }
 }

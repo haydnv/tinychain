@@ -425,8 +425,11 @@ impl Txn {
                     ))),
                 }
             }
-            Op::Ref(OpRef::Post(_link, _data, _capture)) => {
-                Err(error::not_implemented("Txn::resolve OpRef::Post"))
+            Op::Ref(OpRef::Post(link, data, capture)) => {
+                self.gateway
+                    .post(&link, stream::iter(data), &capture, auth)
+                    .map_ok(State::Value)
+                    .await
             }
             Op::Method(Method::Post(_subject, _path, _data, _capture)) => {
                 Err(error::not_implemented("Txn::resolve Method::Post"))
