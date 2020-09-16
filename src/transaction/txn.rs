@@ -426,8 +426,15 @@ impl Txn {
                 }
             }
             Op::Ref(OpRef::Post(link, data, capture)) => {
+                let data = stream::iter(data).map(move |(name, value)| {
+                    // TODO: just allow sending an error as a value
+                    resolve_value(&provided, &value)
+                        .map(|value| (name, value.clone()))
+                        .unwrap()
+                });
+
                 self.gateway
-                    .post(&link, stream::iter(data), &capture, auth)
+                    .post(&link, data, &capture, auth)
                     .map_ok(State::Value)
                     .await
             }

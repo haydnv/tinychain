@@ -599,21 +599,20 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
 
                 if let Ok((def, capture)) = Value::Tuple(value.to_vec()).try_into() {
                     Ok(OpRef::Post(link, def, capture).into())
+                } else if value.is_empty() {
+                    Ok(Value::TCString(TCString::Link(link)))
+                } else if value.len() == 1 {
+                    let key = value.pop().unwrap();
+                    println!("Deserialized OpRef::Get({}, {})", link, key);
+                    Ok(OpRef::Get(link, key).into())
+                } else if value.len() == 2 {
+                    let modifier = value.pop().unwrap();
+                    let object = value.pop().unwrap();
+                    Ok(OpRef::Put(link, object, modifier).into())
                 } else {
-                    if value.is_empty() {
-                        Ok(Value::TCString(TCString::Link(link)))
-                    } else if value.len() == 1 {
-                        let key = value.pop().unwrap();
-                        Ok(OpRef::Get(link, key).into())
-                    } else if value.len() == 2 {
-                        let modifier = value.pop().unwrap();
-                        let object = value.pop().unwrap();
-                        Ok(OpRef::Put(link, object, modifier).into())
-                    } else {
-                        Err(de::Error::custom(
-                            "This functionality is not yet implemented",
-                        ))
-                    }
+                    Err(de::Error::custom(
+                        "This functionality is not yet implemented",
+                    ))
                 }
             } else if let Ok(value_id) = key.parse::<string::ValueId>() {
                 if value.is_empty() {
