@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use futures::future::{self, FutureExt, TryFutureExt};
+use futures::future::{FutureExt, TryFutureExt};
 use futures::stream::{self, FuturesUnordered, Stream, StreamExt};
 
 use crate::auth::{Auth, Token};
@@ -215,8 +215,7 @@ impl Gateway {
             // TODO: harmonize POST return type across the network
             self.post(subject, data, capture, auth)
                 .map_ok(|value| {
-                    let value_stream: TCStream<Value> =
-                        Box::pin(stream::once(future::ready(value)));
+                    let value_stream: TCStream<Value> = Box::pin(stream::empty());
                     vec![value_stream]
                 })
                 .await
@@ -229,7 +228,8 @@ impl Gateway {
         data: S,
         capture: &[ValueId],
         auth: Auth,
-    ) -> TCResult<Value> {
+    ) -> TCResult<()> {
+        // TODO: respond with a Stream
         // TODO: optionally include a txn_id
         self.client.post(subject, data, capture, auth, None).await
     }

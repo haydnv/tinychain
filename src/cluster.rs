@@ -182,9 +182,14 @@ impl Cluster {
                 });
 
             println!("POST to chain {}{}", chain, path.slice_from(1));
-            chain
-                .post(txn, path.slice_from(1), data, capture, auth)
-                .await
+            let result = chain
+                .post(txn.clone(), path.slice_from(1), data, capture, auth)
+                .await;
+
+            txn.mutate(self.into()).await;
+            txn.commit().await;
+
+            result
         } else {
             Err(error::not_found(path))
         }

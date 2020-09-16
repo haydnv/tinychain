@@ -414,6 +414,8 @@ impl Txn {
                         "Value is immutable (doesn't support PUT)",
                     )),
                     State::Chain(chain) => {
+                        self.mutate(chain.clone().into()).await;
+
                         chain
                             .put(self.clone(), path, key, value)
                             .map_ok(State::from)
@@ -435,7 +437,7 @@ impl Txn {
 
                 self.gateway
                     .post(&link, data, &capture, auth)
-                    .map_ok(State::Value)
+                    .map_ok(State::from)
                     .await
             }
             Op::Method(Method::Post(_subject, _path, _data, _capture)) => {

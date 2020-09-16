@@ -1314,6 +1314,10 @@ impl ValueInstance for Number {
             match path[0].as_str() {
                 "add" => Ok(Add::add(self.clone(), key.try_into()?)),
                 "eq" => Ok(Number::Bool(Boolean(self == &Number::try_from(key)?))),
+                "gt" => Ok(Number::Bool(Boolean(self > &Number::try_from(key)?))),
+                "gte" => Ok(Number::Bool(Boolean(self >= &Number::try_from(key)?))),
+                "lt" => Ok(Number::Bool(Boolean(self < &Number::try_from(key)?))),
+                "lte" => Ok(Number::Bool(Boolean(self <= &Number::try_from(key)?))),
                 "mul" => Ok(Mul::mul(self.clone(), key.try_into()?)),
                 "sub" => Ok(Sub::sub(self.clone(), key.try_into()?)),
                 other => Err(error::not_found(other)),

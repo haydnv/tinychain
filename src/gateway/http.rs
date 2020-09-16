@@ -109,7 +109,9 @@ impl Client {
         capture: &[ValueId],
         auth: Auth,
         txn: Option<Arc<Txn>>,
-    ) -> TCResult<Value> {
+    ) -> TCResult<()> {
+        // TODO: respond with a Stream
+
         if auth.is_some() {
             return Err(error::not_implemented("Authorization"));
         }
@@ -157,7 +159,7 @@ impl Client {
 
                 Err(error::TCError::of(status.into(), msg))
             }
-            Ok(mut response) => deserialize_body(response.body_mut(), self.response_limit).await,
+            Ok(_) => Ok(()),
         }
     }
 }
@@ -215,8 +217,7 @@ impl Server {
 
         match request.method() {
             &Method::GET => {
-                let id = get_param(&mut params, "key")?
-                    .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
+                let id = get_param(&mut params, "key")?.unwrap_or_else(|| Value::None);
                 let state = gateway.get(&path.clone().into(), id, token, None).await?;
 
                 match state {

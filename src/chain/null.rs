@@ -158,6 +158,13 @@ impl ChainInstance for NullChain {
                 ChainState::Value(value) => {
                     if key == Value::None {
                         let mut value = value.write(txn.id().clone()).await?;
+                        println!(
+                            "NullChain::put new wrapped value {} (expecting) {} ({})",
+                            new_value,
+                            value.class(),
+                            Link::from(value.class())
+                        );
+
                         new_value.expect(
                             value.class().into(),
                             format!("Chain wraps {}", value.class()),

@@ -690,7 +690,11 @@ impl Serialize for Value {
                 let c: link::Link = c.clone().into();
                 c.serialize(s)
             }
-            Value::Number(n) => n.serialize(s),
+            Value::Number(n) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry(Link::from(n.class()).path(), &[n])?;
+                map.end()
+            }
             Value::Op(op) => {
                 let mut map = s.serialize_map(Some(1))?;
                 match &**op {

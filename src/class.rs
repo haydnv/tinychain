@@ -51,8 +51,8 @@ pub trait Instance {
                 error::Code::BadRequest,
                 format!(
                     "Expected {} but found {} {}",
-                    self.class(),
                     dtype,
+                    self.class(),
                     context_msg
                 ),
             ))
