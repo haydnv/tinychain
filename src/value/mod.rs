@@ -710,10 +710,6 @@ impl Serialize for Value {
                 let mut map = s.serialize_map(Some(1))?;
                 match &**op {
                     Op::Def(op_def) => match op_def {
-                        op::OpDef::If((cond, then, or_else)) => map.serialize_entry(
-                            Link::from(op::OpDefType::If).path(),
-                            &[&Value::from(cond.clone()), then, or_else],
-                        )?,
                         op::OpDef::Post(form) => {
                             map.serialize_entry(Link::from(op::OpDefType::Post).path(), &form)?
                         }
@@ -729,6 +725,10 @@ impl Serialize for Value {
                         op::Method::Post(_subject, _path, _data, _capture) => unimplemented!(),
                     },
                     Op::Ref(op_ref) => match op_ref {
+                        OpRef::If(cond, then, or_else) => map.serialize_entry(
+                            Link::from(op::OpRefType::If).path(),
+                            &[&Value::from(cond.clone()), then, or_else],
+                        )?,
                         OpRef::Get(link, key) => map.serialize_entry(&link.to_string(), &[key])?,
                         OpRef::Put(link, key, value) => {
                             map.serialize_entry(&link.to_string(), &[key, value])?

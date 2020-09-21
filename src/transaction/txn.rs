@@ -213,15 +213,11 @@ impl Txn {
 
                 let state = graph.get(&name).ok_or_else(|| error::not_found(&name))?;
                 if let State::Value(Value::Op(op)) = state {
-                    println!("Provider: {}", &op);
-
-                    if let Op::Def(_) = **op {
-                        if let Op::Def(OpDef::If(_)) = **op {
-                            // pass
-                        } else {
-                            continue;
-                        }
+                    if op.is_def() {
+                        continue;
                     }
+
+                    println!("Provider: {}", &op);
 
                     let mut ready = true;
                     for dep in requires(op, &graph)? {
@@ -326,26 +322,24 @@ impl Txn {
         println!("Txn::resolve {}", provider);
 
         match provider {
-            Op::Def(op_def) => match op_def {
-                OpDef::If((cond, then, or_else)) => {
-                    let cond = provided
-                        .get(cond.value_id())
-                        .ok_or_else(|| error::not_found(cond))?;
-                    if let State::Value(Value::Number(Number::Bool(cond))) = cond {
-                        if cond.into() {
-                            Ok(State::Value(then))
-                        } else {
-                            Ok(State::Value(or_else))
-                        }
+            Op::Def(op_def) => Err(error::not_implemented(format!("Txn::resolve {}", op_def))),
+            Op::Ref(OpRef::If(cond, then, or_else)) => {
+                let cond = provided
+                    .get(cond.value_id())
+                    .ok_or_else(|| error::not_found(cond))?;
+                if let State::Value(Value::Number(Number::Bool(cond))) = cond {
+                    if cond.into() {
+                        Ok(State::Value(then))
                     } else {
-                        Err(error::bad_request(
-                            "Expected a boolean condition but found",
-                            cond,
-                        ))
+                        Ok(State::Value(or_else))
                     }
+                } else {
+                    Err(error::bad_request(
+                        "Expected a boolean condition but found",
+                        cond,
+                    ))
                 }
-                other => Err(error::not_implemented(format!("Txn::resolve {}", other))),
-            },
+            }
             Op::Ref(OpRef::Get(link, key)) => {
                 let object = resolve_value(&provided, &key)?.clone();
                 println!("object {}", object);
@@ -493,17 +487,6 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
             deps.insert(tc_ref.clone());
         }
         Op::Def(OpDef::Post(_)) => {}
-        Op::Def(OpDef::If((cond, then, or_else))) => {
-            let cond_state = txn_state
-                .get(cond.value_id())
-                .ok_or_else(|| error::not_found(cond))?;
-            if let State::Value(Value::Op(cond_op)) = cond_state {
-                deps.extend(requires(cond_op, txn_state)?);
-            } else {
-                deps.extend(value_requires(then, txn_state)?);
-                deps.extend(value_requires(or_else, txn_state)?);
-            }
-        }
         Op::Method(method) => match method {
             Method::Get(subject, _path, key) => {
                 deps.insert(subject.value_id().clone());
@@ -517,6 +500,17 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
             Method::Post(_subject, _path, _data, _capture) => {}
         },
         Op::Ref(op_ref) => match op_ref {
+            OpRef::If(cond, then, or_else) => {
+                let cond_state = txn_state
+                    .get(cond.value_id())
+                    .ok_or_else(|| error::not_found(cond))?;
+                if let State::Value(Value::Op(cond_op)) = cond_state {
+                    deps.extend(requires(cond_op, txn_state)?);
+                } else {
+                    deps.extend(value_requires(then, txn_state)?);
+                    deps.extend(value_requires(or_else, txn_state)?);
+                }
+            }
             OpRef::Get(_path, key) => {
                 deps.extend(value_requires(key, txn_state)?);
             }
