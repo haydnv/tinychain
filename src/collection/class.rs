@@ -12,7 +12,6 @@ use crate::value::link::{Link, TCPath};
 use crate::value::{label, Value};
 
 use super::btree::{BTreeFile, BTreeType};
-use super::graph::{Graph, GraphType};
 use super::null::{Null, NullType};
 use super::table::{TableBaseType, TableType};
 use super::tensor::{TensorBaseType, TensorType};
@@ -133,7 +132,6 @@ impl fmt::Display for CollectionType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionBaseType {
     BTree,
-    Graph,
     Null,
     Table(TableBaseType),
     Tensor(TensorBaseType),
@@ -151,7 +149,6 @@ impl Class for CollectionBaseType {
             use CollectionBaseType::*;
             match suffix[0].as_str() {
                 "btree" if suffix.len() == 1 => Ok(BTree),
-                "graph" if suffix.len() == 1 => Ok(Graph),
                 "null" if suffix.len() == 1 => Ok(Null),
                 "table" => TableBaseType::from_path(path).map(Table),
                 "tensor" => TensorBaseType::from_path(path).map(Tensor),
@@ -182,11 +179,6 @@ impl CollectionClass for CollectionBaseType {
             "btree" if suffix.len() == 1 => {
                 BTreeFile::create(txn, schema.try_into()?)
                     .map_ok(CollectionBase::BTree)
-                    .await
-            }
-            "graph" if suffix.len() == 1 => {
-                Graph::create(txn, schema.try_into()?)
-                    .map_ok(CollectionBase::Graph)
                     .await
             }
             "null" if suffix.len() == 1 => {
@@ -221,7 +213,6 @@ impl From<CollectionBaseType> for Link {
         use CollectionBaseType::*;
         match ct {
             BTree => BTreeType::Tree.into(),
-            Graph => prefix.join(label("graph").into()).into(),
             Null => prefix.join(label("null").into()).into(),
             Table(tbt) => tbt.into(),
             Tensor(tbt) => tbt.into(),
@@ -234,7 +225,6 @@ impl fmt::Display for CollectionBaseType {
         use CollectionBaseType::*;
         match self {
             BTree => write!(f, "{}", BTreeType::Tree),
-            Graph => write!(f, "{}", GraphType::Graph),
             Null => write!(f, "{}", NullType),
             Table(tbt) => write!(f, "{}", tbt),
             Tensor(tbt) => write!(f, "{}", tbt),
@@ -245,7 +235,6 @@ impl fmt::Display for CollectionBaseType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionViewType {
     BTree(BTreeType),
-    Graph(GraphType),
     Null(NullType),
     Table(TableType),
     Tensor(TensorType),
@@ -266,12 +255,6 @@ impl Class for CollectionViewType {
 impl From<BTreeType> for CollectionViewType {
     fn from(btt: BTreeType) -> CollectionViewType {
         Self::BTree(btt)
-    }
-}
-
-impl From<GraphType> for CollectionViewType {
-    fn from(gt: GraphType) -> CollectionViewType {
-        Self::Graph(gt)
     }
 }
 
@@ -298,7 +281,6 @@ impl From<CollectionViewType> for Link {
         use CollectionViewType::*;
         match cvt {
             BTree(btt) => btt.into(),
-            Graph(gt) => gt.into(),
             Null(nt) => nt.into(),
             Table(tt) => tt.into(),
             Tensor(tt) => tt.into(),
@@ -311,7 +293,6 @@ impl fmt::Display for CollectionViewType {
         use CollectionViewType::*;
         match self {
             BTree(btree_type) => write!(f, "{}", btree_type),
-            Graph(graph_type) => write!(f, "{}", graph_type),
             Null(null_type) => write!(f, "{}", null_type),
             Table(table_type) => write!(f, "{}", table_type),
             Tensor(tensor_type) => write!(f, "{}", tensor_type),

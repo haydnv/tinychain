@@ -214,7 +214,7 @@ impl Gateway {
             // TODO: handle txn_id
             // TODO: harmonize POST return type across the network
             self.post(subject, data, capture, auth)
-                .map_ok(|value| {
+                .map_ok(|_value| {
                     let value_stream: TCStream<Value> = Box::pin(stream::empty());
                     vec![value_stream]
                 })
