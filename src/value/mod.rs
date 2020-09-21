@@ -308,6 +308,17 @@ impl<'a> TryFrom<&'a Value> for &'a String {
     }
 }
 
+impl TryFrom<Value> for String {
+    type Error = error::TCError;
+
+    fn try_from(v: Value) -> TCResult<String> {
+        match v {
+            Value::TCString(s) => s.try_into(),
+            other => Err(error::bad_request("Expected String but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Value> for TCPath {
     type Error = error::TCError;
 

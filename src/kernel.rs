@@ -35,13 +35,14 @@ pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<St
                 .map_ok(State::Chain)
                 .await
         }
-        "collection" if path.len() > 1 => {
+        "collection" => {
             let txn = txn.ok_or_else(|| error::unsupported(ERR_TXN_REQUIRED))?;
             CollectionType::get(txn, path, id)
                 .map_ok(State::Collection)
                 .await
         }
-        "value" if path.len() > 1 => ValueType::get(path, id).map(State::Value),
+        "error" => Err(error::get(path, id.try_into()?)),
+        "value" => ValueType::get(path, id).map(State::Value),
         other => Err(error::not_found(other)),
     }
 }

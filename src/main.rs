@@ -20,7 +20,7 @@ mod value;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn data_size(flag: &str) -> class::TCResult<usize> {
+fn data_size(flag: &str) -> error::TCResult<usize> {
     if flag.is_empty() {
         return Err(error::bad_request("Invalid size specified", flag));
     }
@@ -106,7 +106,7 @@ async fn configure(
     clusters: Vec<value::link::TCPath>,
     data_dir: Arc<block::Dir>,
     workspace: Arc<block::Dir>,
-) -> class::TCResult<gateway::Hosted> {
+) -> error::TCResult<gateway::Hosted> {
     let mut hosted = gateway::Hosted::new();
     for path in clusters {
         let cluster = cluster::Cluster::create(path.clone(), data_dir.clone(), workspace.clone())?;

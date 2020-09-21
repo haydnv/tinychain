@@ -1,6 +1,10 @@
 use std::convert::Infallible;
 use std::fmt;
 
+use crate::value::{label, TCPath};
+
+pub type TCResult<T> = Result<T, TCError>;
+
 #[derive(Clone)]
 pub enum Code {
     // "No problem"
@@ -136,6 +140,31 @@ impl fmt::Display for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}: {}", self.reason, self.message)
     }
+}
+
+pub fn get(path: &TCPath, msg: String) -> TCError {
+    let prefix = TCPath::from(vec![label("sbin").into(), label("error").into()]);
+    let suffix = match path.from_path(&prefix) {
+        Ok(suffix) => suffix,
+        Err(cause) => return cause,
+    };
+
+    let (code, msg) = match suffix[0].as_str() {
+        "bad_request" => (Code::BadRequest, msg),
+        "conflict" => (Code::Conflict, msg),
+        "forbidden" => (Code::Forbidden, msg),
+        "internal" => (Code::Internal, msg),
+        "method_not_allowed" => (Code::MethodNotAllowed, msg),
+        "not_found" => (Code::NotFound, msg),
+        "not_implemented" => (Code::NotImplemented, msg),
+        "too_large" => (Code::TooLarge, msg),
+        "transport" => (Code::Transport, msg),
+        "unauthorized" => (Code::Unauthorized, msg),
+        "unknown" => (Code::Unknown, msg),
+        _ => (Code::NotFound, suffix.to_string()),
+    };
+
+    TCError::of(code, msg)
 }
 
 pub fn bad_request<T: fmt::Display>(message: &str, info: T) -> TCError {
