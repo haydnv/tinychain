@@ -2,6 +2,7 @@
 
 **Sign up for updates at [https://rb.gy/3h1bws](https://rb.gy/3h1bws)!**
 
+ - Docker image: [https://hub.docker.com/r/haydnv/tinychain](https://hub.docker.com/r/haydnv/tinychain)
  - Python client: [http://github.com/haydnv/tinychain.py](http://github.com/haydnv/tinychain.py)
  - Test suite: [http://github.com/haydnv/tctest](http://github.com/haydnv/tctest)
 
@@ -18,7 +19,7 @@ enterprise services.
 
 ## Getting started
 The easiest way to get started is using the latest Docker image here:
-[http://hub.docker.com/repository/docker/haydnv/tinychain](http://hub.docker.com/repository/docker/haydnv/tinychain)
+[https://hub.docker.com/r/haydnv/tinychain](https://hub.docker.com/r/haydnv/tinychain)
 
 ```bash
 docker pull haydnv/tinychain:demo1
