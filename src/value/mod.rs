@@ -570,77 +570,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
     where
         M: de::MapAccess<'de>,
     {
-        if let Some(key) = access.next_key::<&str>()? {
-            let mut value: Vec<Value> = access.next_value()?;
-
-            if key.starts_with('$') {
-                let (subject, path) = if let Some(i) = key.find('/') {
-                    let (subject, path) = key.split_at(i);
-                    let subject = TCRef::from_str(subject).map_err(de::Error::custom)?;
-                    let path = TCPath::from_str(path).map_err(de::Error::custom)?;
-                    (subject, path)
-                } else {
-                    (
-                        TCRef::from_str(key).map_err(de::Error::custom)?,
-                        TCPath::default(),
-                    )
-                };
-
-                if let Ok((def, capture)) = Value::Tuple(value.to_vec()).try_into() {
-                    Ok(op::Method::Post(subject, path, def, capture).into())
-                } else {
-                    match value.len() {
-                        0 if &path == "/" => Ok(Value::TCString(TCString::Ref(subject))),
-                        1 => Ok(op::Method::Get(subject, path, value.remove(0)).into()),
-                        2 => Ok(
-                            op::Method::Put(subject, path, value.remove(0), value.remove(0)).into(),
-                        ),
-                        _ => Err(de::Error::custom(format!(
-                            "Expected a Get or Put op, found {}",
-                            Value::Tuple(value)
-                        ))),
-                    }
-                }
-            } else if value.len() == 1 && key.starts_with("/sbin/value/") {
-                use class::ValueClass;
-                let vt = TCPath::from_str(key).map_err(de::Error::custom)?;
-                ValueType::get(&vt, value.pop().unwrap()).map_err(de::Error::custom)
-            } else if let Ok(link) = key.parse::<link::Link>() {
-                println!("Deserialized key {}, value len {}", link, value.len());
-
-                if let Ok((def, capture)) = Value::Tuple(value.to_vec()).try_into() {
-                    Ok(OpRef::Post(link, def, capture).into())
-                } else if value.is_empty() {
-                    Ok(Value::TCString(TCString::Link(link)))
-                } else if value.len() == 1 {
-                    let key = value.pop().unwrap();
-                    println!("Deserialized OpRef::Get({}, {})", link, key);
-                    Ok(OpRef::Get(link, key).into())
-                } else if value.len() == 2 {
-                    let modifier = value.pop().unwrap();
-                    let object = value.pop().unwrap();
-                    Ok(OpRef::Put(link, object, modifier).into())
-                } else {
-                    Err(de::Error::custom(
-                        "This functionality is not yet implemented",
-                    ))
-                }
-            } else if let Ok(value_id) = key.parse::<string::ValueId>() {
-                if value.is_empty() {
-                    Ok(Value::TCString(TCString::Id(value_id)))
-                } else {
-                    Err(de::Error::custom(
-                        "This functionality is not yet implemented",
-                    ))
-                }
-            } else {
-                Err(de::Error::custom(
-                    "This functionality is not yet implemented",
-                ))
-            }
-        } else {
-            Err(de::Error::custom("Unable to parse map entry: invalid key"))
-        }
+        Err(de::Error::custom("not implemented"))
     }
 
     fn visit_none<E>(self) -> Result<Self::Value, E>
@@ -707,36 +637,7 @@ impl Serialize for Value {
                 map.end()
             }
             Value::Op(op) => {
-                let mut map = s.serialize_map(Some(1))?;
-                match &**op {
-                    Op::Def(op_def) => match op_def {
-                        op::OpDef::Post(form) => {
-                            map.serialize_entry(Link::from(op::OpDefType::Post).path(), &form)?
-                        }
-                        _ => unimplemented!(),
-                    },
-                    Op::Method(method) => match method {
-                        op::Method::Get(subject, path, key) => {
-                            map.serialize_entry(&format!("{}{}", subject, path), &[key])?
-                        }
-                        op::Method::Put(subject, path, key, value) => {
-                            map.serialize_entry(&format!("{}{}", subject, path), &[key, value])?
-                        }
-                        op::Method::Post(_subject, _path, _data, _capture) => unimplemented!(),
-                    },
-                    Op::Ref(op_ref) => match op_ref {
-                        OpRef::If(cond, then, or_else) => map.serialize_entry(
-                            Link::from(op::OpRefType::If).path(),
-                            &[&Value::from(cond.clone()), then, or_else],
-                        )?,
-                        OpRef::Get(link, key) => map.serialize_entry(&link.to_string(), &[key])?,
-                        OpRef::Put(link, key, value) => {
-                            map.serialize_entry(&link.to_string(), &[key, value])?
-                        }
-                        OpRef::Post(_link, _data, _capture) => unimplemented!(),
-                    },
-                }
-                map.end()
+                unimplemented!()
             }
             Value::TCString(tc_string) => tc_string.serialize(s),
             Value::Tuple(v) => {
