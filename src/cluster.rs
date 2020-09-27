@@ -163,9 +163,8 @@ impl Cluster {
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
-    ) -> TCResult<Vec<TCStream<Value>>> {
+    ) -> TCResult<TCStream<Value>> {
         if path.is_empty() {
             Err(error::method_not_allowed("Cluster::post"))
         } else if let Some(chain) = self.state.read(txn.id()).await?.chains.get(&path[0]) {
@@ -183,7 +182,7 @@ impl Cluster {
 
             println!("POST to chain {}{}", chain, path.slice_from(1));
             let result = chain
-                .post(txn.clone(), path.slice_from(1), data, capture, auth)
+                .post(txn.clone(), path.slice_from(1), data, auth)
                 .await;
 
             txn.mutate(self.into()).await;

@@ -23,8 +23,6 @@ use crate::value::{Value, ValueId};
 use super::Gateway;
 
 const TIMEOUT: Duration = Duration::from_secs(30);
-const ERR_NO_CAPTURE: &str =
-    "You must specify what state to capture (i.e. with ?capture=[\"foo\", \"bar\", ...])";
 const ERR_DECODE: &str = "(unable to decode error message)";
 
 pub struct Client {
@@ -106,7 +104,6 @@ impl Client {
         &self,
         link: &Link,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<()> {
@@ -125,12 +122,10 @@ impl Client {
             .as_ref()
             .ok_or_else(|| error::bad_request("No host to resolve", &link))?;
 
-        let query_string = encode_query_string(vec![("capture", &serde_json::to_string(capture)?)]);
-
         let uri = Uri::builder()
             .scheme(host.protocol().to_string().as_str())
             .authority(host.authority().as_str())
-            .path_and_query(format!("{}?{}", link.path(), query_string).as_str())
+            .path_and_query(link.path().to_string().as_str())
             .build()
             .map_err(error::internal)?;
 
@@ -249,22 +244,17 @@ impl Server {
                 let values: Vec<(ValueId, Value)> =
                     deserialize_body(request.body_mut(), self.request_limit).await?;
 
-                let capture: Option<Vec<ValueId>> = get_param(&mut params, "capture")?;
-                let capture: Vec<ValueId> =
-                    capture.ok_or_else(|| error::unsupported(ERR_NO_CAPTURE))?;
-
                 let response = gateway
                     .clone()
                     .handle_post(
                         &path.clone().into(),
                         stream::iter(values.into_iter()),
-                        &capture,
                         token,
                         None,
                     )
                     .await?;
 
-                response_list(response)
+                Ok(response_value_stream(response))
             }
             other => Err(error::method_not_allowed(format!(
                 "Tinychain does not support {}",
@@ -302,7 +292,7 @@ fn response_value_stream<S: Stream<Item = Value> + Send + Sync + Unpin + 'static
     s: S,
 ) -> TCStream<TCResult<Bytes>> {
     let json = JsonListStream::from(s);
-    Box::pin(json.map_ok(Bytes::from))
+    Box::pin(json.map_ok(Bytes::from).chain(stream_delimiter(b"\r\n")))
 }
 
 fn response_list<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
@@ -372,7 +362,7 @@ fn get_param<T: DeserializeOwned>(
 }
 
 fn transform_error(err: error::TCError) -> Response<Body> {
-    let mut response = Response::new(Body::from(err.message().to_string()));
+    let mut response = Response::new(Body::from(format!("{}\r\n", err.message())));
 
     use error::Code::*;
     *response.status_mut() = match err.reason() {

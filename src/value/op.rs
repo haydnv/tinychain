@@ -296,7 +296,7 @@ impl fmt::Display for OpDef {
 pub enum Method {
     Get(TCRef, TCPath, Value),
     Put(TCRef, TCPath, Value, Value),
-    Post(TCRef, TCPath, Vec<(ValueId, Value)>, Vec<ValueId>),
+    Post(TCRef, TCPath, Vec<(ValueId, Value)>),
 }
 
 impl Instance for Method {
@@ -306,7 +306,7 @@ impl Instance for Method {
         match self {
             Self::Get(_, _, _) => MethodType::Get,
             Self::Put(_, _, _, _) => MethodType::Put,
-            Self::Post(_, _, _, _) => MethodType::Post,
+            Self::Post(_, _, _) => MethodType::Post,
         }
     }
 }
@@ -316,7 +316,7 @@ impl fmt::Display for Method {
         match self {
             Self::Get(subject, path, _) => write!(f, "GET {}{}", subject, path),
             Self::Put(subject, path, _, _) => write!(f, "PUT {}{}", subject, path),
-            Self::Post(subject, path, _, _) => write!(f, "PUT {}{}", subject, path),
+            Self::Post(subject, path, _) => write!(f, "PUT {}{}", subject, path),
         }
     }
 }
@@ -326,7 +326,7 @@ pub enum OpRef {
     If(TCRef, Value, Value),
     Get(Link, Value),
     Put(Link, Value, Value),
-    Post(Link, Vec<(ValueId, Value)>, Vec<ValueId>),
+    Post(Link, Vec<(ValueId, Value)>),
 }
 
 impl Instance for OpRef {
@@ -337,7 +337,7 @@ impl Instance for OpRef {
             Self::If(_, _, _) => OpRefType::If,
             Self::Get(_, _) => OpRefType::Get,
             Self::Put(_, _, _) => OpRefType::Put,
-            Self::Post(_, _, _) => OpRefType::Post,
+            Self::Post(_, _) => OpRefType::Post,
         }
     }
 }
@@ -374,7 +374,7 @@ impl fmt::Display for OpRef {
             }
             OpRef::Get(link, id) => write!(f, "OpRef::Get {}: {}", link, id),
             OpRef::Put(path, id, val) => write!(f, "OpRef::Put {}: {} <- {}", path, id, val),
-            OpRef::Post(path, _, _) => write!(f, "OpRef::Post {}", path),
+            OpRef::Post(path, _) => write!(f, "OpRef::Post {}", path),
         }
     }
 }

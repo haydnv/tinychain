@@ -5,7 +5,7 @@ use std::hash::Hash;
 use std::iter;
 use std::sync::Arc;
 
-use futures::future::{self, try_join_all, TryFutureExt};
+use futures::future::{self, TryFutureExt};
 use futures::stream::{self, FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -144,14 +144,14 @@ impl Txn {
     pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
         mut parameters: S,
-        capture: &[ValueId],
         auth: Auth,
-    ) -> TCResult<HashMap<ValueId, State>> {
+    ) -> TCResult<State> {
         // TODO: use a Graph here and queue every op absolutely as soon as it's ready
 
         println!("Txn::execute");
 
         let mut graph = HashMap::new();
+        let mut capture = None;
         while let Some((name, value)) = parameters.next().await {
             if let Value::TCString(TCString::Ref(tc_ref)) = value {
                 return Err(error::bad_request(
@@ -160,47 +160,18 @@ impl Txn {
                 ));
             }
 
+            capture = Some(name.clone());
             graph.insert(name, State::Value(value));
         }
 
-        for name in &capture.to_vec() {
-            if !graph.contains_key(&name) {
-                println!(
-                    "Txn::execute cannot capture {} since it was not defined",
-                    &name
-                );
-                return Err(error::not_found(&name));
-            }
-        }
+        let capture = capture.ok_or(error::unsupported("Cannot execute empty operation"))?;
 
         let mut pending = FuturesUnordered::new();
 
-        loop {
+        while !is_resolved(graph.get(&capture).ok_or(error::not_found(&capture))?) {
             let mut visited = HashSet::new();
             let mut unvisited = Vec::with_capacity(graph.len());
-
-            let start = capture
-                .to_vec()
-                .iter()
-                .filter_map(|name| graph.get_key_value(name))
-                .filter_map(|(name, state)| match state {
-                    State::Value(Value::Op(op)) => match **op {
-                        Op::Def(OpDef::Get(_)) => None,
-                        Op::Def(OpDef::Put(_)) => None,
-                        Op::Def(OpDef::Post(_)) => None,
-                        _ => Some(name),
-                    },
-                    _ => None,
-                })
-                .next();
-
-            let start = if let Some(start) = start {
-                start
-            } else {
-                break;
-            };
-
-            unvisited.push(start.clone());
+            unvisited.push(capture.clone());
             while let Some(name) = unvisited.pop() {
                 if visited.contains(&name) {
                     println!("Already visited {}", name);
@@ -222,17 +193,10 @@ impl Txn {
                     let mut ready = true;
                     for dep in requires(op, &graph)? {
                         let dep_state = graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
-                        let resolved = if let State::Value(Value::Op(_)) = dep_state {
-                            false
-                        } else {
-                            true
-                        };
 
-                        if !resolved {
+                        if !is_resolved(dep_state) {
                             ready = false;
-                            if !visited.contains(&dep) {
-                                unvisited.push(dep);
-                            }
+                            unvisited.push(dep);
                         }
                     }
 
@@ -252,47 +216,31 @@ impl Txn {
             }
         }
 
-        Ok(graph
-            .drain()
-            .filter(|(name, _state)| capture.contains(name))
-            .collect())
+        graph.remove(&capture).ok_or(error::not_found(capture))
     }
 
     pub async fn execute_and_stream<S: Stream<Item = (ValueId, Value)> + Unpin>(
         self: Arc<Self>,
         parameters: S,
-        capture: &[ValueId],
         auth: Auth,
-    ) -> TCResult<Vec<TCStream<Value>>> {
-        let mut txn_state = self.clone().execute(parameters, &capture, auth).await?;
-        let mut streams = Vec::with_capacity(capture.len());
-        for value_id in &capture.to_vec() {
-            let this = self.clone();
-            let state = txn_state
-                .remove(value_id)
-                .ok_or_else(|| error::not_found(value_id))?;
-
-            streams.push(async move {
-                match state {
-                    State::Chain(chain) => chain.to_stream(this).await,
-                    State::Cluster(_cluster) => {
-                        // TODO
-                        let stream: TCStream<Value> = Box::pin(stream::empty());
-                        TCResult::Ok(stream)
-                    }
-                    State::Collection(collection) => {
-                        let stream: TCStream<Value> = collection.to_stream(this).await?;
-                        TCResult::Ok(stream)
-                    }
-                    State::Value(value) => {
-                        let stream: TCStream<Value> = Box::pin(stream::once(future::ready(value)));
-                        TCResult::Ok(stream)
-                    }
-                }
-            });
+    ) -> TCResult<TCStream<Value>> {
+        let state = self.clone().execute(parameters, auth).await?;
+        match state {
+            State::Chain(chain) => chain.to_stream(self).await,
+            State::Cluster(_cluster) => {
+                // TODO
+                let stream: TCStream<Value> = Box::pin(stream::empty());
+                TCResult::Ok(stream)
+            }
+            State::Collection(collection) => {
+                let stream: TCStream<Value> = collection.to_stream(self).await?;
+                TCResult::Ok(stream)
+            }
+            State::Value(value) => {
+                let stream: TCStream<Value> = Box::pin(stream::once(future::ready(value)));
+                TCResult::Ok(stream)
+            }
         }
-
-        try_join_all(streams).await
     }
 
     pub async fn commit(&self) {
@@ -421,7 +369,7 @@ impl Txn {
                     ))),
                 }
             }
-            Op::Ref(OpRef::Post(link, data, capture)) => {
+            Op::Ref(OpRef::Post(link, data)) => {
                 let data = stream::iter(data).map(move |(name, value)| {
                     // TODO: just allow sending an error as a value
                     resolve_value(&provided, &value)
@@ -430,11 +378,11 @@ impl Txn {
                 });
 
                 self.gateway
-                    .post(&link, data, &capture, auth)
+                    .post(&link, data, auth)
                     .map_ok(State::from)
                     .await
             }
-            Op::Method(Method::Post(_subject, _path, _data, _capture)) => {
+            Op::Method(Method::Post(_subject, _path, _data)) => {
                 Err(error::not_implemented("Txn::resolve Method::Post"))
             }
         }
@@ -476,6 +424,25 @@ fn resolve_value<'a>(
     }
 }
 
+fn is_resolved(state: &State) -> bool {
+    match state {
+        State::Value(value) => is_resolved_value(value),
+        _ => true,
+    }
+}
+
+fn is_resolved_value(value: &Value) -> bool {
+    match value {
+        Value::Op(op) => match **op {
+            Op::Ref(_) => false,
+            _ => true,
+        },
+        Value::TCString(TCString::Ref(_)) => false,
+        Value::Tuple(values) => values.iter().all(is_resolved_value),
+        _ => true,
+    }
+}
+
 fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<ValueId>> {
     let mut deps = HashSet::new();
 
@@ -497,7 +464,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(key, txn_state)?);
                 deps.extend(value_requires(value, txn_state)?);
             }
-            Method::Post(_subject, _path, _data, _capture) => {}
+            Method::Post(_subject, _path, _data) => {}
         },
         Op::Ref(op_ref) => match op_ref {
             OpRef::If(cond, then, or_else) => {
@@ -518,7 +485,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(key, txn_state)?);
                 deps.extend(value_requires(value, txn_state)?);
             }
-            OpRef::Post(_path, data, _capture) => {
+            OpRef::Post(_path, data) => {
                 for (_id, provider) in data {
                     deps.extend(value_requires(provider, txn_state)?);
                 }

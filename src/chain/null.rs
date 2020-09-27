@@ -132,14 +132,7 @@ impl ChainInstance for NullChain {
                     let mut params = Vec::with_capacity(def.len() + 1);
                     params.push((key_name.clone(), key));
                     params.extend(def.to_vec());
-
-                    let capture = &params.last().unwrap().0.clone();
-                    let mut txn_state = txn
-                        .execute(stream::iter(params), &[capture.clone()], auth)
-                        .await?;
-                    txn_state
-                        .remove(capture)
-                        .ok_or_else(|| error::not_found(capture))
+                    txn.execute(stream::iter(params), auth).await
                 } else {
                     Err(error::method_not_allowed(path))
                 }
@@ -192,9 +185,8 @@ impl ChainInstance for NullChain {
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
-    ) -> TCResult<Vec<TCStream<Value>>> {
+    ) -> TCResult<TCStream<Value>> {
         if path.is_empty() {
             Err(error::method_not_allowed("NullChain::post"))
         } else if path.len() == 1 {
@@ -208,7 +200,7 @@ impl ChainInstance for NullChain {
                         .join(", ")
                 );
                 let data = data.chain(stream::iter(def.to_vec()));
-                txn.execute_and_stream(data, capture, auth).await
+                txn.execute_and_stream(data, auth).await
             } else {
                 Err(error::not_found(path))
             }

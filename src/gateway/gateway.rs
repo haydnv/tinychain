@@ -189,10 +189,9 @@ impl Gateway {
         self: Arc<Self>,
         subject: &Link,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
         txn: Option<Arc<Txn>>,
-    ) -> TCResult<Vec<TCStream<Value>>> {
+    ) -> TCResult<TCStream<Value>> {
         println!("Gateway::post {}", subject);
 
         let txn = if let Some(txn) = txn {
@@ -204,19 +203,19 @@ impl Gateway {
         if subject.host().is_none() {
             let path = subject.path();
             if path[0] == "sbin" {
-                kernel::post(txn, path, data, capture, auth).await
+                kernel::post(txn, path, data, auth).await
             } else if let Some((suffix, cluster)) = self.hosted.get(path) {
-                cluster.post(txn, suffix, data, capture, auth).await
+                cluster.post(txn, suffix, data, auth).await
             } else {
                 Err(error::not_found(path))
             }
         } else {
             // TODO: handle txn_id
             // TODO: harmonize POST return type across the network
-            self.post(subject, data, capture, auth)
+            self.post(subject, data, auth)
                 .map_ok(|_value| {
                     let value_stream: TCStream<Value> = Box::pin(stream::empty());
-                    vec![value_stream]
+                    value_stream
                 })
                 .await
         }
@@ -226,11 +225,10 @@ impl Gateway {
         &self,
         subject: &Link,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
     ) -> TCResult<()> {
         // TODO: respond with a Stream
         // TODO: optionally include a txn_id
-        self.client.post(subject, data, capture, auth, None).await
+        self.client.post(subject, data, auth, None).await
     }
 }

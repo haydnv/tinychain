@@ -1,7 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Bound;
-use std::str::FromStr;
 
 use bytes::Bytes;
 use serde::de;
@@ -566,7 +565,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         self.visit_uint(value).map_err(de::Error::custom)
     }
 
-    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+    fn visit_map<M>(self, _access: M) -> Result<Self::Value, M::Error>
     where
         M: de::MapAccess<'de>,
     {
@@ -636,9 +635,7 @@ impl Serialize for Value {
                 map.serialize_entry(Link::from(n.class()).path(), &[n])?;
                 map.end()
             }
-            Value::Op(op) => {
-                unimplemented!()
-            }
+            Value::Op(_op) => unimplemented!(),
             Value::TCString(tc_string) => tc_string.serialize(s),
             Value::Tuple(v) => {
                 let mut seq = s.serialize_seq(Some(v.len()))?;

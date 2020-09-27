@@ -117,9 +117,8 @@ pub trait ChainInstance: Instance {
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
-    ) -> TCResult<Vec<TCStream<Value>>>;
+    ) -> TCResult<TCStream<Value>>;
 
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
 }
@@ -160,11 +159,10 @@ impl ChainInstance for Chain {
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
-    ) -> TCResult<Vec<TCStream<Value>>> {
+    ) -> TCResult<TCStream<Value>> {
         match self {
-            Self::Null(nc) => nc.post(txn, path, data, capture, auth).await,
+            Self::Null(nc) => nc.post(txn, path, data, auth).await,
         }
     }
 

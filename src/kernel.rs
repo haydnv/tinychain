@@ -52,15 +52,14 @@ pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(
     txn: Arc<Txn>,
     path: &TCPath,
     values: S,
-    capture: &[ValueId],
     auth: Auth,
-) -> TCResult<Vec<TCStream<Value>>> {
+) -> TCResult<TCStream<Value>> {
     let suffix = path.from_path(&TCPath::from_str("sbin")?)?;
 
     if suffix.is_empty() {
         Err(error::method_not_allowed(path))
     } else if &suffix == "/transact" {
-        transact(txn, values, capture, auth.clone()).await
+        transact(txn, values, auth.clone()).await
     } else {
         Err(error::not_found(path))
     }
@@ -69,10 +68,9 @@ pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(
 async fn transact<S: Stream<Item = (ValueId, Value)> + Unpin>(
     txn: Arc<Txn>,
     values: S,
-    capture: &[ValueId],
     auth: Auth,
-) -> TCResult<Vec<TCStream<Value>>> {
-    match txn.clone().execute_and_stream(values, capture, auth).await {
+) -> TCResult<TCStream<Value>> {
+    match txn.clone().execute_and_stream(values, auth).await {
         Ok(response) => {
             txn.rollback().await;
             Ok(response)
