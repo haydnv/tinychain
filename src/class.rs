@@ -29,6 +29,7 @@ pub type TCTryStream<T> = TCStream<TCResult<T>>;
 pub trait Class: Into<Link> + Clone + Eq + fmt::Display {
     type Instance: Instance;
 
+    // TODO: delete and replace with TryCastFrom
     fn from_path(path: &TCPath) -> TCResult<Self>;
 
     fn prefix() -> TCPath;

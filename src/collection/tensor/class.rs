@@ -13,8 +13,9 @@ use crate::collection::{
 };
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::value::class::ValueInstance;
 use crate::value::number::class::{NumberClass, NumberType};
-use crate::value::{label, Link, Number, TCPath, Value};
+use crate::value::{label, Link, Number, TCPath, TryCastInto, Value};
 
 use super::bounds::{Bounds, Shape};
 use super::dense::BlockListFile;
@@ -74,12 +75,12 @@ impl CollectionClass for TensorBaseType {
 
         match suffix[0].as_str() {
             "dense" if suffix.len() == 1 => {
-                if let Ok(schema) = schema.clone().try_into() {
-                    let (dtype, shape): (NumberType, Shape) = schema;
+                if schema.matches::<(NumberType, Shape)>() {
+                    let (dtype, shape): (NumberType, Shape) = schema.opt_cast_into().unwrap();
                     let block_list = BlockListFile::constant(txn, shape, dtype.zero()).await?;
                     Ok(TensorBase::Dense(block_list))
-                } else if let Ok(data) = schema.clone().try_into() {
-                    let mut data: Vec<Number> = data;
+                } else if schema.matches::<Vec<Number>>() {
+                    let mut data: Vec<Number> = schema.opt_cast_into().unwrap();
                     let shape = vec![data.len() as u64].into();
                     let dtype = data
                         .iter()
@@ -304,7 +305,9 @@ impl CollectionInstance for TensorView {
         txn: Arc<Txn>,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        let bounds: Bounds = selector.try_into()?;
+        let bounds: Bounds = selector
+            .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
+
         if bounds.is_coord() {
             let coord: Vec<u64> = bounds.try_into()?;
             let value = self.read_value(&txn, &coord).await?;
@@ -325,7 +328,9 @@ impl CollectionInstance for TensorView {
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
-        let bounds: Bounds = selector.try_into()?;
+        let bounds: Bounds = selector
+            .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
+
         match value {
             CollectionItem::Value(value) => self.write_value(txn.id().clone(), bounds, value).await,
             CollectionItem::Slice(slice) => self.write(txn, bounds, slice).await,

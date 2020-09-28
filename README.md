@@ -17,7 +17,19 @@ Tinychain is intended to bridge the gap between the futuristic distributed compu
 blockchain dApps and the security- and performance- critical application stack of traditional
 enterprise services.
 
-## Getting started
+## Contents
+
+ * [Getting Started](#getting-started)
+    * [Running Tinychain](#running-tinychain)
+    * [The Tinychain Environment](#the-tinychain-environment)
+ * [Security](#security)
+ * [Protocol](#protocol)
+ * [Getting Involved](#getting-involved)
+
+## Getting Started
+
+### Running Tinychain
+
 The easiest way to get started is using the latest Docker image here:
 [https://hub.docker.com/r/haydnv/tinychain](https://hub.docker.com/r/haydnv/tinychain)
 
@@ -93,13 +105,14 @@ First, use your favorite text editor to create a simple "Hello, World!" program:
 {"/sbin/value/string/ustring": "Hello, World!"}
 ```
 
-We'll go over the particulars of this exact format in a moment. For now, save this program to
-`myapp.json` and use cURL to run the program:
+Save this program to `myapp.json` and run it with cURL:
 
 ```bash
 curl "http://127.0.0.1:8702/sbin/transact" -d @myapp.json
 ```
 
+
+** This feature is not yet implemented
 
 ## Security
 
@@ -155,6 +168,6 @@ query parameter, called "key,", as in http://127.0.0.1:8888/app/vendor/inventory
 requires a value argument, which is the body of the request.
  * **POST**: supports reading and writing mutable state and must return exactly one value.
 
-## Getting involved
+## Getting Involved
 Developer documentation is coming soon. Until then, feel free to file a bug for any part
 of the Tinychain host software that you want to understand better. Pull requests are also welcome!

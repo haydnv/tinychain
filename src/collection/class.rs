@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
@@ -9,7 +8,7 @@ use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::transaction::{Transact, Txn};
 use crate::value::link::{Link, TCPath};
-use crate::value::{label, Value};
+use crate::value::{label, TryCastInto, Value};
 
 use super::btree::{BTreeFile, BTreeType};
 use super::null::{Null, NullType};
@@ -177,9 +176,14 @@ impl CollectionClass for CollectionBaseType {
 
         match suffix[0].as_str() {
             "btree" if suffix.len() == 1 => {
-                BTreeFile::create(txn, schema.try_into()?)
-                    .map_ok(CollectionBase::BTree)
-                    .await
+                BTreeFile::create(
+                    txn,
+                    schema.try_cast_into(|v| {
+                        error::bad_request("Expected BTree schema but found", v)
+                    })?,
+                )
+                .map_ok(CollectionBase::BTree)
+                .await
             }
             "null" if suffix.len() == 1 => {
                 if schema != Value::None {

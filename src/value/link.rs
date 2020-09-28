@@ -464,6 +464,10 @@ impl TCPath {
         }
     }
 
+    pub fn into_segments(self) -> Vec<ValueId> {
+        self.segments
+    }
+
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
     }
@@ -546,7 +550,7 @@ impl fmt::Display for TCPath {
             "/{}",
             self.segments
                 .iter()
-                .map(String::from)
+                .map(|s| s.to_string())
                 .collect::<Vec<String>>()
                 .join("/")
         )

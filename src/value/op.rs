@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 
 use crate::class::{Class, Instance, TCResult};
@@ -6,7 +6,7 @@ use crate::error;
 
 use super::class::{ValueClass, ValueInstance};
 use super::link::{Link, TCPath};
-use super::{label, TCRef, Value, ValueId, ValueType};
+use super::{label, TCRef, TryCastFrom, Value, ValueId, ValueType};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDefType {
@@ -261,17 +261,7 @@ impl TryFrom<Value> for OpDef {
     type Error = error::TCError;
 
     fn try_from(value: Value) -> TCResult<OpDef> {
-        if let Value::Tuple(_) = value {
-            if let Ok(get_op) = value.clone().try_into() {
-                Ok(OpDef::Get(get_op))
-            } else if let Ok(put_op) = value.clone().try_into() {
-                Ok(OpDef::Put(put_op))
-            } else if let Ok(post_op) = value.clone().try_into() {
-                Ok(OpDef::Post(post_op))
-            } else {
-                Err(error::bad_request("Expected OpDef but found", value))
-            }
-        } else if let Value::Op(op) = value {
+        if let Value::Op(op) = value {
             match *op {
                 Op::Def(op_def) => Ok(op_def),
                 other => Err(error::bad_request("Expected OpDef but found", other)),
@@ -342,26 +332,26 @@ impl Instance for OpRef {
     }
 }
 
-impl TryFrom<Value> for OpRef {
-    type Error = error::TCError;
+impl TryCastFrom<Value> for OpRef {
+    fn can_cast_from(v: &Value) -> bool {
+        match v {
+            Value::Op(op) => match **op {
+                Op::Ref(_) => true,
+                _ => false,
+            },
+            Value::Tuple(_data) => unimplemented!(),
+            _ => false,
+        }
+    }
 
-    fn try_from(v: Value) -> TCResult<OpRef> {
+    fn opt_cast_from(v: Value) -> Option<OpRef> {
         match v {
             Value::Op(op) => match *op {
-                Op::Ref(op_ref) => Ok(op_ref),
-                other => Err(error::bad_request("Expected OpRef but found", other)),
+                Op::Ref(op_ref) => Some(op_ref),
+                _ => None,
             },
-            Value::Tuple(data) => {
-                if let Ok((cond, then, or_else)) = Value::Tuple(data.to_vec()).try_into() {
-                    Ok(OpRef::If(cond, then, or_else))
-                } else {
-                    Err(error::bad_request(
-                        "Expected OpRef but found",
-                        Value::Tuple(data),
-                    ))
-                }
-            }
-            other => Err(error::bad_request("Expected OpRef but found", other)),
+            Value::Tuple(_data) => unimplemented!(),
+            _ => None,
         }
     }
 }
@@ -446,18 +436,6 @@ impl TryFrom<Value> for Op {
     fn try_from(v: Value) -> TCResult<Op> {
         match v {
             Value::Op(op) => Ok(*op),
-            Value::Tuple(data) => {
-                if let Ok(op_def) = OpDef::try_from(Value::Tuple(data.to_vec())) {
-                    Ok(Op::Def(op_def))
-                } else if let Ok(op_ref) = OpRef::try_from(Value::Tuple(data.to_vec())) {
-                    Ok(Op::Ref(op_ref))
-                } else {
-                    Err(error::bad_request(
-                        "Expected Op but found",
-                        Value::Tuple(data),
-                    ))
-                }
-            }
             other => Err(error::bad_request("Expected Op but found", other)),
         }
     }

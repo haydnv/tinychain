@@ -15,7 +15,7 @@ use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{label, Link, TCPath, Value, ValueId};
+use crate::value::{label, Link, TCPath, TryCastInto, Value, ValueId};
 
 use super::bounds::{self, Bounds, ColumnBound};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
@@ -58,7 +58,9 @@ impl CollectionClass for TableBaseType {
         let suffix = path.from_path(&Self::prefix())?;
 
         if suffix.is_empty() {
-            TableIndex::create(txn, schema.try_into()?)
+            let schema = schema
+                .try_cast_into(|v| error::bad_request("Expected TableSchema but found", v))?;
+            TableIndex::create(txn, schema)
                 .map_ok(TableBase::from)
                 .await
         } else {
@@ -424,7 +426,7 @@ impl TableInstance for Index {
                 Ok(self.clone().into())
             }
         } else {
-            let order: Vec<String> = order.iter().map(String::from).collect();
+            let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
             Err(error::bad_request(
                 &format!("Index with schema {} does not support order", self.schema),
                 order.join(", "),
@@ -848,7 +850,7 @@ impl TableInstance for TableIndex {
             }
 
             if columns == &initial[..] {
-                let order: Vec<String> = columns.iter().map(String::from).collect();
+                let order: Vec<String> = columns.iter().map(|id| id.to_string()).collect();
                 return Err(error::bad_request(
                     "This table has no index to support the order",
                     order.join(", "),
@@ -983,7 +985,7 @@ impl TableInstance for TableIndex {
             }
 
             if order == &initial[..] {
-                let order: Vec<String> = order.iter().map(String::from).collect();
+                let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
                 return Err(error::bad_request(
                     "This table has no index to support the order",
                     order.join(", "),

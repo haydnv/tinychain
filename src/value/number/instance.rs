@@ -8,10 +8,10 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::value::class::ValueInstance;
-use crate::value::{TCPath, Value};
+use crate::value::{CastFrom, CastInto, TCPath, TryCastFrom, Value};
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
-use super::class::{CastFrom, CastInto, NumberClass, NumberInstance};
+use super::class::{NumberClass, NumberInstance};
 
 #[derive(Clone, PartialEq)]
 pub struct Boolean(bool);
@@ -113,6 +113,12 @@ impl Sub for Boolean {
             (left, Boolean(false)) => left,
             _ => Boolean(false),
         }
+    }
+}
+
+impl CastFrom<Boolean> for u64 {
+    fn cast_from(b: Boolean) -> u64 {
+        UInt::from(b).into()
     }
 }
 
@@ -1216,17 +1222,13 @@ impl From<UInt> for u64 {
     }
 }
 
-impl TryFrom<UInt> for usize {
-    type Error = error::TCError;
-
-    fn try_from(u: UInt) -> TCResult<usize> {
+impl From<UInt> for usize {
+    fn from(u: UInt) -> usize {
         match u {
-            UInt::U64(u) => Ok(u as usize),
-            UInt::U32(u) => Ok(u as usize),
-            other => Err(error::bad_request(
-                "Expected a UInt64 or UInt32 but found",
-                other,
-            )),
+            UInt::U64(u) => u as usize,
+            UInt::U32(u) => u as usize,
+            UInt::U16(u) => u as usize,
+            UInt::U8(u) => u as usize,
         }
     }
 }
@@ -1641,12 +1643,23 @@ impl TryFrom<Number> for u64 {
     }
 }
 
-impl TryFrom<Number> for usize {
-    type Error = error::TCError;
+impl TryCastFrom<Number> for u64 {
+    fn can_cast_from(number: &Number) -> bool {
+        UInt::can_cast_from(number)
+    }
 
-    fn try_from(n: Number) -> TCResult<usize> {
-        let u: UInt = n.try_into()?;
-        u.try_into()
+    fn opt_cast_from(number: Number) -> Option<u64> {
+        UInt::opt_cast_from(number).map(u64::from)
+    }
+}
+
+impl TryCastFrom<Number> for usize {
+    fn can_cast_from(number: &Number) -> bool {
+        UInt::can_cast_from(number)
+    }
+
+    fn opt_cast_from(number: Number) -> Option<usize> {
+        UInt::opt_cast_from(number).map(usize::from)
     }
 }
 

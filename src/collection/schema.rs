@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use crate::class::{Instance, TCResult};
 use crate::error;
+use crate::value::class::ValueInstance;
 use crate::value::number::NumberType;
-use crate::value::{Value, ValueId, ValueType};
+use crate::value::{TryCastFrom, TryCastInto, Value, ValueId, ValueType};
 
 const ERR_BAD_COLUMN: &str = "Expected a Column in the form \
 [<name: ValueId>, <dtype: Link>, (<max_len: U64>)], found";
@@ -74,28 +74,34 @@ impl From<(ValueId, ValueType, usize)> for Column {
     }
 }
 
-impl TryFrom<Value> for Column {
-    type Error = error::TCError;
+impl TryCastFrom<Value> for Column {
+    fn can_cast_from(value: &Value) -> bool {
+        if value.matches::<(ValueId, ValueType)>() {
+            true
+        } else if value.matches::<(ValueId, ValueType, u64)>() {
+            true
+        } else {
+            false
+        }
+    }
 
-    fn try_from(value: Value) -> TCResult<Column> {
-        match &value {
-            Value::Tuple(tuple) if tuple.len() == 2 => {
-                let (name, dtype) = value.try_into()?;
-                Ok(Column {
-                    name,
-                    dtype,
-                    max_len: None,
-                })
-            }
-            Value::Tuple(tuple) if tuple.len() == 3 => {
-                let (name, dtype, max_len) = value.try_into()?;
-                Ok(Column {
-                    name,
-                    dtype,
-                    max_len: Some(max_len),
-                })
-            }
-            other => Err(error::bad_request(ERR_BAD_COLUMN, other)),
+    fn opt_cast_from(value: Value) -> Option<Column> {
+        if value.matches::<(ValueId, ValueType)>() {
+            let (name, dtype) = value.opt_cast_into().unwrap();
+            Some(Column {
+                name,
+                dtype,
+                max_len: None,
+            })
+        } else if value.matches::<(ValueId, ValueType, u64)>() {
+            let (name, dtype, max_len) = value.opt_cast_into().unwrap();
+            Some(Column {
+                name,
+                dtype,
+                max_len: Some(max_len),
+            })
+        } else {
+            None
         }
     }
 }
@@ -321,22 +327,16 @@ impl From<(Vec<Column>, Vec<Column>)> for IndexSchema {
     }
 }
 
-impl TryFrom<Value> for IndexSchema {
-    type Error = error::TCError;
+impl TryCastFrom<Value> for IndexSchema {
+    fn can_cast_from(value: &Value) -> bool {
+        value.matches::<(Vec<Column>, Vec<Column>)>()
+    }
 
-    fn try_from(value: Value) -> TCResult<IndexSchema> {
-        if let Value::Tuple(schema) = value {
-            if schema.len() == 2 {
-                let (key, values) = Value::Tuple(schema).try_into()?;
-                Ok(IndexSchema { key, values })
-            } else {
-                Err(error::bad_request(
-                    "Expected 2-tuple of column lists, found",
-                    Value::Tuple(schema),
-                ))
-            }
+    fn opt_cast_from(value: Value) -> Option<IndexSchema> {
+        if let Some((key, values)) = value.opt_cast_into() {
+            Some(IndexSchema { key, values })
         } else {
-            Err(error::bad_request("Expected IndexSchema, found", value))
+            None
         }
     }
 }
@@ -421,51 +421,18 @@ impl<I: Iterator<Item = (ValueId, Vec<ValueId>)>> From<(IndexSchema, I)> for Tab
     }
 }
 
-impl TryFrom<Value> for TableSchema {
-    type Error = error::TCError;
-
-    fn try_from(value: Value) -> TCResult<TableSchema> {
-        let (primary, indices): (IndexSchema, Vec<(ValueId, Vec<ValueId>)>) = value.try_into()?;
-        println!("TableSchema primary: {}", primary);
-        Ok(TableSchema {
-            primary,
-            indices: indices.into_iter().collect(),
-        })
-    }
-}
-
-pub struct GraphSchema {
-    nodes: HashMap<ValueId, TableSchema>,
-    edges: HashMap<ValueId, NumberType>,
-}
-
-impl GraphSchema {
-    pub fn nodes(&'_ self) -> &'_ HashMap<ValueId, TableSchema> {
-        &self.nodes
+impl TryCastFrom<Value> for TableSchema {
+    fn can_cast_from(value: &Value) -> bool {
+        value.matches::<(IndexSchema, Vec<(ValueId, Vec<ValueId>)>)>()
     }
 
-    pub fn edges(&'_ self) -> &'_ HashMap<ValueId, NumberType> {
-        &self.edges
-    }
-}
-
-impl From<(HashMap<ValueId, TableSchema>, HashMap<ValueId, NumberType>)> for GraphSchema {
-    fn from(schema: (HashMap<ValueId, TableSchema>, HashMap<ValueId, NumberType>)) -> GraphSchema {
-        let (nodes, edges) = schema;
-        GraphSchema { nodes, edges }
-    }
-}
-
-impl TryFrom<Value> for GraphSchema {
-    type Error = error::TCError;
-
-    fn try_from(value: Value) -> TCResult<GraphSchema> {
-        let (nodes, edges): (Vec<(ValueId, TableSchema)>, Vec<(ValueId, NumberType)>) =
-            value.try_into()?;
-
-        Ok(GraphSchema {
-            nodes: nodes.into_iter().collect(),
-            edges: edges.into_iter().collect(),
-        })
+    fn opt_cast_from(value: Value) -> Option<TableSchema> {
+        if let Some((primary, indices)) = value.opt_cast_into() {
+            let indices: Vec<(ValueId, Vec<ValueId>)> = indices;
+            let indices = indices.into_iter().collect();
+            Some(TableSchema { primary, indices })
+        } else {
+            None
+        }
     }
 }

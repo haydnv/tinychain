@@ -543,7 +543,7 @@ impl TableInstance for IndexSlice {
                 Ok(self.clone().into())
             }
         } else {
-            let order: Vec<String> = order.iter().map(String::from).collect();
+            let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
             Err(error::bad_request(
                 &format!("Index with schema {} does not support order", &self.schema),
                 order.join(", "),
@@ -595,7 +595,7 @@ impl TableInstance for IndexSlice {
         if self.schema.starts_with(order) {
             Ok(())
         } else {
-            let order: Vec<String> = order.iter().map(String::from).collect();
+            let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
             Err(error::bad_request(
                 &format!("Index with schema {} does not support order", &self.schema),
                 order.join(", "),

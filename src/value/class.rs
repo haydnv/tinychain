@@ -5,7 +5,7 @@ use crate::class::{Class, Instance, TCResult, TCType};
 use crate::error;
 
 use super::link::TCPath;
-use super::{label, Link, Value};
+use super::{label, Link, TryCastFrom, Value};
 
 pub type NumberType = super::number::class::NumberType;
 pub type OpType = super::op::OpType;
@@ -16,6 +16,10 @@ pub trait ValueInstance: Instance + Default + Sized {
 
     fn get(&self, _path: TCPath, _key: Value) -> TCResult<Self> {
         Err(error::method_not_allowed(format!("GET {}", self.class())))
+    }
+
+    fn matches<T: TryCastFrom<Self>>(&self) -> bool {
+        T::can_cast_from(self)
     }
 }
 
@@ -139,6 +143,37 @@ impl From<ValueType> for Link {
             Op => prefix.join(label("op").into()).into(),
             Tuple => prefix.join(label("tuple").into()).into(),
             Value => prefix.join(label("value").into()).into(),
+        }
+    }
+}
+
+impl TryCastFrom<Link> for ValueType {
+    fn can_cast_from(link: &Link) -> bool {
+        match ValueType::from_path(link.path()) {
+            Ok(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(link: Link) -> Option<ValueType> {
+        ValueType::from_path(link.path()).ok()
+    }
+}
+
+impl TryCastFrom<TCType> for ValueType {
+    fn can_cast_from(class: &TCType) -> bool {
+        if let TCType::Value(_) = class {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(class: TCType) -> Option<ValueType> {
+        if let TCType::Value(vt) = class {
+            Some(vt)
+        } else {
+            None
         }
     }
 }

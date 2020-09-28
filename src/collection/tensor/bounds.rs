@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter;
 use std::ops;
@@ -7,7 +7,8 @@ use itertools::{Itertools, MultiProduct};
 
 use crate::class::TCResult;
 use crate::error;
-use crate::value::Value;
+use crate::value::class::ValueInstance;
+use crate::value::{TryCastFrom, TryCastInto, Value};
 
 pub type Coords = MultiProduct<AxisIter>;
 
@@ -80,19 +81,29 @@ impl From<ops::Range<u64>> for AxisBounds {
     }
 }
 
-impl TryFrom<Value> for AxisBounds {
-    type Error = error::TCError;
-
-    fn try_from(value: Value) -> TCResult<AxisBounds> {
-        // TODO: figure out how to do this without calling .clone
-        if let Ok(x) = value.clone().try_into() {
-            Ok(AxisBounds::At(x))
-        } else if let Ok((start, end)) = value.clone().try_into() {
-            // TODO: remove ambiguity between In(range) and Of(x1, x2)
-            Ok(AxisBounds::In(start..end))
+impl TryCastFrom<Value> for AxisBounds {
+    fn can_cast_from(value: &Value) -> bool {
+        if value.matches::<u64>() {
+            true
+        } else if value.matches::<(u64, u64)>() {
+            true
+        } else if value.matches::<Vec<u64>>() {
+            true
         } else {
-            let at: Vec<u64> = value.try_into()?;
-            Ok(AxisBounds::Of(at))
+            false
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<AxisBounds> {
+        if value.matches::<u64>() {
+            value.opt_cast_into().map(AxisBounds::At)
+        } else if value.matches::<(u64, u64)>() {
+            let range: (u64, u64) = value.opt_cast_into().unwrap();
+            Some(AxisBounds::In(range.0..range.1))
+        } else if value.matches::<Vec<u64>>() {
+            value.opt_cast_into().map(AxisBounds::Of)
+        } else {
+            None
         }
     }
 }
@@ -303,12 +314,14 @@ impl From<(AxisBounds, Vec<u64>)> for Bounds {
     }
 }
 
-impl TryFrom<Value> for Bounds {
-    type Error = error::TCError;
+impl TryCastFrom<Value> for Bounds {
+    fn can_cast_from(value: &Value) -> bool {
+        value.matches::<Vec<AxisBounds>>()
+    }
 
-    fn try_from(value: Value) -> TCResult<Bounds> {
-        let bounds: Vec<AxisBounds> = value.try_into()?;
-        Ok(bounds.into())
+    fn opt_cast_from(value: Value) -> Option<Bounds> {
+        let bounds: Option<Vec<AxisBounds>> = value.opt_cast_into();
+        bounds.map(Bounds::from)
     }
 }
 
@@ -440,12 +453,14 @@ impl From<Vec<u64>> for Shape {
     }
 }
 
-impl TryFrom<Value> for Shape {
-    type Error = error::TCError;
+impl TryCastFrom<Value> for Shape {
+    fn can_cast_from(value: &Value) -> bool {
+        value.matches::<Vec<u64>>()
+    }
 
-    fn try_from(value: Value) -> TCResult<Shape> {
-        let shape = value.try_into()?;
-        Ok(Shape(shape))
+    fn opt_cast_from(value: Value) -> Option<Shape> {
+        let shape: Option<Vec<u64>> = value.opt_cast_into();
+        shape.map(Shape::from)
     }
 }
 

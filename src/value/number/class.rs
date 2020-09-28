@@ -4,11 +4,11 @@ use std::ops::{Add, Mul, Sub};
 
 use serde::{Deserialize, Serialize};
 
-use crate::class::{Class, TCResult};
+use crate::class::{Class, TCResult, TCType};
 use crate::error;
 use crate::value::class::{ValueClass, ValueInstance, ValueType};
 use crate::value::link::TCPath;
-use crate::value::{label, Link};
+use crate::value::{label, CastInto, Link, TryCastFrom};
 
 use super::instance::{Boolean, Complex, Float, Int, Number, UInt};
 
@@ -123,26 +123,6 @@ pub trait NumberInstance:
         let this: Boolean = self.cast_into();
         let that: Boolean = other.cast_into();
         this.xor(that).into()
-    }
-}
-
-pub trait CastFrom<T> {
-    fn cast_from(value: T) -> Self;
-}
-
-pub trait CastInto<T> {
-    fn cast_into(self) -> T;
-}
-
-impl<T> CastFrom<T> for T {
-    fn cast_from(value: T) -> Self {
-        value
-    }
-}
-
-impl<T, F: CastFrom<T>> CastInto<F> for T {
-    fn cast_into(self) -> F {
-        F::cast_from(self)
     }
 }
 
@@ -828,6 +808,37 @@ impl From<NumberType> for Link {
             Float(ft) => ft.into(),
             Int(it) => it.into(),
             UInt(ut) => ut.into(),
+        }
+    }
+}
+
+impl TryCastFrom<Link> for NumberType {
+    fn can_cast_from(link: &Link) -> bool {
+        match NumberType::from_path(link.path()) {
+            Ok(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(link: Link) -> Option<NumberType> {
+        NumberType::from_path(link.path()).ok()
+    }
+}
+
+impl TryCastFrom<TCType> for NumberType {
+    fn can_cast_from(class: &TCType) -> bool {
+        if let TCType::Value(ValueType::Number(_)) = class {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(class: TCType) -> Option<NumberType> {
+        if let TCType::Value(ValueType::Number(nt)) = class {
+            Some(nt)
+        } else {
+            None
         }
     }
 }

@@ -14,6 +14,10 @@ pub struct TCRef {
 }
 
 impl TCRef {
+    pub fn into_id(self) -> ValueId {
+        self.to
+    }
+
     pub fn value_id(&'_ self) -> &'_ ValueId {
         &self.to
     }

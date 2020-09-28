@@ -16,9 +16,10 @@ use crate::auth::{Auth, Token};
 use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::transaction::Txn;
+use crate::value::class::ValueInstance;
 use crate::value::json::JsonListStream;
 use crate::value::link::*;
-use crate::value::{Value, ValueId};
+use crate::value::{TryCastInto, Value, ValueId};
 
 use super::Gateway;
 
@@ -241,8 +242,14 @@ impl Server {
             }
             &Method::POST => {
                 println!("POST {}", path);
-                let values: Vec<(ValueId, Value)> =
+                let request: Value =
                     deserialize_body(request.body_mut(), self.request_limit).await?;
+
+                let values: Vec<(ValueId, Value)> = if request.matches::<Vec<(ValueId, Value)>>() {
+                    request.opt_cast_into().unwrap()
+                } else {
+                    return Err(error::not_implemented("Executable casting"));
+                };
 
                 let response = gateway
                     .clone()

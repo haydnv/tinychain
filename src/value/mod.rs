@@ -6,7 +6,7 @@ use bytes::Bytes;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-use crate::class::{Class, Instance, TCResult, TCType};
+use crate::class::{Instance, TCResult, TCType};
 use crate::error;
 
 pub mod class;
@@ -32,6 +32,74 @@ pub type ValueType = class::ValueType;
 
 pub const fn label(id: &'static str) -> string::Label {
     string::label(id)
+}
+
+pub trait CastFrom<T> {
+    fn cast_from(value: T) -> Self;
+}
+
+pub trait CastInto<T> {
+    fn cast_into(self) -> T;
+}
+
+impl<T> CastFrom<T> for T {
+    fn cast_from(value: T) -> Self {
+        value
+    }
+}
+
+impl<T, F: CastFrom<T>> CastInto<F> for T {
+    fn cast_into(self) -> F {
+        F::cast_from(self)
+    }
+}
+
+pub trait TryCastFrom<T>: Sized {
+    fn can_cast_from(value: &T) -> bool;
+
+    fn opt_cast_from(value: T) -> Option<Self>;
+
+    fn try_cast_from<E: FnOnce(&T) -> error::TCError>(value: T, err: E) -> TCResult<Self> {
+        if Self::can_cast_from(&value) {
+            Ok(Self::opt_cast_from(value).unwrap())
+        } else {
+            Err(err(&value))
+        }
+    }
+}
+
+pub trait TryCastInto<T>: Sized {
+    fn can_cast_into(&self) -> bool;
+
+    fn opt_cast_into(self) -> Option<T>;
+
+    fn try_cast_into<E: FnOnce(&Self) -> error::TCError>(self, err: E) -> TCResult<T> {
+        if self.can_cast_into() {
+            Ok(self.opt_cast_into().unwrap())
+        } else {
+            Err(err(&self))
+        }
+    }
+}
+
+impl<F, T: CastFrom<F>> TryCastFrom<F> for T {
+    fn can_cast_from(_: &F) -> bool {
+        true
+    }
+
+    fn opt_cast_from(f: F) -> Option<T> {
+        Some(T::cast_from(f))
+    }
+}
+
+impl<F, T: TryCastFrom<F>> TryCastInto<T> for F {
+    fn can_cast_into(&self) -> bool {
+        T::can_cast_from(self)
+    }
+
+    fn opt_cast_into(self) -> Option<T> {
+        T::opt_cast_from(self)
+    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -264,29 +332,6 @@ impl<'a> TryFrom<&'a Value> for &'a Number {
     }
 }
 
-impl TryFrom<Value> for number::NumberType {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<number::NumberType> {
-        match v {
-            Value::Class(t) => t.try_into(),
-            Value::TCString(TCString::Link(l)) if l.host().is_none() => {
-                number::NumberType::from_path(l.path())
-            }
-            other => Err(error::bad_request("Expected NumberType, found", other)),
-        }
-    }
-}
-
-impl TryFrom<Value> for usize {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<usize> {
-        let n: Number = v.try_into()?;
-        n.try_into()
-    }
-}
-
 impl TryFrom<Value> for u64 {
     type Error = error::TCError;
 
@@ -351,31 +396,6 @@ impl TryFrom<Value> for TCString {
     }
 }
 
-impl TryFrom<Value> for TCType {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<TCType> {
-        match v {
-            Value::Class(c) => Ok(c),
-            other => Err(error::bad_request("Expected Class, found", other)),
-        }
-    }
-}
-
-impl TryFrom<Value> for ValueType {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<ValueType> {
-        match v {
-            Value::Class(t) => t.try_into(),
-            Value::TCString(TCString::Link(l)) if l.host().is_none() => {
-                ValueType::from_path(l.path())
-            }
-            other => Err(error::bad_request("Expected ValueType, found", other)),
-        }
-    }
-}
-
 impl TryFrom<Value> for ValueId {
     type Error = error::TCError;
 
@@ -422,56 +442,197 @@ impl<T: TryFrom<Value, Error = error::TCError>> TryFrom<Value> for Vec<T> {
     }
 }
 
-impl<
-        E1: Into<error::TCError>,
-        T1: TryFrom<Value, Error = E1>,
-        E2: Into<error::TCError>,
-        T2: TryFrom<Value, Error = E2>,
-    > TryFrom<Value> for (T1, T2)
-{
-    type Error = error::TCError;
+impl TryCastFrom<Value> for Number {
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::Number(_) = value {
+            true
+        } else {
+            false
+        }
+    }
 
-    fn try_from(source: Value) -> TCResult<(T1, T2)> {
-        match source {
-            Value::Tuple(mut source) if source.len() == 2 => {
-                let second: T2 = source.pop().unwrap().try_into().map_err(|e: E2| e.into())?;
-                let first: T1 = source.pop().unwrap().try_into().map_err(|e: E1| e.into())?;
-                Ok((first, second))
-            }
-            Value::Tuple(other) => {
-                let len = other.len();
-                Err(error::unsupported(format!(
-                    "Expected a 2-Tuple but found {} (of length {})",
-                    Value::Tuple(other),
-                    len
-                )))
-            }
-            other => Err(error::bad_request("Expected a 2-Tuple but found", other)),
+    fn opt_cast_from(value: Value) -> Option<Number> {
+        if let Value::Number(n) = value {
+            Some(n)
+        } else {
+            None
         }
     }
 }
 
-impl<
-        E1: Into<error::TCError>,
-        T1: TryFrom<Value, Error = E1>,
-        E2: Into<error::TCError>,
-        T2: TryFrom<Value, Error = E2>,
-        E3: Into<error::TCError>,
-        T3: TryFrom<Value, Error = E3>,
-    > TryFrom<Value> for (T1, T2, T3)
-{
-    type Error = error::TCError;
-
-    fn try_from(source: Value) -> TCResult<(T1, T2, T3)> {
-        match source {
-            Value::Tuple(mut source) if source.len() == 3 => {
-                let third: T3 = source.pop().unwrap().try_into().map_err(|e: E3| e.into())?;
-                let second: T2 = source.pop().unwrap().try_into().map_err(|e: E2| e.into())?;
-                let first: T1 = source.pop().unwrap().try_into().map_err(|e: E1| e.into())?;
-                Ok((first, second, third))
-            }
-            other => Err(error::bad_request("Expected a 3-Tuple but found", other)),
+impl TryCastFrom<Value> for u64 {
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::Number(n) = value {
+            u64::can_cast_from(n)
+        } else {
+            false
         }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<u64> {
+        if let Value::Number(n) = value {
+            u64::opt_cast_from(n)
+        } else {
+            None
+        }
+    }
+}
+
+impl TryCastFrom<Value> for usize {
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::Number(n) = value {
+            usize::can_cast_from(n)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<usize> {
+        if let Value::Number(n) = value {
+            usize::opt_cast_from(n)
+        } else {
+            None
+        }
+    }
+}
+
+impl TryCastFrom<Value> for number::NumberType {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Class(class) => number::NumberType::can_cast_from(class),
+            Value::TCString(TCString::Link(link)) => number::NumberType::can_cast_from(link),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<number::NumberType> {
+        match value {
+            Value::Class(class) => class.opt_cast_into(),
+            Value::TCString(TCString::Link(link)) => link.opt_cast_into(),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Value> for ValueId {
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::TCString(s) = value {
+            ValueId::can_cast_from(s)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<ValueId> {
+        if let Value::TCString(s) = value {
+            ValueId::opt_cast_from(s)
+        } else {
+            None
+        }
+    }
+}
+
+impl TryCastFrom<Value> for ValueType {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Class(class) => ValueType::can_cast_from(class),
+            Value::TCString(TCString::Link(link)) => ValueType::can_cast_from(link),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<ValueType> {
+        match value {
+            Value::Class(class) => class.opt_cast_into(),
+            Value::TCString(TCString::Link(link)) => link.opt_cast_into(),
+            _ => None,
+        }
+    }
+}
+
+impl<T: TryCastFrom<Value>> TryCastFrom<Value> for Vec<T> {
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::Tuple(values) = value {
+            values.iter().all(T::can_cast_from)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Vec<T>> {
+        if let Value::Tuple(mut values) = value {
+            let mut cast: Vec<T> = Vec::with_capacity(values.len());
+            for val in values.drain(..) {
+                if let Some(val) = val.opt_cast_into() {
+                    cast.push(val)
+                } else {
+                    return None;
+                }
+            }
+
+            Some(cast)
+        } else {
+            None
+        }
+    }
+}
+
+impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>> TryCastFrom<Value> for (T1, T2) {
+    fn can_cast_from(source: &Value) -> bool {
+        if let Value::Tuple(source) = source {
+            if source.len() == 2 && T1::can_cast_from(&source[0]) && T2::can_cast_from(&source[1]) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn opt_cast_from(source: Value) -> Option<(T1, T2)> {
+        if let Value::Tuple(mut source) = source {
+            if source.len() == 2 {
+                let second: Option<T2> = source.pop().unwrap().opt_cast_into();
+                let first: Option<T1> = source.pop().unwrap().opt_cast_into();
+                if first.is_some() && second.is_some() {
+                    return Some((first.unwrap(), second.unwrap()));
+                }
+            }
+        }
+
+        None
+    }
+}
+
+impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>, T3: TryCastFrom<Value>> TryCastFrom<Value>
+    for (T1, T2, T3)
+{
+    fn can_cast_from(source: &Value) -> bool {
+        if let Value::Tuple(source) = source {
+            if source.len() == 3
+                && T1::can_cast_from(&source[0])
+                && T2::can_cast_from(&source[1])
+                && T3::can_cast_from(&source[2])
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn opt_cast_from(source: Value) -> Option<(T1, T2, T3)> {
+        if let Value::Tuple(mut source) = source {
+            if source.len() == 3 {
+                let third: Option<T3> = source.pop().unwrap().opt_cast_into();
+                let second: Option<T2> = source.pop().unwrap().opt_cast_into();
+                let first: Option<T1> = source.pop().unwrap().opt_cast_into();
+                if first.is_some() && second.is_some() && third.is_some() {
+                    return Some((first.unwrap(), second.unwrap(), third.unwrap()));
+                }
+            }
+        }
+
+        None
     }
 }
 
