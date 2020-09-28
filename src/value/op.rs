@@ -8,7 +8,7 @@ use super::class::{ValueClass, ValueInstance};
 use super::link::{Link, TCPath};
 use super::{label, TCRef, TryCastFrom, Value, ValueId, ValueType};
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {
     Get,
     Put,
@@ -58,7 +58,7 @@ impl fmt::Display for OpDefType {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum MethodType {
     Get,
     Put,
@@ -108,7 +108,7 @@ impl fmt::Display for MethodType {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpRefType {
     If,
     Get,
@@ -162,7 +162,7 @@ impl fmt::Display for OpRefType {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpType {
     Def(OpDefType),
     Method(MethodType),
@@ -194,20 +194,6 @@ impl Class for OpType {
 
 impl ValueClass for OpType {
     type Instance = Op;
-
-    fn get(path: &TCPath, op: Op) -> TCResult<Op> {
-        let class = Link::from(op.class());
-        if path == class.path() {
-            Ok(op)
-        } else {
-            Err(error::unsupported(format!(
-                "Cannot cast {} to {}; class is {}",
-                op,
-                path,
-                class.path()
-            )))
-        }
-    }
 
     fn size(self) -> Option<usize> {
         None

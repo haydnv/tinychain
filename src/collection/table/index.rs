@@ -54,18 +54,13 @@ impl Class for TableBaseType {
 impl CollectionClass for TableBaseType {
     type Instance = TableBase;
 
-    async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<TableBase> {
-        let suffix = path.from_path(&Self::prefix())?;
+    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<TableBase> {
+        let schema =
+            schema.try_cast_into(|v| error::bad_request("Expected TableSchema but found", v))?;
 
-        if suffix.is_empty() {
-            let schema = schema
-                .try_cast_into(|v| error::bad_request("Expected TableSchema but found", v))?;
-            TableIndex::create(txn, schema)
-                .map_ok(TableBase::from)
-                .await
-        } else {
-            Err(error::not_found(suffix))
-        }
+        TableIndex::create(txn, schema)
+            .map_ok(TableBase::from)
+            .await
     }
 }
 

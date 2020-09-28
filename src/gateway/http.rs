@@ -16,10 +16,9 @@ use crate::auth::{Auth, Token};
 use crate::class::{State, TCResult, TCStream};
 use crate::error;
 use crate::transaction::Txn;
-use crate::value::class::ValueInstance;
 use crate::value::json::JsonListStream;
 use crate::value::link::*;
-use crate::value::{TryCastInto, Value, ValueId};
+use crate::value::{Value, ValueId};
 
 use super::Gateway;
 
@@ -107,9 +106,7 @@ impl Client {
         data: S,
         auth: Auth,
         txn: Option<Arc<Txn>>,
-    ) -> TCResult<()> {
-        // TODO: respond with a Stream
-
+    ) -> TCResult<State> {
         if auth.is_some() {
             return Err(error::not_implemented("Authorization"));
         }
@@ -155,7 +152,10 @@ impl Client {
 
                 Err(error::TCError::of(status.into(), msg))
             }
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                // TODO: deserialize response
+                Ok(().into())
+            }
         }
     }
 }
@@ -229,6 +229,7 @@ impl Server {
                     ))))),
                 }
             }
+
             &Method::PUT => {
                 println!("PUT {}", path);
                 let id = get_param(&mut params, "key")?
@@ -240,28 +241,32 @@ impl Server {
                     .await?;
                 Ok(Box::pin(stream::empty()))
             }
+
             &Method::POST => {
                 println!("POST {}", path);
                 let request: Value =
                     deserialize_body(request.body_mut(), self.request_limit).await?;
 
-                let values: Vec<(ValueId, Value)> = if request.matches::<Vec<(ValueId, Value)>>() {
-                    request.opt_cast_into().unwrap()
-                } else {
-                    return Err(error::not_implemented("Executable casting"));
-                };
-
                 let response = gateway
                     .clone()
-                    .handle_post(
-                        &path.clone().into(),
-                        stream::iter(values.into_iter()),
-                        token,
-                        None,
-                    )
+                    .handle_post(&path.clone().into(), request, token, None)
                     .await?;
 
-                Ok(response_value_stream(response))
+                match response {
+                    State::Value(value) => {
+                        let response = serde_json::to_string_pretty(&value)
+                            .map(|s| format!("{}\r\n", s))
+                            .map(Bytes::from)
+                            .map_err(error::TCError::from);
+                        let response: TCStream<TCResult<Bytes>> =
+                            Box::pin(stream::once(future::ready(response)));
+                        Ok(response)
+                    }
+                    other => Err(error::not_implemented(format!(
+                        "Streaming serialization for {}",
+                        other
+                    ))),
+                }
             }
             other => Err(error::method_not_allowed(format!(
                 "Tinychain does not support {}",

@@ -35,8 +35,8 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
     type Instance: CollectionInstance;
 
     async fn get(
+        &self,
         txn: Arc<Txn>,
-        path: &TCPath,
         schema: Value,
     ) -> TCResult<<Self as CollectionClass>::Instance>;
 }
@@ -87,13 +87,16 @@ impl CollectionClass for CollectionType {
     type Instance = Collection;
 
     async fn get(
+        &self,
         txn: Arc<Txn>,
-        path: &TCPath,
         schema: Value,
     ) -> TCResult<<Self as CollectionClass>::Instance> {
-        CollectionBaseType::get(txn, path, schema)
-            .await
-            .map(Collection::Base)
+        match self {
+            Self::Base(cbt) => cbt.get(txn, schema).map_ok(Collection::Base).await,
+            Self::View(_) => Err(error::unsupported(
+                "Cannot instantiate a CollectionView directly",
+            )),
+        }
     }
 }
 
@@ -165,47 +168,18 @@ impl Class for CollectionBaseType {
 impl CollectionClass for CollectionBaseType {
     type Instance = CollectionBase;
 
-    async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<CollectionBase> {
-        println!("CollectionBaseType::get {}", path);
-
-        let suffix = path.from_path(&Self::prefix())?;
-
-        if suffix.is_empty() {
-            return Err(error::unsupported("You must specify a type of Collection"));
-        }
-
-        match suffix[0].as_str() {
-            "btree" if suffix.len() == 1 => {
-                BTreeFile::create(
-                    txn,
-                    schema.try_cast_into(|v| {
-                        error::bad_request("Expected BTree schema but found", v)
-                    })?,
-                )
-                .map_ok(CollectionBase::BTree)
-                .await
-            }
-            "null" if suffix.len() == 1 => {
-                if schema != Value::None {
-                    Err(error::bad_request(
-                        "Null Collection has no schema, found",
-                        schema,
-                    ))
-                } else {
-                    Ok(CollectionBase::Null(Null::create()))
-                }
-            }
-            "table" => {
-                TableBaseType::get(txn, path, schema)
-                    .map_ok(CollectionBase::Table)
+    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<CollectionBase> {
+        match self {
+            Self::BTree => {
+                let schema = schema
+                    .try_cast_into(|s| error::bad_request("Expected BTree schema but found", s))?;
+                BTreeFile::create(txn, schema)
+                    .map_ok(CollectionBase::BTree)
                     .await
             }
-            "tensor" => {
-                TensorBaseType::get(txn, path, schema)
-                    .map_ok(CollectionBase::Tensor)
-                    .await
-            }
-            other => Err(error::not_found(other)),
+            Self::Null => Ok(CollectionBase::Null(Null::create())),
+            Self::Table(tt) => tt.get(txn, schema).map_ok(CollectionBase::Table).await,
+            Self::Tensor(tt) => tt.get(txn, schema).map_ok(CollectionBase::Tensor).await,
         }
     }
 }

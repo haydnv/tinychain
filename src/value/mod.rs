@@ -6,8 +6,9 @@ use bytes::Bytes;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-use crate::class::{Instance, TCResult, TCType};
+use crate::class::{Class, Instance, TCResult, TCType};
 use crate::error;
+use crate::value::class::ValueClass;
 
 pub mod class;
 pub mod json;
@@ -23,7 +24,6 @@ pub type Link = link::Link;
 pub type Number = number::instance::Number;
 pub type Op = op::Op;
 pub type OpRef = op::OpRef;
-pub type OpType = op::OpType;
 pub type TCPath = link::TCPath;
 pub type TCString = string::TCString;
 pub type TCRef = reference::TCRef;
@@ -126,7 +126,7 @@ impl Instance for Value {
             Value::Class(_) => ValueType::Class,
             Value::Number(n) => ValueType::Number(n.class()),
             Value::TCString(s) => ValueType::TCString(s.class()),
-            Value::Op(_) => ValueType::Op,
+            Value::Op(op) => ValueType::Op(op.class()),
             Value::Tuple(_) => ValueType::Tuple,
         }
     }
@@ -514,6 +514,19 @@ impl TryCastFrom<Value> for number::NumberType {
     }
 }
 
+impl TryCastFrom<Value> for TCString {
+    fn can_cast_from(_value: &Value) -> bool {
+        true
+    }
+
+    fn opt_cast_from(value: Value) -> Option<TCString> {
+        match value {
+            Value::TCString(s) => Some(s),
+            other => Some(TCString::UString(other.to_string())),
+        }
+    }
+}
+
 impl TryCastFrom<Value> for ValueId {
     fn can_cast_from(value: &Value) -> bool {
         if let Value::TCString(s) = value {
@@ -593,9 +606,10 @@ impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>> TryCastFrom<Value> for (T1,
             if source.len() == 2 {
                 let second: Option<T2> = source.pop().unwrap().opt_cast_into();
                 let first: Option<T1> = source.pop().unwrap().opt_cast_into();
-                if first.is_some() && second.is_some() {
-                    return Some((first.unwrap(), second.unwrap()));
-                }
+                return match (first, second) {
+                    (Some(first), Some(second)) => Some((first, second)),
+                    _ => None,
+                };
             }
         }
 
@@ -626,9 +640,10 @@ impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>, T3: TryCastFrom<Value>> Try
                 let third: Option<T3> = source.pop().unwrap().opt_cast_into();
                 let second: Option<T2> = source.pop().unwrap().opt_cast_into();
                 let first: Option<T1> = source.pop().unwrap().opt_cast_into();
-                if first.is_some() && second.is_some() && third.is_some() {
-                    return Some((first.unwrap(), second.unwrap(), third.unwrap()));
-                }
+                return match (first, second, third) {
+                    (Some(first), Some(second), Some(third)) => Some((first, second, third)),
+                    _ => None,
+                };
             }
         }
 
@@ -726,11 +741,28 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         self.visit_uint(value).map_err(de::Error::custom)
     }
 
-    fn visit_map<M>(self, _access: M) -> Result<Self::Value, M::Error>
+    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
     where
         M: de::MapAccess<'de>,
     {
-        Err(de::Error::custom("not implemented"))
+        if let Some(key) = access.next_key::<&str>()? {
+            let value: Value = access.next_value()?;
+
+            if let Ok(link) = key.parse::<link::Link>() {
+                if link.host().is_none() && link.path().starts_with(&ValueType::prefix()) {
+                    let dtype = ValueType::from_path(link.path()).map_err(de::Error::custom)?;
+                    dtype.try_cast(value).map_err(de::Error::custom)
+                } else {
+                    Err(de::Error::custom(format!("Support for {}", link)))
+                }
+            } else {
+                Err(de::Error::custom("Not implemented"))
+            }
+        } else {
+            Err(de::Error::custom(
+                "Empty map is not a valid Tinychain datatype",
+            ))
+        }
     }
 
     fn visit_none<E>(self) -> Result<Self::Value, E>

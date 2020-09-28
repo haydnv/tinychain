@@ -1,11 +1,10 @@
-use std::convert::TryInto;
 use std::fmt;
 
 use crate::class::{Class, Instance, TCResult, TCType};
 use crate::error;
 
 use super::link::TCPath;
-use super::{label, Link, TryCastFrom, Value};
+use super::{label, Link, TryCastFrom, TryCastInto, Value};
 
 pub type NumberType = super::number::class::NumberType;
 pub type OpType = super::op::OpType;
@@ -26,12 +25,14 @@ pub trait ValueInstance: Instance + Default + Sized {
 pub trait ValueClass: Class {
     type Instance: ValueInstance;
 
-    fn get(
-        path: &TCPath,
-        value: <Self as ValueClass>::Instance,
-    ) -> TCResult<<Self as ValueClass>::Instance>;
-
     fn size(self) -> Option<usize>;
+
+    fn try_cast<V: TryCastInto<<Self as ValueClass>::Instance> + fmt::Display>(
+        &self,
+        value: V,
+    ) -> TCResult<<Self as ValueClass>::Instance> {
+        value.try_cast_into(|v| error::bad_request(format!("Cannot cast into type {}", self), v))
+    }
 }
 
 impl From<NumberType> for ValueType {
@@ -54,7 +55,7 @@ pub enum ValueType {
     None,
     Number(NumberType),
     TCString(StringType),
-    Op,
+    Op(OpType),
     Tuple,
     Value, // self
 }
@@ -77,7 +78,6 @@ impl Class for ValueType {
             match suffix[0].as_str() {
                 "none" => Ok(ValueType::None),
                 "bytes" => Ok(ValueType::Bytes),
-                "op" => Ok(ValueType::Op),
                 "tuple" => Ok(ValueType::Tuple),
                 other => Err(error::not_found(other)),
             }
@@ -85,6 +85,7 @@ impl Class for ValueType {
             match suffix[0].as_str() {
                 "number" => NumberType::from_path(path).map(ValueType::Number),
                 "string" => StringType::from_path(path).map(ValueType::TCString),
+                "op" => OpType::from_path(path).map(ValueType::Op),
                 other => Err(error::not_found(other)),
             }
         }
@@ -97,26 +98,6 @@ impl Class for ValueType {
 
 impl ValueClass for ValueType {
     type Instance = Value;
-
-    fn get(path: &TCPath, value: Value) -> TCResult<Value> {
-        let suffix = path.from_path(&Self::prefix())?;
-
-        if suffix.is_empty() {
-            return Ok(value);
-        }
-
-        match suffix[0].as_str() {
-            "none" if suffix.len() == 1 => Ok(Value::None),
-            "bytes" if suffix.len() == 1 => Err(error::not_implemented("/sbin/value/bytes")),
-            "number" => NumberType::get(path, value.try_into()?).map(Value::Number),
-            "string" => StringType::get(path, value.try_into()?).map(Value::TCString),
-            "op" => OpType::get(path, value.try_into()?)
-                .map(Box::new)
-                .map(Value::Op),
-            "tuple" => Err(error::not_implemented("/sbin/value/tuple")),
-            other => Err(error::not_found(other)),
-        }
-    }
 
     fn size(self) -> Option<usize> {
         use ValueType::*;
@@ -138,9 +119,9 @@ impl From<ValueType> for Link {
             Bound => prefix.join(label("bound").into()).into(),
             Bytes => prefix.join(label("bytes").into()).into(),
             Class => prefix.join(label("class").into()).into(),
-            Number(n) => n.into(),
-            TCString(s) => s.into(),
-            Op => prefix.join(label("op").into()).into(),
+            Number(nt) => nt.into(),
+            TCString(st) => st.into(),
+            Op(ot) => ot.into(),
             Tuple => prefix.join(label("tuple").into()).into(),
             Value => prefix.join(label("value").into()).into(),
         }
@@ -186,9 +167,9 @@ impl fmt::Display for ValueType {
             Bound => write!(f, "type Bound"),
             Bytes => write!(f, "type Bytes"),
             Class => write!(f, "type Class"),
-            Number(n) => write!(f, "type Number: {}", n),
-            TCString(s) => write!(f, "type String: {}", s),
-            Op => write!(f, "type Op"),
+            Number(nt) => write!(f, "type Number: {}", nt),
+            TCString(st) => write!(f, "type String: {}", st),
+            Op(ot) => write!(f, "type Op: {}", ot),
             Tuple => write!(f, "type Tuple"),
             Value => write!(f, "Value"),
         }

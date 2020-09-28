@@ -13,8 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::auth::Auth;
 use crate::block::{BlockData, Dir, DirEntry, File};
 use crate::chain::ChainInstance;
-use crate::class::{Instance, State, TCBoxTryFuture, TCResult, TCStream};
-use crate::collection::class::CollectionInstance;
+use crate::class::{Instance, State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
@@ -164,11 +163,16 @@ impl Txn {
             graph.insert(name, State::Value(value));
         }
 
-        let capture = capture.ok_or(error::unsupported("Cannot execute empty operation"))?;
+        let capture =
+            capture.ok_or_else(|| error::unsupported("Cannot execute empty operation"))?;
 
         let mut pending = FuturesUnordered::new();
 
-        while !is_resolved(graph.get(&capture).ok_or(error::not_found(&capture))?) {
+        while !is_resolved(
+            graph
+                .get(&capture)
+                .ok_or_else(|| error::not_found(&capture))?,
+        ) {
             let mut visited = HashSet::new();
             let mut unvisited = Vec::with_capacity(graph.len());
             unvisited.push(capture.clone());
@@ -216,31 +220,9 @@ impl Txn {
             }
         }
 
-        graph.remove(&capture).ok_or(error::not_found(capture))
-    }
-
-    pub async fn execute_and_stream<S: Stream<Item = (ValueId, Value)> + Unpin>(
-        self: Arc<Self>,
-        parameters: S,
-        auth: Auth,
-    ) -> TCResult<TCStream<Value>> {
-        let state = self.clone().execute(parameters, auth).await?;
-        match state {
-            State::Chain(chain) => chain.to_stream(self).await,
-            State::Cluster(_cluster) => {
-                // TODO
-                let stream: TCStream<Value> = Box::pin(stream::empty());
-                TCResult::Ok(stream)
-            }
-            State::Collection(collection) => {
-                let stream: TCStream<Value> = collection.to_stream(self).await?;
-                TCResult::Ok(stream)
-            }
-            State::Value(value) => {
-                let stream: TCStream<Value> = Box::pin(stream::once(future::ready(value)));
-                TCResult::Ok(stream)
-            }
-        }
+        graph
+            .remove(&capture)
+            .ok_or_else(|| error::not_found(capture))
     }
 
     pub async fn commit(&self) {

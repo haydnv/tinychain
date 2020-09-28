@@ -7,15 +7,17 @@ use futures::stream::{self, FuturesUnordered, Stream, StreamExt};
 
 use crate::auth::{Auth, Token};
 use crate::block::Dir;
-use crate::class::{State, TCResult, TCStream};
+use crate::class::{State, TCResult};
 use crate::error;
 use crate::kernel;
 use crate::transaction::Txn;
 use crate::value::link::{Link, LinkHost};
-use crate::value::{Value, ValueId};
+use crate::value::{TryCastInto, Value, ValueId};
 
 use super::http;
 use super::{Hosted, NetworkTime, Server};
+
+const ERR_BAD_POSTDATA: &str = "POST requires a list of (ValueId, Value) tuples, not";
 
 pub struct Gateway {
     peers: Vec<LinkHost>,
@@ -185,13 +187,13 @@ impl Gateway {
         }
     }
 
-    pub async fn handle_post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin + 'static>(
+    pub async fn handle_post(
         self: Arc<Self>,
         subject: &Link,
-        data: S,
+        data: Value,
         auth: Auth,
         txn: Option<Arc<Txn>>,
-    ) -> TCResult<TCStream<Value>> {
+    ) -> TCResult<State> {
         println!("Gateway::post {}", subject);
 
         let txn = if let Some(txn) = txn {
@@ -200,24 +202,24 @@ impl Gateway {
             Txn::new(self.clone(), self.workspace.clone()).await?
         };
 
+        if subject.host().is_none() && !subject.path().is_empty() && subject.path()[0] == "sbin" {
+            return kernel::post(txn, subject.path(), data, auth).await;
+        }
+
+        let data: Vec<(ValueId, Value)> =
+            data.try_cast_into(|v| error::bad_request(ERR_BAD_POSTDATA, v))?;
+        let data = stream::iter(data);
+
         if subject.host().is_none() {
             let path = subject.path();
-            if path[0] == "sbin" {
-                kernel::post(txn, path, data, auth).await
-            } else if let Some((suffix, cluster)) = self.hosted.get(path) {
+            if let Some((suffix, cluster)) = self.hosted.get(path) {
                 cluster.post(txn, suffix, data, auth).await
             } else {
-                Err(error::not_found(path))
+                Err(error::not_implemented("Peer discovery"))
             }
         } else {
             // TODO: handle txn_id
-            // TODO: harmonize POST return type across the network
-            self.post(subject, data, auth)
-                .map_ok(|_value| {
-                    let value_stream: TCStream<Value> = Box::pin(stream::empty());
-                    value_stream
-                })
-                .await
+            self.post(subject, data, auth).await
         }
     }
 
@@ -226,7 +228,7 @@ impl Gateway {
         subject: &Link,
         data: S,
         auth: Auth,
-    ) -> TCResult<()> {
+    ) -> TCResult<State> {
         // TODO: respond with a Stream
         // TODO: optionally include a txn_id
         self.client.post(subject, data, auth, None).await

@@ -10,7 +10,7 @@ use futures::stream::{self, Stream, StreamExt};
 use crate::auth::Auth;
 use crate::block::Dir;
 use crate::chain::{Chain, ChainInstance};
-use crate::class::{State, TCResult, TCStream};
+use crate::class::{State, TCResult};
 use crate::error;
 use crate::gateway::Gateway;
 use crate::transaction::lock::{Mutate, TxnLock};
@@ -164,7 +164,7 @@ impl Cluster {
         path: TCPath,
         data: S,
         auth: Auth,
-    ) -> TCResult<TCStream<Value>> {
+    ) -> TCResult<State> {
         if path.is_empty() {
             Err(error::method_not_allowed("Cluster::post"))
         } else if let Some(chain) = self.state.read(txn.id()).await?.chains.get(&path[0]) {
@@ -173,6 +173,7 @@ impl Cluster {
                 self.path.clone().join(path[0].clone().into()).into(),
                 Value::None,
             );
+
             let data = stream::once(future::ready((label("self").into(), get_chain.into())))
                 .chain(data)
                 .map(|(name, value)| {

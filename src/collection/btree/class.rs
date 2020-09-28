@@ -41,12 +41,8 @@ impl Class for BTreeType {
 impl CollectionClass for BTreeType {
     type Instance = BTree;
 
-    async fn get(_txn: Arc<Txn>, path: &TCPath, _schema: Value) -> TCResult<BTree> {
-        if path.is_empty() {
-            Err(error::not_implemented("BTreeType::get"))
-        } else {
-            Err(error::not_found(path))
-        }
+    async fn get(&self, _txn: Arc<Txn>, _schema: Value) -> TCResult<BTree> {
+        Err(error::not_implemented("BTreeType::get"))
     }
 }
 

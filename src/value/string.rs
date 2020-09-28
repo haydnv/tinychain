@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -55,22 +55,6 @@ impl Class for StringType {
 
 impl ValueClass for StringType {
     type Instance = TCString;
-
-    fn get(path: &TCPath, value: TCString) -> TCResult<TCString> {
-        let suffix = path.from_path(&Self::prefix())?;
-
-        if suffix.is_empty() {
-            return Ok(value);
-        }
-
-        match suffix[0].as_str() {
-            "id" => value.try_into().map(TCString::Id),
-            "link" => value.try_into().map(TCString::Link),
-            "ref" => value.try_into().map(TCString::Ref),
-            "ustring" => value.try_into().map(TCString::UString),
-            other => Err(error::not_found(other)),
-        }
-    }
 
     fn size(self) -> Option<usize> {
         None

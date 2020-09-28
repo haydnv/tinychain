@@ -9,13 +9,13 @@ use futures::TryFutureExt;
 use crate::auth::Auth;
 use crate::class::*;
 use crate::collection::class::*;
-use crate::collection::{Collection, CollectionBase, CollectionBaseType};
+use crate::collection::{Collection, CollectionBase};
 use crate::error;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 use crate::value::class::ValueClass;
 use crate::value::op::OpDef;
-use crate::value::{Link, TCPath, Value, ValueId, ValueType};
+use crate::value::{Link, TCPath, Value, ValueId};
 
 use super::{Chain, ChainInstance, ChainType};
 
@@ -66,23 +66,20 @@ pub struct NullChain {
 impl NullChain {
     pub async fn create(
         txn: Arc<Txn>,
-        dtype: TCPath,
+        dtype: TCType,
         schema: Value,
         ops: HashMap<ValueId, OpDef>,
     ) -> TCResult<NullChain> {
-        let dtype = TCType::from_path(&dtype)?;
         let state = match dtype {
             TCType::Collection(ct) => match ct {
                 CollectionType::Base(ct) => {
-                    // TODO: figure out a better way than "Link::from(ct).path()"
-                    let collection =
-                        CollectionBaseType::get(txn, Link::from(ct).path(), schema).await?;
+                    let collection = ct.get(txn, schema).await?;
                     collection.into()
                 }
                 _ => return Err(error::unsupported(ERR_COLLECTION_VIEW)),
             },
             TCType::Value(vt) => {
-                let value = ValueType::get(Link::from(vt).path(), schema)?;
+                let value = vt.try_cast(schema)?;
                 println!("NullChain::create({}) wraps value {}", vt, value);
                 value.into()
             }
@@ -186,7 +183,7 @@ impl ChainInstance for NullChain {
         path: TCPath,
         data: S,
         auth: Auth,
-    ) -> TCResult<TCStream<Value>> {
+    ) -> TCResult<State> {
         if path.is_empty() {
             Err(error::method_not_allowed("NullChain::post"))
         } else if path.len() == 1 {
@@ -200,7 +197,7 @@ impl ChainInstance for NullChain {
                         .join(", ")
                 );
                 let data = data.chain(stream::iter(def.to_vec()));
-                txn.execute_and_stream(data, auth).await
+                txn.execute(data, auth).await
             } else {
                 Err(error::not_found(path))
             }

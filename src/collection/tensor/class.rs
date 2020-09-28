@@ -22,6 +22,8 @@ use super::dense::BlockListFile;
 use super::sparse::SparseTable;
 use super::{DenseTensor, SparseTensor, TensorBoolean, TensorIO, TensorTransform};
 
+const ERR_CREATE_DENSE: &str = "DenseTensor can be constructed with (NumberType, Shape) or \
+(Number, ...), not";
 const ERR_SPECIFY_TYPE: &str = "You must specify a type of tensor (tensor/dense or tensor/sparse)";
 
 pub trait TensorInstance: Send + Sync {
@@ -65,16 +67,9 @@ impl Class for TensorBaseType {
 impl CollectionClass for TensorBaseType {
     type Instance = TensorBase;
 
-    async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<TensorBase> {
-        println!("TensorBaseType::get {}", path);
-        let suffix = path.from_path(&Self::prefix())?;
-
-        if suffix.is_empty() {
-            return Err(error::unsupported(ERR_SPECIFY_TYPE));
-        }
-
-        match suffix[0].as_str() {
-            "dense" if suffix.len() == 1 => {
+    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<TensorBase> {
+        match self {
+            Self::Dense => {
                 if schema.matches::<(NumberType, Shape)>() {
                     let (dtype, shape): (NumberType, Shape) = schema.opt_cast_into().unwrap();
                     let block_list = BlockListFile::constant(txn, shape, dtype.zero()).await?;
@@ -91,11 +86,10 @@ impl CollectionClass for TensorBaseType {
                             .await?;
                     Ok(TensorBase::Dense(block_list))
                 } else {
-                    Err(error::bad_request("DenseTensor can be constructed with (NumberType, Shape) or (Number, ...), not", schema))
+                    Err(error::bad_request(ERR_CREATE_DENSE, schema))
                 }
             }
-            "sparse" if suffix.len() == 1 => todo!(),
-            _ => Err(error::not_found(suffix)),
+            Self::Sparse => todo!(),
         }
     }
 }
