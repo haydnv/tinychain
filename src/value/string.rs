@@ -14,7 +14,7 @@ use crate::error;
 use super::class::{ValueClass, ValueInstance};
 use super::link::{Link, TCPath};
 use super::reference::TCRef;
-use super::{TCResult, TryCastFrom, ValueType};
+use super::{TCResult, TryCastFrom, Value, ValueType};
 
 const RESERVED_CHARS: [&str; 21] = [
     "/", "..", "~", "$", "`", "^", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":",
@@ -58,6 +58,10 @@ impl ValueClass for StringType {
 
     fn size(self) -> Option<usize> {
         None
+    }
+
+    fn try_cast(&self, _value: Value) -> TCResult<TCString> {
+        unimplemented!()
     }
 }
 

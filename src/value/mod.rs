@@ -891,7 +891,25 @@ impl Serialize for Value {
                 map.serialize_entry(Link::from(n.class()).path(), &[n])?;
                 map.end()
             }
-            Value::Op(_op) => unimplemented!(),
+            Value::Op(op) => match &**op {
+                Op::Ref(op_ref) => match op_ref {
+                    OpRef::Get(subject, key) => {
+                        let mut map = s.serialize_map(Some(1))?;
+                        map.serialize_entry(&subject, &[key])?;
+                        map.end()
+                    }
+                    _ => unimplemented!(),
+                },
+                Op::Method(method) => match method {
+                    Method::Get(subject, path, key) => {
+                        let mut map = s.serialize_map(Some(1))?;
+                        map.serialize_entry(&format!("{}{}", subject, path), &[key])?;
+                        map.end()
+                    }
+                    _ => unimplemented!(),
+                },
+                _ => unimplemented!(),
+            },
             Value::TCString(tc_string) => tc_string.serialize(s),
             Value::Tuple(v) => {
                 let mut seq = s.serialize_seq(Some(v.len()))?;

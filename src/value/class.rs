@@ -27,12 +27,7 @@ pub trait ValueClass: Class {
 
     fn size(self) -> Option<usize>;
 
-    fn try_cast<V: TryCastInto<<Self as ValueClass>::Instance> + fmt::Display>(
-        &self,
-        value: V,
-    ) -> TCResult<<Self as ValueClass>::Instance> {
-        value.try_cast_into(|v| error::bad_request(format!("Cannot cast into type {}", self), v))
-    }
+    fn try_cast(&self, value: Value) -> TCResult<<Self as ValueClass>::Instance>;
 }
 
 impl From<NumberType> for ValueType {
@@ -105,6 +100,18 @@ impl ValueClass for ValueType {
             None => Some(1),
             Number(nt) => ValueClass::size(nt),
             _ => Option::None,
+        }
+    }
+
+    fn try_cast(&self, value: Value) -> TCResult<Value> {
+        match self {
+            Self::None => Ok(Value::None),
+            Self::Number(nt) => nt.try_cast(value).map(Value::Number),
+            Self::TCString(st) => st.try_cast(value).map(Value::TCString),
+            Self::Op(ot) => ot.try_cast(value).map(Box::new).map(Value::Op),
+            other => value.try_cast_into(|v| {
+                error::not_implemented(format!("Cast into {} from {}", other, v))
+            }),
         }
     }
 }

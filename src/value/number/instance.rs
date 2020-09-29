@@ -1426,6 +1426,7 @@ impl Add for Number {
 
     fn add(self, other: Number) -> Self {
         let dtype = Ord::max(self.class(), other.class());
+        println!("Add:add {} + {} = {}", self.class(), other.class(), dtype);
 
         use NumberType as NT;
 

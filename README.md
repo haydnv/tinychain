@@ -155,7 +155,16 @@ value assigned in the function definition. To return multiple values, we can use
 ]
 ```
 
-Try it! 
+Try it! The value `{"$one": []}` is a `Ref`, meaning a reference to another value in the same
+transaction context. `Ref`s are useful for calling object methods--for example, try:
+
+```json
+[
+    ["one", {"/sbin/value/number/int/32": 1}],
+    ["two", {"/sbin/value/number/int/32": 2}],
+    ["add_result", {"$one/add": [{"$two": []}]}]
+]
+```
 
 ** This feature is not yet implemented
 

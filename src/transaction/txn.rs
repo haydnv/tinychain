@@ -197,7 +197,8 @@ impl Txn {
 
                         println!("Provider: {}", &op);
                         for dep in requires(op, &graph)? {
-                            let dep_state = graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
+                            let dep_state =
+                                graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
 
                             if !is_resolved(dep_state) {
                                 ready = false;
@@ -216,7 +217,9 @@ impl Txn {
                         let mut ready = true;
                         for dep in tuple {
                             if let Value::TCString(TCString::Ref(dep)) = dep {
-                                let dep_state = graph.get(dep.value_id()).ok_or_else(|| error::not_found(&dep))?;
+                                let dep_state = graph
+                                    .get(dep.value_id())
+                                    .ok_or_else(|| error::not_found(&dep))?;
 
                                 if !is_resolved(dep_state) {
                                     ready = false;
@@ -430,6 +433,7 @@ fn is_resolved_value(value: &Value) -> bool {
     match value {
         Value::Op(op) => match **op {
             Op::Ref(_) => false,
+            Op::Method(_) => false,
             _ => true,
         },
         Value::TCString(TCString::Ref(_)) => false,
@@ -459,7 +463,16 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(key, txn_state)?);
                 deps.extend(value_requires(value, txn_state)?);
             }
-            Method::Post(_subject, _path, _data) => {}
+            Method::Post(subject, _path, data) => {
+                deps.insert(subject.value_id().clone());
+                deps.extend(data.iter().filter_map(|(name, dep)| {
+                    if is_resolved_value(dep) {
+                        None
+                    } else {
+                        Some(name.clone())
+                    }
+                }));
+            }
         },
         Op::Ref(op_ref) => match op_ref {
             OpRef::If(cond, then, or_else) => {

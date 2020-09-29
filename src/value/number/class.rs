@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::{Add, Mul, Sub};
 
@@ -8,7 +9,7 @@ use crate::class::{Class, TCResult, TCType};
 use crate::error;
 use crate::value::class::{ValueClass, ValueInstance, ValueType};
 use crate::value::link::TCPath;
-use crate::value::{label, CastInto, Link, TryCastFrom};
+use crate::value::{label, CastInto, Link, TryCastFrom, Value};
 
 use super::instance::{Boolean, Complex, Float, Int, Number, UInt};
 
@@ -164,6 +165,12 @@ impl ValueClass for ComplexType {
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
     }
+
+    fn try_cast(&self, value: Value) -> TCResult<Complex> {
+        let n = Number::try_from(value)?;
+        let n = n.into_type(NumberType::Complex(*self));
+        n.try_into()
+    }
 }
 
 impl NumberClass for ComplexType {
@@ -249,6 +256,12 @@ impl ValueClass for BooleanType {
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
     }
+
+    fn try_cast(&self, value: Value) -> TCResult<Boolean> {
+        let n = Number::try_from(value)?;
+        let n = n.into_type(NumberType::Bool);
+        n.try_into()
+    }
 }
 
 impl NumberClass for BooleanType {
@@ -326,6 +339,12 @@ impl ValueClass for FloatType {
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
+    }
+
+    fn try_cast(&self, value: Value) -> TCResult<Float> {
+        let n = Number::try_from(value)?;
+        let n = n.into_type(NumberType::Float(*self));
+        n.try_into()
     }
 }
 
@@ -425,6 +444,12 @@ impl ValueClass for IntType {
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
+    }
+
+    fn try_cast(&self, value: Value) -> TCResult<Int> {
+        let n = Number::try_from(value)?;
+        let n = n.into_type(NumberType::Int(*self));
+        n.try_into()
     }
 }
 
@@ -532,6 +557,12 @@ impl ValueClass for UIntType {
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
+    }
+
+    fn try_cast(&self, value: Value) -> TCResult<UInt> {
+        let n = Number::try_from(value)?;
+        let n = n.into_type(NumberType::UInt(*self));
+        n.try_into()
     }
 }
 
@@ -652,6 +683,10 @@ impl ValueClass for NumberType {
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
+    }
+
+    fn try_cast(&self, value: Value) -> TCResult<Number> {
+        Number::try_from(value).map(|n| n.into_type(*self))
     }
 }
 

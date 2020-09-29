@@ -6,7 +6,7 @@ use crate::error;
 
 use super::class::{ValueClass, ValueInstance};
 use super::link::{Link, TCPath};
-use super::{label, TCRef, TryCastFrom, TryCastInto, Value, ValueId, ValueType};
+use super::{label, TCRef, TryCastFrom, Value, ValueId, ValueType};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {
@@ -197,6 +197,10 @@ impl ValueClass for OpType {
 
     fn size(self) -> Option<usize> {
         None
+    }
+
+    fn try_cast(&self, _value: Value) -> TCResult<Op> {
+        unimplemented!()
     }
 }
 
