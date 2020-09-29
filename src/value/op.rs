@@ -6,7 +6,7 @@ use crate::error;
 
 use super::class::{ValueClass, ValueInstance};
 use super::link::{Link, TCPath};
-use super::{label, TCRef, TryCastFrom, Value, ValueId, ValueType};
+use super::{label, TCRef, TryCastFrom, TryCastInto, Value, ValueId, ValueType};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {
@@ -34,6 +34,18 @@ impl Class for OpDefType {
 
     fn prefix() -> TCPath {
         OpType::prefix().join(label("def").into())
+    }
+}
+
+impl ValueClass for OpDefType {
+    type Instance = OpDef;
+
+    fn size(self) -> Option<usize> {
+        None
+    }
+
+    fn try_cast(&self, value: Value) -> TCResult<OpDef> {
+        OpDef::try_cast_from(value, |v| error::bad_request("Not a valid OpDef", v))
     }
 }
 
@@ -87,6 +99,18 @@ impl Class for MethodType {
     }
 }
 
+impl ValueClass for MethodType {
+    type Instance = Method;
+
+    fn size(self) -> Option<usize> {
+        None
+    }
+
+    fn try_cast(&self, _value: Value) -> TCResult<Method> {
+        Err(error::not_implemented("Cast Value into Method"))
+    }
+}
+
 impl From<MethodType> for Link {
     fn from(mt: MethodType) -> Link {
         let prefix = MethodType::prefix();
@@ -136,6 +160,18 @@ impl Class for OpRefType {
 
     fn prefix() -> TCPath {
         OpType::prefix().join(label("ref").into())
+    }
+}
+
+impl ValueClass for OpRefType {
+    type Instance = OpRef;
+
+    fn size(self) -> Option<usize> {
+        None
+    }
+
+    fn try_cast(&self, value: Value) -> TCResult<OpRef> {
+        value.try_cast_into(|v| error::bad_request(format!("Cannot cast into {} from", self), v))
     }
 }
 
@@ -199,8 +235,12 @@ impl ValueClass for OpType {
         None
     }
 
-    fn try_cast(&self, _value: Value) -> TCResult<Op> {
-        unimplemented!()
+    fn try_cast(&self, value: Value) -> TCResult<Op> {
+        match self {
+            Self::Def(odt) => odt.try_cast(value).map(Op::Def),
+            Self::Method(mt) => mt.try_cast(value).map(Op::Method),
+            Self::Ref(ort) => ort.try_cast(value).map(Op::Ref),
+        }
     }
 }
 
@@ -247,6 +287,10 @@ impl Instance for OpDef {
     }
 }
 
+impl ValueInstance for OpDef {
+    type Class = OpDefType;
+}
+
 impl TryFrom<Value> for OpDef {
     type Error = error::TCError;
 
@@ -258,6 +302,32 @@ impl TryFrom<Value> for OpDef {
             }
         } else {
             Err(error::bad_request("Expected OpDef but found", value))
+        }
+    }
+}
+
+impl TryCastFrom<Value> for OpDef {
+    fn can_cast_from(value: &Value) -> bool {
+        if value.matches::<PutOp>() {
+            true
+        } else if value.matches::<GetOp>() {
+            true
+        } else if value.matches::<PostOp>() {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<OpDef> {
+        if value.matches::<PutOp>() {
+            value.opt_cast_into().map(OpDef::Put)
+        } else if value.matches::<GetOp>() {
+            value.opt_cast_into().map(OpDef::Get)
+        } else if value.matches::<PostOp>() {
+            value.opt_cast_into().map(OpDef::Post)
+        } else {
+            None
         }
     }
 }
@@ -291,6 +361,10 @@ impl Instance for Method {
     }
 }
 
+impl ValueInstance for Method {
+    type Class = MethodType;
+}
+
 impl fmt::Display for Method {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -322,6 +396,10 @@ impl Instance for OpRef {
     }
 }
 
+impl ValueInstance for OpRef {
+    type Class = OpRefType;
+}
+
 impl TryCastFrom<Value> for OpRef {
     fn can_cast_from(v: &Value) -> bool {
         match v {
@@ -329,8 +407,19 @@ impl TryCastFrom<Value> for OpRef {
                 Op::Ref(_) => true,
                 _ => false,
             },
-            Value::Tuple(_data) => unimplemented!(),
-            _ => false,
+            other => {
+                if other.matches::<(TCRef, Value, Value)>() {
+                    true
+                } else if other.matches::<(Link, Vec<(ValueId, Value)>)>() {
+                    true
+                } else if other.matches::<(Link, Value, Value)>() {
+                    true
+                } else if other.matches::<(Link, Value)>() {
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 
@@ -340,8 +429,14 @@ impl TryCastFrom<Value> for OpRef {
                 Op::Ref(op_ref) => Some(op_ref),
                 _ => None,
             },
-            Value::Tuple(_data) => unimplemented!(),
-            _ => None,
+            other => {
+                if other.matches::<(TCRef, Value, Value)>() {
+                    let (cond, then, or_else) = other.opt_cast_into().unwrap();
+                    Some(OpRef::If(cond, then, or_else))
+                } else {
+                    unimplemented!()
+                }
+            }
         }
     }
 }

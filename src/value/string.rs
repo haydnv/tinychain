@@ -423,6 +423,24 @@ impl TryFrom<TCString> for TCRef {
     }
 }
 
+impl TryCastFrom<TCString> for Link {
+    fn can_cast_from(s: &TCString) -> bool {
+        match s {
+            TCString::UString(s) => Link::from_str(s).is_ok(),
+            _ => true,
+        }
+    }
+
+    fn opt_cast_from(s: TCString) -> Option<Link> {
+        match s {
+            TCString::Id(id) => Some(TCPath::from(id).into()),
+            TCString::Link(link) => Some(link),
+            TCString::Ref(tc_ref) => Some(TCPath::from(tc_ref.into_id()).into()),
+            TCString::UString(s) => Link::from_str(&s).ok(),
+        }
+    }
+}
+
 impl TryCastFrom<TCString> for ValueId {
     fn can_cast_from(s: &TCString) -> bool {
         match s {
@@ -440,6 +458,16 @@ impl TryCastFrom<TCString> for ValueId {
             TCString::Ref(tc_ref) => Some(tc_ref.into_id()),
             TCString::UString(s) => ValueId::opt_cast_from(s),
         }
+    }
+}
+
+impl TryCastFrom<TCString> for TCRef {
+    fn can_cast_from(s: &TCString) -> bool {
+        ValueId::can_cast_from(s)
+    }
+
+    fn opt_cast_from(s: TCString) -> Option<TCRef> {
+        ValueId::opt_cast_from(s).map(TCRef::from)
     }
 }
 

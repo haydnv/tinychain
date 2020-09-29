@@ -38,6 +38,7 @@ pub trait NumberInstance:
     + PartialOrd
     + From<Boolean>
     + Into<Number>
+    + Default
 {
     type Abs: NumberInstance;
     type Class: NumberClass;

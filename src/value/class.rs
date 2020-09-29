@@ -10,7 +10,7 @@ pub type NumberType = super::number::class::NumberType;
 pub type OpType = super::op::OpType;
 pub type StringType = super::string::StringType;
 
-pub trait ValueInstance: Instance + Default + Sized {
+pub trait ValueInstance: Instance + Sized {
     type Class: ValueClass;
 
     fn get(&self, _path: TCPath, _key: Value) -> TCResult<Self> {

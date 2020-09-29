@@ -444,6 +444,24 @@ impl<T: TryFrom<Value, Error = error::TCError>> TryFrom<Value> for Vec<T> {
     }
 }
 
+impl TryCastFrom<Value> for Link {
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::TCString(s) = value {
+            Link::can_cast_from(s)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Link> {
+        if let Value::TCString(s) = value {
+            Link::opt_cast_from(s)
+        } else {
+            None
+        }
+    }
+}
+
 impl TryCastFrom<Value> for Number {
     fn can_cast_from(value: &Value) -> bool {
         if let Value::Number(_) = value {
@@ -535,6 +553,22 @@ impl TryCastFrom<Value> for TCPath {
         }
 
         None
+    }
+}
+
+impl TryCastFrom<Value> for TCRef {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::TCString(s) => TCRef::can_cast_from(s),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<TCRef> {
+        match value {
+            Value::TCString(s) => TCRef::opt_cast_from(s),
+            _ => None
+        }
     }
 }
 
