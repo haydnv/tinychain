@@ -6,7 +6,7 @@ use crate::error;
 
 use super::class::{ValueClass, ValueInstance};
 use super::link::{Link, TCPath};
-use super::{label, TCRef, TryCastFrom, Value, ValueId, ValueType};
+use super::{label, TCRef, TryCastFrom, TryCastInto, Value, ValueId, ValueType};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {

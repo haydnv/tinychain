@@ -1,6 +1,7 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Bound;
+use std::str::FromStr;
 
 use bytes::Bytes;
 use serde::de;
@@ -21,6 +22,7 @@ pub mod version;
 
 pub type Label = string::Label;
 pub type Link = link::Link;
+pub type Method = op::Method;
 pub type Number = number::instance::Number;
 pub type Op = op::Op;
 pub type OpRef = op::OpRef;
@@ -514,6 +516,28 @@ impl TryCastFrom<Value> for number::NumberType {
     }
 }
 
+impl TryCastFrom<Value> for TCPath {
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::TCString(TCString::Link(link)) = value {
+            if link.host().is_none() {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn opt_cast_from(value: Value) -> Option<TCPath> {
+        if let Value::TCString(TCString::Link(link)) = value {
+            if link.host().is_none() {
+                return Some(link.into_path());
+            }
+        }
+
+        None
+    }
+}
+
 impl TryCastFrom<Value> for TCString {
     fn can_cast_from(_value: &Value) -> bool {
         true
@@ -748,7 +772,46 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         if let Some(key) = access.next_key::<&str>()? {
             let value: Value = access.next_value()?;
 
-            if let Ok(link) = key.parse::<link::Link>() {
+            if key.starts_with('$') {
+                let (subject, path) = if let Some(i) = key.find('/') {
+                    let (subject, path) = key.split_at(i);
+                    let subject = TCRef::from_str(subject).map_err(de::Error::custom)?;
+                    let path = TCPath::from_str(path).map_err(de::Error::custom)?;
+                    (subject, path)
+                } else {
+                    (
+                        TCRef::from_str(key).map_err(de::Error::custom)?,
+                        TCPath::default(),
+                    )
+                };
+
+                if value == Value::Tuple(vec![]) || value == Value::None {
+                    Ok(subject.into())
+                } else {
+                    use class::ValueInstance;
+
+                    let method = if value.matches::<Vec<(ValueId, Value)>>() {
+                        let data: Vec<(ValueId, Value)> = value.opt_cast_into().unwrap();
+                        Method::Post(subject, path, data)
+                    } else {
+                        let mut data: Vec<Value> = value.try_into().map_err(de::Error::custom)?;
+                        if data.len() == 1 {
+                            Method::Get(subject, path, data.pop().unwrap())
+                        } else if data.len() == 2 {
+                            let value = data.pop().unwrap();
+                            let key = data.pop().unwrap();
+                            Method::Put(subject, path, key, value)
+                        } else {
+                            return Err(de::Error::custom(format!(
+                                "Expected a Method but found: {}",
+                                Value::Tuple(data)
+                            )));
+                        }
+                    };
+
+                    Ok(Value::Op(Box::new(Op::Method(method))))
+                }
+            } else if let Ok(link) = key.parse::<link::Link>() {
                 if link.host().is_none() && link.path().starts_with(&ValueType::prefix()) {
                     let dtype = ValueType::from_path(link.path()).map_err(de::Error::custom)?;
                     dtype.try_cast(value).map_err(de::Error::custom)

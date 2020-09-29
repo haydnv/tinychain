@@ -111,6 +111,51 @@ Save this program to `myapp.json` and run it with cURL:
 curl "http://127.0.0.1:8702/sbin/transact" -d @myapp.json
 ```
 
+You should see an output like:
+
+```bash
+$ curl "http://127.0.0.1:8702/sbin/transact" -d @myapp.json 
+"Hello, World!"
+$
+```
+
+`/sbin/transact` is an endpoint that will simply attempt to execute whatever JSON you send via
+HTTP POST. Other POST endpoints, however, require a more specific executable format--try replacing
+the contents of `myapp.json` with this:
+
+```json
+[
+    ["one", {"/sbin/value/number/int/32": 1}],
+    ["two", {"/sbin/value/number/int/32": 2}]
+]
+```
+
+When you run this, you'll only see:
+
+```json
+$ curl "http://127.0.0.1:8702/sbin/transact" -d @myapp.json 
+{
+  "/sbin/value/number/uint/64": [
+    2
+  ]
+}
+```
+
+That's because Tinychain interpreted this as an executable function, and only returned the last
+value assigned in the function definition. To return multiple values, we can use a tuple:
+
+```json
+[
+    ["one", {"/sbin/value/number/int/32": 1}],
+    ["two", {"/sbin/value/number/int/32": 2}],
+    ["onetwo", {"/sbin/value/tuple": [
+        {"$one": []},
+        {"$two": []}
+    ]}]
+]
+```
+
+Try it! 
 
 ** This feature is not yet implemented
 

@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::hash::Hash;
 use std::iter;
@@ -187,29 +187,48 @@ impl Txn {
                 println!("Txn::execute {} (#{})", &name, visited.len());
 
                 let state = graph.get(&name).ok_or_else(|| error::not_found(&name))?;
-                if let State::Value(Value::Op(op)) = state {
-                    if op.is_def() {
-                        continue;
-                    }
-
-                    println!("Provider: {}", &op);
-
+                if let State::Value(value) = state {
                     let mut ready = true;
-                    for dep in requires(op, &graph)? {
-                        let dep_state = graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
 
-                        if !is_resolved(dep_state) {
-                            ready = false;
-                            unvisited.push(dep);
+                    if let Value::Op(op) = value {
+                        if op.is_def() {
+                            continue;
                         }
-                    }
 
-                    if ready {
-                        pending.push(
-                            self.clone()
-                                .resolve(graph.clone(), *op.clone(), auth.clone())
-                                .map_ok(|state| (name, state)),
-                        );
+                        println!("Provider: {}", &op);
+                        for dep in requires(op, &graph)? {
+                            let dep_state = graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
+
+                            if !is_resolved(dep_state) {
+                                ready = false;
+                                unvisited.push(dep);
+                            }
+                        }
+
+                        if ready {
+                            pending.push(
+                                self.clone()
+                                    .resolve(graph.clone(), *op.clone(), auth.clone())
+                                    .map_ok(|state| (name, state)),
+                            );
+                        }
+                    } else if let Value::Tuple(tuple) = value {
+                        let mut ready = true;
+                        for dep in tuple {
+                            if let Value::TCString(TCString::Ref(dep)) = dep {
+                                let dep_state = graph.get(dep.value_id()).ok_or_else(|| error::not_found(&dep))?;
+
+                                if !is_resolved(dep_state) {
+                                    ready = false;
+                                    unvisited.push(dep.value_id().clone());
+                                }
+                            }
+                        }
+
+                        if ready {
+                            let resolved = resolve_state(&graph, value)?;
+                            graph.insert(name, resolved);
+                        }
                     }
                 }
             }
@@ -271,18 +290,17 @@ impl Txn {
                 }
             }
             Op::Ref(OpRef::Get(link, key)) => {
-                let object = resolve_value(&provided, &key)?.clone();
-                println!("object {}", object);
+                let key: Value = resolve_state(&provided, &key)?.try_into()?;
                 self.gateway
                     .clone()
-                    .get(&link, object, auth, Some(self.clone()))
+                    .get(&link, key, auth, Some(self.clone()))
                     .await
             }
             Op::Method(Method::Get(tc_ref, path, key)) => {
                 let subject = provided
                     .get(tc_ref.value_id())
                     .ok_or_else(|| error::not_found(tc_ref))?;
-                let key = resolve_value(&provided, &key)?;
+                let key: Value = resolve_state(&provided, &key)?.try_into()?;
 
                 println!("Method::Get subject {}: {}", subject, key);
 
@@ -354,8 +372,9 @@ impl Txn {
             Op::Ref(OpRef::Post(link, data)) => {
                 let data = stream::iter(data).map(move |(name, value)| {
                     // TODO: just allow sending an error as a value
-                    resolve_value(&provided, &value)
-                        .map(|value| (name, value.clone()))
+                    resolve_state(&provided, &value)
+                        .map(Value::try_from)
+                        .map(|value| (name, value.unwrap()))
                         .unwrap()
                 });
 
@@ -388,21 +407,15 @@ fn resolve_state(provided: &HashMap<ValueId, State>, object: &Value) -> TCResult
             Some(state) => Ok(state.clone()),
             None => Err(error::not_found(object)),
         },
+        Value::Tuple(tuple) => {
+            let tuple: TCResult<Vec<State>> = tuple
+                .iter()
+                .map(|val| resolve_state(provided, val))
+                .collect();
+            let tuple: TCResult<Vec<Value>> = tuple?.drain(..).map(Value::try_from).collect();
+            tuple.map(Value::Tuple).map(State::Value)
+        }
         other => Ok(State::Value(other.clone())),
-    }
-}
-
-fn resolve_value<'a>(
-    provided: &'a HashMap<ValueId, State>,
-    object: &'a Value,
-) -> TCResult<&'a Value> {
-    match object {
-        Value::TCString(TCString::Ref(object)) => match provided.get(object.value_id()) {
-            Some(State::Value(object)) => Ok(object),
-            Some(other) => Err(error::bad_request("Expected Value but found", other)),
-            None => Err(error::not_found(object)),
-        },
-        other => Ok(other),
     }
 }
 
