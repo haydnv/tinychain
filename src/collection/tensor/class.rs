@@ -12,10 +12,8 @@ use crate::collection::{
     Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
 };
 use crate::error;
+use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::class::ValueInstance;
-use crate::value::number::class::{NumberClass, NumberType};
-use crate::value::{label, Link, Number, TCPath, TryCastInto, Value};
 
 use super::bounds::{Bounds, Shape};
 use super::dense::BlockListFile;
@@ -166,7 +164,7 @@ impl CollectionInstance for TensorBase {
             .await
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         TensorView::from(self.clone()).to_stream(txn).await
     }
 }
@@ -305,7 +303,7 @@ impl CollectionInstance for TensorView {
         if bounds.is_coord() {
             let coord: Vec<u64> = bounds.try_into()?;
             let value = self.read_value(&txn, &coord).await?;
-            Ok(CollectionItem::Value(value))
+            Ok(CollectionItem::Scalar(value))
         } else {
             let slice = self.slice(bounds)?;
             Ok(CollectionItem::Slice(slice))
@@ -326,22 +324,31 @@ impl CollectionInstance for TensorView {
             .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
 
         match value {
-            CollectionItem::Value(value) => self.write_value(txn.id().clone(), bounds, value).await,
+            CollectionItem::Scalar(value) => {
+                self.write_value(txn.id().clone(), bounds, value).await
+            }
             CollectionItem::Slice(slice) => self.write(txn, bounds, slice).await,
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             // TODO: Forward errors, don't panic!
             Self::Dense(dense) => {
                 let result_stream = dense.value_stream(txn).await?;
-                let values: TCStream<Value> = Box::pin(result_stream.map(|r| r.unwrap().into()));
+                let values: TCStream<Scalar> = Box::pin(
+                    result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
+                );
                 Ok(values)
             }
             Self::Sparse(sparse) => {
                 let result_stream = sparse.filled(txn).await?;
-                let values: TCStream<Value> = Box::pin(result_stream.map(|r| r.unwrap().into()));
+                let values: TCStream<Scalar> = Box::pin(
+                    result_stream
+                        .map(|r| r.unwrap())
+                        .map(Value::from)
+                        .map(Scalar::Value),
+                );
                 Ok(values)
             }
         }
@@ -515,7 +522,7 @@ impl CollectionInstance for Tensor {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Base(base) => base.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,

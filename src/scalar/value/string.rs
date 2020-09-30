@@ -8,13 +8,14 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use uuid::Uuid;
 
-use crate::class::{Class, Instance};
+use crate::class::{Class, Instance, TCResult};
 use crate::error;
+use crate::scalar::{Scalar, ScalarClass, ScalarInstance, TryCastFrom};
 
-use super::class::{ValueClass, ValueInstance};
+use super::class::{ValueClass, ValueInstance, ValueType};
 use super::link::{Link, TCPath};
 use super::reference::TCRef;
-use super::{TCResult, TryCastFrom, Value, ValueType};
+use super::Value;
 
 const RESERVED_CHARS: [&str; 21] = [
     "/", "..", "~", "$", "`", "^", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":",
@@ -53,16 +54,26 @@ impl Class for StringType {
     }
 }
 
-impl ValueClass for StringType {
+impl ScalarClass for StringType {
     type Instance = TCString;
 
     fn size(self) -> Option<usize> {
         None
     }
 
-    fn try_cast(&self, _value: Value) -> TCResult<TCString> {
-        unimplemented!()
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<TCString> {
+        let scalar: Scalar = scalar.into();
+        let value = Value::try_cast_from(scalar, |s| {
+            error::bad_request("Can't cast into Value from", s)
+        })?;
+        TCString::try_cast_from(value, |v| {
+            error::bad_request("Can't cast into String from", v)
+        })
     }
+}
+
+impl ValueClass for StringType {
+    type Instance = TCString;
 }
 
 impl From<StringType> for Link {
@@ -302,6 +313,10 @@ impl Instance for TCString {
             TCString::UString(_) => StringType::UString,
         }
     }
+}
+
+impl ScalarInstance for TCString {
+    type Class = StringType;
 }
 
 impl ValueInstance for TCString {

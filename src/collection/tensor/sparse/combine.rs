@@ -7,7 +7,7 @@ use futures::stream::{Fuse, Stream, StreamExt};
 use pin_project::pin_project;
 
 use crate::class::TCResult;
-use crate::value::Number;
+use crate::scalar::Number;
 
 use super::bounds::Shape;
 use super::{SparseRow, SparseStream};

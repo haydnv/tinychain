@@ -7,8 +7,9 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::value::class::ValueInstance;
-use crate::value::{CastFrom, CastInto, TCPath, TryCastFrom, Value};
+use crate::scalar::{
+    CastFrom, CastInto, ScalarInstance, TCPath, TryCastFrom, Value, ValueInstance,
+};
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{NumberClass, NumberInstance};
@@ -22,6 +23,10 @@ impl Instance for Boolean {
     fn class(&self) -> BooleanType {
         BooleanType
     }
+}
+
+impl ScalarInstance for Boolean {
+    type Class = BooleanType;
 }
 
 impl ValueInstance for Boolean {
@@ -159,6 +164,10 @@ impl Instance for Complex {
             Complex::C64(_) => ComplexType::C64,
         }
     }
+}
+
+impl ScalarInstance for Complex {
+    type Class = ComplexType;
 }
 
 impl ValueInstance for Complex {
@@ -421,6 +430,10 @@ impl Instance for Float {
     }
 }
 
+impl ScalarInstance for Float {
+    type Class = FloatType;
+}
+
 impl ValueInstance for Float {
     type Class = FloatType;
 }
@@ -651,6 +664,10 @@ impl Instance for Int {
             Int::I64(_) => IntType::I64,
         }
     }
+}
+
+impl ScalarInstance for Int {
+    type Class = IntType;
 }
 
 impl ValueInstance for Int {
@@ -944,6 +961,10 @@ impl Instance for UInt {
             UInt::U64(_) => UIntType::U64,
         }
     }
+}
+
+impl ScalarInstance for UInt {
+    type Class = UIntType;
 }
 
 impl ValueInstance for UInt {
@@ -1306,6 +1327,10 @@ impl Instance for Number {
             Self::UInt(u) => UInt(u.class()),
         }
     }
+}
+
+impl ScalarInstance for Number {
+    type Class = NumberType;
 }
 
 impl ValueInstance for Number {

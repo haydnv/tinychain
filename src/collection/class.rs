@@ -6,9 +6,8 @@ use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
 use crate::error;
+use crate::scalar::{label, Link, Scalar, TCPath, TryCastInto, Value};
 use crate::transaction::{Transact, Txn};
-use crate::value::link::{Link, TCPath};
-use crate::value::{label, TryCastInto, Value};
 
 use super::btree::{BTreeFile, BTreeType};
 use super::null::{Null, NullType};
@@ -16,15 +15,15 @@ use super::table::{TableBaseType, TableType};
 use super::tensor::{TensorBaseType, TensorType};
 use super::{Collection, CollectionBase, CollectionView};
 
-pub enum CollectionItem<I: Into<Value>, S: CollectionInstance> {
-    Value(I),
+pub enum CollectionItem<I: Into<Scalar>, S: CollectionInstance> {
+    Scalar(I),
     Slice(S),
 }
 
-impl<I: Into<Value>, S: CollectionInstance> From<CollectionItem<I, S>> for State {
+impl<I: Into<Scalar>, S: CollectionInstance> From<CollectionItem<I, S>> for State {
     fn from(ci: CollectionItem<I, S>) -> State {
         match ci {
-            CollectionItem::Value(v) => State::Value(v.into()),
+            CollectionItem::Scalar(s) => State::Scalar(s.into()),
             CollectionItem::Slice(s) => State::Collection(s.into()),
         }
     }
@@ -43,7 +42,7 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
 
 #[async_trait]
 pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sync {
-    type Item: Into<Value>;
+    type Item: Into<Scalar>;
     type Slice: CollectionInstance;
 
     async fn get_item(
@@ -61,7 +60,7 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sy
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()>;
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>>;
 }
 
 #[derive(Clone, Eq, PartialEq)]

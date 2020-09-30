@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::cluster::Cluster;
-use crate::value::link::{PathSegment, TCPath};
+use crate::scalar::value::link::{PathSegment, TCPath};
 
 #[derive(Clone)]
 struct HostedNode {

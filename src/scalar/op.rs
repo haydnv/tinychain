@@ -1,12 +1,15 @@
-use std::convert::TryFrom;
 use std::fmt;
+
+use serde::{Serialize, Serializer};
 
 use crate::class::{Class, Instance, TCResult};
 use crate::error;
 
-use super::class::{ValueClass, ValueInstance};
 use super::link::{Link, TCPath};
-use super::{label, TCRef, TryCastFrom, TryCastInto, Value, ValueId, ValueType};
+use super::{
+    label, Scalar, ScalarClass, ScalarInstance, ScalarType, TCRef, TryCastFrom, TryCastInto, Value,
+    ValueId,
+};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {
@@ -37,15 +40,16 @@ impl Class for OpDefType {
     }
 }
 
-impl ValueClass for OpDefType {
+impl ScalarClass for OpDefType {
     type Instance = OpDef;
 
     fn size(self) -> Option<usize> {
         None
     }
 
-    fn try_cast(&self, value: Value) -> TCResult<OpDef> {
-        OpDef::try_cast_from(value, |v| error::bad_request("Not a valid OpDef", v))
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<OpDef> {
+        let scalar: Scalar = scalar.into();
+        OpDef::try_cast_from(scalar, |v| error::bad_request("Not a valid OpDef", v))
     }
 }
 
@@ -99,15 +103,15 @@ impl Class for MethodType {
     }
 }
 
-impl ValueClass for MethodType {
+impl ScalarClass for MethodType {
     type Instance = Method;
 
     fn size(self) -> Option<usize> {
         None
     }
 
-    fn try_cast(&self, _value: Value) -> TCResult<Method> {
-        Err(error::not_implemented("Cast Value into Method"))
+    fn try_cast<S: Into<Scalar>>(&self, _scalar: S) -> TCResult<Method> {
+        Err(error::not_implemented("Cast Scalar into Method"))
     }
 }
 
@@ -163,15 +167,16 @@ impl Class for OpRefType {
     }
 }
 
-impl ValueClass for OpRefType {
+impl ScalarClass for OpRefType {
     type Instance = OpRef;
 
     fn size(self) -> Option<usize> {
         None
     }
 
-    fn try_cast(&self, value: Value) -> TCResult<OpRef> {
-        value.try_cast_into(|v| error::bad_request(format!("Cannot cast into {} from", self), v))
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<OpRef> {
+        let scalar: Scalar = scalar.into();
+        scalar.try_cast_into(|v| error::bad_request(format!("Cannot cast into {} from", self), v))
     }
 }
 
@@ -224,22 +229,23 @@ impl Class for OpType {
     }
 
     fn prefix() -> TCPath {
-        ValueType::prefix().join(label("op").into())
+        ScalarType::prefix().join(label("op").into())
     }
 }
 
-impl ValueClass for OpType {
+impl ScalarClass for OpType {
     type Instance = Op;
 
     fn size(self) -> Option<usize> {
         None
     }
 
-    fn try_cast(&self, value: Value) -> TCResult<Op> {
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Op> {
+        let scalar: Scalar = scalar.into();
         match self {
-            Self::Def(odt) => odt.try_cast(value).map(Op::Def),
-            Self::Method(mt) => mt.try_cast(value).map(Op::Method),
-            Self::Ref(ort) => ort.try_cast(value).map(Op::Ref),
+            Self::Def(odt) => odt.try_cast(scalar).map(Op::Def),
+            Self::Method(mt) => mt.try_cast(scalar).map(Op::Method),
+            Self::Ref(ort) => ort.try_cast(scalar).map(Op::Ref),
         }
     }
 }
@@ -264,9 +270,9 @@ impl fmt::Display for OpType {
     }
 }
 
-pub type GetOp = (ValueId, Vec<(ValueId, Value)>);
-pub type PutOp = (ValueId, ValueId, Vec<(ValueId, Value)>);
-pub type PostOp = Vec<(ValueId, Value)>;
+pub type GetOp = (ValueId, Vec<(ValueId, Scalar)>);
+pub type PutOp = (ValueId, ValueId, Vec<(ValueId, Scalar)>);
+pub type PostOp = Vec<(ValueId, Scalar)>;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDef {
@@ -287,45 +293,30 @@ impl Instance for OpDef {
     }
 }
 
-impl ValueInstance for OpDef {
+impl ScalarInstance for OpDef {
     type Class = OpDefType;
 }
 
-impl TryFrom<Value> for OpDef {
-    type Error = error::TCError;
-
-    fn try_from(value: Value) -> TCResult<OpDef> {
-        if let Value::Op(op) = value {
-            match *op {
-                Op::Def(op_def) => Ok(op_def),
-                other => Err(error::bad_request("Expected OpDef but found", other)),
-            }
-        } else {
-            Err(error::bad_request("Expected OpDef but found", value))
-        }
-    }
-}
-
-impl TryCastFrom<Value> for OpDef {
-    fn can_cast_from(value: &Value) -> bool {
-        if value.matches::<PutOp>() {
+impl TryCastFrom<Scalar> for OpDef {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        if scalar.matches::<PutOp>() {
             true
-        } else if value.matches::<GetOp>() {
+        } else if scalar.matches::<GetOp>() {
             true
-        } else if value.matches::<PostOp>() {
+        } else if scalar.matches::<PostOp>() {
             true
         } else {
             false
         }
     }
 
-    fn opt_cast_from(value: Value) -> Option<OpDef> {
-        if value.matches::<PutOp>() {
-            value.opt_cast_into().map(OpDef::Put)
-        } else if value.matches::<GetOp>() {
-            value.opt_cast_into().map(OpDef::Get)
-        } else if value.matches::<PostOp>() {
-            value.opt_cast_into().map(OpDef::Post)
+    fn opt_cast_from(scalar: Scalar) -> Option<OpDef> {
+        if scalar.matches::<PutOp>() {
+            scalar.opt_cast_into().map(OpDef::Put)
+        } else if scalar.matches::<GetOp>() {
+            scalar.opt_cast_into().map(OpDef::Get)
+        } else if scalar.matches::<PostOp>() {
+            scalar.opt_cast_into().map(OpDef::Post)
         } else {
             None
         }
@@ -345,8 +336,8 @@ impl fmt::Display for OpDef {
 #[derive(Clone, Eq, PartialEq)]
 pub enum Method {
     Get(TCRef, TCPath, Value),
-    Put(TCRef, TCPath, Value, Value),
-    Post(TCRef, TCPath, Vec<(ValueId, Value)>),
+    Put(TCRef, TCPath, Value, Scalar),
+    Post(TCRef, TCPath, Vec<(ValueId, Scalar)>),
 }
 
 impl Instance for Method {
@@ -361,7 +352,7 @@ impl Instance for Method {
     }
 }
 
-impl ValueInstance for Method {
+impl ScalarInstance for Method {
     type Class = MethodType;
 }
 
@@ -377,10 +368,10 @@ impl fmt::Display for Method {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {
-    If(TCRef, Value, Value),
+    If(TCRef, Scalar, Scalar),
     Get(Link, Value),
-    Put(Link, Value, Value),
-    Post(Link, Vec<(ValueId, Value)>),
+    Put(Link, Value, Scalar),
+    Post(Link, Vec<(ValueId, Scalar)>),
 }
 
 impl Instance for OpRef {
@@ -396,17 +387,13 @@ impl Instance for OpRef {
     }
 }
 
-impl ValueInstance for OpRef {
+impl ScalarInstance for OpRef {
     type Class = OpRefType;
 }
 
-impl TryCastFrom<Value> for OpRef {
-    fn can_cast_from(v: &Value) -> bool {
-        match v {
-            Value::Op(op) => match **op {
-                Op::Ref(_) => true,
-                _ => false,
-            },
+impl TryCastFrom<Scalar> for OpRef {
+    fn can_cast_from(s: &Scalar) -> bool {
+        match s {
             other => {
                 if other.matches::<(TCRef, Value, Value)>() {
                     true
@@ -423,12 +410,8 @@ impl TryCastFrom<Value> for OpRef {
         }
     }
 
-    fn opt_cast_from(v: Value) -> Option<OpRef> {
-        match v {
-            Value::Op(op) => match *op {
-                Op::Ref(op_ref) => Some(op_ref),
-                _ => None,
-            },
+    fn opt_cast_from(s: Scalar) -> Option<OpRef> {
+        match s {
             other => {
                 if other.matches::<(TCRef, Value, Value)>() {
                     let (cond, then, or_else) = other.opt_cast_into().unwrap();
@@ -482,7 +465,7 @@ impl Instance for Op {
     }
 }
 
-impl ValueInstance for Op {
+impl ScalarInstance for Op {
     type Class = OpType;
 }
 
@@ -504,25 +487,12 @@ impl From<OpRef> for Op {
     }
 }
 
-impl TryFrom<Op> for GetOp {
-    type Error = error::TCError;
-
-    fn try_from(op: Op) -> TCResult<GetOp> {
-        match op {
-            Op::Def(OpDef::Get(get_op)) => Ok(get_op),
-            other => Err(error::bad_request("Expected GetOp but found", other)),
-        }
-    }
-}
-
-impl TryFrom<Value> for Op {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<Op> {
-        match v {
-            Value::Op(op) => Ok(*op),
-            other => Err(error::bad_request("Expected Op but found", other)),
-        }
+impl Serialize for Op {
+    fn serialize<S>(&self, _s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        unimplemented!()
     }
 }
 

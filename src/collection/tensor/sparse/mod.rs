@@ -12,11 +12,8 @@ use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::error;
+use crate::scalar::{label, Label, Value, ValueId, ValueType};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::class::ValueType;
-use crate::value::number::class::{NumberClass, NumberInstance, NumberType};
-use crate::value::number::instance::{Number, UInt};
-use crate::value::{label, Label, Value, ValueId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::class::TensorInstance;
@@ -1986,7 +1983,7 @@ fn group_axes<'a>(
     })
 }
 
-fn slice_table<'a>(mut table: Table, bounds: &'a Bounds) -> TCBoxTryFuture<'a, Table> {
+fn slice_table(mut table: Table, bounds: &'_ Bounds) -> TCBoxTryFuture<'_, Table> {
     use AxisBounds::*;
 
     Box::pin(async move {

@@ -4,9 +4,8 @@ use async_trait::async_trait;
 
 use crate::class::{TCBoxTryFuture, TCResult};
 use crate::error;
+use crate::scalar::value::number::*;
 use crate::transaction::{Txn, TxnId};
-use crate::value::number::class::NumberType;
-use crate::value::Number;
 
 mod einsum;
 mod transform;

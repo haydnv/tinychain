@@ -10,8 +10,8 @@ use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
 use crate::error;
+use crate::scalar::{Link, Scalar, TCPath, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{Link, TCPath, Value, ValueId};
 
 use super::schema::{Column, Row, TableSchema};
 
@@ -217,7 +217,7 @@ impl CollectionInstance for Table {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Base(base) => base.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,

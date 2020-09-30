@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 use std::fmt;
 
-use crate::value::{label, TCPath};
+use crate::scalar::value::{label, TCPath};
 
 pub type TCResult<T> = Result<T, TCError>;
 

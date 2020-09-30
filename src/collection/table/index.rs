@@ -14,8 +14,8 @@ use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
+use crate::scalar::{label, Link, Scalar, TCPath, TryCastInto, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{label, Link, TCPath, TryCastInto, Value, ValueId};
 
 use super::bounds::{self, Bounds, ColumnBound};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
@@ -141,7 +141,7 @@ impl CollectionInstance for TableBase {
     ) -> TCResult<()> {
         let key: Vec<Value> = selector.try_into()?;
         match value {
-            CollectionItem::Value(value) => match self {
+            CollectionItem::Scalar(value) => match self {
                 Self::Index(_) => Err(error::not_implemented("Index::put")),
                 Self::ROIndex(_) => Err(error::unsupported("Cannot write to a read-only index")),
                 Self::Table(table) => table.insert(txn.id().clone(), key, value).await,
@@ -150,7 +150,7 @@ impl CollectionInstance for TableBase {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         let txn_id = txn.id().clone();
 
         let stream = match self {
@@ -159,7 +159,7 @@ impl CollectionInstance for TableBase {
             Self::Table(table) => table.clone().stream(txn_id).await?,
         };
 
-        Ok(Box::pin(stream.map(Value::from)))
+        Ok(Box::pin(stream.map(Scalar::from)))
     }
 }
 

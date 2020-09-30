@@ -15,8 +15,6 @@ use crate::block::File;
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::number::class::{NumberClass, NumberInstance, NumberType};
-use crate::value::Number;
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::class::TensorInstance;

@@ -3,9 +3,7 @@ use std::fmt;
 
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::value::class::ValueInstance;
-use crate::value::number::NumberType;
-use crate::value::{TryCastFrom, TryCastInto, Value, ValueId, ValueType};
+use crate::scalar::*;
 
 const ERR_BAD_COLUMN: &str = "Expected a Column in the form \
 [<name: ValueId>, <dtype: Link>, (<max_len: U64>)], found";

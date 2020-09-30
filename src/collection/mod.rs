@@ -6,8 +6,8 @@ use async_trait::async_trait;
 
 use crate::class::{Instance, TCResult, TCStream};
 use crate::error;
+use crate::scalar::{Number, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::Value;
 
 pub mod btree;
 pub mod class;
@@ -51,7 +51,7 @@ impl Instance for CollectionBase {
 
 #[async_trait]
 impl class::CollectionInstance for CollectionBase {
-    type Item = Value;
+    type Item = Scalar;
     type Slice = CollectionView;
 
     async fn get_item(
@@ -82,7 +82,7 @@ impl class::CollectionInstance for CollectionBase {
         view.put_item(txn, selector, value).await
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::BTree(btree) => btree.to_stream(txn).await,
             Self::Null(null) => null.to_stream(txn).await,
@@ -158,7 +158,7 @@ impl Instance for CollectionView {
 
 #[async_trait]
 impl class::CollectionInstance for CollectionView {
-    type Item = Value;
+    type Item = Scalar;
     type Slice = CollectionView;
 
     async fn get_item(
@@ -169,9 +169,12 @@ impl class::CollectionInstance for CollectionView {
         match self {
             Self::BTree(btree) => {
                 let item = match btree.get_item(txn, selector).await? {
-                    CollectionItem::Value(key) => CollectionItem::Value(Value::Tuple(key)),
+                    CollectionItem::Scalar(key) => {
+                        CollectionItem::Scalar(Scalar::Value(Value::Tuple(key)))
+                    }
                     CollectionItem::Slice(slice) => CollectionItem::Slice(slice.into()),
                 };
+
                 Ok(item)
             }
             _ => Err(error::not_implemented("CollectionView::get")),
@@ -195,10 +198,10 @@ impl class::CollectionInstance for CollectionView {
     ) -> TCResult<()> {
         match self {
             Self::BTree(btree) => match value {
-                CollectionItem::Value(value) => {
+                CollectionItem::Scalar(value) => {
                     let value = value.try_into()?;
                     btree
-                        .put_item(txn, selector, CollectionItem::Value(value))
+                        .put_item(txn, selector, CollectionItem::Scalar(value))
                         .await
                 }
                 CollectionItem::Slice(slice) => {
@@ -210,10 +213,10 @@ impl class::CollectionInstance for CollectionView {
             },
             Self::Null(_) => Err(error::unsupported("Cannot modify a Null Collection")),
             Self::Table(table) => match value {
-                CollectionItem::Value(value) => {
+                CollectionItem::Scalar(value) => {
                     let value = value.try_into()?;
                     table
-                        .put_item(txn, selector, CollectionItem::Value(value))
+                        .put_item(txn, selector, CollectionItem::Scalar(value))
                         .await
                 }
                 CollectionItem::Slice(slice) => {
@@ -224,10 +227,11 @@ impl class::CollectionInstance for CollectionView {
                 }
             },
             Self::Tensor(tensor) => match value {
-                CollectionItem::Value(value) => {
-                    let value = value.try_into()?;
+                CollectionItem::Scalar(value) => {
+                    let value = Value::try_from(value)?;
+                    let number = Number::try_from(value)?;
                     tensor
-                        .put_item(txn, selector, CollectionItem::Value(value))
+                        .put_item(txn, selector, CollectionItem::Scalar(number))
                         .await
                 }
                 CollectionItem::Slice(slice) => {
@@ -240,7 +244,7 @@ impl class::CollectionInstance for CollectionView {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::BTree(btree) => btree.to_stream(txn).await,
             Self::Null(null) => null.to_stream(txn).await,
@@ -323,7 +327,7 @@ impl Instance for Collection {
 
 #[async_trait]
 impl class::CollectionInstance for Collection {
-    type Item = Value;
+    type Item = Scalar;
     type Slice = CollectionView;
 
     async fn get_item(
@@ -356,7 +360,7 @@ impl class::CollectionInstance for Collection {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Self::Item>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Base(base) => base.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,

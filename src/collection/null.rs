@@ -8,8 +8,8 @@ use crate::class::{Class, Instance, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionBase, CollectionItem};
 use crate::error;
+use crate::scalar::{label, Link, Scalar, TCPath, Value};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{label, Link, TCPath, Value};
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct NullType;
@@ -93,7 +93,7 @@ impl CollectionInstance for Null {
         Err(error::unsupported("Null Collection cannot be modified"))
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         Ok(Box::pin(stream::empty()))
     }
 }

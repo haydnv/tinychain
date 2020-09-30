@@ -15,10 +15,10 @@ use serde::de::DeserializeOwned;
 use crate::auth::{Auth, Token};
 use crate::class::{State, TCResult, TCStream};
 use crate::error;
+use crate::scalar::value::link::*;
+use crate::scalar::{Scalar, Value, ValueId};
+use crate::stream::json::JsonListStream;
 use crate::transaction::Txn;
-use crate::value::json::JsonListStream;
-use crate::value::link::*;
-use crate::value::{Value, ValueId};
 
 use super::Gateway;
 
@@ -49,7 +49,7 @@ impl Client {
         key: &Value,
         auth: &Auth,
         txn: &Option<Arc<Txn>>,
-    ) -> TCResult<Value> {
+    ) -> TCResult<Scalar> {
         if auth.is_some() {
             return Err(error::not_implemented("Authorization"));
         }
@@ -100,7 +100,7 @@ impl Client {
         }
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + 'static>(
+    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Sync + 'static>(
         &self,
         link: &Link,
         data: S,
@@ -217,12 +217,13 @@ impl Server {
                 let state = gateway.get(&path.clone().into(), id, token, None).await?;
 
                 match state {
-                    State::Value(value) => {
-                        let value = serde_json::to_string_pretty(&value)
+                    State::Scalar(scalar) => {
+                        let scalar = serde_json::to_string_pretty(&scalar)
                             .map(|json| format!("{}\r\n", json))
                             .map(Bytes::from)
                             .map_err(error::TCError::from);
-                        Ok(Box::pin(stream::once(future::ready(value))))
+
+                        Ok(Box::pin(stream::once(future::ready(scalar))))
                     }
                     _other => Ok(Box::pin(stream::once(future::ready(Err(
                         error::not_implemented("serializing a State over the network"),
@@ -234,7 +235,8 @@ impl Server {
                 println!("PUT {}", path);
                 let id = get_param(&mut params, "key")?
                     .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
-                let value: Value = deserialize_body(request.body_mut(), self.request_limit).await?;
+                let value: Scalar =
+                    deserialize_body(request.body_mut(), self.request_limit).await?;
                 gateway
                     .clone()
                     .put(&path.clone().into(), id, value.into(), &token, None)
@@ -244,7 +246,7 @@ impl Server {
 
             &Method::POST => {
                 println!("POST {}", path);
-                let request: Value =
+                let request: Scalar =
                     deserialize_body(request.body_mut(), self.request_limit).await?;
 
                 let response = gateway
@@ -253,13 +255,15 @@ impl Server {
                     .await?;
 
                 match response {
-                    State::Value(value) => {
-                        let response = serde_json::to_string_pretty(&value)
+                    State::Scalar(scalar) => {
+                        let response = serde_json::to_string_pretty(&scalar)
                             .map(|s| format!("{}\r\n", s))
                             .map(Bytes::from)
                             .map_err(error::TCError::from);
+
                         let response: TCStream<TCResult<Bytes>> =
                             Box::pin(stream::once(future::ready(response)));
+
                         Ok(response)
                     }
                     other => Err(error::not_implemented(format!(

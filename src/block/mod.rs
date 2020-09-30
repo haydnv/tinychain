@@ -8,9 +8,9 @@ use bytes::Bytes;
 
 use crate::class::TCResult;
 use crate::error;
+use crate::scalar::value::link::PathSegment;
 use crate::transaction::lock::{Mutate, TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::TxnId;
-use crate::value::link::PathSegment;
 
 mod cache;
 mod dir;

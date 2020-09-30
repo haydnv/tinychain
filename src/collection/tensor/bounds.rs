@@ -7,8 +7,7 @@ use itertools::{Itertools, MultiProduct};
 
 use crate::class::TCResult;
 use crate::error;
-use crate::value::class::ValueInstance;
-use crate::value::{TryCastFrom, TryCastInto, Value};
+use crate::scalar::{ScalarInstance, TryCastFrom, TryCastInto, Value};
 
 pub type Coords = MultiProduct<AxisIter>;
 

@@ -9,11 +9,8 @@ use crate::auth::Auth;
 use crate::class::{Class, State, TCResult};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error;
+use crate::scalar::*;
 use crate::transaction::Txn;
-use crate::value::class::{ValueClass, ValueInstance};
-use crate::value::link::TCPath;
-use crate::value::op::OpRef;
-use crate::value::{label, TryCastInto, Value, ValueId, ValueType};
 
 const ERR_TXN_REQUIRED: &str = "Collection requires a transaction context";
 
@@ -38,26 +35,26 @@ pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<St
         "error" => Err(error::get(path, id.try_into()?)),
         "value" => {
             let dtype = ValueType::from_path(path)?;
-            dtype.try_cast(id).map(State::Value)
+            dtype.try_cast(id).map(Scalar::Value).map(State::Scalar)
         }
         "transact" => Err(error::method_not_allowed(suffix)),
         other => Err(error::not_found(other)),
     }
 }
 
-pub async fn post(txn: Arc<Txn>, path: &TCPath, data: Value, auth: Auth) -> TCResult<State> {
+pub async fn post(txn: Arc<Txn>, path: &TCPath, data: Scalar, auth: Auth) -> TCResult<State> {
     let suffix = path.from_path(&TCPath::from_str("sbin")?)?;
 
     if suffix.is_empty() {
         Err(error::method_not_allowed(path))
     } else if &suffix == "/transact" {
-        if data.matches::<Vec<(ValueId, Value)>>() {
-            let values: Vec<(ValueId, Value)> = data.opt_cast_into().unwrap();
+        if data.matches::<Vec<(ValueId, Scalar)>>() {
+            let values: Vec<(ValueId, Scalar)> = data.opt_cast_into().unwrap();
             txn.execute(stream::iter(values), auth).await
         } else if data.matches::<OpRef>() {
             Err(error::not_implemented("Resolve OpRef"))
         } else {
-            Ok(State::Value(data))
+            Ok(State::Scalar(data))
         }
     } else {
         Err(error::not_found(path))

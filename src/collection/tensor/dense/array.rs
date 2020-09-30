@@ -8,8 +8,7 @@ use bytes::Bytes;
 use crate::block::BlockData;
 use crate::class::TCResult;
 use crate::error;
-use crate::value::number::class::{ComplexType, FloatType, IntType, NumberType, UIntType};
-use crate::value::number::instance::{Boolean, Complex, Float, Int, Number, UInt};
+use crate::scalar::value::number::*;
 
 const BATCH: bool = true;
 

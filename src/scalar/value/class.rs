@@ -1,33 +1,24 @@
 use std::fmt;
 
-use crate::class::{Class, Instance, TCResult, TCType};
+use crate::class::{Class, TCResult, TCType};
 use crate::error;
+use crate::scalar::{Scalar, ScalarClass, ScalarInstance, ScalarType, TryCastFrom, TryCastInto};
 
-use super::link::TCPath;
-use super::{label, Link, TryCastFrom, TryCastInto, Value};
+use super::link::{Link, TCPath};
+use super::number::NumberType;
+use super::string::{label, StringType};
+use super::Value;
 
-pub type NumberType = super::number::class::NumberType;
-pub type OpType = super::op::OpType;
-pub type StringType = super::string::StringType;
-
-pub trait ValueInstance: Instance + Sized {
+pub trait ValueInstance: ScalarInstance {
     type Class: ValueClass;
 
     fn get(&self, _path: TCPath, _key: Value) -> TCResult<Self> {
         Err(error::method_not_allowed(format!("GET {}", self.class())))
     }
-
-    fn matches<T: TryCastFrom<Self>>(&self) -> bool {
-        T::can_cast_from(self)
-    }
 }
 
-pub trait ValueClass: Class {
+pub trait ValueClass: ScalarClass {
     type Instance: ValueInstance;
-
-    fn size(self) -> Option<usize>;
-
-    fn try_cast(&self, value: Value) -> TCResult<<Self as ValueClass>::Instance>;
 }
 
 impl From<NumberType> for ValueType {
@@ -50,7 +41,6 @@ pub enum ValueType {
     None,
     Number(NumberType),
     TCString(StringType),
-    Op(OpType),
     Tuple,
     Value, // self
 }
@@ -80,7 +70,6 @@ impl Class for ValueType {
             match suffix[0].as_str() {
                 "number" => NumberType::from_path(path).map(ValueType::Number),
                 "string" => StringType::from_path(path).map(ValueType::TCString),
-                "op" => OpType::from_path(path).map(ValueType::Op),
                 other => Err(error::not_found(other)),
             }
         }
@@ -91,29 +80,35 @@ impl Class for ValueType {
     }
 }
 
-impl ValueClass for ValueType {
+impl ScalarClass for ValueType {
     type Instance = Value;
 
     fn size(self) -> Option<usize> {
         use ValueType::*;
         match self {
             None => Some(1),
-            Number(nt) => ValueClass::size(nt),
+            Number(nt) => ScalarClass::size(nt),
             _ => Option::None,
         }
     }
 
-    fn try_cast(&self, value: Value) -> TCResult<Value> {
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Value> {
         match self {
             Self::None => Ok(Value::None),
-            Self::Number(nt) => nt.try_cast(value).map(Value::Number),
-            Self::TCString(st) => st.try_cast(value).map(Value::TCString),
-            Self::Op(ot) => ot.try_cast(value).map(Box::new).map(Value::Op),
-            other => value.try_cast_into(|v| {
-                error::not_implemented(format!("Cast into {} from {}", other, v))
-            }),
+            Self::Number(nt) => nt.try_cast(scalar).map(Value::Number),
+            Self::TCString(st) => st.try_cast(scalar).map(Value::TCString),
+            other => {
+                let scalar: Scalar = scalar.into();
+                scalar.try_cast_into(|v| {
+                    error::not_implemented(format!("Cast into {} from {}", other, v))
+                })
+            }
         }
     }
+}
+
+impl ValueClass for ValueType {
+    type Instance = Value;
 }
 
 impl From<ValueType> for Link {
@@ -128,7 +123,6 @@ impl From<ValueType> for Link {
             Class => prefix.join(label("class").into()).into(),
             Number(nt) => nt.into(),
             TCString(st) => st.into(),
-            Op(ot) => ot.into(),
             Tuple => prefix.join(label("tuple").into()).into(),
             Value => prefix.join(label("value").into()).into(),
         }
@@ -150,7 +144,7 @@ impl TryCastFrom<Link> for ValueType {
 
 impl TryCastFrom<TCType> for ValueType {
     fn can_cast_from(class: &TCType) -> bool {
-        if let TCType::Value(_) = class {
+        if let TCType::Scalar(ScalarType::Value(_)) = class {
             true
         } else {
             false
@@ -158,7 +152,7 @@ impl TryCastFrom<TCType> for ValueType {
     }
 
     fn opt_cast_from(class: TCType) -> Option<ValueType> {
-        if let TCType::Value(vt) = class {
+        if let TCType::Scalar(ScalarType::Value(vt)) = class {
             Some(vt)
         } else {
             None
@@ -176,7 +170,6 @@ impl fmt::Display for ValueType {
             Class => write!(f, "type Class"),
             Number(nt) => write!(f, "type Number: {}", nt),
             TCString(st) => write!(f, "type String: {}", st),
-            Op(ot) => write!(f, "type Op: {}", ot),
             Tuple => write!(f, "type Tuple"),
             Value => write!(f, "Value"),
         }

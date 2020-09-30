@@ -4,8 +4,7 @@ use std::ops::Bound;
 
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::value::class::{StringType, ValueType};
-use crate::value::{Number, Value, ValueId};
+use crate::scalar::{Number, StringType, Value, ValueId, ValueType};
 
 pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {
     left.expect(dtype, "for collation")?;

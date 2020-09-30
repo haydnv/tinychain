@@ -9,99 +9,25 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::class::{Class, Instance, TCResult, TCType};
 use crate::error;
-use crate::value::class::ValueClass;
+
+use super::{Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto};
 
 pub mod class;
-pub mod json;
 pub mod link;
 pub mod number;
-pub mod op;
 pub mod reference;
 pub mod string;
 pub mod version;
 
-pub type Label = string::Label;
-pub type Link = link::Link;
-pub type Method = op::Method;
-pub type Number = number::instance::Number;
-pub type Op = op::Op;
-pub type OpRef = op::OpRef;
-pub type TCPath = link::TCPath;
-pub type TCString = string::TCString;
-pub type TCRef = reference::TCRef;
-pub type ValueId = string::ValueId;
-pub type ValueType = class::ValueType;
+pub use class::*;
+pub use link::*;
+pub use number::*;
+pub use reference::*;
+pub use string::*;
+pub use version::*;
 
 pub const fn label(id: &'static str) -> string::Label {
     string::label(id)
-}
-
-pub trait CastFrom<T> {
-    fn cast_from(value: T) -> Self;
-}
-
-pub trait CastInto<T> {
-    fn cast_into(self) -> T;
-}
-
-impl<T> CastFrom<T> for T {
-    fn cast_from(value: T) -> Self {
-        value
-    }
-}
-
-impl<T, F: CastFrom<T>> CastInto<F> for T {
-    fn cast_into(self) -> F {
-        F::cast_from(self)
-    }
-}
-
-pub trait TryCastFrom<T>: Sized {
-    fn can_cast_from(value: &T) -> bool;
-
-    fn opt_cast_from(value: T) -> Option<Self>;
-
-    fn try_cast_from<E: FnOnce(&T) -> error::TCError>(value: T, err: E) -> TCResult<Self> {
-        if Self::can_cast_from(&value) {
-            Ok(Self::opt_cast_from(value).unwrap())
-        } else {
-            Err(err(&value))
-        }
-    }
-}
-
-pub trait TryCastInto<T>: Sized {
-    fn can_cast_into(&self) -> bool;
-
-    fn opt_cast_into(self) -> Option<T>;
-
-    fn try_cast_into<E: FnOnce(&Self) -> error::TCError>(self, err: E) -> TCResult<T> {
-        if self.can_cast_into() {
-            Ok(self.opt_cast_into().unwrap())
-        } else {
-            Err(err(&self))
-        }
-    }
-}
-
-impl<F, T: CastFrom<F>> TryCastFrom<F> for T {
-    fn can_cast_from(_: &F) -> bool {
-        true
-    }
-
-    fn opt_cast_from(f: F) -> Option<T> {
-        Some(T::cast_from(f))
-    }
-}
-
-impl<F, T: TryCastFrom<F>> TryCastInto<T> for F {
-    fn can_cast_into(&self) -> bool {
-        T::can_cast_from(self)
-    }
-
-    fn opt_cast_into(self) -> Option<T> {
-        T::opt_cast_from(self)
-    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -112,7 +38,6 @@ pub enum Value {
     Class(TCType),
     Number(Number),
     TCString(TCString),
-    Op(Box<op::Op>),
     Tuple(Vec<Value>),
 }
 
@@ -120,7 +45,6 @@ impl Instance for Value {
     type Class = class::ValueType;
 
     fn class(&self) -> class::ValueType {
-        use class::ValueType;
         match self {
             Value::None => ValueType::None,
             Value::Bound(_) => ValueType::Bound,
@@ -128,10 +52,13 @@ impl Instance for Value {
             Value::Class(_) => ValueType::Class,
             Value::Number(n) => ValueType::Number(n.class()),
             Value::TCString(s) => ValueType::TCString(s.class()),
-            Value::Op(op) => ValueType::Op(op.class()),
             Value::Tuple(_) => ValueType::Tuple,
         }
     }
+}
+
+impl ScalarInstance for Value {
+    type Class = class::ValueType;
 }
 
 impl class::ValueInstance for Value {
@@ -140,13 +67,9 @@ impl class::ValueInstance for Value {
     fn get(&self, path: TCPath, key: Value) -> TCResult<Self> {
         match self {
             Value::None => Err(error::not_found(path)),
-            Value::Bound(_) => Err(error::method_not_allowed("GET Bound")),
-            Value::Bytes(_) => Err(error::method_not_allowed("GET Bytes")),
-            Value::Class(class) => Err(error::method_not_allowed(format!("GET {}", class))),
             Value::Number(number) => number.get(path, key).map(Value::Number),
             Value::TCString(string) => string.get(path, key).map(Value::TCString),
-            Value::Op(op) => (**op).get(path, key).map(Box::new).map(Value::Op),
-            Value::Tuple(_) => Err(error::method_not_allowed("GET Tuple")),
+            other => Err(error::method_not_allowed(format!("GET {}", other.class()))),
         }
     }
 }
@@ -191,27 +114,9 @@ impl From<Bytes> for Value {
     }
 }
 
-impl From<op::Method> for Value {
-    fn from(m: op::Method) -> Value {
-        Value::Op(Box::new(m.into()))
-    }
-}
-
 impl From<Number> for Value {
     fn from(n: Number) -> Value {
         Value::Number(n)
-    }
-}
-
-impl From<Op> for Value {
-    fn from(op: Op) -> Value {
-        Value::Op(Box::new(op))
-    }
-}
-
-impl From<OpRef> for Value {
-    fn from(op_ref: OpRef) -> Value {
-        Op::from(op_ref).into()
     }
 }
 
@@ -243,12 +148,6 @@ impl From<ValueId> for Value {
     }
 }
 
-impl<T1: Into<Value>, T2: Into<Value>> From<(T1, T2)> for Value {
-    fn from(tuple: (T1, T2)) -> Value {
-        Value::Tuple(vec![tuple.0.into(), tuple.1.into()])
-    }
-}
-
 impl<T: Into<Value>> From<Option<T>> for Value {
     fn from(opt: Option<T>) -> Value {
         match opt {
@@ -261,6 +160,12 @@ impl<T: Into<Value>> From<Option<T>> for Value {
 impl<T: Into<Value>> From<Vec<T>> for Value {
     fn from(mut v: Vec<T>) -> Value {
         Value::Tuple(v.drain(..).map(|i| i.into()).collect())
+    }
+}
+
+impl<T1: Into<Value>, T2: Into<Value>> From<(T1, T2)> for Value {
+    fn from(tuple: (T1, T2)) -> Value {
+        Value::Tuple(vec![tuple.0.into(), tuple.1.into()])
     }
 }
 
@@ -431,16 +336,28 @@ impl TryFrom<Value> for Vec<Value> {
     }
 }
 
-impl<T: TryFrom<Value, Error = error::TCError>> TryFrom<Value> for Vec<T> {
-    type Error = error::TCError;
-
-    fn try_from(source: Value) -> TCResult<Vec<T>> {
-        let mut source: Vec<Value> = source.try_into()?;
-        let mut values = Vec::with_capacity(source.len());
-        for value in source.drain(..) {
-            values.push(value.try_into()?);
+impl TryCastFrom<Vec<Scalar>> for Value {
+    fn can_cast_from(tuple: &Vec<Scalar>) -> bool {
+        for s in tuple {
+            match s {
+                Scalar::Value(_) => {}
+                _ => return false,
+            }
         }
-        Ok(values)
+
+        true
+    }
+
+    fn opt_cast_from(mut tuple: Vec<Scalar>) -> Option<Value> {
+        let mut values = Vec::with_capacity(tuple.len());
+        for s in tuple.drain(..) {
+            match s {
+                Scalar::Value(value) => values.push(value),
+                _ => return None,
+            }
+        }
+
+        Some(Value::Tuple(values))
     }
 }
 
@@ -567,7 +484,7 @@ impl TryCastFrom<Value> for TCRef {
     fn opt_cast_from(value: Value) -> Option<TCRef> {
         match value {
             Value::TCString(s) => TCRef::opt_cast_from(s),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -709,7 +626,7 @@ impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>, T3: TryCastFrom<Value>> Try
     }
 }
 
-struct ValueVisitor;
+pub struct ValueVisitor;
 
 impl ValueVisitor {
     fn visit_float<F: Into<number::instance::Float>>(&self, f: F) -> TCResult<Value> {
@@ -807,43 +724,15 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
             let value: Value = access.next_value()?;
 
             if key.starts_with('$') {
-                let (subject, path) = if let Some(i) = key.find('/') {
-                    let (subject, path) = key.split_at(i);
-                    let subject = TCRef::from_str(subject).map_err(de::Error::custom)?;
-                    let path = TCPath::from_str(path).map_err(de::Error::custom)?;
-                    (subject, path)
-                } else {
-                    (
-                        TCRef::from_str(key).map_err(de::Error::custom)?,
-                        TCPath::default(),
-                    )
-                };
+                let subject = TCRef::from_str(key).map_err(de::Error::custom)?;
 
                 if value == Value::Tuple(vec![]) || value == Value::None {
-                    Ok(subject.into())
+                    Ok(Value::TCString(TCString::Ref(subject)))
                 } else {
-                    use class::ValueInstance;
-
-                    let method = if value.matches::<Vec<(ValueId, Value)>>() {
-                        let data: Vec<(ValueId, Value)> = value.opt_cast_into().unwrap();
-                        Method::Post(subject, path, data)
-                    } else {
-                        let mut data: Vec<Value> = value.try_into().map_err(de::Error::custom)?;
-                        if data.len() == 1 {
-                            Method::Get(subject, path, data.pop().unwrap())
-                        } else if data.len() == 2 {
-                            let value = data.pop().unwrap();
-                            let key = data.pop().unwrap();
-                            Method::Put(subject, path, key, value)
-                        } else {
-                            return Err(de::Error::custom(format!(
-                                "Expected a Method but found: {}",
-                                Value::Tuple(data)
-                            )));
-                        }
-                    };
-
-                    Ok(Value::Op(Box::new(Op::Method(method))))
+                    Err(de::Error::custom(format!(
+                        "Expected Value but found MethodRef: {}",
+                        value
+                    )))
                 }
             } else if let Ok(link) = key.parse::<link::Link>() {
                 if link.host().is_none() && link.path().starts_with(&ValueType::prefix()) {
@@ -862,13 +751,6 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         }
     }
 
-    fn visit_none<E>(self) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(Value::None)
-    }
-
     fn visit_seq<L>(self, mut access: L) -> Result<Self::Value, L::Error>
     where
         L: de::SeqAccess<'de>,
@@ -884,6 +766,13 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         }
 
         Ok(Value::Tuple(items))
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(Value::None)
     }
 
     fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
@@ -925,25 +814,6 @@ impl Serialize for Value {
                 map.serialize_entry(Link::from(n.class()).path(), &[n])?;
                 map.end()
             }
-            Value::Op(op) => match &**op {
-                Op::Ref(op_ref) => match op_ref {
-                    OpRef::Get(subject, key) => {
-                        let mut map = s.serialize_map(Some(1))?;
-                        map.serialize_entry(&subject, &[key])?;
-                        map.end()
-                    }
-                    _ => unimplemented!(),
-                },
-                Op::Method(method) => match method {
-                    Method::Get(subject, path, key) => {
-                        let mut map = s.serialize_map(Some(1))?;
-                        map.serialize_entry(&format!("{}{}", subject, path), &[key])?;
-                        map.end()
-                    }
-                    _ => unimplemented!(),
-                },
-                _ => unimplemented!(),
-            },
             Value::TCString(tc_string) => tc_string.serialize(s),
             Value::Tuple(v) => {
                 let mut seq = s.serialize_seq(Some(v.len()))?;
@@ -971,7 +841,6 @@ impl fmt::Display for Value {
             Value::Class(c) => write!(f, "Class: {}", c),
             Value::Number(n) => write!(f, "Number({})", n),
             Value::TCString(s) => write!(f, "String({})", s),
-            Value::Op(op) => write!(f, "Op: {}", op),
             Value::Tuple(v) => write!(
                 f,
                 "[{}]",

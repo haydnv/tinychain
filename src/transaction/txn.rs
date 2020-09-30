@@ -17,10 +17,7 @@ use crate::class::{Instance, State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
-use crate::value::class::ValueInstance;
-use crate::value::link::PathSegment;
-use crate::value::op::{Method, Op, OpDef, OpRef};
-use crate::value::{Number, TCString, Value, ValueId};
+use crate::scalar::*;
 
 use super::Transact;
 
@@ -140,7 +137,7 @@ impl Txn {
         &self.id
     }
 
-    pub async fn execute<S: Stream<Item = (ValueId, Value)> + Unpin>(
+    pub async fn execute<S: Stream<Item = (ValueId, Scalar)> + Unpin>(
         self: Arc<Self>,
         mut parameters: S,
         auth: Auth,
@@ -151,16 +148,9 @@ impl Txn {
 
         let mut graph = HashMap::new();
         let mut capture = None;
-        while let Some((name, value)) = parameters.next().await {
-            if let Value::TCString(TCString::Ref(tc_ref)) = value {
-                return Err(error::bad_request(
-                    &format!("Tried to assign {} to a reference", name),
-                    tc_ref,
-                ));
-            }
-
+        while let Some((name, scalar)) = parameters.next().await {
             capture = Some(name.clone());
-            graph.insert(name, State::Value(value));
+            graph.insert(name, State::Scalar(scalar));
         }
 
         let capture =
@@ -187,10 +177,10 @@ impl Txn {
                 println!("Txn::execute {} (#{})", &name, visited.len());
 
                 let state = graph.get(&name).ok_or_else(|| error::not_found(&name))?;
-                if let State::Value(value) = state {
+                if let State::Scalar(scalar) = state {
                     let mut ready = true;
 
-                    if let Value::Op(op) = value {
+                    if let Scalar::Op(op) = scalar {
                         if op.is_def() {
                             continue;
                         }
@@ -213,7 +203,26 @@ impl Txn {
                                     .map_ok(|state| (name, state)),
                             );
                         }
-                    } else if let Value::Tuple(tuple) = value {
+                    } else if let Scalar::Tuple(tuple) = scalar {
+                        let mut ready = true;
+                        for dep in tuple {
+                            if let Scalar::Value(Value::TCString(TCString::Ref(dep))) = dep {
+                                let dep_state = graph
+                                    .get(dep.value_id())
+                                    .ok_or_else(|| error::not_found(&dep))?;
+
+                                if !is_resolved(dep_state) {
+                                    ready = false;
+                                    unvisited.push(dep.value_id().clone());
+                                }
+                            }
+                        }
+
+                        if ready {
+                            let resolved = dereference_state(&graph, scalar)?;
+                            graph.insert(name, resolved);
+                        }
+                    } else if let Scalar::Value(Value::Tuple(tuple)) = scalar {
                         let mut ready = true;
                         for dep in tuple {
                             if let Value::TCString(TCString::Ref(dep)) = dep {
@@ -229,7 +238,7 @@ impl Txn {
                         }
 
                         if ready {
-                            let resolved = resolve_state(&graph, value)?;
+                            let resolved = dereference_state(&graph, scalar)?;
                             graph.insert(name, resolved);
                         }
                     }
@@ -279,11 +288,11 @@ impl Txn {
                 let cond = provided
                     .get(cond.value_id())
                     .ok_or_else(|| error::not_found(cond))?;
-                if let State::Value(Value::Number(Number::Bool(cond))) = cond {
+                if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(cond)))) = cond {
                     if cond.into() {
-                        Ok(State::Value(then))
+                        Ok(State::Scalar(then))
                     } else {
-                        Ok(State::Value(or_else))
+                        Ok(State::Scalar(or_else))
                     }
                 } else {
                     Err(error::bad_request(
@@ -293,7 +302,9 @@ impl Txn {
                 }
             }
             Op::Ref(OpRef::Get(link, key)) => {
-                let key: Value = resolve_state(&provided, &key)?.try_into()?;
+                let key = dereference_value_state(&provided, &key)
+                    .and_then(Scalar::try_from)
+                    .and_then(Value::try_from)?;
                 self.gateway
                     .clone()
                     .get(&link, key, auth, Some(self.clone()))
@@ -303,12 +314,17 @@ impl Txn {
                 let subject = provided
                     .get(tc_ref.value_id())
                     .ok_or_else(|| error::not_found(tc_ref))?;
-                let key: Value = resolve_state(&provided, &key)?.try_into()?;
+                let key = dereference_value_state(&provided, &key)
+                    .and_then(Scalar::try_from)
+                    .and_then(Value::try_from)?;
 
                 println!("Method::Get subject {}: {}", subject, key);
 
                 match subject {
-                    State::Value(value) => value.get(path, key.clone()).map(State::Value),
+                    State::Scalar(Scalar::Value(value)) => value
+                        .get(path, key.clone())
+                        .map(Scalar::Value)
+                        .map(State::Scalar),
                     State::Chain(chain) => {
                         println!("Txn::resolve Chain {}: {}", path, key);
                         chain.get(self.clone(), &path, key.clone(), auth).await
@@ -335,7 +351,7 @@ impl Txn {
                 }
             }
             Op::Ref(OpRef::Put(link, key, value)) => {
-                let value = resolve_state(&provided, &value)?;
+                let value = dereference_state(&provided, &value)?;
                 self.gateway
                     .clone()
                     .put(&link, key, value, &auth, Some(self.clone()))
@@ -347,7 +363,7 @@ impl Txn {
                 let subject = provided
                     .get(&tc_ref.clone().into())
                     .ok_or_else(|| error::not_found(tc_ref))?;
-                let value = resolve_state(&provided, &value)?;
+                let value = dereference_state(&provided, &value)?;
 
                 println!(
                     "Txn::resolve Method::Put {}{}: {} <- {}",
@@ -355,7 +371,7 @@ impl Txn {
                 );
 
                 match subject {
-                    State::Value(_) => Err(error::unsupported(
+                    State::Scalar(_) => Err(error::unsupported(
                         "Value is immutable (doesn't support PUT)",
                     )),
                     State::Chain(chain) => {
@@ -375,9 +391,9 @@ impl Txn {
             Op::Ref(OpRef::Post(link, data)) => {
                 let data = stream::iter(data).map(move |(name, value)| {
                     // TODO: just allow sending an error as a value
-                    resolve_state(&provided, &value)
-                        .map(Value::try_from)
-                        .map(|value| (name, value.unwrap()))
+                    dereference_state(&provided, &value)
+                        .map(Scalar::try_from)
+                        .map(|scalar| (name, scalar.unwrap()))
                         .unwrap()
                 });
 
@@ -397,14 +413,16 @@ impl Txn {
             State::Chain(chain) => Box::new(chain),
             State::Cluster(cluster) => Box::new(cluster),
             State::Collection(collection) => Box::new(collection),
-            State::Value(_) => panic!("Value does not support transaction-specific mutations!"),
+            State::Scalar(_) => {
+                panic!("Scalar values do not support transaction-specific mutations!")
+            }
         };
 
         self.mutated.write().await.push(state)
     }
 }
 
-fn resolve_state(provided: &HashMap<ValueId, State>, object: &Value) -> TCResult<State> {
+fn dereference_value_state(provided: &HashMap<ValueId, State>, object: &Value) -> TCResult<State> {
     match object {
         Value::TCString(TCString::Ref(object)) => match provided.get(object.value_id()) {
             Some(state) => Ok(state.clone()),
@@ -413,31 +431,58 @@ fn resolve_state(provided: &HashMap<ValueId, State>, object: &Value) -> TCResult
         Value::Tuple(tuple) => {
             let tuple: TCResult<Vec<State>> = tuple
                 .iter()
-                .map(|val| resolve_state(provided, val))
+                .map(|val| dereference_value_state(provided, val))
                 .collect();
+
             let tuple: TCResult<Vec<Value>> = tuple?.drain(..).map(Value::try_from).collect();
-            tuple.map(Value::Tuple).map(State::Value)
+            tuple
+                .map(Value::Tuple)
+                .map(Scalar::Value)
+                .map(State::Scalar)
         }
-        other => Ok(State::Value(other.clone())),
+        other => Ok(State::Scalar(Scalar::Value(other.clone()))),
+    }
+}
+
+fn dereference_state(provided: &HashMap<ValueId, State>, object: &Scalar) -> TCResult<State> {
+    match object {
+        Scalar::Value(value) => dereference_value_state(provided, value),
+        Scalar::Tuple(tuple) => {
+            let tuple: TCResult<Vec<State>> = tuple
+                .iter()
+                .map(|val| dereference_state(provided, val))
+                .collect();
+
+            let tuple: TCResult<Vec<Scalar>> = tuple?.drain(..).map(Scalar::try_from).collect();
+            tuple.map(Scalar::Tuple).map(State::Scalar)
+        }
+        other => Ok(State::Scalar(other.clone())),
     }
 }
 
 fn is_resolved(state: &State) -> bool {
     match state {
-        State::Value(value) => is_resolved_value(value),
+        State::Scalar(scalar) => is_resolved_scalar(scalar),
         _ => true,
+    }
+}
+
+fn is_resolved_scalar(scalar: &Scalar) -> bool {
+    match scalar {
+        Scalar::Op(op) => match **op {
+            Op::Ref(_) => false,
+            Op::Method(_) => false,
+            _ => true,
+        },
+        Scalar::Value(value) => is_resolved_value(value),
+        Scalar::Tuple(tuple) => tuple.iter().all(is_resolved_scalar),
     }
 }
 
 fn is_resolved_value(value: &Value) -> bool {
     match value {
-        Value::Op(op) => match **op {
-            Op::Ref(_) => false,
-            Op::Method(_) => false,
-            _ => true,
-        },
         Value::TCString(TCString::Ref(_)) => false,
-        Value::Tuple(values) => values.iter().all(is_resolved_value),
+        Value::Tuple(tuple) => tuple.iter().all(is_resolved_value),
         _ => true,
     }
 }
@@ -456,17 +501,17 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
         Op::Method(method) => match method {
             Method::Get(subject, _path, key) => {
                 deps.insert(subject.value_id().clone());
-                deps.extend(value_requires(key, txn_state)?);
+                deps.extend(value_requires(key)?);
             }
             Method::Put(subject, _path, key, value) => {
                 deps.insert(subject.value_id().clone());
-                deps.extend(value_requires(key, txn_state)?);
-                deps.extend(value_requires(value, txn_state)?);
+                deps.extend(value_requires(key)?);
+                deps.extend(scalar_requires(value, txn_state)?);
             }
             Method::Post(subject, _path, data) => {
                 deps.insert(subject.value_id().clone());
                 deps.extend(data.iter().filter_map(|(name, dep)| {
-                    if is_resolved_value(dep) {
+                    if is_resolved_scalar(dep) {
                         None
                     } else {
                         Some(name.clone())
@@ -475,27 +520,17 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
             }
         },
         Op::Ref(op_ref) => match op_ref {
-            OpRef::If(cond, then, or_else) => {
-                let cond_state = txn_state
-                    .get(cond.value_id())
-                    .ok_or_else(|| error::not_found(cond))?;
-                if let State::Value(Value::Op(cond_op)) = cond_state {
-                    deps.extend(requires(cond_op, txn_state)?);
-                } else {
-                    deps.extend(value_requires(then, txn_state)?);
-                    deps.extend(value_requires(or_else, txn_state)?);
-                }
-            }
+            OpRef::If(_cond, _then, _or_else) => unimplemented!(),
             OpRef::Get(_path, key) => {
-                deps.extend(value_requires(key, txn_state)?);
+                deps.extend(value_requires(key)?);
             }
             OpRef::Put(_path, key, value) => {
-                deps.extend(value_requires(key, txn_state)?);
-                deps.extend(value_requires(value, txn_state)?);
+                deps.extend(value_requires(key)?);
+                deps.extend(scalar_requires(value, txn_state)?);
             }
             OpRef::Post(_path, data) => {
                 for (_id, provider) in data {
-                    deps.extend(value_requires(provider, txn_state)?);
+                    deps.extend(scalar_requires(provider, txn_state)?);
                 }
             }
         },
@@ -504,14 +539,34 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
     Ok(deps)
 }
 
-fn value_requires(
-    value: &Value,
+fn scalar_requires(
+    scalar: &Scalar,
     txn_state: &HashMap<ValueId, State>,
 ) -> TCResult<HashSet<ValueId>> {
+    match scalar {
+        Scalar::Op(op) => requires(&**op, txn_state),
+        Scalar::Value(value) => value_requires(value),
+        Scalar::Tuple(tuple) => {
+            let mut required = HashSet::new();
+            for s in tuple {
+                required.extend(scalar_requires(s, txn_state)?);
+            }
+            Ok(required)
+        }
+    }
+}
+
+fn value_requires(value: &Value) -> TCResult<HashSet<ValueId>> {
     match value {
-        Value::Op(op) => requires(op, txn_state),
         Value::TCString(TCString::Ref(tc_ref)) => {
             Ok(iter::once(tc_ref.value_id().clone()).collect())
+        }
+        Value::Tuple(tuple) => {
+            let mut required = HashSet::new();
+            for s in tuple {
+                required.extend(value_requires(s)?);
+            }
+            Ok(required)
         }
         _ => Ok(HashSet::new()),
     }

@@ -13,8 +13,8 @@ use crate::collection::class::CollectionInstance;
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::{Collection, CollectionItem, CollectionView};
 use crate::error;
+use crate::scalar::{label, Link, Scalar, TCPath, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{label, Link, TCPath, Value, ValueId};
 
 use super::bounds::{self, Bounds};
 use super::index::TableIndex;
@@ -122,7 +122,7 @@ impl CollectionInstance for TableView {
         Err(error::not_implemented("TableBase::put"))
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         Err(error::not_implemented("TableBase::to_stream"))
     }
 }

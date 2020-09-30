@@ -7,9 +7,8 @@ use crate::class::{Class, Instance, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
+use crate::scalar::{label, Link, Scalar, TCPath, Value};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::link::{Link, TCPath};
-use crate::value::{label, Value};
 
 use super::{BTreeFile, BTreeSlice, Key, Selector};
 
@@ -119,7 +118,7 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Tree(tree) => tree.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,

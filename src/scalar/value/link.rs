@@ -9,9 +9,8 @@ use addr::DomainName;
 use serde::de;
 use serde::ser::{SerializeMap, Serializer};
 
-use crate::error;
-use crate::value::string::Label;
-use crate::value::{TCResult, Value, ValueId};
+use crate::error::{self, TCResult};
+use crate::scalar::{Label, Value, ValueId};
 
 pub type PathSegment = ValueId;
 
