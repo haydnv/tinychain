@@ -1,6 +1,5 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::ops::Bound;
 use std::str::FromStr;
 
 use bytes::Bytes;
@@ -33,7 +32,6 @@ pub const fn label(id: &'static str) -> string::Label {
 #[derive(Clone, Eq, PartialEq)]
 pub enum Value {
     None,
-    Bound(Bound<Box<Value>>),
     Bytes(Bytes),
     Class(TCType),
     Number(Number),
@@ -47,7 +45,6 @@ impl Instance for Value {
     fn class(&self) -> class::ValueType {
         match self {
             Value::None => ValueType::None,
-            Value::Bound(_) => ValueType::Bound,
             Value::Bytes(_) => ValueType::Bytes,
             Value::Class(_) => ValueType::Class,
             Value::Number(n) => ValueType::Number(n.class()),
@@ -95,16 +92,6 @@ impl From<&'static [u8]> for Value {
 impl From<bool> for Value {
     fn from(b: bool) -> Value {
         Value::Number(b.into())
-    }
-}
-
-impl From<Bound<Value>> for Value {
-    fn from(b: Bound<Value>) -> Value {
-        match b {
-            Bound::Included(v) => Value::Bound(Bound::Included(Box::new(v))),
-            Bound::Excluded(v) => Value::Bound(Bound::Excluded(Box::new(v))),
-            Bound::Unbounded => Value::Bound(Bound::Unbounded),
-        }
     }
 }
 
@@ -176,21 +163,6 @@ impl TryFrom<Value> for bool {
         match v {
             Value::Number(n) => n.try_into(),
             other => Err(error::bad_request("Expected bool but found", other)),
-        }
-    }
-}
-
-impl TryFrom<Value> for Bound<Value> {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<Bound<Value>> {
-        match v {
-            Value::Bound(b) => match b {
-                Bound::Included(b) => Ok(Bound::Included(*b)),
-                Bound::Excluded(b) => Ok(Bound::Excluded(*b)),
-                Bound::Unbounded => Ok(Bound::Unbounded),
-            },
-            other => Err(error::bad_request("Expected Bound but found", other)),
         }
     }
 }
@@ -799,7 +771,6 @@ impl Serialize for Value {
     {
         match self {
             Value::None => s.serialize_none(),
-            Value::Bound(b) => b.serialize(s),
             Value::Bytes(b) => {
                 let mut map = s.serialize_map(Some(1))?;
                 map.serialize_entry(Link::from(ValueType::Bytes).path(), &[base64::encode(b)])?;
@@ -837,7 +808,6 @@ impl fmt::Display for Value {
         match self {
             Value::None => write!(f, "None"),
             Value::Bytes(b) => write!(f, "Bytes({})", b.len()),
-            Value::Bound(b) => write!(f, "Bound({:?})", b),
             Value::Class(c) => write!(f, "Class: {}", c),
             Value::Number(n) => write!(f, "Number({})", n),
             Value::TCString(s) => write!(f, "String({})", s),

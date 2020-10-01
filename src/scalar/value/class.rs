@@ -35,10 +35,9 @@ impl From<StringType> for ValueType {
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub enum ValueType {
-    Bound,
+    None,
     Bytes,
     Class,
-    None,
     Number(NumberType),
     TCString(StringType),
     Tuple,
@@ -118,7 +117,6 @@ impl From<ValueType> for Link {
         use ValueType::*;
         match vt {
             None => prefix.join(label("none").into()).into(),
-            Bound => prefix.join(label("bound").into()).into(),
             Bytes => prefix.join(label("bytes").into()).into(),
             Class => prefix.join(label("class").into()).into(),
             Number(nt) => nt.into(),
@@ -165,7 +163,6 @@ impl fmt::Display for ValueType {
         use ValueType::*;
         match self {
             None => write!(f, "type None"),
-            Bound => write!(f, "type Bound"),
             Bytes => write!(f, "type Bytes"),
             Class => write!(f, "type Class"),
             Number(nt) => write!(f, "type Number: {}", nt),
