@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, TCBoxFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, TCBoxFuture, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{
     Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
@@ -136,40 +136,43 @@ impl Instance for TensorBase {
     }
 }
 
-#[async_trait]
 impl CollectionInstance for TensorBase {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        TensorView::from(self.clone())
-            .get(txn, path, selector)
-            .await
+    ) -> TCBoxTryFuture<CollectionItem<Self::Item, Self::Slice>> {
+        Box::pin(async move {
+            TensorView::from(self.clone())
+                .get(txn, path, selector)
+                .await
+        })
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
-        TensorView::from(self.clone()).is_empty(txn).await
+    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+        Box::pin(async move { TensorView::from(self.clone()).is_empty(txn).await })
     }
 
-    async fn put(
-        &self,
+    fn put<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCResult<()> {
-        TensorView::from(self.clone())
-            .put(txn, path, selector, value)
-            .await
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            TensorView::from(self.clone())
+                .put(txn, path, selector, value)
+                .await
+        })
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
-        TensorView::from(self.clone()).to_stream(txn).await
+    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
+        Box::pin(async move { TensorView::from(self.clone()).to_stream(txn).await })
     }
 }
 
@@ -290,81 +293,86 @@ impl Instance for TensorView {
     }
 }
 
-#[async_trait]
 impl CollectionInstance for TensorView {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        if !path.is_empty() {
-            return Err(error::not_found(path));
-        }
+    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
+        Box::pin(async move {
+            if !path.is_empty() {
+                return Err(error::not_found(path));
+            }
 
-        let bounds: Bounds = selector
-            .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
+            let bounds: Bounds = selector
+                .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
 
-        if bounds.is_coord() {
-            let coord: Vec<u64> = bounds.try_into()?;
-            let value = self.read_value(&txn, &coord).await?;
-            Ok(CollectionItem::Scalar(value))
-        } else {
-            let slice = self.slice(bounds)?;
-            Ok(CollectionItem::Slice(slice))
-        }
+            if bounds.is_coord() {
+                let coord: Vec<u64> = bounds.try_into()?;
+                let value = self.read_value(&txn, &coord).await?;
+                Ok(CollectionItem::Scalar(value))
+            } else {
+                let slice = self.slice(bounds)?;
+                Ok(CollectionItem::Slice(slice))
+            }
+        })
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
-        self.any(txn).map_ok(|any| !any).await
+    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+        Box::pin(self.any(txn).map_ok(|any| !any))
     }
 
-    async fn put(
-        &self,
+    fn put<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCResult<()> {
-        if !path.is_empty() {
-            return Err(error::not_found(path));
-        }
-
-        let bounds: Bounds = selector
-            .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
-
-        match value {
-            CollectionItem::Scalar(value) => {
-                self.write_value(txn.id().clone(), bounds, value).await
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            if !path.is_empty() {
+                return Err(error::not_found(path));
             }
-            CollectionItem::Slice(slice) => self.write(txn, bounds, slice).await,
-        }
+
+            let bounds: Bounds = selector
+                .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
+
+            match value {
+                CollectionItem::Scalar(value) => {
+                    self.write_value(txn.id().clone(), bounds, value).await
+                }
+                CollectionItem::Slice(slice) => self.write(txn, bounds, slice).await,
+            }
+        })
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
-        match self {
-            // TODO: Forward errors, don't panic!
-            Self::Dense(dense) => {
-                let result_stream = dense.value_stream(txn).await?;
-                let values: TCStream<Scalar> = Box::pin(
-                    result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
-                );
-                Ok(values)
+    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
+        Box::pin(async move {
+            match self {
+                // TODO: Forward errors, don't panic!
+                Self::Dense(dense) => {
+                    let result_stream = dense.value_stream(txn).await?;
+                    let values: TCStream<Scalar> = Box::pin(
+                        result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
+                    );
+                    Ok(values)
+                }
+                Self::Sparse(sparse) => {
+                    let result_stream = sparse.filled(txn).await?;
+                    let values: TCStream<Scalar> = Box::pin(
+                        result_stream
+                            .map(|r| r.unwrap())
+                            .map(Value::from)
+                            .map(Scalar::Value),
+                    );
+                    Ok(values)
+                }
             }
-            Self::Sparse(sparse) => {
-                let result_stream = sparse.filled(txn).await?;
-                let values: TCStream<Scalar> = Box::pin(
-                    result_stream
-                        .map(|r| r.unwrap())
-                        .map(Value::from)
-                        .map(Scalar::Value),
-                );
-                Ok(values)
-            }
-        }
+        })
     }
 }
 
@@ -499,47 +507,46 @@ impl Instance for Tensor {
     }
 }
 
-#[async_trait]
 impl CollectionInstance for Tensor {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get(txn, path, selector).await,
-            Self::View(view) => view.get(txn, path, selector).await,
+            Self::Base(base) => base.get(txn, path, selector),
+            Self::View(view) => view.get(txn, path, selector),
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
         match self {
-            Self::Base(base) => base.is_empty(txn).await,
-            Self::View(view) => view.is_empty(txn).await,
+            Self::Base(base) => base.is_empty(txn),
+            Self::View(view) => view.is_empty(txn),
         }
     }
 
-    async fn put(
-        &self,
+    fn put<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCResult<()> {
+    ) -> TCBoxTryFuture<'a, ()> {
         match self {
-            Self::Base(base) => base.put(txn, path, selector, value).await,
-            Self::View(view) => view.put(txn, path, selector, value).await,
+            Self::Base(base) => base.put(txn, path, selector, value),
+            Self::View(view) => view.put(txn, path, selector, value),
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
         match self {
-            Self::Base(base) => base.to_stream(txn).await,
-            Self::View(view) => view.to_stream(txn).await,
+            Self::Base(base) => base.to_stream(txn),
+            Self::View(view) => view.to_stream(txn),
         }
     }
 }

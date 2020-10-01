@@ -1,13 +1,12 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::future;
 
-use crate::class::{Instance, TCBoxFuture, TCResult, TCStream};
+use crate::class::{Instance, TCBoxFuture, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
-use crate::scalar::{Number, Scalar, TCPath, Value};
+use crate::scalar::{Scalar, TCPath, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 pub mod btree;
@@ -50,47 +49,50 @@ impl Instance for CollectionBase {
     }
 }
 
-#[async_trait]
 impl class::CollectionInstance for CollectionBase {
     type Item = Scalar;
     type Slice = CollectionView;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        let view: CollectionView = self.clone().into();
-        view.get(txn, path, selector).await
+    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
+        Box::pin(async move {
+            let view: CollectionView = self.clone().into();
+            view.get(txn, path, selector).await
+        })
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
         match self {
-            Self::BTree(btree) => btree.is_empty(txn).await,
-            Self::Null(null) => null.is_empty(txn).await,
-            Self::Table(table) => table.is_empty(txn).await,
-            Self::Tensor(tensor) => tensor.is_empty(txn).await,
+            Self::BTree(btree) => btree.is_empty(txn),
+            Self::Null(null) => null.is_empty(txn),
+            Self::Table(table) => table.is_empty(txn),
+            Self::Tensor(tensor) => tensor.is_empty(txn),
         }
     }
 
-    async fn put(
-        &self,
+    fn put<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCResult<()> {
-        let view: CollectionView = self.clone().into();
-        view.put(txn, path, selector, value).await
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            let view: CollectionView = self.clone().into();
+            view.put(txn, path, selector, value).await
+        })
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
         match self {
-            Self::BTree(btree) => btree.to_stream(txn).await,
-            Self::Null(null) => null.to_stream(txn).await,
-            Self::Table(table) => table.to_stream(txn).await,
-            Self::Tensor(tensor) => tensor.to_stream(txn).await,
+            Self::BTree(btree) => btree.to_stream(txn),
+            Self::Null(null) => null.to_stream(txn),
+            Self::Table(table) => table.to_stream(txn),
+            Self::Tensor(tensor) => tensor.to_stream(txn),
         }
     }
 }
@@ -158,102 +160,65 @@ impl Instance for CollectionView {
     }
 }
 
-#[async_trait]
 impl class::CollectionInstance for CollectionView {
     type Item = Scalar;
     type Slice = CollectionView;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        match self {
-            Self::BTree(btree) => {
-                let item = match btree.get(txn, path, selector).await? {
-                    CollectionItem::Scalar(key) => {
-                        CollectionItem::Scalar(Scalar::Value(Value::Tuple(key)))
-                    }
-                    CollectionItem::Slice(slice) => CollectionItem::Slice(slice.into()),
-                };
+    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
+        Box::pin(async move {
+            match self {
+                Self::BTree(btree) => {
+                    let item = match btree.get(txn, path, selector).await? {
+                        CollectionItem::Scalar(key) => {
+                            CollectionItem::Scalar(Scalar::Value(Value::Tuple(key)))
+                        }
+                        CollectionItem::Slice(slice) => CollectionItem::Slice(slice.into()),
+                    };
 
-                Ok(item)
+                    Ok(item)
+                }
+                _ => Err(error::not_implemented("CollectionView::get")),
             }
-            _ => Err(error::not_implemented("CollectionView::get")),
-        }
+        })
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<bool> {
         match self {
-            Self::BTree(btree) => btree.is_empty(txn).await,
-            Self::Null(null) => null.is_empty(txn).await,
-            Self::Table(table) => table.is_empty(txn).await,
-            Self::Tensor(tensor) => tensor.is_empty(txn).await,
+            Self::BTree(btree) => btree.is_empty(txn),
+            Self::Null(null) => null.is_empty(txn),
+            Self::Table(table) => table.is_empty(txn),
+            Self::Tensor(tensor) => tensor.is_empty(txn),
         }
     }
 
-    async fn put(
-        &self,
+    fn put<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCResult<()> {
-        match self {
-            Self::BTree(btree) => match value {
-                CollectionItem::Scalar(value) => {
-                    let value = value.try_into()?;
-                    btree
-                        .put(txn, path, selector, CollectionItem::Scalar(value))
-                        .await
-                }
-                CollectionItem::Slice(slice) => {
-                    let slice = slice.try_into()?;
-                    btree
-                        .put(txn, path, selector, CollectionItem::Slice(slice))
-                        .await
-                }
-            },
-            Self::Null(_) => Err(error::unsupported("Cannot modify a Null Collection")),
-            Self::Table(table) => match value {
-                CollectionItem::Scalar(value) => {
-                    let value = value.try_into()?;
-                    table
-                        .put(txn, path, selector, CollectionItem::Scalar(value))
-                        .await
-                }
-                CollectionItem::Slice(slice) => {
-                    let slice = slice.try_into()?;
-                    table
-                        .put(txn, path, selector, CollectionItem::Slice(slice))
-                        .await
-                }
-            },
-            Self::Tensor(tensor) => match value {
-                CollectionItem::Scalar(value) => {
-                    let value = Value::try_from(value)?;
-                    let number = Number::try_from(value)?;
-                    tensor
-                        .put(txn, path, selector, CollectionItem::Scalar(number))
-                        .await
-                }
-                CollectionItem::Slice(slice) => {
-                    let slice = slice.try_into()?;
-                    tensor
-                        .put(txn, path, selector, CollectionItem::Slice(slice))
-                        .await
-                }
-            },
-        }
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            match self {
+                Self::BTree(btree) => btree.put(txn, path, selector, value.try_into()?).await,
+                Self::Null(null) => null.put(txn, path, selector, value.try_into()?).await,
+                Self::Table(table) => table.put(txn, path, selector, value.try_into()?).await,
+                Self::Tensor(tensor) => tensor.put(txn, path, selector, value.try_into()?).await,
+            }
+        })
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
         match self {
-            Self::BTree(btree) => btree.to_stream(txn).await,
-            Self::Null(null) => null.to_stream(txn).await,
-            Self::Table(table) => table.to_stream(txn).await,
-            Self::Tensor(tensor) => tensor.to_stream(txn).await,
+            Self::BTree(btree) => btree.to_stream(txn),
+            Self::Null(null) => null.to_stream(txn),
+            Self::Table(table) => table.to_stream(txn),
+            Self::Tensor(tensor) => tensor.to_stream(txn),
         }
     }
 }
@@ -300,6 +265,20 @@ impl TryFrom<CollectionView> for BTreeSlice {
     }
 }
 
+impl TryFrom<CollectionView> for Null {
+    type Error = error::TCError;
+
+    fn try_from(view: CollectionView) -> TCResult<Null> {
+        match view {
+            CollectionView::Null(null) => Ok(null),
+            other => Err(error::bad_request(
+                "Expected Null collection but found",
+                other,
+            )),
+        }
+    }
+}
+
 impl fmt::Display for CollectionView {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -328,47 +307,46 @@ impl Instance for Collection {
     }
 }
 
-#[async_trait]
 impl class::CollectionInstance for Collection {
     type Item = Scalar;
     type Slice = CollectionView;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get(txn, path, selector).await,
-            Self::View(view) => view.get(txn, path, selector).await,
+            Self::Base(base) => base.get(txn, path, selector),
+            Self::View(view) => view.get(txn, path, selector),
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
         match self {
-            Self::Base(base) => base.is_empty(txn).await,
-            Self::View(view) => view.is_empty(txn).await,
+            Self::Base(base) => base.is_empty(txn),
+            Self::View(view) => view.is_empty(txn),
         }
     }
 
-    async fn put(
-        &self,
+    fn put<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCResult<()> {
+    ) -> TCBoxTryFuture<'a, ()> {
         match self {
-            Self::Base(base) => base.put(txn, path, selector, value).await,
-            Self::View(view) => view.put(txn, path, selector, value).await,
+            Self::Base(base) => base.put(txn, path, selector, value),
+            Self::View(view) => view.put(txn, path, selector, value),
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
         match self {
-            Self::Base(base) => base.to_stream(txn).await,
-            Self::View(view) => view.to_stream(txn).await,
+            Self::Base(base) => base.to_stream(txn),
+            Self::View(view) => view.to_stream(txn),
         }
     }
 }

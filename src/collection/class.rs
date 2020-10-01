@@ -1,10 +1,11 @@
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, State, TCBoxTryFuture, TCResult, TCStream, TCType};
 use crate::error;
 use crate::scalar::{label, Link, Scalar, TCPath, TryCastInto, Value};
 use crate::transaction::{Transact, Txn};
@@ -18,6 +19,32 @@ use super::{Collection, CollectionBase, CollectionView};
 pub enum CollectionItem<I: Into<Scalar>, S: CollectionInstance> {
     Scalar(I),
     Slice(S),
+}
+
+impl<I: Into<Scalar>, S: CollectionInstance> CollectionItem<I, S> {
+    pub fn try_into<
+        TI: Into<Scalar>,
+        EI: Into<error::TCError>,
+        TS: CollectionInstance,
+        ES: Into<error::TCError>,
+    >(
+        self,
+    ) -> TCResult<CollectionItem<TI, TS>>
+    where
+        TI: TryFrom<I, Error = EI>,
+        TS: TryFrom<S, Error = ES>,
+    {
+        match self {
+            CollectionItem::Scalar(scalar) => scalar
+                .try_into()
+                .map(CollectionItem::Scalar)
+                .map_err(|e: EI| e.into()),
+            CollectionItem::Slice(slice) => slice
+                .try_into()
+                .map(CollectionItem::Slice)
+                .map_err(|e: ES| e.into()),
+        }
+    }
 }
 
 impl<I: Into<Scalar>, S: CollectionInstance> From<CollectionItem<I, S>> for State {
@@ -40,29 +67,28 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
     ) -> TCResult<<Self as CollectionClass>::Instance>;
 }
 
-#[async_trait]
 pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sync {
     type Item: Into<Scalar>;
     type Slice: CollectionInstance;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>>;
+    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>>;
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool>;
+    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
 
-    async fn put(
-        &self,
+    fn put<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCResult<()>;
+    ) -> TCBoxTryFuture<'a, ()>;
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>>;
+    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>>;
 }
 
 #[derive(Clone, Eq, PartialEq)]

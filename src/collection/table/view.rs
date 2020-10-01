@@ -3,7 +3,6 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, join};
 
@@ -96,36 +95,35 @@ impl Instance for TableView {
     }
 }
 
-#[async_trait]
 impl CollectionInstance for TableView {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         _txn: Arc<Txn>,
         _path: TCPath,
         _selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        Err(error::not_implemented("TableBase::get"))
+    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
+        Box::pin(async move { Err(error::not_implemented("TableBase::get")) })
     }
 
-    async fn is_empty(&self, _txn: Arc<Txn>) -> TCResult<bool> {
-        Err(error::not_implemented("TableBase::is_empty"))
+    fn is_empty<'a>(&'a self, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+        Box::pin(async move { Err(error::not_implemented("TableBase::is_empty")) })
     }
 
-    async fn put(
-        &self,
+    fn put<'a>(
+        &'a self,
         _txn: Arc<Txn>,
         _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCResult<()> {
-        Err(error::not_implemented("TableBase::put"))
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move { Err(error::not_implemented("TableBase::put")) })
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
-        Err(error::not_implemented("TableBase::to_stream"))
+    fn to_stream<'a>(&'a self, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
+        Box::pin(async move { Err(error::not_implemented("TableBase::to_stream")) })
     }
 }
 

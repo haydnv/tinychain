@@ -2,7 +2,6 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
 
@@ -182,47 +181,46 @@ impl Instance for Table {
     }
 }
 
-#[async_trait]
 impl CollectionInstance for Table {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get(txn, path, selector).await,
-            Self::View(view) => view.get(txn, path, selector).await,
+            Self::Base(base) => base.get(txn, path, selector),
+            Self::View(view) => view.get(txn, path, selector),
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
         match self {
-            Self::Base(base) => base.is_empty(txn).await,
-            Self::View(view) => view.is_empty(txn).await,
+            Self::Base(base) => base.is_empty(txn),
+            Self::View(view) => view.is_empty(txn),
         }
     }
 
-    async fn put(
-        &self,
+    fn put<'a>(
+        &'a self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCResult<()> {
+    ) -> TCBoxTryFuture<'a, ()> {
         match self {
-            Self::Base(base) => base.put(txn, path, selector, value).await,
-            Self::View(view) => view.put(txn, path, selector, value).await,
+            Self::Base(base) => base.put(txn, path, selector, value),
+            Self::View(view) => view.put(txn, path, selector, value),
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
         match self {
-            Self::Base(base) => base.to_stream(txn).await,
-            Self::View(view) => view.to_stream(txn).await,
+            Self::Base(base) => base.to_stream(txn),
+            Self::View(view) => view.to_stream(txn),
         }
     }
 }
