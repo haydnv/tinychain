@@ -101,9 +101,10 @@ impl CollectionInstance for TableView {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get_item(
+    async fn get(
         &self,
         _txn: Arc<Txn>,
+        _path: TCPath,
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::not_implemented("TableBase::get"))
@@ -113,9 +114,10 @@ impl CollectionInstance for TableView {
         Err(error::not_implemented("TableBase::is_empty"))
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         _txn: Arc<Txn>,
+        _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {

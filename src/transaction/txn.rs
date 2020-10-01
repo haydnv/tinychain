@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use crate::auth::Auth;
 use crate::block::{BlockData, Dir, DirEntry, File};
 use crate::chain::ChainInstance;
-use crate::class::{Instance, State, TCBoxTryFuture, TCResult};
+use crate::class::{State, TCBoxTryFuture, TCResult};
+use crate::collection::class::CollectionInstance;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
@@ -321,10 +322,6 @@ impl Txn {
                 println!("Method::Get subject {}: {}", subject, key);
 
                 match subject {
-                    State::Scalar(Scalar::Value(value)) => value
-                        .get(path, key.clone())
-                        .map(Scalar::Value)
-                        .map(State::Scalar),
                     State::Chain(chain) => {
                         println!("Txn::resolve Chain {}: {}", path, key);
                         chain.get(self.clone(), &path, key.clone(), auth).await
@@ -341,13 +338,21 @@ impl Txn {
                             )
                             .await
                     }
-                    other => {
-                        self.mutate(subject.clone()).await;
-                        Err(error::not_implemented(format!(
-                            "Txn::resolve Method::Get {}",
-                            other.class()
-                        )))
+                    State::Collection(collection) => {
+                        println!("Txn::resolve Collection {}: {}", path, key);
+                        collection
+                            .get(self.clone(), path, key)
+                            .await
+                            .map(State::from)
                     }
+                    State::Scalar(scalar) => match scalar {
+                        Scalar::Op(_) => Err(error::not_implemented("Txn::resolve Op")),
+                        Scalar::Value(value) => value
+                            .get(path, key.clone())
+                            .map(Scalar::Value)
+                            .map(State::Scalar),
+                        other => Err(error::method_not_allowed(format!("GET: {}", other))),
+                    },
                 }
             }
             Op::Ref(OpRef::Put(link, key, value)) => {
@@ -413,9 +418,7 @@ impl Txn {
             State::Chain(chain) => Box::new(chain),
             State::Cluster(cluster) => Box::new(cluster),
             State::Collection(collection) => Box::new(collection),
-            State::Scalar(_) => {
-                panic!("Scalar values do not support transaction-specific mutations!")
-            }
+            State::Scalar(_) => panic!("Scalar values do not support transactional mutations!"),
         };
 
         self.mutated.write().await.push(state)

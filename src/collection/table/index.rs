@@ -117,9 +117,10 @@ impl CollectionInstance for TableBase {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get_item(
+    async fn get(
         &self,
         _txn: Arc<Txn>,
+        _path: TCPath,
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::not_implemented("TableBase::get"))
@@ -133,20 +134,27 @@ impl CollectionInstance for TableBase {
         }
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
-        let key: Vec<Value> = selector.try_into()?;
-        match value {
-            CollectionItem::Scalar(value) => match self {
-                Self::Index(_) => Err(error::not_implemented("Index::put")),
-                Self::ROIndex(_) => Err(error::unsupported("Cannot write to a read-only index")),
-                Self::Table(table) => table.insert(txn.id().clone(), key, value).await,
-            },
-            _ => Err(error::not_implemented("TableBase::put")),
+        if path == TCPath::default() {
+            let key: Vec<Value> = selector.try_into()?;
+            match value {
+                CollectionItem::Scalar(value) => match self {
+                    Self::Index(_) => Err(error::not_implemented("Index::put")),
+                    Self::ROIndex(_) => {
+                        Err(error::unsupported("Cannot write to a read-only index"))
+                    }
+                    Self::Table(table) => table.insert(txn.id().clone(), key, value).await,
+                },
+                _ => Err(error::not_implemented("TableBase::put")),
+            }
+        } else {
+            Err(error::not_found(path))
         }
     }
 

@@ -88,14 +88,15 @@ impl CollectionInstance for BTree {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Tree(tree) => tree.get_item(txn, selector).await,
-            Self::View(view) => view.get_item(txn, selector).await,
+            Self::Tree(tree) => tree.get(txn, path, selector).await,
+            Self::View(view) => view.get(txn, path, selector).await,
         }
     }
 
@@ -106,15 +107,16 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Tree(tree) => tree.put_item(txn, selector, value).await,
-            Self::View(view) => view.put_item(txn, selector, value).await,
+            Self::Tree(tree) => tree.put(txn, path, selector, value).await,
+            Self::View(view) => view.put(txn, path, selector, value).await,
         }
     }
 

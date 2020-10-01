@@ -17,7 +17,7 @@ use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
 use crate::scalar::{
-    CastFrom, CastInto, Scalar, ScalarClass, TryCastFrom, TryCastInto, Value, ValueType,
+    CastFrom, CastInto, Scalar, ScalarClass, TCPath, TryCastFrom, TryCastInto, Value, ValueType,
 };
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -231,11 +231,16 @@ impl CollectionInstance for BTreeSlice {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         bounds: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
         let bounds: Selector =
             bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
         validate_selector(&bounds, self.source.schema())?;
@@ -248,7 +253,7 @@ impl CollectionInstance for BTreeSlice {
             (Selector::Range(container, _), Selector::Range(contained, _))
                 if container.contains(contained, &schema)? =>
             {
-                self.source.get_item(txn, bounds.cast_into()).await
+                self.source.get(txn, path, bounds.cast_into()).await
             }
             _ => Err(error::bad_request(
                 &format!("BTreeSlice[{}] does not contain", &self.bounds),
@@ -266,9 +271,10 @@ impl CollectionInstance for BTreeSlice {
         Ok(count == 0)
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         _txn: Arc<Txn>,
+        _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
@@ -804,11 +810,16 @@ impl CollectionInstance for BTreeFile {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         bounds: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
         let bounds: Selector =
             bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
         validate_selector(&bounds, self.schema())?;
@@ -835,12 +846,17 @@ impl CollectionInstance for BTreeFile {
             .map(|root| root.keys.is_empty())
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         key: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
         let key = match key {
             CollectionItem::Scalar(key) => key,
             CollectionItem::Slice(_) => {

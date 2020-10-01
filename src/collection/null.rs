@@ -72,9 +72,10 @@ impl CollectionInstance for Null {
     type Item = Value;
     type Slice = Null;
 
-    async fn get_item(
+    async fn get(
         &self,
         _txn: Arc<Txn>,
+        _path: TCPath,
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::unsupported("Null Collection has no contents to GET"))
@@ -84,9 +85,10 @@ impl CollectionInstance for Null {
         Ok(true)
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         _txn: Arc<Txn>,
+        _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {

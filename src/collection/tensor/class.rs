@@ -141,26 +141,30 @@ impl CollectionInstance for TensorBase {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        TensorView::from(self.clone()).get_item(txn, selector).await
+        TensorView::from(self.clone())
+            .get(txn, path, selector)
+            .await
     }
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
         TensorView::from(self.clone()).is_empty(txn).await
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         TensorView::from(self.clone())
-            .put_item(txn, selector, value)
+            .put(txn, path, selector, value)
             .await
     }
 
@@ -292,11 +296,16 @@ impl CollectionInstance for TensorView {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
         let bounds: Bounds = selector
             .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
 
@@ -314,12 +323,17 @@ impl CollectionInstance for TensorView {
         self.any(txn).map_ok(|any| !any).await
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
         let bounds: Bounds = selector
             .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
 
@@ -492,14 +506,15 @@ impl CollectionInstance for Tensor {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get_item(txn, selector).await,
-            Self::View(view) => view.get_item(txn, selector).await,
+            Self::Base(base) => base.get(txn, path, selector).await,
+            Self::View(view) => view.get(txn, path, selector).await,
         }
     }
 
@@ -510,15 +525,16 @@ impl CollectionInstance for Tensor {
         }
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.put_item(txn, selector, value).await,
-            Self::View(view) => view.put_item(txn, selector, value).await,
+            Self::Base(base) => base.put(txn, path, selector, value).await,
+            Self::View(view) => view.put(txn, path, selector, value).await,
         }
     }
 

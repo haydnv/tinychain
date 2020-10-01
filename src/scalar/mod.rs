@@ -542,19 +542,35 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     Ok(Scalar::Op(Box::new(Op::Method(method))))
                 }
             } else if let Ok(link) = key.parse::<link::Link>() {
-                if link.host().is_none() && link.path().starts_with(&ValueType::prefix()) {
-                    let dtype = ValueType::from_path(link.path()).map_err(de::Error::custom)?;
-                    let value: Value = access.next_value()?;
+                if link.host().is_none() {
+                    if link.path().starts_with(&ValueType::prefix()) {
+                        let dtype = ValueType::from_path(link.path()).map_err(de::Error::custom)?;
+                        let value: Value = access.next_value()?;
 
-                    dtype
-                        .try_cast(value)
-                        .map(Scalar::Value)
-                        .map_err(de::Error::custom)
+                        dtype
+                            .try_cast(value)
+                            .map(Scalar::Value)
+                            .map_err(de::Error::custom)
+                    } else if link.path().starts_with(&OpType::prefix()) {
+                        let dtype = OpType::from_path(link.path()).map_err(de::Error::custom)?;
+                        let value: Scalar = access.next_value()?;
+
+                        dtype
+                            .try_cast(value)
+                            .map(Box::new)
+                            .map(Scalar::Op)
+                            .map_err(de::Error::custom)
+                    } else {
+                        Err(de::Error::custom(format!("Support for {}", link)))
+                    }
                 } else {
-                    Err(de::Error::custom(format!("Support for {}", link)))
+                    Err(de::Error::custom("Not implemented"))
                 }
             } else {
-                Err(de::Error::custom("Not implemented"))
+                Err(de::Error::custom(format!(
+                    "Expected a Ref or Link, not \"{}\"",
+                    key
+                )))
             }
         } else {
             Err(de::Error::custom(
