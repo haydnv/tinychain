@@ -8,7 +8,7 @@ use futures::stream::Stream;
 use crate::auth::Auth;
 use crate::block::Dir;
 use crate::chain::{Chain, ChainInstance};
-use crate::class::{State, TCBoxFuture, TCResult};
+use crate::class::{State, TCBoxFuture, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::gateway::Gateway;
 use crate::scalar::*;
@@ -72,104 +72,110 @@ impl Cluster {
         })
     }
 
-    pub async fn get(
+    pub fn get(
         &self,
         gateway: Arc<Gateway>,
         txn: Option<Arc<Txn>>,
         path: TCPath,
         key: Value,
         auth: Auth,
-    ) -> TCResult<State> {
-        if path.is_empty() {
-            Ok(self.clone().into())
-        } else {
+    ) -> TCBoxTryFuture<State> {
+        Box::pin(async move {
+            if path.is_empty() {
+                Ok(self.clone().into())
+            } else {
+                let txn = if let Some(txn) = txn {
+                    txn
+                } else {
+                    Txn::new(gateway.clone(), self.workspace.clone()).await?
+                };
+
+                let state = self.state.read(txn.id()).await?;
+                if let Some(chain) = state.chains.get(&path[0]) {
+                    println!(
+                        "Cluster::get chain {}{}: {}",
+                        &path[0],
+                        path.slice_from(1),
+                        &key
+                    );
+                    chain.get(txn, &path.slice_from(1), key, auth).await
+                } else {
+                    println!("Cluster has no chain at {}", path[0]);
+                    Err(error::not_found(path))
+                }
+            }
+        })
+    }
+
+    pub fn put<'a>(
+        self,
+        gateway: Arc<Gateway>,
+        txn: Option<Arc<Txn>>,
+        path: &'a TCPath,
+        key: Value,
+        state: State,
+        _auth: Auth,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
             let txn = if let Some(txn) = txn {
                 txn
             } else {
                 Txn::new(gateway.clone(), self.workspace.clone()).await?
             };
 
-            let state = self.state.read(txn.id()).await?;
-            if let Some(chain) = state.chains.get(&path[0]) {
-                println!(
-                    "Cluster::get chain {}{}: {}",
-                    &path[0],
-                    path.slice_from(1),
-                    &key
-                );
-                chain.get(txn, &path.slice_from(1), key, auth).await
+            let result = if path == &self.path {
+                let name: ValueId = key.try_into()?;
+                let chain: Chain = state.try_into()?;
+
+                txn.mutate(self.clone().into()).await;
+
+                println!("Cluster will now host a chain called {}", name);
+                let mut state = self.state.write(txn.id().clone()).await?;
+                state.chains.insert(name, chain);
+                Ok(())
             } else {
-                println!("Cluster has no chain at {}", path[0]);
-                Err(error::not_found(path))
-            }
-        }
-    }
-
-    pub async fn put(
-        self,
-        gateway: Arc<Gateway>,
-        txn: Option<Arc<Txn>>,
-        path: &TCPath,
-        key: Value,
-        state: State,
-        _auth: &Auth,
-    ) -> TCResult<()> {
-        let txn = if let Some(txn) = txn {
-            txn
-        } else {
-            Txn::new(gateway.clone(), self.workspace.clone()).await?
-        };
-
-        let result = if path == &self.path {
-            let name: ValueId = key.try_into()?;
-            let chain: Chain = state.try_into()?;
-
-            txn.mutate(self.clone().into()).await;
-
-            println!("Cluster will now host a chain called {}", name);
-            let mut state = self.state.write(txn.id().clone()).await?;
-            state.chains.insert(name, chain);
-            Ok(())
-        } else {
-            let suffix = path.from_path(&self.path)?;
-            if path.is_empty() {
-                Err(error::not_found(path))
-            } else {
-                println!("Cluster::put {}: {} <- {}", path, key, state);
-                let cluster_state = self.state.read(txn.id()).await?;
-                if let Some(chain) = cluster_state.chains.get(&suffix[0]) {
-                    txn.mutate(chain.clone().into()).await;
-                    chain
-                        .put(txn.clone(), suffix.slice_from(1), key, state)
-                        .await
+                let suffix = path.from_path(&self.path)?;
+                if path.is_empty() {
+                    Err(error::not_found(path))
                 } else {
-                    Err(error::not_found(suffix))
+                    println!("Cluster::put {}: {} <- {}", path, key, state);
+                    let cluster_state = self.state.read(txn.id()).await?;
+                    if let Some(chain) = cluster_state.chains.get(&suffix[0]) {
+                        txn.mutate(chain.clone().into()).await;
+                        chain
+                            .put(txn.clone(), suffix.slice_from(1), key, state)
+                            .await
+                    } else {
+                        Err(error::not_found(suffix))
+                    }
                 }
-            }
-        };
+            };
 
-        result?;
-        txn.commit().await;
-        Ok(())
+            result?;
+            txn.commit().await;
+            Ok(())
+        })
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Sync + Unpin>(
+    pub fn post<'a, S: Stream<Item = (ValueId, Scalar)> + Send + Sync + Unpin + 'a>(
         self,
         txn: Arc<Txn>,
         path: TCPath,
         _data: S,
         _auth: Auth,
-    ) -> TCResult<State> {
-        if path.is_empty() {
-            Err(error::method_not_allowed("Cluster::post"))
-        } else if let Some(_chain) = self.state.read(txn.id()).await?.chains.get(&path[0]) {
-            Err(error::not_implemented(format!(
-                "Cluster::post to chain {}",
-                &path[0]
-            )))
-        } else {
-            Err(error::not_found(path))
-        }
+    ) -> TCBoxTryFuture<'a, State> {
+        Box::pin(async move {
+            if path.is_empty() {
+                Err(error::method_not_allowed("Cluster::post"))
+            } else if let Some(_chain) = self.state.read(txn.id()).await?.chains.get(&path[0]) {
+                Err(error::not_implemented(format!(
+                    "Cluster::post to chain {}",
+                    &path[0]
+                )))
+            } else {
+                Err(error::not_found(path))
+            }
+        })
     }
 }
 

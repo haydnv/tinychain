@@ -158,7 +158,7 @@ impl Gateway {
         subject: &Link,
         selector: Value,
         state: State,
-        auth: &Auth,
+        auth: Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<()> {
         println!("Gateway::put {}: {} <- {}", subject, selector, state);

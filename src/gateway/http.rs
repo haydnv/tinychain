@@ -239,7 +239,7 @@ impl Server {
                     deserialize_body(request.body_mut(), self.request_limit).await?;
                 gateway
                     .clone()
-                    .put(&path.clone().into(), id, value.into(), &token, None)
+                    .put(&path.clone().into(), id, value.into(), token, None)
                     .await?;
                 Ok(Box::pin(stream::empty()))
             }
