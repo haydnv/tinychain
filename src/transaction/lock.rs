@@ -5,22 +5,20 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
 use futures::future::{self, Future};
 use futures::task::{Context, Poll, Waker};
 
-use crate::class::TCResult;
-use crate::error;
+use crate::class::TCBoxFuture;
+use crate::error::{self, TCResult};
 
 use super::{Transact, TxnId};
 
-#[async_trait]
 pub trait Mutate: Send + Sync {
     type Pending: Send + Sync;
 
     fn diverge(&self, txn_id: &TxnId) -> Self::Pending;
 
-    async fn converge(&mut self, new_value: Self::Pending);
+    fn converge<'a>(&'a mut self, new_value: Self::Pending) -> TCBoxFuture<'a, ()>;
 }
 
 pub struct Mutable<T: Clone + Send + Sync> {
@@ -33,7 +31,6 @@ impl<T: Clone + Send + Sync> Mutable<T> {
     }
 }
 
-#[async_trait]
 impl<T: Clone + Send + Sync> Mutate for Mutable<T> {
     type Pending = T;
 
@@ -41,8 +38,9 @@ impl<T: Clone + Send + Sync> Mutate for Mutable<T> {
         self.value.clone()
     }
 
-    async fn converge(&mut self, new_value: Self::Pending) {
+    fn converge<'a>(&'a mut self, new_value: Self::Pending) -> TCBoxFuture<'a, ()> {
         self.value = new_value;
+        Box::pin(future::ready(()))
     }
 }
 
@@ -322,51 +320,54 @@ impl<T: Mutate> TxnLock<T> {
     }
 }
 
-#[async_trait]
 impl<T: Mutate> Transact for TxnLock<T> {
-    async fn commit(&self, txn_id: &TxnId) {
-        println!("TxnLock::commit {} at {}", &self.name, txn_id);
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        Box::pin(async move {
+            println!("TxnLock::commit {} at {}", &self.name, txn_id);
 
-        async {
-            println!(
-                "TxnLock::commit {} getting read lock at {}...",
-                &self.name, txn_id
-            );
-            self.read(txn_id).await.unwrap(); // make sure there's no active write lock
+            async {
+                println!(
+                    "TxnLock::commit {} getting read lock at {}...",
+                    &self.name, txn_id
+                );
+                self.read(txn_id).await.unwrap(); // make sure there's no active write lock
+                let lock = &mut self.inner.lock().unwrap();
+                assert!(lock.state.reserved.is_none());
+                if let Some(last_commit) = &lock.state.last_commit {
+                    assert!(last_commit < txn_id);
+                }
+                println!("got inner lock for {}: {}", &self.name, txn_id);
+                lock.state.last_commit = Some(txn_id.clone());
+                println!("freed write lock reservation {} at {}", &self.name, txn_id);
+
+                println!("updating value of {}", &self.name);
+                if let Some(new_value) = lock.value_at.remove(txn_id) {
+                    let value = unsafe { &mut *lock.value.get() };
+                    value.converge(new_value.into_inner())
+                } else {
+                    Box::pin(future::ready(()))
+                }
+            }
+            .await
+            .await;
+
             let lock = &mut self.inner.lock().unwrap();
-            assert!(lock.state.reserved.is_none());
-            if let Some(last_commit) = &lock.state.last_commit {
-                assert!(last_commit < txn_id);
+
+            while let Some(waker) = lock.state.wakers.pop_front() {
+                waker.wake()
             }
-            println!("got inner lock for {}: {}", &self.name, txn_id);
-            lock.state.last_commit = Some(txn_id.clone());
-            println!("freed write lock reservation {} at {}", &self.name, txn_id);
 
-            println!("updating value of {}", &self.name);
-            if let Some(new_value) = lock.value_at.remove(txn_id) {
-                let value = unsafe { &mut *lock.value.get() };
-                value.converge(new_value.into_inner())
-            } else {
-                Box::pin(future::ready(()))
-            }
-        }
-        .await
-        .await;
-
-        let lock = &mut self.inner.lock().unwrap();
-
-        while let Some(waker) = lock.state.wakers.pop_front() {
-            waker.wake()
-        }
-
-        lock.state.wakers.shrink_to_fit()
+            lock.state.wakers.shrink_to_fit()
+        })
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        println!("TxnLock::rollback {}: {}", &self.name, txn_id);
-        self.read(txn_id).await.unwrap(); // make sure there's no active write lock
-        let lock = &mut self.inner.lock().unwrap();
-        lock.value_at.remove(txn_id);
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        Box::pin(async move {
+            println!("TxnLock::rollback {}: {}", &self.name, txn_id);
+            self.read(txn_id).await.unwrap(); // make sure there's no active write lock
+            let lock = &mut self.inner.lock().unwrap();
+            lock.value_at.remove(txn_id);
+        })
     }
 }
 

@@ -7,7 +7,9 @@ use futures::stream::Stream;
 use futures::TryFutureExt;
 
 use crate::auth::Auth;
-use crate::class::{Class, Instance, State, TCBoxTryFuture, TCResult, TCStream, TCType};
+use crate::class::{
+    Class, Instance, State, TCBoxFuture, TCBoxTryFuture, TCResult, TCStream, TCType,
+};
 use crate::error;
 use crate::scalar::{label, Link, OpDef, Scalar, TCPath, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -185,17 +187,16 @@ impl ChainInstance for Chain {
     }
 }
 
-#[async_trait]
 impl Transact for Chain {
-    async fn commit(&self, txn_id: &TxnId) {
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Null(nc) => nc.commit(txn_id).await,
+            Self::Null(nc) => nc.commit(txn_id),
         }
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Null(nc) => nc.rollback(txn_id).await,
+            Self::Null(nc) => nc.rollback(txn_id),
         }
     }
 }

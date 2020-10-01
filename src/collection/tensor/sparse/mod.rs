@@ -8,7 +8,7 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 
-use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
+use crate::class::{Instance, TCBoxFuture, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::error;
@@ -183,14 +183,13 @@ impl SparseAccessor for DenseAccessor {
     }
 }
 
-#[async_trait]
 impl Transact for DenseAccessor {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -331,14 +330,15 @@ impl SparseAccessor for SparseBroadcast {
     }
 }
 
-#[async_trait]
 impl Transact for SparseBroadcast {
-    async fn commit(&self, _txn_id: &TxnId) {
+    fn commit<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 
-    async fn rollback(&self, _txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 }
 
@@ -421,14 +421,13 @@ impl SparseAccessor for SparseCast {
     }
 }
 
-#[async_trait]
 impl Transact for SparseCast {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -573,14 +572,15 @@ impl SparseAccessor for SparseCombinator {
     }
 }
 
-#[async_trait]
 impl Transact for SparseCombinator {
-    async fn commit(&self, _txn_id: &TxnId) {
+    fn commit<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 
-    async fn rollback(&self, _txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 }
 
@@ -672,14 +672,13 @@ impl SparseAccessor for SparseExpand {
     }
 }
 
-#[async_trait]
 impl Transact for SparseExpand {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -838,14 +837,13 @@ impl SparseAccessor for SparseReduce {
     }
 }
 
-#[async_trait]
 impl Transact for SparseReduce {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -969,14 +967,13 @@ impl SparseAccessor for SparseReshape {
     }
 }
 
-#[async_trait]
 impl Transact for SparseReshape {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -1079,14 +1076,13 @@ impl SparseAccessor for SparseSlice {
     }
 }
 
-#[async_trait]
 impl Transact for SparseSlice {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -1192,14 +1188,13 @@ impl SparseAccessor for SparseTranspose {
     }
 }
 
-#[async_trait]
 impl Transact for SparseTranspose {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -1396,14 +1391,13 @@ impl SparseAccessor for SparseTable {
     }
 }
 
-#[async_trait]
 impl Transact for SparseTable {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.table.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.table.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.table.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.table.rollback(txn_id)
     }
 }
 
@@ -1489,14 +1483,15 @@ impl SparseAccessor for SparseUnary {
     }
 }
 
-#[async_trait]
 impl Transact for SparseUnary {
-    async fn commit(&self, _txn_id: &TxnId) {
+    fn commit<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 
-    async fn rollback(&self, _txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 }
 
@@ -1895,14 +1890,13 @@ impl TensorTransform for SparseTensor {
     }
 }
 
-#[async_trait]
 impl Transact for SparseTensor {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.accessor.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.accessor.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.accessor.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.accessor.rollback(txn_id)
     }
 }
 

@@ -3,12 +3,11 @@ use std::convert::TryInto;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::future::join_all;
 use uuid::Uuid;
 
-use crate::class::TCResult;
-use crate::error;
+use crate::class::TCBoxFuture;
+use crate::error::{self, TCResult};
 use crate::lock::RwLock;
 use crate::scalar::value::link::PathSegment;
 use crate::transaction::lock::{Mutable, TxnLock, TxnLockReadGuard};
@@ -154,78 +153,82 @@ impl<T: BlockData> File<T> {
     }
 }
 
-#[async_trait]
 impl<T: BlockData> Transact for File<T> {
-    async fn commit(&self, txn_id: &TxnId) {
-        let new_listing = self.listing.read(txn_id).await.unwrap();
-        let old_listing = self.listing.canonical().value();
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        Box::pin(async move {
+            let new_listing = self.listing.read(txn_id).await.unwrap();
+            let old_listing = self.listing.canonical().value();
 
-        let mut dir = self.dir.write().await;
-        for block_id in old_listing.difference(&new_listing) {
-            dir.delete_block(block_id).unwrap();
-        }
+            let mut dir = self.dir.write().await;
+            for block_id in old_listing.difference(&new_listing) {
+                dir.delete_block(block_id).unwrap();
+            }
 
-        self.listing.commit(txn_id).await;
+            self.listing.commit(txn_id).await;
 
-        let mut mutated: Vec<BlockId> = self
-            .mutated
-            .write(txn_id.clone())
-            .await
-            .unwrap()
-            .drain()
-            .collect();
-        self.mutated.commit(txn_id).await;
+            let mut mutated: Vec<BlockId> = self
+                .mutated
+                .write(txn_id.clone())
+                .await
+                .unwrap()
+                .drain()
+                .collect();
+            self.mutated.commit(txn_id).await;
 
-        let cache = self.cache.read().await;
-        println!("File::commit! cache has {} blocks", cache.len());
-        let mut pending = self.pending.write().await;
-        let txn_dir_id: PathSegment = txn_id.clone().into();
-        if mutated.is_empty() {
+            let cache = self.cache.read().await;
+            println!("File::commit! cache has {} blocks", cache.len());
+            let mut pending = self.pending.write().await;
+            let txn_dir_id: PathSegment = txn_id.clone().into();
+            if mutated.is_empty() {
+                cache.commit(txn_id).await;
+                pending.delete_dir(&txn_dir_id).unwrap();
+                return;
+            }
+
+            let txn_dir = pending.create_or_get_dir(&txn_dir_id).unwrap();
+
+            let copy_ops = mutated
+                .drain(..)
+                .filter_map(|block_id| cache.get(&block_id).map(|lock| (block_id, lock)))
+                .map(|(block_id, lock)| {
+                    let dir_lock = txn_dir.write();
+                    async move {
+                        let data = lock.read(txn_id).await.unwrap().deref().clone().into();
+                        println!(
+                            "moving block {} from cache to Txn dir ({} bytes)",
+                            &block_id,
+                            data.len()
+                        );
+                        dir_lock
+                            .await
+                            .create_or_get_block(block_id, data)
+                            .await
+                            .unwrap();
+                    }
+                });
+
+            join_all(copy_ops).await;
             cache.commit(txn_id).await;
+            println!("emptied cache");
+            dir.move_all(txn_dir.write().await.deref_mut()).unwrap();
+            println!("moved all blocks to main Dir");
             pending.delete_dir(&txn_dir_id).unwrap();
-            return;
-        }
 
-        let txn_dir = pending.create_or_get_dir(&txn_dir_id).unwrap();
-
-        let copy_ops = mutated
-            .drain(..)
-            .filter_map(|block_id| cache.get(&block_id).map(|lock| (block_id, lock)))
-            .map(|(block_id, lock)| {
-                let dir_lock = txn_dir.write();
-                async move {
-                    let data = lock.read(txn_id).await.unwrap().deref().clone().into();
-                    println!(
-                        "moving block {} from cache to Txn dir ({} bytes)",
-                        &block_id,
-                        data.len()
-                    );
-                    dir_lock
-                        .await
-                        .create_or_get_block(block_id, data)
-                        .await
-                        .unwrap();
-                }
-            });
-
-        join_all(copy_ops).await;
-        cache.commit(txn_id).await;
-        println!("emptied cache");
-        dir.move_all(txn_dir.write().await.deref_mut()).unwrap();
-        println!("moved all blocks to main Dir");
-        pending.delete_dir(&txn_dir_id).unwrap();
-
-        for block_id in dir.block_ids() {
-            println!("dir contents: {}", block_id);
-        }
+            for block_id in dir.block_ids() {
+                println!("dir contents: {}", block_id);
+            }
+        })
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.pending
-            .write()
-            .await
-            .delete_dir(&txn_id.clone().into())
-            .unwrap();
-        self.listing.rollback(txn_id).await;
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        Box::pin(async move {
+            self.pending
+                .write()
+                .await
+                .delete_dir(&txn_id.clone().into())
+                .unwrap();
+
+            self.listing.rollback(txn_id).await;
+        })
     }
 }

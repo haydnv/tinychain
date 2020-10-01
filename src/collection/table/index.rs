@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
-use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, TCBoxFuture, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{self, BTreeFile};
 use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
@@ -279,21 +279,20 @@ impl TableInstance for TableBase {
     }
 }
 
-#[async_trait]
 impl Transact for TableBase {
-    async fn commit(&self, txn_id: &TxnId) {
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Index(index) => index.commit(txn_id).await,
-            Self::ROIndex(_) => (), // no-op
-            Self::Table(table) => table.commit(txn_id).await,
+            Self::Index(index) => index.commit(txn_id),
+            Self::ROIndex(_) => Box::pin(future::ready(())), // no-op
+            Self::Table(table) => table.commit(txn_id),
         }
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Index(index) => index.rollback(txn_id).await,
-            Self::ROIndex(_) => (), // no-op
-            Self::Table(table) => table.rollback(txn_id).await,
+            Self::Index(index) => index.rollback(txn_id),
+            Self::ROIndex(_) => Box::pin(future::ready(())), // no-op
+            Self::Table(table) => table.rollback(txn_id),
         }
     }
 }
@@ -505,14 +504,13 @@ impl From<Index> for Table {
     }
 }
 
-#[async_trait]
 impl Transact for Index {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.btree.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.btree.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.btree.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.btree.rollback(txn_id)
     }
 }
 
@@ -1025,23 +1023,26 @@ impl From<TableIndex> for Table {
     }
 }
 
-#[async_trait]
 impl Transact for TableIndex {
-    async fn commit(&self, txn_id: &TxnId) {
-        let mut commits = Vec::with_capacity(self.auxiliary.len() + 1);
-        commits.push(self.primary.commit(txn_id));
-        for index in self.auxiliary.values() {
-            commits.push(index.commit(txn_id));
-        }
-        join_all(commits).await;
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        Box::pin(async move {
+            let mut commits = Vec::with_capacity(self.auxiliary.len() + 1);
+            commits.push(self.primary.commit(txn_id));
+            for index in self.auxiliary.values() {
+                commits.push(index.commit(txn_id));
+            }
+            join_all(commits).await;
+        })
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        let mut rollbacks = Vec::with_capacity(self.auxiliary.len() + 1);
-        rollbacks.push(self.primary.rollback(txn_id));
-        for index in self.auxiliary.values() {
-            rollbacks.push(index.commit(txn_id));
-        }
-        join_all(rollbacks).await;
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        Box::pin(async move {
+            let mut rollbacks = Vec::with_capacity(self.auxiliary.len() + 1);
+            rollbacks.push(self.primary.rollback(txn_id));
+            for index in self.auxiliary.values() {
+                rollbacks.push(index.commit(txn_id));
+            }
+            join_all(rollbacks).await;
+        })
     }
 }

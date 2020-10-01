@@ -12,7 +12,7 @@ use num::integer::div_ceil;
 
 use crate::block::BlockId;
 use crate::block::File;
-use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
+use crate::class::{Instance, TCBoxFuture, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -228,14 +228,15 @@ impl BlockList for BlockListCombine {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListCombine {
-    async fn commit(&self, _txn_id: &TxnId) {
+    fn commit<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 
-    async fn rollback(&self, _txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 }
 
@@ -583,14 +584,13 @@ impl BlockList for BlockListFile {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListFile {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.file.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.file.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.file.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.file.rollback(txn_id)
     }
 }
 
@@ -685,14 +685,15 @@ impl BlockList for BlockListBroadcast {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListBroadcast {
-    async fn commit(&self, _txn_id: &TxnId) {
+    fn commit<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 
-    async fn rollback(&self, _txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 }
 
@@ -781,14 +782,13 @@ impl BlockList for BlockListCast {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListCast {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -865,14 +865,13 @@ impl BlockList for BlockListExpand {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListExpand {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -978,14 +977,15 @@ impl BlockList for BlockListReduce {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListReduce {
-    async fn commit(&self, _txn_id: &TxnId) {
+    fn commit<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 
-    async fn rollback(&self, _txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 }
 
@@ -1104,14 +1104,13 @@ impl BlockList for BlockListReshape {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListReshape {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -1187,14 +1186,13 @@ impl BlockList for BlockListSlice {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListSlice {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -1318,14 +1316,13 @@ impl BlockList for BlockListSparse {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListSparse {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -1407,14 +1404,13 @@ impl BlockList for BlockListTranspose {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListTranspose {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.source.rollback(txn_id)
     }
 }
 
@@ -1507,14 +1503,15 @@ impl BlockList for BlockListUnary {
     }
 }
 
-#[async_trait]
 impl Transact for BlockListUnary {
-    async fn commit(&self, _txn_id: &TxnId) {
+    fn commit<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 
-    async fn rollback(&self, _txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         // no-op
+        Box::pin(future::ready(()))
     }
 }
 
@@ -1893,14 +1890,13 @@ impl TensorTransform for DenseTensor {
     }
 }
 
-#[async_trait]
 impl Transact for DenseTensor {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.blocks.commit(txn_id).await
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.blocks.commit(txn_id)
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.blocks.rollback(txn_id).await
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+        self.blocks.rollback(txn_id)
     }
 }
 

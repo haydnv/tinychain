@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, TCResult, TCStream};
+use crate::class::{Class, Instance, TCBoxFuture, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{
     Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
@@ -203,19 +203,18 @@ impl TensorInstance for TensorBase {
     }
 }
 
-#[async_trait]
 impl Transact for TensorBase {
-    async fn commit(&self, txn_id: &TxnId) {
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Dense(dense) => dense.commit(txn_id).await,
-            Self::Sparse(sparse) => sparse.commit(txn_id).await,
+            Self::Dense(dense) => dense.commit(txn_id),
+            Self::Sparse(sparse) => sparse.commit(txn_id),
         }
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Dense(dense) => dense.rollback(txn_id).await,
-            Self::Sparse(sparse) => sparse.rollback(txn_id).await,
+            Self::Dense(dense) => dense.rollback(txn_id),
+            Self::Sparse(sparse) => sparse.rollback(txn_id),
         }
     }
 }
@@ -399,19 +398,18 @@ impl TensorInstance for TensorView {
     }
 }
 
-#[async_trait]
 impl Transact for TensorView {
-    async fn commit(&self, txn_id: &TxnId) {
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Dense(dense) => dense.commit(txn_id).await,
-            Self::Sparse(sparse) => sparse.commit(txn_id).await,
+            Self::Dense(dense) => dense.commit(txn_id),
+            Self::Sparse(sparse) => sparse.commit(txn_id),
         }
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Dense(dense) => dense.rollback(txn_id).await,
-            Self::Sparse(sparse) => sparse.rollback(txn_id).await,
+            Self::Dense(dense) => dense.rollback(txn_id),
+            Self::Sparse(sparse) => sparse.rollback(txn_id),
         }
     }
 }
@@ -576,19 +574,18 @@ impl TensorInstance for Tensor {
     }
 }
 
-#[async_trait]
 impl Transact for Tensor {
-    async fn commit(&self, txn_id: &TxnId) {
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Base(base) => base.commit(txn_id).await,
-            Self::View(view) => view.commit(txn_id).await,
+            Self::Base(base) => base.commit(txn_id),
+            Self::View(view) => view.commit(txn_id),
         }
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Base(base) => base.rollback(txn_id).await,
-            Self::View(view) => view.rollback(txn_id).await,
+            Self::Base(base) => base.rollback(txn_id),
+            Self::View(view) => view.rollback(txn_id),
         }
     }
 }

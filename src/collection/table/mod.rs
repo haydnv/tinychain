@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
 
-use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, TCBoxFuture, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
 use crate::error;
@@ -354,19 +354,18 @@ impl TableInstance for Table {
     }
 }
 
-#[async_trait]
 impl Transact for Table {
-    async fn commit(&self, txn_id: &TxnId) {
+    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Base(base) => base.commit(txn_id).await,
-            Self::View(view) => view.commit(txn_id).await,
+            Self::Base(base) => base.commit(txn_id),
+            Self::View(view) => view.commit(txn_id),
         }
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
+    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
         match self {
-            Self::Base(base) => base.rollback(txn_id).await,
-            Self::View(view) => view.rollback(txn_id).await,
+            Self::Base(base) => base.rollback(txn_id),
+            Self::View(view) => view.rollback(txn_id),
         }
     }
 }
