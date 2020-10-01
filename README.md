@@ -90,7 +90,7 @@ You can see an up-to-date list of available API endpoints by looking through the
 Tinychain is both a database platform (like MySQL) and an analytics/ML platform (like TensorFlow)
 as well as a Turing-complete runtime (like Ethereum) with blockchain-powered versioning features.**
 In general, Tinychain development consists of constructing a deferred execution graph (very
-loosely based on TensorFlow v1), testing it, and saving it to a [Cluster](#cluster) for users to
+loosely based on TensorFlow v1), testing it, and saving it to a Cluster** for users to
 execute. We'll go through an example application to see what this means in practice.
 
 First, start a new Tinychain host:
@@ -163,6 +163,30 @@ transaction context. `Ref`s are useful for calling object methods--for example, 
     ["one", {"/sbin/value/number/int/32": 1}],
     ["two", {"/sbin/value/number/int/32": 2}],
     ["add_result", {"$one/add": [{"$two": []}]}]
+]
+```
+
+This should produce:
+
+```bash
+$ curl "http://127.0.0.1:8702/sbin/transact" -d @myapp.json 
+{
+  "/sbin/value/number/int/32": [
+    3
+  ]
+}
+```
+
+You can define a function and call it like so:
+
+```json
+[
+    ["guess", {"/sbin/op/def/get": ["n", [
+            ["n_is_five", {"$n/eq": [5]}],
+            ["message", {"/sbin/op/ref/if": [{"$n_is_five": []}, "right", "wrong"]}]
+        ]]
+    }],
+    ["outcome", {"$guess": [6]}]
 ]
 ```
 
