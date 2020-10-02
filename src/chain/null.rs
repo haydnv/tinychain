@@ -175,7 +175,7 @@ impl ChainInstance for NullChain {
         })
     }
 
-    fn post<'a, S: Stream<Item = (ValueId, Scalar)> + Send + Sync + Unpin + 'a>(
+    fn post<'a, S: Stream<Item = (ValueId, Scalar)> + Send + Unpin + 'a>(
         &'a self,
         txn: Arc<Txn>,
         path: TCPath,

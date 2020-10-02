@@ -100,7 +100,7 @@ impl Client {
         }
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Sync + 'static>(
+    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + 'static>(
         &self,
         link: &Link,
         data: S,
@@ -304,14 +304,14 @@ async fn deserialize_body<D: DeserializeOwned>(
     })
 }
 
-fn response_value_stream<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
+fn response_value_stream<S: Stream<Item = Value> + Send + Unpin + 'static>(
     s: S,
 ) -> TCStream<TCResult<Bytes>> {
     let json = JsonListStream::from(s);
     Box::pin(json.map_ok(Bytes::from).chain(stream_delimiter(b"\r\n")))
 }
 
-fn response_list<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
+fn response_list<S: Stream<Item = Value> + Send + Unpin + 'static>(
     data: Vec<S>,
 ) -> TCResult<TCStream<TCResult<Bytes>>> {
     let start = stream_delimiter(b"[");

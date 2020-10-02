@@ -203,7 +203,7 @@ fn validate_range(range: &BTreeRange, schema: &[Column]) -> TCResult<()> {
     Ok(())
 }
 
-type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Sync + Unpin>>>;
+type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Unpin>>>;
 
 #[derive(Clone)]
 pub struct BTreeSlice {

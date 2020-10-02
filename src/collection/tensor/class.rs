@@ -23,7 +23,7 @@ const ERR_CREATE_DENSE: &str = "DenseTensor can be constructed with (NumberType,
 (Number, ...), not";
 const ERR_SPECIFY_TYPE: &str = "You must specify a type of tensor (tensor/dense or tensor/sparse)";
 
-pub trait TensorInstance: Send + Sync {
+pub trait TensorInstance: Send {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;

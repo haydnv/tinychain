@@ -18,10 +18,10 @@ pub const ERR_PROTECTED: &str =
     "You have accessed a protected class. This should not be possible. \
 Please file a bug report.";
 
-pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send + Sync>>;
+pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send>>;
 pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
 pub type TCResult<T> = error::TCResult<T>;
-pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + Unpin>>;
+pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin>>;
 pub type TCTryStream<T> = TCStream<TCResult<T>>;
 
 pub trait Class: Into<Link> + Clone + Eq + fmt::Display {

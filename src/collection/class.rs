@@ -55,7 +55,7 @@ impl<I: Into<Scalar>, S: CollectionInstance> From<CollectionItem<I, S>> for Stat
     }
 }
 
-pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
+pub trait CollectionClass: Class + Into<CollectionType> + Send {
     type Instance: CollectionInstance;
 
     fn get<'a>(
@@ -65,7 +65,7 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
     ) -> TCBoxTryFuture<'a, <Self as CollectionClass>::Instance>;
 }
 
-pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sync {
+pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
     type Item: Into<Scalar>;
     type Slice: CollectionInstance;
 

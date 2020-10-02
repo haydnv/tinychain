@@ -14,7 +14,7 @@ use crate::scalar::{
 
 use super::instance::{Boolean, Complex, Float, Int, Number, UInt};
 
-pub trait NumberClass: Class + ValueClass + Into<NumberType> + Ord + Send + Sync {
+pub trait NumberClass: Class + ValueClass + Into<NumberType> + Ord + Send {
     type Instance: NumberInstance;
 
     fn size(self) -> usize;

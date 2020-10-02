@@ -156,7 +156,7 @@ impl<B: BlockData> DerefMut for BlockOwnedMut<B> {
 }
 
 pub trait BlockData:
-    Clone + TryFrom<Bytes, Error = error::TCError> + Into<Bytes> + Send + Sync + fmt::Display
+    Clone + TryFrom<Bytes, Error = error::TCError> + Into<Bytes> + Send + fmt::Display
 {
     fn size(&self) -> usize;
 }

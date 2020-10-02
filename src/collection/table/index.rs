@@ -4,6 +4,7 @@ use std::fmt;
 use std::iter;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
@@ -175,14 +176,15 @@ impl CollectionInstance for TableBase {
     }
 }
 
+#[async_trait]
 impl TableInstance for TableBase {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         match self {
-            Self::Index(index) => index.count(txn_id),
-            Self::ROIndex(index) => index.count(txn_id),
-            Self::Table(table) => table.count(txn_id),
+            Self::Index(index) => index.count(txn_id).await,
+            Self::ROIndex(index) => index.count(txn_id).await,
+            Self::Table(table) => table.count(txn_id).await,
         }
     }
 
@@ -398,11 +400,12 @@ impl Index {
     }
 }
 
+#[async_trait]
 impl TableInstance for Index {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        self.len(txn_id)
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.len(txn_id).await
     }
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
@@ -568,11 +571,12 @@ impl ReadOnly {
     }
 }
 
+#[async_trait]
 impl TableInstance for ReadOnly {
     type Stream = <Index as TableInstance>::Stream;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        Box::pin(async move { self.index.clone().count(txn_id).await })
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.index.clone().count(txn_id).await
     }
 
     fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
@@ -777,11 +781,12 @@ impl TableIndex {
     }
 }
 
+#[async_trait]
 impl TableInstance for TableIndex {
     type Stream = <Index as TableInstance>::Stream;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        self.primary.count(txn_id)
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.primary.count(txn_id).await
     }
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {

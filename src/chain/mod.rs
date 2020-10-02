@@ -20,7 +20,7 @@ mod null;
 pub type ChainBlock = block::ChainBlock;
 
 #[async_trait]
-pub trait ChainClass: Class + Into<ChainType> + Send + Sync {
+pub trait ChainClass: Class + Into<ChainType> + Send {
     type Instance: ChainInstance;
 
     async fn get(
@@ -115,7 +115,7 @@ pub trait ChainInstance: Instance {
         value: State,
     ) -> TCBoxTryFuture<'a, ()>;
 
-    fn post<'a, S: Stream<Item = (ValueId, Scalar)> + Send + Sync + Unpin + 'a>(
+    fn post<'a, S: Stream<Item = (ValueId, Scalar)> + Send + Unpin + 'a>(
         &'a self,
         txn: Arc<Txn>,
         path: TCPath,
@@ -168,7 +168,7 @@ impl ChainInstance for Chain {
         }
     }
 
-    fn post<'a, S: Stream<Item = (ValueId, Scalar)> + Send + Sync + Unpin + 'a>(
+    fn post<'a, S: Stream<Item = (ValueId, Scalar)> + Send + Unpin + 'a>(
         &'a self,
         txn: Arc<Txn>,
         path: TCPath,

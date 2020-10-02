@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
 
@@ -81,20 +82,19 @@ impl fmt::Display for TableType {
     }
 }
 
-pub trait TableInstance: Clone + Into<Table> + Sized + Send + Sync + 'static {
-    type Stream: Stream<Item = Vec<Value>> + Send + Sync + Unpin;
+#[async_trait]
+pub trait TableInstance: Clone + Into<Table> + Sized + Send + 'static {
+    type Stream: Stream<Item = Vec<Value>> + Send + Unpin;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        Box::pin(async move {
-            let count = self
-                .clone()
-                .stream(txn_id)
-                .await?
-                .fold(0, |count, _| future::ready(count + 1))
-                .await;
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        let count = self
+            .clone()
+            .stream(txn_id)
+            .await?
+            .fold(0, |count, _| future::ready(count + 1))
+            .await;
 
-            Ok(count)
-        })
+        Ok(count)
     }
 
     fn delete<'a>(self, _txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
@@ -225,13 +225,14 @@ impl CollectionInstance for Table {
     }
 }
 
+#[async_trait]
 impl TableInstance for Table {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         match self {
-            Self::Base(base) => base.count(txn_id),
-            Self::View(view) => view.count(txn_id),
+            Self::Base(base) => base.count(txn_id).await,
+            Self::View(view) => view.count(txn_id).await,
         }
     }
 

@@ -199,9 +199,7 @@ struct SparseBroadcast {
 }
 
 impl SparseBroadcast {
-    async fn broadcast_coords<
-        S: Stream<Item = TCResult<Vec<u64>>> + Send + Sync + Unpin + 'static,
-    >(
+    async fn broadcast_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Unpin + 'static>(
         self: Arc<Self>,
         txn: Arc<Txn>,
         coords: S,

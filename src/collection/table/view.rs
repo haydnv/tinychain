@@ -3,6 +3,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, join};
 
@@ -127,17 +128,18 @@ impl CollectionInstance for TableView {
     }
 }
 
+#[async_trait]
 impl TableInstance for TableView {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.count(txn_id),
-            Self::IndexSlice(index_slice) => index_slice.count(txn_id),
-            Self::Limit(limited) => limited.count(txn_id),
-            Self::Merge(merged) => merged.count(txn_id),
-            Self::Selection(columns) => columns.count(txn_id),
-            Self::TableSlice(table_slice) => table_slice.count(txn_id),
+            Self::Aggregate(aggregate) => aggregate.count(txn_id).await,
+            Self::IndexSlice(index_slice) => index_slice.count(txn_id).await,
+            Self::Limit(limited) => limited.count(txn_id).await,
+            Self::Merge(merged) => merged.count(txn_id).await,
+            Self::Selection(columns) => columns.count(txn_id).await,
+            Self::TableSlice(table_slice) => table_slice.count(txn_id).await,
         }
     }
 
@@ -523,11 +525,15 @@ impl IndexSlice {
     }
 }
 
+#[async_trait]
 impl TableInstance for IndexSlice {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        self.source.clone().len(txn_id, self.range.clone().into())
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.source
+            .clone()
+            .len(txn_id, self.range.clone().into())
+            .await
     }
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
@@ -641,14 +647,13 @@ impl TryFrom<(Table, u64)> for Limited {
     }
 }
 
+#[async_trait]
 impl TableInstance for Limited {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        Box::pin(async move {
-            let source_count = self.source.count(txn_id).await?;
-            Ok(u64::min(source_count, self.limit as u64))
-        })
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        let source_count = self.source.count(txn_id).await?;
+        Ok(u64::min(source_count, self.limit as u64))
     }
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
@@ -786,6 +791,7 @@ impl Merged {
     }
 }
 
+#[async_trait]
 impl TableInstance for Merged {
     type Stream = TCStream<Vec<Value>>;
 
@@ -976,11 +982,12 @@ impl<T: Into<Table>> TryFrom<(T, Vec<ValueId>)> for Selection {
     }
 }
 
+#[async_trait]
 impl TableInstance for Selection {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        Box::pin(async move { self.source.clone().count(txn_id).await })
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.source.clone().count(txn_id).await
     }
 
     fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
@@ -1100,14 +1107,13 @@ impl TableSlice {
     }
 }
 
+#[async_trait]
 impl TableInstance for TableSlice {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        Box::pin(async move {
-            let index = self.table.supporting_index(&self.bounds)?;
-            index.slice(self.bounds.clone())?.count(txn_id).await
-        })
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        let index = self.table.supporting_index(&self.bounds)?;
+        index.slice(self.bounds.clone())?.count(txn_id).await
     }
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {

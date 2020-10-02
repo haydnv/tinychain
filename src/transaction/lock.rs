@@ -13,25 +13,25 @@ use crate::error::{self, TCResult};
 
 use super::{Transact, TxnId};
 
-pub trait Mutate: Send + Sync {
-    type Pending: Send + Sync;
+pub trait Mutate: Send {
+    type Pending: Send;
 
     fn diverge(&self, txn_id: &TxnId) -> Self::Pending;
 
     fn converge<'a>(&'a mut self, new_value: Self::Pending) -> TCBoxFuture<'a, ()>;
 }
 
-pub struct Mutable<T: Clone + Send + Sync> {
+pub struct Mutable<T: Clone + Send> {
     value: T,
 }
 
-impl<T: Clone + Send + Sync> Mutable<T> {
+impl<T: Clone + Send> Mutable<T> {
     pub fn value(&'_ self) -> &'_ T {
         &self.value
     }
 }
 
-impl<T: Clone + Send + Sync> Mutate for Mutable<T> {
+impl<T: Clone + Send> Mutate for Mutable<T> {
     type Pending = T;
 
     fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
@@ -44,7 +44,7 @@ impl<T: Clone + Send + Sync> Mutate for Mutable<T> {
     }
 }
 
-impl<T: Clone + Send + Sync> From<T> for Mutable<T> {
+impl<T: Clone + Send> From<T> for Mutable<T> {
     fn from(value: T) -> Mutable<T> {
         Mutable { value }
     }

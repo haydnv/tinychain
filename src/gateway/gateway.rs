@@ -222,7 +222,7 @@ impl Gateway {
         }
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Sync + Unpin + 'static>(
+    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin + 'static>(
         &self,
         subject: &Link,
         data: S,
