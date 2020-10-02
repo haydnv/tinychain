@@ -3,8 +3,7 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future;
-use futures::stream::{self, Stream};
+use futures::stream::{self, Stream, StreamExt};
 use futures::TryFutureExt;
 
 use crate::auth::Auth;
@@ -101,108 +100,92 @@ impl Instance for NullChain {
     }
 }
 
+#[async_trait]
 impl ChainInstance for NullChain {
     type Class = ChainType;
 
-    fn get<'a>(
-        &'a self,
-        txn: Arc<Txn>,
-        path: &'a TCPath,
-        key: Value,
-        _auth: Auth,
-    ) -> TCBoxTryFuture<'a, State> {
-        Box::pin(async move {
-            println!("NullChain::get {}: {}", path, &key);
+    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
+        println!("NullChain::get {}: {}", path, &key);
 
-            if path.is_empty() {
-                Ok(Chain::Null(Box::new(self.clone())).into())
-            } else if path == "/object" {
-                match &self.state {
-                    ChainState::Collection(collection) => {
-                        Ok(Collection::Base(collection.clone()).into())
-                    }
-                    ChainState::Scalar(scalar) => {
-                        scalar
-                            .read(txn.id())
-                            .map_ok(|s| State::Scalar(s.clone()))
-                            .await
-                    }
+        if path.is_empty() {
+            Ok(Chain::Null(Box::new(self.clone())).into())
+        } else if path == "/object" {
+            match &self.state {
+                ChainState::Collection(collection) => {
+                    Ok(Collection::Base(collection.clone()).into())
                 }
-            } else if path.len() == 1 {
-                if let Some(op) = self.ops.read(txn.id()).await?.get(&path[0]) {
-                    if let OpDef::Get((_key_name, _def)) = op {
-                        Err(error::not_implemented("Chain methods"))
+                ChainState::Scalar(scalar) => {
+                    scalar
+                        .read(txn.id())
+                        .map_ok(|s| State::Scalar(s.clone()))
+                        .await
+                }
+            }
+        } else if path.len() == 1 {
+            if let Some(op) = self.ops.read(txn.id()).await?.get(&path[0]) {
+                if let OpDef::Get((key_name, def)) = op {
+                    let mut params = Vec::with_capacity(def.len() + 1);
+                    params.push((key_name.clone(), Scalar::Value(key)));
+                    params.extend(def.to_vec());
+                    txn.execute(stream::iter(params), auth).await
+                } else {
+                    Err(error::method_not_allowed(path))
+                }
+            } else {
+                Err(error::not_found(path))
+            }
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
+    async fn put(&self, txn: Arc<Txn>, path: TCPath, key: Value, new_value: State) -> TCResult<()> {
+        if &path == "/object" {
+            match &self.state {
+                ChainState::Collection(_) => Err(error::not_implemented("NullChain::put")),
+                ChainState::Scalar(scalar) => {
+                    if key == Value::None {
+                        let mut scalar = scalar.write(txn.id().clone()).await?;
+
+                        new_value.expect(
+                            scalar.class().into(),
+                            format!("Chain wraps {}", scalar.class()),
+                        )?;
+                        *scalar = new_value.try_into()?;
+                        Ok(())
                     } else {
-                        Err(error::method_not_allowed(path))
+                        Err(error::bad_request("Value has no such attribute", key))
                     }
-                } else {
-                    Err(error::not_found(path))
                 }
+            }
+        } else {
+            Err(error::not_implemented(path))
+        }
+    }
+
+    async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
+        &self,
+        txn: Arc<Txn>,
+        path: TCPath,
+        data: S,
+        auth: Auth,
+    ) -> TCResult<State> {
+        if path.is_empty() {
+            Err(error::method_not_allowed("NullChain::post"))
+        } else if path.len() == 1 {
+            if let Some(OpDef::Post(def)) = self.ops.read(txn.id()).await?.get(&path[0]) {
+                let data = data.chain(stream::iter(def.to_vec()));
+                txn.execute(data, auth).await
             } else {
                 Err(error::not_found(path))
             }
-        })
+        } else {
+            Err(error::not_found(path))
+        }
     }
 
-    fn put<'a>(
-        &'a self,
-        txn: Arc<Txn>,
-        path: TCPath,
-        key: Value,
-        new_value: State,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            if &path == "/object" {
-                match &self.state {
-                    ChainState::Collection(_) => Err(error::not_implemented("NullChain::put")),
-                    ChainState::Scalar(scalar) => {
-                        if key == Value::None {
-                            let mut scalar = scalar.write(txn.id().clone()).await?;
-
-                            new_value.expect(
-                                scalar.class().into(),
-                                format!("Chain wraps {}", scalar.class()),
-                            )?;
-                            *scalar = new_value.try_into()?;
-                            Ok(())
-                        } else {
-                            Err(error::bad_request("Value has no such attribute", key))
-                        }
-                    }
-                }
-            } else {
-                Err(error::not_implemented(path))
-            }
-        })
-    }
-
-    fn post<'a, S: Stream<Item = (ValueId, Scalar)> + Send + Unpin + 'a>(
-        &'a self,
-        txn: Arc<Txn>,
-        path: TCPath,
-        _data: S,
-        _auth: Auth,
-    ) -> TCBoxTryFuture<'a, State> {
-        Box::pin(async move {
-            if path.is_empty() {
-                Err(error::method_not_allowed("NullChain::post"))
-            } else if path.len() == 1 {
-                if let Some(OpDef::Post(_def)) = self.ops.read(txn.id()).await?.get(&path[0]) {
-                    Err(error::not_implemented("Chain methods"))
-                } else {
-                    Err(error::not_found(path))
-                }
-            } else {
-                Err(error::not_found(path))
-            }
-        })
-    }
-
-    fn to_stream<'a>(&'a self, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Value>> {
-        Box::pin(future::ready({
-            let stream: TCStream<Value> = Box::pin(stream::empty());
-            Ok(stream)
-        }))
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+        Ok(Box::pin(stream::empty()))
     }
 }
 

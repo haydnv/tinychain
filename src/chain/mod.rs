@@ -7,7 +7,7 @@ use futures::stream::Stream;
 use futures::TryFutureExt;
 
 use crate::auth::Auth;
-use crate::class::{Class, Instance, State, TCBoxTryFuture, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::scalar::{label, Link, OpDef, Scalar, TCPath, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -94,34 +94,23 @@ impl ChainClass for ChainType {
     }
 }
 
+#[async_trait]
 pub trait ChainInstance: Instance {
     type Class: ChainClass;
 
-    fn get<'a>(
-        &'a self,
-        txn: Arc<Txn>,
-        path: &'a TCPath,
-        key: Value,
-        auth: Auth,
-    ) -> TCBoxTryFuture<'a, State>;
+    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State>;
 
-    fn put<'a>(
-        &'a self,
-        txn: Arc<Txn>,
-        path: TCPath,
-        key: Value,
-        value: State,
-    ) -> TCBoxTryFuture<'a, ()>;
+    async fn put(&self, txn: Arc<Txn>, path: TCPath, key: Value, value: State) -> TCResult<()>;
 
-    fn post<'a, S: Stream<Item = (ValueId, Scalar)> + Send + Unpin + 'a>(
-        &'a self,
+    async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
+        &self,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
         auth: Auth,
-    ) -> TCBoxTryFuture<'a, State>;
+    ) -> TCResult<State>;
 
-    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Value>>;
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
 }
 
 #[derive(Clone)]
@@ -139,48 +128,37 @@ impl Instance for Chain {
     }
 }
 
+#[async_trait]
 impl ChainInstance for Chain {
     type Class = ChainType;
 
-    fn get<'a>(
-        &'a self,
-        txn: Arc<Txn>,
-        path: &'a TCPath,
-        key: Value,
-        auth: Auth,
-    ) -> TCBoxTryFuture<'a, State> {
+    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
         match self {
-            Self::Null(nc) => nc.get(txn, path, key, auth),
+            Self::Null(nc) => nc.get(txn, path, key, auth).await,
         }
     }
 
-    fn put<'a>(
-        &'a self,
-        txn: Arc<Txn>,
-        path: TCPath,
-        key: Value,
-        value: State,
-    ) -> TCBoxTryFuture<'a, ()> {
+    async fn put(&self, txn: Arc<Txn>, path: TCPath, key: Value, value: State) -> TCResult<()> {
         match self {
-            Self::Null(nc) => nc.put(txn, path, key, value),
+            Self::Null(nc) => nc.put(txn, path, key, value).await,
         }
     }
 
-    fn post<'a, S: Stream<Item = (ValueId, Scalar)> + Send + Unpin + 'a>(
-        &'a self,
+    async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
+        &self,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
         auth: Auth,
-    ) -> TCBoxTryFuture<'a, State> {
+    ) -> TCResult<State> {
         match self {
-            Self::Null(nc) => nc.post(txn, path, data, auth),
+            Self::Null(nc) => nc.post(txn, path, data, auth).await,
         }
     }
 
-    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
         match self {
-            Self::Null(nc) => nc.to_stream(txn),
+            Self::Null(nc) => nc.to_stream(txn).await,
         }
     }
 }
