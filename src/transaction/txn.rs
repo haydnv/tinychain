@@ -368,7 +368,7 @@ impl Txn {
                 let value = dereference_state(&provided, &value)?;
                 self.gateway
                     .clone()
-                    .put(&link, key, value, auth, Some(self.clone()))
+                    .put(&link, key, value, &auth, Some(self.clone()))
                     .await?;
 
                 Ok(().into())
@@ -584,7 +584,6 @@ fn scalar_requires(
             for s in tuple {
                 required.extend(scalar_requires(s, txn_state)?);
             }
-
             Ok(required)
         }
     }
