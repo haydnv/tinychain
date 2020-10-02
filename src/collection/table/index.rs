@@ -50,18 +50,17 @@ impl Class for TableBaseType {
     }
 }
 
+#[async_trait]
 impl CollectionClass for TableBaseType {
     type Instance = TableBase;
 
-    fn get<'a>(&'a self, txn: Arc<Txn>, schema: Value) -> TCBoxTryFuture<'a, TableBase> {
-        Box::pin(async move {
-            let schema = schema
-                .try_cast_into(|v| error::bad_request("Expected TableSchema but found", v))?;
+    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<TableBase> {
+        let schema =
+            schema.try_cast_into(|v| error::bad_request("Expected TableSchema but found", v))?;
 
-            TableIndex::create(txn, schema)
-                .map_ok(TableBase::from)
-                .await
-        })
+        TableIndex::create(txn, schema)
+            .map_ok(TableBase::from)
+            .await
     }
 }
 

@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use futures::TryFutureExt;
 
@@ -60,39 +61,34 @@ impl Class for TensorBaseType {
     }
 }
 
+#[async_trait]
 impl CollectionClass for TensorBaseType {
     type Instance = TensorBase;
 
-    fn get<'a>(&'a self, txn: Arc<Txn>, schema: Value) -> TCBoxTryFuture<'a, TensorBase> {
-        Box::pin(async move {
-            match self {
-                Self::Dense => {
-                    if schema.matches::<(NumberType, Shape)>() {
-                        let (dtype, shape): (NumberType, Shape) = schema.opt_cast_into().unwrap();
-                        let block_list = BlockListFile::constant(txn, shape, dtype.zero()).await?;
-                        Ok(TensorBase::Dense(block_list))
-                    } else if schema.matches::<Vec<Number>>() {
-                        let mut data: Vec<Number> = schema.opt_cast_into().unwrap();
-                        let shape = vec![data.len() as u64].into();
-                        let dtype = data
-                            .iter()
-                            .map(|n| n.class())
-                            .fold(NumberType::Bool, Ord::max);
-                        let block_list = BlockListFile::from_values(
-                            txn,
-                            shape,
-                            dtype,
-                            stream::iter(data.drain(..)),
-                        )
-                        .await?;
-                        Ok(TensorBase::Dense(block_list))
-                    } else {
-                        Err(error::bad_request(ERR_CREATE_DENSE, schema))
-                    }
+    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<TensorBase> {
+        match self {
+            Self::Dense => {
+                if schema.matches::<(NumberType, Shape)>() {
+                    let (dtype, shape): (NumberType, Shape) = schema.opt_cast_into().unwrap();
+                    let block_list = BlockListFile::constant(txn, shape, dtype.zero()).await?;
+                    Ok(TensorBase::Dense(block_list))
+                } else if schema.matches::<Vec<Number>>() {
+                    let mut data: Vec<Number> = schema.opt_cast_into().unwrap();
+                    let shape = vec![data.len() as u64].into();
+                    let dtype = data
+                        .iter()
+                        .map(|n| n.class())
+                        .fold(NumberType::Bool, Ord::max);
+                    let block_list =
+                        BlockListFile::from_values(txn, shape, dtype, stream::iter(data.drain(..)))
+                            .await?;
+                    Ok(TensorBase::Dense(block_list))
+                } else {
+                    Err(error::bad_request(ERR_CREATE_DENSE, schema))
                 }
-                Self::Sparse => todo!(),
             }
-        })
+            Self::Sparse => todo!(),
+        }
     }
 }
 

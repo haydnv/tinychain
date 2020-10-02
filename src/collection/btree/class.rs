@@ -1,6 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::future;
 
 use crate::class::{Class, Instance, TCBoxFuture, TCBoxTryFuture, TCResult, TCStream};
@@ -36,11 +37,12 @@ impl Class for BTreeType {
     }
 }
 
+#[async_trait]
 impl CollectionClass for BTreeType {
     type Instance = BTree;
 
-    fn get<'a>(&'a self, _txn: Arc<Txn>, _schema: Value) -> TCBoxTryFuture<'a, BTree> {
-        Box::pin(async move { Err(error::not_implemented("BTreeType::get")) })
+    async fn get(&self, _txn: Arc<Txn>, _schema: Value) -> TCResult<BTree> {
+        Err(error::not_implemented("BTreeType::get"))
     }
 }
 
