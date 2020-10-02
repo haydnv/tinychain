@@ -3,9 +3,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future;
 
-use crate::class::{Instance, TCBoxFuture, TCResult, TCStream};
+use crate::class::{Instance, TCResult, TCStream};
 use crate::error;
 use crate::scalar::{Number, Scalar, TCPath, Value};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -95,22 +94,23 @@ impl class::CollectionInstance for CollectionBase {
     }
 }
 
+#[async_trait]
 impl Transact for CollectionBase {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn commit(&self, txn_id: &TxnId) {
         match self {
-            Self::BTree(btree) => btree.commit(txn_id),
-            Self::Null(_) => Box::pin(future::ready(())), // no-op
-            Self::Table(table) => table.commit(txn_id),
-            Self::Tensor(tensor) => tensor.commit(txn_id),
+            Self::BTree(btree) => btree.commit(txn_id).await,
+            Self::Null(_) => (), // no-op
+            Self::Table(table) => table.commit(txn_id).await,
+            Self::Tensor(tensor) => tensor.commit(txn_id).await,
         }
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn rollback(&self, txn_id: &TxnId) {
         match self {
-            Self::BTree(btree) => btree.rollback(txn_id),
-            Self::Null(_) => Box::pin(future::ready(())), // no-op
-            Self::Table(table) => table.rollback(txn_id),
-            Self::Tensor(tensor) => tensor.rollback(txn_id),
+            Self::BTree(btree) => btree.rollback(txn_id).await,
+            Self::Null(_) => (), // no-op
+            Self::Table(table) => table.rollback(txn_id).await,
+            Self::Tensor(tensor) => tensor.rollback(txn_id).await,
         }
     }
 }
@@ -258,22 +258,23 @@ impl class::CollectionInstance for CollectionView {
     }
 }
 
+#[async_trait]
 impl Transact for CollectionView {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn commit(&self, txn_id: &TxnId) {
         match self {
-            Self::BTree(btree) => btree.commit(txn_id),
-            Self::Null(null) => null.commit(txn_id), // no-op
-            Self::Table(table) => table.commit(txn_id),
-            Self::Tensor(tensor) => tensor.commit(txn_id),
+            Self::BTree(btree) => btree.commit(txn_id).await,
+            Self::Null(null) => null.commit(txn_id).await, // no-op
+            Self::Table(table) => table.commit(txn_id).await,
+            Self::Tensor(tensor) => tensor.commit(txn_id).await,
         }
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn rollback(&self, txn_id: &TxnId) {
         match self {
-            Self::BTree(btree) => btree.rollback(txn_id),
-            Self::Null(null) => null.rollback(txn_id), // no-op
-            Self::Table(table) => table.rollback(txn_id),
-            Self::Tensor(tensor) => tensor.rollback(txn_id),
+            Self::BTree(btree) => btree.rollback(txn_id).await,
+            Self::Null(null) => null.rollback(txn_id).await, // no-op
+            Self::Table(table) => table.rollback(txn_id).await,
+            Self::Tensor(tensor) => tensor.rollback(txn_id).await,
         }
     }
 }
@@ -373,18 +374,19 @@ impl class::CollectionInstance for Collection {
     }
 }
 
+#[async_trait]
 impl Transact for Collection {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn commit(&self, txn_id: &TxnId) {
         match self {
-            Self::Base(base) => base.commit(txn_id),
-            Self::View(view) => view.commit(txn_id),
+            Self::Base(base) => base.commit(txn_id).await,
+            Self::View(view) => view.commit(txn_id).await,
         }
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn rollback(&self, txn_id: &TxnId) {
         match self {
-            Self::Base(base) => base.rollback(txn_id),
-            Self::View(view) => view.rollback(txn_id),
+            Self::Base(base) => base.rollback(txn_id).await,
+            Self::View(view) => view.rollback(txn_id).await,
         }
     }
 }

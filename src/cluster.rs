@@ -3,12 +3,13 @@ use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::stream::Stream;
 
 use crate::auth::Auth;
 use crate::block::Dir;
 use crate::chain::{Chain, ChainInstance};
-use crate::class::{State, TCBoxFuture, TCResult};
+use crate::class::{State, TCResult};
 use crate::error;
 use crate::gateway::Gateway;
 use crate::scalar::*;
@@ -33,6 +34,7 @@ struct ClusterState {
     chains: HashMap<PathSegment, Chain>,
 }
 
+#[async_trait]
 impl Mutate for ClusterState {
     type Pending = Self;
 
@@ -40,8 +42,8 @@ impl Mutate for ClusterState {
         self.clone()
     }
 
-    fn converge<'a>(&'a mut self, new_value: Self::Pending) -> TCBoxFuture<'a, ()> {
-        Box::pin(async move { *self = new_value })
+    async fn converge(&mut self, new_value: Self::Pending) {
+        *self = new_value
     }
 }
 
@@ -173,15 +175,16 @@ impl Cluster {
     }
 }
 
+#[async_trait]
 impl Transact for Cluster {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn commit(&self, txn_id: &TxnId) {
         println!("Cluster::commit!");
-        self.state.commit(txn_id)
+        self.state.commit(txn_id).await
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn rollback(&self, txn_id: &TxnId) {
         println!("Cluster::rollback!");
-        self.state.rollback(txn_id)
+        self.state.rollback(txn_id).await
     }
 }
 

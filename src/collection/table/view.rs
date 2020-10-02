@@ -277,30 +277,31 @@ impl TableInstance for TableView {
     }
 }
 
+#[async_trait]
 impl Transact for TableView {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        let no_op = || Box::pin(future::ready(()));
+    async fn commit(&self, txn_id: &TxnId) {
+        let no_op = ();
 
         match self {
-            Self::Aggregate(_) => no_op(),
-            Self::IndexSlice(index_slice) => index_slice.commit(txn_id),
-            Self::Limit(limited) => limited.commit(txn_id),
-            Self::Merge(merged) => merged.commit(txn_id),
-            Self::Selection(_) => no_op(),
-            Self::TableSlice(table_slice) => table_slice.commit(txn_id),
+            Self::Aggregate(_) => no_op,
+            Self::IndexSlice(index_slice) => index_slice.commit(txn_id).await,
+            Self::Limit(limited) => limited.commit(txn_id).await,
+            Self::Merge(merged) => merged.commit(txn_id).await,
+            Self::Selection(_) => no_op,
+            Self::TableSlice(table_slice) => table_slice.commit(txn_id).await,
         }
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        let no_op = || Box::pin(future::ready(()));
+    async fn rollback(&self, txn_id: &TxnId) {
+        let no_op = ();
 
         match self {
-            Self::Aggregate(_) => no_op(),
-            Self::IndexSlice(index_slice) => index_slice.rollback(txn_id),
-            Self::Limit(limited) => limited.rollback(txn_id),
-            Self::Merge(merged) => merged.rollback(txn_id),
-            Self::Selection(_) => no_op(),
-            Self::TableSlice(table_slice) => table_slice.rollback(txn_id),
+            Self::Aggregate(_) => no_op,
+            Self::IndexSlice(index_slice) => index_slice.rollback(txn_id).await,
+            Self::Limit(limited) => limited.rollback(txn_id).await,
+            Self::Merge(merged) => merged.rollback(txn_id).await,
+            Self::Selection(_) => no_op,
+            Self::TableSlice(table_slice) => table_slice.rollback(txn_id).await,
         }
     }
 }
@@ -616,13 +617,14 @@ impl From<IndexSlice> for Table {
     }
 }
 
+#[async_trait]
 impl Transact for IndexSlice {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        self.source.commit(txn_id)
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        self.source.rollback(txn_id)
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
     }
 }
 
@@ -725,13 +727,14 @@ impl From<Limited> for Table {
     }
 }
 
+#[async_trait]
 impl Transact for Limited {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        self.source.commit(txn_id)
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        self.source.rollback(txn_id)
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
     }
 }
 
@@ -757,18 +760,19 @@ impl MergeSource {
     }
 }
 
+#[async_trait]
 impl Transact for MergeSource {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn commit(&self, txn_id: &TxnId) {
         match self {
-            Self::Table(table) => table.commit(txn_id),
-            Self::Merge(merged) => merged.commit(txn_id),
+            Self::Table(table) => table.commit(txn_id).await,
+            Self::Merge(merged) => merged.commit(txn_id).await,
         }
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn rollback(&self, txn_id: &TxnId) {
         match self {
-            Self::Table(table) => table.rollback(txn_id),
-            Self::Merge(merged) => merged.rollback(txn_id),
+            Self::Table(table) => table.rollback(txn_id).await,
+            Self::Merge(merged) => merged.rollback(txn_id).await,
         }
     }
 }
@@ -920,17 +924,14 @@ impl From<Merged> for Table {
     }
 }
 
+#[async_trait]
 impl Transact for Merged {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        Box::pin(async move {
-            join!(self.left.commit(txn_id), self.right.commit(txn_id));
-        })
+    async fn commit(&self, txn_id: &TxnId) {
+        join!(self.left.commit(txn_id), self.right.commit(txn_id));
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        Box::pin(async move {
-            join!(self.left.rollback(txn_id), self.right.rollback(txn_id));
-        })
+    async fn rollback(&self, txn_id: &TxnId) {
+        join!(self.left.rollback(txn_id), self.right.rollback(txn_id));
     }
 }
 
@@ -1203,12 +1204,13 @@ impl From<TableSlice> for Table {
     }
 }
 
+#[async_trait]
 impl Transact for TableSlice {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        self.table.commit(txn_id)
+    async fn commit(&self, txn_id: &TxnId) {
+        self.table.commit(txn_id).await
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        self.table.rollback(txn_id)
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.table.rollback(txn_id).await
     }
 }

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::future;
-use futures::join;
 use futures::stream::{self, Stream};
 use futures::TryFutureExt;
 
@@ -27,18 +27,19 @@ enum ChainState {
     Scalar(TxnLock<Mutable<Scalar>>),
 }
 
+#[async_trait]
 impl Transact for ChainState {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn commit(&self, txn_id: &TxnId) {
         match self {
-            Self::Collection(c) => c.commit(txn_id),
-            Self::Scalar(s) => s.commit(txn_id),
+            Self::Collection(c) => c.commit(txn_id).await,
+            Self::Scalar(s) => s.commit(txn_id).await,
         }
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn rollback(&self, txn_id: &TxnId) {
         match self {
-            Self::Collection(c) => c.rollback(txn_id),
-            Self::Scalar(s) => s.rollback(txn_id),
+            Self::Collection(c) => c.rollback(txn_id).await,
+            Self::Scalar(s) => s.rollback(txn_id).await,
         }
     }
 }
@@ -205,16 +206,15 @@ impl ChainInstance for NullChain {
     }
 }
 
+#[async_trait]
 impl Transact for NullChain {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        Box::pin(async move {
-            join!(self.state.commit(txn_id), self.ops.commit(txn_id));
-        })
+    async fn commit(&self, txn_id: &TxnId) {
+        self.state.commit(txn_id).await;
+        self.ops.commit(txn_id).await;
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        Box::pin(async move {
-            join!(self.state.rollback(txn_id), self.ops.rollback(txn_id));
-        })
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.state.rollback(txn_id).await;
+        self.ops.rollback(txn_id).await;
     }
 }

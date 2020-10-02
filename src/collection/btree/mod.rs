@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::block::File;
 use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
-use crate::class::{Instance, TCBoxFuture, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
 use crate::scalar::{
     CastFrom, CastInto, Scalar, ScalarClass, TCPath, TryCastFrom, TryCastInto, Value, ValueType,
@@ -294,15 +294,14 @@ impl CollectionInstance for BTreeSlice {
     }
 }
 
+#[async_trait]
 impl Transact for BTreeSlice {
-    fn commit<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn commit(&self, _txn_id: &TxnId) {
         // no-op
-        Box::pin(future::ready(()))
     }
 
-    fn rollback<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn rollback(&self, _txn_id: &TxnId) {
         // no-op
-        Box::pin(future::ready(()))
     }
 }
 
@@ -893,17 +892,14 @@ impl CollectionInstance for BTreeFile {
     }
 }
 
+#[async_trait]
 impl Transact for BTreeFile {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        Box::pin(async move {
-            join(self.file.commit(txn_id), self.root.commit(txn_id)).await;
-        })
+    async fn commit(&self, txn_id: &TxnId) {
+        join(self.file.commit(txn_id), self.root.commit(txn_id)).await;
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        Box::pin(async move {
-            join(self.file.rollback(txn_id), self.root.rollback(txn_id)).await;
-        })
+    async fn rollback(&self, txn_id: &TxnId) {
+        join(self.file.rollback(txn_id), self.root.rollback(txn_id)).await;
     }
 }
 

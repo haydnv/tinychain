@@ -5,11 +5,11 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use futures::future;
+use async_trait::async_trait;
 use uuid::Uuid;
 
 use crate::chain;
-use crate::class::{TCBoxFuture, TCBoxTryFuture, TCResult};
+use crate::class::{TCBoxTryFuture, TCResult};
 use crate::collection::btree;
 use crate::collection::tensor;
 use crate::error;
@@ -105,6 +105,7 @@ impl fmt::Display for DirEntry {
 
 struct DirContents(HashMap<PathSegment, DirEntry>);
 
+#[async_trait]
 impl Mutate for DirContents {
     type Pending = HashMap<PathSegment, DirEntry>;
 
@@ -112,9 +113,8 @@ impl Mutate for DirContents {
         self.0.clone()
     }
 
-    fn converge<'a>(&'a mut self, other: Self::Pending) -> TCBoxFuture<'a, ()> {
+    async fn converge(&mut self, other: Self::Pending) {
         self.0 = other;
-        Box::pin(future::ready(()))
     }
 }
 
@@ -270,12 +270,13 @@ impl Dir {
     }
 }
 
+#[async_trait]
 impl Transact for Dir {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        self.contents.commit(txn_id)
+    async fn commit(&self, txn_id: &TxnId) {
+        self.contents.commit(txn_id).await
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        self.contents.rollback(txn_id)
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.contents.rollback(txn_id).await
     }
 }

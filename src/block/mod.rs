@@ -3,11 +3,11 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future;
 
-use crate::class::TCBoxFuture;
-use crate::error::{self, TCResult};
+use crate::class::TCResult;
+use crate::error;
 use crate::scalar::value::link::PathSegment;
 use crate::transaction::lock::{Mutate, TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::TxnId;
@@ -161,6 +161,7 @@ pub trait BlockData:
     fn size(&self) -> usize;
 }
 
+#[async_trait]
 impl<B: BlockData> Mutate for B {
     type Pending = Self;
 
@@ -168,8 +169,7 @@ impl<B: BlockData> Mutate for B {
         self.clone()
     }
 
-    fn converge<'a>(&'a mut self, other: Self) -> TCBoxFuture<'a, ()> {
+    async fn converge(&mut self, other: Self) {
         *self = other;
-        Box::pin(future::ready(()))
     }
 }

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use async_trait::async_trait;
 use futures::future::join_all;
 
-use crate::class::TCBoxFuture;
 use crate::transaction::lock::TxnLock;
 use crate::transaction::{Transact, TxnId};
 
@@ -38,16 +38,13 @@ impl<T: BlockData> Cache<T> {
     }
 }
 
+#[async_trait]
 impl<T: BlockData> Transact for Cache<T> {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        Box::pin(async move {
-            join_all(self.blocks.values().map(|lock| lock.commit(txn_id))).await;
-        })
+    async fn commit(&self, txn_id: &TxnId) {
+        join_all(self.blocks.values().map(|lock| lock.commit(txn_id))).await;
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
-        Box::pin(async move {
-            join_all(self.blocks.values().map(|lock| lock.rollback(txn_id))).await;
-        })
+    async fn rollback(&self, txn_id: &TxnId) {
+        join_all(self.blocks.values().map(|lock| lock.rollback(txn_id))).await;
     }
 }

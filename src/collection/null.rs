@@ -2,9 +2,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::{future, stream};
+use futures::stream;
 
-use crate::class::{Class, Instance, TCBoxFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionBase, CollectionItem};
 use crate::error;
@@ -100,15 +100,14 @@ impl CollectionInstance for Null {
     }
 }
 
+#[async_trait]
 impl Transact for Null {
-    fn commit<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn commit(&self, _txn_id: &TxnId) {
         // no-op
-        Box::pin(future::ready(()))
     }
 
-    fn rollback<'a>(&'a self, _txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn rollback(&self, _txn_id: &TxnId) {
         // no-op
-        Box::pin(future::ready(()))
     }
 }
 

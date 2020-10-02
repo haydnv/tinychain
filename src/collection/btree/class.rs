@@ -2,9 +2,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future;
 
-use crate::class::{Class, Instance, TCBoxFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
@@ -129,18 +128,23 @@ impl CollectionInstance for BTree {
     }
 }
 
+#[async_trait]
 impl Transact for BTree {
-    fn commit<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn commit(&self, txn_id: &TxnId) {
+        let no_op = ();
+
         match self {
-            Self::Tree(tree) => tree.commit(txn_id),
-            Self::View(_) => Box::pin(future::ready(())),
+            Self::Tree(tree) => tree.commit(txn_id).await,
+            Self::View(_) => no_op,
         }
     }
 
-    fn rollback<'a>(&'a self, txn_id: &'a TxnId) -> TCBoxFuture<'a, ()> {
+    async fn rollback(&self, txn_id: &TxnId) {
+        let no_op = ();
+
         match self {
-            Self::Tree(tree) => tree.rollback(txn_id),
-            Self::View(_) => Box::pin(future::ready(())),
+            Self::Tree(tree) => tree.rollback(txn_id).await,
+            Self::View(_) => no_op,
         }
     }
 }
