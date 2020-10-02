@@ -1,17 +1,15 @@
-use std::convert::TryInto;
 use std::fmt;
 
-use crate::class::{Class, Instance, TCResult, TCType};
+use crate::class::{Class, TCResult, TCType};
 use crate::error;
+use crate::scalar::{Scalar, ScalarClass, ScalarInstance, ScalarType, TryCastFrom, TryCastInto};
 
-use super::link::TCPath;
-use super::{label, Link, Value};
+use super::link::{Link, TCPath};
+use super::number::NumberType;
+use super::string::{label, StringType};
+use super::Value;
 
-pub type NumberType = super::number::class::NumberType;
-pub type OpType = super::op::OpType;
-pub type StringType = super::string::StringType;
-
-pub trait ValueInstance: Instance + Default + Sized {
+pub trait ValueInstance: ScalarInstance {
     type Class: ValueClass;
 
     fn get(&self, _path: TCPath, _key: Value) -> TCResult<Self> {
@@ -19,15 +17,8 @@ pub trait ValueInstance: Instance + Default + Sized {
     }
 }
 
-pub trait ValueClass: Class {
+pub trait ValueClass: ScalarClass {
     type Instance: ValueInstance;
-
-    fn get(
-        path: &TCPath,
-        value: <Self as ValueClass>::Instance,
-    ) -> TCResult<<Self as ValueClass>::Instance>;
-
-    fn size(self) -> Option<usize>;
 }
 
 impl From<NumberType> for ValueType {
@@ -44,13 +35,11 @@ impl From<StringType> for ValueType {
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub enum ValueType {
-    Bound,
+    None,
     Bytes,
     Class,
-    None,
     Number(NumberType),
     TCString(StringType),
-    Op,
     Tuple,
     Value, // self
 }
@@ -73,7 +62,6 @@ impl Class for ValueType {
             match suffix[0].as_str() {
                 "none" => Ok(ValueType::None),
                 "bytes" => Ok(ValueType::Bytes),
-                "op" => Ok(ValueType::Op),
                 "tuple" => Ok(ValueType::Tuple),
                 other => Err(error::not_found(other)),
             }
@@ -91,37 +79,35 @@ impl Class for ValueType {
     }
 }
 
-impl ValueClass for ValueType {
+impl ScalarClass for ValueType {
     type Instance = Value;
-
-    fn get(path: &TCPath, value: Value) -> TCResult<Value> {
-        let suffix = path.from_path(&Self::prefix())?;
-
-        if suffix.is_empty() {
-            return Ok(value);
-        }
-
-        match suffix[0].as_str() {
-            "none" if suffix.len() == 1 => Ok(Value::None),
-            "bytes" if suffix.len() == 1 => Err(error::not_implemented("/sbin/value/bytes")),
-            "number" => NumberType::get(path, value.try_into()?).map(Value::Number),
-            "string" => StringType::get(path, value.try_into()?).map(Value::TCString),
-            "op" => OpType::get(path, value.try_into()?)
-                .map(Box::new)
-                .map(Value::Op),
-            "tuple" => Err(error::not_implemented("/sbin/value/tuple")),
-            other => Err(error::not_found(other)),
-        }
-    }
 
     fn size(self) -> Option<usize> {
         use ValueType::*;
         match self {
             None => Some(1),
-            Number(nt) => ValueClass::size(nt),
+            Number(nt) => ScalarClass::size(nt),
             _ => Option::None,
         }
     }
+
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Value> {
+        match self {
+            Self::None => Ok(Value::None),
+            Self::Number(nt) => nt.try_cast(scalar).map(Value::Number),
+            Self::TCString(st) => st.try_cast(scalar).map(Value::TCString),
+            other => {
+                let scalar: Scalar = scalar.into();
+                scalar.try_cast_into(|v| {
+                    error::not_implemented(format!("Cast into {} from {}", other, v))
+                })
+            }
+        }
+    }
+}
+
+impl ValueClass for ValueType {
+    type Instance = Value;
 }
 
 impl From<ValueType> for Link {
@@ -131,14 +117,43 @@ impl From<ValueType> for Link {
         use ValueType::*;
         match vt {
             None => prefix.join(label("none").into()).into(),
-            Bound => prefix.join(label("bound").into()).into(),
             Bytes => prefix.join(label("bytes").into()).into(),
             Class => prefix.join(label("class").into()).into(),
-            Number(n) => n.into(),
-            TCString(s) => s.into(),
-            Op => prefix.join(label("op").into()).into(),
+            Number(nt) => nt.into(),
+            TCString(st) => st.into(),
             Tuple => prefix.join(label("tuple").into()).into(),
             Value => prefix.join(label("value").into()).into(),
+        }
+    }
+}
+
+impl TryCastFrom<Link> for ValueType {
+    fn can_cast_from(link: &Link) -> bool {
+        match ValueType::from_path(link.path()) {
+            Ok(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(link: Link) -> Option<ValueType> {
+        ValueType::from_path(link.path()).ok()
+    }
+}
+
+impl TryCastFrom<TCType> for ValueType {
+    fn can_cast_from(class: &TCType) -> bool {
+        if let TCType::Scalar(ScalarType::Value(_)) = class {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(class: TCType) -> Option<ValueType> {
+        if let TCType::Scalar(ScalarType::Value(vt)) = class {
+            Some(vt)
+        } else {
+            None
         }
     }
 }
@@ -148,12 +163,10 @@ impl fmt::Display for ValueType {
         use ValueType::*;
         match self {
             None => write!(f, "type None"),
-            Bound => write!(f, "type Bound"),
             Bytes => write!(f, "type Bytes"),
             Class => write!(f, "type Class"),
-            Number(n) => write!(f, "type Number: {}", n),
-            TCString(s) => write!(f, "type String: {}", s),
-            Op => write!(f, "type Op"),
+            Number(nt) => write!(f, "type Number: {}", nt),
+            TCString(st) => write!(f, "type String: {}", st),
             Tuple => write!(f, "type Tuple"),
             Value => write!(f, "Value"),
         }

@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Bound;
 use std::pin::Pin;
@@ -16,10 +16,11 @@ use crate::block::File;
 use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
+use crate::scalar::{
+    CastFrom, CastInto, Scalar, ScalarClass, TCPath, TryCastFrom, TryCastInto, Value, ValueType,
+};
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::class::{ValueClass, ValueType};
-use crate::value::Value;
 
 use super::class::*;
 use super::schema::{Column, RowSchema};
@@ -203,7 +204,7 @@ fn validate_range(range: &BTreeRange, schema: &[Column]) -> TCResult<()> {
     Ok(())
 }
 
-type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Sync + Unpin>>>;
+type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Unpin>>>;
 
 #[derive(Clone)]
 pub struct BTreeSlice {
@@ -230,12 +231,18 @@ impl CollectionInstance for BTreeSlice {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         bounds: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        let bounds: Selector = bounds.try_into()?;
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
+        let bounds: Selector =
+            bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
         validate_selector(&bounds, self.source.schema())?;
 
         let schema: Vec<ValueType> = self.source.schema().iter().map(|c| *c.dtype()).collect();
@@ -246,7 +253,7 @@ impl CollectionInstance for BTreeSlice {
             (Selector::Range(container, _), Selector::Range(contained, _))
                 if container.contains(contained, &schema)? =>
             {
-                self.source.get_item(txn, bounds.into()).await
+                self.source.get(txn, path, bounds.cast_into()).await
             }
             _ => Err(error::bad_request(
                 &format!("BTreeSlice[{}] does not contain", &self.bounds),
@@ -264,9 +271,10 @@ impl CollectionInstance for BTreeSlice {
         Ok(count == 0)
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         _txn: Arc<Txn>,
+        _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
@@ -275,14 +283,14 @@ impl CollectionInstance for BTreeSlice {
         ))
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         let rows = self
             .source
             .clone()
             .slice(txn.id().clone(), self.bounds.clone())
             .await?;
 
-        Ok(Box::pin(rows.map(Value::Tuple)))
+        Ok(Box::pin(rows.map(Value::Tuple).map(Scalar::Value)))
     }
 }
 
@@ -802,12 +810,18 @@ impl CollectionInstance for BTreeFile {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         bounds: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        let bounds: Selector = bounds.try_into()?;
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
+        let bounds: Selector =
+            bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
         validate_selector(&bounds, self.schema())?;
 
         if let Selector::Key(key) = bounds {
@@ -815,8 +829,9 @@ impl CollectionInstance for BTreeFile {
                 .clone()
                 .slice(txn.id().clone(), Selector::Key(key.to_vec()))
                 .await?;
+
             if let Some(key) = slice.next().await {
-                Ok(CollectionItem::Value(key))
+                Ok(CollectionItem::Scalar(key))
             } else {
                 Err(error::not_found(Value::Tuple(key)))
             }
@@ -831,20 +846,26 @@ impl CollectionInstance for BTreeFile {
             .map(|root| root.keys.is_empty())
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         key: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
         let key = match key {
-            CollectionItem::Value(key) => key,
+            CollectionItem::Scalar(key) => key,
             CollectionItem::Slice(_) => {
                 return Err(error::unsupported("BTree::put(<slice>) is not supported"));
             }
         };
 
-        let selector: Selector = selector.try_into()?;
+        let selector: Selector =
+            selector.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
 
         validate_selector(&selector, self.schema())?;
         validate_key(&key, self.schema())?;
@@ -859,12 +880,14 @@ impl CollectionInstance for BTreeFile {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         let stream = self
             .clone()
             .slice(txn.id().clone(), Selector::all())
             .await?
-            .map(Value::Tuple);
+            .map(Value::Tuple)
+            .map(Scalar::Value);
+
         Ok(Box::pin(stream))
     }
 }
@@ -1031,17 +1054,6 @@ impl Selector {
     }
 }
 
-impl From<Selector> for Value {
-    fn from(selector: Selector) -> Value {
-        match selector {
-            Selector::Key(key) => Value::Tuple(key),
-            Selector::Range(BTreeRange(start, end), reverse) => {
-                Value::Tuple(vec![start.into(), end.into(), reverse.into()])
-            }
-        }
-    }
-}
-
 impl From<BTreeRange> for Selector {
     fn from(range: BTreeRange) -> Selector {
         Selector::Range(range, false)
@@ -1054,31 +1066,19 @@ impl From<Key> for Selector {
     }
 }
 
-impl TryFrom<Value> for Selector {
-    type Error = error::TCError;
+impl TryCastFrom<Value> for Selector {
+    fn can_cast_from(_value: &Value) -> bool {
+        unimplemented!()
+    }
 
-    fn try_from(value: Value) -> TCResult<Selector> {
-        let selector: Vec<Value> = value.try_into()?;
-        match &selector[..] {
-            [start, end] => {
-                let start: TCResult<Vec<Bound<Value>>> = start.clone().try_into();
-                let end: TCResult<Vec<Bound<Value>>> = end.clone().try_into();
-                if start.is_ok() && end.is_ok() {
-                    return Ok(Selector::Range(BTreeRange(start?, end?), false));
-                }
-            }
-            [start, end, reverse] => {
-                let start: TCResult<Vec<Bound<Value>>> = start.clone().try_into();
-                let end: TCResult<Vec<Bound<Value>>> = end.clone().try_into();
-                let reverse: TCResult<bool> = reverse.clone().try_into();
-                if start.is_ok() && end.is_ok() && reverse.is_ok() {
-                    return Ok(Selector::Range(BTreeRange(start?, end?), reverse?));
-                }
-            }
-            _ => {}
-        }
+    fn opt_cast_from(_value: Value) -> Option<Selector> {
+        unimplemented!()
+    }
+}
 
-        Ok(Selector::Key(selector))
+impl CastFrom<Selector> for Value {
+    fn cast_from(_s: Selector) -> Value {
+        unimplemented!()
     }
 }
 

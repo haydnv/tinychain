@@ -6,8 +6,7 @@ use crate::class::{Instance, TCResult};
 use crate::collection::btree::BTreeRange;
 use crate::collection::schema::Column;
 use crate::error;
-use crate::value::class::ValueType;
-use crate::value::{Value, ValueId};
+use crate::scalar::{Value, ValueId, ValueType};
 
 #[derive(Clone)]
 pub enum ColumnBound {

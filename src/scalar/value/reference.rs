@@ -5,8 +5,8 @@ use serde::de;
 use serde::ser::Serializer;
 use serde::Serialize;
 
-use crate::error;
-use crate::value::{TCResult, ValueId};
+use crate::error::{self, TCResult};
+use crate::scalar::ValueId;
 
 #[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct TCRef {
@@ -14,6 +14,10 @@ pub struct TCRef {
 }
 
 impl TCRef {
+    pub fn into_id(self) -> ValueId {
+        self.to
+    }
+
     pub fn value_id(&'_ self) -> &'_ ValueId {
         &self.to
     }

@@ -9,8 +9,7 @@ use signature::{Signature, Signer, Verifier};
 
 use crate::class::TCResult;
 use crate::error;
-use crate::value::link::{Link, TCPath};
-use crate::value::Value;
+use crate::scalar::{Link, TCPath, Value};
 
 pub type Auth = Option<Token>;
 

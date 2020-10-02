@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
@@ -7,9 +6,8 @@ use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
 use crate::error;
+use crate::scalar::{label, Link, Scalar, TCPath, TryCastInto, Value};
 use crate::transaction::{Transact, Txn};
-use crate::value::link::{Link, TCPath};
-use crate::value::{label, Value};
 
 use super::btree::{BTreeFile, BTreeType};
 use super::null::{Null, NullType};
@@ -17,52 +15,54 @@ use super::table::{TableBaseType, TableType};
 use super::tensor::{TensorBaseType, TensorType};
 use super::{Collection, CollectionBase, CollectionView};
 
-pub enum CollectionItem<I: Into<Value>, S: CollectionInstance> {
-    Value(I),
+pub enum CollectionItem<I: Into<Scalar>, S: CollectionInstance> {
+    Scalar(I),
     Slice(S),
 }
 
-impl<I: Into<Value>, S: CollectionInstance> From<CollectionItem<I, S>> for State {
+impl<I: Into<Scalar>, S: CollectionInstance> From<CollectionItem<I, S>> for State {
     fn from(ci: CollectionItem<I, S>) -> State {
         match ci {
-            CollectionItem::Value(v) => State::Value(v.into()),
+            CollectionItem::Scalar(s) => State::Scalar(s.into()),
             CollectionItem::Slice(s) => State::Collection(s.into()),
         }
     }
 }
 
 #[async_trait]
-pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
+pub trait CollectionClass: Class + Into<CollectionType> + Send {
     type Instance: CollectionInstance;
 
     async fn get(
+        &self,
         txn: Arc<Txn>,
-        path: &TCPath,
         schema: Value,
     ) -> TCResult<<Self as CollectionClass>::Instance>;
 }
 
 #[async_trait]
-pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sync {
-    type Item: Into<Value>;
+pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
+    type Item: Into<Scalar>;
     type Slice: CollectionInstance;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>>;
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool>;
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()>;
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>>;
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -88,13 +88,16 @@ impl CollectionClass for CollectionType {
     type Instance = Collection;
 
     async fn get(
+        &self,
         txn: Arc<Txn>,
-        path: &TCPath,
         schema: Value,
     ) -> TCResult<<Self as CollectionClass>::Instance> {
-        CollectionBaseType::get(txn, path, schema)
-            .await
-            .map(Collection::Base)
+        match self {
+            Self::Base(cbt) => cbt.get(txn, schema).map_ok(Collection::Base).await,
+            Self::View(_) => Err(error::unsupported(
+                "Cannot instantiate a CollectionView directly",
+            )),
+        }
     }
 }
 
@@ -166,42 +169,18 @@ impl Class for CollectionBaseType {
 impl CollectionClass for CollectionBaseType {
     type Instance = CollectionBase;
 
-    async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<CollectionBase> {
-        println!("CollectionBaseType::get {}", path);
-
-        let suffix = path.from_path(&Self::prefix())?;
-
-        if suffix.is_empty() {
-            return Err(error::unsupported("You must specify a type of Collection"));
-        }
-
-        match suffix[0].as_str() {
-            "btree" if suffix.len() == 1 => {
-                BTreeFile::create(txn, schema.try_into()?)
+    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<CollectionBase> {
+        match self {
+            Self::BTree => {
+                let schema = schema
+                    .try_cast_into(|s| error::bad_request("Expected BTree schema but found", s))?;
+                BTreeFile::create(txn, schema)
                     .map_ok(CollectionBase::BTree)
                     .await
             }
-            "null" if suffix.len() == 1 => {
-                if schema != Value::None {
-                    Err(error::bad_request(
-                        "Null Collection has no schema, found",
-                        schema,
-                    ))
-                } else {
-                    Ok(CollectionBase::Null(Null::create()))
-                }
-            }
-            "table" => {
-                TableBaseType::get(txn, path, schema)
-                    .map_ok(CollectionBase::Table)
-                    .await
-            }
-            "tensor" => {
-                TensorBaseType::get(txn, path, schema)
-                    .map_ok(CollectionBase::Tensor)
-                    .await
-            }
-            other => Err(error::not_found(other)),
+            Self::Null => Ok(CollectionBase::Null(Null::create())),
+            Self::Table(tt) => tt.get(txn, schema).map_ok(CollectionBase::Table).await,
+            Self::Tensor(tt) => tt.get(txn, schema).map_ok(CollectionBase::Tensor).await,
         }
     }
 }

@@ -15,8 +15,6 @@ use crate::block::File;
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::number::class::{NumberClass, NumberInstance, NumberType};
-use crate::value::Number;
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::class::TensorInstance;
@@ -293,7 +291,7 @@ impl BlockListFile {
         })
     }
 
-    pub async fn from_values<S: Stream<Item = Number> + Send + Sync + Unpin>(
+    pub async fn from_values<S: Stream<Item = Number> + Send + Unpin>(
         txn: Arc<Txn>,
         shape: Shape,
         dtype: NumberType,
@@ -1913,7 +1911,7 @@ impl From<BlockListFile> for DenseTensor {
     }
 }
 
-pub async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Sync + Unpin + 'static>(
+pub async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Unpin + 'static>(
     txn: Arc<Txn>,
     coords: S,
     num_coords: u64,

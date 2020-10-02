@@ -15,16 +15,14 @@ use serde::de::DeserializeOwned;
 use crate::auth::{Auth, Token};
 use crate::class::{State, TCResult, TCStream};
 use crate::error;
+use crate::scalar::value::link::*;
+use crate::scalar::{Scalar, Value, ValueId};
+use crate::stream::json::JsonListStream;
 use crate::transaction::Txn;
-use crate::value::json::JsonListStream;
-use crate::value::link::*;
-use crate::value::{Value, ValueId};
 
 use super::Gateway;
 
 const TIMEOUT: Duration = Duration::from_secs(30);
-const ERR_NO_CAPTURE: &str =
-    "You must specify what state to capture (i.e. with ?capture=[\"foo\", \"bar\", ...])";
 const ERR_DECODE: &str = "(unable to decode error message)";
 
 pub struct Client {
@@ -51,7 +49,7 @@ impl Client {
         key: &Value,
         auth: &Auth,
         txn: &Option<Arc<Txn>>,
-    ) -> TCResult<Value> {
+    ) -> TCResult<Scalar> {
         if auth.is_some() {
             return Err(error::not_implemented("Authorization"));
         }
@@ -102,16 +100,13 @@ impl Client {
         }
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + 'static>(
+    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + 'static>(
         &self,
         link: &Link,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
         txn: Option<Arc<Txn>>,
-    ) -> TCResult<()> {
-        // TODO: respond with a Stream
-
+    ) -> TCResult<State> {
         if auth.is_some() {
             return Err(error::not_implemented("Authorization"));
         }
@@ -125,12 +120,10 @@ impl Client {
             .as_ref()
             .ok_or_else(|| error::bad_request("No host to resolve", &link))?;
 
-        let query_string = encode_query_string(vec![("capture", &serde_json::to_string(capture)?)]);
-
         let uri = Uri::builder()
             .scheme(host.protocol().to_string().as_str())
             .authority(host.authority().as_str())
-            .path_and_query(format!("{}?{}", link.path(), query_string).as_str())
+            .path_and_query(link.path().to_string().as_str())
             .build()
             .map_err(error::internal)?;
 
@@ -159,7 +152,10 @@ impl Client {
 
                 Err(error::TCError::of(status.into(), msg))
             }
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                // TODO: deserialize response
+                Ok(().into())
+            }
         }
     }
 }
@@ -221,50 +217,60 @@ impl Server {
                 let state = gateway.get(&path.clone().into(), id, token, None).await?;
 
                 match state {
-                    State::Value(value) => {
-                        let value = serde_json::to_string_pretty(&value)
+                    State::Scalar(scalar) => {
+                        let scalar = serde_json::to_string_pretty(&scalar)
                             .map(|json| format!("{}\r\n", json))
                             .map(Bytes::from)
                             .map_err(error::TCError::from);
-                        Ok(Box::pin(stream::once(future::ready(value))))
+
+                        Ok(Box::pin(stream::once(future::ready(scalar))))
                     }
                     _other => Ok(Box::pin(stream::once(future::ready(Err(
                         error::not_implemented("serializing a State over the network"),
                     ))))),
                 }
             }
+
             &Method::PUT => {
                 println!("PUT {}", path);
                 let id = get_param(&mut params, "key")?
                     .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
-                let value: Value = deserialize_body(request.body_mut(), self.request_limit).await?;
+                let value: Scalar =
+                    deserialize_body(request.body_mut(), self.request_limit).await?;
                 gateway
                     .clone()
                     .put(&path.clone().into(), id, value.into(), &token, None)
                     .await?;
                 Ok(Box::pin(stream::empty()))
             }
+
             &Method::POST => {
                 println!("POST {}", path);
-                let values: Vec<(ValueId, Value)> =
+                let request: Scalar =
                     deserialize_body(request.body_mut(), self.request_limit).await?;
-
-                let capture: Option<Vec<ValueId>> = get_param(&mut params, "capture")?;
-                let capture: Vec<ValueId> =
-                    capture.ok_or_else(|| error::unsupported(ERR_NO_CAPTURE))?;
 
                 let response = gateway
                     .clone()
-                    .handle_post(
-                        &path.clone().into(),
-                        stream::iter(values.into_iter()),
-                        &capture,
-                        token,
-                        None,
-                    )
+                    .handle_post(&path.clone().into(), request, token, None)
                     .await?;
 
-                response_list(response)
+                match response {
+                    State::Scalar(scalar) => {
+                        let response = serde_json::to_string_pretty(&scalar)
+                            .map(|s| format!("{}\r\n", s))
+                            .map(Bytes::from)
+                            .map_err(error::TCError::from);
+
+                        let response: TCStream<TCResult<Bytes>> =
+                            Box::pin(stream::once(future::ready(response)));
+
+                        Ok(response)
+                    }
+                    other => Err(error::not_implemented(format!(
+                        "Streaming serialization for {}",
+                        other
+                    ))),
+                }
             }
             other => Err(error::method_not_allowed(format!(
                 "Tinychain does not support {}",
@@ -298,14 +304,14 @@ async fn deserialize_body<D: DeserializeOwned>(
     })
 }
 
-fn response_value_stream<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
+fn response_value_stream<S: Stream<Item = Value> + Send + Unpin + 'static>(
     s: S,
 ) -> TCStream<TCResult<Bytes>> {
     let json = JsonListStream::from(s);
-    Box::pin(json.map_ok(Bytes::from))
+    Box::pin(json.map_ok(Bytes::from).chain(stream_delimiter(b"\r\n")))
 }
 
-fn response_list<S: Stream<Item = Value> + Send + Sync + Unpin + 'static>(
+fn response_list<S: Stream<Item = Value> + Send + Unpin + 'static>(
     data: Vec<S>,
 ) -> TCResult<TCStream<TCResult<Bytes>>> {
     let start = stream_delimiter(b"[");
@@ -372,7 +378,7 @@ fn get_param<T: DeserializeOwned>(
 }
 
 fn transform_error(err: error::TCError) -> Response<Body> {
-    let mut response = Response::new(Body::from(err.message().to_string()));
+    let mut response = Response::new(Body::from(format!("{}\r\n", err.message())));
 
     use error::Code::*;
     *response.status_mut() = match err.reason() {

@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::pin::Pin;
 
@@ -9,9 +9,7 @@ use crate::chain::{Chain, ChainType};
 use crate::cluster::Cluster;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::value::link::{Link, TCPath};
-use crate::value::number::NumberType;
-use crate::value::{label, Value, ValueType};
+use crate::scalar::*;
 
 const ERR_EMPTY_CLASSPATH: &str = "Expected a class path, \
 e.g. /sbin/value/number/int/64 or /sbin/collection/table, but found: ";
@@ -20,10 +18,10 @@ pub const ERR_PROTECTED: &str =
     "You have accessed a protected class. This should not be possible. \
 Please file a bug report.";
 
-pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send + Sync>>;
+pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send>>;
 pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
 pub type TCResult<T> = error::TCResult<T>;
-pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Sync + Unpin>>;
+pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin>>;
 pub type TCTryStream<T> = TCStream<TCResult<T>>;
 
 pub trait Class: Into<Link> + Clone + Eq + fmt::Display {
@@ -65,7 +63,7 @@ pub enum TCType {
     Chain(ChainType),
     Cluster,
     Collection(CollectionType),
-    Value(ValueType),
+    Scalar(ScalarType),
 }
 
 impl Class for TCType {
@@ -78,7 +76,7 @@ impl Class for TCType {
             match suffix[0].as_str() {
                 "chain" => ChainType::from_path(path).map(TCType::Chain),
                 "collection" => CollectionType::from_path(path).map(TCType::Collection),
-                "value" => ValueType::from_path(path).map(TCType::Value),
+                "op" | "tuple" | "value" => ScalarType::from_path(path).map(TCType::Scalar),
                 other => Err(error::not_found(other)),
             }
         } else {
@@ -105,18 +103,7 @@ impl From<CollectionType> for TCType {
 
 impl From<ValueType> for TCType {
     fn from(vt: ValueType) -> TCType {
-        TCType::Value(vt)
-    }
-}
-
-impl TryFrom<TCType> for NumberType {
-    type Error = error::TCError;
-
-    fn try_from(class: TCType) -> TCResult<NumberType> {
-        match class {
-            TCType::Value(ValueType::Number(nt)) => Ok(nt),
-            other => Err(error::bad_request("Expected ValueType, found", other)),
-        }
+        TCType::Scalar(ScalarType::Value(vt))
     }
 }
 
@@ -125,7 +112,7 @@ impl TryFrom<TCType> for ValueType {
 
     fn try_from(class: TCType) -> TCResult<ValueType> {
         match class {
-            TCType::Value(class) => Ok(class),
+            TCType::Scalar(ScalarType::Value(class)) => Ok(class),
             other => Err(error::bad_request("Expected ValueType, found", other)),
         }
     }
@@ -137,7 +124,7 @@ impl From<TCType> for Link {
             TCType::Chain(ct) => ct.into(),
             TCType::Cluster => TCType::prefix().join(label("cluster").into()).into(),
             TCType::Collection(ct) => ct.into(),
-            TCType::Value(vt) => vt.into(),
+            TCType::Scalar(st) => st.into(),
         }
     }
 }
@@ -148,7 +135,7 @@ impl fmt::Display for TCType {
             Self::Chain(ct) => write!(f, "{}", ct),
             Self::Cluster => write!(f, "type Cluster"),
             Self::Collection(ct) => write!(f, "{}", ct),
-            Self::Value(vt) => write!(f, "{}", vt),
+            Self::Scalar(st) => write!(f, "{}", st),
         }
     }
 }
@@ -158,7 +145,7 @@ pub enum State {
     Chain(Chain),
     Cluster(Cluster),
     Collection(Collection),
-    Value(Value),
+    Scalar(Scalar),
 }
 
 impl Instance for State {
@@ -169,7 +156,7 @@ impl Instance for State {
             Self::Chain(chain) => chain.class().into(),
             Self::Cluster(_) => TCType::Cluster,
             Self::Collection(collection) => collection.class().into(),
-            Self::Value(value) => value.class().into(),
+            Self::Scalar(scalar) => scalar.class().into(),
         }
     }
 }
@@ -192,15 +179,15 @@ impl From<Collection> for State {
     }
 }
 
-impl From<Value> for State {
-    fn from(v: Value) -> State {
-        Self::Value(v)
+impl From<Scalar> for State {
+    fn from(s: Scalar) -> State {
+        Self::Scalar(s)
     }
 }
 
 impl From<()> for State {
     fn from(_: ()) -> State {
-        Self::Value(Value::None)
+        Self::Scalar(Scalar::Value(Value::None))
     }
 }
 
@@ -215,14 +202,23 @@ impl TryFrom<State> for Chain {
     }
 }
 
+impl TryFrom<State> for Scalar {
+    type Error = error::TCError;
+
+    fn try_from(state: State) -> TCResult<Scalar> {
+        match state {
+            State::Scalar(scalar) => Ok(scalar),
+            other => Err(error::bad_request("Expected Scalar but found", other)),
+        }
+    }
+}
+
 impl TryFrom<State> for Value {
     type Error = error::TCError;
 
     fn try_from(state: State) -> TCResult<Value> {
-        match state {
-            State::Value(value) => Ok(value),
-            other => Err(error::bad_request("Expected Value but found", other)),
-        }
+        let scalar = Scalar::try_from(state)?;
+        scalar.try_into()
     }
 }
 
@@ -232,7 +228,7 @@ impl fmt::Display for State {
             Self::Chain(c) => write!(f, "{}", c),
             Self::Cluster(c) => write!(f, "{}", c),
             Self::Collection(c) => write!(f, "{}", c),
-            Self::Value(v) => write!(f, "{}", v),
+            Self::Scalar(s) => write!(f, "{}", s),
         }
     }
 }

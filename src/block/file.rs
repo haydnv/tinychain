@@ -10,9 +10,9 @@ use uuid::Uuid;
 use crate::class::TCResult;
 use crate::error;
 use crate::lock::RwLock;
+use crate::scalar::value::link::PathSegment;
 use crate::transaction::lock::{Mutable, TxnLock, TxnLockReadGuard};
 use crate::transaction::{Transact, TxnId};
-use crate::value::link::PathSegment;
 
 use super::cache::Cache;
 use super::hostfs;

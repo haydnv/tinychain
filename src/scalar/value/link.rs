@@ -9,9 +9,8 @@ use addr::DomainName;
 use serde::de;
 use serde::ser::{SerializeMap, Serializer};
 
-use crate::error;
-use crate::value::string::Label;
-use crate::value::{TCResult, Value, ValueId};
+use crate::error::{self, TCResult};
+use crate::scalar::{Label, Value, ValueId};
 
 pub type PathSegment = ValueId;
 
@@ -464,6 +463,10 @@ impl TCPath {
         }
     }
 
+    pub fn into_segments(self) -> Vec<ValueId> {
+        self.segments
+    }
+
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
     }
@@ -546,7 +549,7 @@ impl fmt::Display for TCPath {
             "/{}",
             self.segments
                 .iter()
-                .map(String::from)
+                .map(|s| s.to_string())
                 .collect::<Vec<String>>()
                 .join("/")
         )

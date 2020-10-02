@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 use std::fmt;
 
-use crate::value::{label, TCPath};
+use crate::scalar::value::{label, TCPath};
 
 pub type TCResult<T> = Result<T, TCError>;
 
@@ -167,8 +167,7 @@ pub fn get(path: &TCPath, msg: String) -> TCError {
     TCError::of(code, msg)
 }
 
-pub fn bad_request<T: fmt::Display>(message: &str, info: T) -> TCError {
-    println!("error! {}: {}", message, info);
+pub fn bad_request<I: fmt::Display, T: fmt::Display>(message: I, info: T) -> TCError {
     TCError::of(Code::BadRequest, format!("{}: {}", message, info))
 }
 

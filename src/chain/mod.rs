@@ -9,9 +9,8 @@ use futures::TryFutureExt;
 use crate::auth::Auth;
 use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
 use crate::error;
+use crate::scalar::{label, Link, OpDef, Scalar, TCPath, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::op::OpDef;
-use crate::value::{label, Link, TCPath, Value, ValueId};
 
 mod block;
 mod null;
@@ -19,13 +18,13 @@ mod null;
 pub type ChainBlock = block::ChainBlock;
 
 #[async_trait]
-pub trait ChainClass: Class + Into<ChainType> + Send + Sync {
+pub trait ChainClass: Class + Into<ChainType> + Send {
     type Instance: ChainInstance;
 
     async fn get(
+        &self,
         txn: Arc<Txn>,
-        path: &TCPath,
-        ctype: TCPath,
+        dtype: TCType,
         schema: Value,
         ops: HashMap<ValueId, OpDef>,
     ) -> TCResult<<Self as ChainClass>::Instance>;
@@ -78,27 +77,18 @@ impl ChainClass for ChainType {
     type Instance = Chain;
 
     async fn get(
+        &self,
         txn: Arc<Txn>,
-        path: &TCPath,
-        ctype: TCPath,
+        dtype: TCType,
         schema: Value,
         ops: HashMap<ValueId, OpDef>,
     ) -> TCResult<Chain> {
-        let suffix = path.from_path(&Self::prefix())?;
-
-        if suffix.is_empty() {
-            Err(error::unsupported("You must specify a type of Chain"))
-        } else if suffix.len() > 1 {
-            Err(error::not_found(suffix))
-        } else {
-            match suffix[0].as_str() {
-                "null" => {
-                    null::NullChain::create(txn, ctype, schema, ops)
-                        .map_ok(Box::new)
-                        .map_ok(Chain::Null)
-                        .await
-                }
-                other => Err(error::not_found(other)),
+        match self {
+            Self::Null => {
+                null::NullChain::create(txn, dtype, schema, ops)
+                    .map_ok(Box::new)
+                    .map_ok(Chain::Null)
+                    .await
             }
         }
     }
@@ -112,14 +102,13 @@ pub trait ChainInstance: Instance {
 
     async fn put(&self, txn: Arc<Txn>, path: TCPath, key: Value, value: State) -> TCResult<()>;
 
-    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
+    async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
-    ) -> TCResult<Vec<TCStream<Value>>>;
+    ) -> TCResult<State>;
 
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
 }
@@ -155,16 +144,15 @@ impl ChainInstance for Chain {
         }
     }
 
-    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
+    async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
-    ) -> TCResult<Vec<TCStream<Value>>> {
+    ) -> TCResult<State> {
         match self {
-            Self::Null(nc) => nc.post(txn, path, data, capture, auth).await,
+            Self::Null(nc) => nc.post(txn, path, data, auth).await,
         }
     }
 

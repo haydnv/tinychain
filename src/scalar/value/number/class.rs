@@ -1,18 +1,20 @@
 use std::cmp::Ordering;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::{Add, Mul, Sub};
 
 use serde::{Deserialize, Serialize};
 
-use crate::class::{Class, TCResult};
+use crate::class::{Class, TCResult, TCType};
 use crate::error;
-use crate::value::class::{ValueClass, ValueInstance, ValueType};
-use crate::value::link::TCPath;
-use crate::value::{label, Link};
+use crate::scalar::{
+    label, CastInto, Link, Scalar, ScalarClass, ScalarType, TCPath, TryCastFrom, Value, ValueClass,
+    ValueInstance, ValueType,
+};
 
 use super::instance::{Boolean, Complex, Float, Int, Number, UInt};
 
-pub trait NumberClass: Class + ValueClass + Into<NumberType> + Ord + Send + Sync {
+pub trait NumberClass: Class + ValueClass + Into<NumberType> + Ord + Send {
     type Instance: NumberInstance;
 
     fn size(self) -> usize;
@@ -37,6 +39,7 @@ pub trait NumberInstance:
     + PartialOrd
     + From<Boolean>
     + Into<Number>
+    + Default
 {
     type Abs: NumberInstance;
     type Class: NumberClass;
@@ -126,26 +129,6 @@ pub trait NumberInstance:
     }
 }
 
-pub trait CastFrom<T> {
-    fn cast_from(value: T) -> Self;
-}
-
-pub trait CastInto<T> {
-    fn cast_into(self) -> T;
-}
-
-impl<T> CastFrom<T> for T {
-    fn cast_from(value: T) -> Self {
-        value
-    }
-}
-
-impl<T, F: CastFrom<T>> CastInto<F> for T {
-    fn cast_into(self) -> F {
-        F::cast_from(self)
-    }
-}
-
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Deserialize, Serialize)]
 pub enum ComplexType {
     C32,
@@ -178,28 +161,23 @@ impl Class for ComplexType {
     }
 }
 
-impl ValueClass for ComplexType {
+impl ScalarClass for ComplexType {
     type Instance = Complex;
-
-    fn get(path: &TCPath, value: Complex) -> TCResult<Complex> {
-        if path.is_empty() {
-            Ok(value)
-        } else if path.len() == 1 {
-            let dtype = match path[0].as_str() {
-                "32" => ComplexType::C32,
-                "64" => ComplexType::C64,
-                _ => return Err(error::not_found(&path[0])),
-            };
-
-            Ok(value.into_type(dtype))
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
     }
+
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Complex> {
+        let v = Value::try_from(scalar.into())?;
+        let n = Number::try_from(v)?;
+        let n = n.into_type(NumberType::Complex(*self));
+        n.try_into()
+    }
+}
+
+impl ValueClass for ComplexType {
+    type Instance = Complex;
 }
 
 impl NumberClass for ComplexType {
@@ -279,20 +257,24 @@ impl Class for BooleanType {
     }
 }
 
-impl ValueClass for BooleanType {
+impl ScalarClass for BooleanType {
     type Instance = Boolean;
-
-    fn get(path: &TCPath, value: Boolean) -> TCResult<Boolean> {
-        if path.is_empty() {
-            Ok(value)
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
     }
+
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Boolean> {
+        let s: Scalar = scalar.into();
+        let v = Value::try_from(s)?;
+        let n = Number::try_from(v)?;
+        let n = n.into_type(NumberType::Bool);
+        n.try_into()
+    }
+}
+
+impl ValueClass for BooleanType {
+    type Instance = Boolean;
 }
 
 impl NumberClass for BooleanType {
@@ -365,28 +347,24 @@ impl Class for FloatType {
     }
 }
 
-impl ValueClass for FloatType {
+impl ScalarClass for FloatType {
     type Instance = Float;
-
-    fn get(path: &TCPath, value: Float) -> TCResult<Float> {
-        if path.is_empty() {
-            Ok(value)
-        } else if path.len() == 1 {
-            let dtype = match path[0].as_str() {
-                "32" => FloatType::F32,
-                "64" => FloatType::F64,
-                _ => return Err(error::not_found(&path[0])),
-            };
-
-            Ok(value.into_type(dtype))
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
     }
+
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Float> {
+        let s: Scalar = scalar.into();
+        let v = Value::try_from(s)?;
+        let n = Number::try_from(v)?;
+        let n = n.into_type(NumberType::Float(*self));
+        n.try_into()
+    }
+}
+
+impl ValueClass for FloatType {
+    type Instance = Float;
 }
 
 impl NumberClass for FloatType {
@@ -480,31 +458,23 @@ impl Class for IntType {
     }
 }
 
-impl ValueClass for IntType {
+impl ScalarClass for IntType {
     type Instance = Int;
-
-    fn get(path: &TCPath, value: Int) -> TCResult<Int> {
-        let path = path.from_path(&Self::prefix())?;
-
-        if path.is_empty() {
-            Ok(value)
-        } else if path.len() == 1 {
-            let dtype = match path[0].as_str() {
-                "16" => IntType::I16,
-                "32" => IntType::I32,
-                "64" => IntType::I64,
-                _ => return Err(error::not_found(&path[0])),
-            };
-
-            Ok(value.into_type(dtype))
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
     }
+
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Int> {
+        let v = Value::try_from(scalar.into())?;
+        let n = Number::try_from(v)?;
+        let n = n.into_type(NumberType::Int(*self));
+        n.try_into()
+    }
+}
+
+impl ValueClass for IntType {
+    type Instance = Int;
 }
 
 impl NumberClass for IntType {
@@ -606,32 +576,23 @@ impl Class for UIntType {
     }
 }
 
-impl ValueClass for UIntType {
+impl ScalarClass for UIntType {
     type Instance = UInt;
-
-    fn get(path: &TCPath, value: UInt) -> TCResult<UInt> {
-        let path = path.from_path(&Self::prefix())?;
-
-        if path.is_empty() {
-            Ok(value)
-        } else if path.len() == 1 {
-            let dtype = match path[0].as_str() {
-                "8" => UIntType::U8,
-                "16" => UIntType::U16,
-                "32" => UIntType::U32,
-                "64" => UIntType::U64,
-                _ => return Err(error::not_found(&path[0])),
-            };
-
-            Ok(value.into_type(dtype))
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
     }
+
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<UInt> {
+        let v = Value::try_from(scalar.into())?;
+        let n = Number::try_from(v)?;
+        let n = n.into_type(NumberType::UInt(*self));
+        n.try_into()
+    }
+}
+
+impl ValueClass for UIntType {
+    type Instance = UInt;
 }
 
 impl NumberClass for UIntType {
@@ -746,33 +707,21 @@ impl Class for NumberType {
     }
 }
 
-impl ValueClass for NumberType {
+impl ScalarClass for NumberType {
     type Instance = Number;
-
-    fn get(path: &TCPath, value: Number) -> TCResult<Number> {
-        println!("NumberType::get {}", path);
-        let suffix = path.from_path(&Self::prefix())?;
-        println!("suffix {}", suffix);
-
-        if suffix.is_empty() {
-            return Err(error::bad_request(
-                "You must specify a type of Number to GET",
-                "",
-            ));
-        }
-
-        match suffix[0].as_str() {
-            "complex" => ComplexType::get(path, value.cast_into()).map(Number::Complex),
-            "float" => FloatType::get(path, value.cast_into()).map(Number::Float),
-            "int" => IntType::get(path, value.cast_into()).map(Number::Int),
-            "uint" => UIntType::get(path, value.cast_into()).map(Number::UInt),
-            other => Err(error::not_found(other)),
-        }
-    }
 
     fn size(self) -> Option<usize> {
         Some(NumberClass::size(self))
     }
+
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Number> {
+        let value = Value::try_from(scalar.into())?;
+        Number::try_from(value).map(|n| n.into_type(*self))
+    }
+}
+
+impl ValueClass for NumberType {
+    type Instance = Number;
 }
 
 impl NumberClass for NumberType {
@@ -828,6 +777,48 @@ impl From<NumberType> for Link {
             Float(ft) => ft.into(),
             Int(it) => it.into(),
             UInt(ut) => ut.into(),
+        }
+    }
+}
+
+impl TryFrom<TCType> for NumberType {
+    type Error = error::TCError;
+
+    fn try_from(class: TCType) -> TCResult<NumberType> {
+        match class {
+            TCType::Scalar(ScalarType::Value(ValueType::Number(nt))) => Ok(nt),
+            other => Err(error::bad_request("Expected ValueType, found", other)),
+        }
+    }
+}
+
+impl TryCastFrom<Link> for NumberType {
+    fn can_cast_from(link: &Link) -> bool {
+        match NumberType::from_path(link.path()) {
+            Ok(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(link: Link) -> Option<NumberType> {
+        NumberType::from_path(link.path()).ok()
+    }
+}
+
+impl TryCastFrom<TCType> for NumberType {
+    fn can_cast_from(class: &TCType) -> bool {
+        if let TCType::Scalar(ScalarType::Value(ValueType::Number(_))) = class {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(class: TCType) -> Option<NumberType> {
+        if let TCType::Scalar(ScalarType::Value(ValueType::Number(nt))) = class {
+            Some(nt)
+        } else {
+            None
         }
     }
 }

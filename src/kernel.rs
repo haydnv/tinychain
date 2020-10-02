@@ -1,20 +1,16 @@
-use std::collections::HashMap;
 use std::convert::TryInto;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use futures::{Stream, TryFutureExt};
+use futures::stream;
+use futures::TryFutureExt;
 
 use crate::auth::Auth;
-use crate::chain::{ChainClass, ChainType};
-use crate::class::{State, TCResult, TCStream};
+use crate::class::{Class, State, TCResult};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error;
+use crate::scalar::*;
 use crate::transaction::Txn;
-use crate::value::class::ValueClass;
-use crate::value::link::TCPath;
-use crate::value::op::OpDef;
-use crate::value::{label, Value, ValueId, ValueType};
 
 const ERR_TXN_REQUIRED: &str = "Collection requires a transaction context";
 
@@ -28,58 +24,39 @@ pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<St
 
     match suffix[0].as_str() {
         "chain" => {
-            let txn = txn.ok_or_else(|| error::unsupported(ERR_TXN_REQUIRED))?;
-            let ((ctype, schema), ops): ((TCPath, Value), Vec<(ValueId, OpDef)>) = id.try_into()?;
-            let ops: HashMap<ValueId, OpDef> = ops.into_iter().collect();
-            ChainType::get(txn, path, ctype, schema, ops)
-                .map_ok(State::Chain)
-                .await
+            let _txn = txn.ok_or_else(|| error::unsupported(ERR_TXN_REQUIRED))?;
+            Err(error::not_implemented("Instantiate Chain"))
         }
         "collection" => {
             let txn = txn.ok_or_else(|| error::unsupported(ERR_TXN_REQUIRED))?;
-            CollectionType::get(txn, path, id)
-                .map_ok(State::Collection)
-                .await
+            let ctype = CollectionType::from_path(path)?;
+            ctype.get(txn, id).map_ok(State::Collection).await
         }
         "error" => Err(error::get(path, id.try_into()?)),
-        "value" => ValueType::get(path, id).map(State::Value),
+        "value" => {
+            let dtype = ValueType::from_path(path)?;
+            dtype.try_cast(id).map(Scalar::Value).map(State::Scalar)
+        }
         "transact" => Err(error::method_not_allowed(suffix)),
         other => Err(error::not_found(other)),
     }
 }
 
-pub async fn post<S: Stream<Item = (ValueId, Value)> + Unpin>(
-    txn: Arc<Txn>,
-    path: &TCPath,
-    values: S,
-    capture: &[ValueId],
-    auth: Auth,
-) -> TCResult<Vec<TCStream<Value>>> {
+pub async fn post(txn: Arc<Txn>, path: &TCPath, data: Scalar, auth: Auth) -> TCResult<State> {
     let suffix = path.from_path(&TCPath::from_str("sbin")?)?;
 
     if suffix.is_empty() {
         Err(error::method_not_allowed(path))
     } else if &suffix == "/transact" {
-        transact(txn, values, capture, auth.clone()).await
+        if data.matches::<Vec<(ValueId, Scalar)>>() {
+            let values: Vec<(ValueId, Scalar)> = data.opt_cast_into().unwrap();
+            txn.execute(stream::iter(values), auth).await
+        } else if data.matches::<OpRef>() {
+            Err(error::not_implemented("Resolve OpRef"))
+        } else {
+            Ok(State::Scalar(data))
+        }
     } else {
         Err(error::not_found(path))
-    }
-}
-
-async fn transact<S: Stream<Item = (ValueId, Value)> + Unpin>(
-    txn: Arc<Txn>,
-    values: S,
-    capture: &[ValueId],
-    auth: Auth,
-) -> TCResult<Vec<TCStream<Value>>> {
-    match txn.clone().execute_and_stream(values, capture, auth).await {
-        Ok(response) => {
-            txn.rollback().await;
-            Ok(response)
-        }
-        Err(cause) => {
-            txn.rollback().await;
-            Err(cause)
-        }
     }
 }

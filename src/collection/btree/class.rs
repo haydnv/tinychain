@@ -7,9 +7,8 @@ use crate::class::{Class, Instance, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
+use crate::scalar::{label, Link, Scalar, TCPath, Value};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::link::{Link, TCPath};
-use crate::value::{label, Value};
 
 use super::{BTreeFile, BTreeSlice, Key, Selector};
 
@@ -41,12 +40,8 @@ impl Class for BTreeType {
 impl CollectionClass for BTreeType {
     type Instance = BTree;
 
-    async fn get(_txn: Arc<Txn>, path: &TCPath, _schema: Value) -> TCResult<BTree> {
-        if path.is_empty() {
-            Err(error::not_implemented("BTreeType::get"))
-        } else {
-            Err(error::not_found(path))
-        }
+    async fn get(&self, _txn: Arc<Txn>, _schema: Value) -> TCResult<BTree> {
+        Err(error::not_implemented("BTreeType::get"))
     }
 }
 
@@ -93,14 +88,15 @@ impl CollectionInstance for BTree {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Tree(tree) => tree.get_item(txn, selector).await,
-            Self::View(view) => view.get_item(txn, selector).await,
+            Self::Tree(tree) => tree.get(txn, path, selector).await,
+            Self::View(view) => view.get(txn, path, selector).await,
         }
     }
 
@@ -111,19 +107,20 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Tree(tree) => tree.put_item(txn, selector, value).await,
-            Self::View(view) => view.put_item(txn, selector, value).await,
+            Self::Tree(tree) => tree.put(txn, path, selector, value).await,
+            Self::View(view) => view.put(txn, path, selector, value).await,
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Tree(tree) => tree.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,

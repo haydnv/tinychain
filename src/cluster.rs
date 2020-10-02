@@ -4,20 +4,17 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future;
-use futures::stream::{self, Stream, StreamExt};
+use futures::stream::Stream;
 
 use crate::auth::Auth;
 use crate::block::Dir;
 use crate::chain::{Chain, ChainInstance};
-use crate::class::{State, TCResult, TCStream};
+use crate::class::{State, TCResult};
 use crate::error;
 use crate::gateway::Gateway;
+use crate::scalar::*;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::link::{LinkHost, PathSegment, TCPath};
-use crate::value::op::OpRef;
-use crate::value::{label, Value, ValueId};
 
 #[derive(Clone)]
 enum ClusterReplica {
@@ -158,38 +155,20 @@ impl Cluster {
         Ok(())
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
+    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Sync + Unpin>(
         self,
         txn: Arc<Txn>,
         path: TCPath,
-        data: S,
-        capture: &[ValueId],
-        auth: Auth,
-    ) -> TCResult<Vec<TCStream<Value>>> {
+        _data: S,
+        _auth: Auth,
+    ) -> TCResult<State> {
         if path.is_empty() {
             Err(error::method_not_allowed("Cluster::post"))
-        } else if let Some(chain) = self.state.read(txn.id()).await?.chains.get(&path[0]) {
-            println!("Cluster::post to chain {}", &path[0]);
-            let get_chain = OpRef::Get(
-                self.path.clone().join(path[0].clone().into()).into(),
-                Value::None,
-            );
-            let data = stream::once(future::ready((label("self").into(), get_chain.into())))
-                .chain(data)
-                .map(|(name, value)| {
-                    println!("Cluster::post data {} = {}", name, value);
-                    (name, value)
-                });
-
-            println!("POST to chain {}{}", chain, path.slice_from(1));
-            let result = chain
-                .post(txn.clone(), path.slice_from(1), data, capture, auth)
-                .await;
-
-            txn.mutate(self.into()).await;
-            txn.commit().await;
-
-            result
+        } else if let Some(_chain) = self.state.read(txn.id()).await?.chains.get(&path[0]) {
+            Err(error::not_implemented(format!(
+                "Cluster::post to chain {}",
+                &path[0]
+            )))
         } else {
             Err(error::not_found(path))
         }

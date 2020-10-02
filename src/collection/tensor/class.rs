@@ -12,18 +12,19 @@ use crate::collection::{
     Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
 };
 use crate::error;
+use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::number::class::{NumberClass, NumberType};
-use crate::value::{label, Link, Number, TCPath, Value};
 
 use super::bounds::{Bounds, Shape};
 use super::dense::BlockListFile;
 use super::sparse::SparseTable;
 use super::{DenseTensor, SparseTensor, TensorBoolean, TensorIO, TensorTransform};
 
+const ERR_CREATE_DENSE: &str = "DenseTensor can be constructed with (NumberType, Shape) or \
+(Number, ...), not";
 const ERR_SPECIFY_TYPE: &str = "You must specify a type of tensor (tensor/dense or tensor/sparse)";
 
-pub trait TensorInstance: Send + Sync {
+pub trait TensorInstance: Send {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;
@@ -64,22 +65,15 @@ impl Class for TensorBaseType {
 impl CollectionClass for TensorBaseType {
     type Instance = TensorBase;
 
-    async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<TensorBase> {
-        println!("TensorBaseType::get {}", path);
-        let suffix = path.from_path(&Self::prefix())?;
-
-        if suffix.is_empty() {
-            return Err(error::unsupported(ERR_SPECIFY_TYPE));
-        }
-
-        match suffix[0].as_str() {
-            "dense" if suffix.len() == 1 => {
-                if let Ok(schema) = schema.clone().try_into() {
-                    let (dtype, shape): (NumberType, Shape) = schema;
+    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<TensorBase> {
+        match self {
+            Self::Dense => {
+                if schema.matches::<(NumberType, Shape)>() {
+                    let (dtype, shape): (NumberType, Shape) = schema.opt_cast_into().unwrap();
                     let block_list = BlockListFile::constant(txn, shape, dtype.zero()).await?;
                     Ok(TensorBase::Dense(block_list))
-                } else if let Ok(data) = schema.clone().try_into() {
-                    let mut data: Vec<Number> = data;
+                } else if schema.matches::<Vec<Number>>() {
+                    let mut data: Vec<Number> = schema.opt_cast_into().unwrap();
                     let shape = vec![data.len() as u64].into();
                     let dtype = data
                         .iter()
@@ -90,11 +84,10 @@ impl CollectionClass for TensorBaseType {
                             .await?;
                     Ok(TensorBase::Dense(block_list))
                 } else {
-                    Err(error::bad_request("DenseTensor can be constructed with (NumberType, Shape) or (Number, ...), not", schema))
+                    Err(error::bad_request(ERR_CREATE_DENSE, schema))
                 }
             }
-            "sparse" if suffix.len() == 1 => todo!(),
-            _ => Err(error::not_found(suffix)),
+            Self::Sparse => todo!(),
         }
     }
 }
@@ -148,30 +141,34 @@ impl CollectionInstance for TensorBase {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        TensorView::from(self.clone()).get_item(txn, selector).await
+        TensorView::from(self.clone())
+            .get(txn, path, selector)
+            .await
     }
 
     async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
         TensorView::from(self.clone()).is_empty(txn).await
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         TensorView::from(self.clone())
-            .put_item(txn, selector, value)
+            .put(txn, path, selector, value)
             .await
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         TensorView::from(self.clone()).to_stream(txn).await
     }
 }
@@ -299,16 +296,23 @@ impl CollectionInstance for TensorView {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        let bounds: Bounds = selector.try_into()?;
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
+        let bounds: Bounds = selector
+            .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
+
         if bounds.is_coord() {
             let coord: Vec<u64> = bounds.try_into()?;
             let value = self.read_value(&txn, &coord).await?;
-            Ok(CollectionItem::Value(value))
+            Ok(CollectionItem::Scalar(value))
         } else {
             let slice = self.slice(bounds)?;
             Ok(CollectionItem::Slice(slice))
@@ -319,30 +323,46 @@ impl CollectionInstance for TensorView {
         self.any(txn).map_ok(|any| !any).await
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
-        let bounds: Bounds = selector.try_into()?;
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
+        let bounds: Bounds = selector
+            .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
+
         match value {
-            CollectionItem::Value(value) => self.write_value(txn.id().clone(), bounds, value).await,
+            CollectionItem::Scalar(value) => {
+                self.write_value(txn.id().clone(), bounds, value).await
+            }
             CollectionItem::Slice(slice) => self.write(txn, bounds, slice).await,
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             // TODO: Forward errors, don't panic!
             Self::Dense(dense) => {
                 let result_stream = dense.value_stream(txn).await?;
-                let values: TCStream<Value> = Box::pin(result_stream.map(|r| r.unwrap().into()));
+                let values: TCStream<Scalar> = Box::pin(
+                    result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
+                );
                 Ok(values)
             }
             Self::Sparse(sparse) => {
                 let result_stream = sparse.filled(txn).await?;
-                let values: TCStream<Value> = Box::pin(result_stream.map(|r| r.unwrap().into()));
+                let values: TCStream<Scalar> = Box::pin(
+                    result_stream
+                        .map(|r| r.unwrap())
+                        .map(Value::from)
+                        .map(Scalar::Value),
+                );
                 Ok(values)
             }
         }
@@ -486,14 +506,15 @@ impl CollectionInstance for Tensor {
     type Item = Number;
     type Slice = TensorView;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get_item(txn, selector).await,
-            Self::View(view) => view.get_item(txn, selector).await,
+            Self::Base(base) => base.get(txn, path, selector).await,
+            Self::View(view) => view.get(txn, path, selector).await,
         }
     }
 
@@ -504,19 +525,20 @@ impl CollectionInstance for Tensor {
         }
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.put_item(txn, selector, value).await,
-            Self::View(view) => view.put_item(txn, selector, value).await,
+            Self::Base(base) => base.put(txn, path, selector, value).await,
+            Self::View(view) => view.put(txn, path, selector, value).await,
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Base(base) => base.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,

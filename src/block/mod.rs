@@ -8,9 +8,9 @@ use bytes::Bytes;
 
 use crate::class::TCResult;
 use crate::error;
+use crate::scalar::value::link::PathSegment;
 use crate::transaction::lock::{Mutate, TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::TxnId;
-use crate::value::link::PathSegment;
 
 mod cache;
 mod dir;
@@ -156,7 +156,7 @@ impl<B: BlockData> DerefMut for BlockOwnedMut<B> {
 }
 
 pub trait BlockData:
-    Clone + TryFrom<Bytes, Error = error::TCError> + Into<Bytes> + Send + Sync + fmt::Display
+    Clone + TryFrom<Bytes, Error = error::TCError> + Into<Bytes> + Send + fmt::Display
 {
     fn size(&self) -> usize;
 }

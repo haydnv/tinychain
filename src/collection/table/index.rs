@@ -14,8 +14,8 @@ use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
+use crate::scalar::{label, Link, Scalar, TCPath, TryCastInto, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{label, Link, TCPath, Value, ValueId};
 
 use super::bounds::{self, Bounds, ColumnBound};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
@@ -54,16 +54,13 @@ impl Class for TableBaseType {
 impl CollectionClass for TableBaseType {
     type Instance = TableBase;
 
-    async fn get(txn: Arc<Txn>, path: &TCPath, schema: Value) -> TCResult<TableBase> {
-        let suffix = path.from_path(&Self::prefix())?;
+    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<TableBase> {
+        let schema =
+            schema.try_cast_into(|v| error::bad_request("Expected TableSchema but found", v))?;
 
-        if suffix.is_empty() {
-            TableIndex::create(txn, schema.try_into()?)
-                .map_ok(TableBase::from)
-                .await
-        } else {
-            Err(error::not_found(suffix))
-        }
+        TableIndex::create(txn, schema)
+            .map_ok(TableBase::from)
+            .await
     }
 }
 
@@ -120,9 +117,10 @@ impl CollectionInstance for TableBase {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get_item(
+    async fn get(
         &self,
         _txn: Arc<Txn>,
+        _path: TCPath,
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::not_implemented("TableBase::get"))
@@ -136,24 +134,31 @@ impl CollectionInstance for TableBase {
         }
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
-        let key: Vec<Value> = selector.try_into()?;
-        match value {
-            CollectionItem::Value(value) => match self {
-                Self::Index(_) => Err(error::not_implemented("Index::put")),
-                Self::ROIndex(_) => Err(error::unsupported("Cannot write to a read-only index")),
-                Self::Table(table) => table.insert(txn.id().clone(), key, value).await,
-            },
-            _ => Err(error::not_implemented("TableBase::put")),
+        if path == TCPath::default() {
+            let key: Vec<Value> = selector.try_into()?;
+            match value {
+                CollectionItem::Scalar(value) => match self {
+                    Self::Index(_) => Err(error::not_implemented("Index::put")),
+                    Self::ROIndex(_) => {
+                        Err(error::unsupported("Cannot write to a read-only index"))
+                    }
+                    Self::Table(table) => table.insert(txn.id().clone(), key, value).await,
+                },
+                _ => Err(error::not_implemented("TableBase::put")),
+            }
+        } else {
+            Err(error::not_found(path))
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         let txn_id = txn.id().clone();
 
         let stream = match self {
@@ -162,18 +167,19 @@ impl CollectionInstance for TableBase {
             Self::Table(table) => table.clone().stream(txn_id).await?,
         };
 
-        Ok(Box::pin(stream.map(Value::from)))
+        Ok(Box::pin(stream.map(Scalar::from)))
     }
 }
 
+#[async_trait]
 impl TableInstance for TableBase {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         match self {
-            Self::Index(index) => index.count(txn_id),
-            Self::ROIndex(index) => index.count(txn_id),
-            Self::Table(table) => table.count(txn_id),
+            Self::Index(index) => index.count(txn_id).await,
+            Self::ROIndex(index) => index.count(txn_id).await,
+            Self::Table(table) => table.count(txn_id).await,
         }
     }
 
@@ -390,11 +396,12 @@ impl Index {
     }
 }
 
+#[async_trait]
 impl TableInstance for Index {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        self.len(txn_id)
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.len(txn_id).await
     }
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
@@ -424,7 +431,7 @@ impl TableInstance for Index {
                 Ok(self.clone().into())
             }
         } else {
-            let order: Vec<String> = order.iter().map(String::from).collect();
+            let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
             Err(error::bad_request(
                 &format!("Index with schema {} does not support order", self.schema),
                 order.join(", "),
@@ -561,11 +568,12 @@ impl ReadOnly {
     }
 }
 
+#[async_trait]
 impl TableInstance for ReadOnly {
     type Stream = <Index as TableInstance>::Stream;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        Box::pin(async move { self.index.clone().count(txn_id).await })
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.index.clone().count(txn_id).await
     }
 
     fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
@@ -770,11 +778,12 @@ impl TableIndex {
     }
 }
 
+#[async_trait]
 impl TableInstance for TableIndex {
     type Stream = <Index as TableInstance>::Stream;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        self.primary.count(txn_id)
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.primary.count(txn_id).await
     }
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
@@ -848,7 +857,7 @@ impl TableInstance for TableIndex {
             }
 
             if columns == &initial[..] {
-                let order: Vec<String> = columns.iter().map(String::from).collect();
+                let order: Vec<String> = columns.iter().map(|id| id.to_string()).collect();
                 return Err(error::bad_request(
                     "This table has no index to support the order",
                     order.join(", "),
@@ -983,7 +992,7 @@ impl TableInstance for TableIndex {
             }
 
             if order == &initial[..] {
-                let order: Vec<String> = order.iter().map(String::from).collect();
+                let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
                 return Err(error::bad_request(
                     "This table has no index to support the order",
                     order.join(", "),

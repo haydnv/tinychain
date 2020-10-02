@@ -10,8 +10,8 @@ use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
 use crate::error;
+use crate::scalar::{Link, Scalar, TCPath, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::{Link, TCPath, Value, ValueId};
 
 use super::schema::{Column, Row, TableSchema};
 
@@ -82,20 +82,19 @@ impl fmt::Display for TableType {
     }
 }
 
-pub trait TableInstance: Clone + Into<Table> + Sized + Send + Sync + 'static {
-    type Stream: Stream<Item = Vec<Value>> + Send + Sync + Unpin;
+#[async_trait]
+pub trait TableInstance: Clone + Into<Table> + Sized + Send + 'static {
+    type Stream: Stream<Item = Vec<Value>> + Send + Unpin;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        Box::pin(async move {
-            let count = self
-                .clone()
-                .stream(txn_id)
-                .await?
-                .fold(0, |count, _| future::ready(count + 1))
-                .await;
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        let count = self
+            .clone()
+            .stream(txn_id)
+            .await?
+            .fold(0, |count, _| future::ready(count + 1))
+            .await;
 
-            Ok(count)
-        })
+        Ok(count)
     }
 
     fn delete<'a>(self, _txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
@@ -187,14 +186,15 @@ impl CollectionInstance for Table {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn get_item(
+    async fn get(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get_item(txn, selector).await,
-            Self::View(view) => view.get_item(txn, selector).await,
+            Self::Base(base) => base.get(txn, path, selector).await,
+            Self::View(view) => view.get(txn, path, selector).await,
         }
     }
 
@@ -205,19 +205,20 @@ impl CollectionInstance for Table {
         }
     }
 
-    async fn put_item(
+    async fn put(
         &self,
         txn: Arc<Txn>,
+        path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.put_item(txn, selector, value).await,
-            Self::View(view) => view.put_item(txn, selector, value).await,
+            Self::Base(base) => base.put(txn, path, selector, value).await,
+            Self::View(view) => view.put(txn, path, selector, value).await,
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Base(base) => base.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,
@@ -225,13 +226,14 @@ impl CollectionInstance for Table {
     }
 }
 
+#[async_trait]
 impl TableInstance for Table {
     type Stream = TCStream<Vec<Value>>;
 
-    fn count(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
+    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         match self {
-            Self::Base(base) => base.count(txn_id),
-            Self::View(view) => view.count(txn_id),
+            Self::Base(base) => base.count(txn_id).await,
+            Self::View(view) => view.count(txn_id).await,
         }
     }
 

@@ -9,13 +9,11 @@ use futures::TryFutureExt;
 use crate::auth::Auth;
 use crate::class::*;
 use crate::collection::class::*;
-use crate::collection::{Collection, CollectionBase, CollectionBaseType};
+use crate::collection::{Collection, CollectionBase};
 use crate::error;
+use crate::scalar::{OpDef, Scalar, ScalarClass, TCPath, Value, ValueId};
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
-use crate::value::class::ValueClass;
-use crate::value::op::OpDef;
-use crate::value::{Link, TCPath, Value, ValueId, ValueType};
 
 use super::{Chain, ChainInstance, ChainType};
 
@@ -25,7 +23,7 @@ consider making a copy of the Collection first";
 #[derive(Clone)]
 enum ChainState {
     Collection(CollectionBase),
-    Value(TxnLock<Mutable<Value>>),
+    Scalar(TxnLock<Mutable<Scalar>>),
 }
 
 #[async_trait]
@@ -33,14 +31,14 @@ impl Transact for ChainState {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::Collection(c) => c.commit(txn_id).await,
-            Self::Value(v) => v.commit(txn_id).await,
+            Self::Scalar(s) => s.commit(txn_id).await,
         }
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
             Self::Collection(c) => c.rollback(txn_id).await,
-            Self::Value(v) => v.rollback(txn_id).await,
+            Self::Scalar(s) => s.rollback(txn_id).await,
         }
     }
 }
@@ -51,9 +49,9 @@ impl From<CollectionBase> for ChainState {
     }
 }
 
-impl From<Value> for ChainState {
-    fn from(v: Value) -> ChainState {
-        ChainState::Value(TxnLock::new("Chain value", v.into()))
+impl From<Scalar> for ChainState {
+    fn from(s: Scalar) -> ChainState {
+        ChainState::Scalar(TxnLock::new("Chain value", s.into()))
     }
 }
 
@@ -66,25 +64,22 @@ pub struct NullChain {
 impl NullChain {
     pub async fn create(
         txn: Arc<Txn>,
-        dtype: TCPath,
+        dtype: TCType,
         schema: Value,
         ops: HashMap<ValueId, OpDef>,
     ) -> TCResult<NullChain> {
-        let dtype = TCType::from_path(&dtype)?;
         let state = match dtype {
             TCType::Collection(ct) => match ct {
                 CollectionType::Base(ct) => {
-                    // TODO: figure out a better way than "Link::from(ct).path()"
-                    let collection =
-                        CollectionBaseType::get(txn, Link::from(ct).path(), schema).await?;
+                    let collection = ct.get(txn, schema).await?;
                     collection.into()
                 }
                 _ => return Err(error::unsupported(ERR_COLLECTION_VIEW)),
             },
-            TCType::Value(vt) => {
-                let value = ValueType::get(Link::from(vt).path(), schema)?;
-                println!("NullChain::create({}) wraps value {}", vt, value);
-                value.into()
+            TCType::Scalar(st) => {
+                let scalar = st.try_cast(schema)?;
+                println!("NullChain::create({}) wraps scalar {}", st, scalar);
+                scalar.into()
             }
             other => return Err(error::not_implemented(format!("Chain({})", other))),
         };
@@ -119,10 +114,10 @@ impl ChainInstance for NullChain {
                 ChainState::Collection(collection) => {
                     Ok(Collection::Base(collection.clone()).into())
                 }
-                ChainState::Value(value) => {
-                    value
+                ChainState::Scalar(scalar) => {
+                    scalar
                         .read(txn.id())
-                        .map_ok(|v| State::Value(v.clone()))
+                        .map_ok(|s| State::Scalar(s.clone()))
                         .await
                 }
             }
@@ -130,16 +125,9 @@ impl ChainInstance for NullChain {
             if let Some(op) = self.ops.read(txn.id()).await?.get(&path[0]) {
                 if let OpDef::Get((key_name, def)) = op {
                     let mut params = Vec::with_capacity(def.len() + 1);
-                    params.push((key_name.clone(), key));
+                    params.push((key_name.clone(), Scalar::Value(key)));
                     params.extend(def.to_vec());
-
-                    let capture = &params.last().unwrap().0.clone();
-                    let mut txn_state = txn
-                        .execute(stream::iter(params), &[capture.clone()], auth)
-                        .await?;
-                    txn_state
-                        .remove(capture)
-                        .ok_or_else(|| error::not_found(capture))
+                    txn.execute(stream::iter(params), auth).await
                 } else {
                     Err(error::method_not_allowed(path))
                 }
@@ -155,21 +143,15 @@ impl ChainInstance for NullChain {
         if &path == "/object" {
             match &self.state {
                 ChainState::Collection(_) => Err(error::not_implemented("NullChain::put")),
-                ChainState::Value(value) => {
+                ChainState::Scalar(scalar) => {
                     if key == Value::None {
-                        let mut value = value.write(txn.id().clone()).await?;
-                        println!(
-                            "NullChain::put new wrapped value {} (expecting) {} ({})",
-                            new_value,
-                            value.class(),
-                            Link::from(value.class())
-                        );
+                        let mut scalar = scalar.write(txn.id().clone()).await?;
 
                         new_value.expect(
-                            value.class().into(),
-                            format!("Chain wraps {}", value.class()),
+                            scalar.class().into(),
+                            format!("Chain wraps {}", scalar.class()),
                         )?;
-                        *value = new_value.try_into()?;
+                        *scalar = new_value.try_into()?;
                         Ok(())
                     } else {
                         Err(error::bad_request("Value has no such attribute", key))
@@ -177,38 +159,23 @@ impl ChainInstance for NullChain {
                 }
             }
         } else {
-            let key: ValueId = key.try_into()?;
-            let new_value: Value = new_value.try_into()?;
-            let op: OpDef = new_value.try_into()?;
-            let mut ops = self.ops.write(txn.id().clone()).await?;
-            println!("updating definition of {} to {}", key, op);
-            ops.insert(key, op);
-            Ok(())
+            Err(error::not_implemented(path))
         }
     }
 
-    async fn post<S: Stream<Item = (ValueId, Value)> + Send + Sync + Unpin>(
+    async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
-        capture: &[ValueId],
         auth: Auth,
-    ) -> TCResult<Vec<TCStream<Value>>> {
+    ) -> TCResult<State> {
         if path.is_empty() {
             Err(error::method_not_allowed("NullChain::post"))
         } else if path.len() == 1 {
             if let Some(OpDef::Post(def)) = self.ops.read(txn.id()).await?.get(&path[0]) {
-                println!(
-                    "Chain::post {} def: {}",
-                    path,
-                    def.iter()
-                        .map(|(name, op)| format!("{}: {}", name, op))
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                );
                 let data = data.chain(stream::iter(def.to_vec()));
-                txn.execute_and_stream(data, capture, auth).await
+                txn.execute(data, auth).await
             } else {
                 Err(error::not_found(path))
             }

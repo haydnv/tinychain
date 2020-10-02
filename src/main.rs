@@ -15,8 +15,9 @@ mod error;
 mod gateway;
 mod kernel;
 mod lock;
+mod scalar;
+mod stream;
 mod transaction;
-mod value;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -52,13 +53,13 @@ struct Config {
     pub http_port: u16,
 
     #[structopt(long = "ext")]
-    pub adapters: Vec<value::link::Link>,
+    pub adapters: Vec<scalar::value::link::Link>,
 
     #[structopt(long = "host")]
-    pub hosted: Vec<value::link::TCPath>,
+    pub hosted: Vec<scalar::value::link::TCPath>,
 
     #[structopt(long = "peer")]
-    pub peers: Vec<value::link::LinkHost>,
+    pub peers: Vec<scalar::value::link::LinkHost>,
 
     #[structopt(long = "request_limit", default_value = "10M", parse(try_from_str = data_size))]
     pub request_limit: usize,
@@ -103,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 async fn configure(
-    clusters: Vec<value::link::TCPath>,
+    clusters: Vec<scalar::value::link::TCPath>,
     data_dir: Arc<block::Dir>,
     workspace: Arc<block::Dir>,
 ) -> error::TCResult<gateway::Hosted> {

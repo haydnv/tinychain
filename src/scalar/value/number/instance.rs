@@ -7,11 +7,12 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::value::class::ValueInstance;
-use crate::value::{TCPath, Value};
+use crate::scalar::{
+    CastFrom, CastInto, ScalarInstance, TCPath, TryCastFrom, Value, ValueInstance,
+};
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
-use super::class::{CastFrom, CastInto, NumberClass, NumberInstance};
+use super::class::{NumberClass, NumberInstance};
 
 #[derive(Clone, PartialEq)]
 pub struct Boolean(bool);
@@ -22,6 +23,10 @@ impl Instance for Boolean {
     fn class(&self) -> BooleanType {
         BooleanType
     }
+}
+
+impl ScalarInstance for Boolean {
+    type Class = BooleanType;
 }
 
 impl ValueInstance for Boolean {
@@ -116,6 +121,12 @@ impl Sub for Boolean {
     }
 }
 
+impl CastFrom<Boolean> for u64 {
+    fn cast_from(b: Boolean) -> u64 {
+        UInt::from(b).into()
+    }
+}
+
 impl PartialOrd for Boolean {
     fn partial_cmp(&self, other: &Boolean) -> Option<Ordering> {
         let (Boolean(l), Boolean(r)) = (self, other);
@@ -153,6 +164,10 @@ impl Instance for Complex {
             Complex::C64(_) => ComplexType::C64,
         }
     }
+}
+
+impl ScalarInstance for Complex {
+    type Class = ComplexType;
 }
 
 impl ValueInstance for Complex {
@@ -415,6 +430,10 @@ impl Instance for Float {
     }
 }
 
+impl ScalarInstance for Float {
+    type Class = FloatType;
+}
+
 impl ValueInstance for Float {
     type Class = FloatType;
 }
@@ -645,6 +664,10 @@ impl Instance for Int {
             Int::I64(_) => IntType::I64,
         }
     }
+}
+
+impl ScalarInstance for Int {
+    type Class = IntType;
 }
 
 impl ValueInstance for Int {
@@ -940,6 +963,10 @@ impl Instance for UInt {
     }
 }
 
+impl ScalarInstance for UInt {
+    type Class = UIntType;
+}
+
 impl ValueInstance for UInt {
     type Class = UIntType;
 }
@@ -1216,17 +1243,13 @@ impl From<UInt> for u64 {
     }
 }
 
-impl TryFrom<UInt> for usize {
-    type Error = error::TCError;
-
-    fn try_from(u: UInt) -> TCResult<usize> {
+impl From<UInt> for usize {
+    fn from(u: UInt) -> usize {
         match u {
-            UInt::U64(u) => Ok(u as usize),
-            UInt::U32(u) => Ok(u as usize),
-            other => Err(error::bad_request(
-                "Expected a UInt64 or UInt32 but found",
-                other,
-            )),
+            UInt::U64(u) => u as usize,
+            UInt::U32(u) => u as usize,
+            UInt::U16(u) => u as usize,
+            UInt::U8(u) => u as usize,
         }
     }
 }
@@ -1304,6 +1327,10 @@ impl Instance for Number {
             Self::UInt(u) => UInt(u.class()),
         }
     }
+}
+
+impl ScalarInstance for Number {
+    type Class = NumberType;
 }
 
 impl ValueInstance for Number {
@@ -1424,6 +1451,7 @@ impl Add for Number {
 
     fn add(self, other: Number) -> Self {
         let dtype = Ord::max(self.class(), other.class());
+        println!("Add:add {} + {} = {}", self.class(), other.class(), dtype);
 
         use NumberType as NT;
 
@@ -1641,12 +1669,23 @@ impl TryFrom<Number> for u64 {
     }
 }
 
-impl TryFrom<Number> for usize {
-    type Error = error::TCError;
+impl TryCastFrom<Number> for u64 {
+    fn can_cast_from(number: &Number) -> bool {
+        UInt::can_cast_from(number)
+    }
 
-    fn try_from(n: Number) -> TCResult<usize> {
-        let u: UInt = n.try_into()?;
-        u.try_into()
+    fn opt_cast_from(number: Number) -> Option<u64> {
+        UInt::opt_cast_from(number).map(u64::from)
+    }
+}
+
+impl TryCastFrom<Number> for usize {
+    fn can_cast_from(number: &Number) -> bool {
+        UInt::can_cast_from(number)
+    }
+
+    fn opt_cast_from(number: Number) -> Option<usize> {
+        UInt::opt_cast_from(number).map(usize::from)
     }
 }
 
