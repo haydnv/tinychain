@@ -4,7 +4,6 @@ use std::fmt;
 use std::iter;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
@@ -50,17 +49,18 @@ impl Class for TableBaseType {
     }
 }
 
-#[async_trait]
 impl CollectionClass for TableBaseType {
     type Instance = TableBase;
 
-    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<TableBase> {
-        let schema =
-            schema.try_cast_into(|v| error::bad_request("Expected TableSchema but found", v))?;
+    fn get<'a>(&'a self, txn: Arc<Txn>, schema: Value) -> TCBoxTryFuture<'a, TableBase> {
+        Box::pin(async move {
+            let schema = schema
+                .try_cast_into(|v| error::bad_request("Expected TableSchema but found", v))?;
 
-        TableIndex::create(txn, schema)
-            .map_ok(TableBase::from)
-            .await
+            TableIndex::create(txn, schema)
+                .map_ok(TableBase::from)
+                .await
+        })
     }
 }
 

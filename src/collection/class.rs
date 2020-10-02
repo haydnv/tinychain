@@ -2,7 +2,6 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, State, TCBoxTryFuture, TCResult, TCStream, TCType};
@@ -56,15 +55,14 @@ impl<I: Into<Scalar>, S: CollectionInstance> From<CollectionItem<I, S>> for Stat
     }
 }
 
-#[async_trait]
 pub trait CollectionClass: Class + Into<CollectionType> + Send + Sync {
     type Instance: CollectionInstance;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         txn: Arc<Txn>,
         schema: Value,
-    ) -> TCResult<<Self as CollectionClass>::Instance>;
+    ) -> TCBoxTryFuture<'a, <Self as CollectionClass>::Instance>;
 }
 
 pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send + Sync {
@@ -109,21 +107,22 @@ impl Class for CollectionType {
     }
 }
 
-#[async_trait]
 impl CollectionClass for CollectionType {
     type Instance = Collection;
 
-    async fn get(
-        &self,
+    fn get<'a>(
+        &'a self,
         txn: Arc<Txn>,
         schema: Value,
-    ) -> TCResult<<Self as CollectionClass>::Instance> {
-        match self {
-            Self::Base(cbt) => cbt.get(txn, schema).map_ok(Collection::Base).await,
-            Self::View(_) => Err(error::unsupported(
-                "Cannot instantiate a CollectionView directly",
-            )),
-        }
+    ) -> TCBoxTryFuture<'a, <Self as CollectionClass>::Instance> {
+        Box::pin(async move {
+            match self {
+                Self::Base(cbt) => cbt.get(txn, schema).map_ok(Collection::Base).await,
+                Self::View(_) => Err(error::unsupported(
+                    "Cannot instantiate a CollectionView directly",
+                )),
+            }
+        })
     }
 }
 
@@ -191,23 +190,25 @@ impl Class for CollectionBaseType {
     }
 }
 
-#[async_trait]
 impl CollectionClass for CollectionBaseType {
     type Instance = CollectionBase;
 
-    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<CollectionBase> {
-        match self {
-            Self::BTree => {
-                let schema = schema
-                    .try_cast_into(|s| error::bad_request("Expected BTree schema but found", s))?;
-                BTreeFile::create(txn, schema)
-                    .map_ok(CollectionBase::BTree)
-                    .await
+    fn get<'a>(&'a self, txn: Arc<Txn>, schema: Value) -> TCBoxTryFuture<'a, CollectionBase> {
+        Box::pin(async move {
+            match self {
+                Self::BTree => {
+                    let schema = schema.try_cast_into(|s| {
+                        error::bad_request("Expected BTree schema but found", s)
+                    })?;
+                    BTreeFile::create(txn, schema)
+                        .map_ok(CollectionBase::BTree)
+                        .await
+                }
+                Self::Null => Ok(CollectionBase::Null(Null::create())),
+                Self::Table(tt) => tt.get(txn, schema).map_ok(CollectionBase::Table).await,
+                Self::Tensor(tt) => tt.get(txn, schema).map_ok(CollectionBase::Tensor).await,
             }
-            Self::Null => Ok(CollectionBase::Null(Null::create())),
-            Self::Table(tt) => tt.get(txn, schema).map_ok(CollectionBase::Table).await,
-            Self::Tensor(tt) => tt.get(txn, schema).map_ok(CollectionBase::Tensor).await,
-        }
+        })
     }
 }
 
