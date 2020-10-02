@@ -346,7 +346,16 @@ impl Txn {
                             .map(State::from)
                     }
                     State::Scalar(scalar) => match scalar {
-                        Scalar::Op(_) => Err(error::not_implemented("Txn::resolve Op")),
+                        Scalar::Op(op) => match &**op {
+                            Op::Def(op_def) => {
+                                if !path.is_empty() {
+                                    return Err(error::not_found(path));
+                                }
+
+                                op_def.get(self, key, auth).await
+                            }
+                            other => Err(error::method_not_allowed(other)),
+                        },
                         Scalar::Value(value) => value
                             .get(path, key.clone())
                             .map(Scalar::Value)
@@ -523,7 +532,28 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
             }
         },
         Op::Ref(op_ref) => match op_ref {
-            OpRef::If(_cond, _then, _or_else) => unimplemented!(),
+            OpRef::If(cond, then, or_else) => {
+                let cond_state = txn_state
+                    .get(cond.value_id())
+                    .ok_or_else(|| error::not_found(cond))?;
+                if is_resolved(cond_state) {
+                    if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = cond_state
+                    {
+                        if b.into() {
+                            deps.extend(scalar_requires(then, txn_state)?);
+                        } else {
+                            deps.extend(scalar_requires(or_else, txn_state)?);
+                        }
+                    } else {
+                        return Err(error::bad_request(
+                            "Expected a Boolean condition but found",
+                            cond_state,
+                        ));
+                    }
+                } else {
+                    deps.insert(cond.value_id().clone());
+                }
+            }
             OpRef::Get(_path, key) => {
                 deps.extend(value_requires(key)?);
             }

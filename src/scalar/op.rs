@@ -1,9 +1,14 @@
 use std::fmt;
+use std::iter;
+use std::sync::Arc;
 
+use futures::stream;
 use serde::{Serialize, Serializer};
 
-use crate::class::{Class, Instance, TCResult};
+use crate::auth::Auth;
+use crate::class::{Class, Instance, State, TCBoxTryFuture, TCResult};
 use crate::error;
+use crate::transaction::Txn;
 
 use super::link::{Link, TCPath};
 use super::{
@@ -281,6 +286,19 @@ pub enum OpDef {
     Post(PostOp),
 }
 
+impl OpDef {
+    pub fn get<'a>(&'a self, txn: Arc<Txn>, key: Value, auth: Auth) -> TCBoxTryFuture<'a, State> {
+        Box::pin(async move {
+            if let Self::Get((key_id, def)) = self {
+                let data = iter::once((key_id.clone(), Scalar::Value(key))).chain(def.to_vec());
+                txn.execute(stream::iter(data), auth).await
+            } else {
+                Err(error::method_not_allowed(self))
+            }
+        })
+    }
+}
+
 impl Instance for OpDef {
     type Class = OpDefType;
 
@@ -299,15 +317,7 @@ impl ScalarInstance for OpDef {
 
 impl TryCastFrom<Scalar> for OpDef {
     fn can_cast_from(scalar: &Scalar) -> bool {
-        if scalar.matches::<PutOp>() {
-            true
-        } else if scalar.matches::<GetOp>() {
-            true
-        } else if scalar.matches::<PostOp>() {
-            true
-        } else {
-            false
-        }
+        scalar.matches::<PutOp>() || scalar.matches::<GetOp>() || scalar.matches::<PostOp>()
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<OpDef> {
@@ -393,33 +403,18 @@ impl ScalarInstance for OpRef {
 
 impl TryCastFrom<Scalar> for OpRef {
     fn can_cast_from(s: &Scalar) -> bool {
-        match s {
-            other => {
-                if other.matches::<(TCRef, Value, Value)>() {
-                    true
-                } else if other.matches::<(Link, Vec<(ValueId, Value)>)>() {
-                    true
-                } else if other.matches::<(Link, Value, Value)>() {
-                    true
-                } else if other.matches::<(Link, Value)>() {
-                    true
-                } else {
-                    false
-                }
-            }
-        }
+        s.matches::<(TCRef, Value, Value)>()
+            || s.matches::<(Link, Vec<(ValueId, Value)>)>()
+            || s.matches::<(Link, Value, Value)>()
+            || s.matches::<(Link, Value)>()
     }
 
     fn opt_cast_from(s: Scalar) -> Option<OpRef> {
-        match s {
-            other => {
-                if other.matches::<(TCRef, Value, Value)>() {
-                    let (cond, then, or_else) = other.opt_cast_into().unwrap();
-                    Some(OpRef::If(cond, then, or_else))
-                } else {
-                    unimplemented!()
-                }
-            }
+        if s.matches::<(TCRef, Value, Value)>() {
+            let (cond, then, or_else) = s.opt_cast_into().unwrap();
+            Some(OpRef::If(cond, then, or_else))
+        } else {
+            unimplemented!()
         }
     }
 }
