@@ -1,9 +1,10 @@
 use std::fmt;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::{future, stream};
 
-use crate::class::{Class, Instance, TCBoxFuture, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, TCBoxFuture, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionBase, CollectionItem};
 use crate::error;
@@ -66,42 +67,36 @@ impl Instance for Null {
     }
 }
 
+#[async_trait]
 impl CollectionInstance for Null {
     type Item = Value;
     type Slice = Null;
 
-    fn get<'a>(
-        &'a self,
+    async fn get(
+        &self,
         _txn: Arc<Txn>,
         _path: TCPath,
         _selector: Value,
-    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
-        Box::pin(future::ready(Err(error::unsupported(
-            "Null Collection has no contents to GET",
-        ))))
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        Err(error::unsupported("Null Collection has no contents to GET"))
     }
 
-    fn is_empty<'a>(&'a self, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
-        Box::pin(future::ready(Ok(true)))
+    async fn is_empty(&self, _txn: Arc<Txn>) -> TCResult<bool> {
+        Ok(true)
     }
 
-    fn put<'a>(
-        &'a self,
+    async fn put(
+        &self,
         _txn: Arc<Txn>,
         _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(
-            "Null Collection cannot be modified",
-        ))))
+    ) -> TCResult<()> {
+        Err(error::unsupported("Null Collection cannot be modified"))
     }
 
-    fn to_stream<'a>(&'a self, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
-        Box::pin(future::ready({
-            let stream: TCStream<Scalar> = Box::pin(stream::empty());
-            Ok(stream)
-        }))
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+        Ok(Box::pin(stream::empty()))
     }
 }
 

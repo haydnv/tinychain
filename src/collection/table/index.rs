@@ -112,39 +112,36 @@ impl Instance for TableBase {
     }
 }
 
+#[async_trait]
 impl CollectionInstance for TableBase {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    fn get<'a>(
-        &'a self,
+    async fn get(
+        &self,
         _txn: Arc<Txn>,
         _path: TCPath,
         _selector: Value,
-    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
-        Box::pin(async move { Err(error::not_implemented("TableBase::get")) })
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        Err(error::not_implemented("TableBase::get"))
     }
 
-    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
         match self {
-            Self::Index(index) => index.is_empty(txn),
-            Self::ROIndex(index) => index.is_empty(txn),
-            Self::Table(table) => table.is_empty(txn),
+            Self::Index(index) => index.is_empty(txn).await,
+            Self::ROIndex(index) => index.is_empty(txn).await,
+            Self::Table(table) => table.is_empty(txn).await,
         }
     }
 
-    fn put<'a>(
-        &'a self,
+    async fn put(
+        &self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            if !path.is_empty() {
-                return Err(error::not_found(path));
-            }
-
+    ) -> TCResult<()> {
+        if path == TCPath::default() {
             let key: Vec<Value> = selector.try_into()?;
             match value {
                 CollectionItem::Scalar(value) => match self {
@@ -156,22 +153,21 @@ impl CollectionInstance for TableBase {
                 },
                 _ => Err(error::not_implemented("TableBase::put")),
             }
-        })
+        } else {
+            Err(error::not_found(path))
+        }
     }
 
-    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
-        Box::pin(async move {
-            let txn_id = txn.id().clone();
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+        let txn_id = txn.id().clone();
 
-            let stream = match self {
-                Self::Index(index) => index.clone().stream(txn_id).await?,
-                Self::ROIndex(index) => index.clone().stream(txn_id).await?,
-                Self::Table(table) => table.clone().stream(txn_id).await?,
-            };
+        let stream = match self {
+            Self::Index(index) => index.clone().stream(txn_id).await?,
+            Self::ROIndex(index) => index.clone().stream(txn_id).await?,
+            Self::Table(table) => table.clone().stream(txn_id).await?,
+        };
 
-            let stream: TCStream<Scalar> = Box::pin(stream.map(Scalar::from));
-            Ok(stream)
-        })
+        Ok(Box::pin(stream.map(Scalar::from)))
     }
 }
 

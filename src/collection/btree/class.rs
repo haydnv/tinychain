@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future;
 
-use crate::class::{Class, Instance, TCBoxFuture, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, TCBoxFuture, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
@@ -84,46 +84,47 @@ impl Instance for BTree {
     }
 }
 
+#[async_trait]
 impl CollectionInstance for BTree {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    fn get<'a>(
-        &'a self,
+    async fn get(
+        &self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
-    ) -> TCBoxTryFuture<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Tree(tree) => tree.get(txn, path, selector),
-            Self::View(view) => view.get(txn, path, selector),
+            Self::Tree(tree) => tree.get(txn, path, selector).await,
+            Self::View(view) => view.get(txn, path, selector).await,
         }
     }
 
-    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
         match self {
-            Self::Tree(tree) => tree.is_empty(txn),
-            Self::View(view) => view.is_empty(txn),
+            Self::Tree(tree) => tree.is_empty(txn).await,
+            Self::View(view) => view.is_empty(txn).await,
         }
     }
 
-    fn put<'a>(
-        &'a self,
+    async fn put(
+        &self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCResult<()> {
         match self {
-            Self::Tree(tree) => tree.put(txn, path, selector, value),
-            Self::View(view) => view.put(txn, path, selector, value),
+            Self::Tree(tree) => tree.put(txn, path, selector, value).await,
+            Self::View(view) => view.put(txn, path, selector, value).await,
         }
     }
 
-    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
-            Self::Tree(tree) => tree.to_stream(txn),
-            Self::View(view) => view.to_stream(txn),
+            Self::Tree(tree) => tree.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
         }
     }
 }

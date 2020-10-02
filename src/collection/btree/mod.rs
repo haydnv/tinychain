@@ -5,6 +5,7 @@ use std::ops::Bound;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{self, join, try_join, try_join_all, Future, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
@@ -225,80 +226,71 @@ impl Instance for BTreeSlice {
     }
 }
 
+#[async_trait]
 impl CollectionInstance for BTreeSlice {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    fn get<'a>(
-        &'a self,
+    async fn get(
+        &self,
         txn: Arc<Txn>,
         path: TCPath,
         bounds: Value,
-    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
-        Box::pin(async move {
-            if !path.is_empty() {
-                return Err(error::not_found(path));
-            }
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
 
-            let bounds: Selector =
-                bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
-            validate_selector(&bounds, self.source.schema())?;
+        let bounds: Selector =
+            bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
+        validate_selector(&bounds, self.source.schema())?;
 
-            let schema: Vec<ValueType> = self.source.schema().iter().map(|c| *c.dtype()).collect();
-            match (&self.bounds, &bounds) {
-                (Selector::Key(this), Selector::Key(that)) if this == that => {
-                    Ok(CollectionItem::Slice(self.clone()))
-                }
-                (Selector::Range(container, _), Selector::Range(contained, _))
-                    if container.contains(contained, &schema)? =>
-                {
-                    self.source.get(txn, path, bounds.cast_into()).await
-                }
-                _ => Err(error::bad_request(
-                    &format!("BTreeSlice[{}] does not contain", &self.bounds),
-                    &bounds,
-                )),
+        let schema: Vec<ValueType> = self.source.schema().iter().map(|c| *c.dtype()).collect();
+        match (&self.bounds, &bounds) {
+            (Selector::Key(this), Selector::Key(that)) if this == that => {
+                Ok(CollectionItem::Slice(self.clone()))
             }
-        })
+            (Selector::Range(container, _), Selector::Range(contained, _))
+                if container.contains(contained, &schema)? =>
+            {
+                self.source.get(txn, path, bounds.cast_into()).await
+            }
+            _ => Err(error::bad_request(
+                &format!("BTreeSlice[{}] does not contain", &self.bounds),
+                &bounds,
+            )),
+        }
     }
 
-    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
-        Box::pin(async move {
-            let count = self
-                .source
-                .clone()
-                .len(txn.id().clone(), self.bounds.clone())
-                .await?;
-
-            Ok(count == 0)
-        })
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        let count = self
+            .source
+            .clone()
+            .len(txn.id().clone(), self.bounds.clone())
+            .await?;
+        Ok(count == 0)
     }
 
-    fn put<'a>(
-        &'a self,
+    async fn put(
+        &self,
         _txn: Arc<Txn>,
         _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            Err(error::unsupported(
-                "BTreeSlice is immutable; write to the source BTree instead",
-            ))
-        })
+    ) -> TCResult<()> {
+        Err(error::unsupported(
+            "BTreeSlice is immutable; write to the source BTree instead",
+        ))
     }
 
-    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
-        Box::pin(async move {
-            let rows = self
-                .source
-                .clone()
-                .slice(txn.id().clone(), self.bounds.clone())
-                .await?;
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+        let rows = self
+            .source
+            .clone()
+            .slice(txn.id().clone(), self.bounds.clone())
+            .await?;
 
-            let stream: TCStream<Scalar> = Box::pin(rows.map(Value::Tuple).map(Scalar::Value));
-            Ok(stream)
-        })
+        Ok(Box::pin(rows.map(Value::Tuple).map(Scalar::Value)))
     }
 }
 
@@ -814,98 +806,90 @@ impl Instance for BTreeFile {
     }
 }
 
+#[async_trait]
 impl CollectionInstance for BTreeFile {
     type Item = Key;
     type Slice = BTreeSlice;
 
-    fn get<'a>(
-        &'a self,
+    async fn get(
+        &self,
         txn: Arc<Txn>,
         path: TCPath,
         bounds: Value,
-    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
-        Box::pin(async move {
-            if !path.is_empty() {
-                return Err(error::not_found(path));
-            }
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
 
-            let bounds: Selector =
-                bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
-            validate_selector(&bounds, self.schema())?;
+        let bounds: Selector =
+            bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
+        validate_selector(&bounds, self.schema())?;
 
-            if let Selector::Key(key) = bounds {
-                let mut slice = self
-                    .clone()
-                    .slice(txn.id().clone(), Selector::Key(key.to_vec()))
-                    .await?;
+        if let Selector::Key(key) = bounds {
+            let mut slice = self
+                .clone()
+                .slice(txn.id().clone(), Selector::Key(key.to_vec()))
+                .await?;
 
-                if let Some(key) = slice.next().await {
-                    Ok(CollectionItem::Scalar(key))
-                } else {
-                    Err(error::not_found(Value::Tuple(key)))
-                }
+            if let Some(key) = slice.next().await {
+                Ok(CollectionItem::Scalar(key))
             } else {
-                Ok(CollectionItem::Slice(BTreeSlice::new(self.clone(), bounds)))
+                Err(error::not_found(Value::Tuple(key)))
             }
-        })
+        } else {
+            Ok(CollectionItem::Slice(BTreeSlice::new(self.clone(), bounds)))
+        }
     }
 
-    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
-        Box::pin(async move {
-            self.get_root(txn.id())
-                .map_ok(|root| root.keys.is_empty())
-                .await
-        })
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+        self.get_root(txn.id())
+            .await
+            .map(|root| root.keys.is_empty())
     }
 
-    fn put<'a>(
-        &'a self,
+    async fn put(
+        &self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         key: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            if !path.is_empty() {
-                return Err(error::not_found(path));
+    ) -> TCResult<()> {
+        if !path.is_empty() {
+            return Err(error::not_found(path));
+        }
+
+        let key = match key {
+            CollectionItem::Scalar(key) => key,
+            CollectionItem::Slice(_) => {
+                return Err(error::unsupported("BTree::put(<slice>) is not supported"));
             }
+        };
 
-            let key = match key {
-                CollectionItem::Scalar(key) => key,
-                CollectionItem::Slice(_) => {
-                    return Err(error::unsupported("BTree::put(<slice>) is not supported"));
-                }
-            };
+        let selector: Selector =
+            selector.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
 
-            let selector: Selector =
-                selector.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
+        validate_selector(&selector, self.schema())?;
+        validate_key(&key, self.schema())?;
 
-            validate_selector(&selector, self.schema())?;
-            validate_key(&key, self.schema())?;
-
-            match selector {
-                Selector::Key(selector)
-                    if self.collator.compare(&selector, &key) == Ordering::Equal =>
-                {
-                    self.insert(txn.id(), key).await
-                }
-                selector => self.update(txn.id(), &selector, &key).await,
+        match selector {
+            Selector::Key(selector)
+                if self.collator.compare(&selector, &key) == Ordering::Equal =>
+            {
+                self.insert(txn.id(), key).await
             }
-        })
+            selector => self.update(txn.id(), &selector, &key).await,
+        }
     }
 
-    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
-        Box::pin(async move {
-            let stream = self
-                .clone()
-                .slice(txn.id().clone(), Selector::all())
-                .await?
-                .map(Value::Tuple)
-                .map(Scalar::Value);
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+        let stream = self
+            .clone()
+            .slice(txn.id().clone(), Selector::all())
+            .await?
+            .map(Value::Tuple)
+            .map(Scalar::Value);
 
-            let stream: TCStream<Scalar> = Box::pin(stream);
-            Ok(stream)
-        })
+        Ok(Box::pin(stream))
     }
 }
 

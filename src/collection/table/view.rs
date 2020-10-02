@@ -96,35 +96,36 @@ impl Instance for TableView {
     }
 }
 
+#[async_trait]
 impl CollectionInstance for TableView {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    fn get<'a>(
-        &'a self,
+    async fn get(
+        &self,
         _txn: Arc<Txn>,
         _path: TCPath,
         _selector: Value,
-    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
-        Box::pin(async move { Err(error::not_implemented("TableBase::get")) })
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+        Err(error::not_implemented("TableBase::get"))
     }
 
-    fn is_empty<'a>(&'a self, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
-        Box::pin(async move { Err(error::not_implemented("TableBase::is_empty")) })
+    async fn is_empty(&self, _txn: Arc<Txn>) -> TCResult<bool> {
+        Err(error::not_implemented("TableBase::is_empty"))
     }
 
-    fn put<'a>(
-        &'a self,
+    async fn put(
+        &self,
         _txn: Arc<Txn>,
         _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move { Err(error::not_implemented("TableBase::put")) })
+    ) -> TCResult<()> {
+        Err(error::not_implemented("TableBase::put"))
     }
 
-    fn to_stream<'a>(&'a self, _txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
-        Box::pin(async move { Err(error::not_implemented("TableBase::to_stream")) })
+    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+        Err(error::not_implemented("TableBase::to_stream"))
     }
 }
 

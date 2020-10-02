@@ -227,17 +227,6 @@ impl<T: Into<Scalar>> From<Vec<T>> for Scalar {
     }
 }
 
-impl TryFrom<Scalar> for Number {
-    type Error = error::TCError;
-
-    fn try_from(s: Scalar) -> TCResult<Number> {
-        match s {
-            Scalar::Value(value) => value.try_into(),
-            other => Err(error::bad_request("Expected Value but found", other)),
-        }
-    }
-}
-
 impl TryFrom<Scalar> for Value {
     type Error = error::TCError;
 

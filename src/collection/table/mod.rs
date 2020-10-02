@@ -181,46 +181,47 @@ impl Instance for Table {
     }
 }
 
+#[async_trait]
 impl CollectionInstance for Table {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    fn get<'a>(
-        &'a self,
+    async fn get(
+        &self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
-    ) -> TCBoxTryFuture<'a, CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get(txn, path, selector),
-            Self::View(view) => view.get(txn, path, selector),
+            Self::Base(base) => base.get(txn, path, selector).await,
+            Self::View(view) => view.get(txn, path, selector).await,
         }
     }
 
-    fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
         match self {
-            Self::Base(base) => base.is_empty(txn),
-            Self::View(view) => view.is_empty(txn),
+            Self::Base(base) => base.is_empty(txn).await,
+            Self::View(view) => view.is_empty(txn).await,
         }
     }
 
-    fn put<'a>(
-        &'a self,
+    async fn put(
+        &self,
         txn: Arc<Txn>,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.put(txn, path, selector, value),
-            Self::View(view) => view.put(txn, path, selector, value),
+            Self::Base(base) => base.put(txn, path, selector, value).await,
+            Self::View(view) => view.put(txn, path, selector, value).await,
         }
     }
 
-    fn to_stream<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
         match self {
-            Self::Base(base) => base.to_stream(txn),
-            Self::View(view) => view.to_stream(txn),
+            Self::Base(base) => base.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
         }
     }
 }
