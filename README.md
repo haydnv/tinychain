@@ -34,10 +34,10 @@ The easiest way to get started is using the latest Docker image here:
 [https://hub.docker.com/r/haydnv/tinychain](https://hub.docker.com/r/haydnv/tinychain)
 
 ```bash
-docker pull haydnv/tinychain:demo1
+docker pull haydnv/tinychain:demo2
 
 # include the "--gpus all" argument if you have nvidia-docker installed
-docker run -it --rm haydnv/tinychain:demo1 bash
+docker run -it --rm haydnv/tinychain:demo2 bash
 
 cd /tinychain
 source ~/.profile
