@@ -560,6 +560,8 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                             .map(Box::new)
                             .map(Scalar::Op)
                             .map_err(de::Error::custom)
+                    } else if link == Link::from(ScalarType::Tuple) {
+                        access.next_value().map(Scalar::Tuple)
                     } else {
                         Err(de::Error::custom(format!("Support for {}", link)))
                     }
