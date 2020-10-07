@@ -302,7 +302,7 @@ impl Txn {
                     ))
                 }
             }
-            Op::Ref(OpRef::Get(link, key)) => {
+            Op::Ref(OpRef::Get((link, key))) => {
                 let key = dereference_value_state(&provided, &key)
                     .and_then(Scalar::try_from)
                     .and_then(Value::try_from)?;
@@ -311,7 +311,7 @@ impl Txn {
                     .get(&link, key, auth, Some(self.clone()))
                     .await
             }
-            Op::Method(Method::Get(tc_ref, path, key)) => {
+            Op::Method(Method::Get(tc_ref, (path, key))) => {
                 let subject = provided
                     .get(tc_ref.value_id())
                     .ok_or_else(|| error::not_found(tc_ref))?;
@@ -364,7 +364,7 @@ impl Txn {
                     },
                 }
             }
-            Op::Ref(OpRef::Put(link, key, value)) => {
+            Op::Ref(OpRef::Put((link, key, value))) => {
                 let value = dereference_state(&provided, &value)?;
                 self.gateway
                     .clone()
@@ -373,7 +373,7 @@ impl Txn {
 
                 Ok(().into())
             }
-            Op::Method(Method::Put(tc_ref, path, key, value)) => {
+            Op::Method(Method::Put(tc_ref, (path, key, value))) => {
                 let subject = provided
                     .get(&tc_ref.clone().into())
                     .ok_or_else(|| error::not_found(tc_ref))?;
@@ -402,7 +402,7 @@ impl Txn {
                     ))),
                 }
             }
-            Op::Ref(OpRef::Post(link, data)) => {
+            Op::Ref(OpRef::Post((link, data))) => {
                 let data = stream::iter(data).map(move |(name, value)| {
                     // TODO: just allow sending an error as a value
                     dereference_state(&provided, &value)
@@ -416,7 +416,7 @@ impl Txn {
                     .map_ok(State::from)
                     .await
             }
-            Op::Method(Method::Post(_subject, _path, _data)) => {
+            Op::Method(Method::Post(_subject, (_path, _data))) => {
                 Err(error::not_implemented("Txn::resolve Method::Post"))
             }
         }
@@ -511,16 +511,16 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
         }
         Op::Def(OpDef::Post(_)) => {}
         Op::Method(method) => match method {
-            Method::Get(subject, _path, key) => {
+            Method::Get(subject, (_path, key)) => {
                 deps.insert(subject.value_id().clone());
                 deps.extend(value_requires(key)?);
             }
-            Method::Put(subject, _path, key, value) => {
+            Method::Put(subject, (_path, key, value)) => {
                 deps.insert(subject.value_id().clone());
                 deps.extend(value_requires(key)?);
                 deps.extend(scalar_requires(value, txn_state)?);
             }
-            Method::Post(subject, _path, data) => {
+            Method::Post(subject, (_path, data)) => {
                 deps.insert(subject.value_id().clone());
                 deps.extend(data.iter().filter_map(|(name, dep)| {
                     if is_resolved_scalar(dep) {
@@ -554,14 +554,14 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                     deps.insert(cond.value_id().clone());
                 }
             }
-            OpRef::Get(_path, key) => {
+            OpRef::Get((_path, key)) => {
                 deps.extend(value_requires(key)?);
             }
-            OpRef::Put(_path, key, value) => {
+            OpRef::Put((_path, key, value)) => {
                 deps.extend(value_requires(key)?);
                 deps.extend(scalar_requires(value, txn_state)?);
             }
-            OpRef::Post(_path, data) => {
+            OpRef::Post((_path, data)) => {
                 for (_id, provider) in data {
                     deps.extend(scalar_requires(provider, txn_state)?);
                 }
