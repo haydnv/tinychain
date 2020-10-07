@@ -345,9 +345,9 @@ impl fmt::Display for OpDef {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Method {
-    Get(TCRef, TCPath, Value),
-    Put(TCRef, TCPath, Value, Scalar),
-    Post(TCRef, TCPath, Vec<(ValueId, Scalar)>),
+    Get(TCRef, (TCPath, Value)),
+    Put(TCRef, (TCPath, Value, Scalar)),
+    Post(TCRef, (TCPath, Vec<(ValueId, Scalar)>)),
 }
 
 impl Instance for Method {
@@ -355,9 +355,9 @@ impl Instance for Method {
 
     fn class(&self) -> MethodType {
         match self {
-            Self::Get(_, _, _) => MethodType::Get,
-            Self::Put(_, _, _, _) => MethodType::Put,
-            Self::Post(_, _, _) => MethodType::Post,
+            Self::Get(_, _) => MethodType::Get,
+            Self::Put(_, _) => MethodType::Put,
+            Self::Post(_, _) => MethodType::Post,
         }
     }
 }
@@ -369,9 +369,9 @@ impl ScalarInstance for Method {
 impl fmt::Display for Method {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Get(subject, path, _) => write!(f, "GET {}{}", subject, path),
-            Self::Put(subject, path, _, _) => write!(f, "PUT {}{}", subject, path),
-            Self::Post(subject, path, _) => write!(f, "PUT {}{}", subject, path),
+            Self::Get(subject, (path, _)) => write!(f, "GET {}: {}", subject, path),
+            Self::Put(subject, (path, _, _)) => write!(f, "PUT {}{}", subject, path),
+            Self::Post(subject, (path, _)) => write!(f, "PUT {}{}", subject, path),
         }
     }
 }

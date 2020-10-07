@@ -521,16 +521,16 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                 } else {
                     let method = if value.matches::<Vec<(ValueId, Value)>>() {
                         let data: Vec<(ValueId, Scalar)> = value.opt_cast_into().unwrap();
-                        Method::Post(subject, path, data)
+                        Method::Post(subject, (path, data))
                     } else {
                         let mut data: Vec<Scalar> = value.try_into().map_err(de::Error::custom)?;
                         if data.len() == 1 {
                             let key = data.pop().unwrap().try_into().map_err(de::Error::custom)?;
-                            Method::Get(subject, path, key)
+                            Method::Get(subject, (path, key))
                         } else if data.len() == 2 {
                             let value = data.pop().unwrap();
                             let key = data.pop().unwrap().try_into().map_err(de::Error::custom)?;
-                            Method::Put(subject, path, key, value)
+                            Method::Put(subject, (path, key, value))
                         } else {
                             return Err(de::Error::custom(format!(
                                 "Expected a Method but found: {}",
