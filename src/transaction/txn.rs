@@ -302,7 +302,7 @@ impl Txn {
                     ))
                 }
             }
-            Op::Ref(OpRef::Get(link, key)) => {
+            Op::Ref(OpRef::Get((link, key))) => {
                 let key = dereference_value_state(&provided, &key)
                     .and_then(Scalar::try_from)
                     .and_then(Value::try_from)?;
@@ -364,7 +364,7 @@ impl Txn {
                     },
                 }
             }
-            Op::Ref(OpRef::Put(link, key, value)) => {
+            Op::Ref(OpRef::Put((link, key, value))) => {
                 let value = dereference_state(&provided, &value)?;
                 self.gateway
                     .clone()
@@ -402,7 +402,7 @@ impl Txn {
                     ))),
                 }
             }
-            Op::Ref(OpRef::Post(link, data)) => {
+            Op::Ref(OpRef::Post((link, data))) => {
                 let data = stream::iter(data).map(move |(name, value)| {
                     // TODO: just allow sending an error as a value
                     dereference_state(&provided, &value)
@@ -554,14 +554,14 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                     deps.insert(cond.value_id().clone());
                 }
             }
-            OpRef::Get(_path, key) => {
+            OpRef::Get((_path, key)) => {
                 deps.extend(value_requires(key)?);
             }
-            OpRef::Put(_path, key, value) => {
+            OpRef::Put((_path, key, value)) => {
                 deps.extend(value_requires(key)?);
                 deps.extend(scalar_requires(value, txn_state)?);
             }
-            OpRef::Post(_path, data) => {
+            OpRef::Post((_path, data)) => {
                 for (_id, provider) in data {
                     deps.extend(scalar_requires(provider, txn_state)?);
                 }

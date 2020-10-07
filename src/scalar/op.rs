@@ -376,12 +376,16 @@ impl fmt::Display for Method {
     }
 }
 
+type GetRef = (Link, Value);
+type PutRef = (Link, Value, Scalar);
+type PostRef = (Link, Vec<(ValueId, Scalar)>);
+
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {
     If(TCRef, Scalar, Scalar),
-    Get(Link, Value),
-    Put(Link, Value, Scalar),
-    Post(Link, Vec<(ValueId, Scalar)>),
+    Get(GetRef),
+    Put(PutRef),
+    Post(PostRef),
 }
 
 impl Instance for OpRef {
@@ -390,9 +394,9 @@ impl Instance for OpRef {
     fn class(&self) -> OpRefType {
         match self {
             Self::If(_, _, _) => OpRefType::If,
-            Self::Get(_, _) => OpRefType::Get,
-            Self::Put(_, _, _) => OpRefType::Put,
-            Self::Post(_, _) => OpRefType::Post,
+            Self::Get((_, _)) => OpRefType::Get,
+            Self::Put((_, _, _)) => OpRefType::Put,
+            Self::Post((_, _)) => OpRefType::Post,
         }
     }
 }
@@ -425,9 +429,9 @@ impl fmt::Display for OpRef {
             OpRef::If(cond, then, or_else) => {
                 write!(f, "OpRef::If ({}) then {} else {}", cond, then, or_else)
             }
-            OpRef::Get(link, id) => write!(f, "OpRef::Get {}: {}", link, id),
-            OpRef::Put(path, id, val) => write!(f, "OpRef::Put {}: {} <- {}", path, id, val),
-            OpRef::Post(path, _) => write!(f, "OpRef::Post {}", path),
+            OpRef::Get((link, id)) => write!(f, "OpRef::Get {}: {}", link, id),
+            OpRef::Put((path, id, val)) => write!(f, "OpRef::Put {}: {} <- {}", path, id, val),
+            OpRef::Post((path, _)) => write!(f, "OpRef::Post {}", path),
         }
     }
 }
@@ -462,12 +466,6 @@ impl Instance for Op {
 
 impl ScalarInstance for Op {
     type Class = OpType;
-}
-
-impl Default for Op {
-    fn default() -> Op {
-        Op::Ref(OpRef::Get(Link::default(), Value::default()))
-    }
 }
 
 impl From<Method> for Op {
