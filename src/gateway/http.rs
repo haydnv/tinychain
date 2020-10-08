@@ -259,10 +259,10 @@ impl Server {
                         let response = serde_json::to_string_pretty(&scalar)
                             .map(|s| format!("{}\r\n", s))
                             .map(Bytes::from)
-                            .map_err(error::TCError::from);
+                            .map_err(error::TCError::from)?;
 
                         let response: TCStream<TCResult<Bytes>> =
-                            Box::pin(stream::once(future::ready(response)));
+                            Box::pin(stream::once(future::ready(Ok(response))));
 
                         Ok(response)
                     }

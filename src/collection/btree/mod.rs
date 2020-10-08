@@ -17,7 +17,7 @@ use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
 use crate::scalar::{
-    CastFrom, CastInto, Scalar, ScalarClass, TCPath, TryCastFrom, TryCastInto, Value, ValueType,
+    CastFrom, CastInto, Scalar, TCPath, TryCastFrom, TryCastInto, Value, ValueClass, ValueType,
 };
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};

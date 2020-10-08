@@ -57,10 +57,6 @@ impl Class for StringType {
 impl ScalarClass for StringType {
     type Instance = TCString;
 
-    fn size(self) -> Option<usize> {
-        None
-    }
-
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<TCString> {
         let scalar: Scalar = scalar.into();
         let value = Value::try_cast_from(scalar, |s| {
@@ -74,6 +70,10 @@ impl ScalarClass for StringType {
 
 impl ValueClass for StringType {
     type Instance = TCString;
+
+    fn size(self) -> Option<usize> {
+        None
+    }
 }
 
 impl From<StringType> for Link {

@@ -48,10 +48,6 @@ impl Class for OpDefType {
 impl ScalarClass for OpDefType {
     type Instance = OpDef;
 
-    fn size(self) -> Option<usize> {
-        None
-    }
-
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<OpDef> {
         let scalar: Scalar = scalar.into();
         OpDef::try_cast_from(scalar, |v| error::bad_request("Not a valid OpDef", v))
@@ -110,10 +106,6 @@ impl Class for MethodType {
 
 impl ScalarClass for MethodType {
     type Instance = Method;
-
-    fn size(self) -> Option<usize> {
-        None
-    }
 
     fn try_cast<S: Into<Scalar>>(&self, _scalar: S) -> TCResult<Method> {
         Err(error::not_implemented("Cast Scalar into Method"))
@@ -174,10 +166,6 @@ impl Class for OpRefType {
 
 impl ScalarClass for OpRefType {
     type Instance = OpRef;
-
-    fn size(self) -> Option<usize> {
-        None
-    }
 
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<OpRef> {
         let scalar: Scalar = scalar.into();
@@ -240,10 +228,6 @@ impl Class for OpType {
 
 impl ScalarClass for OpType {
     type Instance = Op;
-
-    fn size(self) -> Option<usize> {
-        None
-    }
 
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Op> {
         let scalar: Scalar = scalar.into();
