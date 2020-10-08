@@ -90,8 +90,13 @@ You can see an up-to-date list of available API endpoints by looking through the
 Tinychain is both a database platform (like MySQL) and an analytics/ML platform (like TensorFlow)
 as well as a Turing-complete runtime (like Ethereum) with blockchain-powered versioning features.**
 In general, Tinychain development consists of constructing a deferred execution graph (very
-loosely based on TensorFlow v1), testing it, and saving it to a [Cluster](#cluster) for users to
-execute. We'll go through an example application to see what this means in practice.
+loosely based on TensorFlow v1), testing it, and saving it to a Cluster for users to execute. We'll
+go through an example application to see what this means in practice.
+
+Note that these examples are all given in JSON, which is useful if you're implementing a custom
+client of your own, but in general it's much easier and more intuitive to use the
+[Python client](http://github.com/haydnv/tinychain.py). You can find these examples in Python
+[here](https://github.com/haydnv/tctest/blob/master/examples/walkthrough.py) in the test suite.
 
 First, start a new Tinychain host:
 
@@ -198,8 +203,8 @@ For example, consider a third-party service that returns data like
 {"/sbin/object": {"lat": 40.689, "lng": -74.044}}
 ```
 
-You can also modify it to define other instance variables and methods--consider this example with a
-new method called `radians`:
+You can easily modify an object to define other instance variables and methods--consider this
+example with a new method called `radians`:
 
 ```json
 {
@@ -210,18 +215,13 @@ new method called `radians`:
             ["pi", 3.14159],
             ["radians_per_degree", {"$pi/div": [180]}],
             ["coord_radians", {"/sbin/object": {
-                "lat": {"$self/lat/mul": [{"$radians_per_degree": {}}]},
-                "lng": {"$self/lng/mul": [{"$radians_per_degree": {}}]}
+                "lat": {"$self/lat/mul": [{"$radians_per_degree": []}]},
+                "lng": {"$self/lng/mul": [{"$radians_per_degree": []}]}
             }]
         ]}
     }
 }
 ```
-
-This is useful for testing and debugging, but in production you'll want more rigorous constraints
-on the form of your data. To do that you can define a class and instantiate it with the instance
-data. This comes in very handy with any type of third-party data, whether it comes from a Tinychain
-API or not.
 
 ** This feature is not yet implemented
 
