@@ -19,6 +19,8 @@ pub trait ValueInstance: ScalarInstance {
 
 pub trait ValueClass: ScalarClass {
     type Instance: ValueInstance;
+
+    fn size(self) -> Option<usize>;
 }
 
 impl From<NumberType> for ValueType {
@@ -82,15 +84,6 @@ impl Class for ValueType {
 impl ScalarClass for ValueType {
     type Instance = Value;
 
-    fn size(self) -> Option<usize> {
-        use ValueType::*;
-        match self {
-            None => Some(1),
-            Number(nt) => ScalarClass::size(nt),
-            _ => Option::None,
-        }
-    }
-
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Value> {
         match self {
             Self::None => Ok(Value::None),
@@ -108,6 +101,15 @@ impl ScalarClass for ValueType {
 
 impl ValueClass for ValueType {
     type Instance = Value;
+
+    fn size(self) -> Option<usize> {
+        use ValueType::*;
+        match self {
+            None => Some(1),
+            Number(nt) => ValueClass::size(nt),
+            _ => Option::None,
+        }
+    }
 }
 
 impl From<ValueType> for Link {

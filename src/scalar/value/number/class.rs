@@ -164,10 +164,6 @@ impl Class for ComplexType {
 impl ScalarClass for ComplexType {
     type Instance = Complex;
 
-    fn size(self) -> Option<usize> {
-        Some(NumberClass::size(self))
-    }
-
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Complex> {
         let v = Value::try_from(scalar.into())?;
         let n = Number::try_from(v)?;
@@ -178,6 +174,10 @@ impl ScalarClass for ComplexType {
 
 impl ValueClass for ComplexType {
     type Instance = Complex;
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
 }
 
 impl NumberClass for ComplexType {
@@ -260,10 +260,6 @@ impl Class for BooleanType {
 impl ScalarClass for BooleanType {
     type Instance = Boolean;
 
-    fn size(self) -> Option<usize> {
-        Some(NumberClass::size(self))
-    }
-
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Boolean> {
         let s: Scalar = scalar.into();
         let v = Value::try_from(s)?;
@@ -275,6 +271,10 @@ impl ScalarClass for BooleanType {
 
 impl ValueClass for BooleanType {
     type Instance = Boolean;
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
 }
 
 impl NumberClass for BooleanType {
@@ -350,10 +350,6 @@ impl Class for FloatType {
 impl ScalarClass for FloatType {
     type Instance = Float;
 
-    fn size(self) -> Option<usize> {
-        Some(NumberClass::size(self))
-    }
-
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Float> {
         let s: Scalar = scalar.into();
         let v = Value::try_from(s)?;
@@ -365,6 +361,10 @@ impl ScalarClass for FloatType {
 
 impl ValueClass for FloatType {
     type Instance = Float;
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
 }
 
 impl NumberClass for FloatType {
@@ -461,10 +461,6 @@ impl Class for IntType {
 impl ScalarClass for IntType {
     type Instance = Int;
 
-    fn size(self) -> Option<usize> {
-        Some(NumberClass::size(self))
-    }
-
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Int> {
         let v = Value::try_from(scalar.into())?;
         let n = Number::try_from(v)?;
@@ -475,6 +471,10 @@ impl ScalarClass for IntType {
 
 impl ValueClass for IntType {
     type Instance = Int;
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
 }
 
 impl NumberClass for IntType {
@@ -579,10 +579,6 @@ impl Class for UIntType {
 impl ScalarClass for UIntType {
     type Instance = UInt;
 
-    fn size(self) -> Option<usize> {
-        Some(NumberClass::size(self))
-    }
-
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<UInt> {
         let v = Value::try_from(scalar.into())?;
         let n = Number::try_from(v)?;
@@ -593,6 +589,10 @@ impl ScalarClass for UIntType {
 
 impl ValueClass for UIntType {
     type Instance = UInt;
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
 }
 
 impl NumberClass for UIntType {
@@ -710,10 +710,6 @@ impl Class for NumberType {
 impl ScalarClass for NumberType {
     type Instance = Number;
 
-    fn size(self) -> Option<usize> {
-        Some(NumberClass::size(self))
-    }
-
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Number> {
         let value = Value::try_from(scalar.into())?;
         Number::try_from(value).map(|n| n.into_type(*self))
@@ -722,6 +718,10 @@ impl ScalarClass for NumberType {
 
 impl ValueClass for NumberType {
     type Instance = Number;
+
+    fn size(self) -> Option<usize> {
+        Some(NumberClass::size(self))
+    }
 }
 
 impl NumberClass for NumberType {

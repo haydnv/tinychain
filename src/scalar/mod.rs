@@ -93,8 +93,6 @@ pub trait ScalarInstance: Instance + Sized {
 pub trait ScalarClass: Class {
     type Instance: ScalarInstance;
 
-    fn size(self) -> Option<usize>;
-
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<<Self as ScalarClass>::Instance>;
 }
 
@@ -129,14 +127,6 @@ impl Class for ScalarType {
 
 impl ScalarClass for ScalarType {
     type Instance = Scalar;
-
-    fn size(self) -> Option<usize> {
-        match self {
-            Self::Op(ot) => ot.size(),
-            Self::Value(vt) => vt.size(),
-            Self::Tuple => None,
-        }
-    }
 
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Scalar> {
         match self {
