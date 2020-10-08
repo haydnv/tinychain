@@ -8,8 +8,10 @@ use crate::class::{Class, Instance, TCType};
 use crate::error::{self, TCResult};
 use crate::scalar::{label, Link, Scalar, TCPath, ValueId};
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-struct ObjectType;
+use super::{ScalarClass, ScalarInstance};
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub struct ObjectType;
 
 impl Class for ObjectType {
     type Instance = Object;
@@ -27,6 +29,14 @@ impl Class for ObjectType {
     }
 }
 
+impl ScalarClass for ObjectType {
+    type Instance = Object;
+
+    fn try_cast<S: Into<Scalar>>(&self, _scalar: S) -> TCResult<Object> {
+        Err(error::not_implemented("ObjectType::try_cast"))
+    }
+}
+
 impl From<ObjectType> for Link {
     fn from(_: ObjectType) -> Link {
         ObjectType::prefix().into()
@@ -39,14 +49,9 @@ impl fmt::Display for ObjectType {
     }
 }
 
-struct Object {
+#[derive(Clone, Eq, PartialEq)]
+pub struct Object {
     data: HashMap<ValueId, Scalar>,
-}
-
-impl<'de> Deserialize<'de> for Object {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Deserialize::deserialize(d).map(|data| Object { data })
-    }
 }
 
 impl Instance for Object {
@@ -57,11 +62,27 @@ impl Instance for Object {
     }
 }
 
+impl ScalarInstance for Object {
+    type Class = ObjectType;
+}
+
+impl<'de> Deserialize<'de> for Object {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Deserialize::deserialize(d).map(|data| Object { data })
+    }
+}
+
 impl Serialize for Object {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         self.data.serialize(s)
+    }
+}
+
+impl fmt::Display for Object {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Object of type {}", self.class())
     }
 }

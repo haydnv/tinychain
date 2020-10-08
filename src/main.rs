@@ -15,7 +15,6 @@ mod error;
 mod gateway;
 mod kernel;
 mod lock;
-mod object;
 mod scalar;
 mod stream;
 mod transaction;

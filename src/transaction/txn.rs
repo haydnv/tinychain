@@ -481,6 +481,7 @@ fn is_resolved(state: &State) -> bool {
 
 fn is_resolved_scalar(scalar: &Scalar) -> bool {
     match scalar {
+        Scalar::Object(_) => true,
         Scalar::Op(op) => match **op {
             Op::Ref(_) => false,
             Op::Method(_) => false,
@@ -577,6 +578,7 @@ fn scalar_requires(
     txn_state: &HashMap<ValueId, State>,
 ) -> TCResult<HashSet<ValueId>> {
     match scalar {
+        Scalar::Object(_) => Ok(HashSet::new()),
         Scalar::Op(op) => requires(&**op, txn_state),
         Scalar::Value(value) => value_requires(value),
         Scalar::Tuple(tuple) => {

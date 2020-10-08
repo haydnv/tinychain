@@ -3,14 +3,16 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::de;
-use serde::ser::{Serialize, SerializeSeq, Serializer};
+use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::class::*;
 use crate::error;
 
+pub mod object;
 pub mod op;
 pub mod value;
 
+pub use object::*;
 pub use op::*;
 pub use value::*;
 
@@ -98,6 +100,7 @@ pub trait ScalarClass: Class {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum ScalarType {
+    Object(object::ObjectType),
     Op(op::OpType),
     Value(ValueType),
     Tuple,
@@ -113,6 +116,7 @@ impl Class for ScalarType {
         }
 
         match suffix[0].as_str() {
+            "object" => ObjectType::from_path(path).map(ScalarType::Object),
             "op" => op::OpType::from_path(path).map(ScalarType::Op),
             "value" => ValueType::from_path(path).map(ScalarType::Value),
             "tuple" if suffix.len() == 1 => Ok(ScalarType::Tuple),
@@ -130,6 +134,7 @@ impl ScalarClass for ScalarType {
 
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Scalar> {
         match self {
+            Self::Object(ot) => ot.try_cast(scalar).map(Scalar::Object),
             Self::Op(ot) => ot.try_cast(scalar).map(Box::new).map(Scalar::Op),
             Self::Value(vt) => vt.try_cast(scalar).map(Scalar::Value),
             Self::Tuple => {
@@ -145,6 +150,7 @@ impl ScalarClass for ScalarType {
 impl From<ScalarType> for Link {
     fn from(st: ScalarType) -> Link {
         match st {
+            ScalarType::Object(ot) => ot.into(),
             ScalarType::Op(ot) => ot.into(),
             ScalarType::Value(vt) => vt.into(),
             ScalarType::Tuple => ScalarType::prefix().join(label("tuple").into()).into(),
@@ -166,6 +172,7 @@ impl fmt::Display for ScalarType {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Scalar {
+    Object(object::Object),
     Op(Box<op::Op>),
     Value(value::Value),
     Tuple(Vec<Scalar>),
@@ -176,6 +183,7 @@ impl Instance for Scalar {
 
     fn class(&self) -> Self::Class {
         match self {
+            Self::Object(object) => ScalarType::Object(object.class()),
             Self::Op(op) => ScalarType::Op(op.class()),
             Self::Value(value) => ScalarType::Value(value.class()),
             Self::Tuple(_) => ScalarType::Tuple,
@@ -255,6 +263,7 @@ impl<T: TryFrom<Scalar, Error = error::TCError>> TryFrom<Scalar> for Vec<T> {
 impl TryCastFrom<Scalar> for Value {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
+            Scalar::Object(_obj) => unimplemented!(),
             Scalar::Op(_op) => unimplemented!(),
             Scalar::Value(_) => true,
             Scalar::Tuple(tuple) => Value::can_cast_from(tuple),
@@ -263,6 +272,7 @@ impl TryCastFrom<Scalar> for Value {
 
     fn opt_cast_from(scalar: Scalar) -> Option<Value> {
         match scalar {
+            Scalar::Object(_obj) => unimplemented!(),
             Scalar::Op(_op) => unimplemented!(),
             Scalar::Value(value) => Some(value),
             Scalar::Tuple(tuple) => Value::opt_cast_from(tuple),
@@ -552,6 +562,8 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                             .map_err(de::Error::custom)
                     } else if link == Link::from(ScalarType::Tuple) {
                         access.next_value().map(Scalar::Tuple)
+                    } else if link == Link::from(ObjectType) {
+                        access.next_value().map(Scalar::Object)
                     } else {
                         Err(de::Error::custom(format!("Support for {}", link)))
                     }
@@ -597,21 +609,20 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
 }
 
 impl<'de> de::Deserialize<'de> for Scalar {
-    fn deserialize<D>(d: D) -> Result<Self, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
+    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value_visitor = value::ValueVisitor;
         d.deserialize_any(ScalarVisitor { value_visitor })
     }
 }
 
 impl Serialize for Scalar {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
+            Scalar::Object(object) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry(&Link::from(object.class()).to_string(), object)?;
+                map.end()
+            }
             Scalar::Op(op) => op.serialize(s),
             Scalar::Value(value) => value.serialize(s),
             Scalar::Tuple(tuple) => {
@@ -628,6 +639,7 @@ impl Serialize for Scalar {
 impl fmt::Display for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Scalar::Object(object) => write!(f, "{}", object),
             Scalar::Op(op) => write!(f, "{}", op),
             Scalar::Value(value) => write!(f, "{}", value),
             Scalar::Tuple(tuple) => write!(
