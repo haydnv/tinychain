@@ -189,6 +189,40 @@ You can define a function and call it like so:
     ["outcome", {"$guess": [6]}]
 ]
 ```
+
+Tinychain supports generic objects, making it easy to import data into Tinychain from other sources.
+For example, consider a third-party service that returns data like
+`{"lat": 40.689, "lng": -74.044}`. You can easily import this into Tinychain like so:
+
+```json
+{"/sbin/object": {"lat": 40.689, "lng": -74.044}}
+```
+
+You can also modify it to define other instance variables and methods--consider this example with a
+new method called `radians`:
+
+```json
+{
+    "/sbin/object": {
+        "lat": 40.689,
+        "lng": -74.044,
+        "radians": {"/sbin/op/def/get": [
+            ["pi", 3.14159],
+            ["radians_per_degree", {"$pi/div": [180]}],
+            ["coord_radians", {"/sbin/object": {
+                "lat": {"$self/lat/mul": [{"$radians_per_degree": {}}]},
+                "lng": {"$self/lng/mul": [{"$radians_per_degree": {}}]}
+            }]
+        ]}
+    }
+}
+```
+
+This is useful for testing and debugging, but in production you'll want more rigorous constraints
+on the form of your data. To do that you can define a class and instantiate it with the instance
+data. This comes in very handy with any type of third-party data, whether it comes from a Tinychain
+API or not.
+
 ** This feature is not yet implemented
 
 ## Security
