@@ -213,6 +213,12 @@ impl From<Value> for Scalar {
     }
 }
 
+impl From<ValueId> for Scalar {
+    fn from(id: ValueId) -> Scalar {
+        Scalar::Value(id.into())
+    }
+}
+
 impl<T1: Into<Scalar>, T2: Into<Scalar>> From<(T1, T2)> for Scalar {
     fn from(tuple: (T1, T2)) -> Scalar {
         Scalar::Tuple(vec![tuple.0.into(), tuple.1.into()])
@@ -521,16 +527,16 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                 } else {
                     let method = if value.matches::<Vec<(ValueId, Value)>>() {
                         let data: Vec<(ValueId, Scalar)> = value.opt_cast_into().unwrap();
-                        Method::Post(subject, (path, data))
+                        Method::Post((subject, path), data)
                     } else {
                         let mut data: Vec<Scalar> = value.try_into().map_err(de::Error::custom)?;
                         if data.len() == 1 {
                             let key = data.pop().unwrap().try_into().map_err(de::Error::custom)?;
-                            Method::Get(subject, (path, key))
+                            Method::Get((subject, path), key)
                         } else if data.len() == 2 {
                             let value = data.pop().unwrap();
                             let key = data.pop().unwrap().try_into().map_err(de::Error::custom)?;
-                            Method::Put(subject, (path, key, value))
+                            Method::Put((subject, path), (key, value))
                         } else {
                             return Err(de::Error::custom(format!(
                                 "Expected a Method but found: {}",
@@ -623,7 +629,55 @@ impl Serialize for Scalar {
                 map.serialize_entry(&Link::from(object.class()).to_string(), object)?;
                 map.end()
             }
-            Scalar::Op(op) => op.serialize(s),
+            Scalar::Op(op) => match &**op {
+                Op::Def(def) => {
+                    let mut map = s.serialize_map(Some(1))?;
+                    map.serialize_entry(
+                        &Link::from(def.class()).to_string(),
+                        &Scalar::cast_from(def.clone()),
+                    )?;
+                    map.end()
+                }
+                Op::Method(method) => {
+                    let ((subject, path), args): ((TCRef, TCPath), Scalar) = match method {
+                        Method::Get(subject, arg) => (subject.clone(), vec![arg.clone()].into()),
+                        Method::Put(subject, args) => (subject.clone(), args.clone().into()),
+                        Method::Post(subject, args) => (subject.clone(), args.to_vec().into()),
+                    };
+
+                    let mut map = s.serialize_map(Some(1))?;
+                    map.serialize_entry(&format!("{}{}", subject, path), &args)?;
+                    map.end()
+                }
+                Op::Ref(op_ref) => match op_ref {
+                    OpRef::If(cond, then, or_else) => {
+                        let mut map = s.serialize_map(Some(1))?;
+                        map.serialize_entry(
+                            &Link::from(op_ref.class()).to_string(),
+                            &[&Scalar::Value(cond.clone().into()), then, or_else],
+                        )?;
+                        map.end()
+                    }
+                    OpRef::Get((path, key)) => {
+                        let mut map = s.serialize_map(Some(1))?;
+                        map.serialize_entry(&path.to_string(), key)?;
+                        map.end()
+                    }
+                    OpRef::Put((path, key, value)) => {
+                        let mut map = s.serialize_map(Some(1))?;
+                        map.serialize_entry(
+                            &path.to_string(),
+                            &[&Scalar::Value(key.clone()), value],
+                        )?;
+                        map.end()
+                    }
+                    OpRef::Post((path, data)) => {
+                        let mut map = s.serialize_map(Some(1))?;
+                        map.serialize_entry(&path.to_string(), data)?;
+                        map.end()
+                    }
+                },
+            },
             Scalar::Value(value) => value.serialize(s),
             Scalar::Tuple(tuple) => {
                 let mut seq = s.serialize_seq(Some(tuple.len()))?;

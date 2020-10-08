@@ -217,7 +217,7 @@ example with a new method called `radians`:
             ["coord_radians", {"/sbin/object": {
                 "lat": {"$self/lat/mul": [{"$radians_per_degree": []}]},
                 "lng": {"$self/lng/mul": [{"$radians_per_degree": []}]}
-            }]
+            }}]
         ]}
     }
 }

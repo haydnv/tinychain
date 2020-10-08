@@ -3,7 +3,6 @@ use std::iter;
 use std::sync::Arc;
 
 use futures::stream;
-use serde::{Serialize, Serializer};
 
 use crate::auth::Auth;
 use crate::class::{Class, Instance, State, TCBoxTryFuture, TCResult};
@@ -12,8 +11,8 @@ use crate::transaction::Txn;
 
 use super::link::{Link, TCPath};
 use super::{
-    label, Scalar, ScalarClass, ScalarInstance, ScalarType, TCRef, TryCastFrom, TryCastInto, Value,
-    ValueId,
+    label, CastFrom, Scalar, ScalarClass, ScalarInstance, ScalarType, TCRef, TryCastFrom,
+    TryCastInto, Value, ValueId,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
@@ -317,6 +316,18 @@ impl TryCastFrom<Scalar> for OpDef {
     }
 }
 
+impl CastFrom<OpDef> for Scalar {
+    fn cast_from(def: OpDef) -> Scalar {
+        match def {
+            OpDef::Get((key_name, def)) => Scalar::Tuple(vec![key_name.into(), def.into()]),
+            OpDef::Put((key_name, value_name, def)) => {
+                Scalar::Tuple(vec![key_name.into(), value_name.into(), def.into()])
+            }
+            OpDef::Post(def) => def.into(),
+        }
+    }
+}
+
 impl fmt::Display for OpDef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -329,9 +340,9 @@ impl fmt::Display for OpDef {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Method {
-    Get(TCRef, (TCPath, Value)),
-    Put(TCRef, (TCPath, Value, Scalar)),
-    Post(TCRef, (TCPath, Vec<(ValueId, Scalar)>)),
+    Get((TCRef, TCPath), Value),
+    Put((TCRef, TCPath), (Value, Scalar)),
+    Post((TCRef, TCPath), Vec<(ValueId, Scalar)>),
 }
 
 impl Instance for Method {
@@ -353,9 +364,9 @@ impl ScalarInstance for Method {
 impl fmt::Display for Method {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Get(subject, (path, _)) => write!(f, "GET {}: {}", subject, path),
-            Self::Put(subject, (path, _, _)) => write!(f, "PUT {}{}", subject, path),
-            Self::Post(subject, (path, _)) => write!(f, "PUT {}{}", subject, path),
+            Self::Get((subject, path), _) => write!(f, "GET {}: {}", subject, path),
+            Self::Put((subject, path), (_, _)) => write!(f, "PUT {}{}", subject, path),
+            Self::Post((subject, path), _) => write!(f, "PUT {}{}", subject, path),
         }
     }
 }
@@ -461,15 +472,6 @@ impl From<Method> for Op {
 impl From<OpRef> for Op {
     fn from(op_ref: OpRef) -> Op {
         Op::Ref(op_ref)
-    }
-}
-
-impl Serialize for Op {
-    fn serialize<S>(&self, _s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        unimplemented!()
     }
 }
 
