@@ -17,6 +17,8 @@ use super::link::{Link, TCPath};
 use super::reference::TCRef;
 use super::Value;
 
+const EMPTY: &[usize] = &[];
+
 const RESERVED_CHARS: [&str; 21] = [
     "/", "..", "~", "$", "`", "^", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":",
     "//", "@", "#",
@@ -491,15 +493,12 @@ impl Serialize for TCString {
     where
         S: Serializer,
     {
-        match self {
-            Self::Id(i) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("/sbin/value/id", &[i.as_str()])?;
-                map.end()
-            }
-            Self::Link(l) => l.serialize(s),
-            Self::Ref(r) => r.serialize(s),
-            Self::UString(u) => s.serialize_str(u.as_str()),
+        if let Self::UString(ustring) = self {
+            s.serialize_str(ustring.as_str())
+        } else {
+            let mut map = s.serialize_map(Some(1))?;
+            map.serialize_entry(&self.to_string(), EMPTY)?;
+            map.end()
         }
     }
 }
@@ -507,10 +506,10 @@ impl Serialize for TCString {
 impl fmt::Display for TCString {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TCString::Id(id) => write!(f, "ValueId: {}", id),
-            TCString::Link(l) => write!(f, "Link: {}", l),
-            TCString::Ref(r) => write!(f, "Ref: {}", r),
-            TCString::UString(u) => write!(f, "UString: \"{}\"", u),
+            TCString::Id(id) => write!(f, "{}", id),
+            TCString::Link(l) => write!(f, "{}", l),
+            TCString::Ref(r) => write!(f, "{}", r),
+            TCString::UString(u) => write!(f, "{}", u),
         }
     }
 }
