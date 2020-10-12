@@ -12,7 +12,7 @@ use super::Value;
 pub trait ValueInstance: ScalarInstance {
     type Class: ValueClass;
 
-    fn get(&self, _path: TCPath, _key: Value) -> TCResult<Self> {
+    fn get(&self, _path: TCPath, _key: Value) -> TCResult<Value> {
         Err(error::method_not_allowed(format!("GET {}", self.class())))
     }
 }
