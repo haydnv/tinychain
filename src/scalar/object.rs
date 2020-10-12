@@ -90,7 +90,9 @@ impl Object {
                 Some(scalar) => match scalar {
                     Scalar::Object(object) => object.get(txn, path.slice_from(1), key, auth).await,
                     Scalar::Op(op) => match &**op {
-                        Op::Def(op_def) => op_def.get(txn, key, auth).await,
+                        Op::Def(op_def) => {
+                            op_def.get(txn, key, auth, Some(self.clone().into())).await
+                        }
                         other => Err(error::not_implemented(other)),
                     },
                     Scalar::Value(value) => value

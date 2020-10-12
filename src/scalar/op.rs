@@ -1,5 +1,4 @@
 use std::fmt;
-use std::iter;
 use std::sync::Arc;
 
 use futures::stream;
@@ -270,11 +269,24 @@ pub enum OpDef {
 }
 
 impl OpDef {
-    pub fn get<'a>(&'a self, txn: Arc<Txn>, key: Value, auth: Auth) -> TCBoxTryFuture<'a, State> {
+    pub fn get<'a>(
+        &'a self,
+        txn: Arc<Txn>,
+        key: Value,
+        auth: Auth,
+        context: Option<Scalar>,
+    ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Get((key_id, def)) = self {
-                let data = iter::once((key_id.clone(), Scalar::Value(key))).chain(def.to_vec());
-                txn.execute(stream::iter(data), auth).await
+                let mut data = if let Some(subject) = context {
+                    vec![(label("self").into(), subject)]
+                } else {
+                    vec![]
+                };
+
+                data.push((key_id.clone(), Scalar::Value(key)));
+                txn.execute(stream::iter(data.drain(..).chain(def.to_vec())), auth)
+                    .await
             } else {
                 Err(error::method_not_allowed(self))
             }

@@ -209,6 +209,12 @@ impl From<Number> for Scalar {
     }
 }
 
+impl From<Object> for Scalar {
+    fn from(o: Object) -> Scalar {
+        Scalar::Object(o)
+    }
+}
+
 impl From<Op> for Scalar {
     fn from(op: Op) -> Scalar {
         Scalar::Op(Box::new(op))

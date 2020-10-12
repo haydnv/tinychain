@@ -353,7 +353,7 @@ impl Txn {
                                     return Err(error::not_found(path));
                                 }
 
-                                op_def.get(self, key, auth).await
+                                op_def.get(self, key, auth, None).await
                             }
                             other => Err(error::method_not_allowed(other)),
                         },
