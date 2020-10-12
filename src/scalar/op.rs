@@ -414,14 +414,14 @@ impl ScalarInstance for OpRef {
 
 impl TryCastFrom<Scalar> for OpRef {
     fn can_cast_from(s: &Scalar) -> bool {
-        s.matches::<(TCRef, Value, Value)>()
+        s.matches::<(TCRef, Scalar, Scalar)>()
             || s.matches::<(Link, Vec<(ValueId, Value)>)>()
             || s.matches::<(Link, Value, Value)>()
             || s.matches::<(Link, Value)>()
     }
 
     fn opt_cast_from(s: Scalar) -> Option<OpRef> {
-        if s.matches::<(TCRef, Value, Value)>() {
+        if s.matches::<(TCRef, Scalar, Scalar)>() {
             let (cond, then, or_else) = s.opt_cast_into().unwrap();
             Some(OpRef::If(cond, then, or_else))
         } else {

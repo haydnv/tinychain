@@ -275,19 +275,17 @@ impl<T: TryFrom<Scalar, Error = error::TCError>> TryFrom<Scalar> for Vec<T> {
 impl TryCastFrom<Scalar> for Value {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
-            Scalar::Object(_obj) => unimplemented!(),
-            Scalar::Op(_op) => unimplemented!(),
             Scalar::Value(_) => true,
             Scalar::Tuple(tuple) => Value::can_cast_from(tuple),
+            _ => false,
         }
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Value> {
         match scalar {
-            Scalar::Object(_obj) => unimplemented!(),
-            Scalar::Op(_op) => unimplemented!(),
             Scalar::Value(value) => Some(value),
             Scalar::Tuple(tuple) => Value::opt_cast_from(tuple),
+            _ => None
         }
     }
 }
@@ -529,7 +527,14 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                 let value: Scalar = access.next_value()?;
 
                 if value == Scalar::Tuple(vec![]) || value == Scalar::Value(Value::None) {
-                    Ok(Scalar::Value(subject.into()))
+                    if path == TCPath::default() {
+                        Ok(Scalar::Value(subject.into()))
+                    } else {
+                        Ok(Scalar::Op(Box::new(Op::Method(Method::Get(
+                            (subject, path),
+                            Value::None,
+                        )))))
+                    }
                 } else {
                     let method = if value.matches::<Vec<(ValueId, Value)>>() {
                         let data: Vec<(ValueId, Scalar)> = value.opt_cast_into().unwrap();
