@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::class::{Class, Instance, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
@@ -20,7 +20,9 @@ pub enum BTreeType {
 
 impl Class for BTreeType {
     type Instance = BTree;
+}
 
+impl NativeClass for BTreeType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let path = path.from_path(&Self::prefix())?;
 

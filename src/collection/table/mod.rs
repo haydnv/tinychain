@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
 
-use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
 use crate::error;
@@ -41,7 +41,9 @@ pub enum TableType {
 
 impl Class for TableType {
     type Instance = Table;
+}
 
+impl NativeClass for TableType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         TableBaseType::from_path(path).map(TableType::Base)
     }

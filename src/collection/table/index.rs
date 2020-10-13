@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
-use crate::class::{Class, Instance, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{self, BTreeFile};
 use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
@@ -32,7 +32,9 @@ pub enum TableBaseType {
 
 impl Class for TableBaseType {
     type Instance = TableBase;
+}
 
+impl NativeClass for TableBaseType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let path = path.from_path(&Self::prefix())?;
 

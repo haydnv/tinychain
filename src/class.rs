@@ -26,7 +26,9 @@ pub type TCTryStream<T> = TCStream<TCResult<T>>;
 
 pub trait Class: Into<Link> + Clone + Eq + fmt::Display {
     type Instance: Instance;
+}
 
+pub trait NativeClass: Class {
     fn from_path(path: &TCPath) -> TCResult<Self>;
 
     fn prefix() -> TCPath;
@@ -68,7 +70,9 @@ pub enum TCType {
 
 impl Class for TCType {
     type Instance = State;
+}
 
+impl NativeClass for TCType {
     fn from_path(path: &TCPath) -> TCResult<TCType> {
         let suffix = path.from_path(&Self::prefix())?;
 

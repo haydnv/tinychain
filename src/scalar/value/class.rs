@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::class::{Class, TCResult, TCType};
+use crate::class::{Class, NativeClass, TCResult, TCType};
 use crate::error;
 use crate::scalar::{Scalar, ScalarClass, ScalarInstance, ScalarType, TryCastFrom, TryCastInto};
 
@@ -54,7 +54,9 @@ impl ValueType {
 
 impl Class for ValueType {
     type Instance = Value;
+}
 
+impl NativeClass for ValueType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
 

@@ -7,7 +7,7 @@ use futures::stream::Stream;
 use futures::TryFutureExt;
 
 use crate::auth::Auth;
-use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::scalar::{label, Link, OpDef, Scalar, TCPath, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -37,7 +37,9 @@ pub enum ChainType {
 
 impl Class for ChainType {
     type Instance = Chain;
+}
 
+impl NativeClass for ChainType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
 

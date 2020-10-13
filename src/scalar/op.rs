@@ -4,7 +4,7 @@ use std::sync::Arc;
 use futures::stream;
 
 use crate::auth::Auth;
-use crate::class::{Class, Instance, State, TCBoxTryFuture, TCResult};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::transaction::Txn;
 
@@ -23,7 +23,9 @@ pub enum OpDefType {
 
 impl Class for OpDefType {
     type Instance = OpDef;
+}
 
+impl NativeClass for OpDefType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.len() == 1 {
@@ -82,7 +84,9 @@ pub enum MethodType {
 
 impl Class for MethodType {
     type Instance = Method;
+}
 
+impl NativeClass for MethodType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.len() == 1 {
@@ -141,7 +145,9 @@ pub enum OpRefType {
 
 impl Class for OpRefType {
     type Instance = OpRef;
+}
 
+impl NativeClass for OpRefType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.len() == 1 {
@@ -203,7 +209,9 @@ pub enum OpType {
 
 impl Class for OpType {
     type Instance = Op;
+}
 
+impl NativeClass for OpType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
 

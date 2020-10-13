@@ -6,7 +6,7 @@ use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 
 use crate::auth::Auth;
-use crate::class::{Class, Instance, State, TCBoxTryFuture, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCType};
 use crate::error::{self, TCResult};
 use crate::scalar::{label, Link, Op, Scalar, TCPath, Value, ValueId, ValueInstance};
 use crate::transaction::Txn;
@@ -14,46 +14,85 @@ use crate::transaction::Txn;
 use super::{ScalarClass, ScalarInstance};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub struct ObjectType;
+pub struct ObjectClassType;
+
+impl Class for ObjectClassType {
+    type Instance = ObjectType;
+}
+
+impl ScalarClass for ObjectClassType {
+    type Instance = ObjectType;
+
+    fn try_cast<S: Into<Scalar>>(&self, _scalar: S) -> TCResult<ObjectType> {
+        Err(error::unsupported("Cannot cast a Class"))
+    }
+}
+
+impl From<ObjectClassType> for Link {
+    fn from(_: ObjectClassType) -> Link {
+        TCType::prefix().join(label("class").into()).into()
+    }
+}
+
+impl fmt::Display for ObjectClassType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "user-defined Class")
+    }
+}
+
+#[derive(Clone, Default, Eq, PartialEq)]
+pub struct ObjectType {
+    extends: Option<Link>,
+    proto: HashMap<ValueId, Scalar>,
+}
 
 impl Class for ObjectType {
     type Instance = Object;
-
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        if path == &Self::prefix() {
-            Ok(ObjectType)
-        } else {
-            Err(error::not_found(path))
-        }
-    }
-
-    fn prefix() -> TCPath {
-        TCType::prefix().join(label("object").into())
-    }
 }
 
 impl ScalarClass for ObjectType {
     type Instance = Object;
 
     fn try_cast<S: Into<Scalar>>(&self, _scalar: S) -> TCResult<Object> {
-        Err(error::not_implemented("ObjectType::try_cast"))
+        Err(error::unsupported("Cannot cast a Class"))
     }
 }
 
+impl Instance for ObjectType {
+    type Class = ObjectClassType;
+
+    fn class(&self) -> ObjectClassType {
+        ObjectClassType
+    }
+}
+
+impl ScalarInstance for ObjectType {
+    type Class = ObjectClassType;
+}
+
 impl From<ObjectType> for Link {
-    fn from(_: ObjectType) -> Link {
-        ObjectType::prefix().into()
+    fn from(ot: ObjectType) -> Link {
+        if let Some(link) = ot.extends {
+            link
+        } else {
+            TCType::prefix().join(label("object").into()).into()
+        }
     }
 }
 
 impl fmt::Display for ObjectType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "user-defined Class")
+        if let Some(link) = &self.extends {
+            write!(f, "class {}", link)
+        } else {
+            write!(f, "user-defined Class")
+        }
     }
 }
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct Object {
+    class: ObjectType,
     data: HashMap<ValueId, Scalar>,
 }
 
@@ -61,7 +100,7 @@ impl Instance for Object {
     type Class = ObjectType;
 
     fn class(&self) -> Self::Class {
-        ObjectType
+        self.class.clone()
     }
 }
 
@@ -117,7 +156,10 @@ impl ScalarInstance for Object {
 
 impl<'de> Deserialize<'de> for Object {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Deserialize::deserialize(d).map(|data| Object { data })
+        Deserialize::deserialize(d).map(|data| Object {
+            class: ObjectType::default(),
+            data,
+        })
     }
 }
 

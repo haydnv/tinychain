@@ -6,7 +6,7 @@ use bytes::Bytes;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-use crate::class::{Class, Instance, TCResult, TCType};
+use crate::class::{Instance, NativeClass, TCResult, TCType};
 use crate::error;
 
 use super::{Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto};

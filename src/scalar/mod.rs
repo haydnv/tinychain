@@ -98,7 +98,7 @@ pub trait ScalarClass: Class {
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<<Self as ScalarClass>::Instance>;
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum ScalarType {
     Object(object::ObjectType),
     Op(op::OpType),
@@ -108,7 +108,9 @@ pub enum ScalarType {
 
 impl Class for ScalarType {
     type Instance = Scalar;
+}
 
+impl NativeClass for ScalarType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.is_empty() {
@@ -116,7 +118,7 @@ impl Class for ScalarType {
         }
 
         match suffix[0].as_str() {
-            "object" => ObjectType::from_path(path).map(ScalarType::Object),
+            "object" if suffix.len() == 1 => Ok(ScalarType::Object(ObjectType::default())),
             "op" => op::OpType::from_path(path).map(ScalarType::Op),
             "value" => ValueType::from_path(path).map(ScalarType::Value),
             "tuple" if suffix.len() == 1 => Ok(ScalarType::Tuple),
@@ -285,7 +287,7 @@ impl TryCastFrom<Scalar> for Value {
         match scalar {
             Scalar::Value(value) => Some(value),
             Scalar::Tuple(tuple) => Value::opt_cast_from(tuple),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -579,7 +581,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                             .map_err(de::Error::custom)
                     } else if link == Link::from(ScalarType::Tuple) {
                         access.next_value().map(Scalar::Tuple)
-                    } else if link == Link::from(ObjectType) {
+                    } else if link == Link::from(ObjectType::default()) {
                         access.next_value().map(Scalar::Object)
                     } else {
                         Err(de::Error::custom(format!("Support for {}", link)))
