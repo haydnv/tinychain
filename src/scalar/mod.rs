@@ -99,7 +99,7 @@ pub trait ScalarClass: Class {
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<<Self as ScalarClass>::Instance>;
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum ScalarType {
     Map,
     Object(object::ObjectType),
@@ -110,7 +110,9 @@ pub enum ScalarType {
 
 impl Class for ScalarType {
     type Instance = Scalar;
+}
 
+impl NativeClass for ScalarType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.is_empty() {
@@ -119,7 +121,7 @@ impl Class for ScalarType {
 
         match suffix[0].as_str() {
             "map" if suffix.len() == 1 => Ok(ScalarType::Map),
-            "object" => ObjectType::from_path(path).map(ScalarType::Object),
+            "object" if suffix.len() == 1 => Ok(ScalarType::Object(ObjectType::default())),
             "op" => op::OpType::from_path(path).map(ScalarType::Op),
             "value" => ValueType::from_path(path).map(ScalarType::Value),
             "tuple" if suffix.len() == 1 => Ok(ScalarType::Tuple),
@@ -293,7 +295,7 @@ impl TryCastFrom<Scalar> for Value {
         match scalar {
             Scalar::Value(value) => Some(value),
             Scalar::Tuple(tuple) => Value::opt_cast_from(tuple),
-            _ => None
+            _ => None,
         }
     }
 }

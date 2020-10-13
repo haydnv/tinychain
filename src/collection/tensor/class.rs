@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{
     Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
@@ -42,7 +42,9 @@ pub enum TensorBaseType {
 
 impl Class for TensorBaseType {
     type Instance = TensorBase;
+}
 
+impl NativeClass for TensorBaseType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.len() == 1 {
@@ -243,7 +245,9 @@ pub enum TensorViewType {
 
 impl Class for TensorViewType {
     type Instance = TensorView;
+}
 
+impl NativeClass for TensorViewType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         Err(error::bad_request(crate::class::ERR_PROTECTED, path))
     }
@@ -456,7 +460,9 @@ pub enum TensorType {
 
 impl Class for TensorType {
     type Instance = Tensor;
+}
 
+impl NativeClass for TensorType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         TensorBaseType::from_path(path).map(TensorType::Base)
     }

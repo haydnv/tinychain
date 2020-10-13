@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream;
 
-use crate::class::{Class, Instance, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionBase, CollectionItem};
 use crate::error;
@@ -16,7 +16,9 @@ pub struct NullType;
 
 impl Class for NullType {
     type Instance = Null;
+}
 
+impl NativeClass for NullType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
 

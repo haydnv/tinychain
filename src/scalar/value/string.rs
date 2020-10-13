@@ -8,7 +8,7 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use uuid::Uuid;
 
-use crate::class::{Class, Instance, TCResult};
+use crate::class::{Class, Instance, NativeClass, TCResult};
 use crate::error;
 use crate::scalar::{Scalar, ScalarClass, ScalarInstance, TryCastFrom};
 
@@ -34,7 +34,9 @@ pub enum StringType {
 
 impl Class for StringType {
     type Instance = TCString;
+}
 
+impl NativeClass for StringType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let path = path.from_path(&Self::prefix())?;
 

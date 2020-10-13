@@ -6,7 +6,7 @@ use futures::stream;
 use futures::TryFutureExt;
 
 use crate::auth::Auth;
-use crate::class::{Class, State, TCResult};
+use crate::class::{NativeClass, State, TCResult};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error;
 use crate::scalar::*;
