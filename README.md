@@ -223,6 +223,22 @@ example with a new method called `radians`:
 }
 ```
 
+Of course, you can call an method on a generic `Object` just like any other:
+
+```json
+[
+    ["greeting", {"/sbin/object": {
+        "en": "Hello!",
+        "es": "¡Hola!",
+        "render": {"/sbin/op/def/get": ["lang", [
+            ["is_spanish", {"$lang/eq": ["es"]}],
+            ["rendered", {"/sbin/op/ref/if": [{"$is_spanish": []}, {"$self/es": []}, {"$self/en": []}]}]
+        ]]}
+    }}],
+    ["result", {"$greeting/render": ["es"]}]
+]
+```
+
 ** This feature is not yet implemented
 
 ## Security
