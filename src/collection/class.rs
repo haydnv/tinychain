@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, State, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::scalar::{label, Link, Scalar, TCPath, TryCastInto, Value};
 use crate::transaction::{Transact, Txn};
@@ -73,7 +73,9 @@ pub enum CollectionType {
 
 impl Class for CollectionType {
     type Instance = Collection;
+}
 
+impl NativeClass for CollectionType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         CollectionBaseType::from_path(path).map(CollectionType::Base)
     }
@@ -142,7 +144,9 @@ pub enum CollectionBaseType {
 
 impl Class for CollectionBaseType {
     type Instance = CollectionBase;
+}
 
+impl NativeClass for CollectionBaseType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
 
@@ -221,7 +225,9 @@ pub enum CollectionViewType {
 
 impl Class for CollectionViewType {
     type Instance = CollectionView;
+}
 
+impl NativeClass for CollectionViewType {
     fn from_path(_path: &TCPath) -> TCResult<Self> {
         Err(error::internal(crate::class::ERR_PROTECTED))
     }

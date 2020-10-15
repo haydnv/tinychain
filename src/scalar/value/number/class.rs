@@ -5,7 +5,7 @@ use std::ops::{Add, Mul, Sub};
 
 use serde::{Deserialize, Serialize};
 
-use crate::class::{Class, TCResult, TCType};
+use crate::class::{Class, NativeClass, TCResult, TCType};
 use crate::error;
 use crate::scalar::{
     label, CastInto, Link, Scalar, ScalarClass, ScalarType, TCPath, TryCastFrom, Value, ValueClass,
@@ -137,7 +137,9 @@ pub enum ComplexType {
 
 impl Class for ComplexType {
     type Instance = Complex;
+}
 
+impl NativeClass for ComplexType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let path = path.from_path(&Self::prefix())?;
 
@@ -241,7 +243,9 @@ pub struct BooleanType;
 
 impl Class for BooleanType {
     type Instance = Boolean;
+}
 
+impl NativeClass for BooleanType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let path = path.from_path(&Self::prefix())?;
 
@@ -323,7 +327,9 @@ pub enum FloatType {
 
 impl Class for FloatType {
     type Instance = Float;
+}
 
+impl NativeClass for FloatType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let path = path.from_path(&Self::prefix())?;
 
@@ -433,7 +439,9 @@ pub enum IntType {
 
 impl Class for IntType {
     type Instance = Int;
+}
 
+impl NativeClass for IntType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let path = path.from_path(&Self::prefix())?;
 
@@ -550,7 +558,9 @@ pub enum UIntType {
 
 impl Class for UIntType {
     type Instance = UInt;
+}
 
+impl NativeClass for UIntType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let path = path.from_path(&Self::prefix())?;
 
@@ -681,7 +691,9 @@ impl NumberType {
 
 impl Class for NumberType {
     type Instance = Number;
+}
 
+impl NativeClass for NumberType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
 

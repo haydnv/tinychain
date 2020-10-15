@@ -1336,17 +1336,17 @@ impl ScalarInstance for Number {
 impl ValueInstance for Number {
     type Class = NumberType;
 
-    fn get(&self, path: TCPath, key: Value) -> TCResult<Self> {
+    fn get(&self, path: TCPath, key: Value) -> TCResult<Value> {
         if path.len() == 1 {
             match path[0].as_str() {
-                "add" => Ok(Add::add(self.clone(), key.try_into()?)),
-                "eq" => Ok(Number::Bool(Boolean(self == &Number::try_from(key)?))),
-                "gt" => Ok(Number::Bool(Boolean(self > &Number::try_from(key)?))),
-                "gte" => Ok(Number::Bool(Boolean(self >= &Number::try_from(key)?))),
-                "lt" => Ok(Number::Bool(Boolean(self < &Number::try_from(key)?))),
-                "lte" => Ok(Number::Bool(Boolean(self <= &Number::try_from(key)?))),
-                "mul" => Ok(Mul::mul(self.clone(), key.try_into()?)),
-                "sub" => Ok(Sub::sub(self.clone(), key.try_into()?)),
+                "add" => Ok(Add::add(self.clone(), key.try_into()?).into()),
+                "eq" => Ok(Number::Bool(Boolean(self == &Number::try_from(key)?)).into()),
+                "gt" => Ok(Number::Bool(Boolean(self > &Number::try_from(key)?)).into()),
+                "gte" => Ok(Number::Bool(Boolean(self >= &Number::try_from(key)?)).into()),
+                "lt" => Ok(Number::Bool(Boolean(self < &Number::try_from(key)?)).into()),
+                "lte" => Ok(Number::Bool(Boolean(self <= &Number::try_from(key)?)).into()),
+                "mul" => Ok(Mul::mul(self.clone(), key.try_into()?).into()),
+                "sub" => Ok(Sub::sub(self.clone(), key.try_into()?).into()),
                 other => Err(error::not_found(other)),
             }
         } else {

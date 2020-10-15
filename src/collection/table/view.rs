@@ -41,7 +41,9 @@ pub enum TableViewType {
 
 impl Class for TableViewType {
     type Instance = TableView;
+}
 
+impl NativeClass for TableViewType {
     fn from_path(_path: &TCPath) -> TCResult<Self> {
         Err(error::internal(crate::class::ERR_PROTECTED))
     }

@@ -82,15 +82,7 @@ impl From<ops::Range<u64>> for AxisBounds {
 
 impl TryCastFrom<Value> for AxisBounds {
     fn can_cast_from(value: &Value) -> bool {
-        if value.matches::<u64>() {
-            true
-        } else if value.matches::<(u64, u64)>() {
-            true
-        } else if value.matches::<Vec<u64>>() {
-            true
-        } else {
-            false
-        }
+        value.matches::<u64>() || value.matches::<(u64, u64)>() || value.matches::<Vec<u64>>()
     }
 
     fn opt_cast_from(value: Value) -> Option<AxisBounds> {

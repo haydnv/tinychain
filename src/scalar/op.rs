@@ -1,11 +1,10 @@
 use std::fmt;
-use std::iter;
 use std::sync::Arc;
 
 use futures::stream;
 
 use crate::auth::Auth;
-use crate::class::{Class, Instance, State, TCBoxTryFuture, TCResult};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::transaction::Txn;
 
@@ -24,7 +23,9 @@ pub enum OpDefType {
 
 impl Class for OpDefType {
     type Instance = OpDef;
+}
 
+impl NativeClass for OpDefType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.len() == 1 {
@@ -83,7 +84,9 @@ pub enum MethodType {
 
 impl Class for MethodType {
     type Instance = Method;
+}
 
+impl NativeClass for MethodType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.len() == 1 {
@@ -142,7 +145,9 @@ pub enum OpRefType {
 
 impl Class for OpRefType {
     type Instance = OpRef;
+}
 
+impl NativeClass for OpRefType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.len() == 1 {
@@ -204,7 +209,9 @@ pub enum OpType {
 
 impl Class for OpType {
     type Instance = Op;
+}
 
+impl NativeClass for OpType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
 
@@ -270,11 +277,24 @@ pub enum OpDef {
 }
 
 impl OpDef {
-    pub fn get<'a>(&'a self, txn: Arc<Txn>, key: Value, auth: Auth) -> TCBoxTryFuture<'a, State> {
+    pub fn get<'a>(
+        &'a self,
+        txn: Arc<Txn>,
+        key: Value,
+        auth: Auth,
+        context: Option<Scalar>,
+    ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Get((key_id, def)) = self {
-                let data = iter::once((key_id.clone(), Scalar::Value(key))).chain(def.to_vec());
-                txn.execute(stream::iter(data), auth).await
+                let mut data = if let Some(subject) = context {
+                    vec![(label("self").into(), subject)]
+                } else {
+                    vec![]
+                };
+
+                data.push((key_id.clone(), Scalar::Value(key)));
+                txn.execute(stream::iter(data.drain(..).chain(def.to_vec())), auth)
+                    .await
             } else {
                 Err(error::method_not_allowed(self))
             }

@@ -99,7 +99,7 @@ pub trait ScalarClass: Class {
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<<Self as ScalarClass>::Instance>;
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum ScalarType {
     Map,
     Object(object::ObjectType),
@@ -110,7 +110,9 @@ pub enum ScalarType {
 
 impl Class for ScalarType {
     type Instance = Scalar;
+}
 
+impl NativeClass for ScalarType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let suffix = path.from_path(&Self::prefix())?;
         if suffix.is_empty() {
@@ -119,7 +121,7 @@ impl Class for ScalarType {
 
         match suffix[0].as_str() {
             "map" if suffix.len() == 1 => Ok(ScalarType::Map),
-            "object" => ObjectType::from_path(path).map(ScalarType::Object),
+            "object" if suffix.len() == 1 => Ok(ScalarType::Object(ObjectType::default())),
             "op" => op::OpType::from_path(path).map(ScalarType::Op),
             "value" => ValueType::from_path(path).map(ScalarType::Value),
             "tuple" if suffix.len() == 1 => Ok(ScalarType::Tuple),
@@ -209,6 +211,12 @@ impl From<Number> for Scalar {
     }
 }
 
+impl From<Object> for Scalar {
+    fn from(o: Object) -> Scalar {
+        Scalar::Object(o)
+    }
+}
+
 impl From<Op> for Scalar {
     fn from(op: Op) -> Scalar {
         Scalar::Op(Box::new(op))
@@ -277,21 +285,17 @@ impl<T: TryFrom<Scalar, Error = error::TCError>> TryFrom<Scalar> for Vec<T> {
 impl TryCastFrom<Scalar> for Value {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
-            Scalar::Map(_map) => unimplemented!(),
-            Scalar::Object(_obj) => unimplemented!(),
-            Scalar::Op(_) => false,
             Scalar::Value(_) => true,
             Scalar::Tuple(tuple) => Value::can_cast_from(tuple),
+            _ => false,
         }
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Value> {
         match scalar {
-            Scalar::Map(_map) => unimplemented!(),
-            Scalar::Object(_obj) => unimplemented!(),
-            Scalar::Op(_op) => None,
             Scalar::Value(value) => Some(value),
             Scalar::Tuple(tuple) => Value::opt_cast_from(tuple),
+            _ => None,
         }
     }
 }
@@ -552,7 +556,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
 
                 return if data == Scalar::Tuple(vec![]) || data == Scalar::Value(Value::None) {
                     if path == TCPath::default() {
-                        Ok(Scalar::Value(Value::TCString(subject.into())))
+                        Ok(Scalar::Value(subject.into()))
                     } else {
                         Ok(Scalar::Op(Box::new(Op::Method(Method::Get(
                             (subject, path),
@@ -585,7 +589,8 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
             } else if let Ok(link) = key.parse::<link::Link>() {
                 return if link.host().is_none() {
                     if link.path().starts_with(&TCType::prefix()) {
-                        let dtype = ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
+                        let dtype =
+                            ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
                         dtype.try_cast(data).map_err(de::Error::custom)
                     } else if data == Scalar::Value(Value::None)
                         || data == Scalar::Value(Value::Tuple(vec![]))

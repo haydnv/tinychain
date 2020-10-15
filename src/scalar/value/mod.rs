@@ -6,7 +6,7 @@ use bytes::Bytes;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-use crate::class::{Class, Instance, TCResult, TCType};
+use crate::class::{Instance, NativeClass, TCResult, TCType};
 use crate::error;
 
 use super::{Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto};
@@ -61,11 +61,11 @@ impl ScalarInstance for Value {
 impl class::ValueInstance for Value {
     type Class = class::ValueType;
 
-    fn get(&self, path: TCPath, key: Value) -> TCResult<Self> {
+    fn get(&self, path: TCPath, key: Value) -> TCResult<Value> {
         match self {
             Value::None => Err(error::not_found(path)),
-            Value::Number(number) => number.get(path, key).map(Value::Number),
-            Value::TCString(string) => string.get(path, key).map(Value::TCString),
+            Value::Number(number) => number.get(path, key),
+            Value::TCString(string) => string.get(path, key),
             other => Err(error::method_not_allowed(format!("GET {}", other.class()))),
         }
     }

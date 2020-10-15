@@ -8,7 +8,7 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use uuid::Uuid;
 
-use crate::class::{Class, Instance, TCResult};
+use crate::class::{Class, Instance, NativeClass, TCResult};
 use crate::error;
 use crate::scalar::{Scalar, ScalarClass, ScalarInstance, TryCastFrom};
 
@@ -34,7 +34,9 @@ pub enum StringType {
 
 impl Class for StringType {
     type Instance = TCString;
+}
 
+impl NativeClass for StringType {
     fn from_path(path: &TCPath) -> TCResult<Self> {
         let path = path.from_path(&Self::prefix())?;
 
@@ -323,6 +325,22 @@ impl ScalarInstance for TCString {
 
 impl ValueInstance for TCString {
     type Class = StringType;
+
+    fn get(&self, path: TCPath, key: Value) -> TCResult<Value> {
+        if path.is_empty() {
+            Ok(self.clone().into())
+        } else if path.len() > 1 {
+            Err(error::not_found(path))
+        } else {
+            match path[0].as_str() {
+                "eq" => match key {
+                    Value::TCString(other) => Ok((self == &other).into()),
+                    other => Err(error::bad_request("Can't compare String with", other)),
+                },
+                other => Err(error::not_found(other)),
+            }
+        }
+    }
 }
 
 impl Default for TCString {

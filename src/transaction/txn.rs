@@ -346,13 +346,14 @@ impl Txn {
                             .map(State::from)
                     }
                     State::Scalar(scalar) => match scalar {
+                        Scalar::Object(object) => object.get(self, path, key, auth).await,
                         Scalar::Op(op) => match &**op {
                             Op::Def(op_def) => {
                                 if !path.is_empty() {
                                     return Err(error::not_found(path));
                                 }
 
-                                op_def.get(self, key, auth).await
+                                op_def.get(self, key, auth, None).await
                             }
                             other => Err(error::method_not_allowed(other)),
                         },
@@ -385,9 +386,15 @@ impl Txn {
                 );
 
                 match subject {
-                    State::Scalar(_) => Err(error::unsupported(
-                        "Value is immutable (doesn't support PUT)",
-                    )),
+                    State::Scalar(scalar) => match scalar {
+                        Scalar::Object(object) => {
+                            object
+                                .put(self, path, key, value, auth)
+                                .map_ok(State::from)
+                                .await
+                        }
+                        other => Err(error::method_not_allowed(other)),
+                    },
                     State::Chain(chain) => {
                         self.mutate(chain.clone().into()).await;
 
