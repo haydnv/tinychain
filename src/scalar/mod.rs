@@ -120,10 +120,7 @@ impl NativeClass for ScalarType {
         }
 
         match suffix[0].as_str() {
-<<<<<<< HEAD
             "map" if suffix.len() == 1 => Ok(ScalarType::Map),
-=======
->>>>>>> 27ba19fbf3e369d938677e1bf4002dd7a277a527
             "object" if suffix.len() == 1 => Ok(ScalarType::Object(ObjectType::default())),
             "op" => op::OpType::from_path(path).map(ScalarType::Op),
             "value" => ValueType::from_path(path).map(ScalarType::Value),
@@ -557,7 +554,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     )
                 };
 
-                if value == Scalar::Tuple(vec![]) || value == Scalar::Value(Value::None) {
+                return if data == Scalar::Tuple(vec![]) || data == Scalar::Value(Value::None) {
                     if path == TCPath::default() {
                         Ok(Scalar::Value(subject.into()))
                     } else {
