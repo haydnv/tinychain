@@ -481,6 +481,7 @@ fn is_resolved(state: &State) -> bool {
 
 fn is_resolved_scalar(scalar: &Scalar) -> bool {
     match scalar {
+        Scalar::Map(map) => map.values().all(is_resolved_scalar),
         Scalar::Object(_) => true,
         Scalar::Op(op) => match **op {
             Op::Ref(_) => false,
@@ -578,6 +579,13 @@ fn scalar_requires(
     txn_state: &HashMap<ValueId, State>,
 ) -> TCResult<HashSet<ValueId>> {
     match scalar {
+        Scalar::Map(map) => {
+            let mut required = HashSet::new();
+            for s in map.values() {
+                required.extend(scalar_requires(s, txn_state)?);
+            }
+            Ok(required)
+        }
         Scalar::Object(_) => Ok(HashSet::new()),
         Scalar::Op(op) => requires(&**op, txn_state),
         Scalar::Value(value) => value_requires(value),

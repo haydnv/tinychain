@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use serde::de::{Deserialize, Deserializer};
-use serde::ser::{Serialize, Serializer};
-
 use crate::class::{Class, Instance, TCType};
 use crate::error::{self, TCResult};
 use crate::scalar::{label, Link, Scalar, TCPath, ValueId};
@@ -32,8 +29,13 @@ impl Class for ObjectType {
 impl ScalarClass for ObjectType {
     type Instance = Object;
 
-    fn try_cast<S: Into<Scalar>>(&self, _scalar: S) -> TCResult<Object> {
-        Err(error::not_implemented("ObjectType::try_cast"))
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Object> {
+        let scalar: Scalar = scalar.into();
+
+        match scalar {
+            Scalar::Map(data) => Ok(Object { data }),
+            other => Err(error::bad_request("Cannot cast into Object from", other))
+        }
     }
 }
 
@@ -54,6 +56,12 @@ pub struct Object {
     data: HashMap<ValueId, Scalar>,
 }
 
+impl Object {
+    pub fn data(&'_ self) -> &'_ HashMap<ValueId, Scalar> {
+        &self.data
+    }
+}
+
 impl Instance for Object {
     type Class = ObjectType;
 
@@ -64,21 +72,6 @@ impl Instance for Object {
 
 impl ScalarInstance for Object {
     type Class = ObjectType;
-}
-
-impl<'de> Deserialize<'de> for Object {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Deserialize::deserialize(d).map(|data| Object { data })
-    }
-}
-
-impl Serialize for Object {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.data.serialize(s)
-    }
 }
 
 impl fmt::Display for Object {

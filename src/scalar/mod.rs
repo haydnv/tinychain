@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::str::FromStr;
@@ -100,6 +101,7 @@ pub trait ScalarClass: Class {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum ScalarType {
+    Map,
     Object(object::ObjectType),
     Op(op::OpType),
     Value(ValueType),
@@ -116,6 +118,7 @@ impl Class for ScalarType {
         }
 
         match suffix[0].as_str() {
+            "map" if suffix.len() == 1 => Ok(ScalarType::Map),
             "object" => ObjectType::from_path(path).map(ScalarType::Object),
             "op" => op::OpType::from_path(path).map(ScalarType::Op),
             "value" => ValueType::from_path(path).map(ScalarType::Value),
@@ -133,16 +136,18 @@ impl ScalarClass for ScalarType {
     type Instance = Scalar;
 
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Scalar> {
+        let scalar: Scalar = scalar.into();
+
         match self {
+            Self::Map => match scalar {
+                Scalar::Map(map) => Ok(Scalar::Map(map)),
+                other => Err(error::bad_request("Cannot cast into Map from", other)),
+            },
             Self::Object(ot) => ot.try_cast(scalar).map(Scalar::Object),
             Self::Op(ot) => ot.try_cast(scalar).map(Box::new).map(Scalar::Op),
             Self::Value(vt) => vt.try_cast(scalar).map(Scalar::Value),
-            Self::Tuple => {
-                let scalar: Scalar = scalar.into();
-                scalar.try_cast_into(|v| {
-                    error::not_implemented(format!("Cast into Tuple from {}", v))
-                })
-            }
+            Self::Tuple => scalar
+                .try_cast_into(|v| error::not_implemented(format!("Cast into Tuple from {}", v))),
         }
     }
 }
@@ -150,6 +155,7 @@ impl ScalarClass for ScalarType {
 impl From<ScalarType> for Link {
     fn from(st: ScalarType) -> Link {
         match st {
+            ScalarType::Map => ScalarType::prefix().join(label("map").into()).into(),
             ScalarType::Object(ot) => ot.into(),
             ScalarType::Op(ot) => ot.into(),
             ScalarType::Value(vt) => vt.into(),
@@ -172,6 +178,7 @@ impl fmt::Display for ScalarType {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Scalar {
+    Map(HashMap<ValueId, Scalar>),
     Object(object::Object),
     Op(Box<op::Op>),
     Value(value::Value),
@@ -183,6 +190,7 @@ impl Instance for Scalar {
 
     fn class(&self) -> Self::Class {
         match self {
+            Self::Map(_) => ScalarType::Map,
             Self::Object(object) => ScalarType::Object(object.class()),
             Self::Op(op) => ScalarType::Op(op.class()),
             Self::Value(value) => ScalarType::Value(value.class()),
@@ -269,8 +277,9 @@ impl<T: TryFrom<Scalar, Error = error::TCError>> TryFrom<Scalar> for Vec<T> {
 impl TryCastFrom<Scalar> for Value {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
+            Scalar::Map(_map) => unimplemented!(),
             Scalar::Object(_obj) => unimplemented!(),
-            Scalar::Op(_op) => unimplemented!(),
+            Scalar::Op(_) => false,
             Scalar::Value(_) => true,
             Scalar::Tuple(tuple) => Value::can_cast_from(tuple),
         }
@@ -278,8 +287,9 @@ impl TryCastFrom<Scalar> for Value {
 
     fn opt_cast_from(scalar: Scalar) -> Option<Value> {
         match scalar {
+            Scalar::Map(_map) => unimplemented!(),
             Scalar::Object(_obj) => unimplemented!(),
-            Scalar::Op(_op) => unimplemented!(),
+            Scalar::Op(_op) => None,
             Scalar::Value(value) => Some(value),
             Scalar::Tuple(tuple) => Value::opt_cast_from(tuple),
         }
@@ -506,7 +516,27 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
     where
         M: de::MapAccess<'de>,
     {
-        if let Some(key) = access.next_key::<&str>()? {
+        let mut data: HashMap<String, Scalar> = HashMap::new();
+
+        while let Some(key) = access.next_key()? {
+            match access.next_value()? {
+                Some(value) => {
+                    data.insert(key, value);
+                }
+                None => {
+                    return Err(de::Error::custom(format!(
+                        "Failed to parse value of {}",
+                        key
+                    )))
+                }
+            }
+        }
+
+        if data.is_empty() {
+            return Ok(Scalar::Map(HashMap::new()));
+        } else if data.len() == 1 {
+            let (key, data) = data.drain().next().unwrap();
+
             if key.starts_with('$') {
                 let (subject, path) = if let Some(i) = key.find('/') {
                     let (subject, path) = key.split_at(i);
@@ -515,21 +545,26 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     (subject, path)
                 } else {
                     (
-                        TCRef::from_str(key).map_err(de::Error::custom)?,
+                        TCRef::from_str(&key).map_err(de::Error::custom)?,
                         TCPath::default(),
                     )
                 };
 
-                let value: Scalar = access.next_value()?;
-
-                if value == Scalar::Tuple(vec![]) || value == Scalar::Value(Value::None) {
-                    Ok(Scalar::Value(subject.into()))
+                return if data == Scalar::Tuple(vec![]) || data == Scalar::Value(Value::None) {
+                    if path == TCPath::default() {
+                        Ok(Scalar::Value(Value::TCString(subject.into())))
+                    } else {
+                        Ok(Scalar::Op(Box::new(Op::Method(Method::Get(
+                            (subject, path),
+                            Value::None,
+                        )))))
+                    }
                 } else {
-                    let method = if value.matches::<Vec<(ValueId, Value)>>() {
-                        let data: Vec<(ValueId, Scalar)> = value.opt_cast_into().unwrap();
+                    let method = if data.matches::<Vec<(ValueId, Scalar)>>() {
+                        let data: Vec<(ValueId, Scalar)> = data.opt_cast_into().unwrap();
                         Method::Post((subject, path), data)
                     } else {
-                        let mut data: Vec<Scalar> = value.try_into().map_err(de::Error::custom)?;
+                        let mut data: Vec<Scalar> = data.try_into().map_err(de::Error::custom)?;
                         if data.len() == 1 {
                             let key = data.pop().unwrap().try_into().map_err(de::Error::custom)?;
                             Method::Get((subject, path), key)
@@ -546,47 +581,55 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     };
 
                     Ok(Scalar::Op(Box::new(Op::Method(method))))
-                }
+                };
             } else if let Ok(link) = key.parse::<link::Link>() {
-                if link.host().is_none() {
-                    if link.path().starts_with(&ValueType::prefix()) {
-                        let dtype = ValueType::from_path(link.path()).map_err(de::Error::custom)?;
-                        let value: Value = access.next_value()?;
-
-                        dtype
-                            .try_cast(value)
-                            .map(Scalar::Value)
-                            .map_err(de::Error::custom)
-                    } else if link.path().starts_with(&OpType::prefix()) {
-                        let dtype = OpType::from_path(link.path()).map_err(de::Error::custom)?;
-                        let value: Scalar = access.next_value()?;
-
-                        dtype
-                            .try_cast(value)
-                            .map(Box::new)
-                            .map(Scalar::Op)
-                            .map_err(de::Error::custom)
-                    } else if link == Link::from(ScalarType::Tuple) {
-                        access.next_value().map(Scalar::Tuple)
-                    } else if link == Link::from(ObjectType) {
-                        access.next_value().map(Scalar::Object)
+                return if link.host().is_none() {
+                    if link.path().starts_with(&TCType::prefix()) {
+                        let dtype = ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
+                        dtype.try_cast(data).map_err(de::Error::custom)
+                    } else if data == Scalar::Value(Value::None)
+                        || data == Scalar::Value(Value::Tuple(vec![]))
+                    {
+                        Ok(Scalar::Value(Value::TCString(link.into())))
                     } else {
-                        Err(de::Error::custom(format!("Support for {}", link)))
+                        let op_ref = if data.matches::<Vec<(ValueId, Scalar)>>() {
+                            OpRef::Post(data.opt_cast_into().unwrap())
+                        } else {
+                            let mut data: Vec<Scalar> =
+                                data.try_into().map_err(de::Error::custom)?;
+
+                            if data.len() == 1 {
+                                let key =
+                                    data.pop().unwrap().try_into().map_err(de::Error::custom)?;
+                                OpRef::Get((link, key))
+                            } else if data.len() == 2 {
+                                let value = data.pop().unwrap();
+                                let key =
+                                    data.pop().unwrap().try_into().map_err(de::Error::custom)?;
+                                OpRef::Put((link, key, value))
+                            } else {
+                                return Err(de::Error::custom(format!(
+                                    "Invalid Op format for {}",
+                                    link
+                                )));
+                            }
+                        };
+
+                        Ok(Scalar::Op(Box::new(Op::Ref(op_ref))))
                     }
                 } else {
                     Err(de::Error::custom("Not implemented"))
-                }
-            } else {
-                Err(de::Error::custom(format!(
-                    "Expected a Ref or Link, not \"{}\"",
-                    key
-                )))
+                };
             }
-        } else {
-            Err(de::Error::custom(
-                "Empty map is not a valid Tinychain datatype",
-            ))
         }
+
+        let mut map = HashMap::with_capacity(data.len());
+        for (key, value) in data.drain() {
+            let key: ValueId = key.parse().map_err(de::Error::custom)?;
+            map.insert(key, value);
+        }
+
+        Ok(Scalar::Map(map))
     }
 
     fn visit_seq<L>(self, mut access: L) -> Result<Self::Value, L::Error>
@@ -624,9 +667,14 @@ impl<'de> de::Deserialize<'de> for Scalar {
 impl Serialize for Scalar {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
+            Scalar::Map(map) => {
+                let mut serialized = s.serialize_map(Some(1))?;
+                serialized.serialize_entry(&Link::from(ScalarType::Map).to_string(), map)?;
+                serialized.end()
+            }
             Scalar::Object(object) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(&Link::from(object.class()).to_string(), object)?;
+                map.serialize_entry(&Link::from(object.class()).to_string(), object.data())?;
                 map.end()
             }
             Scalar::Op(op) => match &**op {
@@ -693,6 +741,14 @@ impl Serialize for Scalar {
 impl fmt::Display for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Scalar::Map(map) => write!(
+                f,
+                "{{{}}}",
+                map.iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
             Scalar::Object(object) => write!(f, "{}", object),
             Scalar::Op(op) => write!(f, "{}", op),
             Scalar::Value(value) => write!(f, "{}", value),
