@@ -553,9 +553,8 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                         TCPath::default(),
                     )
                 };
-                let value: Scalar = access.next_value()?;
 
-                if value == Scalar::Tuple(vec![]) || value == Scalar::Value(Value::None) {
+                return if data == Scalar::Tuple(vec![]) || data == Scalar::Value(Value::None) {
                     if path == TCPath::default() {
                         Ok(Scalar::Value(subject.into()))
                     } else {
@@ -590,7 +589,8 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
             } else if let Ok(link) = key.parse::<link::Link>() {
                 return if link.host().is_none() {
                     if link.path().starts_with(&TCType::prefix()) {
-                        let dtype = ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
+                        let dtype =
+                            ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
                         dtype.try_cast(data).map_err(de::Error::custom)
                     } else if data == Scalar::Value(Value::None)
                         || data == Scalar::Value(Value::Tuple(vec![]))

@@ -54,8 +54,11 @@ impl ScalarClass for ObjectType {
         let scalar: Scalar = scalar.into();
 
         match scalar {
-            Scalar::Map(data) => Ok(Object { class: ObjectType::default(), data }),
-            other => Err(error::bad_request("Cannot cast into Object from", other))
+            Scalar::Map(data) => Ok(Object {
+                class: ObjectType::default(),
+                data,
+            }),
+            other => Err(error::bad_request("Cannot cast into Object from", other)),
         }
     }
 }
