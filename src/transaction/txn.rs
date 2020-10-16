@@ -6,7 +6,7 @@ use std::iter;
 use std::sync::Arc;
 
 use futures::future::{self, TryFutureExt};
-use futures::stream::{self, FuturesUnordered, Stream, StreamExt};
+use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -138,20 +138,18 @@ impl Txn {
         &self.id
     }
 
-    pub async fn execute<S: Stream<Item = (ValueId, Scalar)> + Unpin>(
+    pub async fn execute<I: Into<State>, S: Stream<Item = (ValueId, I)> + Unpin>(
         self: Arc<Self>,
         mut parameters: S,
         auth: Auth,
     ) -> TCResult<State> {
-        // TODO: use a Graph here and queue every op absolutely as soon as it's ready
-
         println!("Txn::execute");
 
-        let mut graph = HashMap::new();
+        let mut graph: HashMap<ValueId, State> = HashMap::new();
         let mut capture = None;
-        while let Some((name, scalar)) = parameters.next().await {
+        while let Some((name, state)) = parameters.next().await {
             capture = Some(name.clone());
-            graph.insert(name, State::Scalar(scalar));
+            graph.insert(name, state.into());
         }
 
         let capture =
@@ -188,6 +186,7 @@ impl Txn {
 
                         println!("Provider: {}", &op);
                         for dep in requires(op, &graph)? {
+                            println!("requires {}", dep);
                             let dep_state =
                                 graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
 
@@ -345,8 +344,8 @@ impl Txn {
                             .await
                             .map(State::from)
                     }
+                    State::Object(object) => object.get(self.clone(), path, key, auth).await,
                     State::Scalar(scalar) => match scalar {
-                        Scalar::Object(object) => object.get(self, path, key, auth).await,
                         Scalar::Op(op) => match &**op {
                             Op::Def(op_def) => {
                                 if !path.is_empty() {
@@ -386,15 +385,7 @@ impl Txn {
                 );
 
                 match subject {
-                    State::Scalar(scalar) => match scalar {
-                        Scalar::Object(object) => {
-                            object
-                                .put(self, path, key, value, auth)
-                                .map_ok(State::from)
-                                .await
-                        }
-                        other => Err(error::method_not_allowed(other)),
-                    },
+                    State::Scalar(scalar) => Err(error::method_not_allowed(scalar)),
                     State::Chain(chain) => {
                         self.mutate(chain.clone().into()).await;
 
@@ -410,16 +401,9 @@ impl Txn {
                 }
             }
             Op::Ref(OpRef::Post((link, data))) => {
-                let data = stream::iter(data).map(move |(name, value)| {
-                    // TODO: just allow sending an error as a value
-                    dereference_state(&provided, &value)
-                        .map(Scalar::try_from)
-                        .map(|scalar| (name, scalar.unwrap()))
-                        .unwrap()
-                });
-
                 self.gateway
-                    .post(&link, data, auth)
+                    .clone()
+                    .post(&link, Scalar::Map(data), auth, Some(self))
                     .map_ok(State::from)
                     .await
             }
@@ -434,6 +418,7 @@ impl Txn {
             State::Chain(chain) => Box::new(chain),
             State::Cluster(cluster) => Box::new(cluster),
             State::Collection(collection) => Box::new(collection),
+            State::Object(_) => panic!("Objects do not support transactional mutations!"),
             State::Scalar(_) => panic!("Scalar values do not support transactional mutations!"),
         };
 
@@ -489,7 +474,6 @@ fn is_resolved(state: &State) -> bool {
 fn is_resolved_scalar(scalar: &Scalar) -> bool {
     match scalar {
         Scalar::Map(map) => map.values().all(is_resolved_scalar),
-        Scalar::Object(_) => true,
         Scalar::Op(op) => match **op {
             Op::Ref(_) => false,
             Op::Method(_) => false,
@@ -571,7 +555,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(scalar_requires(value, txn_state)?);
             }
             OpRef::Post((_path, data)) => {
-                for (_id, provider) in data {
+                for provider in data.values() {
                     deps.extend(scalar_requires(provider, txn_state)?);
                 }
             }
@@ -593,8 +577,10 @@ fn scalar_requires(
             }
             Ok(required)
         }
-        Scalar::Object(_) => Ok(HashSet::new()),
-        Scalar::Op(op) => requires(&**op, txn_state),
+        Scalar::Op(op) => match &**op {
+            Op::Def(_) => Ok(HashSet::new()),
+            other => requires(other, txn_state),
+        },
         Scalar::Value(value) => value_requires(value),
         Scalar::Tuple(tuple) => {
             let mut required = HashSet::new();

@@ -101,6 +101,12 @@ impl From<Bytes> for Value {
     }
 }
 
+impl From<Link> for Value {
+    fn from(l: Link) -> Value {
+        Value::TCString(l.into())
+    }
+}
+
 impl From<Number> for Value {
     fn from(n: Number) -> Value {
         Value::Number(n)

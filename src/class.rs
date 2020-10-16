@@ -9,6 +9,7 @@ use crate::chain::{Chain, ChainType};
 use crate::cluster::Cluster;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
+use crate::object::*;
 use crate::scalar::*;
 
 const ERR_EMPTY_CLASSPATH: &str = "Expected a class path, \
@@ -65,6 +66,7 @@ pub enum TCType {
     Chain(ChainType),
     Cluster,
     Collection(CollectionType),
+    Object(ObjectType),
     Scalar(ScalarType),
 }
 
@@ -76,15 +78,12 @@ impl NativeClass for TCType {
     fn from_path(path: &TCPath) -> TCResult<TCType> {
         let suffix = path.from_path(&Self::prefix())?;
 
-        if suffix.len() > 1 {
-            match suffix[0].as_str() {
-                "chain" => ChainType::from_path(path).map(TCType::Chain),
-                "collection" => CollectionType::from_path(path).map(TCType::Collection),
-                "op" | "tuple" | "value" => ScalarType::from_path(path).map(TCType::Scalar),
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            Err(error::bad_request(ERR_EMPTY_CLASSPATH, path))
+        match suffix[0].as_str() {
+            "chain" => ChainType::from_path(path).map(TCType::Chain),
+            "collection" => CollectionType::from_path(path).map(TCType::Collection),
+            "object" if suffix.len() == 1 => Ok(TCType::Object(ObjectType::default())),
+            "op" | "tuple" | "value" => ScalarType::from_path(path).map(TCType::Scalar),
+            other => Err(error::not_found(other)),
         }
     }
 
@@ -102,6 +101,12 @@ impl From<ChainType> for TCType {
 impl From<CollectionType> for TCType {
     fn from(ct: CollectionType) -> TCType {
         TCType::Collection(ct)
+    }
+}
+
+impl From<ObjectType> for TCType {
+    fn from(ot: ObjectType) -> TCType {
+        TCType::Object(ot)
     }
 }
 
@@ -128,6 +133,7 @@ impl From<TCType> for Link {
             TCType::Chain(ct) => ct.into(),
             TCType::Cluster => TCType::prefix().join(label("cluster").into()).into(),
             TCType::Collection(ct) => ct.into(),
+            TCType::Object(ot) => ot.into(),
             TCType::Scalar(st) => st.into(),
         }
     }
@@ -139,6 +145,7 @@ impl fmt::Display for TCType {
             Self::Chain(ct) => write!(f, "{}", ct),
             Self::Cluster => write!(f, "type Cluster"),
             Self::Collection(ct) => write!(f, "{}", ct),
+            Self::Object(ot) => write!(f, "{}", ot),
             Self::Scalar(st) => write!(f, "{}", st),
         }
     }
@@ -149,6 +156,7 @@ pub enum State {
     Chain(Chain),
     Cluster(Cluster),
     Collection(Collection),
+    Object(Object),
     Scalar(Scalar),
 }
 
@@ -160,6 +168,7 @@ impl Instance for State {
             Self::Chain(chain) => chain.class().into(),
             Self::Cluster(_) => TCType::Cluster,
             Self::Collection(collection) => collection.class().into(),
+            Self::Object(object) => object.class().into(),
             Self::Scalar(scalar) => scalar.class().into(),
         }
     }
@@ -183,6 +192,12 @@ impl From<Collection> for State {
     }
 }
 
+impl From<Object> for State {
+    fn from(o: Object) -> State {
+        State::Object(o)
+    }
+}
+
 impl From<Scalar> for State {
     fn from(s: Scalar) -> State {
         Self::Scalar(s)
@@ -202,6 +217,17 @@ impl TryFrom<State> for Chain {
         match state {
             State::Chain(chain) => Ok(chain),
             other => Err(error::bad_request("Expected Chain but found", other)),
+        }
+    }
+}
+
+impl TryFrom<State> for Object {
+    type Error = error::TCError;
+
+    fn try_from(state: State) -> TCResult<Object> {
+        match state {
+            State::Object(object) => Ok(object),
+            other => Err(error::bad_request("Expected Object but found", other)),
         }
     }
 }
@@ -232,6 +258,7 @@ impl fmt::Display for State {
             Self::Chain(c) => write!(f, "{}", c),
             Self::Cluster(c) => write!(f, "{}", c),
             Self::Collection(c) => write!(f, "{}", c),
+            Self::Object(o) => write!(f, "{}", o),
             Self::Scalar(s) => write!(f, "{}", s),
         }
     }

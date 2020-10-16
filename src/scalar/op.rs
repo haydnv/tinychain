@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -6,6 +7,7 @@ use futures::stream;
 use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
 use crate::error;
+use crate::object::Object;
 use crate::transaction::Txn;
 
 use super::link::{Link, TCPath};
@@ -50,7 +52,20 @@ impl ScalarClass for OpDefType {
 
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<OpDef> {
         let scalar: Scalar = scalar.into();
-        OpDef::try_cast_from(scalar, |v| error::bad_request("Not a valid OpDef", v))
+
+        match self {
+            Self::Get => {
+                if scalar.matches::<GetOp>() {
+                    Ok(OpDef::Get(scalar.opt_cast_into().unwrap()))
+                } else if scalar.matches::<Vec<(ValueId, Scalar)>>() {
+                    Ok(OpDef::Get((label("key").into(), scalar.opt_cast_into().unwrap())))
+                } else {
+                    Err(error::bad_request("Invalid GET definition", scalar))
+                }
+            }
+            Self::Put => scalar.try_cast_into(|v| error::bad_request("Invalid PUT definition", v)).map(OpDef::Put),
+            Self::Post => scalar.try_cast_into(|v| error::bad_request("Invalid POST definition", v)).map(OpDef::Post),
+        }
     }
 }
 
@@ -282,19 +297,19 @@ impl OpDef {
         txn: Arc<Txn>,
         key: Value,
         auth: Auth,
-        context: Option<Scalar>,
+        context: Option<Object>,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Get((key_id, def)) = self {
                 let mut data = if let Some(subject) = context {
-                    vec![(label("self").into(), subject)]
+                    vec![(label("self").into(), State::Object(subject))]
                 } else {
                     vec![]
                 };
 
-                data.push((key_id.clone(), Scalar::Value(key)));
-                txn.execute(stream::iter(data.drain(..).chain(def.to_vec())), auth)
-                    .await
+                data.push((key_id.clone(), Scalar::Value(key).into()));
+                data.extend(def.to_vec().into_iter().map(|(k, v)| (k, State::Scalar(v))));
+                txn.execute(stream::iter(data.drain(..)), auth).await
             } else {
                 Err(error::method_not_allowed(self))
             }
@@ -362,7 +377,7 @@ impl fmt::Display for OpDef {
 pub enum Method {
     Get((TCRef, TCPath), Value),
     Put((TCRef, TCPath), (Value, Scalar)),
-    Post((TCRef, TCPath), Vec<(ValueId, Scalar)>),
+    Post((TCRef, TCPath), HashMap<ValueId, Scalar>),
 }
 
 impl Instance for Method {
@@ -393,7 +408,7 @@ impl fmt::Display for Method {
 
 type GetRef = (Link, Value);
 type PutRef = (Link, Value, Scalar);
-type PostRef = (Link, Vec<(ValueId, Scalar)>);
+type PostRef = (Link, HashMap<ValueId, Scalar>);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {

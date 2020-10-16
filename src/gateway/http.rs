@@ -251,10 +251,21 @@ impl Server {
 
                 let response = gateway
                     .clone()
-                    .handle_post(&path.clone().into(), request, token, None)
+                    .post(&path.clone().into(), request, token, None)
                     .await?;
 
                 match response {
+                    State::Object(object) => {
+                        let response = serde_json::to_string_pretty(&object)
+                            .map(|s| format!("{}\r\n", s))
+                            .map(Bytes::from)
+                            .map_err(error::TCError::from)?;
+
+                        let response: TCStream<TCResult<Bytes>> =
+                            Box::pin(stream::once(future::ready(Ok(response))));
+
+                        Ok(response)
+                    }
                     State::Scalar(scalar) => {
                         let response = serde_json::to_string_pretty(&scalar)
                             .map(|s| format!("{}\r\n", s))

@@ -1,28 +1,21 @@
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
+
+use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCType};
 use crate::error::{self, TCResult};
-use crate::scalar::{label, Link, Op, Scalar, TCPath, Value, ValueId, ValueInstance};
+use crate::scalar::{label, Link, Op, Scalar, TCPath, TryCastInto, Value, ValueId, ValueInstance};
 use crate::transaction::Txn;
-
-use super::{ScalarClass, ScalarInstance};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ObjectClassType;
 
 impl Class for ObjectClassType {
     type Instance = ObjectType;
-}
-
-impl ScalarClass for ObjectClassType {
-    type Instance = ObjectType;
-
-    fn try_cast<S: Into<Scalar>>(&self, _scalar: S) -> TCResult<ObjectType> {
-        Err(error::unsupported("Cannot cast a Class"))
-    }
 }
 
 impl From<ObjectClassType> for Link {
@@ -43,24 +36,54 @@ pub struct ObjectType {
     proto: HashMap<ValueId, Scalar>,
 }
 
-impl Class for ObjectType {
-    type Instance = Object;
-}
+impl ObjectType {
+    pub fn prefix() -> TCPath {
+        TCType::prefix().join(label("object").into())
+    }
 
-impl ScalarClass for ObjectType {
-    type Instance = Object;
+    pub fn post(
+        path: TCPath,
+        mut params: HashMap<ValueId, Scalar>,
+        _auth: Auth,
+    ) -> TCResult<State> {
+        if path.is_empty() {
+            let extends = match params.remove(&label("extends").into()) {
+                Some(extends) => {
+                    let extends = Value::try_from(extends)?;
+                    Some(extends.try_cast_into(|v| {
+                        error::bad_request("Expected a Link to a Class, found", v)
+                    })?)
+                }
+                None => None,
+            };
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Object> {
-        let scalar: Scalar = scalar.into();
+            let data = params
+                .remove(&label("data").into())
+                .unwrap_or_else(|| Scalar::Map(HashMap::new()));
+            let data = data.try_cast_into(|v| {
+                error::bad_request("Expected a Map to define the requested Object, found", v)
+            })?;
 
-        match scalar {
-            Scalar::Map(data) => Ok(Object {
-                class: ObjectType::default(),
-                data,
-            }),
-            other => Err(error::bad_request("Cannot cast into Object from", other)),
+            if params.is_empty() {
+                let class = ObjectType {
+                    extends,
+                    proto: HashMap::new(),
+                };
+                Ok(State::Object(Object { class, data }))
+            } else {
+                Err(error::bad_request(
+                    "Found unrecognized parameter",
+                    params.keys().next().unwrap(),
+                ))
+            }
+        } else {
+            Err(error::not_found(path))
         }
     }
+}
+
+impl Class for ObjectType {
+    type Instance = Object;
 }
 
 impl Instance for ObjectType {
@@ -71,16 +94,12 @@ impl Instance for ObjectType {
     }
 }
 
-impl ScalarInstance for ObjectType {
-    type Class = ObjectClassType;
-}
-
 impl From<ObjectType> for Link {
     fn from(ot: ObjectType) -> Link {
         if let Some(link) = ot.extends {
             link
         } else {
-            TCType::prefix().join(label("object").into()).into()
+            ObjectType::prefix().into()
         }
     }
 }
@@ -125,16 +144,13 @@ impl Object {
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if path.is_empty() {
-                return Ok(State::Scalar(Scalar::Object(self.clone())));
+                return Ok(State::Object(self.clone()));
             }
 
             match self.data.get(&path[0]) {
                 Some(scalar) => match scalar {
-                    Scalar::Object(object) => object.get(txn, path.slice_from(1), key, auth).await,
                     Scalar::Op(op) => match &**op {
-                        Op::Def(op_def) => {
-                            op_def.get(txn, key, auth, Some(self.clone().into())).await
-                        }
+                        Op::Def(op_def) => op_def.get(txn, key, auth, Some(self.clone())).await,
                         other => Err(error::not_implemented(other)),
                     },
                     Scalar::Value(value) => value
@@ -161,8 +177,15 @@ impl Object {
     }
 }
 
-impl ScalarInstance for Object {
-    type Class = ObjectType;
+impl Serialize for Object {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = s.serialize_map(Some(1))?;
+        map.serialize_entry(&Link::from(self.class()).to_string(), &self.data)?;
+        map.end()
+    }
 }
 
 impl fmt::Display for Object {

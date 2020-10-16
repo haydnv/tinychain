@@ -8,12 +8,11 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::class::*;
 use crate::error;
+use crate::object::ObjectType;
 
-pub mod object;
 pub mod op;
 pub mod value;
 
-pub use object::*;
 pub use op::*;
 pub use value::*;
 
@@ -102,7 +101,6 @@ pub trait ScalarClass: Class {
 #[derive(Clone, Eq, PartialEq)]
 pub enum ScalarType {
     Map,
-    Object(object::ObjectType),
     Op(op::OpType),
     Value(ValueType),
     Tuple,
@@ -121,7 +119,6 @@ impl NativeClass for ScalarType {
 
         match suffix[0].as_str() {
             "map" if suffix.len() == 1 => Ok(ScalarType::Map),
-            "object" if suffix.len() == 1 => Ok(ScalarType::Object(ObjectType::default())),
             "op" => op::OpType::from_path(path).map(ScalarType::Op),
             "value" => ValueType::from_path(path).map(ScalarType::Value),
             "tuple" if suffix.len() == 1 => Ok(ScalarType::Tuple),
@@ -145,7 +142,6 @@ impl ScalarClass for ScalarType {
                 Scalar::Map(map) => Ok(Scalar::Map(map)),
                 other => Err(error::bad_request("Cannot cast into Map from", other)),
             },
-            Self::Object(ot) => ot.try_cast(scalar).map(Scalar::Object),
             Self::Op(ot) => ot.try_cast(scalar).map(Box::new).map(Scalar::Op),
             Self::Value(vt) => vt.try_cast(scalar).map(Scalar::Value),
             Self::Tuple => scalar
@@ -158,7 +154,6 @@ impl From<ScalarType> for Link {
     fn from(st: ScalarType) -> Link {
         match st {
             ScalarType::Map => ScalarType::prefix().join(label("map").into()).into(),
-            ScalarType::Object(ot) => ot.into(),
             ScalarType::Op(ot) => ot.into(),
             ScalarType::Value(vt) => vt.into(),
             ScalarType::Tuple => ScalarType::prefix().join(label("tuple").into()).into(),
@@ -174,14 +169,18 @@ impl From<ScalarType> for TCType {
 
 impl fmt::Display for ScalarType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self)
+        match self {
+            Self::Map => write!(f, "type Map"),
+            Self::Op(ot) => write!(f, "{}", ot),
+            Self::Value(vt) => write!(f, "{}", vt),
+            Self::Tuple => write!(f, "type Tuple"),
+        }
     }
 }
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Scalar {
     Map(HashMap<ValueId, Scalar>),
-    Object(object::Object),
     Op(Box<op::Op>),
     Value(value::Value),
     Tuple(Vec<Scalar>),
@@ -193,7 +192,6 @@ impl Instance for Scalar {
     fn class(&self) -> Self::Class {
         match self {
             Self::Map(_) => ScalarType::Map,
-            Self::Object(object) => ScalarType::Object(object.class()),
             Self::Op(op) => ScalarType::Op(op.class()),
             Self::Value(value) => ScalarType::Value(value.class()),
             Self::Tuple(_) => ScalarType::Tuple,
@@ -205,15 +203,15 @@ impl ScalarInstance for Scalar {
     type Class = ScalarType;
 }
 
-impl From<Number> for Scalar {
-    fn from(n: Number) -> Scalar {
-        Scalar::Value(Value::Number(n))
+impl From<HashMap<ValueId, Scalar>> for Scalar {
+    fn from(map: HashMap<ValueId, Scalar>) -> Scalar {
+        Scalar::Map(map)
     }
 }
 
-impl From<Object> for Scalar {
-    fn from(o: Object) -> Scalar {
-        Scalar::Object(o)
+impl From<Number> for Scalar {
+    fn from(n: Number) -> Scalar {
+        Scalar::Value(Value::Number(n))
     }
 }
 
@@ -279,6 +277,29 @@ impl<T: TryFrom<Scalar, Error = error::TCError>> TryFrom<Scalar> for Vec<T> {
             items.push(item.try_into()?);
         }
         Ok(items)
+    }
+}
+
+impl TryCastFrom<Scalar> for HashMap<ValueId, Scalar> {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Map(_) => true,
+            other => other.matches::<Vec<(ValueId, Scalar)>>(),
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<HashMap<ValueId, Scalar>> {
+        match scalar {
+            Scalar::Map(map) => Some(map),
+            other => {
+                if let Some(data) = other.opt_cast_into() {
+                    let data: Vec<(ValueId, Scalar)> = data;
+                    Some(data.into_iter().collect())
+                } else {
+                    None
+                }
+            }
+        }
     }
 }
 
@@ -450,7 +471,9 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
     type Value = Scalar;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Tinychain Scalar, e.g. \"foo\" or 123 or {\"$object_ref: [\"slice_id\", \"$state\"]\"}")
+        f.write_str(
+            "a Tinychain Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"slice_id\", \"$state\"]\"}",
+        )
     }
 
     fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
@@ -564,9 +587,8 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                         )))))
                     }
                 } else {
-                    let method = if data.matches::<Vec<(ValueId, Scalar)>>() {
-                        let data: Vec<(ValueId, Scalar)> = data.opt_cast_into().unwrap();
-                        Method::Post((subject, path), data)
+                    let method = if data.matches::<HashMap<ValueId, Scalar>>() {
+                        Method::Post((subject, path), data.opt_cast_into().unwrap())
                     } else {
                         let mut data: Vec<Scalar> = data.try_into().map_err(de::Error::custom)?;
                         if data.len() == 1 {
@@ -587,10 +609,20 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     Ok(Scalar::Op(Box::new(Op::Method(method))))
                 };
             } else if let Ok(link) = key.parse::<link::Link>() {
-                return if link.host().is_none() {
+                return if let Scalar::Map(data) = data {
+                    println!("parsing object of type {} with data {}", link, Scalar::Map(data.clone()));
+                    let mut instantiate = HashMap::with_capacity(2);
+                    instantiate.insert(label("extends").into(), Scalar::Value(link.into()));
+                    instantiate.insert(label("data").into(), Scalar::Map(data));
+                    Ok(Scalar::Op(Box::new(Op::Ref(OpRef::Post((
+                        ObjectType::prefix().into(),
+                        instantiate,
+                    ))))))
+                } else if link.host().is_none() {
                     if link.path().starts_with(&TCType::prefix()) {
                         let dtype =
                             ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
+                        println!("try cast {} into {}", data, dtype);
                         dtype.try_cast(data).map_err(de::Error::custom)
                     } else if data == Scalar::Value(Value::None)
                         || data == Scalar::Value(Value::Tuple(vec![]))
@@ -677,11 +709,6 @@ impl Serialize for Scalar {
                 serialized.serialize_entry(&Link::from(ScalarType::Map).to_string(), map)?;
                 serialized.end()
             }
-            Scalar::Object(object) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(&Link::from(object.class()).to_string(), object.data())?;
-                map.end()
-            }
             Scalar::Op(op) => match &**op {
                 Op::Def(def) => {
                     let mut map = s.serialize_map(Some(1))?;
@@ -695,7 +722,7 @@ impl Serialize for Scalar {
                     let ((subject, path), args): ((TCRef, TCPath), Scalar) = match method {
                         Method::Get(subject, arg) => (subject.clone(), vec![arg.clone()].into()),
                         Method::Put(subject, args) => (subject.clone(), args.clone().into()),
-                        Method::Post(subject, args) => (subject.clone(), args.to_vec().into()),
+                        Method::Post(subject, args) => (subject.clone(), args.clone().into()),
                     };
 
                     let mut map = s.serialize_map(Some(1))?;
@@ -754,7 +781,6 @@ impl fmt::Display for Scalar {
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
-            Scalar::Object(object) => write!(f, "{}", object),
             Scalar::Op(op) => write!(f, "{}", op),
             Scalar::Value(value) => write!(f, "{}", value),
             Scalar::Tuple(tuple) => write!(

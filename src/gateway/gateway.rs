@@ -3,11 +3,11 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use futures::future::{FutureExt, TryFutureExt};
-use futures::stream::{self, FuturesUnordered, Stream, StreamExt};
+use futures::stream::{self, FuturesUnordered, StreamExt};
 
 use crate::auth::{Auth, Token};
 use crate::block::Dir;
-use crate::class::{State, TCResult};
+use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::kernel;
 use crate::scalar::{Link, LinkHost, Scalar, TryCastInto, Value, ValueId};
@@ -186,50 +186,41 @@ impl Gateway {
         }
     }
 
-    pub async fn handle_post(
+    pub fn post(
         self: Arc<Self>,
         subject: &Link,
         data: Scalar,
         auth: Auth,
         txn: Option<Arc<Txn>>,
-    ) -> TCResult<State> {
-        println!("Gateway::post {}", subject);
+    ) -> TCBoxTryFuture<State> {
+        Box::pin(async move {
+            println!("Gateway::post {}", subject);
 
-        let txn = if let Some(txn) = txn {
-            txn
-        } else {
-            Txn::new(self.clone(), self.workspace.clone()).await?
-        };
-
-        if subject.host().is_none() && !subject.path().is_empty() && subject.path()[0] == "sbin" {
-            return kernel::post(txn, subject.path(), data, auth).await;
-        }
-
-        let data: Vec<(ValueId, Scalar)> =
-            data.try_cast_into(|v| error::bad_request(ERR_BAD_POSTDATA, v))?;
-        let data = stream::iter(data);
-
-        if subject.host().is_none() {
-            let path = subject.path();
-            if let Some((suffix, cluster)) = self.hosted.get(path) {
-                cluster.post(txn, suffix, data, auth).await
+            let txn = if let Some(txn) = txn {
+                txn
             } else {
-                Err(error::not_implemented("Peer discovery"))
-            }
-        } else {
-            // TODO: handle txn_id
-            self.post(subject, data, auth).await
-        }
-    }
+                Txn::new(self.clone(), self.workspace.clone()).await?
+            };
 
-    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin + 'static>(
-        &self,
-        subject: &Link,
-        data: S,
-        auth: Auth,
-    ) -> TCResult<State> {
-        // TODO: respond with a Stream
-        // TODO: optionally include a txn_id
-        self.client.post(subject, data, auth, None).await
+            if subject.host().is_none() && !subject.path().is_empty() && subject.path()[0] == "sbin"
+            {
+                return kernel::post(txn, subject.path(), data, auth).await;
+            }
+
+            let data: Vec<(ValueId, Scalar)> =
+                data.try_cast_into(|v| error::bad_request(ERR_BAD_POSTDATA, v))?;
+            let data = stream::iter(data);
+
+            if subject.host().is_none() {
+                let path = subject.path();
+                if let Some((suffix, cluster)) = self.hosted.get(path) {
+                    cluster.post(txn, suffix, data, auth).await
+                } else {
+                    Err(error::not_implemented("Peer discovery"))
+                }
+            } else {
+                self.client.post(subject, data, auth, None).await
+            }
+        })
     }
 }
