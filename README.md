@@ -200,26 +200,24 @@ For example, consider a third-party service that returns data like
 `{"lat": 40.689, "lng": -74.044}`. You can easily import this into Tinychain like so:
 
 ```json
-{"/sbin/object": {"lat": 40.689, "lng": -74.044}}
+{"lat": 40.689, "lng": -74.044}
 ```
 
-You can easily modify an object to define other instance variables and methods--consider this
+You can easily modify an `Object` to define other instance variables and methods--consider this
 example with a new method called `radians`:
 
 ```json
 {
-    "/sbin/object": {
-        "lat": 40.689,
-        "lng": -74.044,
-        "radians": {"/sbin/op/def/get": [
-            ["pi", 3.14159],
-            ["radians_per_degree", {"$pi/div": [180]}],
-            ["coord_radians", {"/sbin/object": {
-                "lat": {"$self/lat/mul": [{"$radians_per_degree": []}]},
-                "lng": {"$self/lng/mul": [{"$radians_per_degree": []}]}
-            }}]
-        ]}
-    }
+    "lat": 40.689,
+    "lng": -74.044,
+    "radians": {"/sbin/op/def/get": [
+        ["pi", 3.14159],
+        ["radians_per_degree", {"$pi/div": [180]}],
+        ["coord_radians", {"/sbin/object": {
+            "lat": {"$self/lat/mul": [{"$radians_per_degree": []}]},
+            "lng": {"$self/lng/mul": [{"$radians_per_degree": []}]}
+        }}]
+    ]}
 }
 ```
 
@@ -239,6 +237,26 @@ Of course, you can call an method on a generic `Object` just like any other:
 ]
 ```
 
+This is handy for prototyping and debugging, but for production use you'll want to impose more
+formal constraints on your data. You can do this by using a `Class`. Classes in Tinychain work
+just like any object-oriented language; you can think of them as formal constraints on data which
+enable the application handling the data to make very specific assumptions. For example, this
+`Class` called `Degree` extends `Number` and implements a method called `radians`.
+
+```json
+[
+    ["Degree", {"/sbin/value/number": {
+        "radians": {"/sbin/op/def/get": [
+            ["pi", 3.14159],
+            ["radians_per_degree", {"$pi/div": [180]}],
+            ["radians", {"$self/mul": [{"$radians_per_degree": []}]}]
+        ]}
+    }}],
+    ["d", {"$Degree": [90]}],
+    ["r", {"$d/radians": []}]
+]
+```
+
 ** This feature is not yet implemented
 
 ## Security
@@ -251,7 +269,7 @@ planned for implementation in 2020Q4.
 
 All Tinychain primitives are expressible in JSON. The basic formats are:
 
-```
+```javascript
 // a Link to "/path/to/subject", to be resolved by peer discovery
 {"/path/to/subject": []}
 
