@@ -8,7 +8,6 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::class::*;
 use crate::error;
-use crate::object::ObjectType;
 
 pub mod op;
 pub mod value;
@@ -609,16 +608,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     Ok(Scalar::Op(Box::new(Op::Method(method))))
                 };
             } else if let Ok(link) = key.parse::<link::Link>() {
-                return if let Scalar::Map(data) = data {
-                    println!("parsing object of type {} with data {}", link, Scalar::Map(data.clone()));
-                    let mut instantiate = HashMap::with_capacity(2);
-                    instantiate.insert(label("extends").into(), Scalar::Value(link.into()));
-                    instantiate.insert(label("data").into(), Scalar::Map(data));
-                    Ok(Scalar::Op(Box::new(Op::Ref(OpRef::Post((
-                        ObjectType::prefix().into(),
-                        instantiate,
-                    ))))))
-                } else if link.host().is_none() {
+                return if link.host().is_none() {
                     if link.path().starts_with(&TCType::prefix()) {
                         let dtype =
                             ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
@@ -704,11 +694,7 @@ impl<'de> de::Deserialize<'de> for Scalar {
 impl Serialize for Scalar {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
-            Scalar::Map(map) => {
-                let mut serialized = s.serialize_map(Some(1))?;
-                serialized.serialize_entry(&Link::from(ScalarType::Map).to_string(), map)?;
-                serialized.end()
-            }
+            Scalar::Map(map) => map.serialize(s),
             Scalar::Op(op) => match &**op {
                 Op::Def(def) => {
                     let mut map = s.serialize_map(Some(1))?;

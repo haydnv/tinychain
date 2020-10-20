@@ -58,13 +58,20 @@ impl ScalarClass for OpDefType {
                 if scalar.matches::<GetOp>() {
                     Ok(OpDef::Get(scalar.opt_cast_into().unwrap()))
                 } else if scalar.matches::<Vec<(ValueId, Scalar)>>() {
-                    Ok(OpDef::Get((label("key").into(), scalar.opt_cast_into().unwrap())))
+                    Ok(OpDef::Get((
+                        label("key").into(),
+                        scalar.opt_cast_into().unwrap(),
+                    )))
                 } else {
                     Err(error::bad_request("Invalid GET definition", scalar))
                 }
             }
-            Self::Put => scalar.try_cast_into(|v| error::bad_request("Invalid PUT definition", v)).map(OpDef::Put),
-            Self::Post => scalar.try_cast_into(|v| error::bad_request("Invalid POST definition", v)).map(OpDef::Post),
+            Self::Put => scalar
+                .try_cast_into(|v| error::bad_request("Invalid PUT definition", v))
+                .map(OpDef::Put),
+            Self::Post => scalar
+                .try_cast_into(|v| error::bad_request("Invalid POST definition", v))
+                .map(OpDef::Post),
         }
     }
 }
