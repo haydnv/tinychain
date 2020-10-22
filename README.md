@@ -11,11 +11,11 @@ Rust. This is a *preview* release of Tinychain intended to solicit feedback on t
 Many core features, such as file persistence, are not yet implemented.
 
 Tinychain supports BTree indexes and tables (like MySQL), tensors
-(like TensorFlow/Theano/Torch/etc.), graphs (like Neo4j), and blockchains (like Ethereum). Tensor
-and graph operations support hardware acceleration on CUDA and OpenCL devices (such as Nvidia GPUs).
-Tinychain is intended to bridge the gap between the futuristic distributed computing technology of
-blockchain dApps and the security- and performance- critical application stack of traditional
-enterprise services.
+(like TensorFlow/Theano/Torch/etc.), graphs\** (like Neo4j), and blockchains** (like Ethereum).
+Tensor and graph operations support hardware acceleration on CUDA and OpenCL devices (such as Nvidia
+GPUs). Tinychain is intended to bridge the gap between the futuristic distributed computing
+technology of blockchain dApps and the security- and performance- critical application stack of
+traditional enterprise services.
 
 ## Contents
 
@@ -200,26 +200,24 @@ For example, consider a third-party service that returns data like
 `{"lat": 40.689, "lng": -74.044}`. You can easily import this into Tinychain like so:
 
 ```json
-{"/sbin/object": {"lat": 40.689, "lng": -74.044}}
+{"lat": 40.689, "lng": -74.044}
 ```
 
-You can easily modify an object to define other instance variables and methods--consider this
+You can easily modify an `Object` to define other instance variables and methods--consider this
 example with a new method called `radians`:
 
 ```json
 {
-    "/sbin/object": {
-        "lat": 40.689,
-        "lng": -74.044,
-        "radians": {"/sbin/op/def/get": [
-            ["pi", 3.14159],
-            ["radians_per_degree", {"$pi/div": [180]}],
-            ["coord_radians", {"/sbin/object": {
-                "lat": {"$self/lat/mul": [{"$radians_per_degree": []}]},
-                "lng": {"$self/lng/mul": [{"$radians_per_degree": []}]}
-            }}]
-        ]}
-    }
+    "lat": 40.689,
+    "lng": -74.044,
+    "radians": {"/sbin/op/def/get": [
+        ["pi", 3.14159],
+        ["radians_per_degree", {"$pi/div": [180]}],
+        ["coord_radians", {
+            "lat": {"$self/lat/mul": [{"$radians_per_degree": []}]},
+            "lng": {"$self/lng/mul": [{"$radians_per_degree": []}]}
+        }]
+    ]}
 }
 ```
 
@@ -227,14 +225,14 @@ Of course, you can call an method on a generic `Object` just like any other:
 
 ```json
 [
-    ["greeting", {"/sbin/object": {
+    ["greeting", {
         "en": "Hello!",
         "es": "¡Hola!",
         "render": {"/sbin/op/def/get": ["lang", [
             ["is_spanish", {"$lang/eq": ["es"]}],
             ["rendered", {"/sbin/op/ref/if": [{"$is_spanish": []}, {"$self/es": []}, {"$self/en": []}]}]
         ]]}
-    }}],
+    }],
     ["result", {"$greeting/render": ["es"]}]
 ]
 ```
@@ -251,7 +249,7 @@ planned for implementation in 2020Q4.
 
 All Tinychain primitives are expressible in JSON. The basic formats are:
 
-```
+```javascript
 // a Link to "/path/to/subject", to be resolved by peer discovery
 {"/path/to/subject": []}
 

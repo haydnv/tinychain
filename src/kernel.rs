@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 
@@ -9,7 +8,6 @@ use crate::auth::Auth;
 use crate::class::{NativeClass, State, TCResult};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error;
-use crate::object::ObjectType;
 use crate::scalar::*;
 use crate::transaction::Txn;
 
@@ -44,12 +42,7 @@ pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<St
 }
 
 pub async fn post(txn: Arc<Txn>, path: &TCPath, data: Scalar, auth: Auth) -> TCResult<State> {
-    if path.starts_with(&ObjectType::prefix()) {
-        let postdata: HashMap<ValueId, Scalar> = data.try_cast_into(|v| {
-            error::bad_request("Expected POST data, i.e. a Map, but found", v)
-        })?;
-        ObjectType::post(path.slice_from(2), postdata, auth)
-    } else if path == "/sbin/transact" {
+    if path == "/sbin/transact" {
         if data.matches::<Vec<(ValueId, Scalar)>>() {
             let values: Vec<(ValueId, Scalar)> = data.opt_cast_into().unwrap();
             txn.execute(stream::iter(values), auth).await

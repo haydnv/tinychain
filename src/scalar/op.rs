@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -7,10 +6,10 @@ use futures::stream;
 use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
 use crate::error;
-use crate::object::Object;
 use crate::transaction::Txn;
 
 use super::link::{Link, TCPath};
+use super::object::Object;
 use super::{
     label, CastFrom, Scalar, ScalarClass, ScalarInstance, ScalarType, TCRef, TryCastFrom,
     TryCastInto, Value, ValueId,
@@ -58,13 +57,20 @@ impl ScalarClass for OpDefType {
                 if scalar.matches::<GetOp>() {
                     Ok(OpDef::Get(scalar.opt_cast_into().unwrap()))
                 } else if scalar.matches::<Vec<(ValueId, Scalar)>>() {
-                    Ok(OpDef::Get((label("key").into(), scalar.opt_cast_into().unwrap())))
+                    Ok(OpDef::Get((
+                        label("key").into(),
+                        scalar.opt_cast_into().unwrap(),
+                    )))
                 } else {
                     Err(error::bad_request("Invalid GET definition", scalar))
                 }
             }
-            Self::Put => scalar.try_cast_into(|v| error::bad_request("Invalid PUT definition", v)).map(OpDef::Put),
-            Self::Post => scalar.try_cast_into(|v| error::bad_request("Invalid POST definition", v)).map(OpDef::Post),
+            Self::Put => scalar
+                .try_cast_into(|v| error::bad_request("Invalid PUT definition", v))
+                .map(OpDef::Put),
+            Self::Post => scalar
+                .try_cast_into(|v| error::bad_request("Invalid POST definition", v))
+                .map(OpDef::Post),
         }
     }
 }
@@ -297,7 +303,7 @@ impl OpDef {
         txn: Arc<Txn>,
         key: Value,
         auth: Auth,
-        context: Option<Object>,
+        context: Option<crate::object::Object>,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Get((key_id, def)) = self {
@@ -377,7 +383,7 @@ impl fmt::Display for OpDef {
 pub enum Method {
     Get((TCRef, TCPath), Value),
     Put((TCRef, TCPath), (Value, Scalar)),
-    Post((TCRef, TCPath), HashMap<ValueId, Scalar>),
+    Post((TCRef, TCPath), Object),
 }
 
 impl Instance for Method {
@@ -408,7 +414,7 @@ impl fmt::Display for Method {
 
 type GetRef = (Link, Value);
 type PutRef = (Link, Value, Scalar);
-type PostRef = (Link, HashMap<ValueId, Scalar>);
+type PostRef = (Link, Object);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {

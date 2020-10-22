@@ -1,14 +1,11 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 
-use serde::ser::{Serialize, SerializeMap, Serializer};
-
 use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCType};
-use crate::error::{self, TCResult};
-use crate::scalar::{label, Link, Op, Scalar, TCPath, TryCastInto, Value, ValueId, ValueInstance};
+use crate::error;
+use crate::scalar::{self, label, Link, Scalar, TCPath, Value, ValueId};
 use crate::transaction::Txn;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
@@ -40,46 +37,6 @@ impl ObjectType {
     pub fn prefix() -> TCPath {
         TCType::prefix().join(label("object").into())
     }
-
-    pub fn post(
-        path: TCPath,
-        mut params: HashMap<ValueId, Scalar>,
-        _auth: Auth,
-    ) -> TCResult<State> {
-        if path.is_empty() {
-            let extends = match params.remove(&label("extends").into()) {
-                Some(extends) => {
-                    let extends = Value::try_from(extends)?;
-                    Some(extends.try_cast_into(|v| {
-                        error::bad_request("Expected a Link to a Class, found", v)
-                    })?)
-                }
-                None => None,
-            };
-
-            let data = params
-                .remove(&label("data").into())
-                .unwrap_or_else(|| Scalar::Map(HashMap::new()));
-            let data = data.try_cast_into(|v| {
-                error::bad_request("Expected a Map to define the requested Object, found", v)
-            })?;
-
-            if params.is_empty() {
-                let class = ObjectType {
-                    extends,
-                    proto: HashMap::new(),
-                };
-                Ok(State::Object(Object { class, data }))
-            } else {
-                Err(error::bad_request(
-                    "Found unrecognized parameter",
-                    params.keys().next().unwrap(),
-                ))
-            }
-        } else {
-            Err(error::not_found(path))
-        }
-    }
 }
 
 impl Class for ObjectType {
@@ -109,7 +66,7 @@ impl fmt::Display for ObjectType {
         if let Some(link) = &self.extends {
             write!(f, "class {}", link)
         } else {
-            write!(f, "user-defined Class")
+            write!(f, "generic Object type")
         }
     }
 }
@@ -117,21 +74,7 @@ impl fmt::Display for ObjectType {
 #[derive(Clone, Eq, PartialEq)]
 pub struct Object {
     class: ObjectType,
-    data: HashMap<ValueId, Scalar>,
-}
-
-impl Object {
-    pub fn data(&'_ self) -> &'_ HashMap<ValueId, Scalar> {
-        &self.data
-    }
-}
-
-impl Instance for Object {
-    type Class = ObjectType;
-
-    fn class(&self) -> Self::Class {
-        self.class.clone()
-    }
+    data: scalar::object::Object,
 }
 
 impl Object {
@@ -143,48 +86,31 @@ impl Object {
         auth: Auth,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
-            if path.is_empty() {
-                return Ok(State::Object(self.clone()));
-            }
-
-            match self.data.get(&path[0]) {
-                Some(scalar) => match scalar {
-                    Scalar::Op(op) => match &**op {
-                        Op::Def(op_def) => op_def.get(txn, key, auth, Some(self.clone())).await,
-                        other => Err(error::not_implemented(other)),
-                    },
-                    Scalar::Value(value) => value
-                        .get(path.slice_from(1), key)
-                        .map(Scalar::Value)
-                        .map(State::Scalar),
-                    other if path.len() == 1 => Ok(State::Scalar(other.clone())),
-                    _ => Err(error::not_found(path)),
-                },
-                _ => Err(error::not_found(path)),
+            match self.data.get(txn, path, key, auth).await {
+                Ok(state) => Ok(state),
+                Err(not_found) if not_found.reason() == &error::Code::NotFound => {
+                    Err(error::not_implemented("Class method resolution"))
+                }
+                Err(cause) => Err(cause),
             }
         })
     }
+}
 
-    pub fn put<'a>(
-        &'a self,
-        _txn: Arc<Txn>,
-        _path: TCPath,
-        _key: Value,
-        _value: State,
-        _auth: Auth,
-    ) -> TCBoxTryFuture<'a, State> {
-        Box::pin(async move { Err(error::not_implemented("Object::put")) })
+impl Instance for Object {
+    type Class = ObjectType;
+
+    fn class(&self) -> Self::Class {
+        self.class.clone()
     }
 }
 
-impl Serialize for Object {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = s.serialize_map(Some(1))?;
-        map.serialize_entry(&Link::from(self.class()).to_string(), &self.data)?;
-        map.end()
+impl From<scalar::object::Object> for Object {
+    fn from(generic: scalar::object::Object) -> Object {
+        Object {
+            class: ObjectType::default(),
+            data: generic,
+        }
     }
 }
 
