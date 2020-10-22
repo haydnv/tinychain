@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -7,10 +6,10 @@ use futures::stream;
 use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
 use crate::error;
-use crate::object::Object;
 use crate::transaction::Txn;
 
 use super::link::{Link, TCPath};
+use super::object::Object;
 use super::{
     label, CastFrom, Scalar, ScalarClass, ScalarInstance, ScalarType, TCRef, TryCastFrom,
     TryCastInto, Value, ValueId,
@@ -304,7 +303,7 @@ impl OpDef {
         txn: Arc<Txn>,
         key: Value,
         auth: Auth,
-        context: Option<Object>,
+        context: Option<crate::object::Object>,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Get((key_id, def)) = self {
@@ -384,7 +383,7 @@ impl fmt::Display for OpDef {
 pub enum Method {
     Get((TCRef, TCPath), Value),
     Put((TCRef, TCPath), (Value, Scalar)),
-    Post((TCRef, TCPath), HashMap<ValueId, Scalar>),
+    Post((TCRef, TCPath), Object),
 }
 
 impl Instance for Method {
@@ -415,7 +414,7 @@ impl fmt::Display for Method {
 
 type GetRef = (Link, Value);
 type PutRef = (Link, Value, Scalar);
-type PostRef = (Link, HashMap<ValueId, Scalar>);
+type PostRef = (Link, Object);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {

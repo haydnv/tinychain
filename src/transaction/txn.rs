@@ -344,7 +344,7 @@ impl Txn {
                             .await
                             .map(State::from)
                     }
-                    State::Object(object) => object.get(self.clone(), path, key, auth).await,
+                    State::Object(_object) => Err(error::not_implemented("State::Object::get")),
                     State::Scalar(scalar) => match scalar {
                         Scalar::Op(op) => match &**op {
                             Op::Def(op_def) => {
@@ -403,7 +403,7 @@ impl Txn {
             Op::Ref(OpRef::Post((link, data))) => {
                 self.gateway
                     .clone()
-                    .post(&link, Scalar::Map(data), auth, Some(self))
+                    .post(&link, Scalar::Object(data.into()), auth, Some(self))
                     .map_ok(State::from)
                     .await
             }
@@ -473,7 +473,7 @@ fn is_resolved(state: &State) -> bool {
 
 fn is_resolved_scalar(scalar: &Scalar) -> bool {
     match scalar {
-        Scalar::Map(map) => map.values().all(is_resolved_scalar),
+        Scalar::Object(object) => object.data().values().all(is_resolved_scalar),
         Scalar::Op(op) => match **op {
             Op::Ref(_) => false,
             Op::Method(_) => false,
@@ -513,9 +513,9 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(key)?);
                 deps.extend(scalar_requires(value, txn_state)?);
             }
-            Method::Post((subject, _path), data) => {
+            Method::Post((subject, _path), params) => {
                 deps.insert(subject.value_id().clone());
-                deps.extend(data.iter().filter_map(|(name, dep)| {
+                deps.extend(params.data().iter().filter_map(|(name, dep)| {
                     if is_resolved_scalar(dep) {
                         None
                     } else {
@@ -554,8 +554,8 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(value_requires(key)?);
                 deps.extend(scalar_requires(value, txn_state)?);
             }
-            OpRef::Post((_path, data)) => {
-                for provider in data.values() {
+            OpRef::Post((_path, params)) => {
+                for provider in params.data().values() {
                     deps.extend(scalar_requires(provider, txn_state)?);
                 }
             }
@@ -570,9 +570,9 @@ fn scalar_requires(
     txn_state: &HashMap<ValueId, State>,
 ) -> TCResult<HashSet<ValueId>> {
     match scalar {
-        Scalar::Map(map) => {
+        Scalar::Object(object) => {
             let mut required = HashSet::new();
-            for s in map.values() {
+            for s in object.data().values() {
                 required.extend(scalar_requires(s, txn_state)?);
             }
             Ok(required)

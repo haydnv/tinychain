@@ -9,7 +9,7 @@ use crate::chain::{Chain, ChainType};
 use crate::cluster::Cluster;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::object::*;
+use crate::object;
 use crate::scalar::*;
 
 const ERR_EMPTY_CLASSPATH: &str = "Expected a class path, \
@@ -66,7 +66,7 @@ pub enum TCType {
     Chain(ChainType),
     Cluster,
     Collection(CollectionType),
-    Object(ObjectType),
+    Object(object::ObjectType),
     Scalar(ScalarType),
 }
 
@@ -81,7 +81,7 @@ impl NativeClass for TCType {
         match suffix[0].as_str() {
             "chain" => ChainType::from_path(path).map(TCType::Chain),
             "collection" => CollectionType::from_path(path).map(TCType::Collection),
-            "object" if suffix.len() == 1 => Ok(TCType::Object(ObjectType::default())),
+            "object" if suffix.len() == 1 => Ok(TCType::Object(object::ObjectType::default())),
             "op" | "tuple" | "value" => ScalarType::from_path(path).map(TCType::Scalar),
             other => Err(error::not_found(other)),
         }
@@ -104,8 +104,8 @@ impl From<CollectionType> for TCType {
     }
 }
 
-impl From<ObjectType> for TCType {
-    fn from(ot: ObjectType) -> TCType {
+impl From<object::ObjectType> for TCType {
+    fn from(ot: object::ObjectType) -> TCType {
         TCType::Object(ot)
     }
 }
@@ -156,7 +156,7 @@ pub enum State {
     Chain(Chain),
     Cluster(Cluster),
     Collection(Collection),
-    Object(Object),
+    Object(object::Object),
     Scalar(Scalar),
 }
 
@@ -192,8 +192,8 @@ impl From<Collection> for State {
     }
 }
 
-impl From<Object> for State {
-    fn from(o: Object) -> State {
+impl From<object::Object> for State {
+    fn from(o: object::Object) -> State {
         State::Object(o)
     }
 }
@@ -221,10 +221,10 @@ impl TryFrom<State> for Chain {
     }
 }
 
-impl TryFrom<State> for Object {
+impl TryFrom<State> for object::Object {
     type Error = error::TCError;
 
-    fn try_from(state: State) -> TCResult<Object> {
+    fn try_from(state: State) -> TCResult<object::Object> {
         match state {
             State::Object(object) => Ok(object),
             other => Err(error::bad_request("Expected Object but found", other)),
