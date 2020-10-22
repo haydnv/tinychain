@@ -1,8 +1,12 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
-use crate::class::{Class, Instance, NativeClass, TCType};
-use crate::scalar::{self, label, Link, Scalar, TCPath, ValueId};
+use crate::auth::Auth;
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCType};
+use crate::error;
+use crate::scalar::{self, label, Link, Scalar, TCPath, Value, ValueId};
+use crate::transaction::Txn;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ObjectClassType;
@@ -62,7 +66,7 @@ impl fmt::Display for ObjectType {
         if let Some(link) = &self.extends {
             write!(f, "class {}", link)
         } else {
-            write!(f, "user-defined Class")
+            write!(f, "generic Object type")
         }
     }
 }
@@ -71,6 +75,26 @@ impl fmt::Display for ObjectType {
 pub struct Object {
     class: ObjectType,
     data: scalar::object::Object,
+}
+
+impl Object {
+    pub fn get<'a>(
+        &'a self,
+        txn: Arc<Txn>,
+        path: TCPath,
+        key: Value,
+        auth: Auth,
+    ) -> TCBoxTryFuture<'a, State> {
+        Box::pin(async move {
+            match self.data.get(txn, path, key, auth).await {
+                Ok(state) => Ok(state),
+                Err(not_found) if not_found.reason() == &error::Code::NotFound => {
+                    Err(error::not_implemented("Class method resolution"))
+                }
+                Err(cause) => Err(cause),
+            }
+        })
+    }
 }
 
 impl Instance for Object {

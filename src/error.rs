@@ -5,7 +5,7 @@ use crate::scalar::value::{label, TCPath};
 
 pub type TCResult<T> = Result<T, TCError>;
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Code {
     // "No problem"
     Ok,

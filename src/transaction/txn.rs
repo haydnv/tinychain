@@ -305,6 +305,7 @@ impl Txn {
                 let key = dereference_value_state(&provided, &key)
                     .and_then(Scalar::try_from)
                     .and_then(Value::try_from)?;
+
                 self.gateway
                     .clone()
                     .get(&link, key, auth, Some(self.clone()))
@@ -314,6 +315,7 @@ impl Txn {
                 let subject = provided
                     .get(tc_ref.value_id())
                     .ok_or_else(|| error::not_found(tc_ref))?;
+
                 let key = dereference_value_state(&provided, &key)
                     .and_then(Scalar::try_from)
                     .and_then(Value::try_from)?;
@@ -344,8 +346,9 @@ impl Txn {
                             .await
                             .map(State::from)
                     }
-                    State::Object(_object) => Err(error::not_implemented("State::Object::get")),
+                    State::Object(object) => object.get(self, path, key, auth).await,
                     State::Scalar(scalar) => match scalar {
+                        Scalar::Object(object) => object.get(self, path, key, auth).await,
                         Scalar::Op(op) => match &**op {
                             Op::Def(op_def) => {
                                 if !path.is_empty() {
