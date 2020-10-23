@@ -22,6 +22,7 @@ use crate::transaction::Txn;
 
 use super::Gateway;
 
+const CONTENT_TYPE: &str = "application/json; charset=utf-8";
 const TIMEOUT: Duration = Duration::from_secs(30);
 const ERR_DECODE: &str = "(unable to decode error message)";
 
@@ -179,10 +180,15 @@ impl Server {
         gateway: Arc<Gateway>,
         request: Request<Body>,
     ) -> Result<Response<Body>, hyper::Error> {
-        match self.authenticate_and_route(gateway, request).await {
-            Err(cause) => Ok(transform_error(cause)),
-            Ok(response) => Ok(Response::new(Body::wrap_stream(response))),
-        }
+        let mut response = match self.authenticate_and_route(gateway, request).await {
+            Err(cause) => transform_error(cause),
+            Ok(response) => Response::new(Body::wrap_stream(response)),
+        };
+
+        response
+            .headers_mut()
+            .insert(hyper::header::CONTENT_TYPE, CONTENT_TYPE.parse().unwrap());
+        Ok(response)
     }
 
     async fn authenticate_and_route(
