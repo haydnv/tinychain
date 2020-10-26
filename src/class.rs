@@ -66,7 +66,7 @@ pub enum TCType {
     Chain(ChainType),
     Cluster,
     Collection(CollectionType),
-    Object(object::ObjectType),
+    Object(object::InstanceClass),
     Scalar(ScalarType),
 }
 
@@ -81,7 +81,7 @@ impl NativeClass for TCType {
         match suffix[0].as_str() {
             "chain" => ChainType::from_path(path).map(TCType::Chain),
             "collection" => CollectionType::from_path(path).map(TCType::Collection),
-            "object" if suffix.len() == 1 => Ok(TCType::Object(object::ObjectType::default())),
+            "object" if suffix.len() == 1 => Ok(TCType::Object(object::InstanceClass::default())),
             "op" | "tuple" | "value" => ScalarType::from_path(path).map(TCType::Scalar),
             other => Err(error::not_found(other)),
         }
@@ -104,9 +104,9 @@ impl From<CollectionType> for TCType {
     }
 }
 
-impl From<object::ObjectType> for TCType {
-    fn from(ot: object::ObjectType) -> TCType {
-        TCType::Object(ot)
+impl From<object::InstanceClass> for TCType {
+    fn from(ic: object::InstanceClass) -> TCType {
+        TCType::Object(ic)
     }
 }
 
