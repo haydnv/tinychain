@@ -627,8 +627,8 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                 };
             } else if let Ok(link) = key.parse::<link::Link>() {
                 return if link.path().starts_with(&TCType::prefix()) {
-                    let dtype =
-                        ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
+                    let dtype = ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
+
                     dtype.try_cast(data).map_err(de::Error::custom)
                 } else if data == Scalar::Value(Value::None)
                     || data == Scalar::Value(Value::Tuple(vec![]))
@@ -647,7 +647,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     };
 
                     Ok(Scalar::Op(Box::new(Op::Ref(op_ref))))
-                }
+                };
             }
         }
 

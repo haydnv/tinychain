@@ -156,7 +156,7 @@ pub enum State {
     Chain(Chain),
     Cluster(Cluster),
     Collection(Collection),
-    Object(object::Object),
+    Object(object::ObjectInstance),
     Scalar(Scalar),
 }
 
@@ -192,8 +192,8 @@ impl From<Collection> for State {
     }
 }
 
-impl From<object::Object> for State {
-    fn from(o: object::Object) -> State {
+impl From<object::ObjectInstance> for State {
+    fn from(o: object::ObjectInstance) -> State {
         State::Object(o)
     }
 }
@@ -221,10 +221,10 @@ impl TryFrom<State> for Chain {
     }
 }
 
-impl TryFrom<State> for object::Object {
+impl TryFrom<State> for object::ObjectInstance {
     type Error = error::TCError;
 
-    fn try_from(state: State) -> TCResult<object::Object> {
+    fn try_from(state: State) -> TCResult<object::ObjectInstance> {
         match state {
             State::Object(object) => Ok(object),
             other => Err(error::bad_request("Expected Object but found", other)),

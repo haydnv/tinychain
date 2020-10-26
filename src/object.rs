@@ -40,7 +40,7 @@ impl ObjectType {
 }
 
 impl Class for ObjectType {
-    type Instance = Object;
+    type Instance = ObjectInstance;
 }
 
 impl Instance for ObjectType {
@@ -72,12 +72,12 @@ impl fmt::Display for ObjectType {
 }
 
 #[derive(Clone, Eq, PartialEq)]
-pub struct Object {
+pub struct ObjectInstance {
     class: ObjectType,
     data: scalar::object::Object,
 }
 
-impl Object {
+impl ObjectInstance {
     pub fn get<'a>(
         &'a self,
         txn: Arc<Txn>,
@@ -97,7 +97,7 @@ impl Object {
     }
 }
 
-impl Instance for Object {
+impl Instance for ObjectInstance {
     type Class = ObjectType;
 
     fn class(&self) -> Self::Class {
@@ -105,16 +105,16 @@ impl Instance for Object {
     }
 }
 
-impl From<scalar::object::Object> for Object {
-    fn from(generic: scalar::object::Object) -> Object {
-        Object {
+impl From<scalar::object::Object> for ObjectInstance {
+    fn from(generic: scalar::object::Object) -> ObjectInstance {
+        ObjectInstance {
             class: ObjectType::default(),
             data: generic,
         }
     }
 }
 
-impl fmt::Display for Object {
+impl fmt::Display for ObjectInstance {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Object of type {}", self.class())
     }
