@@ -397,6 +397,28 @@ impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
     }
 }
 
+impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (T,) {
+    fn can_cast_from(source: &Scalar) -> bool {
+        if let Scalar::Tuple(source) = source {
+            if source.len() == 1 && T::can_cast_from(&source[0]) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn opt_cast_from(source: Scalar) -> Option<(T,)> {
+        if let Scalar::Tuple(mut source) = source {
+            if source.len() == 1 {
+                return source.pop().unwrap().opt_cast_into().map(|item| (item,));
+            }
+        }
+
+        None
+    }
+}
+
 impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (T1, T2) {
     fn can_cast_from(source: &Scalar) -> bool {
         if let Scalar::Tuple(source) = source {
@@ -604,45 +626,28 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     Ok(Scalar::Op(Box::new(Op::Method(method))))
                 };
             } else if let Ok(link) = key.parse::<link::Link>() {
-                return if link.host().is_none() {
-                    if link.path().starts_with(&TCType::prefix()) {
-                        let dtype =
-                            ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
-                        println!("try cast {} into {}", data, dtype);
-                        dtype.try_cast(data).map_err(de::Error::custom)
-                    } else if data == Scalar::Value(Value::None)
-                        || data == Scalar::Value(Value::Tuple(vec![]))
-                    {
-                        Ok(Scalar::Value(Value::TCString(link.into())))
-                    } else {
-                        let op_ref = if data.matches::<Vec<(ValueId, Scalar)>>() {
-                            OpRef::Post(data.opt_cast_into().unwrap())
-                        } else {
-                            let mut data: Vec<Scalar> =
-                                data.try_into().map_err(de::Error::custom)?;
-
-                            if data.len() == 1 {
-                                let key =
-                                    data.pop().unwrap().try_into().map_err(de::Error::custom)?;
-                                OpRef::Get((link, key))
-                            } else if data.len() == 2 {
-                                let value = data.pop().unwrap();
-                                let key =
-                                    data.pop().unwrap().try_into().map_err(de::Error::custom)?;
-                                OpRef::Put((link, key, value))
-                            } else {
-                                return Err(de::Error::custom(format!(
-                                    "Invalid Op format for {}",
-                                    link
-                                )));
-                            }
-                        };
-
-                        Ok(Scalar::Op(Box::new(Op::Ref(op_ref))))
-                    }
+                return if link.path().starts_with(&TCType::prefix()) {
+                    let dtype =
+                        ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
+                    dtype.try_cast(data).map_err(de::Error::custom)
+                } else if data == Scalar::Value(Value::None)
+                    || data == Scalar::Value(Value::Tuple(vec![]))
+                {
+                    Ok(Scalar::Value(Value::TCString(link.into())))
                 } else {
-                    Err(de::Error::custom("Not implemented"))
-                };
+                    let op_ref = if data.matches::<(Value,)>() {
+                        OpRef::Get((link, data.opt_cast_into().unwrap()))
+                    } else if data.matches::<(Value, Scalar)>() {
+                        let (key, value) = data.opt_cast_into().unwrap();
+                        OpRef::Put((link, key, value))
+                    } else if data.matches::<Object>() {
+                        OpRef::Post((link, data.opt_cast_into().unwrap()))
+                    } else {
+                        return Err(de::Error::custom(format!("Invalid Op format: {}", data)));
+                    };
+
+                    Ok(Scalar::Op(Box::new(Op::Ref(op_ref))))
+                }
             }
         }
 
