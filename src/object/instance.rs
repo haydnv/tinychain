@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::auth::Auth;
 use crate::class::{Instance, State, TCBoxTryFuture};
-use crate::error;
+use crate::error::{self, TCResult};
 use crate::scalar::{self, TCPath, Value};
 use crate::transaction::Txn;
 
@@ -32,6 +32,20 @@ impl ObjectInstance {
                 Err(cause) => Err(cause),
             }
         })
+    }
+
+    pub async fn post(
+        &self,
+        _txn: Arc<Txn>,
+        path: TCPath,
+        _data: scalar::Object,
+        _auth: Auth,
+    ) -> TCResult<State> {
+        if path.is_empty() {
+            Err(error::not_implemented("ObjectInstance::post"))
+        } else {
+            Err(error::not_found(path))
+        }
     }
 }
 

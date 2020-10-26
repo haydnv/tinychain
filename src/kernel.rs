@@ -42,8 +42,10 @@ pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<St
     }
 }
 
-pub async fn post(txn: Arc<Txn>, path: &TCPath, data: Scalar, auth: Auth) -> TCResult<State> {
-    if path == "/sbin/transact" {
+pub async fn post(txn: Arc<Txn>, path: TCPath, data: Scalar, auth: Auth) -> TCResult<State> {
+    println!("kernel::post {}", path);
+
+    if &path == "/sbin/transact" {
         if data.matches::<Vec<(ValueId, Scalar)>>() {
             let values: Vec<(ValueId, Scalar)> = data.opt_cast_into().unwrap();
             txn.execute(stream::iter(values), auth).await

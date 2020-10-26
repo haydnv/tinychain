@@ -7,8 +7,8 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::class::*;
-use crate::object::ObjectType;
 use crate::error;
+use crate::object::ObjectType;
 
 pub mod object;
 pub mod op;
@@ -254,7 +254,10 @@ impl TryFrom<Scalar> for object::Object {
     fn try_from(s: Scalar) -> TCResult<object::Object> {
         match s {
             Scalar::Object(object) => Ok(object),
-            other => Err(error::bad_request("Expected generic Object but found", other))
+            other => Err(error::bad_request(
+                "Expected generic Object but found",
+                other,
+            )),
         }
     }
 }

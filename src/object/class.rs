@@ -1,21 +1,56 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
+use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, TCType};
-use crate::scalar::{label, Link, Scalar, TCPath, ValueId};
+use crate::error::{self, TCResult};
+use crate::scalar::{self, label, Link, Scalar, TCPath, ValueId};
+use crate::transaction::Txn;
 
-use super::ObjectInstance;
+use super::{ObjectInstance, ObjectType};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct InstanceClassType;
+
+impl InstanceClassType {
+    pub fn post(
+        _txn: Arc<Txn>,
+        path: TCPath,
+        _data: scalar::Object,
+        _auth: Auth,
+    ) -> TCResult<InstanceClass> {
+        println!("InstanceClassType::post {}", path);
+
+        if path == Self::prefix() {
+            Err(error::not_implemented("InstanceClassType::post"))
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+}
 
 impl Class for InstanceClassType {
     type Instance = InstanceClass;
 }
 
+impl NativeClass for InstanceClassType {
+    fn from_path(path: &TCPath) -> TCResult<Self> {
+        if path == &Self::prefix() {
+            Ok(Self)
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
+    fn prefix() -> TCPath {
+        ObjectType::prefix().join(label("class").into())
+    }
+}
+
 impl From<InstanceClassType> for Link {
     fn from(_: InstanceClassType) -> Link {
-        TCType::prefix().join(label("class").into()).into()
+        InstanceClassType::prefix().into()
     }
 }
 
@@ -32,6 +67,21 @@ pub struct InstanceClass {
 }
 
 impl InstanceClass {
+    pub fn post(
+        _txn: Arc<Txn>,
+        path: TCPath,
+        _data: scalar::Object,
+        _auth: Auth,
+    ) -> TCResult<ObjectInstance> {
+        println!("InstanceClass::post {}", path);
+
+        if path.is_empty() {
+            Err(error::not_implemented("InstanceClass::post"))
+        } else {
+            Err(error::not_found(path))
+        }
+    }
+
     pub fn prefix() -> TCPath {
         TCType::prefix().join(label("object").into())
     }
