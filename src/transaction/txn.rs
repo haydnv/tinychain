@@ -406,7 +406,7 @@ impl Txn {
             Op::Ref(OpRef::Post((link, data))) => {
                 self.gateway
                     .clone()
-                    .post(&link, Scalar::Object(data.into()), auth, Some(self))
+                    .post(&link, data.into(), auth, Some(self))
                     .map_ok(State::from)
                     .await
             }

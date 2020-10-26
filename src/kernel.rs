@@ -8,6 +8,7 @@ use crate::auth::Auth;
 use crate::class::{NativeClass, State, TCResult};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error;
+use crate::object::ObjectType;
 use crate::scalar::*;
 use crate::transaction::Txn;
 
@@ -51,6 +52,9 @@ pub async fn post(txn: Arc<Txn>, path: &TCPath, data: Scalar, auth: Auth) -> TCR
         } else {
             Ok(State::Scalar(data))
         }
+    } else if path.starts_with(&ObjectType::prefix()) {
+        let data = data.try_into()?;
+        ObjectType::post(txn, path, data, auth).map(State::Object)
     } else {
         Err(error::not_found(path))
     }

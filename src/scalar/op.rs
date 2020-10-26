@@ -309,7 +309,7 @@ impl OpDef {
         Box::pin(async move {
             if let Self::Get((key_id, def)) = self {
                 let mut data = if let Some(subject) = context {
-                    vec![(label("self").into(), State::Object(subject))]
+                    vec![(label("self").into(), State::Object(subject.into()))]
                 } else {
                     vec![]
                 };

@@ -7,6 +7,7 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::class::*;
+use crate::object::ObjectType;
 use crate::error;
 
 pub mod object;
@@ -244,6 +245,17 @@ impl<T1: Into<Scalar>, T2: Into<Scalar>> From<(T1, T2)> for Scalar {
 impl<T: Into<Scalar>> From<Vec<T>> for Scalar {
     fn from(mut v: Vec<T>) -> Scalar {
         Scalar::Tuple(v.drain(..).map(|i| i.into()).collect())
+    }
+}
+
+impl TryFrom<Scalar> for object::Object {
+    type Error = error::TCError;
+
+    fn try_from(s: Scalar) -> TCResult<object::Object> {
+        match s {
+            Scalar::Object(object) => Ok(object),
+            other => Err(error::bad_request("Expected generic Object but found", other))
+        }
     }
 }
 
@@ -626,9 +638,11 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     Ok(Scalar::Op(Box::new(Op::Method(method))))
                 };
             } else if let Ok(link) = key.parse::<link::Link>() {
-                return if link.path().starts_with(&TCType::prefix()) {
+                return if link.path().starts_with(&ObjectType::prefix()) {
+                    let data: object::Object = data.try_into().map_err(de::Error::custom)?;
+                    Ok(Scalar::Op(Box::new(Op::Ref(OpRef::Post((link, data))))))
+                } else if link.path().starts_with(&TCType::prefix()) {
                     let dtype = ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
-
                     dtype.try_cast(data).map_err(de::Error::custom)
                 } else if data == Scalar::Value(Value::None)
                     || data == Scalar::Value(Value::Tuple(vec![]))
