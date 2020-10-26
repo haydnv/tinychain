@@ -1,12 +1,10 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::fmt;
-use std::sync::Arc;
 
-use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::error::{self, TCResult};
-use crate::scalar::{self, label, Link, Scalar, TCPath, ValueId};
-use crate::transaction::Txn;
+use crate::scalar::{self, label, Link, Scalar, TCPath, TryCastInto, Value, ValueId};
 
 use super::{ObjectInstance, ObjectType};
 
@@ -14,16 +12,35 @@ use super::{ObjectInstance, ObjectType};
 pub struct InstanceClassType;
 
 impl InstanceClassType {
-    pub fn post(
-        _txn: Arc<Txn>,
-        path: TCPath,
-        _data: scalar::Object,
-        _auth: Auth,
-    ) -> TCResult<InstanceClass> {
+    pub fn post(path: TCPath, data: scalar::Object) -> TCResult<InstanceClass> {
         println!("InstanceClassType::post {}", path);
 
         if path == Self::prefix() {
-            Err(error::not_implemented("InstanceClassType::post"))
+            let mut data: HashMap<ValueId, Scalar> = data.into();
+
+            let extends = if let Some(extends) = data.remove(&label("extends").into()) {
+                let link = extends.try_cast_into(|v| {
+                    error::bad_request("'extends' must be a Link to a Class, not", v)
+                })?;
+
+                Some(link)
+            } else {
+                None
+            };
+
+            let proto = data
+                .remove(&label("proto").into())
+                .unwrap_or_else(|| scalar::Object::default().into())
+                .try_into()?;
+
+            if data.is_empty() {
+                Ok(InstanceClass { extends, proto })
+            } else {
+                Err(error::bad_request(
+                    format!("{} got unrecognized parameters", Self::prefix()),
+                    Value::from(data.keys().cloned().collect::<Vec<ValueId>>()),
+                ))
+            }
         } else {
             Err(error::not_found(path))
         }
@@ -63,16 +80,11 @@ impl fmt::Display for InstanceClassType {
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct InstanceClass {
     extends: Option<Link>,
-    proto: HashMap<ValueId, Scalar>,
+    proto: scalar::Object,
 }
 
 impl InstanceClass {
-    pub fn post(
-        _txn: Arc<Txn>,
-        path: TCPath,
-        _data: scalar::Object,
-        _auth: Auth,
-    ) -> TCResult<ObjectInstance> {
+    pub fn post(path: TCPath, _data: scalar::Object) -> TCResult<ObjectInstance> {
         println!("InstanceClass::post {}", path);
 
         if path.is_empty() {

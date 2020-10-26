@@ -76,3 +76,9 @@ impl From<HashMap<ValueId, Scalar>> for Object {
         Object(map)
     }
 }
+
+impl From<Object> for HashMap<ValueId, Scalar> {
+    fn from(object: Object) -> HashMap<ValueId, Scalar> {
+        object.0
+    }
+}

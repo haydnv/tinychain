@@ -56,7 +56,7 @@ pub async fn post(txn: Arc<Txn>, path: TCPath, data: Scalar, auth: Auth) -> TCRe
         }
     } else if path.starts_with(&ObjectType::prefix()) {
         let data = data.try_into()?;
-        ObjectType::post(txn, path, data, auth).map(State::Object)
+        ObjectType::post(path, data).map(State::Object)
     } else {
         Err(error::not_found(path))
     }

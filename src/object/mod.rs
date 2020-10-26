@@ -20,13 +20,13 @@ pub enum ObjectType {
 }
 
 impl ObjectType {
-    pub fn post(txn: Arc<Txn>, path: TCPath, data: scalar::Object, auth: Auth) -> TCResult<Object> {
+    pub fn post(path: TCPath, data: scalar::Object) -> TCResult<Object> {
         println!("ObjectType::post {}", path);
 
         if path == Self::prefix() {
-            InstanceClass::post(txn, path, data, auth).map(Object::Instance)
+            InstanceClass::post(path, data).map(Object::Instance)
         } else if path.starts_with(&InstanceClassType::prefix()) {
-            InstanceClassType::post(txn, path, data, auth).map(Object::Class)
+            InstanceClassType::post(path, data).map(Object::Class)
         } else {
             Err(error::not_found(path))
         }
