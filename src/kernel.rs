@@ -15,12 +15,12 @@ use crate::transaction::Txn;
 const ERR_TXN_REQUIRED: &str = "Collection requires a transaction context";
 
 pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<State> {
-    println!("kernel::get {}", path);
-
     let suffix = path.from_path(&label("sbin").into())?;
     if suffix.is_empty() {
         return Err(error::unsupported("Cannot access /sbin directly"));
     }
+
+    println!("kernel::get /sbin{}", suffix);
 
     match suffix[0].as_str() {
         "chain" => {

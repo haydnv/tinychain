@@ -5,7 +5,7 @@ use std::hash::Hash;
 use std::iter;
 use std::sync::Arc;
 
-use futures::future::{self, TryFutureExt};
+use futures::future::{self, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -148,8 +148,10 @@ impl Txn {
         let mut graph: HashMap<ValueId, State> = HashMap::new();
         let mut capture = None;
         while let Some((name, state)) = parameters.next().await {
+            let state: State = state.into();
+            println!("pending: {}: {}", name, state);
             capture = Some(name.clone());
-            graph.insert(name, state.into());
+            graph.insert(name, state);
         }
 
         let capture =
@@ -197,10 +199,11 @@ impl Txn {
                         }
 
                         if ready {
+                            println!("queueing dep {}: {}", name, state);
                             pending.push(
                                 self.clone()
                                     .resolve(graph.clone(), *op.clone(), auth.clone())
-                                    .map_ok(|state| (name, state)),
+                                    .map(|r| (name, r)),
                             );
                         }
                     } else if let Scalar::Tuple(tuple) = scalar {
@@ -245,12 +248,17 @@ impl Txn {
                 }
             }
 
-            while let Some(result) = pending.next().await {
-                let (name, state) = result?;
+            while let Some((name, result)) = pending.next().await {
+                if let Err(cause) = &result {
+                    println!("Error resolving {}: {}", name, cause);
+                }
+
+                let state = result?;
                 graph.insert(name, state);
             }
         }
 
+        println!("Txn::execute complete, returning {}...", capture);
         graph
             .remove(&capture)
             .ok_or_else(|| error::not_found(capture))
@@ -320,7 +328,7 @@ impl Txn {
                     .and_then(Scalar::try_from)
                     .and_then(Value::try_from)?;
 
-                println!("Method::Get subject {}: {}", subject, key);
+                println!("Method::Get subject {} {}: {}", subject, path, key);
 
                 match subject {
                     State::Chain(chain) => {
@@ -404,6 +412,8 @@ impl Txn {
                 }
             }
             Op::Ref(OpRef::Post((link, data))) => {
+                println!("Txn::resolve POST {} <- {}", link, data);
+
                 self.gateway
                     .clone()
                     .post(link, data.into(), auth, Some(self))

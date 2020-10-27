@@ -681,6 +681,7 @@ pub enum NumberType {
     Float(FloatType),
     Int(IntType),
     UInt(UIntType),
+    Number,
 }
 
 impl NumberType {
@@ -698,7 +699,7 @@ impl NativeClass for NumberType {
         let suffix = path.from_path(&Self::prefix())?;
 
         if suffix.is_empty() {
-            Err(error::unsupported("You must specify a type of Number"))
+            Ok(NumberType::Number)
         } else if suffix.len() == 1 && suffix[0].as_str() == "bool" {
             Ok(NumberType::Bool)
         } else if suffix.len() > 1 {
@@ -747,6 +748,9 @@ impl NumberClass for NumberType {
             Float(ft) => NumberClass::size(ft),
             Int(it) => NumberClass::size(it),
             UInt(ut) => NumberClass::size(ut),
+
+            // a generic Number still has a distinct maximum size
+            Number => NumberClass::size(ComplexType::C64),
         }
     }
 }
@@ -760,10 +764,16 @@ impl Ord for NumberType {
             (Self::Int(l), Self::Int(r)) => l.cmp(r),
             (Self::UInt(l), Self::UInt(r)) => l.cmp(r),
 
+            (Self::Number, Self::Number) => Ordering::Equal,
+            (Self::Number, _) => Ordering::Greater,
+            (_, Self::Number) => Ordering::Less,
+
             (Self::Bool, _) => Ordering::Less,
             (_, Self::Bool) => Ordering::Greater,
+
             (Self::Complex(_), _) => Ordering::Greater,
             (_, Self::Complex(_)) => Ordering::Less,
+
             (Self::UInt(_), Self::Int(_)) => Ordering::Less,
             (Self::UInt(_), Self::Float(_)) => Ordering::Less,
             (Self::Int(_), Self::UInt(_)) => Ordering::Greater,
@@ -789,6 +799,7 @@ impl From<NumberType> for Link {
             Float(ft) => ft.into(),
             Int(it) => it.into(),
             UInt(ut) => ut.into(),
+            Number => NumberType::prefix().into(),
         }
     }
 }
@@ -839,11 +850,12 @@ impl fmt::Display for NumberType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use NumberType::*;
         match self {
-            Bool => write!(f, "Bool"),
+            Bool => write!(f, "type Bool"),
             Complex(ct) => write!(f, "Complex: {}", ct),
             Float(ft) => write!(f, "Float: {}", ft),
             Int(it) => write!(f, "Int: {}", it),
             UInt(ut) => write!(f, "UInt: {}", ut),
+            Number => write!(f, "type Number"),
         }
     }
 }

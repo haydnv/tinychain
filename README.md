@@ -11,11 +11,11 @@ Rust. This is a *preview* release of Tinychain intended to solicit feedback on t
 Many core features, such as file persistence, are not yet implemented.
 
 Tinychain supports BTree indexes and tables (like MySQL), tensors
-(like TensorFlow/Theano/Torch/etc.), graphs\** (like Neo4j), and blockchains** (like Ethereum).
-Tensor and graph operations support hardware acceleration on CUDA and OpenCL devices (such as Nvidia
-GPUs). Tinychain is intended to bridge the gap between the futuristic distributed computing
-technology of blockchain dApps and the security- and performance- critical application stack of
-traditional enterprise services.
+(like TensorFlow/Theano/Torch/etc.), graphs (like Neo4j), and blockchains (like Ethereum). Tensor
+and graph operations support hardware acceleration on CUDA and OpenCL devices (such as Nvidia GPUs).
+Tinychain is intended to bridge the gap between the futuristic distributed computing technology of
+blockchain dApps and the security- and performance- critical application stack of traditional
+enterprise services.
 
 ## Contents
 
@@ -225,15 +225,36 @@ Of course, you can call an method on a generic `Object` just like any other:
 
 ```json
 [
-    ["greeting", {
+    ["greeting", {"/sbin/object": {
         "en": "Hello!",
         "es": "¡Hola!",
         "render": {"/sbin/op/def/get": ["lang", [
             ["is_spanish", {"$lang/eq": ["es"]}],
             ["rendered", {"/sbin/op/ref/if": [{"$is_spanish": []}, {"$self/es": []}, {"$self/en": []}]}]
         ]]}
-    }],
+    }}],
     ["result", {"$greeting/render": ["es"]}]
+]
+```
+
+This is handy for prototyping and debugging, but for production use you'll want to impose more
+formal constraints on your data. You can do this by using a `Class`. Classes in Tinychain work
+just like any object-oriented language; you can think of them as formal constraints on data which
+enable the application handling the data to make very specific assumptions. For example, this
+`Class` called `Degree` extends `Number` and implements a method called `radians`.
+
+```json
+[
+    ["Meter", {"/sbin/object/class": {
+        "extends": "/sbin/value/number",
+        "proto": {
+            "feet": {"/sbin/op/def/get": [
+                ["ft", {"$self/mul": [3.28]}]
+            ]}
+        }
+    }}],
+    ["m", {"$Meter": [1]}],
+    ["ft", {"$m/feet": []}]
 ]
 ```
 

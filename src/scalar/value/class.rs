@@ -61,20 +61,16 @@ impl NativeClass for ValueType {
         let suffix = path.from_path(&Self::prefix())?;
 
         if suffix.is_empty() {
-            Ok(ValueType::Value)
-        } else if suffix.len() == 1 {
-            match suffix[0].as_str() {
-                "none" => Ok(ValueType::None),
-                "bytes" => Ok(ValueType::Bytes),
-                "tuple" => Ok(ValueType::Tuple),
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            match suffix[0].as_str() {
-                "number" => NumberType::from_path(path).map(ValueType::Number),
-                "string" => StringType::from_path(path).map(ValueType::TCString),
-                other => Err(error::not_found(other)),
-            }
+            return Ok(ValueType::Value);
+        }
+
+        match suffix[0].as_str() {
+            "none" if suffix.len() == 1 => Ok(ValueType::None),
+            "bytes" if suffix.len() == 1 => Ok(ValueType::Bytes),
+            "number" => NumberType::from_path(path).map(ValueType::Number),
+            "string" => StringType::from_path(path).map(ValueType::TCString),
+            "tuple" if suffix.len() == 1 => Ok(ValueType::Tuple),
+            other => Err(error::not_found(other)),
         }
     }
 

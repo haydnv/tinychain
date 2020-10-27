@@ -1,8 +1,10 @@
 use std::fmt;
 use std::sync::Arc;
 
+use futures::TryFutureExt;
+
 use crate::auth::Auth;
-use crate::class::{Class, Instance, NativeClass, State, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCType};
 use crate::error::{self, TCResult};
 use crate::scalar::{self, label, Link, TCPath, Value};
 use crate::transaction::Txn;
@@ -21,7 +23,7 @@ pub enum ObjectType {
 
 impl ObjectType {
     pub fn post(path: TCPath, data: scalar::Object) -> TCResult<Object> {
-        println!("ObjectType::post {}", path);
+        println!("ObjectType::post {} <- {}", path, data);
 
         if path == Self::prefix() {
             InstanceClass::post(path, data).map(Object::Instance)
@@ -73,24 +75,31 @@ impl fmt::Display for ObjectType {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub enum Object {
     Class(InstanceClass),
     Instance(ObjectInstance),
 }
 
 impl Object {
-    pub async fn get(
+    pub fn get(
         &self,
         txn: Arc<Txn>,
         path: TCPath,
         key: Value,
         auth: Auth,
-    ) -> TCResult<State> {
-        match self {
-            Self::Class(_ic) => Err(error::not_implemented("InstanceClass::get")),
-            Self::Instance(instance) => instance.get(txn, path, key, auth).await,
-        }
+    ) -> TCBoxTryFuture<State> {
+        Box::pin(async move {
+            match self {
+                Self::Class(ic) => {
+                    ic.get(txn, path, key, auth)
+                        .map_ok(Object::Instance)
+                        .map_ok(State::Object)
+                        .await
+                }
+                Self::Instance(instance) => instance.get(txn, path, key, auth).await,
+            }
+        })
     }
 }
 

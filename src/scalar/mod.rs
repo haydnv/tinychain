@@ -594,7 +594,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
         if data.is_empty() {
             return Ok(Scalar::Object(Object::default()));
         } else if data.len() == 1 {
-            let (key, data) = data.drain().next().unwrap();
+            let (key, data) = data.clone().drain().next().unwrap();
 
             if key.starts_with('$') {
                 let (subject, path) = if let Some(i) = key.find('/') {
