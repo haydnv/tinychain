@@ -103,7 +103,7 @@ impl Client {
 
     pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + 'static>(
         &self,
-        link: &Link,
+        link: Link,
         data: S,
         auth: Auth,
         txn: Option<Arc<Txn>>,
@@ -257,7 +257,7 @@ impl Server {
 
                 let response = gateway
                     .clone()
-                    .post(&path.clone().into(), request, token, None)
+                    .post(path.into(), request, token, None)
                     .await?;
 
                 match response {

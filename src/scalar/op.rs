@@ -6,6 +6,7 @@ use futures::stream;
 use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
 use crate::error;
+use crate::object::ObjectInstance;
 use crate::transaction::Txn;
 
 use super::link::{Link, TCPath};
@@ -303,13 +304,15 @@ impl OpDef {
         txn: Arc<Txn>,
         key: Value,
         auth: Auth,
-        context: Option<crate::object::Object>,
+        context: Option<&'a ObjectInstance>,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Get((key_id, def)) = self {
                 let mut data = if let Some(subject) = context {
-                    vec![(label("self").into(), State::Object(subject))]
+                    println!("OpDef::get {} (context: {})", subject, key);
+                    vec![(label("self").into(), State::Object(subject.clone().into()))]
                 } else {
+                    println!("OpDef::get {}", key);
                     vec![]
                 };
 

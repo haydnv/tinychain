@@ -186,13 +186,13 @@ impl Gateway {
         }
     }
 
-    pub fn post(
+    pub fn post<'a>(
         self: Arc<Self>,
-        subject: &Link,
+        subject: Link,
         data: Scalar,
         auth: Auth,
         txn: Option<Arc<Txn>>,
-    ) -> TCBoxTryFuture<State> {
+    ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             println!("Gateway::post {}", subject);
 
@@ -204,7 +204,7 @@ impl Gateway {
 
             if subject.host().is_none() && !subject.path().is_empty() && subject.path()[0] == "sbin"
             {
-                return kernel::post(txn, subject.path(), data, auth).await;
+                return kernel::post(txn, subject.into_path(), data, auth).await;
             }
 
             let data: Vec<(ValueId, Scalar)> =

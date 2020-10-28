@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 use serde::ser::{Serialize, Serializer};
@@ -26,22 +27,35 @@ impl Object {
         auth: Auth,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
+            println!("Object::get {}: {}", path, key);
+
             if path.is_empty() {
                 return Ok(State::Scalar(Scalar::Object(self.clone())));
             }
+
+            println!(
+                "data: [{}]",
+                self.0
+                    .keys()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
 
             match self.0.get(&path[0]) {
                 Some(scalar) => match scalar {
                     Scalar::Op(op) => match &**op {
                         Op::Def(op_def) => {
-                            op_def.get(txn, key, auth, Some(self.clone().into())).await
+                            op_def.get(txn, key, auth, Some(&self.clone().into())).await
                         }
                         other => Err(error::not_implemented(other)),
                     },
+
                     Scalar::Value(value) => value
                         .get(path.slice_from(1), key)
                         .map(Scalar::Value)
                         .map(State::Scalar),
+
                     other if path.len() == 1 => Ok(State::Scalar(other.clone())),
                     _ => Err(error::not_found(path)),
                 },
@@ -74,5 +88,25 @@ impl Serialize for Object {
 impl From<HashMap<ValueId, Scalar>> for Object {
     fn from(map: HashMap<ValueId, Scalar>) -> Object {
         Object(map)
+    }
+}
+
+impl From<Object> for HashMap<ValueId, Scalar> {
+    fn from(object: Object) -> HashMap<ValueId, Scalar> {
+        object.0
+    }
+}
+
+impl fmt::Display for Object {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{{{}}}",
+            self.0
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
     }
 }

@@ -979,6 +979,9 @@ impl Array {
                 UIntType::U32 => Ok(U32(data.try_into()?)),
                 UIntType::U64 => Ok(U64(data.try_into()?)),
             },
+            NumberType::Number => Err(error::unsupported(
+                "Array does not support generic type Number",
+            )),
         }
     }
 
@@ -1019,6 +1022,11 @@ impl Array {
                     UIntType::U32 => U32(vec_try_into(values)?.into()),
                     UIntType::U64 => U64(vec_into(values).into()),
                 }
+            }
+            NumberType::Number => {
+                return Err(error::unsupported(
+                    "Array requires a uniform type of Number",
+                ));
             }
         };
 
@@ -1075,6 +1083,7 @@ impl Array {
                 U32 => Self::U32(self.af_cast()),
                 U64 => Self::U64(self.af_cast()),
             },
+            NumberType::Number => self,
         }
     }
 
@@ -1176,6 +1185,7 @@ impl Array {
                 U32 => Self::U32(self.af_cast::<u32>() + other.af_cast()),
                 U64 => Self::U64(self.af_cast::<u64>() + other.af_cast()),
             },
+            NumberType::Number => panic!("Array does not support generic type Number"),
         }
     }
 
@@ -1305,6 +1315,7 @@ impl Array {
                 U32 => Self::U32(self.af_cast::<u32>() * other.af_cast()),
                 U64 => Self::U64(self.af_cast::<u64>() * other.af_cast()),
             },
+            Number => panic!("Array does not support generic type Number"),
         }
     }
 
@@ -1571,6 +1582,11 @@ impl TryFrom<Bytes> for Array {
                 UIntType::U32 => U32(array.try_into()?),
                 UIntType::U64 => U64(array.try_into()?),
             },
+            Number => {
+                return Err(error::unsupported(
+                    "Array does not support generic type Number",
+                ));
+            }
         };
 
         Ok(array)

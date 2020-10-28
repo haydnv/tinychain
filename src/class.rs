@@ -9,8 +9,8 @@ use crate::chain::{Chain, ChainType};
 use crate::cluster::Cluster;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::object;
-use crate::scalar::*;
+use crate::object::{Object, ObjectType};
+use crate::scalar::{label, Link, Scalar, ScalarType, TCPath, Value, ValueType};
 
 const ERR_EMPTY_CLASSPATH: &str = "Expected a class path, \
 e.g. /sbin/value/number/int/64 or /sbin/collection/table, but found: ";
@@ -66,7 +66,7 @@ pub enum TCType {
     Chain(ChainType),
     Cluster,
     Collection(CollectionType),
-    Object(object::ObjectType),
+    Object(ObjectType),
     Scalar(ScalarType),
 }
 
@@ -81,7 +81,7 @@ impl NativeClass for TCType {
         match suffix[0].as_str() {
             "chain" => ChainType::from_path(path).map(TCType::Chain),
             "collection" => CollectionType::from_path(path).map(TCType::Collection),
-            "object" if suffix.len() == 1 => Ok(TCType::Object(object::ObjectType::default())),
+            "object" => ObjectType::from_path(path).map(TCType::Object),
             "op" | "tuple" | "value" => ScalarType::from_path(path).map(TCType::Scalar),
             other => Err(error::not_found(other)),
         }
@@ -104,8 +104,8 @@ impl From<CollectionType> for TCType {
     }
 }
 
-impl From<object::ObjectType> for TCType {
-    fn from(ot: object::ObjectType) -> TCType {
+impl From<ObjectType> for TCType {
+    fn from(ot: ObjectType) -> TCType {
         TCType::Object(ot)
     }
 }
@@ -156,7 +156,7 @@ pub enum State {
     Chain(Chain),
     Cluster(Cluster),
     Collection(Collection),
-    Object(object::Object),
+    Object(Object),
     Scalar(Scalar),
 }
 
@@ -192,8 +192,8 @@ impl From<Collection> for State {
     }
 }
 
-impl From<object::Object> for State {
-    fn from(o: object::Object) -> State {
+impl From<Object> for State {
+    fn from(o: Object) -> State {
         State::Object(o)
     }
 }
@@ -221,10 +221,10 @@ impl TryFrom<State> for Chain {
     }
 }
 
-impl TryFrom<State> for object::Object {
+impl TryFrom<State> for Object {
     type Error = error::TCError;
 
-    fn try_from(state: State) -> TCResult<object::Object> {
+    fn try_from(state: State) -> TCResult<Object> {
         match state {
             State::Object(object) => Ok(object),
             other => Err(error::bad_request("Expected Object but found", other)),

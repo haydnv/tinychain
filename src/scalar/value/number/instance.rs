@@ -1393,6 +1393,7 @@ impl NumberInstance for Number {
                 let u: UInt = self.cast_into();
                 u.into_type(ut).into()
             }
+            NT::Number => self,
         }
     }
 }
@@ -1476,6 +1477,7 @@ impl Add for Number {
                 let this: UInt = self.cast_into();
                 (this + other.cast_into()).into()
             }
+            NT::Number => panic!("A number instance must have a specific type, not Number"),
         }
     }
 }
@@ -1509,6 +1511,7 @@ impl Mul for Number {
                 let this: UInt = self.cast_into();
                 (this * other.cast_into()).into()
             }
+            NT::Number => panic!("A number instance must have a specific type, not Number"),
         }
     }
 }
@@ -1542,6 +1545,7 @@ impl Sub for Number {
                 let this: UInt = self.cast_into();
                 (this - other.cast_into()).into()
             }
+            NT::Number => panic!("A number instance must have a specific type, not Number"),
         }
     }
 }
