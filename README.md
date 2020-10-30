@@ -34,10 +34,10 @@ The easiest way to get started is using the latest Docker image here:
 [https://hub.docker.com/r/haydnv/tinychain](https://hub.docker.com/r/haydnv/tinychain)
 
 ```bash
-docker pull haydnv/tinychain:demo2
+docker pull haydnv/tinychain:demo3
 
 # include the "--gpus all" argument if you have nvidia-docker installed
-docker run -it --rm haydnv/tinychain:demo2 bash
+docker run -it --rm haydnv/tinychain:demo3 bash
 
 cd /tinychain
 source ~/.profile
@@ -306,14 +306,15 @@ Tinychain supports three HTTP access methods:
  * **GET**: supports reading, but not writing, mutable state. A GET Op can be executed via HTTP
 without specifying a transaction context; if the subject of the resource is part of a Cluster, the
 Cluster will return the state of the subject as of the latest commit. Via HTTP, GET takes one
-query parameter, called "key,", as in http://127.0.0.1:8888/sbin/value/number/int/32?key=1.
+query parameter, called "key", as in http://127.0.0.1:8888/sbin/value/number/int/32?key=1.
  * **PUT**: supports writing, but not reading, mutable state. A PUT Op can be executed via HTTP
 without specifying a transaction context; if the subject of the resource is part of a Cluster, the
 Cluster will take the state to be its state as of the latest commit. Via HTTP, PUT takes one
-query parameter, called "key,", as in http://127.0.0.1:8888/app/vendor/inventory?key=[1]; it also
+query parameter, called "key", as in http://127.0.0.1:8888/app/vendor/inventory?key=[1]; it also
 requires a value argument, which is the body of the request.
  * **POST**: supports reading and writing mutable state and must return exactly one value.
 
 ## Getting Involved
 Developer documentation is coming soon. Until then, feel free to file a bug for any part
 of the Tinychain host software that you want to understand better. Pull requests are also welcome!
+
