@@ -67,10 +67,14 @@ impl ObjectInstance {
                 None => match &*self.parent {
                     State::Object(parent) => parent.get(txn, path, key, auth).await,
                     State::Scalar(scalar) => match scalar {
+                        Scalar::Object(object) => object.get(txn, path, key, auth).await,
                         Scalar::Value(value) => {
                             value.get(path, key).map(Scalar::Value).map(State::Scalar)
                         }
-                        _ => Err(error::not_implemented("Class inheritance for Scalar")),
+                        _ => Err(error::not_implemented(format!(
+                            "Class inheritance for Scalar (parent is {})",
+                            scalar
+                        ))),
                     },
                     _ => Err(error::not_implemented("Class inheritance for State")),
                 },
