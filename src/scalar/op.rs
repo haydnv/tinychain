@@ -324,6 +324,23 @@ impl OpDef {
             }
         })
     }
+
+    pub fn post<'a>(
+        &'a self,
+        txn: Arc<Txn>,
+        data: Object,
+        auth: Auth,
+    ) -> TCBoxTryFuture<'a, State> {
+        Box::pin(async move {
+            if let Self::Post(def) = self {
+                let mut op: Vec<(ValueId, Scalar)> = data.into_iter().collect();
+                op.extend(def.to_vec());
+                txn.execute(stream::iter(op.drain(..)), auth).await
+            } else {
+                Err(error::method_not_allowed(self))
+            }
+        })
+    }
 }
 
 impl Instance for OpDef {

@@ -76,6 +76,15 @@ impl Object {
     }
 }
 
+impl IntoIterator for Object {
+    type Item = (ValueId, Scalar);
+    type IntoIter = std::collections::hash_map::IntoIter<ValueId, Scalar>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 impl Serialize for Object {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where

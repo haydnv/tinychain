@@ -308,6 +308,7 @@ impl Txn {
                 let cond = provided
                     .get(cond.value_id())
                     .ok_or_else(|| error::not_found(cond))?;
+
                 if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(cond)))) = cond {
                     if cond.into() {
                         Ok(State::Scalar(then))
@@ -400,6 +401,7 @@ impl Txn {
                 let subject = provided
                     .get(&tc_ref.clone().into())
                     .ok_or_else(|| error::not_found(tc_ref))?;
+
                 let value = dereference_state(&provided, &value)?;
 
                 println!(
@@ -432,8 +434,27 @@ impl Txn {
                     .map_ok(State::from)
                     .await
             }
-            Op::Method(Method::Post((_subject, _path), _data)) => {
-                Err(error::not_implemented("Txn::resolve Method::Post"))
+            Op::Method(Method::Post((subject, path), data)) => {
+                let subject = provided
+                    .get(&subject.clone().into())
+                    .ok_or_else(|| error::not_found(subject))?;
+
+                match subject {
+                    State::Scalar(scalar) => match scalar {
+                        Scalar::Op(op) => match &**op {
+                            Op::Def(op_def) => {
+                                if !path.is_empty() {
+                                    return Err(error::not_found(path));
+                                }
+
+                                op_def.post(self, data, auth).await
+                            }
+                            other => Err(error::method_not_allowed(other)),
+                        },
+                        other => Err(error::method_not_allowed(other)),
+                    },
+                    _ => Err(error::not_implemented("Txn::resolve Method::Post")),
+                }
             }
         }
     }
