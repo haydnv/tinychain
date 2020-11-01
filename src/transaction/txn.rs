@@ -188,6 +188,10 @@ impl Txn {
 
                         println!("Provider: {}", &op);
                         for dep in requires(op, &graph)? {
+                            if dep == name {
+                                return Err(error::bad_request("Dependency cycle", dep));
+                            }
+
                             println!("requires {}", dep);
                             let dep_state =
                                 graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
@@ -210,6 +214,10 @@ impl Txn {
                         let mut ready = true;
                         for dep in tuple {
                             if let Scalar::Value(Value::TCString(TCString::Ref(dep))) = dep {
+                                if dep.value_id() == &name {
+                                    return Err(error::bad_request("Dependency cycle", dep));
+                                }
+
                                 let dep_state = graph
                                     .get(dep.value_id())
                                     .ok_or_else(|| error::not_found(&dep))?;
@@ -229,6 +237,10 @@ impl Txn {
                         let mut ready = true;
                         for dep in tuple {
                             if let Value::TCString(TCString::Ref(dep)) = dep {
+                                if dep.value_id() == &name {
+                                    return Err(error::bad_request("Dependency cycle", dep));
+                                }
+
                                 let dep_state = graph
                                     .get(dep.value_id())
                                     .ok_or_else(|| error::not_found(&dep))?;
