@@ -6,12 +6,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::Stream;
 
-use crate::auth::Auth;
 use crate::block::Dir;
 use crate::chain::{Chain, ChainInstance};
 use crate::class::{State, TCResult};
 use crate::error;
 use crate::gateway::Gateway;
+use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -76,11 +76,11 @@ impl Cluster {
 
     pub async fn get(
         &self,
+        request: Request,
         gateway: Arc<Gateway>,
         txn: Option<Arc<Txn>>,
         path: TCPath,
         key: Value,
-        auth: Auth,
     ) -> TCResult<State> {
         if path.is_empty() {
             Ok(self.clone().into())
@@ -99,7 +99,7 @@ impl Cluster {
                     path.slice_from(1),
                     &key
                 );
-                chain.get(txn, &path.slice_from(1), key, auth).await
+                chain.get(request, txn, &path.slice_from(1), key).await
             } else {
                 println!("Cluster has no chain at {}", path[0]);
                 Err(error::not_found(path))
@@ -109,12 +109,12 @@ impl Cluster {
 
     pub async fn put(
         self,
+        request: &Request,
         gateway: Arc<Gateway>,
         txn: Option<Arc<Txn>>,
         path: &TCPath,
         key: Value,
         state: State,
-        _auth: &Auth,
     ) -> TCResult<()> {
         let txn = if let Some(txn) = txn {
             txn
@@ -142,7 +142,7 @@ impl Cluster {
                 if let Some(chain) = cluster_state.chains.get(&suffix[0]) {
                     txn.mutate(chain.clone().into()).await;
                     chain
-                        .put(txn.clone(), suffix.slice_from(1), key, state)
+                        .put(request, txn.clone(), suffix.slice_from(1), key, state)
                         .await
                 } else {
                     Err(error::not_found(suffix))
@@ -157,10 +157,10 @@ impl Cluster {
 
     pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Sync + Unpin>(
         self,
+        _request: Request,
         txn: Arc<Txn>,
         path: TCPath,
         _data: S,
-        _auth: Auth,
     ) -> TCResult<State> {
         if path.is_empty() {
             Err(error::method_not_allowed("Cluster::post"))

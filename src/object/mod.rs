@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use futures::TryFutureExt;
 
-use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCType};
 use crate::error::{self, TCResult};
+use crate::request::Request;
 use crate::scalar::{self, label, Link, TCPath, Value};
 use crate::transaction::Txn;
 
@@ -84,20 +84,21 @@ pub enum Object {
 impl Object {
     pub fn get(
         &self,
+        request: Request,
         txn: Arc<Txn>,
         path: TCPath,
         key: Value,
-        auth: Auth,
     ) -> TCBoxTryFuture<State> {
         Box::pin(async move {
             match self {
                 Self::Class(ic) => {
-                    ic.get(txn, path, key, auth)
+                    ic.clone()
+                        .get(request, txn, path, key)
                         .map_ok(Object::Instance)
                         .map_ok(State::Object)
                         .await
                 }
-                Self::Instance(instance) => instance.get(txn, path, key, auth).await,
+                Self::Instance(instance) => instance.get(request, txn, path, key).await,
             }
         })
     }

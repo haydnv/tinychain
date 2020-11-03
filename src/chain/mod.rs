@@ -6,9 +6,9 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use futures::TryFutureExt;
 
-use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::{label, Link, OpDef, Scalar, TCPath, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -100,16 +100,29 @@ impl ChainClass for ChainType {
 pub trait ChainInstance: Instance {
     type Class: ChainClass;
 
-    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State>;
+    async fn get(
+        &self,
+        request: Request,
+        txn: Arc<Txn>,
+        path: &TCPath,
+        key: Value,
+    ) -> TCResult<State>;
 
-    async fn put(&self, txn: Arc<Txn>, path: TCPath, key: Value, value: State) -> TCResult<()>;
+    async fn put(
+        &self,
+        request: &Request,
+        txn: Arc<Txn>,
+        path: TCPath,
+        key: Value,
+        state: State,
+    ) -> TCResult<()>;
 
     async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
+        request: Request,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
-        auth: Auth,
     ) -> TCResult<State>;
 
     async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
@@ -134,27 +147,40 @@ impl Instance for Chain {
 impl ChainInstance for Chain {
     type Class = ChainType;
 
-    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
+    async fn get(
+        &self,
+        request: Request,
+        txn: Arc<Txn>,
+        path: &TCPath,
+        key: Value,
+    ) -> TCResult<State> {
         match self {
-            Self::Null(nc) => nc.get(txn, path, key, auth).await,
+            Self::Null(nc) => nc.get(request, txn, path, key).await,
         }
     }
 
-    async fn put(&self, txn: Arc<Txn>, path: TCPath, key: Value, value: State) -> TCResult<()> {
+    async fn put(
+        &self,
+        request: &Request,
+        txn: Arc<Txn>,
+        path: TCPath,
+        key: Value,
+        value: State,
+    ) -> TCResult<()> {
         match self {
-            Self::Null(nc) => nc.put(txn, path, key, value).await,
+            Self::Null(nc) => nc.put(request, txn, path, key, value).await,
         }
     }
 
     async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
+        request: Request,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
-        auth: Auth,
     ) -> TCResult<State> {
         match self {
-            Self::Null(nc) => nc.post(txn, path, data, auth).await,
+            Self::Null(nc) => nc.post(request, txn, path, data).await,
         }
     }
 

@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use futures::stream;
 
-use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::object::ObjectInstance;
+use crate::request::Request;
 use crate::transaction::Txn;
 
 use super::link::{Link, TCPath};
@@ -301,9 +301,9 @@ pub enum OpDef {
 impl OpDef {
     pub fn get<'a>(
         &'a self,
+        request: Request,
         txn: Arc<Txn>,
         key: Value,
-        auth: Auth,
         context: Option<&'a ObjectInstance>,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
@@ -318,7 +318,7 @@ impl OpDef {
 
                 data.push((key_id.clone(), Scalar::Value(key).into()));
                 data.extend(def.to_vec().into_iter().map(|(k, v)| (k, State::Scalar(v))));
-                txn.execute(stream::iter(data.drain(..)), auth).await
+                txn.execute(request, stream::iter(data.drain(..))).await
             } else {
                 Err(error::method_not_allowed(self))
             }
@@ -327,15 +327,15 @@ impl OpDef {
 
     pub fn post<'a>(
         &'a self,
+        request: Request,
         txn: Arc<Txn>,
         data: Object,
-        auth: Auth,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Post(def) = self {
                 let mut op: Vec<(ValueId, Scalar)> = data.into_iter().collect();
                 op.extend(def.to_vec());
-                txn.execute(stream::iter(op.drain(..)), auth).await
+                txn.execute(request, stream::iter(op.drain(..))).await
             } else {
                 Err(error::method_not_allowed(self))
             }

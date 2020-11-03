@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use futures::TryFutureExt;
 
-use crate::auth::Auth;
 use crate::class::{Instance, State, TCBoxTryFuture};
 use crate::error::{self, TCResult};
+use crate::request::Request;
 use crate::scalar::{self, Op, OpRef, Scalar, TCPath, Value, ValueInstance};
 use crate::transaction::Txn;
 
@@ -20,14 +20,14 @@ pub struct ObjectInstance {
 
 impl ObjectInstance {
     pub async fn new(
-        class: InstanceClass,
+        request: Request,
         txn: Arc<Txn>,
+        class: InstanceClass,
         schema: Value,
-        auth: Auth,
     ) -> TCResult<ObjectInstance> {
         let ctr = OpRef::Get((class.extends(), schema));
         let parent = txn
-            .resolve(HashMap::new(), ctr.into(), auth)
+            .resolve(request, HashMap::new(), ctr.into())
             .map_ok(Box::new)
             .await?;
 
@@ -36,10 +36,10 @@ impl ObjectInstance {
 
     pub fn get<'a>(
         &'a self,
+        request: Request,
         txn: Arc<Txn>,
         path: TCPath,
         key: Value,
-        auth: Auth,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             println!("ObjectInstance::get {}: {}", path, key);
@@ -48,7 +48,7 @@ impl ObjectInstance {
             match proto.get(&path[0]) {
                 Some(scalar) => match scalar {
                     Scalar::Op(op) if path.len() == 1 => match &**op {
-                        Op::Def(op_def) => op_def.get(txn, key, auth, Some(self)).await,
+                        Op::Def(op_def) => op_def.get(request, txn, key, Some(self)).await,
                         other => Err(error::not_implemented(format!(
                             "ObjectInstance::get {}",
                             other
@@ -65,9 +65,9 @@ impl ObjectInstance {
                     ))),
                 },
                 None => match &*self.parent {
-                    State::Object(parent) => parent.get(txn, path, key, auth).await,
+                    State::Object(parent) => parent.get(request, txn, path, key).await,
                     State::Scalar(scalar) => match scalar {
-                        Scalar::Object(object) => object.get(txn, path, key, auth).await,
+                        Scalar::Object(object) => object.get(request, txn, path, key).await,
                         Scalar::Value(value) => {
                             value.get(path, key).map(Scalar::Value).map(State::Scalar)
                         }
@@ -84,10 +84,10 @@ impl ObjectInstance {
 
     pub async fn post(
         &self,
+        _request: Request,
         _txn: Arc<Txn>,
         path: TCPath,
         _data: scalar::Object,
-        _auth: Auth,
     ) -> TCResult<State> {
         if path.is_empty() {
             Err(error::not_implemented("ObjectInstance::post"))

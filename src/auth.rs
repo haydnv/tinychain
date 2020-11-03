@@ -11,8 +11,6 @@ use crate::class::TCResult;
 use crate::error;
 use crate::scalar::{Link, TCPath, Value};
 
-pub type Auth = Option<Token>;
-
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Token {
     iss: Link,

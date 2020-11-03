@@ -5,11 +5,12 @@ use std::sync::Arc;
 use futures::future::{FutureExt, TryFutureExt};
 use futures::stream::{self, FuturesUnordered, StreamExt};
 
-use crate::auth::{Auth, Token};
+use crate::auth::Token;
 use crate::block::Dir;
 use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::kernel;
+use crate::request::Request;
 use crate::scalar::{Link, LinkHost, Scalar, TryCastInto, Value, ValueId};
 use crate::transaction::Txn;
 
@@ -94,15 +95,15 @@ impl Gateway {
 
     pub async fn discover(
         self: Arc<Self>,
+        request: Request,
         subject: &Link,
-        auth: Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<Vec<LinkHost>> {
         let mut requests = FuturesUnordered::new();
         for peer in &self.peers {
             requests.push(
                 self.client
-                    .get(subject, &Value::None, &auth, &txn)
+                    .get(&request, subject, &Value::None, txn.clone())
                     .map(move |response| (peer.clone(), response)),
             );
         }
@@ -120,9 +121,9 @@ impl Gateway {
 
     pub async fn get(
         self: Arc<Self>,
+        request: Request,
         subject: &Link,
         key: Value,
-        auth: Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<State> {
         println!("Gateway::get {}", subject);
@@ -140,7 +141,7 @@ impl Gateway {
                         let dest: Link = (host.clone(), path.clone()).into();
                         return self
                             .client
-                            .get(&dest, &key, &auth, &txn)
+                            .get(&request, &dest, &key, txn)
                             .map_ok(State::Scalar)
                             .await;
                     }
@@ -149,7 +150,7 @@ impl Gateway {
                 Err(error::not_found(subject))
             } else if let Some((suffix, cluster)) = self.hosted.get(path) {
                 println!("Gateway::get {}{}: {}", cluster, suffix, key);
-                cluster.get(self.clone(), txn, suffix, key, auth).await
+                cluster.get(request, self.clone(), txn, suffix, key).await
             } else {
                 Err(error::not_found(path))
             }
@@ -160,10 +161,10 @@ impl Gateway {
 
     pub async fn put(
         self: Arc<Self>,
+        request: &Request,
         subject: &Link,
         selector: Value,
         state: State,
-        auth: &Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<()> {
         println!("Gateway::put {}: {} <- {}", subject, selector, state);
@@ -183,7 +184,7 @@ impl Gateway {
                 );
 
                 cluster
-                    .put(self.clone(), txn, path, selector, state, auth)
+                    .put(request, self.clone(), txn, path, selector, state)
                     .await
             } else {
                 Err(error::not_implemented("Peer cluster discovery"))
@@ -193,9 +194,9 @@ impl Gateway {
 
     pub fn post<'a>(
         self: Arc<Self>,
+        request: Request,
         subject: Link,
         data: Scalar,
-        auth: Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
@@ -209,7 +210,7 @@ impl Gateway {
 
             if subject.host().is_none() && !subject.path().is_empty() && subject.path()[0] == "sbin"
             {
-                return kernel::post(txn, subject.into_path(), data, auth).await;
+                return kernel::post(request, txn, subject.into_path(), data).await;
             }
 
             let data: Vec<(ValueId, Scalar)> =
@@ -219,12 +220,12 @@ impl Gateway {
             if subject.host().is_none() {
                 let path = subject.path();
                 if let Some((suffix, cluster)) = self.hosted.get(path) {
-                    cluster.post(txn, suffix, data, auth).await
+                    cluster.post(request, txn, suffix, data).await
                 } else {
                     Err(error::not_implemented("Peer discovery"))
                 }
             } else {
-                self.client.post(subject, data, auth, None).await
+                self.client.post(request, subject, data, None).await
             }
         })
     }

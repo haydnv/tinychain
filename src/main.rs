@@ -16,6 +16,7 @@ mod gateway;
 mod kernel;
 mod lock;
 mod object;
+mod request;
 mod scalar;
 mod stream;
 mod transaction;

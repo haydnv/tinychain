@@ -10,7 +10,6 @@ use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::Auth;
 use crate::block::{BlockData, Dir, DirEntry, File};
 use crate::chain::ChainInstance;
 use crate::class::{State, TCBoxTryFuture, TCResult};
@@ -18,6 +17,7 @@ use crate::collection::class::CollectionInstance;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
+use crate::request::Request;
 use crate::scalar::*;
 
 use super::Transact;
@@ -140,8 +140,8 @@ impl Txn {
 
     pub async fn execute<I: Into<State>, S: Stream<Item = (ValueId, I)> + Unpin>(
         self: Arc<Self>,
+        request: Request,
         mut parameters: S,
-        auth: Auth,
     ) -> TCResult<State> {
         println!("Txn::execute");
 
@@ -206,7 +206,7 @@ impl Txn {
                             println!("queueing dep {}: {}", name, state);
                             pending.push(
                                 self.clone()
-                                    .resolve(graph.clone(), *op.clone(), auth.clone())
+                                    .resolve(request.clone(), graph.clone(), *op.clone())
                                     .map(|r| (name, r)),
                             );
                         }
@@ -296,9 +296,9 @@ impl Txn {
 
     pub async fn resolve(
         self: Arc<Self>,
+        request: Request,
         provided: HashMap<ValueId, State>,
         provider: Op,
-        auth: Auth,
     ) -> TCResult<State> {
         println!("Txn::resolve {}", provider);
 
@@ -329,7 +329,7 @@ impl Txn {
 
                 self.gateway
                     .clone()
-                    .get(&link, key, auth, Some(self.clone()))
+                    .get(request, &link, key, Some(self.clone()))
                     .await
             }
             Op::Method(Method::Get((tc_ref, path), key)) => {
@@ -346,17 +346,17 @@ impl Txn {
                 match subject {
                     State::Chain(chain) => {
                         println!("Txn::resolve Chain {}: {}", path, key);
-                        chain.get(self.clone(), &path, key.clone(), auth).await
+                        chain.get(request, self.clone(), &path, key.clone()).await
                     }
                     State::Cluster(cluster) => {
                         println!("Txn::resolve Cluster {}: {}", path, key);
                         cluster
                             .get(
+                                request,
                                 self.gateway.clone(),
                                 Some(self.clone()),
                                 path,
                                 key.clone(),
-                                auth,
                             )
                             .await
                     }
@@ -367,16 +367,16 @@ impl Txn {
                             .await
                             .map(State::from)
                     }
-                    State::Object(object) => object.get(self, path, key, auth).await,
+                    State::Object(object) => object.get(request, self, path, key).await,
                     State::Scalar(scalar) => match scalar {
-                        Scalar::Object(object) => object.get(self, path, key, auth).await,
+                        Scalar::Object(object) => object.get(request, self, path, key).await,
                         Scalar::Op(op) => match &**op {
                             Op::Def(op_def) => {
                                 if !path.is_empty() {
                                     return Err(error::not_found(path));
                                 }
 
-                                op_def.get(self, key, auth, None).await
+                                op_def.get(request, self, key, None).await
                             }
                             other => Err(error::method_not_allowed(other)),
                         },
@@ -392,7 +392,7 @@ impl Txn {
                 let value = dereference_state(&provided, &value)?;
                 self.gateway
                     .clone()
-                    .put(&link, key, value, &auth, Some(self.clone()))
+                    .put(&request, &link, key, value, Some(self.clone()))
                     .await?;
 
                 Ok(().into())
@@ -415,7 +415,7 @@ impl Txn {
                         self.mutate(chain.clone().into()).await;
 
                         chain
-                            .put(self.clone(), path, key, value)
+                            .put(&request, self, path, key, value)
                             .map_ok(State::from)
                             .await
                     }
@@ -430,7 +430,7 @@ impl Txn {
 
                 self.gateway
                     .clone()
-                    .post(link, data.into(), auth, Some(self))
+                    .post(request, link, data.into(), Some(self))
                     .map_ok(State::from)
                     .await
             }
@@ -447,7 +447,7 @@ impl Txn {
                                     return Err(error::not_found(path));
                                 }
 
-                                op_def.post(self, data, auth).await
+                                op_def.post(request, self, data).await
                             }
                             other => Err(error::method_not_allowed(other)),
                         },

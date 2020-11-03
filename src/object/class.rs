@@ -3,9 +3,9 @@ use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::auth::Auth;
 use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::error::{self, TCResult};
+use crate::request::Request;
 use crate::scalar::{self, label, Link, Scalar, TCPath, TryCastInto, Value, ValueId};
 use crate::transaction::Txn;
 
@@ -100,14 +100,14 @@ impl InstanceClass {
     }
 
     pub async fn get(
-        &self,
+        self,
+        request: Request,
         txn: Arc<Txn>,
         path: TCPath,
         key: Value,
-        auth: Auth,
     ) -> TCResult<ObjectInstance> {
         if path.is_empty() {
-            ObjectInstance::new(self.clone(), txn, key, auth).await
+            ObjectInstance::new(request, txn, self, key).await
         } else {
             Err(error::not_found(path))
         }

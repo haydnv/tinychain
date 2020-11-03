@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use serde::ser::{Serialize, Serializer};
 
-use crate::auth::Auth;
 use crate::class::{State, TCBoxTryFuture};
 use crate::error;
+use crate::request::Request;
 use crate::transaction::Txn;
 
 use super::{Op, Scalar, TCPath, Value, ValueId, ValueInstance};
@@ -21,10 +21,10 @@ impl Object {
 
     pub fn get<'a>(
         &'a self,
+        request: Request,
         txn: Arc<Txn>,
         path: TCPath,
         key: Value,
-        auth: Auth,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             println!("Object::get {}: {}", path, key);
@@ -46,7 +46,9 @@ impl Object {
                 Some(scalar) => match scalar {
                     Scalar::Op(op) => match &**op {
                         Op::Def(op_def) => {
-                            op_def.get(txn, key, auth, Some(&self.clone().into())).await
+                            op_def
+                                .get(request, txn, key, Some(&self.clone().into()))
+                                .await
                         }
                         other => Err(error::not_implemented(other)),
                     },
@@ -66,11 +68,11 @@ impl Object {
 
     pub fn put<'a>(
         &'a self,
+        _request: Request,
         _txn: Arc<Txn>,
         _path: TCPath,
         _key: Value,
         _value: State,
-        _auth: Auth,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move { Err(error::not_implemented("Object::put")) })
     }

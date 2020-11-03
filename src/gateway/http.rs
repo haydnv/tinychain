@@ -9,12 +9,13 @@ use bytes::Bytes;
 use futures::future;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response, StatusCode, Uri};
+use hyper::{Body, Method, StatusCode, Uri};
 use serde::de::DeserializeOwned;
 
-use crate::auth::{Auth, Token};
+use crate::auth::Token;
 use crate::class::{State, TCResult, TCStream};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::value::link::*;
 use crate::scalar::{Scalar, Value, ValueId};
 use crate::stream::json::JsonListStream;
@@ -46,12 +47,12 @@ impl Client {
 
     pub async fn get(
         &self,
+        request: &Request,
         link: &Link,
         key: &Value,
-        auth: &Auth,
-        txn: &Option<Arc<Txn>>,
+        txn: Option<Arc<Txn>>,
     ) -> TCResult<Scalar> {
-        if auth.is_some() {
+        if request.auth().is_some() {
             return Err(error::not_implemented("Authorization"));
         }
 
@@ -103,12 +104,12 @@ impl Client {
 
     pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + 'static>(
         &self,
+        request: Request,
         link: Link,
         data: S,
-        auth: Auth,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<State> {
-        if auth.is_some() {
+        if request.auth().is_some() {
             return Err(error::not_implemented("Authorization"));
         }
 
@@ -130,7 +131,7 @@ impl Client {
 
         println!("POST to {}", uri);
 
-        let req = Request::builder()
+        let req = hyper::Request::builder()
             .method(Method::POST)
             .uri(uri)
             .header("content-type", "application/json")
@@ -161,7 +162,6 @@ impl Client {
     }
 }
 
-// TODO: implement request size limit
 pub struct Server {
     address: SocketAddr,
     request_limit: usize,
@@ -180,11 +180,11 @@ impl Server {
     async fn handle(
         self: Arc<Self>,
         gateway: Arc<Gateway>,
-        request: Request<Body>,
-    ) -> Result<Response<Body>, hyper::Error> {
+        request: hyper::Request<Body>,
+    ) -> Result<hyper::Response<Body>, hyper::Error> {
         let mut response = match self.authenticate_and_route(gateway, request).await {
             Err(cause) => transform_error(cause),
-            Ok(response) => Response::new(Body::wrap_stream(response)),
+            Ok(response) => hyper::Response::new(Body::wrap_stream(response)),
         };
 
         response
@@ -197,9 +197,10 @@ impl Server {
     async fn authenticate_and_route(
         self: Arc<Self>,
         gateway: Arc<Gateway>,
-        mut request: Request<Body>,
+        mut http_request: hyper::Request<Body>,
     ) -> TCResult<TCStream<TCResult<Bytes>>> {
-        let token: Option<Token> = if let Some(header) = request.headers().get("Authorization") {
+        let token: Option<Token> = if let Some(header) = http_request.headers().get("Authorization")
+        {
             let token = header
                 .to_str()
                 .map_err(|e| error::bad_request("Unable to parse Authorization header", e))?;
@@ -209,7 +210,9 @@ impl Server {
             None
         };
 
-        let uri = request.uri().clone();
+        let request = Request::new(self.request_ttl, token);
+
+        let uri = http_request.uri().clone();
         let path: TCPath = uri.path().parse()?;
         let mut params: HashMap<String, String> = uri
             .query()
@@ -221,10 +224,10 @@ impl Server {
             })
             .unwrap_or_else(HashMap::new);
 
-        match request.method() {
+        match http_request.method() {
             &Method::GET => {
                 let id = get_param(&mut params, "key")?.unwrap_or_else(|| Value::None);
-                let state = gateway.get(&path.clone().into(), id, token, None).await?;
+                let state = gateway.get(request, &path.clone().into(), id, None).await?;
 
                 match state {
                     State::Scalar(scalar) => {
@@ -246,22 +249,24 @@ impl Server {
                 let id = get_param(&mut params, "key")?
                     .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
                 let value: Scalar =
-                    deserialize_body(request.body_mut(), self.request_limit).await?;
+                    deserialize_body(http_request.body_mut(), self.request_limit).await?;
+
                 gateway
                     .clone()
-                    .put(&path.clone().into(), id, value.into(), &token, None)
+                    .put(&request, &path.clone().into(), id, value.into(), None)
                     .await?;
+
                 Ok(Box::pin(stream::empty()))
             }
 
             &Method::POST => {
                 println!("POST {}", path);
-                let request: Scalar =
-                    deserialize_body(request.body_mut(), self.request_limit).await?;
+                let request_body: Scalar =
+                    deserialize_body(http_request.body_mut(), self.request_limit).await?;
 
                 let response = gateway
                     .clone()
-                    .post(path.into(), request, token, None)
+                    .post(request, path.into(), request_body, None)
                     .await?;
 
                 match response {
@@ -381,14 +386,15 @@ fn get_param<T: DeserializeOwned>(
         let val: T = serde_json::from_str(&param).map_err(|e| {
             error::bad_request(&format!("Unable to parse URI parameter '{}'", name), e)
         })?;
+
         Ok(Some(val))
     } else {
         Ok(None)
     }
 }
 
-fn transform_error(err: error::TCError) -> Response<Body> {
-    let mut response = Response::new(Body::from(format!("{}\r\n", err.message())));
+fn transform_error(err: error::TCError) -> hyper::Response<Body> {
+    let mut response = hyper::Response::new(Body::from(format!("{}\r\n", err.message())));
 
     use error::Code::*;
     *response.status_mut() = match err.reason() {

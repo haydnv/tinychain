@@ -6,11 +6,11 @@ use async_trait::async_trait;
 use futures::stream::{self, Stream, StreamExt};
 use futures::TryFutureExt;
 
-use crate::auth::Auth;
 use crate::class::*;
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::{OpDef, Scalar, ScalarClass, TCPath, Value, ValueId};
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -104,7 +104,13 @@ impl Instance for NullChain {
 impl ChainInstance for NullChain {
     type Class = ChainType;
 
-    async fn get(&self, txn: Arc<Txn>, path: &TCPath, key: Value, auth: Auth) -> TCResult<State> {
+    async fn get(
+        &self,
+        request: Request,
+        txn: Arc<Txn>,
+        path: &TCPath,
+        key: Value,
+    ) -> TCResult<State> {
         println!("NullChain::get {}: {}", path, &key);
 
         if path.is_empty() {
@@ -127,7 +133,7 @@ impl ChainInstance for NullChain {
                     let mut params = Vec::with_capacity(def.len() + 1);
                     params.push((key_name.clone(), Scalar::Value(key)));
                     params.extend(def.to_vec());
-                    txn.execute(stream::iter(params), auth).await
+                    txn.execute(request, stream::iter(params)).await
                 } else {
                     Err(error::method_not_allowed(path))
                 }
@@ -139,7 +145,14 @@ impl ChainInstance for NullChain {
         }
     }
 
-    async fn put(&self, txn: Arc<Txn>, path: TCPath, key: Value, new_value: State) -> TCResult<()> {
+    async fn put(
+        &self,
+        _request: &Request,
+        txn: Arc<Txn>,
+        path: TCPath,
+        key: Value,
+        new_value: State,
+    ) -> TCResult<()> {
         if &path == "/object" {
             match &self.state {
                 ChainState::Collection(_) => Err(error::not_implemented("NullChain::put")),
@@ -165,17 +178,17 @@ impl ChainInstance for NullChain {
 
     async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
+        request: Request,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
-        auth: Auth,
     ) -> TCResult<State> {
         if path.is_empty() {
             Err(error::method_not_allowed("NullChain::post"))
         } else if path.len() == 1 {
             if let Some(OpDef::Post(def)) = self.ops.read(txn.id()).await?.get(&path[0]) {
                 let data = data.chain(stream::iter(def.to_vec()));
-                txn.execute(data, auth).await
+                txn.execute(request, data).await
             } else {
                 Err(error::not_found(path))
             }

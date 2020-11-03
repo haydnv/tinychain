@@ -4,11 +4,11 @@ use std::sync::Arc;
 use futures::stream;
 use futures::TryFutureExt;
 
-use crate::auth::Auth;
 use crate::class::{NativeClass, State, TCResult};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error;
 use crate::object::ObjectType;
+use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::Txn;
 
@@ -42,13 +42,13 @@ pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<St
     }
 }
 
-pub async fn post(txn: Arc<Txn>, path: TCPath, data: Scalar, auth: Auth) -> TCResult<State> {
+pub async fn post(request: Request, txn: Arc<Txn>, path: TCPath, data: Scalar) -> TCResult<State> {
     println!("kernel::post {}", path);
 
     if &path == "/sbin/transact" {
         if data.matches::<Vec<(ValueId, Scalar)>>() {
             let values: Vec<(ValueId, Scalar)> = data.opt_cast_into().unwrap();
-            txn.execute(stream::iter(values), auth).await
+            txn.execute(request, stream::iter(values)).await
         } else if data.matches::<OpRef>() {
             Err(error::not_implemented("Resolve OpRef"))
         } else {
