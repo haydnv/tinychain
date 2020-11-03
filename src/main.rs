@@ -30,12 +30,13 @@ fn data_size(flag: &str) -> error::TCResult<usize> {
     let msg = "Unable to parse value";
     let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
         .map_err(|_| error::bad_request(msg, flag))?;
+
     if flag.ends_with('K') {
         Ok(size * 1000)
     } else if flag.ends_with('M') {
         Ok(size * 1_000_000)
     } else {
-        Err(error::bad_request(msg, flag))
+        Err(error::bad_request("Unable to parse request_limit", flag))
     }
 }
 
@@ -64,6 +65,9 @@ struct Config {
 
     #[structopt(long = "request_limit", default_value = "10M", parse(try_from_str = data_size))]
     pub request_limit: usize,
+
+    #[structopt(long = "request_ttl", default_value = "30")]
+    pub request_ttl: u32,
 }
 
 #[tokio::main]
@@ -95,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         hosted,
         workspace.clone(),
         config.request_limit,
+        config.request_ttl,
     )
     .map_err(Box::new)?;
 

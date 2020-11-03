@@ -165,13 +165,15 @@ impl Client {
 pub struct Server {
     address: SocketAddr,
     request_limit: usize,
+    request_ttl: u32,
 }
 
 impl Server {
-    pub fn new(address: SocketAddr, request_limit: usize) -> Server {
+    pub fn new(address: SocketAddr, request_limit: usize, request_ttl: u32) -> Server {
         Server {
             address,
             request_limit,
+            request_ttl,
         }
     }
 
@@ -188,6 +190,7 @@ impl Server {
         response
             .headers_mut()
             .insert(hyper::header::CONTENT_TYPE, CONTENT_TYPE.parse().unwrap());
+
         Ok(response)
     }
 
@@ -200,6 +203,7 @@ impl Server {
             let token = header
                 .to_str()
                 .map_err(|e| error::bad_request("Unable to parse Authorization header", e))?;
+
             Some(gateway.authenticate(token).await?)
         } else {
             None

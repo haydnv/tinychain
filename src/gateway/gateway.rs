@@ -25,6 +25,7 @@ pub struct Gateway {
     workspace: Arc<Dir>,
     client: http::Client,
     request_limit: usize,
+    request_ttl: u32,
 }
 
 impl Gateway {
@@ -38,6 +39,7 @@ impl Gateway {
         hosted: Hosted,
         workspace: Arc<Dir>,
         request_limit: usize,
+        request_ttl: u32,
     ) -> TCResult<Gateway> {
         let mut adapter_uris = HashSet::new();
         for adapter in &adapters {
@@ -64,6 +66,7 @@ impl Gateway {
             workspace,
             client,
             request_limit,
+            request_ttl,
         })
     }
 
@@ -83,8 +86,10 @@ impl Gateway {
         let server = Arc::new(super::HttpServer::new(
             (address, port).into(),
             self.request_limit,
+            self.request_ttl,
         ));
-        server.clone().listen(self).await
+
+        server.listen(self).await
     }
 
     pub async fn discover(
