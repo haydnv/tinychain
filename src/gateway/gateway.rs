@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::future::{FutureExt, TryFutureExt};
 use futures::stream::{self, FuturesUnordered, StreamExt};
@@ -26,7 +27,7 @@ pub struct Gateway {
     workspace: Arc<Dir>,
     client: http::Client,
     request_limit: usize,
-    request_ttl: u32,
+    request_ttl: Duration,
 }
 
 impl Gateway {
@@ -40,7 +41,7 @@ impl Gateway {
         hosted: Hosted,
         workspace: Arc<Dir>,
         request_limit: usize,
-        request_ttl: u32,
+        request_ttl: Duration,
     ) -> TCResult<Gateway> {
         let mut adapter_uris = HashSet::new();
         for adapter in &adapters {
@@ -58,7 +59,7 @@ impl Gateway {
             }
         }
 
-        let client = http::Client::new(request_limit);
+        let client = http::Client::new(request_ttl, request_limit);
 
         Ok(Gateway {
             peers,

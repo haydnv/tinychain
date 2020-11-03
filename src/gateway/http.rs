@@ -11,6 +11,7 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, StatusCode, Uri};
 use serde::de::DeserializeOwned;
+use tokio::time::timeout;
 
 use crate::auth::Token;
 use crate::class::{State, TCResult, TCStream};
@@ -24,7 +25,6 @@ use crate::transaction::Txn;
 use super::Gateway;
 
 const CONTENT_TYPE: &str = "application/json; charset=utf-8";
-const TIMEOUT: Duration = Duration::from_secs(30);
 const ERR_DECODE: &str = "(unable to decode error message)";
 
 pub struct Client {
@@ -33,9 +33,9 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(response_limit: usize) -> Client {
+    pub fn new(ttl: Duration, response_limit: usize) -> Client {
         let client = hyper::Client::builder()
-            .pool_idle_timeout(TIMEOUT)
+            .pool_idle_timeout(ttl)
             .http2_only(true)
             .build_http();
 
@@ -82,23 +82,28 @@ impl Client {
             .parse()
             .map_err(|err| error::bad_request("Unable to encode link URI", err))?;
 
-        match self.client.get(uri).await {
-            Err(cause) => Err(error::transport(cause)),
-            Ok(response) if response.status() != 200 => {
-                let status = response.status().as_u16();
-                let msg = if let Ok(msg) = hyper::body::to_bytes(response).await {
-                    if let Ok(msg) = String::from_utf8(msg.to_vec()) {
-                        msg
+        match timeout(request.ttl(), self.client.get(uri)).await {
+            Err(_) => Err(error::bad_request("Timed out awaiting", link)),
+            Ok(result) => match result {
+                Err(cause) => Err(error::transport(cause)),
+                Ok(response) if response.status() != 200 => {
+                    let status = response.status().as_u16();
+                    let msg = if let Ok(msg) = hyper::body::to_bytes(response).await {
+                        if let Ok(msg) = String::from_utf8(msg.to_vec()) {
+                            msg
+                        } else {
+                            ERR_DECODE.to_string()
+                        }
                     } else {
                         ERR_DECODE.to_string()
-                    }
-                } else {
-                    ERR_DECODE.to_string()
-                };
+                    };
 
-                Err(error::TCError::of(status.into(), msg))
-            }
-            Ok(mut response) => deserialize_body(response.body_mut(), self.response_limit).await,
+                    Err(error::TCError::of(status.into(), msg))
+                }
+                Ok(mut response) => {
+                    deserialize_body(response.body_mut(), self.response_limit).await
+                }
+            },
         }
     }
 
@@ -138,26 +143,29 @@ impl Client {
             .body(Body::wrap_stream(JsonListStream::from(data)))
             .map_err(error::internal)?;
 
-        match self.client.request(req).await {
-            Err(cause) => Err(error::transport(cause)),
-            Ok(response) if response.status() != 200 => {
-                let status = response.status().as_u16();
-                let msg = if let Ok(msg) = hyper::body::to_bytes(response).await {
-                    if let Ok(msg) = String::from_utf8(msg.to_vec()) {
-                        msg
+        match timeout(request.ttl(), self.client.request(req)).await {
+            Err(_) => Err(error::bad_request("The request timed out waiting on", link)),
+            Ok(result) => match result {
+                Err(cause) => Err(error::transport(cause)),
+                Ok(response) if response.status() != 200 => {
+                    let status = response.status().as_u16();
+                    let msg = if let Ok(msg) = hyper::body::to_bytes(response).await {
+                        if let Ok(msg) = String::from_utf8(msg.to_vec()) {
+                            msg
+                        } else {
+                            ERR_DECODE.to_string()
+                        }
                     } else {
                         ERR_DECODE.to_string()
-                    }
-                } else {
-                    ERR_DECODE.to_string()
-                };
+                    };
 
-                Err(error::TCError::of(status.into(), msg))
-            }
-            Ok(_) => {
-                // TODO: deserialize response
-                Ok(().into())
-            }
+                    Err(error::TCError::of(status.into(), msg))
+                }
+                Ok(_) => {
+                    // TODO: deserialize response
+                    Ok(().into())
+                }
+            },
         }
     }
 }
@@ -165,11 +173,11 @@ impl Client {
 pub struct Server {
     address: SocketAddr,
     request_limit: usize,
-    request_ttl: u32,
+    request_ttl: Duration,
 }
 
 impl Server {
-    pub fn new(address: SocketAddr, request_limit: usize, request_ttl: u32) -> Server {
+    pub fn new(address: SocketAddr, request_limit: usize, request_ttl: Duration) -> Server {
         Server {
             address,
             request_limit,
@@ -197,7 +205,7 @@ impl Server {
     async fn authenticate_and_route(
         self: Arc<Self>,
         gateway: Arc<Gateway>,
-        mut http_request: hyper::Request<Body>,
+        http_request: hyper::Request<Body>,
     ) -> TCResult<TCStream<TCResult<Bytes>>> {
         let token: Option<Token> = if let Some(header) = http_request.headers().get("Authorization")
         {
@@ -211,7 +219,23 @@ impl Server {
         };
 
         let request = Request::new(self.request_ttl, token);
+        let response = timeout(request.ttl(), self.route(gateway, request, http_request)).await;
 
+        match response {
+            Ok(result) => result,
+            Err(cause) => Err(error::bad_request(
+                "Request timed out before completing",
+                cause,
+            )),
+        }
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        gateway: Arc<Gateway>,
+        request: Request,
+        mut http_request: hyper::Request<Body>,
+    ) -> TCResult<TCStream<TCResult<Bytes>>> {
         let uri = http_request.uri().clone();
         let path: TCPath = uri.path().parse()?;
         let mut params: HashMap<String, String> = uri

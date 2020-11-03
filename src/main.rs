@@ -1,6 +1,8 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use arrayfire as af;
 use structopt::StructOpt;
@@ -41,6 +43,12 @@ fn data_size(flag: &str) -> error::TCResult<usize> {
     }
 }
 
+fn duration(flag: &str) -> error::TCResult<Duration> {
+    u64::from_str(flag)
+        .map(Duration::from_secs)
+        .map_err(|_| error::bad_request("Invalid duration", flag))
+}
+
 #[derive(Clone, StructOpt)]
 struct Config {
     #[structopt(long = "address", default_value = "127.0.0.1")]
@@ -67,8 +75,8 @@ struct Config {
     #[structopt(long = "request_limit", default_value = "10M", parse(try_from_str = data_size))]
     pub request_limit: usize,
 
-    #[structopt(long = "request_ttl", default_value = "30")]
-    pub request_ttl: u32,
+    #[structopt(long = "request_ttl", default_value = "30", parse(try_from_str = duration))]
+    pub request_ttl: Duration,
 }
 
 #[tokio::main]
