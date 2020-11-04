@@ -143,6 +143,8 @@ impl Txn {
         request: &Request,
         mut parameters: S,
     ) -> TCResult<State> {
+        validate_id(request, &self.id)?;
+
         println!("Txn::execute");
 
         let mut graph: HashMap<ValueId, State> = HashMap::new();
@@ -300,6 +302,8 @@ impl Txn {
         provided: HashMap<ValueId, State>,
         provider: Op,
     ) -> TCResult<State> {
+        validate_id(request, &self.id)?;
+
         println!("Txn::resolve {}", provider);
 
         match provider {
@@ -651,5 +655,15 @@ fn value_requires(value: &Value) -> TCResult<HashSet<ValueId>> {
             Ok(required)
         }
         _ => Ok(HashSet::new()),
+    }
+}
+
+fn validate_id(request: &Request, expected: &TxnId) -> TCResult<()> {
+    match request.txn_id() {
+        Some(txn_id) if txn_id != expected => Err(error::unsupported(format!(
+            "Cannot access Transaction {} from {}",
+            expected, txn_id
+        ))),
+        _ => Ok(()),
     }
 }

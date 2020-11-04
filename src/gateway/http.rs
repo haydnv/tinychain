@@ -218,8 +218,25 @@ impl Server {
             None
         };
 
-        let request = Request::new(self.request_ttl, token);
-        let response = timeout(request.ttl(), self.route(gateway, request, http_request)).await;
+        let mut params = http_request
+            .uri()
+            .query()
+            .map(|v| {
+                println!("param {}", v);
+                url::form_urlencoded::parse(v.as_bytes())
+                    .into_owned()
+                    .collect()
+            })
+            .unwrap_or_else(HashMap::new);
+
+        let txn_id = get_param(&mut params, "txn_id")?;
+
+        let request = Request::new(self.request_ttl, token, txn_id);
+        let response = timeout(
+            request.ttl(),
+            self.route(gateway, request, params, http_request),
+        )
+        .await;
 
         match response {
             Ok(result) => result,
@@ -234,19 +251,11 @@ impl Server {
         self: Arc<Self>,
         gateway: Arc<Gateway>,
         request: Request,
+        mut params: HashMap<String, String>,
         mut http_request: hyper::Request<Body>,
     ) -> TCResult<TCStream<TCResult<Bytes>>> {
         let uri = http_request.uri().clone();
         let path: TCPath = uri.path().parse()?;
-        let mut params: HashMap<String, String> = uri
-            .query()
-            .map(|v| {
-                println!("param {}", v);
-                url::form_urlencoded::parse(v.as_bytes())
-                    .into_owned()
-                    .collect()
-            })
-            .unwrap_or_else(HashMap::new);
 
         match http_request.method() {
             &Method::GET => {
