@@ -76,7 +76,7 @@ impl Cluster {
 
     pub async fn get(
         &self,
-        request: Request,
+        request: &Request,
         gateway: Arc<Gateway>,
         txn: Option<Arc<Txn>>,
         path: TCPath,
@@ -157,7 +157,7 @@ impl Cluster {
 
     pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Sync + Unpin>(
         self,
-        _request: Request,
+        _request: &Request,
         txn: Arc<Txn>,
         path: TCPath,
         _data: S,

@@ -96,7 +96,7 @@ impl Gateway {
 
     pub async fn discover(
         self: Arc<Self>,
-        request: Request,
+        request: &Request,
         subject: &Link,
         txn: Option<Arc<Txn>>,
     ) -> TCResult<Vec<LinkHost>> {
@@ -122,7 +122,7 @@ impl Gateway {
 
     pub async fn get(
         self: Arc<Self>,
-        request: Request,
+        request: &Request,
         subject: &Link,
         key: Value,
         txn: Option<Arc<Txn>>,
@@ -195,7 +195,7 @@ impl Gateway {
 
     pub fn post<'a>(
         self: Arc<Self>,
-        request: Request,
+        request: &'a Request,
         subject: Link,
         data: Scalar,
         txn: Option<Arc<Txn>>,

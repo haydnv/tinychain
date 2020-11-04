@@ -42,7 +42,7 @@ pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<St
     }
 }
 
-pub async fn post(request: Request, txn: Arc<Txn>, path: TCPath, data: Scalar) -> TCResult<State> {
+pub async fn post(request: &Request, txn: Arc<Txn>, path: TCPath, data: Scalar) -> TCResult<State> {
     println!("kernel::post {}", path);
 
     if &path == "/sbin/transact" {

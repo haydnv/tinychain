@@ -20,7 +20,7 @@ pub struct ObjectInstance {
 
 impl ObjectInstance {
     pub async fn new(
-        request: Request,
+        request: &Request,
         txn: Arc<Txn>,
         class: InstanceClass,
         schema: Value,
@@ -36,7 +36,7 @@ impl ObjectInstance {
 
     pub fn get<'a>(
         &'a self,
-        request: Request,
+        request: &'a Request,
         txn: Arc<Txn>,
         path: TCPath,
         key: Value,
@@ -84,7 +84,7 @@ impl ObjectInstance {
 
     pub async fn post(
         &self,
-        _request: Request,
+        _request: &Request,
         _txn: Arc<Txn>,
         path: TCPath,
         _data: scalar::Object,

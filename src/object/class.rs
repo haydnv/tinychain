@@ -101,7 +101,7 @@ impl InstanceClass {
 
     pub async fn get(
         self,
-        request: Request,
+        request: &Request,
         txn: Arc<Txn>,
         path: TCPath,
         key: Value,

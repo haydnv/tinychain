@@ -106,7 +106,7 @@ impl ChainInstance for NullChain {
 
     async fn get(
         &self,
-        request: Request,
+        request: &Request,
         txn: Arc<Txn>,
         path: &TCPath,
         key: Value,
@@ -178,7 +178,7 @@ impl ChainInstance for NullChain {
 
     async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
-        request: Request,
+        request: &Request,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,

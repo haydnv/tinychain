@@ -82,13 +82,13 @@ pub enum Object {
 }
 
 impl Object {
-    pub fn get(
-        &self,
-        request: Request,
+    pub fn get<'a>(
+        &'a self,
+        request: &'a Request,
         txn: Arc<Txn>,
         path: TCPath,
         key: Value,
-    ) -> TCBoxTryFuture<State> {
+    ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             match self {
                 Self::Class(ic) => {

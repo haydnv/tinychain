@@ -140,7 +140,7 @@ impl Txn {
 
     pub async fn execute<I: Into<State>, S: Stream<Item = (ValueId, I)> + Unpin>(
         self: Arc<Self>,
-        request: Request,
+        request: &Request,
         mut parameters: S,
     ) -> TCResult<State> {
         println!("Txn::execute");
@@ -206,7 +206,7 @@ impl Txn {
                             println!("queueing dep {}: {}", name, state);
                             pending.push(
                                 self.clone()
-                                    .resolve(request.clone(), graph.clone(), *op.clone())
+                                    .resolve(request, graph.clone(), *op.clone())
                                     .map(|r| (name, r)),
                             );
                         }
@@ -296,7 +296,7 @@ impl Txn {
 
     pub async fn resolve(
         self: Arc<Self>,
-        request: Request,
+        request: &Request,
         provided: HashMap<ValueId, State>,
         provider: Op,
     ) -> TCResult<State> {

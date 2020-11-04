@@ -109,7 +109,7 @@ impl Client {
 
     pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + 'static>(
         &self,
-        request: Request,
+        request: &Request,
         link: Link,
         data: S,
         txn: Option<Arc<Txn>>,
@@ -251,7 +251,9 @@ impl Server {
         match http_request.method() {
             &Method::GET => {
                 let id = get_param(&mut params, "key")?.unwrap_or_else(|| Value::None);
-                let state = gateway.get(request, &path.clone().into(), id, None).await?;
+                let state = gateway
+                    .get(&request, &path.clone().into(), id, None)
+                    .await?;
 
                 match state {
                     State::Scalar(scalar) => {
@@ -290,7 +292,7 @@ impl Server {
 
                 let response = gateway
                     .clone()
-                    .post(request, path.into(), request_body, None)
+                    .post(&request, path.into(), request_body, None)
                     .await?;
 
                 match response {

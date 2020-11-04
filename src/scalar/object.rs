@@ -21,7 +21,7 @@ impl Object {
 
     pub fn get<'a>(
         &'a self,
-        request: Request,
+        request: &'a Request,
         txn: Arc<Txn>,
         path: TCPath,
         key: Value,
@@ -68,7 +68,7 @@ impl Object {
 
     pub fn put<'a>(
         &'a self,
-        _request: Request,
+        _request: &'a Request,
         _txn: Arc<Txn>,
         _path: TCPath,
         _key: Value,

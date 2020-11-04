@@ -102,7 +102,7 @@ pub trait ChainInstance: Instance {
 
     async fn get(
         &self,
-        request: Request,
+        request: &Request,
         txn: Arc<Txn>,
         path: &TCPath,
         key: Value,
@@ -119,7 +119,7 @@ pub trait ChainInstance: Instance {
 
     async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
-        request: Request,
+        request: &Request,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,
@@ -149,7 +149,7 @@ impl ChainInstance for Chain {
 
     async fn get(
         &self,
-        request: Request,
+        request: &Request,
         txn: Arc<Txn>,
         path: &TCPath,
         key: Value,
@@ -174,7 +174,7 @@ impl ChainInstance for Chain {
 
     async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
-        request: Request,
+        request: &Request,
         txn: Arc<Txn>,
         path: TCPath,
         data: S,

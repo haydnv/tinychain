@@ -301,7 +301,7 @@ pub enum OpDef {
 impl OpDef {
     pub fn get<'a>(
         &'a self,
-        request: Request,
+        request: &'a Request,
         txn: Arc<Txn>,
         key: Value,
         context: Option<&'a ObjectInstance>,
@@ -327,7 +327,7 @@ impl OpDef {
 
     pub fn post<'a>(
         &'a self,
-        request: Request,
+        request: &'a Request,
         txn: Arc<Txn>,
         data: Object,
     ) -> TCBoxTryFuture<'a, State> {
