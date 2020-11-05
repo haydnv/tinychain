@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 
@@ -42,7 +41,7 @@ impl NativeClass for BTreeType {
 impl CollectionClass for BTreeType {
     type Instance = BTree;
 
-    async fn get(&self, _txn: Arc<Txn>, _schema: Value) -> TCResult<BTree> {
+    async fn get(&self, _txn: &Txn, _schema: Value) -> TCResult<BTree> {
         Err(error::not_implemented("BTreeType::get"))
     }
 }
@@ -92,7 +91,7 @@ impl CollectionInstance for BTree {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -102,7 +101,7 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
             Self::Tree(tree) => tree.is_empty(txn).await,
             Self::View(view) => view.is_empty(txn).await,
@@ -111,7 +110,7 @@ impl CollectionInstance for BTree {
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -122,7 +121,7 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Tree(tree) => tree.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,

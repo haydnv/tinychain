@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::Arc;
 
 use futures::TryFutureExt;
 
@@ -85,7 +84,7 @@ impl Object {
     pub fn get<'a>(
         &'a self,
         request: &'a Request,
-        txn: Arc<Txn>,
+        txn: &'a Txn,
         path: TCPath,
         key: Value,
     ) -> TCBoxTryFuture<'a, State> {

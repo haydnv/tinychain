@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 
 use crate::class::{TCBoxTryFuture, TCResult};
@@ -19,22 +17,17 @@ pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
 
 pub type Array = dense::array::Array;
-pub type AxisBounds = bounds::AxisBounds;
-pub type Bounds = bounds::Bounds;
 pub type DenseTensor = dense::DenseTensor;
-pub type Shape = bounds::Shape;
-pub type SparseTable = sparse::SparseTable;
 pub type SparseTensor = sparse::SparseTensor;
 pub type Tensor = class::Tensor;
-pub type TensorBase = class::TensorBase;
 pub type TensorBaseType = class::TensorBaseType;
 pub type TensorView = class::TensorView;
 pub type TensorType = class::TensorType;
 
 pub trait TensorBoolean: class::TensorInstance + Sized {
-    fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
+    fn all(&self, txn: Txn) -> TCBoxTryFuture<bool>;
 
-    fn any(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool>;
+    fn any(&self, txn: Txn) -> TCBoxTryFuture<bool>;
 
     fn and(&self, other: &Self) -> TCResult<Self>;
 
@@ -47,30 +40,26 @@ pub trait TensorBoolean: class::TensorInstance + Sized {
 
 #[async_trait]
 pub trait TensorCompare: class::TensorInstance + Sized {
-    async fn eq(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor>;
+    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor>;
 
     fn gt(&self, other: &Self) -> TCResult<Self>;
 
-    async fn gte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor>;
+    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor>;
 
     fn lt(&self, other: &Self) -> TCResult<Self>;
 
-    async fn lte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor>;
+    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor>;
 
     fn ne(&self, other: &Self) -> TCResult<Self>;
 }
 
 pub trait TensorIO: class::TensorInstance + Sized {
-    fn mask<'a>(&'a self, txn: &'a Arc<Txn>, other: Self) -> TCBoxTryFuture<'a, ()>;
+    fn mask<'a>(&'a self, txn: &'a Txn, other: Self) -> TCBoxTryFuture<'a, ()>;
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
 
-    fn write<'a>(
-        &'a self,
-        txn: Arc<Txn>,
-        bounds: bounds::Bounds,
-        value: Self,
-    ) -> TCBoxTryFuture<'a, ()>;
+    fn write<'a>(&'a self, txn: Txn, bounds: bounds::Bounds, value: Self)
+        -> TCBoxTryFuture<'a, ()>;
 
     fn write_value(
         &self,
@@ -98,11 +87,11 @@ pub trait TensorMath: class::TensorInstance + Sized {
 pub trait TensorReduce: class::TensorInstance + Sized {
     fn product(&self, axis: usize) -> TCResult<Self>;
 
-    fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
+    fn product_all(&self, txn: Txn) -> TCBoxTryFuture<Number>;
 
     fn sum(&self, axis: usize) -> TCResult<Self>;
 
-    fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number>;
+    fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number>;
 }
 
 pub trait TensorTransform: class::TensorInstance + Sized {
@@ -120,14 +109,14 @@ pub trait TensorTransform: class::TensorInstance + Sized {
 }
 
 impl TensorBoolean for TensorView {
-    fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool> {
+    fn all(&self, txn: Txn) -> TCBoxTryFuture<bool> {
         match self {
             Self::Dense(dense) => dense.all(txn),
             Self::Sparse(sparse) => sparse.all(txn),
         }
     }
 
-    fn any(&'_ self, txn: Arc<Txn>) -> TCBoxTryFuture<'_, bool> {
+    fn any(&'_ self, txn: Txn) -> TCBoxTryFuture<'_, bool> {
         match self {
             Self::Dense(dense) => dense.any(txn),
             Self::Sparse(sparse) => sparse.any(txn),
@@ -179,7 +168,7 @@ impl TensorBoolean for TensorView {
 
 #[async_trait]
 impl TensorCompare for TensorView {
-    async fn eq(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
+    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.eq(right, txn).await,
             (Self::Sparse(left), Self::Sparse(right)) => left.eq(right, txn).await,
@@ -205,7 +194,7 @@ impl TensorCompare for TensorView {
         }
     }
 
-    async fn gte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
+    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.gte(right, txn).await,
             (Self::Sparse(left), Self::Sparse(right)) => left.gte(right, txn).await,
@@ -232,7 +221,7 @@ impl TensorCompare for TensorView {
         }
     }
 
-    async fn lte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
+    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.lte(right, txn).await,
             (Self::Sparse(left), Self::Sparse(right)) => left.lte(right, txn).await,
@@ -261,7 +250,7 @@ impl TensorCompare for TensorView {
 }
 
 impl TensorIO for TensorView {
-    fn mask<'a>(&'a self, txn: &'a Arc<Txn>, other: Self) -> TCBoxTryFuture<'a, ()> {
+    fn mask<'a>(&'a self, txn: &'a Txn, other: Self) -> TCBoxTryFuture<'a, ()> {
         match (self, &other) {
             (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()),
             (Self::Sparse(l), Self::Sparse(r)) => l.mask(txn, r.clone()),
@@ -270,7 +259,7 @@ impl TensorIO for TensorView {
         }
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         match self {
             Self::Dense(dense) => dense.read_value(txn, coord),
             Self::Sparse(sparse) => sparse.read_value(txn, coord),
@@ -279,7 +268,7 @@ impl TensorIO for TensorView {
 
     fn write<'a>(
         &'a self,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: bounds::Bounds,
         value: Self,
     ) -> TCBoxTryFuture<'a, ()> {
@@ -363,7 +352,7 @@ impl TensorReduce for TensorView {
         }
     }
 
-    fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+    fn product_all(&self, txn: Txn) -> TCBoxTryFuture<Number> {
         match self {
             Self::Dense(dense) => dense.product_all(txn),
             Self::Sparse(sparse) => sparse.product_all(txn),
@@ -377,7 +366,7 @@ impl TensorReduce for TensorView {
         }
     }
 
-    fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+    fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number> {
         match self {
             Self::Dense(dense) => dense.product_all(txn),
             Self::Sparse(sparse) => sparse.product_all(txn),

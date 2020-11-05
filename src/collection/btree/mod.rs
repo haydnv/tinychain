@@ -233,7 +233,7 @@ impl CollectionInstance for BTreeSlice {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         bounds: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -262,18 +262,19 @@ impl CollectionInstance for BTreeSlice {
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         let count = self
             .source
             .clone()
             .len(txn.id().clone(), self.bounds.clone())
             .await?;
+
         Ok(count == 0)
     }
 
     async fn put(
         &self,
-        _txn: Arc<Txn>,
+        _txn: Txn,
         _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
@@ -283,7 +284,7 @@ impl CollectionInstance for BTreeSlice {
         ))
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         let rows = self
             .source
             .clone()
@@ -327,7 +328,7 @@ pub struct BTreeFile {
 }
 
 impl BTreeFile {
-    pub async fn create(txn: Arc<Txn>, schema: RowSchema) -> TCResult<Self> {
+    pub async fn create(txn: &Txn, schema: RowSchema) -> TCResult<Self> {
         let file = txn.context().await?;
 
         if !file.is_empty(txn.id()).await? {
@@ -399,7 +400,7 @@ impl BTreeFile {
             .await
     }
 
-    pub fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+    pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
         Box::pin(async move {
             let root = self.get_root(txn.id()).await?;
             Ok(root.keys.is_empty())
@@ -812,7 +813,7 @@ impl CollectionInstance for BTreeFile {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         bounds: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -840,7 +841,7 @@ impl CollectionInstance for BTreeFile {
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         self.get_root(txn.id())
             .await
             .map(|root| root.keys.is_empty())
@@ -848,7 +849,7 @@ impl CollectionInstance for BTreeFile {
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         key: CollectionItem<Self::Item, Self::Slice>,
@@ -880,7 +881,7 @@ impl CollectionInstance for BTreeFile {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         let stream = self
             .clone()
             .slice(txn.id().clone(), Selector::all())

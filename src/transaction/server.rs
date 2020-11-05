@@ -40,12 +40,10 @@ impl TxnServer {
         }
     }
 
-    pub async fn new_txn(
-        &self,
-        gateway: Arc<Gateway>,
-        txn_id: Option<TxnId>,
-    ) -> TCResult<Arc<Txn>> {
+    pub async fn new_txn(&self, gateway: Arc<Gateway>, txn_id: Option<TxnId>) -> TCResult<Txn> {
         let txn_id = txn_id.unwrap_or_else(|| TxnId::new(Gateway::time()));
-        Txn::new(gateway, self.workspace.clone(), txn_id, self.sender.clone()).await
+        let txn = Txn::new(gateway, self.workspace.clone(), txn_id.clone(), self.sender.clone()).await?;
+        self.txn_pool.write().await.insert(txn_id, txn.clone());
+        Ok(txn)
     }
 }

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 
 use serde::ser::{Serialize, Serializer};
 
@@ -22,7 +21,7 @@ impl Object {
     pub fn get<'a>(
         &'a self,
         request: &'a Request,
-        txn: Arc<Txn>,
+        txn: &'a Txn,
         path: TCPath,
         key: Value,
     ) -> TCBoxTryFuture<'a, State> {
@@ -69,7 +68,7 @@ impl Object {
     pub fn put<'a>(
         &'a self,
         _request: &'a Request,
-        _txn: Arc<Txn>,
+        _txn: &'a Txn,
         _path: TCPath,
         _key: Value,
         _value: State,

@@ -113,7 +113,7 @@ pub trait TableInstance: Clone + Into<Table> + Sized + Send + 'static {
 
     fn index<'a>(
         &'a self,
-        txn: Arc<Txn>,
+        txn: Txn,
         columns: Option<Vec<ValueId>>,
     ) -> TCBoxTryFuture<'a, index::ReadOnly> {
         Box::pin(index::ReadOnly::copy_from(
@@ -151,7 +151,7 @@ pub trait TableInstance: Clone + Into<Table> + Sized + Send + 'static {
 
     fn validate_order(&self, order: &[ValueId]) -> TCResult<()>;
 
-    fn update<'a>(self, _txn: Arc<Txn>, _value: Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, _txn: Txn, _value: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(future::ready(Err(error::unsupported(ERR_UPDATE))))
     }
 
@@ -167,7 +167,7 @@ pub enum Table {
 }
 
 impl Table {
-    pub async fn create(txn: Arc<Txn>, schema: TableSchema) -> TCResult<TableIndex> {
+    pub async fn create(txn: &Txn, schema: TableSchema) -> TCResult<TableIndex> {
         index::TableIndex::create(txn, schema).await
     }
 }
@@ -190,7 +190,7 @@ impl CollectionInstance for Table {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -200,7 +200,7 @@ impl CollectionInstance for Table {
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
             Self::Base(base) => base.is_empty(txn).await,
             Self::View(view) => view.is_empty(txn).await,
@@ -209,7 +209,7 @@ impl CollectionInstance for Table {
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -220,7 +220,7 @@ impl CollectionInstance for Table {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Base(base) => base.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,
@@ -262,7 +262,7 @@ impl TableInstance for Table {
 
     fn index<'a>(
         &'a self,
-        txn: Arc<Txn>,
+        txn: Txn,
         columns: Option<Vec<ValueId>>,
     ) -> TCBoxTryFuture<'a, index::ReadOnly> {
         match self {
@@ -341,7 +341,7 @@ impl TableInstance for Table {
         }
     }
 
-    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
         match self {
             Self::Base(base) => base.update(txn, value),
             Self::View(view) => view.update(txn, value),
