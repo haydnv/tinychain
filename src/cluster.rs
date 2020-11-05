@@ -88,7 +88,7 @@ impl Cluster {
             let txn = if let Some(txn) = txn {
                 txn
             } else {
-                Txn::new(gateway.clone(), self.workspace.clone()).await?
+                gateway.transaction(request).await?
             };
 
             let state = self.state.read(txn.id()).await?;
@@ -119,7 +119,7 @@ impl Cluster {
         let txn = if let Some(txn) = txn {
             txn
         } else {
-            Txn::new(gateway.clone(), self.workspace.clone()).await?
+            gateway.transaction(request).await?
         };
 
         let result = if path == &self.path {

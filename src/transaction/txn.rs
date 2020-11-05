@@ -87,8 +87,7 @@ pub struct Txn {
 }
 
 impl Txn {
-    pub async fn new(gateway: Arc<Gateway>, workspace: Arc<Dir>) -> TCResult<Arc<Txn>> {
-        let id = TxnId::new(Gateway::time());
+    pub async fn new(gateway: Arc<Gateway>, workspace: Arc<Dir>, id: TxnId) -> TCResult<Arc<Txn>> {
         let context: PathSegment = id.clone().try_into()?;
         let dir = workspace.create_dir(&id, &context.clone().into()).await?;
 

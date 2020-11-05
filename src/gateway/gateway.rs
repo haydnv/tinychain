@@ -13,7 +13,7 @@ use crate::error;
 use crate::kernel;
 use crate::request::Request;
 use crate::scalar::{Link, LinkHost, Scalar, TryCastInto, Value, ValueId};
-use crate::transaction::Txn;
+use crate::transaction::{Txn, TxnServer};
 
 use super::http;
 use super::{Hosted, NetworkTime, Server};
@@ -28,6 +28,7 @@ pub struct Gateway {
     client: http::Client,
     request_limit: usize,
     request_ttl: Duration,
+    txn_server: TxnServer,
 }
 
 impl Gateway {
@@ -60,6 +61,7 @@ impl Gateway {
         }
 
         let client = http::Client::new(request_ttl, request_limit);
+        let txn_server = TxnServer::new(workspace.clone());
 
         Ok(Gateway {
             peers,
@@ -69,6 +71,7 @@ impl Gateway {
             client,
             request_limit,
             request_ttl,
+            txn_server,
         })
     }
 
@@ -76,8 +79,10 @@ impl Gateway {
         Err(error::not_implemented("Gateway::authenticate"))
     }
 
-    pub async fn transaction(self: &Arc<Self>) -> TCResult<Arc<Txn>> {
-        Txn::new(self.clone(), self.workspace.clone()).await
+    pub async fn transaction(self: &Arc<Self>, request: &Request) -> TCResult<Arc<Txn>> {
+        self.txn_server
+            .new_txn(self.clone(), request.txn_id().clone())
+            .await
     }
 
     pub async fn http_listen(
@@ -206,7 +211,7 @@ impl Gateway {
             let txn = if let Some(txn) = txn {
                 txn
             } else {
-                Txn::new(self.clone(), self.workspace.clone()).await?
+                self.transaction(request).await?
             };
 
             if subject.host().is_none() && !subject.path().is_empty() && subject.path()[0] == "sbin"
