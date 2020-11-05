@@ -5,9 +5,6 @@ use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::scalar::*;
 
-const ERR_BAD_COLUMN: &str = "Expected a Column in the form \
-[<name: ValueId>, <dtype: Link>, (<max_len: U64>)], found";
-
 pub type Row = HashMap<ValueId, Value>;
 
 #[derive(Clone, PartialEq)]
@@ -74,13 +71,7 @@ impl From<(ValueId, ValueType, usize)> for Column {
 
 impl TryCastFrom<Value> for Column {
     fn can_cast_from(value: &Value) -> bool {
-        if value.matches::<(ValueId, ValueType)>() {
-            true
-        } else if value.matches::<(ValueId, ValueType, u64)>() {
-            true
-        } else {
-            false
-        }
+        value.matches::<(ValueId, ValueType)>() || value.matches::<(ValueId, ValueType, u64)>()
     }
 
     fn opt_cast_from(value: Value) -> Option<Column> {
