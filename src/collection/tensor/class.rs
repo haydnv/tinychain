@@ -1,6 +1,5 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
@@ -66,7 +65,7 @@ impl NativeClass for TensorBaseType {
 impl CollectionClass for TensorBaseType {
     type Instance = TensorBase;
 
-    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<TensorBase> {
+    async fn get(&self, txn: &Txn, schema: Value) -> TCResult<TensorBase> {
         match self {
             Self::Dense => {
                 if schema.matches::<(NumberType, Shape)>() {
@@ -144,7 +143,7 @@ impl CollectionInstance for TensorBase {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -153,13 +152,13 @@ impl CollectionInstance for TensorBase {
             .await
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         TensorView::from(self.clone()).is_empty(txn).await
     }
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -169,7 +168,7 @@ impl CollectionInstance for TensorBase {
             .await
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         TensorView::from(self.clone()).to_stream(txn).await
     }
 }
@@ -217,6 +216,13 @@ impl Transact for TensorBase {
         match self {
             Self::Dense(dense) => dense.rollback(txn_id).await,
             Self::Sparse(sparse) => sparse.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dense(dense) => dense.finalize(txn_id).await,
+            Self::Sparse(sparse) => sparse.finalize(txn_id).await,
         }
     }
 }
@@ -301,7 +307,7 @@ impl CollectionInstance for TensorView {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -322,13 +328,13 @@ impl CollectionInstance for TensorView {
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
-        self.any(txn).map_ok(|any| !any).await
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        self.any(txn.clone()).map_ok(|any| !any).await
     }
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -348,7 +354,7 @@ impl CollectionInstance for TensorView {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
             // TODO: Forward errors, don't panic!
             Self::Dense(dense) => {
@@ -415,6 +421,13 @@ impl Transact for TensorView {
         match self {
             Self::Dense(dense) => dense.rollback(txn_id).await,
             Self::Sparse(sparse) => sparse.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dense(dense) => dense.finalize(txn_id).await,
+            Self::Sparse(sparse) => sparse.finalize(txn_id).await,
         }
     }
 }
@@ -513,7 +526,7 @@ impl CollectionInstance for Tensor {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -523,7 +536,7 @@ impl CollectionInstance for Tensor {
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
             Self::Base(base) => base.is_empty(txn).await,
             Self::View(view) => view.is_empty(txn).await,
@@ -532,7 +545,7 @@ impl CollectionInstance for Tensor {
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -543,7 +556,7 @@ impl CollectionInstance for Tensor {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Base(base) => base.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,
@@ -594,6 +607,13 @@ impl Transact for Tensor {
         match self {
             Self::Base(base) => base.rollback(txn_id).await,
             Self::View(view) => view.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Base(base) => base.finalize(txn_id).await,
+            Self::View(view) => view.finalize(txn_id).await,
         }
     }
 }

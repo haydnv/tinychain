@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 
 use futures::TryFutureExt;
 
@@ -20,8 +19,8 @@ pub struct ObjectInstance {
 
 impl ObjectInstance {
     pub async fn new(
-        request: Request,
-        txn: Arc<Txn>,
+        request: &Request,
+        txn: &Txn,
         class: InstanceClass,
         schema: Value,
     ) -> TCResult<ObjectInstance> {
@@ -36,8 +35,8 @@ impl ObjectInstance {
 
     pub fn get<'a>(
         &'a self,
-        request: Request,
-        txn: Arc<Txn>,
+        request: &'a Request,
+        txn: &'a Txn,
         path: TCPath,
         key: Value,
     ) -> TCBoxTryFuture<'a, State> {
@@ -84,8 +83,8 @@ impl ObjectInstance {
 
     pub async fn post(
         &self,
-        _request: Request,
-        _txn: Arc<Txn>,
+        _request: &Request,
+        _txn: &Txn,
         path: TCPath,
         _data: scalar::Object,
     ) -> TCResult<State> {

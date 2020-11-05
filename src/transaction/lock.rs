@@ -16,7 +16,7 @@ use super::{Transact, TxnId};
 
 #[async_trait]
 pub trait Mutate: Send {
-    type Pending: Send;
+    type Pending: Clone + Send;
 
     fn diverge(&self, txn_id: &TxnId) -> Self::Pending;
 
@@ -338,14 +338,22 @@ impl<T: Mutate> Transact for TxnLock<T> {
             if let Some(last_commit) = &lock.state.last_commit {
                 assert!(last_commit < txn_id);
             }
+
             println!("got inner lock for {}: {}", &self.name, txn_id);
             lock.state.last_commit = Some(txn_id.clone());
             println!("freed write lock reservation {} at {}", &self.name, txn_id);
 
             println!("updating value of {}", &self.name);
-            if let Some(new_value) = lock.value_at.remove(txn_id) {
+            let new_value = if let Some(cell) = lock.value_at.get(txn_id) {
+                let pending: &<T as Mutate>::Pending = unsafe { &*cell.get() };
+                Some(pending.clone())
+            } else {
+                None
+            };
+
+            if let Some(new_value) = new_value {
                 let value = unsafe { &mut *lock.value.get() };
-                value.converge(new_value.into_inner())
+                value.converge(new_value)
             } else {
                 Box::pin(future::ready(()))
             }
@@ -362,8 +370,12 @@ impl<T: Mutate> Transact for TxnLock<T> {
         lock.state.wakers.shrink_to_fit()
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        println!("TxnLock::rollback {}: {}", &self.name, txn_id);
+    async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        println!("TxnLock::finalize {}: {}", &self.name, txn_id);
         self.read(txn_id).await.unwrap(); // make sure there's no active write lock
         let lock = &mut self.inner.lock().unwrap();
         lock.value_at.remove(txn_id);

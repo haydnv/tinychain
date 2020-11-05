@@ -1,5 +1,4 @@
 use std::convert::TryInto;
-use std::sync::Arc;
 
 use futures::stream;
 use futures::TryFutureExt;
@@ -12,9 +11,7 @@ use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::Txn;
 
-const ERR_TXN_REQUIRED: &str = "Collection requires a transaction context";
-
-pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<State> {
+pub async fn get(txn: &Txn, path: &TCPath, id: Value) -> TCResult<State> {
     let suffix = path.from_path(&label("sbin").into())?;
     if suffix.is_empty() {
         return Err(error::unsupported("Cannot access /sbin directly"));
@@ -23,12 +20,8 @@ pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<St
     println!("kernel::get /sbin{}", suffix);
 
     match suffix[0].as_str() {
-        "chain" => {
-            let _txn = txn.ok_or_else(|| error::unsupported(ERR_TXN_REQUIRED))?;
-            Err(error::not_implemented("Instantiate Chain"))
-        }
+        "chain" => Err(error::not_implemented("Instantiate Chain")),
         "collection" => {
-            let txn = txn.ok_or_else(|| error::unsupported(ERR_TXN_REQUIRED))?;
             let ctype = CollectionType::from_path(path)?;
             ctype.get(txn, id).map_ok(State::Collection).await
         }
@@ -42,7 +35,7 @@ pub async fn get(path: &TCPath, id: Value, txn: Option<Arc<Txn>>) -> TCResult<St
     }
 }
 
-pub async fn post(request: Request, txn: Arc<Txn>, path: TCPath, data: Scalar) -> TCResult<State> {
+pub async fn post(request: &Request, txn: &Txn, path: TCPath, data: Scalar) -> TCResult<State> {
     println!("kernel::post {}", path);
 
     if &path == "/sbin/transact" {

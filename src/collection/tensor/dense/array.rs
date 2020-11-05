@@ -955,36 +955,6 @@ impl Array {
         }
     }
 
-    fn try_from_bytes(data: Bytes, dtype: NumberType) -> TCResult<Array> {
-        use Array::*;
-        use NumberType::*;
-        match dtype {
-            NumberType::Bool => Ok(Array::Bool(data.try_into()?)),
-            Complex(c) => match c {
-                ComplexType::C32 => Ok(C32(data.try_into()?)),
-                ComplexType::C64 => Ok(C64(data.try_into()?)),
-            },
-            Float(f) => match f {
-                FloatType::F32 => Ok(F32(data.try_into()?)),
-                FloatType::F64 => Ok(F64(data.try_into()?)),
-            },
-            Int(i) => match i {
-                IntType::I16 => Ok(I16(data.try_into()?)),
-                IntType::I32 => Ok(I32(data.try_into()?)),
-                IntType::I64 => Ok(I64(data.try_into()?)),
-            },
-            UInt(u) => match u {
-                UIntType::U8 => Ok(U8(data.try_into()?)),
-                UIntType::U16 => Ok(U16(data.try_into()?)),
-                UIntType::U32 => Ok(U32(data.try_into()?)),
-                UIntType::U64 => Ok(U64(data.try_into()?)),
-            },
-            NumberType::Number => Err(error::unsupported(
-                "Array does not support generic type Number",
-            )),
-        }
-    }
-
     pub fn try_from_values(values: Vec<Number>, dtype: NumberType) -> TCResult<Array> {
         use Array::*;
         let chunk = match dtype {

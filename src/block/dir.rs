@@ -279,4 +279,8 @@ impl Transact for Dir {
     async fn rollback(&self, txn_id: &TxnId) {
         self.contents.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.contents.finalize(txn_id).await
+    }
 }

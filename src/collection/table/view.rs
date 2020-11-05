@@ -105,20 +105,20 @@ impl CollectionInstance for TableView {
 
     async fn get(
         &self,
-        _txn: Arc<Txn>,
+        _txn: Txn,
         _path: TCPath,
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::not_implemented("TableBase::get"))
     }
 
-    async fn is_empty(&self, _txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
         Err(error::not_implemented("TableBase::is_empty"))
     }
 
     async fn put(
         &self,
-        _txn: Arc<Txn>,
+        _txn: Txn,
         _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
@@ -126,7 +126,7 @@ impl CollectionInstance for TableView {
         Err(error::not_implemented("TableBase::put"))
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Scalar>> {
         Err(error::not_implemented("TableBase::to_stream"))
     }
 }
@@ -234,7 +234,7 @@ impl TableInstance for TableView {
         }
     }
 
-    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
         match self {
             Self::Aggregate(aggregate) => aggregate.update(txn, value),
             Self::IndexSlice(index_slice) => index_slice.update(txn, value),
@@ -282,28 +282,35 @@ impl TableInstance for TableView {
 #[async_trait]
 impl Transact for TableView {
     async fn commit(&self, txn_id: &TxnId) {
-        let no_op = ();
-
         match self {
-            Self::Aggregate(_) => no_op,
+            Self::Aggregate(_) => (), // no-op
             Self::IndexSlice(index_slice) => index_slice.commit(txn_id).await,
             Self::Limit(limited) => limited.commit(txn_id).await,
             Self::Merge(merged) => merged.commit(txn_id).await,
-            Self::Selection(_) => no_op,
+            Self::Selection(_) => (), // no-op
             Self::TableSlice(table_slice) => table_slice.commit(txn_id).await,
         }
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        let no_op = ();
-
         match self {
-            Self::Aggregate(_) => no_op,
+            Self::Aggregate(_) => (), // no-op
             Self::IndexSlice(index_slice) => index_slice.rollback(txn_id).await,
             Self::Limit(limited) => limited.rollback(txn_id).await,
             Self::Merge(merged) => merged.rollback(txn_id).await,
-            Self::Selection(_) => no_op,
+            Self::Selection(_) => (), // no-op
             Self::TableSlice(table_slice) => table_slice.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Aggregate(_) => (), // no-op
+            Self::IndexSlice(index_slice) => index_slice.finalize(txn_id).await,
+            Self::Limit(limited) => limited.finalize(txn_id).await,
+            Self::Merge(merged) => merged.finalize(txn_id).await,
+            Self::Selection(_) => (), // no-op
+            Self::TableSlice(table_slice) => table_slice.finalize(txn_id).await,
         }
     }
 }
@@ -501,7 +508,7 @@ impl IndexSlice {
         self
     }
 
-    pub fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+    pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
         Box::pin(async move {
             let count = self.count(txn.id().clone()).await?;
             Ok(count == 0)
@@ -581,7 +588,7 @@ impl TableInstance for IndexSlice {
         })
     }
 
-    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             self.source
                 .update(
@@ -627,6 +634,10 @@ impl Transact for IndexSlice {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
 
@@ -707,7 +718,7 @@ impl TableInstance for Limited {
         Err(error::unsupported(ERR_LIMITED_ORDER))
     }
 
-    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let source = self.source.clone();
             let schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
@@ -737,6 +748,10 @@ impl Transact for Limited {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
 
@@ -775,6 +790,13 @@ impl Transact for MergeSource {
         match self {
             Self::Table(table) => table.rollback(txn_id).await,
             Self::Merge(merged) => merged.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Table(table) => table.finalize(txn_id).await,
+            Self::Merge(merged) => merged.finalize(txn_id).await,
         }
     }
 }
@@ -898,7 +920,7 @@ impl TableInstance for Merged {
         }
     }
 
-    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
             self.clone()
@@ -934,6 +956,10 @@ impl Transact for Merged {
 
     async fn rollback(&self, txn_id: &TxnId) {
         join!(self.left.rollback(txn_id), self.right.rollback(txn_id));
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        join!(self.left.finalize(txn_id), self.right.finalize(txn_id));
     }
 }
 
@@ -1180,7 +1206,7 @@ impl TableInstance for TableSlice {
         self.table.validate_order(order)
     }
 
-    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let txn_id = txn.id().clone();
             let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
@@ -1214,5 +1240,9 @@ impl Transact for TableSlice {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.table.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.table.finalize(txn_id).await
     }
 }

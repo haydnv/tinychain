@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
-use std::sync::Arc;
 
 use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::error::{self, TCResult};
@@ -101,8 +100,8 @@ impl InstanceClass {
 
     pub async fn get(
         self,
-        request: Request,
-        txn: Arc<Txn>,
+        request: &Request,
+        txn: &Txn,
         path: TCPath,
         key: Value,
     ) -> TCResult<ObjectInstance> {

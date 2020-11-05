@@ -76,7 +76,7 @@ impl<T: BlockData> File<T> {
         block_id: BlockId,
         data: T,
     ) -> TCResult<Block<'_, T>> {
-        if block_id.to_string() == TXN_CACHE {
+        if block_id == TXN_CACHE {
             return Err(error::bad_request("This name is reserved", block_id));
         }
 
@@ -182,7 +182,6 @@ impl<T: BlockData> Transact for File<T> {
         let txn_dir_id: PathSegment = txn_id.clone().into();
         if mutated.is_empty() {
             cache.commit(txn_id).await;
-            pending.delete_dir(&txn_dir_id).unwrap();
             return;
         }
 
@@ -196,10 +195,11 @@ impl<T: BlockData> Transact for File<T> {
                 async move {
                     let data = lock.read(txn_id).await.unwrap().deref().clone().into();
                     println!(
-                        "moving block {} from cache to Txn dir ({} bytes)",
+                        "copying block {} from cache to Txn dir ({} bytes)",
                         &block_id,
                         data.len()
                     );
+
                     dir_lock
                         .await
                         .create_or_get_block(block_id, data)
@@ -211,21 +211,21 @@ impl<T: BlockData> Transact for File<T> {
         join_all(copy_ops).await;
         cache.commit(txn_id).await;
         println!("emptied cache");
-        dir.move_all(txn_dir.write().await.deref_mut()).unwrap();
-        println!("moved all blocks to main Dir");
-        pending.delete_dir(&txn_dir_id).unwrap();
-
-        for block_id in dir.block_ids() {
-            println!("dir contents: {}", block_id);
-        }
+        dir.copy_all(txn_dir.write().await.deref_mut()).unwrap();
+        println!("copied all blocks to main Dir");
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
+        self.listing.rollback(txn_id).await;
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
         self.pending
             .write()
             .await
             .delete_dir(&txn_id.clone().into())
             .unwrap();
-        self.listing.rollback(txn_id).await;
+
+        self.listing.finalize(txn_id).await;
     }
 }

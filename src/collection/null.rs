@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream;
@@ -76,20 +75,20 @@ impl CollectionInstance for Null {
 
     async fn get(
         &self,
-        _txn: Arc<Txn>,
+        _txn: Txn,
         _path: TCPath,
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::unsupported("Null Collection has no contents to GET"))
     }
 
-    async fn is_empty(&self, _txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
         Ok(true)
     }
 
     async fn put(
         &self,
-        _txn: Arc<Txn>,
+        _txn: Txn,
         _path: TCPath,
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
@@ -97,7 +96,7 @@ impl CollectionInstance for Null {
         Err(error::unsupported("Null Collection cannot be modified"))
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Scalar>> {
         Ok(Box::pin(stream::empty()))
     }
 }
@@ -109,6 +108,10 @@ impl Transact for Null {
     }
 
     async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
         // no-op
     }
 }

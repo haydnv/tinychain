@@ -1,6 +1,4 @@
-use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::Stream;
@@ -9,7 +7,7 @@ use futures::TryFutureExt;
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{label, Link, OpDef, Scalar, TCPath, Value, ValueId};
+use crate::scalar::{label, Link, Scalar, TCPath, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
 
 mod block;
@@ -23,10 +21,9 @@ pub trait ChainClass: Class + Into<ChainType> + Send {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: &Txn,
         dtype: TCType,
         schema: Value,
-        ops: HashMap<ValueId, OpDef>,
     ) -> TCResult<<Self as ChainClass>::Instance>;
 }
 
@@ -78,16 +75,10 @@ impl fmt::Display for ChainType {
 impl ChainClass for ChainType {
     type Instance = Chain;
 
-    async fn get(
-        &self,
-        txn: Arc<Txn>,
-        dtype: TCType,
-        schema: Value,
-        ops: HashMap<ValueId, OpDef>,
-    ) -> TCResult<Chain> {
+    async fn get(&self, txn: &Txn, dtype: TCType, schema: Value) -> TCResult<Chain> {
         match self {
             Self::Null => {
-                null::NullChain::create(txn, dtype, schema, ops)
+                null::NullChain::create(txn, dtype, schema)
                     .map_ok(Box::new)
                     .map_ok(Chain::Null)
                     .await
@@ -100,18 +91,13 @@ impl ChainClass for ChainType {
 pub trait ChainInstance: Instance {
     type Class: ChainClass;
 
-    async fn get(
-        &self,
-        request: Request,
-        txn: Arc<Txn>,
-        path: &TCPath,
-        key: Value,
-    ) -> TCResult<State>;
+    async fn get(&self, request: &Request, txn: &Txn, path: &TCPath, key: Value)
+        -> TCResult<State>;
 
     async fn put(
         &self,
         request: &Request,
-        txn: Arc<Txn>,
+        txn: &Txn,
         path: TCPath,
         key: Value,
         state: State,
@@ -119,13 +105,13 @@ pub trait ChainInstance: Instance {
 
     async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
-        request: Request,
-        txn: Arc<Txn>,
+        request: &Request,
+        txn: &Txn,
         path: TCPath,
         data: S,
     ) -> TCResult<State>;
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>>;
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Value>>;
 }
 
 #[derive(Clone)]
@@ -149,8 +135,8 @@ impl ChainInstance for Chain {
 
     async fn get(
         &self,
-        request: Request,
-        txn: Arc<Txn>,
+        request: &Request,
+        txn: &Txn,
         path: &TCPath,
         key: Value,
     ) -> TCResult<State> {
@@ -162,7 +148,7 @@ impl ChainInstance for Chain {
     async fn put(
         &self,
         request: &Request,
-        txn: Arc<Txn>,
+        txn: &Txn,
         path: TCPath,
         key: Value,
         value: State,
@@ -174,8 +160,8 @@ impl ChainInstance for Chain {
 
     async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
-        request: Request,
-        txn: Arc<Txn>,
+        request: &Request,
+        txn: &Txn,
         path: TCPath,
         data: S,
     ) -> TCResult<State> {
@@ -184,7 +170,7 @@ impl ChainInstance for Chain {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Value>> {
         match self {
             Self::Null(nc) => nc.to_stream(txn).await,
         }
@@ -202,6 +188,12 @@ impl Transact for Chain {
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
             Self::Null(nc) => nc.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Null(nc) => nc.finalize(txn_id).await,
         }
     }
 }

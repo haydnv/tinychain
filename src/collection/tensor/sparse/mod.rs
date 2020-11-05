@@ -34,10 +34,9 @@ convert to a DenseTensor first.";
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
 trait SparseAccessor: TensorInstance + Transact + 'static {
-    fn copy<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseTable> {
+    fn copy<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseTable> {
         Box::pin(async move {
-            let accessor =
-                SparseTable::create(txn.clone(), self.shape().clone(), self.dtype()).await?;
+            let accessor = SparseTable::create(&txn, self.shape().clone(), self.dtype()).await?;
 
             let txn_id = txn.id().clone();
             self.filled(txn)
@@ -51,27 +50,24 @@ trait SparseAccessor: TensorInstance + Transact + 'static {
         })
     }
 
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream>;
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream>;
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>>;
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64>;
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64>;
 
-    fn filled_in<'a>(
-        self: Arc<Self>,
-        txn: Arc<Txn>,
-        bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, SparseStream>;
+    fn filled_in<'a>(self: Arc<Self>, txn: Txn, bounds: Bounds)
+        -> TCBoxTryFuture<'a, SparseStream>;
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
 
     fn read_value_owned<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         coord: Vec<u64>,
     ) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move { self.read_value(&txn, &coord).await })
@@ -109,7 +105,7 @@ impl TensorInstance for DenseAccessor {
 
 #[async_trait]
 impl SparseAccessor for DenseAccessor {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let source = self.source.clone();
             let values = source.value_stream(txn).await?;
@@ -127,7 +123,7 @@ impl SparseAccessor for DenseAccessor {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        _txn: Arc<Txn>,
+        _txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         Box::pin(async move {
@@ -145,7 +141,7 @@ impl SparseAccessor for DenseAccessor {
         })
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         Box::pin(async move {
             self.source
                 .value_stream(txn)
@@ -157,7 +153,7 @@ impl SparseAccessor for DenseAccessor {
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         match self.source.slice(bounds) {
@@ -169,7 +165,7 @@ impl SparseAccessor for DenseAccessor {
         }
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         self.source.read_value(txn, coord)
     }
 
@@ -192,6 +188,10 @@ impl Transact for DenseAccessor {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 struct SparseBroadcast {
@@ -202,7 +202,7 @@ struct SparseBroadcast {
 impl SparseBroadcast {
     async fn broadcast_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Unpin + 'static>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         coords: S,
         num_coords: u64,
     ) -> TCResult<SparseStream> {
@@ -243,7 +243,7 @@ impl TensorInstance for SparseBroadcast {
 
 #[async_trait]
 impl SparseAccessor for SparseBroadcast {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let rebase = self.rebase.clone();
             let filled = self
@@ -259,7 +259,7 @@ impl SparseAccessor for SparseBroadcast {
         })
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         Box::pin(async move {
             let filled = self.source.clone().filled(txn).await?;
             let rebase = self.rebase.clone();
@@ -273,7 +273,7 @@ impl SparseAccessor for SparseBroadcast {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         group_axes(self, txn, axes)
@@ -281,7 +281,7 @@ impl SparseAccessor for SparseBroadcast {
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
@@ -310,7 +310,7 @@ impl SparseAccessor for SparseBroadcast {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let coord = self.rebase.invert_coord(coord);
             self.source.read_value(txn, &coord).await
@@ -336,6 +336,10 @@ impl Transact for SparseBroadcast {
     }
 
     async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
         // no-op
     }
 }
@@ -364,7 +368,7 @@ impl TensorInstance for SparseCast {
 }
 
 impl SparseAccessor for SparseCast {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let dtype = self.dtype;
             let filled = self.source.clone().filled(txn).await?;
@@ -376,19 +380,19 @@ impl SparseAccessor for SparseCast {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         self.source.clone().filled_at(txn, axes)
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         self.source.clone().filled_count(txn)
     }
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
@@ -400,7 +404,7 @@ impl SparseAccessor for SparseCast {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
         let dtype = self.dtype;
         Box::pin(
             self.source
@@ -427,6 +431,10 @@ impl Transact for SparseCast {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
 
@@ -507,7 +515,7 @@ impl TensorInstance for SparseCombinator {
 
 #[async_trait]
 impl SparseAccessor for SparseCombinator {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let left = self.left.clone().filled(txn.clone());
             let right = self.right.clone().filled(txn);
@@ -518,13 +526,13 @@ impl SparseAccessor for SparseCombinator {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         group_axes(self, txn, axes)
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         Box::pin(async move {
             let count = self
                 .filled(txn)
@@ -538,7 +546,7 @@ impl SparseAccessor for SparseCombinator {
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
@@ -549,7 +557,7 @@ impl SparseAccessor for SparseCombinator {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let left = self.left.read_value(txn, coord);
             let right = self.right.read_value(txn, coord);
@@ -580,6 +588,10 @@ impl Transact for SparseCombinator {
     async fn rollback(&self, _txn_id: &TxnId) {
         // no-op
     }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
+        // no-op
+    }
 }
 
 struct SparseExpand {
@@ -607,7 +619,7 @@ impl TensorInstance for SparseExpand {
 
 #[async_trait]
 impl SparseAccessor for SparseExpand {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let filled = self
                 .source
@@ -623,19 +635,19 @@ impl SparseAccessor for SparseExpand {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         group_axes(self, txn, axes)
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         self.source.clone().filled_count(txn)
     }
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
@@ -652,7 +664,7 @@ impl SparseAccessor for SparseExpand {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let coord = self.rebase.invert_coord(coord);
             self.source.read_value(txn, &coord).await
@@ -679,9 +691,13 @@ impl Transact for SparseExpand {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
-type Reductor = fn(&SparseTensor, Arc<Txn>) -> TCBoxTryFuture<Number>;
+type Reductor = fn(&SparseTensor, Txn) -> TCBoxTryFuture<Number>;
 
 struct SparseReduce {
     source: SparseTensor,
@@ -718,7 +734,7 @@ impl TensorInstance for SparseReduce {
 }
 
 impl SparseAccessor for SparseReduce {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let reductor = self.reductor;
             let source = self.source.clone();
@@ -743,7 +759,7 @@ impl SparseAccessor for SparseReduce {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         Box::pin(async move {
@@ -793,7 +809,7 @@ impl SparseAccessor for SparseReduce {
         })
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         Box::pin(async move {
             self.filled(txn)
                 .await?
@@ -804,7 +820,7 @@ impl SparseAccessor for SparseReduce {
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
@@ -816,7 +832,7 @@ impl SparseAccessor for SparseReduce {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let source_bounds = self.rebase.invert_coord(coord);
             let reductor = self.reductor;
@@ -845,6 +861,10 @@ impl Transact for SparseReduce {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 struct SparseReshape {
@@ -872,7 +892,7 @@ impl TensorInstance for SparseReshape {
 
 #[async_trait]
 impl SparseAccessor for SparseReshape {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let rebase = self.rebase.clone();
             let filled = self
@@ -889,19 +909,19 @@ impl SparseAccessor for SparseReshape {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         group_axes(self, txn, axes)
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         self.source.clone().filled_count(txn)
     }
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
@@ -947,7 +967,7 @@ impl SparseAccessor for SparseReshape {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let coord = self.rebase.invert_coord(coord);
             self.source.read_value(txn, &coord).await
@@ -976,6 +996,10 @@ impl Transact for SparseReshape {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 struct SparseSlice {
@@ -1003,7 +1027,7 @@ impl TensorInstance for SparseSlice {
 
 #[async_trait]
 impl SparseAccessor for SparseSlice {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let rebase = self.rebase.clone();
             let filled = self
@@ -1020,13 +1044,13 @@ impl SparseAccessor for SparseSlice {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         group_axes(self, txn, axes)
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         Box::pin(async move {
             let count = self
                 .filled(txn)
@@ -1040,7 +1064,7 @@ impl SparseAccessor for SparseSlice {
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
@@ -1057,7 +1081,7 @@ impl SparseAccessor for SparseSlice {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let coord = self.rebase.invert_coord(coord);
             self.source.read_value(txn, &coord).await
@@ -1086,6 +1110,10 @@ impl Transact for SparseSlice {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 struct SparseTranspose {
@@ -1112,7 +1140,7 @@ impl TensorInstance for SparseTranspose {
 }
 
 impl SparseAccessor for SparseTranspose {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let ndim = self.ndim();
             let filled = self
@@ -1132,7 +1160,7 @@ impl SparseAccessor for SparseTranspose {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         // can't use group_axes here because it would lead to a circular dependency in self.filled
@@ -1150,13 +1178,13 @@ impl SparseAccessor for SparseTranspose {
         })
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         self.source.clone().filled_count(txn)
     }
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
@@ -1172,7 +1200,7 @@ impl SparseAccessor for SparseTranspose {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             let coord = self.rebase.invert_coord(coord);
             self.source.read_value(txn, &coord).await
@@ -1199,6 +1227,10 @@ impl Transact for SparseTranspose {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 #[derive(Clone)]
@@ -1209,7 +1241,7 @@ pub struct SparseTable {
 }
 
 impl SparseTable {
-    pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTable> {
+    pub async fn create(txn: &Txn, shape: Shape, dtype: NumberType) -> TCResult<SparseTable> {
         let table = Self::create_table(txn, shape.len(), dtype).await?;
 
         Ok(SparseTable {
@@ -1219,20 +1251,12 @@ impl SparseTable {
         })
     }
 
-    pub async fn create_table(
-        txn: Arc<Txn>,
-        ndim: usize,
-        dtype: NumberType,
-    ) -> TCResult<TableIndex> {
+    pub async fn create_table(txn: &Txn, ndim: usize, dtype: NumberType) -> TCResult<TableIndex> {
         let key: Vec<Column> = Self::key(ndim);
         let value: Vec<Column> = vec![(VALUE.into(), ValueType::Number(dtype)).into()];
         let indices = (0..ndim).map(|axis| (axis.into(), vec![axis.into()]));
 
-        Table::create(
-            txn.clone(),
-            (IndexSchema::from((key, value)), indices).into(),
-        )
-        .await
+        Table::create(txn, (IndexSchema::from((key, value)), indices).into()).await
     }
 
     pub fn try_from_table(table: TableIndex, shape: Shape) -> TCResult<SparseTable> {
@@ -1298,7 +1322,7 @@ impl TensorInstance for SparseTable {
 }
 
 impl SparseAccessor for SparseTable {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let rows = self.table.clone().stream(txn.id().clone()).await?;
             let filled = rows.map(unwrap_row);
@@ -1309,7 +1333,7 @@ impl SparseAccessor for SparseTable {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         Box::pin(async move {
@@ -1326,13 +1350,13 @@ impl SparseAccessor for SparseTable {
         })
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         Box::pin(async move { self.table.count(txn.id().clone()).await })
     }
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
@@ -1343,7 +1367,7 @@ impl SparseAccessor for SparseTable {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         Box::pin(async move {
             if !self.shape().contains_coord(coord) {
                 return Err(error::bad_request(
@@ -1403,6 +1427,10 @@ impl Transact for SparseTable {
     async fn rollback(&self, txn_id: &TxnId) {
         self.table.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.table.finalize(txn_id).await
+    }
 }
 
 struct SparseUnary {
@@ -1430,7 +1458,7 @@ impl TensorInstance for SparseUnary {
 }
 
 impl SparseAccessor for SparseUnary {
-    fn filled<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, SparseStream> {
+    fn filled<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
             let transform = self.transform;
             let filled = self.source.clone().filled(txn).await?;
@@ -1442,19 +1470,19 @@ impl SparseAccessor for SparseUnary {
 
     fn filled_at<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         self.source.clone().filled_at(txn, axes)
     }
 
-    fn filled_count<'a>(self: Arc<Self>, txn: Arc<Txn>) -> TCBoxTryFuture<'a, u64> {
+    fn filled_count<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, u64> {
         self.source.clone().filled_count(txn)
     }
 
     fn filled_in<'a>(
         self: Arc<Self>,
-        txn: Arc<Txn>,
+        txn: Txn,
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, SparseStream> {
         Box::pin(async move {
@@ -1466,7 +1494,7 @@ impl SparseAccessor for SparseUnary {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
         let dtype = self.dtype;
         Box::pin(
             self.source
@@ -1496,6 +1524,10 @@ impl Transact for SparseUnary {
     async fn rollback(&self, _txn_id: &TxnId) {
         // no-op
     }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
+        // no-op
+    }
 }
 
 #[derive(Clone)]
@@ -1504,7 +1536,7 @@ pub struct SparseTensor {
 }
 
 impl SparseTensor {
-    pub async fn copy(&self, txn: Arc<Txn>) -> TCResult<SparseTensor> {
+    pub async fn copy(&self, txn: Txn) -> TCResult<SparseTensor> {
         self.accessor
             .clone()
             .copy(txn)
@@ -1513,7 +1545,7 @@ impl SparseTensor {
             .map(|accessor| SparseTensor { accessor })
     }
 
-    pub async fn create(txn: Arc<Txn>, shape: Shape, dtype: NumberType) -> TCResult<SparseTensor> {
+    pub async fn create(txn: &Txn, shape: Shape, dtype: NumberType) -> TCResult<SparseTensor> {
         SparseTable::create(txn, shape, dtype)
             .await
             .map(Arc::new)
@@ -1526,7 +1558,7 @@ impl SparseTensor {
             .map(|accessor| SparseTensor { accessor })
     }
 
-    pub fn filled(&'_ self, txn: Arc<Txn>) -> TCBoxTryFuture<'_, SparseStream> {
+    pub fn filled(&'_ self, txn: Txn) -> TCBoxTryFuture<'_, SparseStream> {
         self.accessor.clone().filled(txn)
     }
 
@@ -1537,7 +1569,7 @@ impl SparseTensor {
 
     fn filled_at(
         &'_ self,
-        txn: Arc<Txn>,
+        txn: Txn,
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'_, TCTryStream<Vec<u64>>> {
         self.accessor.clone().filled_at(txn, axes)
@@ -1565,7 +1597,7 @@ impl SparseTensor {
     async fn condense(
         &self,
         other: &Self,
-        txn: Arc<Txn>,
+        txn: Txn,
         default: Number,
         condensor: fn(Number, Number) -> Number,
     ) -> TCResult<DenseTensor> {
@@ -1579,7 +1611,7 @@ impl SparseTensor {
         )
         .map(Arc::new)?;
 
-        let condensed = DenseTensor::constant(txn.clone(), this.shape().clone(), default).await?;
+        let condensed = DenseTensor::constant(&txn, this.shape().clone(), default).await?;
 
         let txn_id = txn.id().clone();
         accessor
@@ -1613,7 +1645,7 @@ impl TensorInstance for SparseTensor {
 }
 
 impl TensorBoolean for SparseTensor {
-    fn all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<bool> {
+    fn all(&self, txn: Txn) -> TCBoxTryFuture<bool> {
         Box::pin(async move {
             let mut coords = self
                 .accessor
@@ -1635,7 +1667,7 @@ impl TensorBoolean for SparseTensor {
         })
     }
 
-    fn any(&'_ self, txn: Arc<Txn>) -> TCBoxTryFuture<'_, bool> {
+    fn any(&'_ self, txn: Txn) -> TCBoxTryFuture<'_, bool> {
         Box::pin(async move {
             let mut filled = self.accessor.clone().filled(txn).await?;
             Ok(filled.next().await.is_some())
@@ -1662,7 +1694,7 @@ impl TensorBoolean for SparseTensor {
 
 #[async_trait]
 impl TensorCompare for SparseTensor {
-    async fn eq(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
+    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
         self.condense(other, txn, true.into(), <Number as NumberInstance>::eq)
             .await
     }
@@ -1671,7 +1703,7 @@ impl TensorCompare for SparseTensor {
         self.combine(other, <Number as NumberInstance>::gt, NumberType::Bool)
     }
 
-    async fn gte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
+    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
         self.condense(other, txn, true.into(), <Number as NumberInstance>::gte)
             .await
     }
@@ -1680,7 +1712,7 @@ impl TensorCompare for SparseTensor {
         self.combine(other, <Number as NumberInstance>::lt, NumberType::Bool)
     }
 
-    async fn lte(&self, other: &Self, txn: Arc<Txn>) -> TCResult<DenseTensor> {
+    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
         self.condense(other, txn, true.into(), <Number as NumberInstance>::lte)
             .await
     }
@@ -1691,7 +1723,7 @@ impl TensorCompare for SparseTensor {
 }
 
 impl TensorIO for SparseTensor {
-    fn mask<'a>(&'a self, txn: &'a Arc<Txn>, other: Self) -> TCBoxTryFuture<'a, ()> {
+    fn mask<'a>(&'a self, txn: &'a Txn, other: Self) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let zero = self.dtype().zero();
             let txn_id = txn.id().clone();
@@ -1705,11 +1737,11 @@ impl TensorIO for SparseTensor {
         })
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Arc<Txn>, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
         self.accessor.read_value(txn, coord)
     }
 
-    fn write<'a>(&'a self, txn: Arc<Txn>, bounds: Bounds, other: Self) -> TCBoxTryFuture<'a, ()> {
+    fn write<'a>(&'a self, txn: Txn, bounds: Bounds, other: Self) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let slice = self.slice(bounds)?;
             let other = other
@@ -1790,7 +1822,7 @@ impl TensorReduce for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    fn product_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+    fn product_all(&self, txn: Txn) -> TCBoxTryFuture<Number> {
         Box::pin(async move {
             if self.all(txn.clone()).await? {
                 DenseTensor::from_sparse(self.clone())
@@ -1807,7 +1839,7 @@ impl TensorReduce for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    fn sum_all(&self, txn: Arc<Txn>) -> TCBoxTryFuture<Number> {
+    fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number> {
         Box::pin(async move {
             if self.any(txn.clone()).await? {
                 DenseTensor::from_sparse(self.clone()).sum_all(txn).await
@@ -1902,6 +1934,10 @@ impl Transact for SparseTensor {
     async fn rollback(&self, txn_id: &TxnId) {
         self.accessor.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.accessor.finalize(txn_id).await
+    }
 }
 
 impl From<SparseTable> for SparseTensor {
@@ -1913,7 +1949,7 @@ impl From<SparseTable> for SparseTensor {
 
 fn group_axes<'a>(
     accessor: Arc<dyn SparseAccessor>,
-    txn: Arc<Txn>,
+    txn: Txn,
     axes: Vec<usize>,
 ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
     Box::pin(async move {

@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::Arc;
 
 use futures::TryFutureExt;
 
@@ -82,13 +81,13 @@ pub enum Object {
 }
 
 impl Object {
-    pub fn get(
-        &self,
-        request: Request,
-        txn: Arc<Txn>,
+    pub fn get<'a>(
+        &'a self,
+        request: &'a Request,
+        txn: &'a Txn,
         path: TCPath,
         key: Value,
-    ) -> TCBoxTryFuture<State> {
+    ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             match self {
                 Self::Class(ic) => {

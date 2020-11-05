@@ -48,16 +48,12 @@ impl Client {
     pub async fn get(
         &self,
         request: &Request,
+        txn: &Txn,
         link: &Link,
         key: &Value,
-        txn: Option<Arc<Txn>>,
     ) -> TCResult<Scalar> {
         if request.auth().is_some() {
             return Err(error::not_implemented("Authorization"));
-        }
-
-        if txn.is_some() {
-            return Err(error::not_implemented("Cross-service transactions"));
         }
 
         let host = link
@@ -75,7 +71,7 @@ impl Client {
             link.path().to_string()
         } else {
             let key: String = serde_json::to_string(key).map_err(error::TCError::from)?;
-            format!("{}?key={}", link.path(), key)
+            format!("{}?key={}&txn_id={}", link.path(), key, txn.id())
         };
 
         let uri = format!("http://{}{}", host, path_and_query)
@@ -109,17 +105,13 @@ impl Client {
 
     pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + 'static>(
         &self,
-        request: Request,
+        request: &Request,
+        txn: &Txn,
         link: Link,
         data: S,
-        txn: Option<Arc<Txn>>,
     ) -> TCResult<State> {
         if request.auth().is_some() {
             return Err(error::not_implemented("Authorization"));
-        }
-
-        if txn.is_some() {
-            return Err(error::not_implemented("Cross-service transactions"));
         }
 
         let host = link
@@ -130,7 +122,7 @@ impl Client {
         let uri = Uri::builder()
             .scheme(host.protocol().to_string().as_str())
             .authority(host.authority().as_str())
-            .path_and_query(link.path().to_string().as_str())
+            .path_and_query(format!("{}?txn_id={}", link.path(), txn.id()).as_str())
             .build()
             .map_err(error::internal)?;
 
@@ -218,8 +210,25 @@ impl Server {
             None
         };
 
-        let request = Request::new(self.request_ttl, token);
-        let response = timeout(request.ttl(), self.route(gateway, request, http_request)).await;
+        let mut params = http_request
+            .uri()
+            .query()
+            .map(|v| {
+                println!("param {}", v);
+                url::form_urlencoded::parse(v.as_bytes())
+                    .into_owned()
+                    .collect()
+            })
+            .unwrap_or_else(HashMap::new);
+
+        let txn_id = get_param(&mut params, "txn_id")?;
+
+        let request = Request::new(self.request_ttl, token, txn_id);
+        let response = timeout(
+            request.ttl(),
+            self.route(gateway, request, params, http_request),
+        )
+        .await;
 
         match response {
             Ok(result) => result,
@@ -234,24 +243,19 @@ impl Server {
         self: Arc<Self>,
         gateway: Arc<Gateway>,
         request: Request,
+        mut params: HashMap<String, String>,
         mut http_request: hyper::Request<Body>,
     ) -> TCResult<TCStream<TCResult<Bytes>>> {
         let uri = http_request.uri().clone();
         let path: TCPath = uri.path().parse()?;
-        let mut params: HashMap<String, String> = uri
-            .query()
-            .map(|v| {
-                println!("param {}", v);
-                url::form_urlencoded::parse(v.as_bytes())
-                    .into_owned()
-                    .collect()
-            })
-            .unwrap_or_else(HashMap::new);
+        let txn = gateway.transaction(&request).await?;
 
         match http_request.method() {
             &Method::GET => {
                 let id = get_param(&mut params, "key")?.unwrap_or_else(|| Value::None);
-                let state = gateway.get(request, &path.clone().into(), id, None).await?;
+                let state = gateway
+                    .get(&request, &txn, &path.clone().into(), id)
+                    .await?;
 
                 match state {
                     State::Scalar(scalar) => {
@@ -276,8 +280,7 @@ impl Server {
                     deserialize_body(http_request.body_mut(), self.request_limit).await?;
 
                 gateway
-                    .clone()
-                    .put(&request, &path.clone().into(), id, value.into(), None)
+                    .put(&request, &txn, &path.clone().into(), id, value.into())
                     .await?;
 
                 Ok(Box::pin(stream::empty()))
@@ -289,8 +292,7 @@ impl Server {
                     deserialize_body(http_request.body_mut(), self.request_limit).await?;
 
                 let response = gateway
-                    .clone()
-                    .post(request, path.into(), request_body, None)
+                    .post(&request, &txn, path.into(), request_body)
                     .await?;
 
                 match response {

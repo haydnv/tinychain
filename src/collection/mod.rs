@@ -1,6 +1,5 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 
@@ -19,14 +18,9 @@ pub mod tensor;
 pub type CollectionType = class::CollectionType;
 pub type CollectionBaseType = class::CollectionBaseType;
 pub type CollectionItem<I, S> = class::CollectionItem<I, S>;
-pub type CollectionViewType = class::CollectionViewType;
 
 pub type BTree = btree::BTree;
 pub type BTreeSlice = btree::BTreeSlice;
-pub type Null = null::Null;
-pub type Table = table::Table;
-pub type Tensor = tensor::Tensor;
-pub type TensorView = tensor::TensorView;
 
 #[derive(Clone)]
 pub enum CollectionBase {
@@ -56,7 +50,7 @@ impl class::CollectionInstance for CollectionBase {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -64,7 +58,7 @@ impl class::CollectionInstance for CollectionBase {
         view.get(txn, path, selector).await
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
             Self::BTree(btree) => btree.is_empty(txn).await,
             Self::Null(null) => null.is_empty(txn).await,
@@ -75,7 +69,7 @@ impl class::CollectionInstance for CollectionBase {
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -84,7 +78,7 @@ impl class::CollectionInstance for CollectionBase {
         view.put(txn, path, selector, value).await
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::BTree(btree) => btree.to_stream(txn).await,
             Self::Null(null) => null.to_stream(txn).await,
@@ -99,7 +93,7 @@ impl Transact for CollectionBase {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
-            Self::Null(_) => (), // no-op
+            Self::Null(null) => null.commit(txn_id).await,
             Self::Table(table) => table.commit(txn_id).await,
             Self::Tensor(tensor) => tensor.commit(txn_id).await,
         }
@@ -108,9 +102,18 @@ impl Transact for CollectionBase {
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.rollback(txn_id).await,
-            Self::Null(_) => (), // no-op
+            Self::Null(null) => null.rollback(txn_id).await,
             Self::Table(table) => table.rollback(txn_id).await,
             Self::Tensor(tensor) => tensor.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::BTree(btree) => btree.finalize(txn_id).await,
+            Self::Null(null) => null.finalize(txn_id).await,
+            Self::Table(table) => table.finalize(txn_id).await,
+            Self::Tensor(tensor) => tensor.finalize(txn_id).await,
         }
     }
 }
@@ -165,7 +168,7 @@ impl class::CollectionInstance for CollectionView {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -184,7 +187,7 @@ impl class::CollectionInstance for CollectionView {
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
             Self::BTree(btree) => btree.is_empty(txn).await,
             Self::Null(null) => null.is_empty(txn).await,
@@ -195,7 +198,7 @@ impl class::CollectionInstance for CollectionView {
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -248,7 +251,7 @@ impl class::CollectionInstance for CollectionView {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::BTree(btree) => btree.to_stream(txn).await,
             Self::Null(null) => null.to_stream(txn).await,
@@ -263,7 +266,7 @@ impl Transact for CollectionView {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
-            Self::Null(null) => null.commit(txn_id).await, // no-op
+            Self::Null(null) => null.commit(txn_id).await,
             Self::Table(table) => table.commit(txn_id).await,
             Self::Tensor(tensor) => tensor.commit(txn_id).await,
         }
@@ -272,9 +275,18 @@ impl Transact for CollectionView {
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.rollback(txn_id).await,
-            Self::Null(null) => null.rollback(txn_id).await, // no-op
+            Self::Null(null) => null.rollback(txn_id).await,
             Self::Table(table) => table.rollback(txn_id).await,
             Self::Tensor(tensor) => tensor.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::BTree(btree) => btree.finalize(txn_id).await,
+            Self::Null(null) => null.finalize(txn_id).await,
+            Self::Table(table) => table.finalize(txn_id).await,
+            Self::Tensor(tensor) => tensor.finalize(txn_id).await,
         }
     }
 }
@@ -336,7 +348,7 @@ impl class::CollectionInstance for Collection {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -346,7 +358,7 @@ impl class::CollectionInstance for Collection {
         }
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
             Self::Base(base) => base.is_empty(txn).await,
             Self::View(view) => view.is_empty(txn).await,
@@ -355,7 +367,7 @@ impl class::CollectionInstance for Collection {
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -366,7 +378,7 @@ impl class::CollectionInstance for Collection {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
             Self::Base(base) => base.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,
@@ -387,6 +399,13 @@ impl Transact for Collection {
         match self {
             Self::Base(base) => base.rollback(txn_id).await,
             Self::View(view) => view.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Base(base) => base.finalize(txn_id).await,
+            Self::View(view) => view.finalize(txn_id).await,
         }
     }
 }

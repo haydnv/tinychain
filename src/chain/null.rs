@@ -1,21 +1,16 @@
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use futures::stream::{self, Stream, StreamExt};
-use futures::TryFutureExt;
+use futures::stream::{self, Stream};
 
 use crate::class::*;
 use crate::collection::class::*;
-use crate::collection::{Collection, CollectionBase};
+use crate::collection::CollectionBase;
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{OpDef, Scalar, ScalarClass, TCPath, Value, ValueId};
+use crate::scalar::{Scalar, ScalarClass, TCPath, Value, ValueId};
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::{Chain, ChainInstance, ChainType};
+use super::{ChainInstance, ChainType};
 
 const ERR_COLLECTION_VIEW: &str = "Chain does not support CollectionView; \
 consider making a copy of the Collection first";
@@ -41,6 +36,13 @@ impl Transact for ChainState {
             Self::Scalar(s) => s.rollback(txn_id).await,
         }
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Collection(c) => c.finalize(txn_id).await,
+            Self::Scalar(s) => s.finalize(txn_id).await,
+        }
+    }
 }
 
 impl From<CollectionBase> for ChainState {
@@ -58,16 +60,10 @@ impl From<Scalar> for ChainState {
 #[derive(Clone)]
 pub struct NullChain {
     state: ChainState,
-    ops: TxnLock<Mutable<HashMap<ValueId, OpDef>>>,
 }
 
 impl NullChain {
-    pub async fn create(
-        txn: Arc<Txn>,
-        dtype: TCType,
-        schema: Value,
-        ops: HashMap<ValueId, OpDef>,
-    ) -> TCResult<NullChain> {
+    pub async fn create(txn: &Txn, dtype: TCType, schema: Value) -> TCResult<NullChain> {
         let state = match dtype {
             TCType::Collection(ct) => match ct {
                 CollectionType::Base(ct) => {
@@ -84,11 +80,7 @@ impl NullChain {
             other => return Err(error::not_implemented(format!("Chain({})", other))),
         };
 
-        println!("new chain with {} ops", ops.len());
-        Ok(NullChain {
-            state,
-            ops: TxnLock::new("NullChain ops", ops.into()),
-        })
+        Ok(NullChain { state })
     }
 }
 
@@ -106,98 +98,36 @@ impl ChainInstance for NullChain {
 
     async fn get(
         &self,
-        request: Request,
-        txn: Arc<Txn>,
-        path: &TCPath,
-        key: Value,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &TCPath,
+        _key: Value,
     ) -> TCResult<State> {
-        println!("NullChain::get {}: {}", path, &key);
-
-        if path.is_empty() {
-            Ok(Chain::Null(Box::new(self.clone())).into())
-        } else if path == "/object" {
-            match &self.state {
-                ChainState::Collection(collection) => {
-                    Ok(Collection::Base(collection.clone()).into())
-                }
-                ChainState::Scalar(scalar) => {
-                    scalar
-                        .read(txn.id())
-                        .map_ok(|s| State::Scalar(s.clone()))
-                        .await
-                }
-            }
-        } else if path.len() == 1 {
-            if let Some(op) = self.ops.read(txn.id()).await?.get(&path[0]) {
-                if let OpDef::Get((key_name, def)) = op {
-                    let mut params = Vec::with_capacity(def.len() + 1);
-                    params.push((key_name.clone(), Scalar::Value(key)));
-                    params.extend(def.to_vec());
-                    txn.execute(request, stream::iter(params)).await
-                } else {
-                    Err(error::method_not_allowed(path))
-                }
-            } else {
-                Err(error::not_found(path))
-            }
-        } else {
-            Err(error::not_found(path))
-        }
+        Err(error::not_implemented("NullChain::get"))
     }
 
     async fn put(
         &self,
         _request: &Request,
-        txn: Arc<Txn>,
-        path: TCPath,
-        key: Value,
-        new_value: State,
+        _txn: &Txn,
+        _path: TCPath,
+        _key: Value,
+        _new_value: State,
     ) -> TCResult<()> {
-        if &path == "/object" {
-            match &self.state {
-                ChainState::Collection(_) => Err(error::not_implemented("NullChain::put")),
-                ChainState::Scalar(scalar) => {
-                    if key == Value::None {
-                        let mut scalar = scalar.write(txn.id().clone()).await?;
-
-                        new_value.expect(
-                            scalar.class().into(),
-                            format!("Chain wraps {}", scalar.class()),
-                        )?;
-                        *scalar = new_value.try_into()?;
-                        Ok(())
-                    } else {
-                        Err(error::bad_request("Value has no such attribute", key))
-                    }
-                }
-            }
-        } else {
-            Err(error::not_implemented(path))
-        }
+        Err(error::not_implemented("NullChain::put"))
     }
 
     async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
         &self,
-        request: Request,
-        txn: Arc<Txn>,
-        path: TCPath,
-        data: S,
+        _request: &Request,
+        _txn: &Txn,
+        _path: TCPath,
+        _data: S,
     ) -> TCResult<State> {
-        if path.is_empty() {
-            Err(error::method_not_allowed("NullChain::post"))
-        } else if path.len() == 1 {
-            if let Some(OpDef::Post(def)) = self.ops.read(txn.id()).await?.get(&path[0]) {
-                let data = data.chain(stream::iter(def.to_vec()));
-                txn.execute(request, data).await
-            } else {
-                Err(error::not_found(path))
-            }
-        } else {
-            Err(error::not_found(path))
-        }
+        Err(error::not_implemented("NullChain::post"))
     }
 
-    async fn to_stream(&self, _txn: Arc<Txn>) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Value>> {
         Ok(Box::pin(stream::empty()))
     }
 }
@@ -206,11 +136,13 @@ impl ChainInstance for NullChain {
 impl Transact for NullChain {
     async fn commit(&self, txn_id: &TxnId) {
         self.state.commit(txn_id).await;
-        self.ops.commit(txn_id).await;
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.state.rollback(txn_id).await;
-        self.ops.rollback(txn_id).await;
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.state.finalize(txn_id).await;
     }
 }

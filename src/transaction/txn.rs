@@ -9,6 +9,7 @@ use futures::future::{self, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
 use crate::block::{BlockData, Dir, DirEntry, File};
 use crate::chain::ChainInstance;
@@ -78,71 +79,91 @@ impl fmt::Display for TxnId {
     }
 }
 
-pub struct Txn {
+struct Inner {
     id: TxnId,
     dir: Arc<Dir>,
     context: ValueId,
     gateway: Arc<Gateway>,
     mutated: RwLock<Vec<Box<dyn Transact>>>,
+    txn_server: mpsc::UnboundedSender<TxnId>,
+}
+
+#[derive(Clone)]
+pub struct Txn {
+    inner: Arc<Inner>,
 }
 
 impl Txn {
-    pub async fn new(gateway: Arc<Gateway>, workspace: Arc<Dir>) -> TCResult<Arc<Txn>> {
-        let id = TxnId::new(Gateway::time());
+    pub async fn new(
+        gateway: Arc<Gateway>,
+        workspace: Arc<Dir>,
+        id: TxnId,
+        txn_server: mpsc::UnboundedSender<TxnId>,
+    ) -> TCResult<Txn> {
         let context: PathSegment = id.clone().try_into()?;
         let dir = workspace.create_dir(&id, &context.clone().into()).await?;
 
         println!("new Txn: {}", id);
 
-        Ok(Arc::new(Txn {
+        let inner = Arc::new(Inner {
             id,
             dir,
             context,
             gateway,
             mutated: RwLock::new(vec![]),
-        }))
+            txn_server,
+        });
+
+        Ok(Txn { inner })
     }
 
     pub async fn context<T: BlockData>(&self) -> TCResult<Arc<File<T>>>
     where
         Arc<File<T>>: Into<DirEntry>,
     {
-        self.dir
-            .create_file(self.id.clone(), self.context.clone())
+        self.inner
+            .dir
+            .create_file(self.inner.id.clone(), self.inner.context.clone())
             .await
     }
 
-    pub async fn subcontext(&self, subcontext: ValueId) -> TCResult<Arc<Txn>> {
+    pub async fn subcontext(&self, subcontext: ValueId) -> TCResult<Txn> {
         let dir = self
+            .inner
             .dir
-            .get_or_create_dir(&self.id, &self.context.clone().into())
+            .get_or_create_dir(&self.inner.id, &self.inner.context.clone().into())
             .await?;
 
-        Ok(Arc::new(Txn {
-            id: self.id.clone(),
+        let subcontext = Arc::new(Inner {
+            id: self.inner.id.clone(),
             dir,
             context: subcontext,
-            gateway: self.gateway.clone(),
-            mutated: self.mutated.clone(),
-        }))
+            gateway: self.inner.gateway.clone(),
+            mutated: self.inner.mutated.clone(),
+            txn_server: self.inner.txn_server.clone(),
+        });
+
+        Ok(Txn { inner: subcontext })
     }
 
-    pub fn subcontext_tmp<'a>(&'a self) -> TCBoxTryFuture<'a, Arc<Txn>> {
+    pub fn subcontext_tmp(&self) -> TCBoxTryFuture<Txn> {
         Box::pin(async move {
-            let id = self.dir.unique_id(self.id()).await?;
+            let id = self.inner.dir.unique_id(self.id()).await?;
             self.subcontext(id).await
         })
     }
 
     pub fn id(&'_ self) -> &'_ TxnId {
-        &self.id
+        &self.inner.id
     }
 
     pub async fn execute<I: Into<State>, S: Stream<Item = (ValueId, I)> + Unpin>(
-        self: Arc<Self>,
-        request: Request,
+        &self,
+        request: &Request,
         mut parameters: S,
     ) -> TCResult<State> {
+        validate_id(request, &self.inner.id)?;
+
         println!("Txn::execute");
 
         let mut graph: HashMap<ValueId, State> = HashMap::new();
@@ -205,8 +226,7 @@ impl Txn {
                         if ready {
                             println!("queueing dep {}: {}", name, state);
                             pending.push(
-                                self.clone()
-                                    .resolve(request.clone(), graph.clone(), *op.clone())
+                                self.resolve(request, graph.clone(), *op.clone())
                                     .map(|r| (name, r)),
                             );
                         }
@@ -279,27 +299,59 @@ impl Txn {
     pub async fn commit(&self) {
         println!("commit!");
 
-        future::join_all(self.mutated.write().await.drain(..).map(|s| async move {
-            s.commit(&self.id).await;
-        }))
+        future::join_all(
+            self.inner
+                .mutated
+                .write()
+                .await
+                .drain(..)
+                .map(|s| async move {
+                    s.commit(&self.inner.id).await;
+                }),
+        )
         .await;
     }
 
     pub async fn rollback(&self) {
         println!("rollback!");
 
-        future::join_all(self.mutated.write().await.drain(..).map(|s| async move {
-            s.rollback(&self.id).await;
-        }))
+        future::join_all(
+            self.inner
+                .mutated
+                .write()
+                .await
+                .drain(..)
+                .map(|s| async move {
+                    s.rollback(&self.inner.id).await;
+                }),
+        )
+        .await;
+    }
+
+    pub async fn finalize(&self) {
+        println!("finalize!");
+
+        future::join_all(
+            self.inner
+                .mutated
+                .write()
+                .await
+                .drain(..)
+                .map(|s| async move {
+                    s.finalize(&self.inner.id).await;
+                }),
+        )
         .await;
     }
 
     pub async fn resolve(
-        self: Arc<Self>,
-        request: Request,
+        &self,
+        request: &Request,
         provided: HashMap<ValueId, State>,
         provider: Op,
     ) -> TCResult<State> {
+        validate_id(request, &self.inner.id)?;
+
         println!("Txn::resolve {}", provider);
 
         match provider {
@@ -327,10 +379,7 @@ impl Txn {
                     .and_then(Scalar::try_from)
                     .and_then(Value::try_from)?;
 
-                self.gateway
-                    .clone()
-                    .get(request, &link, key, Some(self.clone()))
-                    .await
+                self.inner.gateway.get(request, self, &link, key).await
             }
             Op::Method(Method::Get((tc_ref, path), key)) => {
                 let subject = provided
@@ -346,18 +395,12 @@ impl Txn {
                 match subject {
                     State::Chain(chain) => {
                         println!("Txn::resolve Chain {}: {}", path, key);
-                        chain.get(request, self.clone(), &path, key.clone()).await
+                        chain.get(request, self, &path, key.clone()).await
                     }
                     State::Cluster(cluster) => {
                         println!("Txn::resolve Cluster {}: {}", path, key);
                         cluster
-                            .get(
-                                request,
-                                self.gateway.clone(),
-                                Some(self.clone()),
-                                path,
-                                key.clone(),
-                            )
+                            .get(request, &self.inner.gateway, self, path, key.clone())
                             .await
                     }
                     State::Collection(collection) => {
@@ -390,9 +433,9 @@ impl Txn {
             }
             Op::Ref(OpRef::Put((link, key, value))) => {
                 let value = dereference_state(&provided, &value)?;
-                self.gateway
-                    .clone()
-                    .put(&request, &link, key, value, Some(self.clone()))
+                self.inner
+                    .gateway
+                    .put(&request, self, &link, key, value)
                     .await?;
 
                 Ok(().into())
@@ -428,9 +471,9 @@ impl Txn {
             Op::Ref(OpRef::Post((link, data))) => {
                 println!("Txn::resolve POST {} <- {}", link, data);
 
-                self.gateway
-                    .clone()
-                    .post(request, link, data.into(), Some(self))
+                self.inner
+                    .gateway
+                    .post(request, self, link, data.into())
                     .map_ok(State::from)
                     .await
             }
@@ -459,7 +502,7 @@ impl Txn {
         }
     }
 
-    pub async fn mutate(self: &Arc<Self>, state: State) {
+    pub async fn mutate(&self, state: State) {
         let state: Box<dyn Transact> = match state {
             State::Chain(chain) => Box::new(chain),
             State::Cluster(cluster) => Box::new(cluster),
@@ -468,7 +511,16 @@ impl Txn {
             State::Scalar(_) => panic!("Scalar values do not support transactional mutations!"),
         };
 
-        self.mutated.write().await.push(state)
+        self.inner.mutated.write().await.push(state)
+    }
+}
+
+impl Drop for Txn {
+    fn drop(&mut self) {
+        // There will still be one reference in TxnServer when all others are dropped, plus this one
+        if Arc::strong_count(&self.inner) == 2 {
+            self.inner.txn_server.send(self.inner.id.clone()).unwrap();
+        }
     }
 }
 
@@ -651,5 +703,15 @@ fn value_requires(value: &Value) -> TCResult<HashSet<ValueId>> {
             Ok(required)
         }
         _ => Ok(HashSet::new()),
+    }
+}
+
+fn validate_id(request: &Request, expected: &TxnId) -> TCResult<()> {
+    match request.txn_id() {
+        Some(txn_id) if txn_id != expected => Err(error::unsupported(format!(
+            "Cannot access Transaction {} from {}",
+            expected, txn_id
+        ))),
+        _ => Ok(()),
     }
 }

@@ -56,7 +56,7 @@ impl NativeClass for TableBaseType {
 impl CollectionClass for TableBaseType {
     type Instance = TableBase;
 
-    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<TableBase> {
+    async fn get(&self, txn: &Txn, schema: Value) -> TCResult<TableBase> {
         let schema =
             schema.try_cast_into(|v| error::bad_request("Expected TableSchema but found", v))?;
 
@@ -121,14 +121,14 @@ impl CollectionInstance for TableBase {
 
     async fn get(
         &self,
-        _txn: Arc<Txn>,
+        _txn: Txn,
         _path: TCPath,
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::not_implemented("TableBase::get"))
     }
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool> {
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
             Self::Index(index) => index.is_empty(txn).await,
             Self::ROIndex(index) => index.is_empty(txn).await,
@@ -138,7 +138,7 @@ impl CollectionInstance for TableBase {
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -160,7 +160,7 @@ impl CollectionInstance for TableBase {
         }
     }
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         let txn_id = txn.id().clone();
 
         let stream = match self {
@@ -265,7 +265,7 @@ impl TableInstance for TableBase {
         }
     }
 
-    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
         match self {
             Self::Index(index) => index.update(txn, value),
             Self::ROIndex(index) => index.update(txn, value),
@@ -297,6 +297,14 @@ impl Transact for TableBase {
             Self::Index(index) => index.rollback(txn_id).await,
             Self::ROIndex(_) => (), // no-op
             Self::Table(table) => table.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Index(index) => index.finalize(txn_id).await,
+            Self::ROIndex(_) => (), // no-op
+            Self::Table(table) => table.finalize(txn_id).await,
         }
     }
 }
@@ -332,7 +340,7 @@ pub struct Index {
 }
 
 impl Index {
-    pub async fn create(txn: Arc<Txn>, schema: IndexSchema) -> TCResult<Index> {
+    pub async fn create(txn: &Txn, schema: IndexSchema) -> TCResult<Index> {
         let btree = BTreeFile::create(txn, schema.clone().into()).await?;
         Ok(Index { btree, schema })
     }
@@ -350,7 +358,7 @@ impl Index {
         })
     }
 
-    pub fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+    pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
         self.btree.is_empty(txn)
     }
 
@@ -493,7 +501,7 @@ impl TableInstance for Index {
         }
     }
 
-    fn update<'a>(self, txn: Arc<Txn>, row: Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, txn: Txn, row: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let key: btree::Key = self.schema().row_into_values(row, false)?;
             self.btree
@@ -518,6 +526,10 @@ impl Transact for Index {
     async fn rollback(&self, txn_id: &TxnId) {
         self.btree.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.btree.finalize(txn_id).await
+    }
 }
 
 #[derive(Clone)]
@@ -528,7 +540,7 @@ pub struct ReadOnly {
 impl ReadOnly {
     pub fn copy_from<'a>(
         source: Table,
-        txn: Arc<Txn>,
+        txn: Txn,
         key_columns: Option<Vec<ValueId>>,
     ) -> TCBoxTryFuture<'a, ReadOnly> {
         Box::pin(async move {
@@ -538,14 +550,16 @@ impl ReadOnly {
                 let column_names: HashSet<&ValueId> = columns.iter().collect();
                 let schema = source_schema.subset(column_names)?;
                 let btree =
-                    BTreeFile::create(txn.subcontext_tmp().await?, schema.clone().into()).await?;
+                    BTreeFile::create(&txn.subcontext_tmp().await?, schema.clone().into()).await?;
+
                 let rows = source.select(columns)?.stream(txn.id().clone()).await?;
                 btree.insert_from(txn.id(), rows).await?;
                 (schema, btree)
             } else {
                 let btree =
-                    BTreeFile::create(txn.subcontext_tmp().await?, source_schema.clone().into())
+                    BTreeFile::create(&txn.subcontext_tmp().await?, source_schema.clone().into())
                         .await?;
+
                 let rows = source.stream(txn.id().clone()).await?;
                 btree.insert_from(txn.id(), rows).await?;
                 (source_schema, btree)
@@ -565,7 +579,7 @@ impl ReadOnly {
         }
     }
 
-    pub fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+    pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
         self.index.is_empty(txn)
     }
 }
@@ -633,16 +647,16 @@ pub struct TableIndex {
 }
 
 impl TableIndex {
-    pub async fn create(txn: Arc<Txn>, schema: TableSchema) -> TCResult<TableIndex> {
+    pub async fn create(txn: &Txn, schema: TableSchema) -> TCResult<TableIndex> {
         let primary = Index::create(
-            txn.subcontext(PRIMARY_INDEX.parse()?).await?,
+            &txn.subcontext(PRIMARY_INDEX.parse()?).await?,
             schema.primary().clone(),
         )
         .await?;
 
         let auxiliary: BTreeMap<ValueId, Index> =
             try_join_all(schema.indices().iter().map(|(name, column_names)| {
-                Self::create_index(&txn, schema.primary(), name.clone(), column_names.to_vec())
+                Self::create_index(txn, schema.primary(), name.clone(), column_names.to_vec())
                     .map_ok(move |index| (name.clone(), index))
             }))
             .await?
@@ -653,7 +667,7 @@ impl TableIndex {
     }
 
     async fn create_index(
-        txn: &Arc<Txn>,
+        txn: &Txn,
         primary: &IndexSchema,
         name: ValueId,
         key: Vec<ValueId>,
@@ -696,12 +710,12 @@ impl TableIndex {
         let schema: IndexSchema = (key, values).into();
 
         let btree =
-            btree::BTreeFile::create(txn.subcontext_tmp().await?, schema.clone().into()).await?;
+            btree::BTreeFile::create(&txn.subcontext_tmp().await?, schema.clone().into()).await?;
 
         Ok(Index { btree, schema })
     }
 
-    pub fn is_empty<'a>(&'a self, txn: Arc<Txn>) -> TCBoxTryFuture<'a, bool> {
+    pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
         self.primary.is_empty(txn)
     }
 
@@ -1005,7 +1019,7 @@ impl TableInstance for TableIndex {
         Ok(())
     }
 
-    fn update<'a>(self, txn: Arc<Txn>, value: Row) -> TCBoxTryFuture<'a, ()> {
+    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let schema = self.primary.schema();
             schema.validate_row_partial(&value)?;
@@ -1039,6 +1053,7 @@ impl Transact for TableIndex {
         for index in self.auxiliary.values() {
             commits.push(index.commit(txn_id));
         }
+
         join_all(commits).await;
     }
 
@@ -1048,6 +1063,17 @@ impl Transact for TableIndex {
         for index in self.auxiliary.values() {
             rollbacks.push(index.commit(txn_id));
         }
+
         join_all(rollbacks).await;
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        let mut cleanups = Vec::with_capacity(self.auxiliary.len() + 1);
+        cleanups.push(self.primary.finalize(txn_id));
+        for index in self.auxiliary.values() {
+            cleanups.push(index.commit(txn_id));
+        }
+
+        join_all(cleanups).await;
     }
 }

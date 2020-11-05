@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::TryFutureExt;
@@ -33,11 +32,7 @@ impl<I: Into<Scalar>, S: CollectionInstance> From<CollectionItem<I, S>> for Stat
 pub trait CollectionClass: Class + Into<CollectionType> + Send {
     type Instance: CollectionInstance;
 
-    async fn get(
-        &self,
-        txn: Arc<Txn>,
-        schema: Value,
-    ) -> TCResult<<Self as CollectionClass>::Instance>;
+    async fn get(&self, txn: &Txn, schema: Value) -> TCResult<<Self as CollectionClass>::Instance>;
 }
 
 #[async_trait]
@@ -47,22 +42,22 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
 
     async fn get(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>>;
 
-    async fn is_empty(&self, txn: Arc<Txn>) -> TCResult<bool>;
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool>;
 
     async fn put(
         &self,
-        txn: Arc<Txn>,
+        txn: Txn,
         path: TCPath,
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()>;
 
-    async fn to_stream(&self, txn: Arc<Txn>) -> TCResult<TCStream<Scalar>>;
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>>;
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -89,11 +84,7 @@ impl NativeClass for CollectionType {
 impl CollectionClass for CollectionType {
     type Instance = Collection;
 
-    async fn get(
-        &self,
-        txn: Arc<Txn>,
-        schema: Value,
-    ) -> TCResult<<Self as CollectionClass>::Instance> {
+    async fn get(&self, txn: &Txn, schema: Value) -> TCResult<<Self as CollectionClass>::Instance> {
         match self {
             Self::Base(cbt) => cbt.get(txn, schema).map_ok(Collection::Base).await,
             Self::View(_) => Err(error::unsupported(
@@ -173,7 +164,7 @@ impl NativeClass for CollectionBaseType {
 impl CollectionClass for CollectionBaseType {
     type Instance = CollectionBase;
 
-    async fn get(&self, txn: Arc<Txn>, schema: Value) -> TCResult<CollectionBase> {
+    async fn get(&self, txn: &Txn, schema: Value) -> TCResult<CollectionBase> {
         match self {
             Self::BTree => {
                 let schema = schema

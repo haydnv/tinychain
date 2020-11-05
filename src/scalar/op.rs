@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::Arc;
 
 use futures::stream;
 
@@ -301,8 +300,8 @@ pub enum OpDef {
 impl OpDef {
     pub fn get<'a>(
         &'a self,
-        request: Request,
-        txn: Arc<Txn>,
+        request: &'a Request,
+        txn: &'a Txn,
         key: Value,
         context: Option<&'a ObjectInstance>,
     ) -> TCBoxTryFuture<'a, State> {
@@ -327,8 +326,8 @@ impl OpDef {
 
     pub fn post<'a>(
         &'a self,
-        request: Request,
-        txn: Arc<Txn>,
+        request: &'a Request,
+        txn: &'a Txn,
         data: Object,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {

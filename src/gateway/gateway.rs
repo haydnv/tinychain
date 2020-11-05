@@ -3,8 +3,8 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::future::{FutureExt, TryFutureExt};
-use futures::stream::{self, FuturesUnordered, StreamExt};
+use futures::future::TryFutureExt;
+use futures::stream;
 
 use crate::auth::Token;
 use crate::block::Dir;
@@ -13,7 +13,7 @@ use crate::error;
 use crate::kernel;
 use crate::request::Request;
 use crate::scalar::{Link, LinkHost, Scalar, TryCastInto, Value, ValueId};
-use crate::transaction::Txn;
+use crate::transaction::{Txn, TxnServer};
 
 use super::http;
 use super::{Hosted, NetworkTime, Server};
@@ -24,10 +24,10 @@ pub struct Gateway {
     peers: Vec<LinkHost>,
     adapters: Vec<Link>,
     hosted: Hosted,
-    workspace: Arc<Dir>,
     client: http::Client,
     request_limit: usize,
     request_ttl: Duration,
+    txn_server: TxnServer,
 }
 
 impl Gateway {
@@ -60,15 +60,16 @@ impl Gateway {
         }
 
         let client = http::Client::new(request_ttl, request_limit);
+        let txn_server = TxnServer::new(workspace.clone());
 
         Ok(Gateway {
             peers,
             adapters,
             hosted,
-            workspace,
             client,
             request_limit,
             request_ttl,
+            txn_server,
         })
     }
 
@@ -76,8 +77,10 @@ impl Gateway {
         Err(error::not_implemented("Gateway::authenticate"))
     }
 
-    pub async fn transaction(self: &Arc<Self>) -> TCResult<Arc<Txn>> {
-        Txn::new(self.clone(), self.workspace.clone()).await
+    pub async fn transaction(self: &Arc<Self>, request: &Request) -> TCResult<Txn> {
+        self.txn_server
+            .new_txn(self.clone(), request.txn_id().clone())
+            .await
     }
 
     pub async fn http_listen(
@@ -94,38 +97,12 @@ impl Gateway {
         server.listen(self).await
     }
 
-    pub async fn discover(
-        self: Arc<Self>,
-        request: Request,
-        subject: &Link,
-        txn: Option<Arc<Txn>>,
-    ) -> TCResult<Vec<LinkHost>> {
-        let mut requests = FuturesUnordered::new();
-        for peer in &self.peers {
-            requests.push(
-                self.client
-                    .get(&request, subject, &Value::None, txn.clone())
-                    .map(move |response| (peer.clone(), response)),
-            );
-        }
-
-        let mut found = Vec::with_capacity(self.peers.len());
-        while let Some((peer, response)) = requests.next().await {
-            match (peer, response) {
-                (peer, Ok(_)) => found.push(peer),
-                (peer, Err(cause)) => println!("GET {}{}: {}", peer, subject, cause),
-            }
-        }
-
-        Err(error::not_implemented("Gateway::discover"))
-    }
-
     pub async fn get(
-        self: Arc<Self>,
-        request: Request,
+        &self,
+        request: &Request,
+        txn: &Txn,
         subject: &Link,
         key: Value,
-        txn: Option<Arc<Txn>>,
     ) -> TCResult<State> {
         println!("Gateway::get {}", subject);
 
@@ -134,7 +111,7 @@ impl Gateway {
         } else if subject.path().len() > 1 {
             let path = subject.path();
             if path[0] == "sbin" {
-                kernel::get(path, key, txn).await
+                kernel::get(txn, path, key).await
             } else if path[0] == "ext" {
                 for adapter in &self.adapters {
                     if path.starts_with(adapter.path()) {
@@ -142,7 +119,7 @@ impl Gateway {
                         let dest: Link = (host.clone(), path.clone()).into();
                         return self
                             .client
-                            .get(&request, &dest, &key, txn)
+                            .get(&request, txn, &dest, &key)
                             .map_ok(State::Scalar)
                             .await;
                     }
@@ -151,7 +128,7 @@ impl Gateway {
                 Err(error::not_found(subject))
             } else if let Some((suffix, cluster)) = self.hosted.get(path) {
                 println!("Gateway::get {}{}: {}", cluster, suffix, key);
-                cluster.get(request, self.clone(), txn, suffix, key).await
+                cluster.get(request, self, txn, suffix, key).await
             } else {
                 Err(error::not_found(path))
             }
@@ -161,12 +138,12 @@ impl Gateway {
     }
 
     pub async fn put(
-        self: Arc<Self>,
+        &self,
         request: &Request,
+        txn: &Txn,
         subject: &Link,
         selector: Value,
         state: State,
-        txn: Option<Arc<Txn>>,
     ) -> TCResult<()> {
         println!("Gateway::put {}: {} <- {}", subject, selector, state);
 
@@ -184,9 +161,7 @@ impl Gateway {
                     cluster, suffix, selector, state
                 );
 
-                cluster
-                    .put(request, self.clone(), txn, path, selector, state)
-                    .await
+                cluster.put(request, self, txn, path, selector, state).await
             } else {
                 Err(error::not_implemented("Peer cluster discovery"))
             }
@@ -194,20 +169,14 @@ impl Gateway {
     }
 
     pub fn post<'a>(
-        self: Arc<Self>,
-        request: Request,
+        &'a self,
+        request: &'a Request,
+        txn: &'a Txn,
         subject: Link,
         data: Scalar,
-        txn: Option<Arc<Txn>>,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             println!("Gateway::post {}", subject);
-
-            let txn = if let Some(txn) = txn {
-                txn
-            } else {
-                Txn::new(self.clone(), self.workspace.clone()).await?
-            };
 
             if subject.host().is_none() && !subject.path().is_empty() && subject.path()[0] == "sbin"
             {
@@ -226,7 +195,7 @@ impl Gateway {
                     Err(error::not_implemented("Peer discovery"))
                 }
             } else {
-                self.client.post(request, subject, data, None).await
+                self.client.post(request, txn, subject, data).await
             }
         })
     }
