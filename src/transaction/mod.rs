@@ -13,4 +13,6 @@ pub trait Transact: Send + Sync {
     async fn commit(&self, txn_id: &TxnId);
 
     async fn rollback(&self, txn_id: &TxnId);
+
+    async fn finalize(&self, _txn_id: &TxnId) {}
 }

@@ -9,6 +9,7 @@ use futures::future::{self, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
 use crate::block::{BlockData, Dir, DirEntry, File};
 use crate::chain::ChainInstance;
@@ -84,10 +85,16 @@ pub struct Txn {
     context: ValueId,
     gateway: Arc<Gateway>,
     mutated: RwLock<Vec<Box<dyn Transact>>>,
+    txn_server: mpsc::UnboundedSender<TxnId>,
 }
 
 impl Txn {
-    pub async fn new(gateway: Arc<Gateway>, workspace: Arc<Dir>, id: TxnId) -> TCResult<Arc<Txn>> {
+    pub async fn new(
+        gateway: Arc<Gateway>,
+        workspace: Arc<Dir>,
+        id: TxnId,
+        txn_server: mpsc::UnboundedSender<TxnId>,
+    ) -> TCResult<Arc<Txn>> {
         let context: PathSegment = id.clone().try_into()?;
         let dir = workspace.create_dir(&id, &context.clone().into()).await?;
 
@@ -99,6 +106,7 @@ impl Txn {
             context,
             gateway,
             mutated: RwLock::new(vec![]),
+            txn_server,
         }))
     }
 
@@ -123,6 +131,7 @@ impl Txn {
             context: subcontext,
             gateway: self.gateway.clone(),
             mutated: self.mutated.clone(),
+            txn_server: self.txn_server.clone(),
         }))
     }
 
@@ -472,6 +481,19 @@ impl Txn {
         };
 
         self.mutated.write().await.push(state)
+    }
+
+    pub async fn finalize(&self) {
+        future::join_all(self.mutated.write().await.drain(..).map(|s| async move {
+            s.finalize(&self.id).await;
+        }))
+        .await;
+    }
+}
+
+impl Drop for Txn {
+    fn drop(&mut self) {
+        self.txn_server.send(self.id.clone()).unwrap();
     }
 }
 
