@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 
 use crate::block::Dir;
-use crate::chain::Chain;
 use crate::class::{State, TCResult};
 use crate::error;
 use crate::gateway::Gateway;
@@ -30,7 +29,6 @@ impl Default for ClusterReplica {
 #[derive(Clone)]
 struct ClusterState {
     replica: ClusterReplica,
-    chains: HashMap<PathSegment, Chain>,
 }
 
 #[async_trait]
@@ -59,10 +57,7 @@ impl Cluster {
         let replica = ClusterReplica::default();
         let state = TxnLock::new(
             format!("State of Cluster at {}", &path),
-            ClusterState {
-                replica,
-                chains: HashMap::new(),
-            },
+            ClusterState { replica },
         );
 
         Ok(Cluster {
@@ -117,6 +112,11 @@ impl Transact for Cluster {
     async fn rollback(&self, txn_id: &TxnId) {
         println!("Cluster::rollback!");
         self.state.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        println!("Cluster::finalize!");
+        self.state.finalize(txn_id).await
     }
 }
 

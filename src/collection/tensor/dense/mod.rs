@@ -229,6 +229,10 @@ impl Transact for BlockListCombine {
     async fn rollback(&self, _txn_id: &TxnId) {
         // no-op
     }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
+        // no-op
+    }
 }
 
 #[derive(Clone)]
@@ -580,6 +584,10 @@ impl Transact for BlockListFile {
     async fn rollback(&self, txn_id: &TxnId) {
         self.file.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.file.finalize(txn_id).await
+    }
 }
 
 struct BlockListBroadcast {
@@ -678,6 +686,10 @@ impl Transact for BlockListBroadcast {
     async fn rollback(&self, _txn_id: &TxnId) {
         // no-op
     }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
+        // no-op
+    }
 }
 
 struct BlockListCast {
@@ -770,6 +782,10 @@ impl Transact for BlockListCast {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 struct BlockListExpand {
@@ -849,6 +865,10 @@ impl Transact for BlockListExpand {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
 
@@ -957,6 +977,10 @@ impl Transact for BlockListReduce {
     }
 
     async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
         // no-op
     }
 }
@@ -1081,6 +1105,10 @@ impl Transact for BlockListReshape {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 struct BlockListSlice {
@@ -1159,6 +1187,10 @@ impl Transact for BlockListSlice {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
 
@@ -1287,6 +1319,10 @@ impl Transact for BlockListSparse {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 struct BlockListTranspose {
@@ -1371,6 +1407,10 @@ impl Transact for BlockListTranspose {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
 
@@ -1466,6 +1506,10 @@ impl Transact for BlockListUnary {
     }
 
     async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
         // no-op
     }
 }
@@ -1853,6 +1897,10 @@ impl Transact for DenseTensor {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.blocks.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.blocks.finalize(txn_id).await
     }
 }
 

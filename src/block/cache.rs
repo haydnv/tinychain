@@ -47,4 +47,8 @@ impl<T: BlockData> Transact for Cache<T> {
     async fn rollback(&self, txn_id: &TxnId) {
         join_all(self.blocks.values().map(|lock| lock.rollback(txn_id))).await;
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        join_all(self.blocks.values().map(|lock| lock.finalize(txn_id))).await;
+    }
 }

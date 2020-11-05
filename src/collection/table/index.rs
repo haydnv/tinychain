@@ -299,6 +299,14 @@ impl Transact for TableBase {
             Self::Table(table) => table.rollback(txn_id).await,
         }
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Index(index) => index.finalize(txn_id).await,
+            Self::ROIndex(_) => (), // no-op
+            Self::Table(table) => table.finalize(txn_id).await,
+        }
+    }
 }
 
 impl From<Index> for TableBase {
@@ -517,6 +525,10 @@ impl Transact for Index {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.btree.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.btree.finalize(txn_id).await
     }
 }
 
@@ -1041,6 +1053,7 @@ impl Transact for TableIndex {
         for index in self.auxiliary.values() {
             commits.push(index.commit(txn_id));
         }
+
         join_all(commits).await;
     }
 
@@ -1050,6 +1063,17 @@ impl Transact for TableIndex {
         for index in self.auxiliary.values() {
             rollbacks.push(index.commit(txn_id));
         }
+
         join_all(rollbacks).await;
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        let mut cleanups = Vec::with_capacity(self.auxiliary.len() + 1);
+        cleanups.push(self.primary.finalize(txn_id));
+        for index in self.auxiliary.values() {
+            cleanups.push(index.commit(txn_id));
+        }
+
+        join_all(cleanups).await;
     }
 }

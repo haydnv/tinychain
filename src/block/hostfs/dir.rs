@@ -54,8 +54,8 @@ impl Dir {
         }
     }
 
-    pub async fn create_or_get_block<'a>(
-        &'a mut self,
+    pub async fn create_or_get_block(
+        &mut self,
         name: PathSegment,
         data: Bytes,
     ) -> TCResult<RwLock<Bytes>> {
@@ -69,8 +69,18 @@ impl Dir {
         }
     }
 
+    pub fn copy_all(&mut self, source: &mut Dir) -> TCResult<()> {
+        for block_id in source.block_ids().cloned() {
+            self.copy_block(block_id, source)?;
+        }
+
+        Ok(())
+    }
+
     pub fn copy_block(&mut self, name: PathSegment, source: &Dir) -> TCResult<()> {
-        let block = source.get_block(&name)?.ok_or(error::not_found(&name))?;
+        let block = source
+            .get_block(&name)?
+            .ok_or_else(|| error::not_found(&name))?;
         self.contents.insert(name, DirEntry::Block(block));
         Ok(())
     }
@@ -150,25 +160,6 @@ impl Dir {
 
     pub fn is_empty(&self) -> bool {
         self.contents.is_empty()
-    }
-
-    pub fn move_all(&mut self, source: &mut Dir) -> TCResult<()> {
-        let mut block_ids: Vec<PathSegment> = source.block_ids().cloned().collect();
-        for block_id in block_ids.drain(..) {
-            self.move_block(block_id, source)?;
-        }
-
-        Ok(())
-    }
-
-    pub fn move_block(&mut self, name: PathSegment, source: &mut Dir) -> TCResult<()> {
-        match source.delete_block(&name) {
-            Ok(block) => {
-                self.contents.insert(name, DirEntry::Block(block));
-                Ok(())
-            }
-            Err(cause) => Err(cause),
-        }
     }
 }
 

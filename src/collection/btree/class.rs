@@ -132,20 +132,23 @@ impl CollectionInstance for BTree {
 #[async_trait]
 impl Transact for BTree {
     async fn commit(&self, txn_id: &TxnId) {
-        let no_op = ();
-
         match self {
             Self::Tree(tree) => tree.commit(txn_id).await,
-            Self::View(_) => no_op,
+            Self::View(_) => (), // no-op
         }
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        let no_op = ();
-
         match self {
             Self::Tree(tree) => tree.rollback(txn_id).await,
-            Self::View(_) => no_op,
+            Self::View(_) => (), // no-op
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Tree(tree) => tree.finalize(txn_id).await,
+            Self::View(_) => (), // no-op
         }
     }
 }

@@ -218,6 +218,13 @@ impl Transact for TensorBase {
             Self::Sparse(sparse) => sparse.rollback(txn_id).await,
         }
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dense(dense) => dense.finalize(txn_id).await,
+            Self::Sparse(sparse) => sparse.finalize(txn_id).await,
+        }
+    }
 }
 
 impl From<TensorBase> for Collection {
@@ -416,6 +423,13 @@ impl Transact for TensorView {
             Self::Sparse(sparse) => sparse.rollback(txn_id).await,
         }
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dense(dense) => dense.finalize(txn_id).await,
+            Self::Sparse(sparse) => sparse.finalize(txn_id).await,
+        }
+    }
 }
 
 impl From<DenseTensor> for TensorView {
@@ -593,6 +607,13 @@ impl Transact for Tensor {
         match self {
             Self::Base(base) => base.rollback(txn_id).await,
             Self::View(view) => view.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Base(base) => base.finalize(txn_id).await,
+            Self::View(view) => view.finalize(txn_id).await,
         }
     }
 }

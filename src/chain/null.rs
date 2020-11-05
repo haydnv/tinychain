@@ -36,6 +36,13 @@ impl Transact for ChainState {
             Self::Scalar(s) => s.rollback(txn_id).await,
         }
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Collection(c) => c.finalize(txn_id).await,
+            Self::Scalar(s) => s.finalize(txn_id).await,
+        }
+    }
 }
 
 impl From<CollectionBase> for ChainState {
@@ -133,5 +140,9 @@ impl Transact for NullChain {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.state.rollback(txn_id).await;
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.state.finalize(txn_id).await;
     }
 }

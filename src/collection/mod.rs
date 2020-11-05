@@ -93,7 +93,7 @@ impl Transact for CollectionBase {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
-            Self::Null(_) => (), // no-op
+            Self::Null(null) => null.commit(txn_id).await,
             Self::Table(table) => table.commit(txn_id).await,
             Self::Tensor(tensor) => tensor.commit(txn_id).await,
         }
@@ -102,9 +102,18 @@ impl Transact for CollectionBase {
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.rollback(txn_id).await,
-            Self::Null(_) => (), // no-op
+            Self::Null(null) => null.rollback(txn_id).await,
             Self::Table(table) => table.rollback(txn_id).await,
             Self::Tensor(tensor) => tensor.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::BTree(btree) => btree.finalize(txn_id).await,
+            Self::Null(null) => null.finalize(txn_id).await,
+            Self::Table(table) => table.finalize(txn_id).await,
+            Self::Tensor(tensor) => tensor.finalize(txn_id).await,
         }
     }
 }
@@ -257,7 +266,7 @@ impl Transact for CollectionView {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
-            Self::Null(null) => null.commit(txn_id).await, // no-op
+            Self::Null(null) => null.commit(txn_id).await,
             Self::Table(table) => table.commit(txn_id).await,
             Self::Tensor(tensor) => tensor.commit(txn_id).await,
         }
@@ -266,9 +275,18 @@ impl Transact for CollectionView {
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.rollback(txn_id).await,
-            Self::Null(null) => null.rollback(txn_id).await, // no-op
+            Self::Null(null) => null.rollback(txn_id).await,
             Self::Table(table) => table.rollback(txn_id).await,
             Self::Tensor(tensor) => tensor.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::BTree(btree) => btree.finalize(txn_id).await,
+            Self::Null(null) => null.finalize(txn_id).await,
+            Self::Table(table) => table.finalize(txn_id).await,
+            Self::Tensor(tensor) => tensor.finalize(txn_id).await,
         }
     }
 }
@@ -381,6 +399,13 @@ impl Transact for Collection {
         match self {
             Self::Base(base) => base.rollback(txn_id).await,
             Self::View(view) => view.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Base(base) => base.finalize(txn_id).await,
+            Self::View(view) => view.finalize(txn_id).await,
         }
     }
 }

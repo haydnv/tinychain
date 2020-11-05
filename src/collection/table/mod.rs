@@ -371,6 +371,13 @@ impl Transact for Table {
             Self::View(view) => view.rollback(txn_id).await,
         }
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Base(base) => base.finalize(txn_id).await,
+            Self::View(view) => view.finalize(txn_id).await,
+        }
+    }
 }
 
 impl From<TableBase> for Table {

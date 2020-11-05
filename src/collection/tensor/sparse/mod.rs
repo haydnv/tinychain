@@ -188,6 +188,10 @@ impl Transact for DenseAccessor {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 struct SparseBroadcast {
@@ -334,6 +338,10 @@ impl Transact for SparseBroadcast {
     async fn rollback(&self, _txn_id: &TxnId) {
         // no-op
     }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
+        // no-op
+    }
 }
 
 struct SparseCast {
@@ -423,6 +431,10 @@ impl Transact for SparseCast {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
 
@@ -576,6 +588,10 @@ impl Transact for SparseCombinator {
     async fn rollback(&self, _txn_id: &TxnId) {
         // no-op
     }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
+        // no-op
+    }
 }
 
 struct SparseExpand {
@@ -674,6 +690,10 @@ impl Transact for SparseExpand {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
 
@@ -841,6 +861,10 @@ impl Transact for SparseReduce {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 struct SparseReshape {
@@ -972,6 +996,10 @@ impl Transact for SparseReshape {
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
 }
 
 struct SparseSlice {
@@ -1081,6 +1109,10 @@ impl Transact for SparseSlice {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
 
@@ -1194,6 +1226,10 @@ impl Transact for SparseTranspose {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
 
@@ -1391,6 +1427,10 @@ impl Transact for SparseTable {
     async fn rollback(&self, txn_id: &TxnId) {
         self.table.rollback(txn_id).await
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.table.finalize(txn_id).await
+    }
 }
 
 struct SparseUnary {
@@ -1482,6 +1522,10 @@ impl Transact for SparseUnary {
     }
 
     async fn rollback(&self, _txn_id: &TxnId) {
+        // no-op
+    }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
         // no-op
     }
 }
@@ -1889,6 +1933,10 @@ impl Transact for SparseTensor {
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.accessor.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.accessor.finalize(txn_id).await
     }
 }
 

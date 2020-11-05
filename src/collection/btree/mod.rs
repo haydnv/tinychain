@@ -304,6 +304,10 @@ impl Transact for BTreeSlice {
     async fn rollback(&self, _txn_id: &TxnId) {
         // no-op
     }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
+        // no-op
+    }
 }
 
 impl From<BTreeSlice> for Collection {
@@ -901,6 +905,10 @@ impl Transact for BTreeFile {
 
     async fn rollback(&self, txn_id: &TxnId) {
         join(self.file.rollback(txn_id), self.root.rollback(txn_id)).await;
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        join(self.file.finalize(txn_id), self.root.finalize(txn_id)).await;
     }
 }
 

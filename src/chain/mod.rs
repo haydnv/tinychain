@@ -190,6 +190,12 @@ impl Transact for Chain {
             Self::Null(nc) => nc.rollback(txn_id).await,
         }
     }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Null(nc) => nc.finalize(txn_id).await,
+        }
+    }
 }
 
 impl From<null::NullChain> for Chain {

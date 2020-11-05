@@ -110,6 +110,10 @@ impl Transact for Null {
     async fn rollback(&self, _txn_id: &TxnId) {
         // no-op
     }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
+        // no-op
+    }
 }
 
 impl From<Null> for Collection {
