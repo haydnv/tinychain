@@ -6,7 +6,7 @@ use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
-use crate::scalar::{label, Link, Scalar, TCPath, Value};
+use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::{BTreeFile, BTreeSlice, Key, Selector};
@@ -22,18 +22,18 @@ impl Class for BTreeType {
 }
 
 impl NativeClass for BTreeType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let path = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let path = Self::prefix().try_suffix(path)?;
 
         if path.is_empty() {
             Ok(BTreeType::Tree)
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(path))
         }
     }
 
-    fn prefix() -> TCPath {
-        CollectionType::prefix().join(label("btree").into())
+    fn prefix() -> TCPathBuf {
+        CollectionType::prefix().append(label("btree"))
     }
 }
 
@@ -92,7 +92,7 @@ impl CollectionInstance for BTree {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
@@ -111,7 +111,7 @@ impl CollectionInstance for BTree {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {

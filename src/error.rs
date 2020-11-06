@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 use std::fmt;
 
-use crate::scalar::value::{label, TCPath};
+use crate::scalar::value::{PathSegment, TCPath};
 
 pub type TCResult<T> = Result<T, TCError>;
 
@@ -142,31 +142,6 @@ impl fmt::Display for TCError {
     }
 }
 
-pub fn get(path: &TCPath, msg: String) -> TCError {
-    let prefix = TCPath::from(vec![label("sbin").into(), label("error").into()]);
-    let suffix = match path.from_path(&prefix) {
-        Ok(suffix) => suffix,
-        Err(cause) => return cause,
-    };
-
-    let (code, msg) = match suffix[0].as_str() {
-        "bad_request" => (Code::BadRequest, msg),
-        "conflict" => (Code::Conflict, msg),
-        "forbidden" => (Code::Forbidden, msg),
-        "internal" => (Code::Internal, msg),
-        "method_not_allowed" => (Code::MethodNotAllowed, msg),
-        "not_found" => (Code::NotFound, msg),
-        "not_implemented" => (Code::NotImplemented, msg),
-        "too_large" => (Code::TooLarge, msg),
-        "transport" => (Code::Transport, msg),
-        "unauthorized" => (Code::Unauthorized, msg),
-        "unknown" => (Code::Unknown, msg),
-        _ => (Code::NotFound, suffix.to_string()),
-    };
-
-    TCError::of(code, msg)
-}
-
 pub fn bad_request<I: fmt::Display, T: fmt::Display>(message: I, info: T) -> TCError {
     TCError::of(Code::BadRequest, format!("{}: {}", message, info))
 }
@@ -198,6 +173,10 @@ pub fn not_found<T: fmt::Display>(id: T) -> TCError {
         Code::NotFound,
         format!("The requested resource could not be found: {}", id),
     )
+}
+
+pub fn path_not_found(path: &[PathSegment]) -> TCError {
+    not_found(TCPath::from(path))
 }
 
 #[allow(dead_code)]

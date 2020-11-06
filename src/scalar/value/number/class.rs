@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::class::{Class, NativeClass, TCResult, TCType};
 use crate::error;
 use crate::scalar::{
-    label, CastInto, Link, Scalar, ScalarClass, ScalarType, TCPath, TryCastFrom, Value, ValueClass,
-    ValueInstance, ValueType,
+    label, CastInto, Link, PathSegment, Scalar, ScalarClass, ScalarType, TCPathBuf, TryCastFrom,
+    Value, ValueClass, ValueInstance, ValueType,
 };
 
 use super::instance::{Boolean, Complex, Float, Int, Number, UInt};
@@ -140,17 +140,17 @@ impl Class for ComplexType {
 }
 
 impl NativeClass for ComplexType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let path = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
-        if path.is_empty() {
+        if suffix.is_empty() {
             Err(error::unsupported(
                 "Complex number requires a size, complex/32 or complex/64",
             ))
-        } else if path.len() > 1 {
-            Err(error::not_found(path))
+        } else if suffix.len() > 1 {
+            Err(error::path_not_found(suffix))
         } else {
-            match path[0].as_str() {
+            match suffix[0].as_str() {
                 "32" => Ok(ComplexType::C32),
                 "64" => Ok(ComplexType::C64),
                 other => Err(error::not_found(other)),
@@ -158,8 +158,8 @@ impl NativeClass for ComplexType {
         }
     }
 
-    fn prefix() -> TCPath {
-        NumberType::prefix().join(label("complex").into())
+    fn prefix() -> TCPathBuf {
+        NumberType::prefix().append(label("complex"))
     }
 }
 
@@ -219,13 +219,13 @@ impl From<ComplexType> for NumberType {
 
 impl From<ComplexType> for Link {
     fn from(ct: ComplexType) -> Link {
-        let prefix = ComplexType::prefix();
-
         use ComplexType::*;
-        match ct {
-            C32 => prefix.join(label("32").into()).into(),
-            C64 => prefix.join(label("64").into()).into(),
-        }
+        let suffix = match ct {
+            C32 => label("32"),
+            C64 => label("64"),
+        };
+
+        ComplexType::prefix().append(suffix).into()
     }
 }
 
@@ -246,18 +246,18 @@ impl Class for BooleanType {
 }
 
 impl NativeClass for BooleanType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let path = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
-        if path.is_empty() {
+        if suffix.is_empty() {
             Ok(BooleanType)
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(suffix))
         }
     }
 
-    fn prefix() -> TCPath {
-        NumberType::prefix().join(label("bool").into())
+    fn prefix() -> TCPathBuf {
+        NumberType::prefix().append(label("bool"))
     }
 }
 
@@ -330,17 +330,17 @@ impl Class for FloatType {
 }
 
 impl NativeClass for FloatType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let path = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
-        if path.is_empty() {
+        if suffix.is_empty() {
             Err(error::unsupported(
                 "Float requires a size, float/32 or float/64",
             ))
-        } else if path.len() > 1 {
-            Err(error::not_found(path))
+        } else if suffix.len() > 1 {
+            Err(error::path_not_found(suffix))
         } else {
-            match path[0].as_str() {
+            match suffix[0].as_str() {
                 "32" => Ok(FloatType::F32),
                 "64" => Ok(FloatType::F64),
                 other => Err(error::not_found(other)),
@@ -348,8 +348,8 @@ impl NativeClass for FloatType {
         }
     }
 
-    fn prefix() -> TCPath {
-        NumberType::prefix().join(label("float").into())
+    fn prefix() -> TCPathBuf {
+        NumberType::prefix().append(label("float"))
     }
 }
 
@@ -410,13 +410,13 @@ impl From<FloatType> for NumberType {
 
 impl From<FloatType> for Link {
     fn from(ft: FloatType) -> Link {
-        let prefix = FloatType::prefix();
-
         use FloatType::*;
-        match ft {
-            F32 => prefix.join(label("32").into()).into(),
-            F64 => prefix.join(label("64").into()).into(),
-        }
+        let suffix = match ft {
+            F32 => label("32"),
+            F64 => label("64"),
+        };
+
+        FloatType::prefix().append(suffix).into()
     }
 }
 
@@ -442,17 +442,17 @@ impl Class for IntType {
 }
 
 impl NativeClass for IntType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let path = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
-        if path.is_empty() {
+        if suffix.is_empty() {
             Err(error::unsupported(
                 "Int requires a size, int/16 or int/32 or int/64",
             ))
-        } else if path.len() > 1 {
-            Err(error::not_found(path))
+        } else if suffix.len() > 1 {
+            Err(error::path_not_found(path))
         } else {
-            match path[0].as_str() {
+            match suffix[0].as_str() {
                 "16" => Ok(IntType::I16),
                 "32" => Ok(IntType::I32),
                 "64" => Ok(IntType::I64),
@@ -461,8 +461,8 @@ impl NativeClass for IntType {
         }
     }
 
-    fn prefix() -> TCPath {
-        NumberType::prefix().join(label("int").into())
+    fn prefix() -> TCPathBuf {
+        NumberType::prefix().append(label("int"))
     }
 }
 
@@ -526,14 +526,14 @@ impl From<IntType> for NumberType {
 
 impl From<IntType> for Link {
     fn from(it: IntType) -> Link {
-        let prefix = IntType::prefix();
-
         use IntType::*;
-        match it {
-            I16 => prefix.join(label("16").into()).into(),
-            I32 => prefix.join(label("32").into()).into(),
-            I64 => prefix.join(label("64").into()).into(),
-        }
+        let suffix = match it {
+            I16 => label("16"),
+            I32 => label("32"),
+            I64 => label("64"),
+        };
+
+        IntType::prefix().append(suffix).into()
     }
 }
 
@@ -561,17 +561,17 @@ impl Class for UIntType {
 }
 
 impl NativeClass for UIntType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let path = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
-        if path.is_empty() {
+        if suffix.is_empty() {
             Err(error::unsupported(
                 "UInt requires a size, uint/8 or uint/16 or uint/32 or uint/64",
             ))
-        } else if path.len() > 1 {
-            Err(error::not_found(path))
+        } else if suffix.len() > 1 {
+            Err(error::path_not_found(path))
         } else {
-            match path[0].as_str() {
+            match suffix[0].as_str() {
                 "8" => Ok(UIntType::U8),
                 "16" => Ok(UIntType::U16),
                 "32" => Ok(UIntType::U32),
@@ -581,8 +581,8 @@ impl NativeClass for UIntType {
         }
     }
 
-    fn prefix() -> TCPath {
-        NumberType::prefix().join(label("uint").into())
+    fn prefix() -> TCPathBuf {
+        NumberType::prefix().append(label("uint"))
     }
 }
 
@@ -650,15 +650,15 @@ impl From<UIntType> for NumberType {
 
 impl From<UIntType> for Link {
     fn from(ut: UIntType) -> Link {
-        let prefix = UIntType::prefix();
-
         use UIntType::*;
-        match ut {
-            U8 => prefix.join(label("8").into()).into(),
-            U16 => prefix.join(label("16").into()).into(),
-            U32 => prefix.join(label("32").into()).into(),
-            U64 => prefix.join(label("64").into()).into(),
-        }
+        let suffix = match ut {
+            U8 => label("8"),
+            U16 => label("16"),
+            U32 => label("32"),
+            U64 => label("64"),
+        };
+
+        UIntType::prefix().append(suffix).into()
     }
 }
 
@@ -695,8 +695,8 @@ impl Class for NumberType {
 }
 
 impl NativeClass for NumberType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
         if suffix.is_empty() {
             Ok(NumberType::Number)
@@ -711,12 +711,12 @@ impl NativeClass for NumberType {
                 other => Err(error::not_found(other)),
             }
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(suffix))
         }
     }
 
-    fn prefix() -> TCPath {
-        ValueType::prefix().join(label("number").into())
+    fn prefix() -> TCPathBuf {
+        ValueType::prefix().append(label("number"))
     }
 }
 
@@ -817,14 +817,11 @@ impl TryFrom<TCType> for NumberType {
 
 impl TryCastFrom<Link> for NumberType {
     fn can_cast_from(link: &Link) -> bool {
-        match NumberType::from_path(link.path()) {
-            Ok(_) => true,
-            _ => false,
-        }
+        NumberType::from_path(&link.path()[..]).is_ok()
     }
 
     fn opt_cast_from(link: Link) -> Option<NumberType> {
-        NumberType::from_path(link.path()).ok()
+        NumberType::from_path(&link.path()[..]).ok()
     }
 }
 

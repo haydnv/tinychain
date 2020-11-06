@@ -8,7 +8,7 @@ use crate::error;
 use crate::request::Request;
 use crate::transaction::Txn;
 
-use super::{Op, Scalar, TCPath, Value, ValueId, ValueInstance};
+use super::{Op, PathSegment, Scalar, TCPath, Value, ValueId, ValueInstance};
 
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct Object(HashMap<ValueId, Scalar>);
@@ -22,11 +22,11 @@ impl Object {
         &'a self,
         request: &'a Request,
         txn: &'a Txn,
-        path: TCPath,
+        path: &'a [PathSegment],
         key: Value,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
-            println!("Object::get {}: {}", path, key);
+            println!("Object::get {}: {}", TCPath::from(path), key);
 
             if path.is_empty() {
                 return Ok(State::Scalar(Scalar::Object(self.clone())));
@@ -53,14 +53,14 @@ impl Object {
                     },
 
                     Scalar::Value(value) => value
-                        .get(path.slice_from(1), key)
+                        .get(&path[1..], key)
                         .map(Scalar::Value)
                         .map(State::Scalar),
 
                     other if path.len() == 1 => Ok(State::Scalar(other.clone())),
-                    _ => Err(error::not_found(path)),
+                    _ => Err(error::path_not_found(path)),
                 },
-                _ => Err(error::not_found(path)),
+                _ => Err(error::path_not_found(path)),
             }
         })
     }

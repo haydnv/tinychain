@@ -3,6 +3,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::hash::Hash;
 use std::iter;
+use std::slice;
 use std::sync::Arc;
 
 use futures::future::{self, FutureExt, TryFutureExt};
@@ -101,7 +102,7 @@ impl Txn {
         txn_server: mpsc::UnboundedSender<TxnId>,
     ) -> TCResult<Txn> {
         let context: PathSegment = id.clone().try_into()?;
-        let dir = workspace.create_dir(&id, &context.clone().into()).await?;
+        let dir = workspace.create_dir(&id, slice::from_ref(&context)).await?;
 
         println!("new Txn: {}", id);
 
@@ -131,7 +132,7 @@ impl Txn {
         let dir = self
             .inner
             .dir
-            .get_or_create_dir(&self.inner.id, &self.inner.context.clone().into())
+            .get_or_create_dir(&self.inner.id, slice::from_ref(&self.inner.context))
             .await?;
 
         let subcontext = Arc::new(Inner {
@@ -395,27 +396,27 @@ impl Txn {
                 match subject {
                     State::Chain(chain) => {
                         println!("Txn::resolve Chain {}: {}", path, key);
-                        chain.get(request, self, &path, key.clone()).await
+                        chain.get(request, self, &path[..], key.clone()).await
                     }
                     State::Cluster(cluster) => {
                         println!("Txn::resolve Cluster {}: {}", path, key);
                         cluster
-                            .get(request, &self.inner.gateway, self, path, key.clone())
+                            .get(request, &self.inner.gateway, self, &path[..], key.clone())
                             .await
                     }
                     State::Collection(collection) => {
                         println!("Txn::resolve Collection {}: {}", path, key);
                         collection
-                            .get(self.clone(), path, key)
+                            .get(self.clone(), &path[..], key)
                             .await
                             .map(State::from)
                     }
-                    State::Object(object) => object.get(request, self, path, key).await,
+                    State::Object(object) => object.get(request, self, &path[..], key).await,
                     State::Scalar(scalar) => match scalar {
-                        Scalar::Object(object) => object.get(request, self, path, key).await,
+                        Scalar::Object(object) => object.get(request, self, &path[..], key).await,
                         Scalar::Op(op) => match &**op {
                             Op::Def(op_def) => {
-                                if !path.is_empty() {
+                                if !&path[..].is_empty() {
                                     return Err(error::not_found(path));
                                 }
 
@@ -424,7 +425,7 @@ impl Txn {
                             other => Err(error::method_not_allowed(other)),
                         },
                         Scalar::Value(value) => value
-                            .get(path, key.clone())
+                            .get(path.as_slice(), key.clone())
                             .map(Scalar::Value)
                             .map(State::Scalar),
                         other => Err(error::method_not_allowed(format!("GET: {}", other))),
@@ -458,7 +459,7 @@ impl Txn {
                         self.mutate(chain.clone().into()).await;
 
                         chain
-                            .put(&request, self, path, key, value)
+                            .put(&request, self, path.as_slice(), key, value)
                             .map_ok(State::from)
                             .await
                     }
@@ -486,7 +487,7 @@ impl Txn {
                     State::Scalar(scalar) => match scalar {
                         Scalar::Op(op) => match &**op {
                             Op::Def(op_def) => {
-                                if !path.is_empty() {
+                                if !path.as_slice().is_empty() {
                                     return Err(error::not_found(path));
                                 }
 

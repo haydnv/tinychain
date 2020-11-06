@@ -114,10 +114,11 @@ impl Class for ScalarType {
 }
 
 impl NativeClass for ScalarType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
+
         if suffix.is_empty() {
-            return Err(error::method_not_allowed(path));
+            return Err(error::method_not_allowed(TCPath::from(path)));
         }
 
         match suffix[0].as_str() {
@@ -129,7 +130,7 @@ impl NativeClass for ScalarType {
         }
     }
 
-    fn prefix() -> TCPath {
+    fn prefix() -> TCPathBuf {
         TCType::prefix()
     }
 }
@@ -156,10 +157,10 @@ impl ScalarClass for ScalarType {
 impl From<ScalarType> for Link {
     fn from(st: ScalarType) -> Link {
         match st {
-            ScalarType::Object => ScalarType::prefix().join(label("object").into()).into(),
+            ScalarType::Object => ScalarType::prefix().append(label("object")).into(),
+            ScalarType::Tuple => ScalarType::prefix().append(label("tuple")).into(),
             ScalarType::Op(ot) => ot.into(),
             ScalarType::Value(vt) => vt.into(),
-            ScalarType::Tuple => ScalarType::prefix().join(label("tuple").into()).into(),
         }
     }
 }
@@ -600,17 +601,17 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                 let (subject, path) = if let Some(i) = key.find('/') {
                     let (subject, path) = key.split_at(i);
                     let subject = TCRef::from_str(subject).map_err(de::Error::custom)?;
-                    let path = TCPath::from_str(path).map_err(de::Error::custom)?;
+                    let path = TCPathBuf::from_str(path).map_err(de::Error::custom)?;
                     (subject, path)
                 } else {
                     (
                         TCRef::from_str(&key).map_err(de::Error::custom)?,
-                        TCPath::default(),
+                        TCPathBuf::default(),
                     )
                 };
 
                 return if data == Scalar::Tuple(vec![]) || data == Scalar::Value(Value::None) {
-                    if path == TCPath::default() {
+                    if path == TCPathBuf::default() {
                         Ok(Scalar::Value(subject.into()))
                     } else {
                         Ok(Scalar::Op(Box::new(Op::Method(Method::Get(
@@ -641,11 +642,12 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     Ok(Scalar::Op(Box::new(Op::Method(method))))
                 };
             } else if let Ok(link) = key.parse::<link::Link>() {
-                return if link.path().starts_with(&ObjectType::prefix()) {
+                return if link.path()[..].starts_with(&ObjectType::prefix()[..]) {
                     let data: object::Object = data.try_into().map_err(de::Error::custom)?;
                     Ok(Scalar::Op(Box::new(Op::Ref(OpRef::Post((link, data))))))
-                } else if link.path().starts_with(&TCType::prefix()) {
-                    let dtype = ScalarType::from_path(link.path()).map_err(de::Error::custom)?;
+                } else if link.path()[..].starts_with(&TCType::prefix()[..]) {
+                    let dtype =
+                        ScalarType::from_path(&link.path()[..]).map_err(de::Error::custom)?;
                     dtype.try_cast(data).map_err(de::Error::custom)
                 } else if data == Scalar::Value(Value::None)
                     || data == Scalar::Value(Value::Tuple(vec![]))
@@ -723,7 +725,7 @@ impl Serialize for Scalar {
                     map.end()
                 }
                 Op::Method(method) => {
-                    let ((subject, path), args): ((TCRef, TCPath), Scalar) = match method {
+                    let ((subject, path), args): ((TCRef, TCPathBuf), Scalar) = match method {
                         Method::Get(subject, arg) => (subject.clone(), vec![arg.clone()].into()),
                         Method::Put(subject, args) => (subject.clone(), args.clone().into()),
                         Method::Post(subject, args) => (subject.clone(), args.clone().into()),

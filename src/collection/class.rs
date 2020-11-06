@@ -5,7 +5,7 @@ use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
 use crate::error;
-use crate::scalar::{label, Link, Scalar, TCPath, TryCastInto, Value};
+use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, TryCastInto, Value};
 use crate::transaction::{Transact, Txn};
 
 use super::btree::{BTreeFile, BTreeType};
@@ -43,7 +43,7 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>>;
 
@@ -52,7 +52,7 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()>;
@@ -71,12 +71,12 @@ impl Class for CollectionType {
 }
 
 impl NativeClass for CollectionType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
         CollectionBaseType::from_path(path).map(CollectionType::Base)
     }
 
-    fn prefix() -> TCPath {
-        TCType::prefix().join(label("collection").into())
+    fn prefix() -> TCPathBuf {
+        TCType::prefix().append(label("collection"))
     }
 }
 
@@ -138,8 +138,8 @@ impl Class for CollectionBaseType {
 }
 
 impl NativeClass for CollectionBaseType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
         if suffix.is_empty() {
             Err(error::unsupported("You must specify a type of Collection"))
@@ -150,12 +150,12 @@ impl NativeClass for CollectionBaseType {
                 "null" if suffix.len() == 1 => Ok(Null),
                 "table" => TableBaseType::from_path(path).map(Table),
                 "tensor" => TensorBaseType::from_path(path).map(Tensor),
-                other => Err(error::not_found(other)),
+                _ => Err(error::path_not_found(suffix)),
             }
         }
     }
 
-    fn prefix() -> TCPath {
+    fn prefix() -> TCPathBuf {
         CollectionType::prefix()
     }
 }
@@ -182,12 +182,10 @@ impl CollectionClass for CollectionBaseType {
 
 impl From<CollectionBaseType> for Link {
     fn from(ct: CollectionBaseType) -> Link {
-        let prefix = CollectionBaseType::prefix();
-
         use CollectionBaseType::*;
         match ct {
             BTree => BTreeType::Tree.into(),
-            Null => prefix.join(label("null").into()).into(),
+            Null => CollectionBaseType::prefix().append(label("null")).into(),
             Table(tbt) => tbt.into(),
             Tensor(tbt) => tbt.into(),
         }
@@ -219,11 +217,11 @@ impl Class for CollectionViewType {
 }
 
 impl NativeClass for CollectionViewType {
-    fn from_path(_path: &TCPath) -> TCResult<Self> {
+    fn from_path(_path: &[PathSegment]) -> TCResult<Self> {
         Err(error::internal(crate::class::ERR_PROTECTED))
     }
 
-    fn prefix() -> TCPath {
+    fn prefix() -> TCPathBuf {
         CollectionType::prefix()
     }
 }

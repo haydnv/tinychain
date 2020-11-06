@@ -8,11 +8,11 @@ use crate::object::ObjectInstance;
 use crate::request::Request;
 use crate::transaction::Txn;
 
-use super::link::{Link, TCPath};
+use super::link::{Link, TCPathBuf};
 use super::object::Object;
 use super::{
-    label, CastFrom, Scalar, ScalarClass, ScalarInstance, ScalarType, TCRef, TryCastFrom,
-    TryCastInto, Value, ValueId,
+    label, CastFrom, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TCRef,
+    TryCastFrom, TryCastInto, Value, ValueId,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
@@ -27,8 +27,9 @@ impl Class for OpDefType {
 }
 
 impl NativeClass for OpDefType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
+
         if suffix.len() == 1 {
             match suffix[0].as_str() {
                 "get" => Ok(OpDefType::Get),
@@ -37,12 +38,12 @@ impl NativeClass for OpDefType {
                 other => Err(error::not_found(other)),
             }
         } else {
-            Err(error::not_found(suffix))
+            Err(error::path_not_found(suffix))
         }
     }
 
-    fn prefix() -> TCPath {
-        OpType::prefix().join(label("def").into())
+    fn prefix() -> TCPathBuf {
+        OpType::prefix().append(label("def"))
     }
 }
 
@@ -77,12 +78,13 @@ impl ScalarClass for OpDefType {
 
 impl From<OpDefType> for Link {
     fn from(odt: OpDefType) -> Link {
-        let prefix = OpDefType::prefix();
-        match odt {
-            OpDefType::Get => prefix.join(label("get").into()).into(),
-            OpDefType::Put => prefix.join(label("put").into()).into(),
-            OpDefType::Post => prefix.join(label("post").into()).into(),
-        }
+        let suffix = match odt {
+            OpDefType::Get => label("get"),
+            OpDefType::Put => label("put"),
+            OpDefType::Post => label("post"),
+        };
+
+        OpDefType::prefix().append(suffix).into()
     }
 }
 
@@ -108,8 +110,9 @@ impl Class for MethodType {
 }
 
 impl NativeClass for MethodType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
+
         if suffix.len() == 1 {
             match suffix[0].as_str() {
                 "get" => Ok(MethodType::Get),
@@ -118,12 +121,12 @@ impl NativeClass for MethodType {
                 other => Err(error::not_found(other)),
             }
         } else {
-            Err(error::not_found(suffix))
+            Err(error::path_not_found(suffix))
         }
     }
 
-    fn prefix() -> TCPath {
-        OpType::prefix().join(label("method").into())
+    fn prefix() -> TCPathBuf {
+        OpType::prefix().append(label("method"))
     }
 }
 
@@ -137,12 +140,13 @@ impl ScalarClass for MethodType {
 
 impl From<MethodType> for Link {
     fn from(mt: MethodType) -> Link {
-        let prefix = MethodType::prefix();
-        match mt {
-            MethodType::Get => prefix.join(label("get").into()).into(),
-            MethodType::Put => prefix.join(label("put").into()).into(),
-            MethodType::Post => prefix.join(label("post").into()).into(),
-        }
+        let suffix = match mt {
+            MethodType::Get => label("get"),
+            MethodType::Put => label("put"),
+            MethodType::Post => label("post"),
+        };
+
+        MethodType::prefix().append(suffix).into()
     }
 }
 
@@ -169,8 +173,9 @@ impl Class for OpRefType {
 }
 
 impl NativeClass for OpRefType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
+
         if suffix.len() == 1 {
             match suffix[0].as_str() {
                 "if" => Ok(OpRefType::If),
@@ -180,12 +185,12 @@ impl NativeClass for OpRefType {
                 other => Err(error::not_found(other)),
             }
         } else {
-            Err(error::not_found(suffix))
+            Err(error::path_not_found(suffix))
         }
     }
 
-    fn prefix() -> TCPath {
-        OpType::prefix().join(label("ref").into())
+    fn prefix() -> TCPathBuf {
+        OpType::prefix().append(label("ref"))
     }
 }
 
@@ -200,13 +205,15 @@ impl ScalarClass for OpRefType {
 
 impl From<OpRefType> for Link {
     fn from(ort: OpRefType) -> Link {
-        let prefix = OpRefType::prefix();
-        match ort {
-            OpRefType::If => prefix.join(label("if").into()).into(),
-            OpRefType::Get => prefix.join(label("get").into()).into(),
-            OpRefType::Put => prefix.join(label("put").into()).into(),
-            OpRefType::Post => prefix.join(label("post").into()).into(),
-        }
+        use OpRefType as ORT;
+        let suffix = match ort {
+            ORT::If => label("if"),
+            ORT::Get => label("get"),
+            ORT::Put => label("put"),
+            ORT::Post => label("post"),
+        };
+
+        OpRefType::prefix().append(suffix).into()
     }
 }
 
@@ -233,8 +240,8 @@ impl Class for OpType {
 }
 
 impl NativeClass for OpType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
         if suffix.is_empty() {
             Err(error::unsupported("You must specify a type of Op"))
@@ -248,8 +255,8 @@ impl NativeClass for OpType {
         }
     }
 
-    fn prefix() -> TCPath {
-        ScalarType::prefix().join(label("op").into())
+    fn prefix() -> TCPathBuf {
+        ScalarType::prefix().append(label("op"))
     }
 }
 
@@ -400,9 +407,9 @@ impl fmt::Display for OpDef {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Method {
-    Get((TCRef, TCPath), Value),
-    Put((TCRef, TCPath), (Value, Scalar)),
-    Post((TCRef, TCPath), Object),
+    Get((TCRef, TCPathBuf), Value),
+    Put((TCRef, TCPathBuf), (Value, Scalar)),
+    Post((TCRef, TCPathBuf), Object),
 }
 
 impl Instance for Method {

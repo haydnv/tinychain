@@ -13,7 +13,7 @@ use crate::collection::class::CollectionInstance;
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::{Collection, CollectionItem, CollectionView};
 use crate::error;
-use crate::scalar::{label, Link, Scalar, TCPath, Value, ValueId};
+use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds};
@@ -44,18 +44,18 @@ impl Class for TableViewType {
 }
 
 impl NativeClass for TableViewType {
-    fn from_path(_path: &TCPath) -> TCResult<Self> {
+    fn from_path(_path: &[PathSegment]) -> TCResult<Self> {
         Err(error::internal(crate::class::ERR_PROTECTED))
     }
 
-    fn prefix() -> TCPath {
+    fn prefix() -> TCPathBuf {
         TableType::prefix()
     }
 }
 
 impl From<TableViewType> for Link {
     fn from(_tvt: TableViewType) -> Link {
-        TableViewType::prefix().join(label("index").into()).into()
+        TableViewType::prefix().append(label("index")).into()
     }
 }
 
@@ -106,7 +106,7 @@ impl CollectionInstance for TableView {
     async fn get(
         &self,
         _txn: Txn,
-        _path: TCPath,
+        _path: &[PathSegment],
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::not_implemented("TableBase::get"))
@@ -119,7 +119,7 @@ impl CollectionInstance for TableView {
     async fn put(
         &self,
         _txn: Txn,
-        _path: TCPath,
+        _path: &[PathSegment],
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {

@@ -7,7 +7,7 @@ use futures::TryFutureExt;
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{label, Link, Scalar, TCPath, Value, ValueId};
+use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
 
 mod block;
@@ -37,8 +37,8 @@ impl Class for ChainType {
 }
 
 impl NativeClass for ChainType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
         if suffix.is_empty() {
             return Err(error::unsupported("You must specify a type of Chain"));
@@ -50,15 +50,15 @@ impl NativeClass for ChainType {
         }
     }
 
-    fn prefix() -> TCPath {
-        TCType::prefix().join(label("chain").into())
+    fn prefix() -> TCPathBuf {
+        TCType::prefix().append(label("chain"))
     }
 }
 
 impl From<ChainType> for Link {
     fn from(ct: ChainType) -> Link {
         match ct {
-            ChainType::Null => ChainType::prefix().join(label("null").into()).into(),
+            ChainType::Null => ChainType::prefix().append(label("null")).into(),
         }
     }
 }
@@ -91,14 +91,19 @@ impl ChainClass for ChainType {
 pub trait ChainInstance: Instance {
     type Class: ChainClass;
 
-    async fn get(&self, request: &Request, txn: &Txn, path: &TCPath, key: Value)
-        -> TCResult<State>;
+    async fn get(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<State>;
 
     async fn put(
         &self,
         request: &Request,
         txn: &Txn,
-        path: TCPath,
+        path: &[PathSegment],
         key: Value,
         state: State,
     ) -> TCResult<()>;
@@ -107,7 +112,7 @@ pub trait ChainInstance: Instance {
         &self,
         request: &Request,
         txn: &Txn,
-        path: TCPath,
+        path: &[PathSegment],
         data: S,
     ) -> TCResult<State>;
 
@@ -137,7 +142,7 @@ impl ChainInstance for Chain {
         &self,
         request: &Request,
         txn: &Txn,
-        path: &TCPath,
+        path: &[PathSegment],
         key: Value,
     ) -> TCResult<State> {
         match self {
@@ -149,7 +154,7 @@ impl ChainInstance for Chain {
         &self,
         request: &Request,
         txn: &Txn,
-        path: TCPath,
+        path: &[PathSegment],
         key: Value,
         value: State,
     ) -> TCResult<()> {
@@ -162,7 +167,7 @@ impl ChainInstance for Chain {
         &self,
         request: &Request,
         txn: &Txn,
-        path: TCPath,
+        path: &[PathSegment],
         data: S,
     ) -> TCResult<State> {
         match self {

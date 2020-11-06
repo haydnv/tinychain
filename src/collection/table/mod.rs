@@ -10,7 +10,7 @@ use crate::class::{Class, Instance, NativeClass, TCBoxTryFuture, TCResult, TCStr
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
 use crate::error;
-use crate::scalar::{Link, Scalar, TCPath, Value, ValueId};
+use crate::scalar::{Link, PathSegment, Scalar, TCPathBuf, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::schema::{Column, Row, TableSchema};
@@ -44,11 +44,11 @@ impl Class for TableType {
 }
 
 impl NativeClass for TableType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
         TableBaseType::from_path(path).map(TableType::Base)
     }
 
-    fn prefix() -> TCPath {
+    fn prefix() -> TCPathBuf {
         TableBaseType::prefix()
     }
 }
@@ -191,7 +191,7 @@ impl CollectionInstance for Table {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
@@ -210,7 +210,7 @@ impl CollectionInstance for Table {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {

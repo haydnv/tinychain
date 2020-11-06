@@ -6,7 +6,7 @@ use crate::collection::class::*;
 use crate::collection::CollectionBase;
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{Scalar, ScalarClass, TCPath, Value, ValueId};
+use crate::scalar::{PathSegment, Scalar, ScalarClass, Value, ValueId};
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -100,7 +100,7 @@ impl ChainInstance for NullChain {
         &self,
         _request: &Request,
         _txn: &Txn,
-        _path: &TCPath,
+        _path: &[PathSegment],
         _key: Value,
     ) -> TCResult<State> {
         Err(error::not_implemented("NullChain::get"))
@@ -110,7 +110,7 @@ impl ChainInstance for NullChain {
         &self,
         _request: &Request,
         _txn: &Txn,
-        _path: TCPath,
+        _path: &[PathSegment],
         _key: Value,
         _new_value: State,
     ) -> TCResult<()> {
@@ -121,7 +121,7 @@ impl ChainInstance for NullChain {
         &self,
         _request: &Request,
         _txn: &Txn,
-        _path: TCPath,
+        _path: &[PathSegment],
         _data: S,
     ) -> TCResult<State> {
         Err(error::not_implemented("NullChain::post"))

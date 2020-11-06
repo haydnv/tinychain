@@ -43,8 +43,9 @@ impl Class for TensorBaseType {
 }
 
 impl NativeClass for TensorBaseType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
+
         if suffix.len() == 1 {
             match suffix[0].as_str() {
                 "dense" => Ok(TensorBaseType::Dense),
@@ -52,12 +53,12 @@ impl NativeClass for TensorBaseType {
                 other => Err(error::not_found(other)),
             }
         } else {
-            Err(error::not_found(suffix))
+            Err(error::path_not_found(suffix))
         }
     }
 
-    fn prefix() -> TCPath {
-        CollectionBaseType::prefix().join(label("tensor").into())
+    fn prefix() -> TCPathBuf {
+        CollectionBaseType::prefix().append(label("tensor"))
     }
 }
 
@@ -104,8 +105,8 @@ impl From<TensorBaseType> for Link {
 
         use TensorBaseType::*;
         match tbt {
-            Dense => prefix.join(label("dense").into()).into(),
-            Sparse => prefix.join(label("sparse").into()).into(),
+            Dense => prefix.append(label("dense")).into(),
+            Sparse => prefix.append(label("sparse")).into(),
         }
     }
 }
@@ -144,7 +145,7 @@ impl CollectionInstance for TensorBase {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         TensorView::from(self.clone())
@@ -159,7 +160,7 @@ impl CollectionInstance for TensorBase {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
@@ -253,11 +254,14 @@ impl Class for TensorViewType {
 }
 
 impl NativeClass for TensorViewType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        Err(error::bad_request(crate::class::ERR_PROTECTED, path))
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        Err(error::bad_request(
+            crate::class::ERR_PROTECTED,
+            TCPath::from(path),
+        ))
     }
 
-    fn prefix() -> TCPath {
+    fn prefix() -> TCPathBuf {
         TensorBaseType::prefix()
     }
 }
@@ -268,8 +272,8 @@ impl From<TensorViewType> for Link {
 
         use TensorViewType::*;
         match tvt {
-            Dense => prefix.join(label("dense").into()).into(),
-            Sparse => prefix.join(label("sparse").into()).into(),
+            Dense => prefix.append(label("dense")).into(),
+            Sparse => prefix.append(label("sparse")).into(),
         }
     }
 }
@@ -308,11 +312,11 @@ impl CollectionInstance for TensorView {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         if !path.is_empty() {
-            return Err(error::not_found(path));
+            return Err(error::path_not_found(path));
         }
 
         let bounds: Bounds = selector
@@ -335,12 +339,12 @@ impl CollectionInstance for TensorView {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         if !path.is_empty() {
-            return Err(error::not_found(path));
+            return Err(error::path_not_found(path));
         }
 
         let bounds: Bounds = selector
@@ -475,11 +479,11 @@ impl Class for TensorType {
 }
 
 impl NativeClass for TensorType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
         TensorBaseType::from_path(path).map(TensorType::Base)
     }
 
-    fn prefix() -> TCPath {
+    fn prefix() -> TCPathBuf {
         TensorBaseType::prefix()
     }
 }
@@ -527,7 +531,7 @@ impl CollectionInstance for Tensor {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
@@ -546,7 +550,7 @@ impl CollectionInstance for Tensor {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {

@@ -76,7 +76,7 @@ impl<T: BlockData> File<T> {
         block_id: BlockId,
         data: T,
     ) -> TCResult<Block<'_, T>> {
-        if block_id == TXN_CACHE {
+        if &block_id == TXN_CACHE {
             return Err(error::bad_request("This name is reserved", block_id));
         }
 

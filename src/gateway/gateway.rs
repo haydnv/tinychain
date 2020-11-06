@@ -12,7 +12,7 @@ use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::kernel;
 use crate::request::Request;
-use crate::scalar::{Link, LinkHost, Scalar, TryCastInto, Value, ValueId};
+use crate::scalar::{Link, LinkHost, Scalar, TCPath, TryCastInto, Value, ValueId};
 use crate::transaction::{Txn, TxnServer};
 
 use super::http;
@@ -108,13 +108,13 @@ impl Gateway {
 
         if subject.host().is_some() {
             Err(error::not_implemented("Gateway::get over the network"))
-        } else if subject.path().len() > 1 {
+        } else if subject.path().as_slice().len() > 1 {
             let path = subject.path();
-            if path[0] == "sbin" {
-                kernel::get(txn, path, key).await
-            } else if path[0] == "ext" {
+            if &path[0] == "sbin" {
+                kernel::get(txn, &path[..], key).await
+            } else if &path[0] == "ext" {
                 for adapter in &self.adapters {
-                    if path.starts_with(adapter.path()) {
+                    if path.as_slice().starts_with(adapter.path()) {
                         let host = adapter.host().as_ref().unwrap();
                         let dest: Link = (host.clone(), path.clone()).into();
                         return self
@@ -127,8 +127,8 @@ impl Gateway {
 
                 Err(error::not_found(subject))
             } else if let Some((suffix, cluster)) = self.hosted.get(path) {
-                println!("Gateway::get {}{}: {}", cluster, suffix, key);
-                cluster.get(request, self, txn, suffix, key).await
+                println!("Gateway::get {}{}: {}", cluster, TCPath::from(suffix), key);
+                cluster.get(request, self, txn, &suffix[..], key).await
             } else {
                 Err(error::not_found(path))
             }
@@ -151,14 +151,17 @@ impl Gateway {
             Err(error::not_implemented("Gateway::put over the network"))
         } else {
             let path = subject.path();
-            if path[0] == "sbin" {
+            if &path[0] == "sbin" {
                 return Err(error::method_not_allowed("/sbin is immutable"));
             }
 
             if let Some((suffix, cluster)) = self.hosted.get(path) {
                 println!(
                     "Gateway::put {}{}: {} <- {}",
-                    cluster, suffix, selector, state
+                    cluster,
+                    TCPath::from(suffix),
+                    selector,
+                    state
                 );
 
                 cluster.put(request, self, txn, path, selector, state).await
@@ -178,9 +181,11 @@ impl Gateway {
         Box::pin(async move {
             println!("Gateway::post {}", subject);
 
-            if subject.host().is_none() && !subject.path().is_empty() && subject.path()[0] == "sbin"
+            if subject.host().is_none()
+                && !subject.path().is_empty()
+                && &subject.path()[0] == "sbin"
             {
-                return kernel::post(request, txn, subject.into_path(), data).await;
+                return kernel::post(request, txn, &subject.into_path()[..], data).await;
             }
 
             let data: Vec<(ValueId, Scalar)> =

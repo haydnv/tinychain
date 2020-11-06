@@ -8,7 +8,7 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::scalar::{
-    CastFrom, CastInto, ScalarInstance, TCPath, TryCastFrom, Value, ValueInstance,
+    CastFrom, CastInto, PathSegment, ScalarInstance, TryCastFrom, Value, ValueInstance,
 };
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
@@ -1336,7 +1336,7 @@ impl ScalarInstance for Number {
 impl ValueInstance for Number {
     type Class = NumberType;
 
-    fn get(&self, path: TCPath, key: Value) -> TCResult<Value> {
+    fn get(&self, path: &[PathSegment], key: Value) -> TCResult<Value> {
         if path.len() == 1 {
             match path[0].as_str() {
                 "add" => Ok(Add::add(self.clone(), key.try_into()?).into()),
@@ -1350,7 +1350,7 @@ impl ValueInstance for Number {
                 other => Err(error::not_found(other)),
             }
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(path))
         }
     }
 }

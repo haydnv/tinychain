@@ -14,7 +14,7 @@ use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
-use crate::scalar::{label, Link, Scalar, TCPath, TryCastInto, Value, ValueId};
+use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, TryCastInto, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds, ColumnBound};
@@ -35,20 +35,20 @@ impl Class for TableBaseType {
 }
 
 impl NativeClass for TableBaseType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let path = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
-        if path.is_empty() {
+        if suffix.is_empty() {
             Ok(TableBaseType::Table)
-        } else if path.len() == 1 && path[0].as_str() == "/index" {
+        } else if suffix.len() == 1 && suffix[0].as_str() == "index" {
             Ok(TableBaseType::Index)
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(path))
         }
     }
 
-    fn prefix() -> TCPath {
-        CollectionType::prefix().join(label("table").into())
+    fn prefix() -> TCPathBuf {
+        CollectionType::prefix().append(label("table"))
     }
 }
 
@@ -78,8 +78,8 @@ impl From<TableBaseType> for Link {
 
         use TableBaseType::*;
         match tbt {
-            Index => prefix.join(label("index").into()).into(),
-            ReadOnly => prefix.join(label("ro_index").into()).into(),
+            Index => prefix.append(label("index")).into(),
+            ReadOnly => prefix.append(label("ro_index")).into(),
             Table => prefix.into(),
         }
     }
@@ -122,7 +122,7 @@ impl CollectionInstance for TableBase {
     async fn get(
         &self,
         _txn: Txn,
-        _path: TCPath,
+        _path: &[PathSegment],
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::not_implemented("TableBase::get"))
@@ -139,11 +139,11 @@ impl CollectionInstance for TableBase {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
-        if path == TCPath::default() {
+        if path.is_empty() {
             let key: Vec<Value> = selector.try_into()?;
             match value {
                 CollectionItem::Scalar(value) => match self {
@@ -156,7 +156,7 @@ impl CollectionInstance for TableBase {
                 _ => Err(error::not_implemented("TableBase::put")),
             }
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(path))
         }
     }
 

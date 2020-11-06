@@ -247,15 +247,13 @@ impl Server {
         mut http_request: hyper::Request<Body>,
     ) -> TCResult<TCStream<TCResult<Bytes>>> {
         let uri = http_request.uri().clone();
-        let path: TCPath = uri.path().parse()?;
+        let path: TCPathBuf = uri.path().parse()?;
         let txn = gateway.transaction(&request).await?;
 
         match http_request.method() {
             &Method::GET => {
                 let id = get_param(&mut params, "key")?.unwrap_or_else(|| Value::None);
-                let state = gateway
-                    .get(&request, &txn, &path.clone().into(), id)
-                    .await?;
+                let state = gateway.get(&request, &txn, &path.into(), id).await?;
 
                 match state {
                     State::Scalar(scalar) => {
@@ -280,7 +278,7 @@ impl Server {
                     deserialize_body(http_request.body_mut(), self.request_limit).await?;
 
                 gateway
-                    .put(&request, &txn, &path.clone().into(), id, value.into())
+                    .put(&request, &txn, &path.into(), id, value.into())
                     .await?;
 
                 Ok(Box::pin(stream::empty()))

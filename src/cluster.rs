@@ -46,17 +46,17 @@ impl Mutate for ClusterState {
 
 #[derive(Clone)]
 pub struct Cluster {
-    path: TCPath,
+    path: TCPathBuf,
     data_dir: Arc<Dir>,
     workspace: Arc<Dir>,
     state: TxnLock<ClusterState>,
 }
 
 impl Cluster {
-    pub fn create(path: TCPath, data_dir: Arc<Dir>, workspace: Arc<Dir>) -> TCResult<Cluster> {
+    pub fn create(path: TCPathBuf, data_dir: Arc<Dir>, workspace: Arc<Dir>) -> TCResult<Cluster> {
         let replica = ClusterReplica::default();
         let state = TxnLock::new(
-            format!("State of Cluster at {}", &path),
+            format!("State of Cluster at {}", path),
             ClusterState { replica },
         );
 
@@ -73,7 +73,7 @@ impl Cluster {
         _request: &Request,
         _gateway: &Gateway,
         _txn: &Txn,
-        _path: TCPath,
+        _path: &[PathSegment],
         _key: Value,
     ) -> TCResult<State> {
         Err(error::not_implemented("Cluster::get"))
@@ -84,7 +84,7 @@ impl Cluster {
         _request: &Request,
         _gateway: &Gateway,
         _txn: &Txn,
-        _path: &TCPath,
+        _path: &[PathSegment],
         _key: Value,
         _state: State,
     ) -> TCResult<()> {
@@ -95,7 +95,7 @@ impl Cluster {
         self,
         _request: &Request,
         _txn: &Txn,
-        _path: TCPath,
+        _path: &[PathSegment],
         _data: S,
     ) -> TCResult<State> {
         Err(error::not_implemented("Gateway::post"))
@@ -122,6 +122,6 @@ impl Transact for Cluster {
 
 impl fmt::Display for Cluster {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Cluster at {}", &self.path)
+        write!(f, "Cluster at {}", self.path)
     }
 }

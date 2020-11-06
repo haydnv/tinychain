@@ -17,7 +17,7 @@ use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
 use crate::scalar::{
-    CastFrom, CastInto, Scalar, TCPath, TryCastFrom, TryCastInto, Value, ValueClass, ValueType,
+    CastFrom, CastInto, PathSegment, Scalar, TryCastFrom, TryCastInto, Value, ValueClass, ValueType,
 };
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -234,11 +234,11 @@ impl CollectionInstance for BTreeSlice {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         bounds: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         if !path.is_empty() {
-            return Err(error::not_found(path));
+            return Err(error::path_not_found(path));
         }
 
         let bounds: Selector =
@@ -275,7 +275,7 @@ impl CollectionInstance for BTreeSlice {
     async fn put(
         &self,
         _txn: Txn,
-        _path: TCPath,
+        _path: &[PathSegment],
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
@@ -818,15 +818,16 @@ impl CollectionInstance for BTreeFile {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         bounds: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         if !path.is_empty() {
-            return Err(error::not_found(path));
+            return Err(error::path_not_found(path));
         }
 
         let bounds: Selector =
             bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
+
         validate_selector(&bounds, self.schema())?;
 
         if let Selector::Key(key) = bounds {
@@ -854,12 +855,12 @@ impl CollectionInstance for BTreeFile {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         key: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         if !path.is_empty() {
-            return Err(error::not_found(path));
+            return Err(error::path_not_found(path));
         }
 
         let key = match key {

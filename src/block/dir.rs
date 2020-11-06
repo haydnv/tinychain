@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
+use std::slice;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -162,11 +163,14 @@ impl Dir {
     pub fn get_dir<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        path: &'a TCPath,
+        path: &'a [PathSegment],
     ) -> TCBoxTryFuture<'a, Option<Arc<Dir>>> {
         Box::pin(async move {
             if path.is_empty() {
-                Err(error::bad_request("Cannot get Dir at empty path", path))
+                Err(error::bad_request(
+                    "Cannot get Dir at empty path",
+                    TCPath::from(path),
+                ))
             } else if path.len() == 1 {
                 if let Some(entry) = self.contents.read(txn_id).await?.deref().get(&path[0]) {
                     match entry {
@@ -176,8 +180,8 @@ impl Dir {
                 } else {
                     Ok(None)
                 }
-            } else if let Some(dir) = self.get_dir(txn_id, &path[0].clone().into()).await? {
-                dir.get_dir(txn_id, &path.slice_from(1)).await
+            } else if let Some(dir) = self.get_dir(txn_id, slice::from_ref(&path[0])).await? {
+                dir.get_dir(txn_id, &path[1..]).await
             } else {
                 Ok(None)
             }
@@ -200,11 +204,14 @@ impl Dir {
     pub fn create_dir<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        path: &'a TCPath,
+        path: &'a [PathSegment],
     ) -> TCBoxTryFuture<'a, Arc<Dir>> {
         Box::pin(async move {
             if path.is_empty() {
-                Err(error::bad_request("Not a valid directory name", path))
+                Err(error::bad_request(
+                    "Not a valid directory name",
+                    TCPath::from(path),
+                ))
             } else if path.len() == 1 {
                 let mut contents = self.contents.write(txn_id.clone()).await?;
                 match contents.entry(path[0].clone()) {
@@ -216,14 +223,14 @@ impl Dir {
                     }
                     _ => Err(error::bad_request(
                         "Tried to create a new Dir but there is already an entry at",
-                        path,
+                        TCPath::from(path),
                     )),
                 }
             } else {
                 let dir = self
-                    .get_or_create_dir(&txn_id, &path[0].clone().into())
+                    .get_or_create_dir(&txn_id, slice::from_ref(&path[0]))
                     .await?;
-                dir.create_dir(txn_id, &path.slice_from(1)).await
+                dir.create_dir(txn_id, &path[1..]).await
             }
         })
     }
@@ -254,7 +261,7 @@ impl Dir {
     pub fn get_or_create_dir<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        path: &'a TCPath,
+        path: &'a [PathSegment],
     ) -> TCBoxTryFuture<'a, Arc<Dir>> {
         Box::pin(async move {
             if let Some(dir) = self.get_dir(txn_id, path).await? {

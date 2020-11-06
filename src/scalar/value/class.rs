@@ -4,7 +4,7 @@ use crate::class::{Class, NativeClass, TCResult, TCType};
 use crate::error;
 use crate::scalar::{Scalar, ScalarClass, ScalarInstance, ScalarType, TryCastFrom, TryCastInto};
 
-use super::link::{Link, TCPath};
+use super::link::{Link, PathSegment, TCPathBuf};
 use super::number::NumberType;
 use super::string::{label, StringType};
 use super::Value;
@@ -12,7 +12,7 @@ use super::Value;
 pub trait ValueInstance: ScalarInstance {
     type Class: ValueClass;
 
-    fn get(&self, _path: TCPath, _key: Value) -> TCResult<Value> {
+    fn get(&self, _path: &[PathSegment], _key: Value) -> TCResult<Value> {
         Err(error::method_not_allowed(format!("GET {}", self.class())))
     }
 }
@@ -57,8 +57,8 @@ impl Class for ValueType {
 }
 
 impl NativeClass for ValueType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
         if suffix.is_empty() {
             return Ok(ValueType::Value);
@@ -74,8 +74,8 @@ impl NativeClass for ValueType {
         }
     }
 
-    fn prefix() -> TCPath {
-        TCType::prefix().join(label("value").into())
+    fn prefix() -> TCPathBuf {
+        TCType::prefix().append(label("value"))
     }
 }
 
@@ -112,31 +112,35 @@ impl ValueClass for ValueType {
 
 impl From<ValueType> for Link {
     fn from(vt: ValueType) -> Link {
-        let prefix = ValueType::prefix();
-
         use ValueType::*;
-        match vt {
-            None => prefix.join(label("none").into()).into(),
-            Bytes => prefix.join(label("bytes").into()).into(),
-            Class => prefix.join(label("class").into()).into(),
-            Number(nt) => nt.into(),
-            TCString(st) => st.into(),
-            Tuple => prefix.join(label("tuple").into()).into(),
-            Value => prefix.join(label("value").into()).into(),
-        }
+        let suffix = match vt {
+            None => label("none"),
+            Bytes => label("bytes"),
+            Class => label("class"),
+            Tuple => label("tuple"),
+            Value => label("value"),
+            Number(nt) => {
+                return nt.into();
+            }
+            TCString(st) => {
+                return st.into();
+            }
+        };
+
+        ValueType::prefix().append(suffix).into()
     }
 }
 
 impl TryCastFrom<Link> for ValueType {
     fn can_cast_from(link: &Link) -> bool {
-        match ValueType::from_path(link.path()) {
+        match ValueType::from_path(&link.path()[..]) {
             Ok(_) => true,
             _ => false,
         }
     }
 
     fn opt_cast_from(link: Link) -> Option<ValueType> {
-        ValueType::from_path(link.path()).ok()
+        ValueType::from_path(&link.path()[..]).ok()
     }
 }
 

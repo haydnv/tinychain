@@ -7,7 +7,7 @@ use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionBase, CollectionItem};
 use crate::error;
-use crate::scalar::{label, Link, Scalar, TCPath, Value};
+use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 #[derive(Clone, Eq, PartialEq)]
@@ -18,18 +18,18 @@ impl Class for NullType {
 }
 
 impl NativeClass for NullType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
         if suffix.is_empty() {
             Ok(NullType)
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(path))
         }
     }
 
-    fn prefix() -> TCPath {
-        CollectionType::prefix().join(label("null").into())
+    fn prefix() -> TCPathBuf {
+        CollectionType::prefix().append(label("null"))
     }
 }
 
@@ -76,7 +76,7 @@ impl CollectionInstance for Null {
     async fn get(
         &self,
         _txn: Txn,
-        _path: TCPath,
+        _path: &[PathSegment],
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         Err(error::unsupported("Null Collection has no contents to GET"))
@@ -89,7 +89,7 @@ impl CollectionInstance for Null {
     async fn put(
         &self,
         _txn: Txn,
-        _path: TCPath,
+        _path: &[PathSegment],
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {

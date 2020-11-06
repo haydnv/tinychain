@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::class::{Instance, TCResult, TCStream};
 use crate::error;
-use crate::scalar::{Number, Scalar, TCPath, Value};
+use crate::scalar::{Number, PathSegment, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 pub mod btree;
@@ -51,7 +51,7 @@ impl class::CollectionInstance for CollectionBase {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         let view: CollectionView = self.clone().into();
@@ -70,7 +70,7 @@ impl class::CollectionInstance for CollectionBase {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
@@ -169,7 +169,7 @@ impl class::CollectionInstance for CollectionView {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
@@ -199,7 +199,7 @@ impl class::CollectionInstance for CollectionView {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
@@ -349,7 +349,7 @@ impl class::CollectionInstance for Collection {
     async fn get(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
@@ -368,7 +368,7 @@ impl class::CollectionInstance for Collection {
     async fn put(
         &self,
         txn: Txn,
-        path: TCPath,
+        path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {

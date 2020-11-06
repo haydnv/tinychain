@@ -5,7 +5,9 @@ use std::fmt;
 use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::error::{self, TCResult};
 use crate::request::Request;
-use crate::scalar::{self, label, Link, Scalar, TCPath, TryCastInto, Value, ValueId};
+use crate::scalar::{
+    self, label, Link, PathSegment, Scalar, TCPath, TCPathBuf, TryCastInto, Value, ValueId,
+};
 use crate::transaction::Txn;
 
 use super::{ObjectInstance, ObjectType};
@@ -14,10 +16,10 @@ use super::{ObjectInstance, ObjectType};
 pub struct InstanceClassType;
 
 impl InstanceClassType {
-    pub fn post(path: TCPath, data: scalar::Object) -> TCResult<InstanceClass> {
-        println!("InstanceClassType::post {}", path);
+    pub fn post(path: &[PathSegment], data: scalar::Object) -> TCResult<InstanceClass> {
+        println!("InstanceClassType::post {}", TCPath::from(path));
 
-        if path == Self::prefix() {
+        if path == &Self::prefix()[..] {
             let mut data: HashMap<ValueId, Scalar> = data.into();
 
             let extends = if let Some(extends) = data.remove(&label("extends").into()) {
@@ -44,7 +46,7 @@ impl InstanceClassType {
                 ))
             }
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(path))
         }
     }
 }
@@ -54,16 +56,16 @@ impl Class for InstanceClassType {
 }
 
 impl NativeClass for InstanceClassType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        if path == &Self::prefix() {
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        if path == &Self::prefix()[..] {
             Ok(Self)
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(path))
         }
     }
 
-    fn prefix() -> TCPath {
-        ObjectType::prefix().join(label("class").into())
+    fn prefix() -> TCPathBuf {
+        ObjectType::prefix().append(label("class"))
     }
 }
 
@@ -102,28 +104,28 @@ impl InstanceClass {
         self,
         request: &Request,
         txn: &Txn,
-        path: TCPath,
+        path: &[PathSegment],
         key: Value,
     ) -> TCResult<ObjectInstance> {
         if path.is_empty() {
             ObjectInstance::new(request, txn, self, key).await
         } else {
-            Err(error::not_found(path))
+            Err(error::not_found(TCPath::from(path)))
         }
     }
 
-    pub fn post(path: TCPath, _data: scalar::Object) -> TCResult<ObjectInstance> {
-        println!("InstanceClass::post {}", path);
+    pub fn post(path: &[PathSegment], _data: scalar::Object) -> TCResult<ObjectInstance> {
+        println!("InstanceClass::post {}", TCPath::from(path));
 
         if path.is_empty() {
             Err(error::not_implemented("InstanceClass::post"))
         } else {
-            Err(error::not_found(path))
+            Err(error::not_found(TCPath::from(path)))
         }
     }
 
-    pub fn prefix() -> TCPath {
-        TCType::prefix().join(label("object").into())
+    pub fn prefix() -> TCPathBuf {
+        TCType::prefix().append(label("object"))
     }
 }
 

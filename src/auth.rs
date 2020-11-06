@@ -9,7 +9,7 @@ use signature::{Signature, Signer, Verifier};
 
 use crate::class::TCResult;
 use crate::error;
-use crate::scalar::{Link, TCPath, Value};
+use crate::scalar::{Link, TCPathBuf, Value};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Token {
@@ -17,7 +17,7 @@ pub struct Token {
     iat: u64,
     exp: u64,
     actor_id: Value,
-    scopes: Vec<TCPath>,
+    scopes: Vec<TCPathBuf>,
 }
 
 impl Token {

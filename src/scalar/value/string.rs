@@ -13,7 +13,7 @@ use crate::error;
 use crate::scalar::{Scalar, ScalarClass, ScalarInstance, TryCastFrom};
 
 use super::class::{ValueClass, ValueInstance, ValueType};
-use super::link::{Link, TCPath};
+use super::link::{Link, PathSegment, TCPath, TCPathBuf};
 use super::reference::TCRef;
 use super::Value;
 
@@ -37,11 +37,11 @@ impl Class for StringType {
 }
 
 impl NativeClass for StringType {
-    fn from_path(path: &TCPath) -> TCResult<Self> {
-        let path = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
-        if path.len() == 1 {
-            match path[0].as_str() {
+        if suffix.len() == 1 {
+            match suffix[0].as_str() {
                 "id" => Ok(StringType::Id),
                 "link" => Ok(StringType::Link),
                 "ref" => Ok(StringType::Ref),
@@ -49,12 +49,12 @@ impl NativeClass for StringType {
                 other => Err(error::not_found(other)),
             }
         } else {
-            Err(error::not_found(path))
+            Err(error::not_found(TCPath::from(suffix)))
         }
     }
 
-    fn prefix() -> TCPath {
-        ValueType::prefix().join(label("string").into())
+    fn prefix() -> TCPathBuf {
+        ValueType::prefix().append(label("string"))
     }
 }
 
@@ -66,6 +66,7 @@ impl ScalarClass for StringType {
         let value = Value::try_cast_from(scalar, |s| {
             error::bad_request("Can't cast into Value from", s)
         })?;
+
         TCString::try_cast_from(value, |v| {
             error::bad_request("Can't cast into String from", v)
         })
@@ -82,15 +83,15 @@ impl ValueClass for StringType {
 
 impl From<StringType> for Link {
     fn from(st: StringType) -> Link {
-        let prefix = StringType::prefix();
-
         use StringType::*;
-        match st {
-            Id => prefix.join(label("id").into()).into(),
-            Link => prefix.join(label("link").into()).into(),
-            Ref => prefix.join(label("ref").into()).into(),
-            UString => prefix.join(label("ustring").into()).into(),
-        }
+        let suffix = match st {
+            Id => label("id"),
+            Link => label("link"),
+            Ref => label("ref"),
+            UString => label("ustring"),
+        };
+
+        StringType::prefix().append(suffix).into()
     }
 }
 
@@ -211,9 +212,15 @@ impl PartialEq<Label> for ValueId {
     }
 }
 
-impl PartialEq<&str> for ValueId {
-    fn eq(&self, other: &&str) -> bool {
+impl PartialEq<str> for ValueId {
+    fn eq(&self, other: &str) -> bool {
         &self.id == other
+    }
+}
+
+impl PartialEq<ValueId> for &str {
+    fn eq(&self, other: &ValueId) -> bool {
+        self == &other.id
     }
 }
 
@@ -226,49 +233,12 @@ impl FromStr for ValueId {
     }
 }
 
-impl TryFrom<TCPath> for ValueId {
-    type Error = error::TCError;
-
-    fn try_from(path: TCPath) -> TCResult<ValueId> {
-        ValueId::try_from(&path)
-    }
-}
-
-impl TryFrom<&TCPath> for ValueId {
-    type Error = error::TCError;
-
-    fn try_from(path: &TCPath) -> TCResult<ValueId> {
-        if path.len() == 1 {
-            Ok(path[0].clone())
-        } else {
-            Err(error::bad_request("Expected a ValueId, found", path))
-        }
-    }
-}
-
-impl TryCastFrom<Link> for ValueId {
-    fn can_cast_from(link: &Link) -> bool {
-        if link.host().is_none() {
-            ValueId::can_cast_from(link.path())
-        } else {
-            false
-        }
-    }
-
-    fn opt_cast_from(link: Link) -> Option<ValueId> {
-        if link.host().is_none() {
-            ValueId::opt_cast_from(link.into_path())
-        } else {
-            None
-        }
-    }
-}
-
 impl TryCastFrom<String> for ValueId {
     fn can_cast_from(id: &String) -> bool {
         validate_id(id).is_ok()
     }
 
+    // TODO: move parsing logic here and depend on opt_cast_from in ValueId::from_str
     fn opt_cast_from(id: String) -> Option<ValueId> {
         match id.parse() {
             Ok(value_id) => Some(value_id),
@@ -277,15 +247,15 @@ impl TryCastFrom<String> for ValueId {
     }
 }
 
-impl TryCastFrom<TCPath> for ValueId {
-    fn can_cast_from(path: &TCPath) -> bool {
-        path.len() == 1
+impl TryCastFrom<TCPathBuf> for ValueId {
+    fn can_cast_from(path: &TCPathBuf) -> bool {
+        path.as_slice().len() == 1
     }
 
-    fn opt_cast_from(path: TCPath) -> Option<ValueId> {
-        if path.len() == 1 {
-            let mut value_id = path.into_segments();
-            value_id.pop()
+    fn opt_cast_from(path: TCPathBuf) -> Option<ValueId> {
+        let mut segments = path.into_vec();
+        if segments.len() == 1 {
+            segments.pop()
         } else {
             None
         }
@@ -326,11 +296,11 @@ impl ScalarInstance for TCString {
 impl ValueInstance for TCString {
     type Class = StringType;
 
-    fn get(&self, path: TCPath, key: Value) -> TCResult<Value> {
+    fn get(&self, path: &[PathSegment], key: Value) -> TCResult<Value> {
         if path.is_empty() {
             Ok(self.clone().into())
         } else if path.len() > 1 {
-            Err(error::not_found(path))
+            Err(error::path_not_found(path))
         } else {
             match path[0].as_str() {
                 "eq" => match key {
@@ -355,8 +325,8 @@ impl From<Link> for TCString {
     }
 }
 
-impl From<TCPath> for TCString {
-    fn from(path: TCPath) -> TCString {
+impl From<TCPathBuf> for TCString {
+    fn from(path: TCPathBuf) -> TCString {
         TCString::Link(path.into())
     }
 }
@@ -430,14 +400,14 @@ impl<'a> TryFrom<&'a TCString> for &'a ValueId {
     }
 }
 
-impl TryFrom<TCString> for TCPath {
+impl TryFrom<TCString> for TCPathBuf {
     type Error = error::TCError;
 
-    fn try_from(s: TCString) -> TCResult<TCPath> {
+    fn try_from(s: TCString) -> TCResult<TCPathBuf> {
         match s {
             TCString::Link(l) => {
                 if l.host().is_none() {
-                    Ok(l.path().clone())
+                    Ok(l.into_path())
                 } else {
                     Err(error::bad_request("Expected Path but found Link", l))
                 }
@@ -458,6 +428,24 @@ impl TryFrom<TCString> for TCRef {
     }
 }
 
+impl TryCastFrom<Link> for ValueId {
+    fn can_cast_from(link: &Link) -> bool {
+        if link.host().is_none() {
+            ValueId::can_cast_from(link.path())
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(link: Link) -> Option<ValueId> {
+        if link.host().is_none() {
+            ValueId::opt_cast_from(link.into_path())
+        } else {
+            None
+        }
+    }
+}
+
 impl TryCastFrom<TCString> for Link {
     fn can_cast_from(s: &TCString) -> bool {
         match s {
@@ -468,9 +456,10 @@ impl TryCastFrom<TCString> for Link {
 
     fn opt_cast_from(s: TCString) -> Option<Link> {
         match s {
-            TCString::Id(id) => Some(TCPath::from(id).into()),
+            TCString::Id(id) => Some(TCPathBuf::from(id).into()),
             TCString::Link(link) => Some(link),
-            TCString::Ref(tc_ref) => Some(TCPath::from(tc_ref.into_id()).into()),
+            TCString::Ref(tc_ref) => Some(TCPathBuf::from(tc_ref.into_id()).into()),
+            // TODO: move Link::from_str logic here and rely on this function in Link::from_str
             TCString::UString(s) => Link::from_str(&s).ok(),
         }
     }

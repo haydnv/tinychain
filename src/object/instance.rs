@@ -6,7 +6,7 @@ use futures::TryFutureExt;
 use crate::class::{Instance, State, TCBoxTryFuture};
 use crate::error::{self, TCResult};
 use crate::request::Request;
-use crate::scalar::{self, Op, OpRef, Scalar, TCPath, Value, ValueInstance};
+use crate::scalar::{self, Op, OpRef, PathSegment, Scalar, TCPath, Value, ValueInstance};
 use crate::transaction::Txn;
 
 use super::InstanceClass;
@@ -37,11 +37,11 @@ impl ObjectInstance {
         &'a self,
         request: &'a Request,
         txn: &'a Txn,
-        path: TCPath,
+        path: &'a [PathSegment],
         key: Value,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
-            println!("ObjectInstance::get {}: {}", path, key);
+            println!("ObjectInstance::get {}: {}", TCPath::from(path), key);
 
             let proto = self.class.proto().data();
             match proto.get(&path[0]) {
@@ -53,9 +53,9 @@ impl ObjectInstance {
                             other
                         ))),
                     },
-                    Scalar::Op(_) => Err(error::not_found(path.slice_from(1))),
+                    Scalar::Op(_) => Err(error::path_not_found(&path[1..])),
                     Scalar::Value(value) => value
-                        .get(path.slice_from(1), key)
+                        .get(&path[1..], key)
                         .map(Scalar::Value)
                         .map(State::Scalar),
                     other => Err(error::not_implemented(format!(
@@ -85,13 +85,13 @@ impl ObjectInstance {
         &self,
         _request: &Request,
         _txn: &Txn,
-        path: TCPath,
+        path: &[PathSegment],
         _data: scalar::Object,
     ) -> TCResult<State> {
         if path.is_empty() {
             Err(error::not_implemented("ObjectInstance::post"))
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(path))
         }
     }
 }

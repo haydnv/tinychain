@@ -67,7 +67,7 @@ struct Config {
     pub adapters: Vec<scalar::value::link::Link>,
 
     #[structopt(long = "host")]
-    pub hosted: Vec<scalar::value::link::TCPath>,
+    pub hosted: Vec<scalar::value::link::TCPathBuf>,
 
     #[structopt(long = "peer")]
     pub peers: Vec<scalar::value::link::LinkHost>,
@@ -119,7 +119,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 async fn configure(
-    clusters: Vec<scalar::value::link::TCPath>,
+    clusters: Vec<scalar::value::link::TCPathBuf>,
     data_dir: Arc<block::Dir>,
     workspace: Arc<block::Dir>,
 ) -> error::TCResult<gateway::Hosted> {

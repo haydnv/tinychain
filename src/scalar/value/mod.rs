@@ -61,9 +61,9 @@ impl ScalarInstance for Value {
 impl class::ValueInstance for Value {
     type Class = class::ValueType;
 
-    fn get(&self, path: TCPath, key: Value) -> TCResult<Value> {
+    fn get(&self, path: &[PathSegment], key: Value) -> TCResult<Value> {
         match self {
-            Value::None => Err(error::not_found(path)),
+            Value::None => Err(error::path_not_found(path)),
             Value::Number(number) => number.get(path, key),
             Value::TCString(string) => string.get(path, key),
             other => Err(error::method_not_allowed(format!("GET {}", other.class()))),
@@ -248,10 +248,10 @@ impl TryFrom<Value> for String {
     }
 }
 
-impl TryFrom<Value> for TCPath {
+impl TryFrom<Value> for TCPathBuf {
     type Error = error::TCError;
 
-    fn try_from(v: Value) -> TCResult<TCPath> {
+    fn try_from(v: Value) -> TCResult<TCPathBuf> {
         match v {
             Value::TCString(s) => s.try_into(),
             other => Err(error::bad_request("Expected Path but found", other)),
@@ -429,25 +429,21 @@ impl TryCastFrom<Value> for number::NumberType {
     }
 }
 
-impl TryCastFrom<Value> for TCPath {
+impl TryCastFrom<Value> for TCPathBuf {
     fn can_cast_from(value: &Value) -> bool {
-        if let Value::TCString(TCString::Link(link)) = value {
-            if link.host().is_none() {
-                return true;
-            }
+        if let Value::TCString(tc_string) = value {
+            TCPathBuf::can_cast_from(tc_string)
+        } else {
+            false
         }
-
-        false
     }
 
-    fn opt_cast_from(value: Value) -> Option<TCPath> {
-        if let Value::TCString(TCString::Link(link)) = value {
-            if link.host().is_none() {
-                return Some(link.into_path());
-            }
+    fn opt_cast_from(value: Value) -> Option<TCPathBuf> {
+        if let Value::TCString(tc_string) = value {
+            TCPathBuf::opt_cast_from(tc_string)
+        } else {
+            None
         }
-
-        None
     }
 }
 
@@ -713,8 +709,11 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                     )))
                 }
             } else if let Ok(link) = key.parse::<link::Link>() {
-                if link.host().is_none() && link.path().starts_with(&ValueType::prefix()) {
-                    let dtype = ValueType::from_path(link.path()).map_err(de::Error::custom)?;
+                if link.host().is_none()
+                    && link.path().as_slice().starts_with(&ValueType::prefix()[..])
+                {
+                    let dtype =
+                        ValueType::from_path(&link.path()[..]).map_err(de::Error::custom)?;
                     dtype.try_cast(value).map_err(de::Error::custom)
                 } else {
                     Err(de::Error::custom(format!("Support for {}", link)))
@@ -779,7 +778,10 @@ impl Serialize for Value {
             Value::None => s.serialize_none(),
             Value::Bytes(b) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(Link::from(ValueType::Bytes).path(), &[base64::encode(b)])?;
+                map.serialize_entry(
+                    &Link::from(ValueType::Bytes).into_path(),
+                    &[base64::encode(b)],
+                )?;
                 map.end()
             }
             Value::Class(c) => {
@@ -788,7 +790,7 @@ impl Serialize for Value {
             }
             Value::Number(n) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(Link::from(n.class()).path(), &[n])?;
+                map.serialize_entry(&Link::from(n.class()).into_path(), &[n])?;
                 map.end()
             }
             Value::TCString(tc_string) => tc_string.serialize(s),

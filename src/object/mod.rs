@@ -5,7 +5,7 @@ use futures::TryFutureExt;
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCType};
 use crate::error::{self, TCResult};
 use crate::request::Request;
-use crate::scalar::{self, label, Link, TCPath, Value};
+use crate::scalar::{self, label, Link, PathSegment, TCPath, TCPathBuf, Value};
 use crate::transaction::Txn;
 
 mod class;
@@ -21,15 +21,15 @@ pub enum ObjectType {
 }
 
 impl ObjectType {
-    pub fn post(path: TCPath, data: scalar::Object) -> TCResult<Object> {
-        println!("ObjectType::post {} <- {}", path, data);
+    pub fn post(path: &[PathSegment], data: scalar::Object) -> TCResult<Object> {
+        println!("ObjectType::post {} <- {}", TCPath::from(path), data);
 
-        if path == Self::prefix() {
+        if path == &Self::prefix()[..] {
             InstanceClass::post(path, data).map(Object::Instance)
         } else if path.starts_with(&InstanceClassType::prefix()) {
             InstanceClassType::post(path, data).map(Object::Class)
         } else {
-            Err(error::not_found(path))
+            Err(error::path_not_found(path))
         }
     }
 }
@@ -39,20 +39,20 @@ impl Class for ObjectType {
 }
 
 impl NativeClass for ObjectType {
-    fn from_path(path: &TCPath) -> TCResult<ObjectType> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<ObjectType> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
         if suffix.is_empty() {
             Ok(ObjectType::Instance(InstanceClass::default()))
-        } else if &suffix == "/class" {
+        } else if suffix.len() == 1 && &suffix[0] == "class" {
             Ok(ObjectType::Class(InstanceClassType))
         } else {
-            Err(error::not_found(suffix))
+            Err(error::path_not_found(suffix))
         }
     }
 
-    fn prefix() -> TCPath {
-        TCType::prefix().join(label("object").into())
+    fn prefix() -> TCPathBuf {
+        TCType::prefix().append(label("object"))
     }
 }
 
@@ -85,7 +85,7 @@ impl Object {
         &'a self,
         request: &'a Request,
         txn: &'a Txn,
-        path: TCPath,
+        path: &'a [PathSegment],
         key: Value,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {

@@ -10,10 +10,7 @@ use crate::cluster::Cluster;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
 use crate::object::{Object, ObjectType};
-use crate::scalar::{label, Link, Scalar, ScalarType, TCPath, Value, ValueType};
-
-const ERR_EMPTY_CLASSPATH: &str = "Expected a class path, \
-e.g. /sbin/value/number/int/64 or /sbin/collection/table, but found: ";
+use crate::scalar::{label, Link, PathSegment, Scalar, ScalarType, TCPathBuf, Value, ValueType};
 
 pub const ERR_PROTECTED: &str =
     "You have accessed a protected class. This should not be possible. \
@@ -30,9 +27,9 @@ pub trait Class: Into<Link> + Clone + Eq + fmt::Display {
 }
 
 pub trait NativeClass: Class {
-    fn from_path(path: &TCPath) -> TCResult<Self>;
+    fn from_path(path: &[PathSegment]) -> TCResult<Self>;
 
-    fn prefix() -> TCPath;
+    fn prefix() -> TCPathBuf;
 }
 
 pub trait Instance {
@@ -75,8 +72,8 @@ impl Class for TCType {
 }
 
 impl NativeClass for TCType {
-    fn from_path(path: &TCPath) -> TCResult<TCType> {
-        let suffix = path.from_path(&Self::prefix())?;
+    fn from_path(path: &[PathSegment]) -> TCResult<TCType> {
+        let suffix = Self::prefix().try_suffix(path)?;
 
         match suffix[0].as_str() {
             "chain" => ChainType::from_path(path).map(TCType::Chain),
@@ -87,7 +84,7 @@ impl NativeClass for TCType {
         }
     }
 
-    fn prefix() -> TCPath {
+    fn prefix() -> TCPathBuf {
         label("sbin").into()
     }
 }
@@ -131,7 +128,7 @@ impl From<TCType> for Link {
     fn from(t: TCType) -> Link {
         match t {
             TCType::Chain(ct) => ct.into(),
-            TCType::Cluster => TCType::prefix().join(label("cluster").into()).into(),
+            TCType::Cluster => TCType::prefix().append(label("cluster")).into(),
             TCType::Collection(ct) => ct.into(),
             TCType::Object(ot) => ot.into(),
             TCType::Scalar(st) => st.into(),
