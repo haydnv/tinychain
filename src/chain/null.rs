@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use futures::stream::{self, Stream};
+use log::debug;
 
 use crate::class::*;
 use crate::collection::class::*;
@@ -74,7 +75,7 @@ impl NullChain {
             },
             TCType::Scalar(st) => {
                 let scalar = st.try_cast(schema)?;
-                println!("NullChain::create({}) wraps scalar {}", st, scalar);
+                debug!("NullChain::create({}) wraps scalar {}", st, scalar);
                 scalar.into()
             }
             other => return Err(error::not_implemented(format!("Chain({})", other))),

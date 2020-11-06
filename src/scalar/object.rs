@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use log::debug;
 use serde::ser::{Serialize, Serializer};
 
 use crate::class::{State, TCBoxTryFuture};
@@ -26,20 +27,11 @@ impl Object {
         key: Value,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
-            println!("Object::get {}: {}", TCPath::from(path), key);
+            debug!("Object::get {}: {}", TCPath::from(path), key);
 
             if path.is_empty() {
                 return Ok(State::Scalar(Scalar::Object(self.clone())));
             }
-
-            println!(
-                "data: [{}]",
-                self.0
-                    .keys()
-                    .map(|id| id.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            );
 
             match self.0.get(&path[0]) {
                 Some(scalar) => match scalar {

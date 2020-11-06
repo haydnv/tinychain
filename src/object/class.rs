@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 
+use log::debug;
+
 use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::error::{self, TCResult};
 use crate::request::Request;
@@ -17,7 +19,7 @@ pub struct InstanceClassType;
 
 impl InstanceClassType {
     pub fn post(path: &[PathSegment], data: scalar::Object) -> TCResult<InstanceClass> {
-        println!("InstanceClassType::post {}", TCPath::from(path));
+        debug!("InstanceClassType::post {}", TCPath::from(path));
 
         if path == &Self::prefix()[..] {
             let mut data: HashMap<ValueId, Scalar> = data.into();
@@ -115,7 +117,7 @@ impl InstanceClass {
     }
 
     pub fn post(path: &[PathSegment], _data: scalar::Object) -> TCResult<ObjectInstance> {
-        println!("InstanceClass::post {}", TCPath::from(path));
+        debug!("InstanceClass::post {}", TCPath::from(path));
 
         if path.is_empty() {
             Err(error::not_implemented("InstanceClass::post"))

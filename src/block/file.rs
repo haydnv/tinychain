@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::join_all;
+use log::debug;
 use uuid::Uuid;
 
 use crate::class::TCResult;
@@ -101,7 +102,7 @@ impl<T: BlockData> File<T> {
     ) -> TCResult<Block<'a, T>> {
         let lock = self.lock_block(txn_id, &block_id).await?;
         let block = Block::new(self, block_id, lock);
-        println!("got block {}", &block);
+        debug!("got block {}", &block);
         Ok(block)
     }
 
@@ -177,7 +178,7 @@ impl<T: BlockData> Transact for File<T> {
         self.mutated.commit(txn_id).await;
 
         let cache = self.cache.read().await;
-        println!("File::commit! cache has {} blocks", cache.len());
+        debug!("File::commit! cache has {} blocks", cache.len());
         let mut pending = self.pending.write().await;
         if mutated.is_empty() {
             cache.commit(txn_id).await;
@@ -193,7 +194,7 @@ impl<T: BlockData> Transact for File<T> {
                 let dir_lock = txn_dir.write();
                 async move {
                     let data = lock.read(txn_id).await.unwrap().deref().clone().into();
-                    println!(
+                    debug!(
                         "copying block {} from cache to Txn dir ({} bytes)",
                         &block_id,
                         data.len()
@@ -209,9 +210,9 @@ impl<T: BlockData> Transact for File<T> {
 
         join_all(copy_ops).await;
         cache.commit(txn_id).await;
-        println!("emptied cache");
+        debug!("emptied cache");
         dir.copy_all(txn_dir.write().await.deref_mut()).unwrap();
-        println!("copied all blocks to main Dir");
+        debug!("copied all blocks to main Dir");
     }
 
     async fn rollback(&self, txn_id: &TxnId) {

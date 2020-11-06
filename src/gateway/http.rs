@@ -10,6 +10,7 @@ use futures::future;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, StatusCode, Uri};
+use log::debug;
 use serde::de::DeserializeOwned;
 use tokio::time::timeout;
 
@@ -126,7 +127,7 @@ impl Client {
             .build()
             .map_err(error::internal)?;
 
-        println!("POST to {}", uri);
+        debug!("POST to {}", uri);
 
         let req = hyper::Request::builder()
             .method(Method::POST)
@@ -214,7 +215,7 @@ impl Server {
             .uri()
             .query()
             .map(|v| {
-                println!("param {}", v);
+                debug!("param {}", v);
                 url::form_urlencoded::parse(v.as_bytes())
                     .into_owned()
                     .collect()
@@ -271,7 +272,7 @@ impl Server {
             }
 
             &Method::PUT => {
-                println!("PUT {}", path);
+                debug!("PUT {}", path);
                 let id = get_param(&mut params, "key")?
                     .ok_or_else(|| error::bad_request("Missing URI parameter", "'key'"))?;
                 let value: Scalar =
@@ -285,7 +286,7 @@ impl Server {
             }
 
             &Method::POST => {
-                println!("POST {}", path);
+                debug!("POST {}", path);
                 let request_body: Scalar =
                     deserialize_body(http_request.body_mut(), self.request_limit).await?;
 

@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::Stream;
+use log::debug;
 
 use crate::block::Dir;
 use crate::class::{State, TCResult};
@@ -105,17 +106,17 @@ impl Cluster {
 #[async_trait]
 impl Transact for Cluster {
     async fn commit(&self, txn_id: &TxnId) {
-        println!("Cluster::commit!");
+        debug!("Cluster::commit!");
         self.state.commit(txn_id).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        println!("Cluster::rollback!");
+        debug!("Cluster::rollback!");
         self.state.rollback(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        println!("Cluster::finalize!");
+        debug!("Cluster::finalize!");
         self.state.finalize(txn_id).await
     }
 }

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use futures::TryFutureExt;
+use log::debug;
 
 use crate::class::{Instance, State, TCBoxTryFuture};
 use crate::error::{self, TCResult};
@@ -41,7 +42,7 @@ impl ObjectInstance {
         key: Value,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
-            println!("ObjectInstance::get {}: {}", TCPath::from(path), key);
+            debug!("ObjectInstance::get {}: {}", TCPath::from(path), key);
 
             let proto = self.class.proto().data();
             match proto.get(&path[0]) {

@@ -17,6 +17,7 @@ mod error;
 mod gateway;
 mod kernel;
 mod lock;
+mod logger;
 mod object;
 mod request;
 mod scalar;
@@ -24,6 +25,7 @@ mod stream;
 mod transaction;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+static LOGGER: logger::Logger = logger::Logger;
 
 fn data_size(flag: &str) -> error::TCResult<usize> {
     if flag.is_empty() {
@@ -77,6 +79,9 @@ struct Config {
 
     #[structopt(long = "request_ttl", default_value = "30", parse(try_from_str = duration))]
     pub request_ttl: Duration,
+
+    #[structopt(long = "log_level", default_value = "warn")]
+    pub log_level: log::LevelFilter,
 }
 
 #[tokio::main]
@@ -90,6 +95,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     af::info();
     println!();
+
+    log::set_logger(&LOGGER)
+        .map(|()| log::set_max_level(config.log_level))
+        .map_err(|e| error::internal(format!("Unable to configure logging: {}", e)))?;
 
     let txn_id = transaction::TxnId::new(gateway::Gateway::time());
     let fs_cache_persistent = block::hostfs::mount(config.data_dir);

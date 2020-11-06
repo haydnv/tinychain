@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use log::{debug, info};
+
 use crate::cluster::Cluster;
 use crate::scalar::value::link::{PathSegment, TCPath, TCPathBuf};
 
@@ -24,21 +26,17 @@ impl Hosted {
     }
 
     pub fn get<'a>(&self, path: &'a [PathSegment]) -> Option<(&'a [PathSegment], Cluster)> {
-        println!("checking for hosted cluster {}", TCPath::from(path));
+        debug!("checking for hosted cluster {}", TCPath::from(path));
 
         let mut node = &self.root;
         let mut found_path = &path[0..0];
         for i in 0..path.len() {
-            println!("checking for segment {}", &path[i]);
-
             if let Some(child) = node.children.get(&path[i]) {
                 found_path = &path[..i];
                 node = child;
-                println!("found segment: {}", &path[i]);
             } else if let Some(cluster) = self.hosted.get(found_path) {
                 return Some((&path[found_path.len()..], cluster.clone()));
             } else {
-                println!("couldn't find {}", &path[i]);
                 return None;
             }
         }
@@ -58,7 +56,7 @@ impl Hosted {
             });
         }
 
-        println!("Hosted directory: {}", path);
+        info!("Hosted directory: {}", path);
         self.hosted.insert(path, cluster)
     }
 }

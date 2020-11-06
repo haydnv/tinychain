@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use futures::future::TryFutureExt;
 use futures::stream;
+use log::debug;
 
 use crate::auth::Token;
 use crate::block::Dir;
@@ -104,7 +105,7 @@ impl Gateway {
         subject: &Link,
         key: Value,
     ) -> TCResult<State> {
-        println!("Gateway::get {}", subject);
+        debug!("Gateway::get {}", subject);
 
         if subject.host().is_some() {
             Err(error::not_implemented("Gateway::get over the network"))
@@ -127,7 +128,7 @@ impl Gateway {
 
                 Err(error::not_found(subject))
             } else if let Some((suffix, cluster)) = self.hosted.get(path) {
-                println!("Gateway::get {}{}: {}", cluster, TCPath::from(suffix), key);
+                debug!("Gateway::get {}{}: {}", cluster, TCPath::from(suffix), key);
                 cluster.get(request, self, txn, &suffix[..], key).await
             } else {
                 Err(error::not_found(path))
@@ -145,7 +146,7 @@ impl Gateway {
         selector: Value,
         state: State,
     ) -> TCResult<()> {
-        println!("Gateway::put {}: {} <- {}", subject, selector, state);
+        debug!("Gateway::put {}: {} <- {}", subject, selector, state);
 
         if subject.host().is_some() {
             Err(error::not_implemented("Gateway::put over the network"))
@@ -156,7 +157,7 @@ impl Gateway {
             }
 
             if let Some((suffix, cluster)) = self.hosted.get(path) {
-                println!(
+                debug!(
                     "Gateway::put {}{}: {} <- {}",
                     cluster,
                     TCPath::from(suffix),
@@ -179,7 +180,7 @@ impl Gateway {
         data: Scalar,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
-            println!("Gateway::post {}", subject);
+            debug!("Gateway::post {}", subject);
 
             if subject.host().is_none()
                 && !subject.path().is_empty()

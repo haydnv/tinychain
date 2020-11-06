@@ -2,6 +2,7 @@ use std::convert::TryInto;
 
 use futures::stream;
 use futures::TryFutureExt;
+use log::debug;
 
 use crate::class::{NativeClass, State, TCResult, TCType};
 use crate::collection::class::{CollectionClass, CollectionType};
@@ -17,7 +18,7 @@ pub async fn get(txn: &Txn, path: &[PathSegment], id: Value) -> TCResult<State> 
         return Err(error::unsupported("Cannot access /sbin directly"));
     }
 
-    println!("kernel::get /sbin{}", TCPath::from(suffix));
+    debug!("kernel::get /sbin{}", TCPath::from(suffix));
 
     match suffix[0].as_str() {
         "chain" => Err(error::not_implemented("Instantiate Chain")),
@@ -40,7 +41,7 @@ pub async fn post(
     path: &[PathSegment],
     data: Scalar,
 ) -> TCResult<State> {
-    println!("kernel::post {}", TCPath::from(path));
+    debug!("kernel::post {}", TCPath::from(path));
 
     if &path[0] == "sbin" && &path[1] == "transact" {
         if data.matches::<Vec<(ValueId, Scalar)>>() {

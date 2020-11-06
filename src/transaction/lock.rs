@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::future::{self, Future};
 use futures::task::{Context, Poll, Waker};
+use log::debug;
 
 use crate::class::TCResult;
 use crate::error;
@@ -222,7 +223,7 @@ impl<T: Mutate> TxnLock<T> {
     }
 
     pub fn try_read(&self, txn_id: &TxnId) -> TCResult<Option<TxnLockReadGuard<T>>> {
-        println!("TxnLock::try_read {} at {}", &self.name, txn_id);
+        debug!("TxnLock::try_read {} at {}", &self.name, txn_id);
 
         let lock = &mut self.inner.lock().unwrap();
 
@@ -233,7 +234,7 @@ impl<T: Mutate> TxnLock<T> {
             // We can't keep track of every historical version here.
             Err(error::conflict())
         } else if lock.state.reserved.is_some() && txn_id >= lock.state.reserved.as_ref().unwrap() {
-            println!(
+            debug!(
                 "TxnLock {} is already reserved for writing at {}",
                 &self.name,
                 lock.state.reserved.as_ref().unwrap()
@@ -243,7 +244,7 @@ impl<T: Mutate> TxnLock<T> {
         } else {
             // Otherwise, return a ReadGuard.
             if !lock.value_at.contains_key(txn_id) {
-                println!(
+                debug!(
                     "setting lock value for TxnLock {} at {}",
                     &self.name, txn_id
                 );
@@ -268,7 +269,7 @@ impl<T: Mutate> TxnLock<T> {
     }
 
     pub fn try_write<'a>(&self, txn_id: &'a TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
-        println!("TxnLock::try_write {} at {}", &self.name, txn_id);
+        debug!("TxnLock::try_write {} at {}", &self.name, txn_id);
 
         let lock = &mut self.inner.lock().unwrap();
         let latest_reader = lock.state.readers.keys().max();
@@ -283,7 +284,7 @@ impl<T: Mutate> TxnLock<T> {
             Some(current_txn) if current_txn > txn_id => Err(error::conflict()),
             // If there's a writer in the past, wait for it to complete.
             Some(current_txn) if current_txn < txn_id => {
-                println!(
+                debug!(
                     "TxnLock::write {} at {} blocked on {}",
                     &self.name, txn_id, current_txn
                 );
@@ -291,14 +292,14 @@ impl<T: Mutate> TxnLock<T> {
             }
             // If there's already a writer for the current transaction, wait for it to complete.
             Some(_) => {
-                println!(
+                debug!(
                     "TxnLock::write {} at {} waiting on existing write lock",
                     &self.name, txn_id,
                 );
                 Ok(None)
             }
             _ => {
-                println!("reserving write lock for {} at {}", &self.name, txn_id);
+                debug!("reserving write lock for {} at {}", &self.name, txn_id);
                 // Otherwise, copy the value to be mutated in this transaction.
                 lock.state.reserved = Some(txn_id.clone());
                 if !lock.value_at.contains_key(txn_id) {
@@ -325,10 +326,10 @@ impl<T: Mutate> TxnLock<T> {
 #[async_trait]
 impl<T: Mutate> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
-        println!("TxnLock::commit {} at {}", &self.name, txn_id);
+        debug!("TxnLock::commit {} at {}", &self.name, txn_id);
 
         async {
-            println!(
+            debug!(
                 "TxnLock::commit {} getting read lock at {}...",
                 &self.name, txn_id
             );
@@ -339,11 +340,11 @@ impl<T: Mutate> Transact for TxnLock<T> {
                 assert!(last_commit < txn_id);
             }
 
-            println!("got inner lock for {}: {}", &self.name, txn_id);
+            debug!("got inner lock for {}: {}", &self.name, txn_id);
             lock.state.last_commit = Some(txn_id.clone());
-            println!("freed write lock reservation {} at {}", &self.name, txn_id);
+            debug!("freed write lock reservation {} at {}", &self.name, txn_id);
 
-            println!("updating value of {}", &self.name);
+            debug!("updating value of {}", &self.name);
             let new_value = if let Some(cell) = lock.value_at.get(txn_id) {
                 let pending: &<T as Mutate>::Pending = unsafe { &*cell.get() };
                 Some(pending.clone())
@@ -375,7 +376,7 @@ impl<T: Mutate> Transact for TxnLock<T> {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        println!("TxnLock::finalize {}: {}", &self.name, txn_id);
+        debug!("TxnLock::finalize {}: {}", &self.name, txn_id);
         self.read(txn_id).await.unwrap(); // make sure there's no active write lock
         let lock = &mut self.inner.lock().unwrap();
         lock.value_at.remove(txn_id);

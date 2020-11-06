@@ -1,6 +1,7 @@
 use std::fmt;
 
 use futures::TryFutureExt;
+use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCType};
 use crate::error::{self, TCResult};
@@ -22,7 +23,7 @@ pub enum ObjectType {
 
 impl ObjectType {
     pub fn post(path: &[PathSegment], data: scalar::Object) -> TCResult<Object> {
-        println!("ObjectType::post {} <- {}", TCPath::from(path), data);
+        debug!("ObjectType::post {} <- {}", TCPath::from(path), data);
 
         if path == &Self::prefix()[..] {
             InstanceClass::post(path, data).map(Object::Instance)

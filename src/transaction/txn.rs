@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use futures::future::{self, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
+use log::debug;
 use rand::Rng;
 use serde::de;
 use tokio::sync::mpsc;
@@ -131,7 +132,7 @@ impl Txn {
             .create_dir(id.clone(), slice::from_ref(&context))
             .await?;
 
-        println!("new Txn: {}", id);
+        debug!("new Txn: {}", id);
 
         let inner = Arc::new(Inner {
             id,
@@ -194,13 +195,13 @@ impl Txn {
     ) -> TCResult<State> {
         validate_id(request, &self.inner.id)?;
 
-        println!("Txn::execute");
+        debug!("Txn::execute");
 
         let mut graph: HashMap<ValueId, State> = HashMap::new();
         let mut capture = None;
         while let Some((name, state)) = parameters.next().await {
             let state: State = state.into();
-            println!("pending: {}: {}", name, state);
+            debug!("pending: {}: {}", name, state);
             capture = Some(name.clone());
             graph.insert(name, state);
         }
@@ -220,13 +221,13 @@ impl Txn {
             unvisited.push(capture.clone());
             while let Some(name) = unvisited.pop() {
                 if visited.contains(&name) {
-                    println!("Already visited {}", name);
+                    debug!("Already visited {}", name);
                     continue;
                 } else {
                     visited.insert(name.clone());
                 }
 
-                println!("Txn::execute {} (#{})", &name, visited.len());
+                debug!("Txn::execute {} (#{})", &name, visited.len());
 
                 let state = graph.get(&name).ok_or_else(|| error::not_found(&name))?;
                 if let State::Scalar(scalar) = state {
@@ -237,13 +238,13 @@ impl Txn {
                             continue;
                         }
 
-                        println!("Provider: {}", &op);
+                        debug!("Provider: {}", &op);
                         for dep in requires(op, &graph)? {
                             if dep == name {
                                 return Err(error::bad_request("Dependency cycle", dep));
                             }
 
-                            println!("requires {}", dep);
+                            debug!("requires {}", dep);
                             let dep_state =
                                 graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
 
@@ -254,7 +255,7 @@ impl Txn {
                         }
 
                         if ready {
-                            println!("queueing dep {}: {}", name, state);
+                            debug!("queueing dep {}: {}", name, state);
                             pending.push(
                                 self.resolve(request, graph.clone(), *op.clone())
                                     .map(|r| (name, r)),
@@ -312,7 +313,7 @@ impl Txn {
 
             while let Some((name, result)) = pending.next().await {
                 if let Err(cause) = &result {
-                    println!("Error resolving {}: {}", name, cause);
+                    debug!("Error resolving {}: {}", name, cause);
                 }
 
                 let state = result?;
@@ -320,14 +321,14 @@ impl Txn {
             }
         }
 
-        println!("Txn::execute complete, returning {}...", capture);
+        debug!("Txn::execute complete, returning {}...", capture);
         graph
             .remove(&capture)
             .ok_or_else(|| error::not_found(capture))
     }
 
     pub async fn commit(&self) {
-        println!("commit!");
+        debug!("commit!");
 
         future::join_all(
             self.inner
@@ -343,7 +344,7 @@ impl Txn {
     }
 
     pub async fn rollback(&self) {
-        println!("rollback!");
+        debug!("rollback!");
 
         future::join_all(
             self.inner
@@ -359,7 +360,7 @@ impl Txn {
     }
 
     pub async fn finalize(&self) {
-        println!("finalize!");
+        debug!("finalize!");
 
         self.inner
             .workspace
@@ -390,7 +391,7 @@ impl Txn {
     ) -> TCResult<State> {
         validate_id(request, &self.inner.id)?;
 
-        println!("Txn::resolve {}", provider);
+        debug!("Txn::resolve {}", provider);
 
         match provider {
             Op::Def(op_def) => Err(error::not_implemented(format!("Txn::resolve {}", op_def))),
@@ -428,21 +429,21 @@ impl Txn {
                     .and_then(Scalar::try_from)
                     .and_then(Value::try_from)?;
 
-                println!("Method::Get subject {} {}: {}", subject, path, key);
+                debug!("Method::Get subject {} {}: {}", subject, path, key);
 
                 match subject {
                     State::Chain(chain) => {
-                        println!("Txn::resolve Chain {}: {}", path, key);
+                        debug!("Txn::resolve Chain {}: {}", path, key);
                         chain.get(request, self, &path[..], key.clone()).await
                     }
                     State::Cluster(cluster) => {
-                        println!("Txn::resolve Cluster {}: {}", path, key);
+                        debug!("Txn::resolve Cluster {}: {}", path, key);
                         cluster
                             .get(request, &self.inner.gateway, self, &path[..], key.clone())
                             .await
                     }
                     State::Collection(collection) => {
-                        println!("Txn::resolve Collection {}: {}", path, key);
+                        debug!("Txn::resolve Collection {}: {}", path, key);
                         collection
                             .get(self.clone(), &path[..], key)
                             .await
@@ -485,7 +486,7 @@ impl Txn {
 
                 let value = dereference_state(&provided, &value)?;
 
-                println!(
+                debug!(
                     "Txn::resolve Method::Put {}{}: {} <- {}",
                     subject, path, key, value
                 );
@@ -507,7 +508,7 @@ impl Txn {
                 }
             }
             Op::Ref(OpRef::Post((link, data))) => {
-                println!("Txn::resolve POST {} <- {}", link, data);
+                debug!("Txn::resolve POST {} <- {}", link, data);
 
                 self.inner
                     .gateway

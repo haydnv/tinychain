@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{self, join, try_join, try_join_all, Future, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
+use log::debug;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -440,7 +441,7 @@ impl BTreeFile {
         let (l, r) = range.bisect(&keys, &self.collator);
 
         if node.leaf {
-            println!(
+            debug!(
                 "_slice BTree node with {} keys from {} to {}",
                 keys.len(),
                 l,
@@ -458,7 +459,7 @@ impl BTreeFile {
                     .filter(|k| !k.deleted)
                     .map(|k| k.value.to_vec())
                     .collect();
-                println!("_slice BTree node with {} keys not deleted", keys.len());
+                debug!("_slice BTree node with {} keys not deleted", keys.len());
                 Box::pin(stream::iter(keys))
             }
         } else {
@@ -692,7 +693,7 @@ impl BTreeFile {
                 {
                     let mut node = node.upgrade().await?;
                     node.keys.insert(i, key.into());
-                    println!("BTree node now has {} keys", node.keys.len());
+                    debug!("BTree node now has {} keys", node.keys.len());
                 } else if keys[i].value == key && keys[i].deleted {
                     let mut node = node.upgrade().await?;
                     node.keys[i].deleted = false;
