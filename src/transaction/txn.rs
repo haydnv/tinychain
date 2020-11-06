@@ -41,6 +41,10 @@ impl TxnId {
         }
     }
 
+    pub fn to_path(&self) -> PathSegment {
+        self.to_string().parse().unwrap()
+    }
+
     pub fn zero() -> TxnId {
         TxnId {
             timestamp: 0,
@@ -94,12 +98,6 @@ impl<'de> de::Deserialize<'de> for TxnId {
     }
 }
 
-impl From<TxnId> for PathSegment {
-    fn from(txn_id: TxnId) -> PathSegment {
-        txn_id.to_string().parse().unwrap()
-    }
-}
-
 impl fmt::Display for TxnId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}-{}", self.timestamp, self.nonce)
@@ -127,7 +125,7 @@ impl Txn {
         id: TxnId,
         txn_server: mpsc::UnboundedSender<TxnId>,
     ) -> TCResult<Txn> {
-        let context = PathSegment::from(id.clone());
+        let context = id.to_path();
         let dir = workspace.create_dir(&id, slice::from_ref(&context)).await?;
 
         println!("new Txn: {}", id);

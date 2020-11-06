@@ -122,24 +122,24 @@ impl<T: BlockData> File<T> {
         if let Some(block) = self.cache.read().await.get(block_id) {
             block.read(txn_id).await
         } else if self.listing.read(txn_id).await?.contains(block_id) {
-            let block =
-                if let Some(txn_dir) = self.pending.read().await.get_dir(&txn_id.clone().into())? {
-                    if let Some(block) = txn_dir.read().await.get_block(block_id)? {
-                        block
-                    } else {
-                        self.dir
-                            .read()
-                            .await
-                            .get_block(&block_id)?
-                            .ok_or_else(|| error::internal(ERR_CORRUPT))?
-                    }
+            let txn_dir = self.pending.read().await.get_dir(&txn_id.to_path())?;
+            let block = if let Some(txn_dir) = txn_dir {
+                if let Some(block) = txn_dir.read().await.get_block(block_id)? {
+                    block
                 } else {
                     self.dir
                         .read()
                         .await
                         .get_block(&block_id)?
                         .ok_or_else(|| error::internal(ERR_CORRUPT))?
-                };
+                }
+            } else {
+                self.dir
+                    .read()
+                    .await
+                    .get_block(&block_id)?
+                    .ok_or_else(|| error::internal(ERR_CORRUPT))?
+            };
 
             let block: T = block.read().await.deref().clone().try_into()?;
             let txn_lock = self.cache.write().await.insert(block_id.clone(), block);
@@ -179,13 +179,12 @@ impl<T: BlockData> Transact for File<T> {
         let cache = self.cache.read().await;
         println!("File::commit! cache has {} blocks", cache.len());
         let mut pending = self.pending.write().await;
-        let txn_dir_id: PathSegment = txn_id.clone().into();
         if mutated.is_empty() {
             cache.commit(txn_id).await;
             return;
         }
 
-        let txn_dir = pending.create_or_get_dir(&txn_dir_id).unwrap();
+        let txn_dir = pending.create_or_get_dir(&txn_id.to_path()).unwrap();
 
         let copy_ops = mutated
             .drain(..)
@@ -223,7 +222,7 @@ impl<T: BlockData> Transact for File<T> {
         self.pending
             .write()
             .await
-            .delete_dir(&txn_id.clone().into())
+            .delete_dir(&txn_id.to_path())
             .unwrap();
 
         self.listing.finalize(txn_id).await;
