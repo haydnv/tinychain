@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 
 pub mod lock;
@@ -15,4 +17,19 @@ pub trait Transact: Send + Sync {
     async fn rollback(&self, txn_id: &TxnId);
 
     async fn finalize(&self, txn_id: &TxnId);
+}
+
+#[async_trait]
+impl<T: Transact> Transact for Arc<T> {
+    async fn commit(&self, txn_id: &TxnId) {
+        <T as Transact>::commit(self, txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        <T as Transact>::rollback(self, txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        <T as Transact>::finalize(self, txn_id).await
+    }
 }

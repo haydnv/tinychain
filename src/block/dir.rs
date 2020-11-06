@@ -2,7 +2,6 @@ use std::collections::hash_map::{Entry, HashMap};
 use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::ops::{Deref, DerefMut};
 use std::slice;
 use std::sync::Arc;
 
@@ -104,33 +103,38 @@ impl fmt::Display for DirEntry {
     }
 }
 
-struct DirContents(HashMap<PathSegment, DirEntry>);
+#[derive(Clone, Default)]
+struct DirContents {
+    entries: HashMap<PathSegment, DirEntry>,
+    deleted: HashSet<PathSegment>,
+}
 
 #[async_trait]
 impl Mutate for DirContents {
-    type Pending = HashMap<PathSegment, DirEntry>;
+    type Pending = Self;
 
     fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
-        self.0.clone()
+        DirContents {
+            entries: self.entries.clone(),
+            deleted: HashSet::new(),
+        }
     }
 
     async fn converge(&mut self, other: Self::Pending) {
-        self.0 = other;
+        self.entries = other.entries;
     }
 }
 
 pub struct Dir {
     cache: RwLock<hostfs::Dir>,
-    temporary: bool,
     contents: TxnLock<DirContents>,
 }
 
 impl Dir {
-    pub fn create(cache: RwLock<hostfs::Dir>, temporary: bool) -> Arc<Dir> {
+    pub fn create<I: fmt::Display>(cache: RwLock<hostfs::Dir>, name: I) -> Arc<Dir> {
         Arc::new(Dir {
             cache,
-            temporary,
-            contents: TxnLock::new("Dir".to_string(), DirContents(HashMap::new())),
+            contents: TxnLock::new(name.to_string(), DirContents::default()),
         })
     }
 
@@ -149,14 +153,16 @@ impl Dir {
             .contents
             .read(txn_id)
             .await?
-            .deref()
+            .entries
             .keys()
             .cloned()
             .collect())
     }
 
-    pub async fn delete_file<'a>(&'a self, txn_id: TxnId, name: &'a PathSegment) -> TCResult<()> {
-        self.contents.write(txn_id).await?.deref_mut().remove(&name);
+    pub async fn delete(&self, txn_id: TxnId, name: PathSegment) -> TCResult<()> {
+        let mut contents = self.contents.write(txn_id).await?;
+        contents.entries.remove(&name);
+        contents.deleted.insert(name);
         Ok(())
     }
 
@@ -172,7 +178,7 @@ impl Dir {
                     TCPath::from(path),
                 ))
             } else if path.len() == 1 {
-                if let Some(entry) = self.contents.read(txn_id).await?.deref().get(&path[0]) {
+                if let Some(entry) = self.contents.read(txn_id).await?.entries.get(&path[0]) {
                     match entry {
                         DirEntry::Dir(dir) => Ok(Some(dir.clone())),
                         other => Err(error::bad_request("Not a Dir", other)),
@@ -193,7 +199,7 @@ impl Dir {
         txn_id: &TxnId,
         name: &PathSegment,
     ) -> TCResult<Option<T>> {
-        if let Some(entry) = self.contents.read(txn_id).await?.deref().get(name) {
+        if let Some(entry) = self.contents.read(txn_id).await?.entries.get(name) {
             let entry: T = entry.clone().try_into()?;
             Ok(Some(entry))
         } else {
@@ -203,7 +209,7 @@ impl Dir {
 
     pub fn create_dir<'a>(
         &'a self,
-        txn_id: &'a TxnId,
+        txn_id: TxnId,
         path: &'a [PathSegment],
     ) -> TCBoxTryFuture<'a, Arc<Dir>> {
         Box::pin(async move {
@@ -214,10 +220,10 @@ impl Dir {
                 ))
             } else if path.len() == 1 {
                 let mut contents = self.contents.write(txn_id.clone()).await?;
-                match contents.entry(path[0].clone()) {
+                match contents.entries.entry(path[0].clone()) {
                     Entry::Vacant(entry) => {
                         let fs_dir = self.cache.write().await.create_dir(path[0].clone())?;
-                        let new_dir = Dir::create(fs_dir, self.temporary);
+                        let new_dir = Dir::create(fs_dir, &path[0]);
                         entry.insert(DirEntry::Dir(new_dir.clone()));
                         Ok(new_dir)
                     }
@@ -244,7 +250,7 @@ impl Dir {
         Arc<File<T>>: Into<DirEntry>,
     {
         let mut contents = self.contents.write(txn_id.clone()).await?;
-        match contents.entry(name) {
+        match contents.entries.entry(name) {
             Entry::Vacant(entry) => {
                 let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
                 let file: Arc<File<T>> = File::create(entry.key().as_str(), fs_cache).await?;
@@ -267,13 +273,13 @@ impl Dir {
             if let Some(dir) = self.get_dir(txn_id, path).await? {
                 Ok(dir)
             } else {
-                self.create_dir(txn_id, path).await
+                self.create_dir(txn_id.clone(), path).await
             }
         })
     }
 
     pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
-        Ok(self.contents.read(txn_id).await?.deref().is_empty())
+        Ok(self.contents.read(txn_id).await?.entries.is_empty())
     }
 }
 
@@ -288,6 +294,12 @@ impl Transact for Dir {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.contents.finalize(txn_id).await
+        let contents = self.contents.read(txn_id).await.unwrap();
+        let mut cache = self.cache.write().await;
+        for name in contents.deleted.iter() {
+            cache.delete(name).unwrap();
+        }
+
+        self.contents.finalize(txn_id).await;
     }
 }

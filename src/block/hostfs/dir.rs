@@ -108,6 +108,11 @@ impl Dir {
         }
     }
 
+    pub fn delete(&mut self, name: &PathSegment) -> TCResult<()> {
+        self.contents.remove(name);
+        Ok(())
+    }
+
     pub fn delete_block(&mut self, name: &PathSegment) -> TCResult<RwLock<Bytes>> {
         match self.contents.remove(name) {
             None => Err(error::not_found(name)),

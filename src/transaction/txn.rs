@@ -106,6 +106,7 @@ impl fmt::Display for TxnId {
 
 struct Inner {
     id: TxnId,
+    workspace: Arc<Dir>,
     dir: Arc<Dir>,
     context: ValueId,
     gateway: Arc<Gateway>,
@@ -126,12 +127,15 @@ impl Txn {
         txn_server: mpsc::UnboundedSender<TxnId>,
     ) -> TCResult<Txn> {
         let context = id.to_path();
-        let dir = workspace.create_dir(&id, slice::from_ref(&context)).await?;
+        let dir = workspace
+            .create_dir(id.clone(), slice::from_ref(&context))
+            .await?;
 
         println!("new Txn: {}", id);
 
         let inner = Arc::new(Inner {
             id,
+            workspace,
             dir,
             context,
             gateway,
@@ -161,6 +165,7 @@ impl Txn {
 
         let subcontext = Arc::new(Inner {
             id: self.inner.id.clone(),
+            workspace: self.inner.dir.clone(),
             dir,
             context: subcontext,
             gateway: self.inner.gateway.clone(),
@@ -356,6 +361,12 @@ impl Txn {
     pub async fn finalize(&self) {
         println!("finalize!");
 
+        self.inner
+            .workspace
+            .delete(self.id().clone(), self.id().to_path())
+            .await
+            .unwrap();
+
         future::join_all(
             self.inner
                 .mutated
@@ -363,10 +374,12 @@ impl Txn {
                 .await
                 .drain(..)
                 .map(|s| async move {
-                    s.finalize(&self.inner.id).await;
+                    s.finalize(self.id()).await;
                 }),
         )
         .await;
+
+        self.inner.workspace.finalize(self.id()).await;
     }
 
     pub async fn resolve(
