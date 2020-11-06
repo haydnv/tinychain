@@ -1,15 +1,16 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::hash::Hash;
 use std::iter;
 use std::slice;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::future::{self, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::de;
 use tokio::sync::mpsc;
 
 use crate::block::{BlockData, Dir, DirEntry, File};
@@ -24,7 +25,9 @@ use crate::scalar::*;
 
 use super::Transact;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
+const INVALID_ID: &str = "Invalid transaction ID";
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TxnId {
     timestamp: u128, // nanoseconds since Unix epoch
     nonce: u16,
@@ -46,6 +49,25 @@ impl TxnId {
     }
 }
 
+impl FromStr for TxnId {
+    type Err = error::TCError;
+
+    fn from_str(s: &str) -> TCResult<TxnId> {
+        let parts: Vec<&str> = s.split('-').collect();
+        if parts.len() == 2 {
+            let timestamp = parts[0]
+                .parse()
+                .map_err(|e| error::bad_request(INVALID_ID, e))?;
+            let nonce = parts[1]
+                .parse()
+                .map_err(|e| error::bad_request(INVALID_ID, e))?;
+            Ok(TxnId { timestamp, nonce })
+        } else {
+            Err(error::bad_request(INVALID_ID, s))
+        }
+    }
+}
+
 impl Ord for TxnId {
     fn cmp(&self, other: &TxnId) -> std::cmp::Ordering {
         if self.timestamp == other.timestamp {
@@ -62,15 +84,19 @@ impl PartialOrd for TxnId {
     }
 }
 
-impl Into<PathSegment> for TxnId {
-    fn into(self) -> PathSegment {
-        self.to_string().parse().unwrap()
+impl<'de> de::Deserialize<'de> for TxnId {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let s = String::deserialize(d)?;
+        Self::from_str(&s).map_err(de::Error::custom)
     }
 }
 
-impl Into<String> for TxnId {
-    fn into(self) -> String {
-        format!("{}-{}", self.timestamp, self.nonce)
+impl From<TxnId> for PathSegment {
+    fn from(txn_id: TxnId) -> PathSegment {
+        txn_id.to_string().parse().unwrap()
     }
 }
 
@@ -101,7 +127,7 @@ impl Txn {
         id: TxnId,
         txn_server: mpsc::UnboundedSender<TxnId>,
     ) -> TCResult<Txn> {
-        let context: PathSegment = id.clone().try_into()?;
+        let context = PathSegment::from(id.clone());
         let dir = workspace.create_dir(&id, slice::from_ref(&context)).await?;
 
         println!("new Txn: {}", id);
