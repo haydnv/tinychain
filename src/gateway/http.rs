@@ -16,6 +16,7 @@ use tokio::time::timeout;
 
 use crate::auth::Token;
 use crate::class::{State, TCResult, TCStream};
+use crate::collection::class::CollectionInstance;
 use crate::error;
 use crate::request::Request;
 use crate::scalar::value::link::*;
@@ -255,20 +256,7 @@ impl Server {
             &Method::GET => {
                 let id = get_param(&mut params, "key")?.unwrap_or_else(|| Value::None);
                 let state = gateway.get(&request, &txn, &path.into(), id).await?;
-
-                match state {
-                    State::Scalar(scalar) => {
-                        let scalar = serde_json::to_string_pretty(&scalar)
-                            .map(|json| format!("{}\r\n", json))
-                            .map(Bytes::from)
-                            .map_err(error::TCError::from);
-
-                        Ok(Box::pin(stream::once(future::ready(scalar))))
-                    }
-                    _other => Ok(Box::pin(stream::once(future::ready(Err(
-                        error::not_implemented("serializing a State over the network"),
-                    ))))),
-                }
+                to_stream(state, txn).await
             }
 
             &Method::PUT => {
@@ -290,28 +278,13 @@ impl Server {
                 let request_body: Scalar =
                     deserialize_body(http_request.body_mut(), self.request_limit).await?;
 
-                let response = gateway
+                let state = gateway
                     .post(&request, &txn, path.into(), request_body)
                     .await?;
 
-                match response {
-                    State::Scalar(scalar) => {
-                        let response = serde_json::to_string_pretty(&scalar)
-                            .map(|s| format!("{}\r\n", s))
-                            .map(Bytes::from)
-                            .map_err(error::TCError::from)?;
-
-                        let response: TCStream<TCResult<Bytes>> =
-                            Box::pin(stream::once(future::ready(Ok(response))));
-
-                        Ok(response)
-                    }
-                    other => Err(error::not_implemented(format!(
-                        "Streaming serialization for {}",
-                        other
-                    ))),
-                }
+                to_stream(state, txn).await
             }
+
             other => Err(error::method_not_allowed(format!(
                 "Tinychain does not support {}",
                 other
@@ -344,31 +317,30 @@ async fn deserialize_body<D: DeserializeOwned>(
     })
 }
 
-fn response_value_stream<S: Stream<Item = Value> + Send + Unpin + 'static>(
-    s: S,
-) -> TCStream<TCResult<Bytes>> {
-    let json = JsonListStream::from(s);
-    Box::pin(json.map_ok(Bytes::from).chain(stream_delimiter(b"\r\n")))
-}
+async fn to_stream(state: State, txn: Txn) -> TCResult<TCStream<TCResult<Bytes>>> {
+    match state {
+        State::Collection(collection) => {
+            let stream = collection.to_stream(txn).await?;
+            let json = JsonListStream::from(stream);
+            let response = Box::pin(json.map_ok(Bytes::from).chain(stream_delimiter(b"\r\n")));
+            Ok(response)
+        }
+        State::Scalar(scalar) => {
+            let response = serde_json::to_string_pretty(&scalar)
+                .map(|s| format!("{}\r\n", s))
+                .map(Bytes::from)
+                .map_err(error::TCError::from)?;
 
-fn response_list<S: Stream<Item = Value> + Send + Unpin + 'static>(
-    data: Vec<S>,
-) -> TCResult<TCStream<TCResult<Bytes>>> {
-    let start = stream_delimiter(b"[");
-    let end = stream_delimiter(b"]");
+            let response: TCStream<TCResult<Bytes>> =
+                Box::pin(stream::once(future::ready(Ok(response))));
 
-    let len = data.len();
-    let items = stream::iter(data.into_iter().enumerate())
-        .map(move |(i, items)| {
-            if i == len - 1 {
-                response_value_stream(items)
-            } else {
-                Box::pin(response_value_stream(items).chain(stream_delimiter(b", ")))
-            }
-        })
-        .flatten();
-
-    Ok(Box::pin(start.chain(items).chain(end)))
+            Ok(response)
+        }
+        other => Err(error::not_implemented(format!(
+            "Streaming serialization for {}",
+            other
+        ))),
+    }
 }
 
 fn stream_delimiter(token: &[u8]) -> TCStream<TCResult<Bytes>> {
