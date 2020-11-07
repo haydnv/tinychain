@@ -709,12 +709,31 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                     )))
                 }
             } else if let Ok(link) = key.parse::<link::Link>() {
-                if link.host().is_none()
-                    && link.path().as_slice().starts_with(&ValueType::prefix()[..])
-                {
-                    let dtype =
-                        ValueType::from_path(&link.path()[..]).map_err(de::Error::custom)?;
-                    dtype.try_cast(value).map_err(de::Error::custom)
+                let path = link.path();
+
+                if value == Value::None || value == Value::Tuple(vec![]) {
+                    Ok(Value::TCString(link.into()))
+                } else if link.host().is_none() && path[..].starts_with(&ValueType::prefix()[..]) {
+                    if let Value::Tuple(mut tuple) = value {
+                        if path.len() == 3 && &path[2] == "tuple" {
+                            Ok(Value::Tuple(tuple))
+                        } else {
+                            let dtype = ValueType::from_path(&link.path()[..])
+                                .map_err(de::Error::custom)?;
+
+                            if tuple.len() == 1 {
+                                let key = tuple.pop().unwrap();
+                                dtype.try_cast(key).map_err(de::Error::custom)
+                            } else {
+                                dtype.try_cast(tuple).map_err(de::Error::custom)
+                            }
+                        }
+                    } else {
+                        let dtype =
+                            ValueType::from_path(&link.path()[..]).map_err(de::Error::custom)?;
+
+                        dtype.try_cast(value).map_err(de::Error::custom)
+                    }
                 } else {
                     Err(de::Error::custom(format!("Support for {}", link)))
                 }

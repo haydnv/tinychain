@@ -8,7 +8,6 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::class::*;
 use crate::error;
-use crate::object::ObjectType;
 
 pub mod object;
 pub mod op;
@@ -246,6 +245,15 @@ impl<T1: Into<Scalar>, T2: Into<Scalar>> From<(T1, T2)> for Scalar {
 impl<T: Into<Scalar>> From<Vec<T>> for Scalar {
     fn from(mut v: Vec<T>) -> Scalar {
         Scalar::Tuple(v.drain(..).map(|i| i.into()).collect())
+    }
+}
+
+impl PartialEq<Value> for Scalar {
+    fn eq(&self, that: &Value) -> bool {
+        match self {
+            Self::Value(this) => this == that,
+            _ => false,
+        }
     }
 }
 
@@ -642,17 +650,63 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     Ok(Scalar::Op(Box::new(Op::Method(method))))
                 };
             } else if let Ok(link) = key.parse::<link::Link>() {
-                return if link.path()[..].starts_with(&ObjectType::prefix()[..]) {
-                    let data: object::Object = data.try_into().map_err(de::Error::custom)?;
-                    Ok(Scalar::Op(Box::new(Op::Ref(OpRef::Post((link, data))))))
-                } else if link.path()[..].starts_with(&TCType::prefix()[..]) {
-                    let dtype =
-                        ScalarType::from_path(&link.path()[..]).map_err(de::Error::custom)?;
-                    dtype.try_cast(data).map_err(de::Error::custom)
-                } else if data == Scalar::Value(Value::None)
-                    || data == Scalar::Value(Value::Tuple(vec![]))
+                if data == Value::None
+                    || data == Value::Tuple(vec![])
+                    || data == Scalar::Tuple(vec![])
                 {
-                    Ok(Scalar::Value(Value::TCString(link.into())))
+                    return Ok(Scalar::Value(Value::TCString(link.into())));
+                }
+
+                let path = link.path();
+                if path.len() > 1 && &path[0] == "sbin" {
+                    match path[1].as_str() {
+                        "value" | "op" | "tuple" | "object" => match data {
+                            Scalar::Value(data) => match data {
+                                Value::Tuple(tuple) if &path[1] == "tuple" => {
+                                    return Ok(Scalar::Value(Value::Tuple(tuple)));
+                                }
+                                Value::Tuple(mut tuple) if tuple.len() == 1 => {
+                                    let key = tuple.pop().unwrap();
+                                    let dtype = ValueType::from_path(&link.path()[..])
+                                        .map_err(de::Error::custom)?;
+
+                                    return dtype
+                                        .try_cast(key)
+                                        .map(Scalar::Value)
+                                        .map_err(de::Error::custom);
+                                }
+                                key => {
+                                    let dtype = ValueType::from_path(&link.path()[..])
+                                        .map_err(de::Error::custom)?;
+
+                                    return dtype
+                                        .try_cast(key)
+                                        .map(Scalar::Value)
+                                        .map_err(de::Error::custom);
+                                }
+                            },
+                            Scalar::Op(_) => {
+                                return Err(de::Error::custom("{<link>: <op>} does not make sense"))
+                            }
+                            Scalar::Object(object) if path.len() == 2 && &path[1] == "object" => {
+                                return Ok(Scalar::Object(object));
+                            }
+                            Scalar::Object(object) => {
+                                return Ok(Scalar::Op(Box::new(Op::Ref(OpRef::Post((
+                                    link, object,
+                                ))))));
+                            }
+                            other => {
+                                let dtype = ScalarType::from_path(&link.path()[..])
+                                    .map_err(de::Error::custom)?;
+                                return dtype.try_cast(other).map_err(de::Error::custom);
+                            }
+                        },
+                        _ if data == Value::None || data == Value::Tuple(vec![]) => {
+                            return Ok(Scalar::Value(Value::TCString(link.into())));
+                        }
+                        _ => {}
+                    }
                 } else {
                     let op_ref = if data.matches::<(Value,)>() {
                         OpRef::Get((link, data.opt_cast_into().unwrap()))
@@ -665,7 +719,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                         return Err(de::Error::custom(format!("Invalid Op format: {}", data)));
                     };
 
-                    Ok(Scalar::Op(Box::new(Op::Ref(op_ref))))
+                    return Ok(Scalar::Op(Box::new(Op::Ref(op_ref))));
                 };
             }
         }
