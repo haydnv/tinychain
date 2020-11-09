@@ -610,7 +610,7 @@ fn is_resolved(state: &State) -> bool {
 
 fn is_resolved_scalar(scalar: &Scalar) -> bool {
     match scalar {
-        Scalar::Object(object) => object.data().values().all(is_resolved_scalar),
+        Scalar::Object(object) => object.values().all(is_resolved_scalar),
         Scalar::Op(op) => match **op {
             Op::Ref(_) => false,
             Op::Method(_) => false,
@@ -652,7 +652,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
             }
             Method::Post((subject, _path), params) => {
                 deps.insert(subject.value_id().clone());
-                deps.extend(params.data().iter().filter_map(|(name, dep)| {
+                deps.extend(params.iter().filter_map(|(name, dep)| {
                     if is_resolved_scalar(dep) {
                         None
                     } else {
@@ -692,7 +692,7 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
                 deps.extend(scalar_requires(value, txn_state)?);
             }
             OpRef::Post((_path, params)) => {
-                for provider in params.data().values() {
+                for provider in params.values() {
                     deps.extend(scalar_requires(provider, txn_state)?);
                 }
             }
@@ -709,7 +709,7 @@ fn scalar_requires(
     match scalar {
         Scalar::Object(object) => {
             let mut required = HashSet::new();
-            for s in object.data().values() {
+            for s in object.values() {
                 required.extend(scalar_requires(s, txn_state)?);
             }
             Ok(required)

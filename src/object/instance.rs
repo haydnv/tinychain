@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Deref;
 
 use futures::TryFutureExt;
 use log::debug;
@@ -44,7 +45,7 @@ impl ObjectInstance {
         Box::pin(async move {
             debug!("ObjectInstance::get {}: {}", TCPath::from(path), key);
 
-            let proto = self.class.proto().data();
+            let proto = self.class.proto().deref();
             match proto.get(&path[0]) {
                 Some(scalar) => match scalar {
                     Scalar::Op(op) if path.len() == 1 => match &**op {

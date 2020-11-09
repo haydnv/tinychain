@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Deref;
 
 use log::debug;
 use serde::ser::{Serialize, Serializer};
@@ -15,10 +16,6 @@ use super::{Op, PathSegment, Scalar, TCPath, Value, ValueId, ValueInstance};
 pub struct Object(HashMap<ValueId, Scalar>);
 
 impl Object {
-    pub fn data(&'_ self) -> &'_ HashMap<ValueId, Scalar> {
-        &self.0
-    }
-
     pub fn get<'a>(
         &'a self,
         request: &'a Request,
@@ -66,6 +63,14 @@ impl Object {
         _value: State,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move { Err(error::not_implemented("Object::put")) })
+    }
+}
+
+impl Deref for Object {
+    type Target = HashMap<ValueId, Scalar>;
+
+    fn deref(&'_ self) -> &'_ HashMap<ValueId, Scalar> {
+        &self.0
     }
 }
 
