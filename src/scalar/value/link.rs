@@ -14,6 +14,8 @@ use serde::ser::{SerializeMap, Serializer};
 use crate::error::{self, TCResult};
 use crate::scalar::{Label, TCString, TryCastFrom, Value, ValueId};
 
+const EMPTY_SLICE: &[usize] = &[];
+
 pub type PathSegment = ValueId;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
@@ -419,8 +421,7 @@ impl<'de> serde::Deserialize<'de> for Link {
 impl serde::Serialize for Link {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut map = s.serialize_map(Some(1))?;
-        let data: HashMap<ValueId, Value> = HashMap::new();
-        map.serialize_entry(&self.to_string(), &data)?;
+        map.serialize_entry(&self.to_string(), &EMPTY_SLICE)?;
         map.end()
     }
 }

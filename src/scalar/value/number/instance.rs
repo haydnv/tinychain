@@ -362,12 +362,12 @@ impl Serialize for Complex {
         match self {
             Complex::C32(c) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(&Link::from(self.class()).to_string(), &[[c.re, c.im]])?;
+                map.serialize_entry(&Link::from(self.class()).to_string(), &[c.re, c.im])?;
                 map.end()
             }
             Complex::C64(c) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(&Link::from(self.class()).to_string(), &[[c.re, c.im]])?;
+                map.serialize_entry(&Link::from(self.class()).to_string(), &[c.re, c.im])?;
                 map.end()
             }
         }

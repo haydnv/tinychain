@@ -769,7 +769,7 @@ impl Serialize for Value {
                 let mut map = s.serialize_map(Some(1))?;
                 map.serialize_entry(
                     &Link::from(ValueType::Bytes).into_path(),
-                    &[base64::encode(b)],
+                    &base64::encode(b),
                 )?;
                 map.end()
             }
@@ -779,7 +779,7 @@ impl Serialize for Value {
             }
             Value::Number(n) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(&Link::from(n.class()).into_path(), &[n])?;
+                map.serialize_entry(&Link::from(n.class()).into_path(), n)?;
                 map.end()
             }
             Value::TCString(tc_string) => tc_string.serialize(s),
