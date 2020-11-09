@@ -615,19 +615,22 @@ impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>, T3: TryCastFrom<Value>> Try
 pub struct ValueVisitor;
 
 impl ValueVisitor {
-    fn visit_float<F: Into<number::instance::Float>>(&self, f: F) -> TCResult<Value> {
+    fn visit_float<F: Into<number::instance::Float>, E: de::Error>(
+        &self,
+        f: F,
+    ) -> Result<Value, E> {
         self.visit_number(f.into())
     }
 
-    fn visit_int<I: Into<number::instance::Int>>(&self, i: I) -> TCResult<Value> {
+    fn visit_int<I: Into<number::instance::Int>, E: de::Error>(&self, i: I) -> Result<Value, E> {
         self.visit_number(i.into())
     }
 
-    fn visit_uint<U: Into<number::instance::UInt>>(&self, u: U) -> TCResult<Value> {
+    fn visit_uint<U: Into<number::instance::UInt>, E: de::Error>(&self, u: U) -> Result<Value, E> {
         self.visit_number(u.into())
     }
 
-    fn visit_number<N: Into<Number>>(&self, n: N) -> TCResult<Value> {
+    fn visit_number<N: Into<Number>, E: de::Error>(&self, n: N) -> Result<Value, E> {
         Ok(Value::Number(n.into()))
     }
 }
@@ -639,73 +642,43 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         f.write_str("a Tinychain Value, e.g. \"foo\" or 123 or {\"$object_ref: [\"slice_id\", \"$state\"]\"}")
     }
 
-    fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_float(value).map_err(de::Error::custom)
+    fn visit_f32<E: de::Error>(self, value: f32) -> Result<Self::Value, E> {
+        self.visit_float(value)
     }
 
-    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_float(value).map_err(de::Error::custom)
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        self.visit_float(value)
     }
 
-    fn visit_i16<E>(self, value: i16) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_int(value).map_err(de::Error::custom)
+    fn visit_i16<E: de::Error>(self, value: i16) -> Result<Self::Value, E> {
+        self.visit_int(value)
     }
 
-    fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_int(value).map_err(de::Error::custom)
+    fn visit_i32<E: de::Error>(self, value: i32) -> Result<Self::Value, E> {
+        self.visit_int(value)
     }
 
-    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_int(value).map_err(de::Error::custom)
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        self.visit_int(value)
     }
 
-    fn visit_u8<E>(self, value: u8) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_uint(value).map_err(de::Error::custom)
+    fn visit_u8<E: de::Error>(self, value: u8) -> Result<Self::Value, E> {
+        self.visit_uint(value)
     }
 
-    fn visit_u16<E>(self, value: u16) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_uint(value).map_err(de::Error::custom)
+    fn visit_u16<E: de::Error>(self, value: u16) -> Result<Self::Value, E> {
+        self.visit_uint(value)
     }
 
-    fn visit_u32<E>(self, value: u32) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_uint(value).map_err(de::Error::custom)
+    fn visit_u32<E: de::Error>(self, value: u32) -> Result<Self::Value, E> {
+        self.visit_uint(value)
     }
 
-    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_uint(value).map_err(de::Error::custom)
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        self.visit_uint(value)
     }
 
-    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
-    where
-        M: de::MapAccess<'de>,
-    {
+    fn visit_map<M: de::MapAccess<'de>>(self, mut access: M) -> Result<Self::Value, M::Error> {
         if let Some(key) = access.next_key::<&str>()? {
             let value: Value = access.next_value()?;
 
@@ -759,10 +732,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         }
     }
 
-    fn visit_seq<L>(self, mut access: L) -> Result<Self::Value, L::Error>
-    where
-        L: de::SeqAccess<'de>,
-    {
+    fn visit_seq<L: de::SeqAccess<'de>>(self, mut access: L) -> Result<Self::Value, L::Error> {
         let mut items: Vec<Value> = if let Some(size) = access.size_hint() {
             Vec::with_capacity(size)
         } else {
@@ -776,35 +746,23 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         Ok(Value::Tuple(items))
     }
 
-    fn visit_none<E>(self) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
         Ok(Value::None)
     }
 
-    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
+    fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
         Ok(Value::TCString(TCString::UString(s.to_string())))
     }
 }
 
 impl<'de> de::Deserialize<'de> for Value {
-    fn deserialize<D>(d: D) -> Result<Self, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
+    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         d.deserialize_any(ValueVisitor)
     }
 }
 
 impl Serialize for Value {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             Value::None => s.serialize_none(),
             Value::Bytes(b) => {

@@ -156,10 +156,7 @@ impl From<u64> for ValueId {
 }
 
 impl<'de> de::Deserialize<'de> for ValueId {
-    fn deserialize<D>(d: D) -> Result<Self, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
+    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         d.deserialize_any(ValueIdVisitor)
     }
 }
@@ -173,13 +170,11 @@ impl<'de> de::Visitor<'de> for ValueIdVisitor {
         f.write_str("a Tinychain ValueId like {\"foo\": []}")
     }
 
-    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
-    where
-        M: de::MapAccess<'de>,
-    {
+    fn visit_map<M: de::MapAccess<'de>>(self, mut access: M) -> Result<Self::Value, M::Error> {
         if let Some(key) = access.next_key::<&str>()? {
             let value: Vec<super::Value> = access.next_value()?;
             if value.is_empty() {
+                // TODO: call parsing logic a different way
                 ValueId::from_str(key).map_err(de::Error::custom)
             } else {
                 Err(de::Error::custom("Expected ValueId but found OpRef"))
@@ -189,19 +184,14 @@ impl<'de> de::Visitor<'de> for ValueIdVisitor {
         }
     }
 
-    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
+    fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+        // TODO: call parsing logic a different way
         ValueId::from_str(s).map_err(de::Error::custom)
     }
 }
 
 impl Serialize for ValueId {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&self.id)
     }
 }
@@ -496,10 +486,7 @@ impl TryCastFrom<TCString> for TCRef {
 }
 
 impl Serialize for TCString {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         if let Self::UString(ustring) = self {
             s.serialize_str(ustring.as_str())
         } else {

@@ -79,10 +79,7 @@ impl IntoIterator for Object {
 }
 
 impl Serialize for Object {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         self.0.serialize(s)
     }
 }

@@ -8,7 +8,7 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::scalar::{
-    CastFrom, CastInto, PathSegment, ScalarInstance, TryCastFrom, Value, ValueInstance,
+    CastFrom, CastInto, Link, PathSegment, ScalarInstance, TryCastFrom, Value, ValueInstance,
 };
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
@@ -141,10 +141,7 @@ impl fmt::Display for Boolean {
 }
 
 impl Serialize for Boolean {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_bool(self.0)
     }
 }
@@ -385,19 +382,16 @@ impl TryFrom<Complex> for num::Complex<f32> {
 }
 
 impl Serialize for Complex {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             Complex::C32(c) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("/sbin/value/number/complex/32", &[[c.re, c.im]])?;
+                map.serialize_entry(&Link::from(self.class()).to_string(), &[[c.re, c.im]])?;
                 map.end()
             }
             Complex::C64(c) => {
                 let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("/sbin/value/number/complex/64", &[[c.re, c.im]])?;
+                map.serialize_entry(&Link::from(self.class()).to_string(), &[[c.re, c.im]])?;
                 map.end()
             }
         }
@@ -627,10 +621,7 @@ impl From<Float> for f64 {
 }
 
 impl Serialize for Float {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             Float::F32(f) => s.serialize_f32(*f),
             Float::F64(f) => s.serialize_f64(*f),
@@ -920,10 +911,7 @@ impl From<Int> for i64 {
 }
 
 impl Serialize for Int {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             Int::I16(i) => s.serialize_i16(*i),
             Int::I32(i) => s.serialize_i32(*i),
@@ -1255,10 +1243,7 @@ impl From<UInt> for usize {
 }
 
 impl Serialize for UInt {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             UInt::U8(u) => s.serialize_u8(*u),
             UInt::U16(u) => s.serialize_u16(*u),
@@ -1693,10 +1678,7 @@ impl TryCastFrom<Number> for usize {
 }
 
 impl Serialize for Number {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             Number::Bool(b) => b.serialize(s),
             Number::Complex(c) => c.serialize(s),

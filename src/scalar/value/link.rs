@@ -392,10 +392,7 @@ impl fmt::Display for Link {
 }
 
 impl<'de> serde::Deserialize<'de> for Link {
-    fn deserialize<D>(deserializer: D) -> Result<Link, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Link, D::Error> {
         let m: HashMap<String, HashMap<ValueId, Value>> =
             de::Deserialize::deserialize(deserializer)?;
         if m.len() != 1 {
@@ -412,6 +409,7 @@ impl<'de> serde::Deserialize<'de> for Link {
                     link
                 )))
             } else {
+                // TODO: move deserialization logic here
                 link.parse().map_err(de::Error::custom)
             }
         }
@@ -419,10 +417,7 @@ impl<'de> serde::Deserialize<'de> for Link {
 }
 
 impl serde::Serialize for Link {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut map = s.serialize_map(Some(1))?;
         let data: HashMap<ValueId, Value> = HashMap::new();
         map.serialize_entry(&self.to_string(), &data)?;
@@ -474,10 +469,7 @@ impl TCPathBuf {
     }
 }
 
-impl<Idx> std::ops::Index<Idx> for TCPathBuf
-where
-    Idx: std::slice::SliceIndex<[PathSegment]>,
-{
+impl<Idx: std::slice::SliceIndex<[PathSegment]>> std::ops::Index<Idx> for TCPathBuf {
     type Output = Idx::Output;
 
     fn index(&self, index: Idx) -> &Self::Output {
@@ -582,20 +574,14 @@ impl TryCastFrom<TCString> for TCPathBuf {
 }
 
 impl<'de> serde::Deserialize<'de> for TCPathBuf {
-    fn deserialize<D>(deserializer: D) -> Result<TCPathBuf, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<TCPathBuf, D::Error> {
         let s: &str = de::Deserialize::deserialize(deserializer)?;
         s.parse().map_err(de::Error::custom)
     }
 }
 
 impl serde::Serialize for TCPathBuf {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&self.to_string())
     }
 }
@@ -624,10 +610,7 @@ impl<'a> From<&'a [PathSegment]> for TCPath<'a> {
     }
 }
 
-impl<'a, Idx> std::ops::Index<Idx> for TCPath<'a>
-where
-    Idx: std::slice::SliceIndex<[PathSegment]>,
-{
+impl<'a, Idx: std::slice::SliceIndex<[PathSegment]>> std::ops::Index<Idx> for TCPath<'a> {
     type Output = Idx::Output;
 
     fn index(&self, index: Idx) -> &Self::Output {

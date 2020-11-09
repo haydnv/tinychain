@@ -64,35 +64,27 @@ impl<'de> de::Visitor<'de> for RefVisitor {
         f.write_str("A reference to a local variable (e.g. '$foo')")
     }
 
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
         if !value.starts_with('$') {
             Err(de::Error::custom(format!(
                 "Expected Ref starting with $, found {}",
                 value
             )))
         } else {
+            // TODO: move deserialization logic here
             value[1..].parse().map_err(de::Error::custom)
         }
     }
 }
 
 impl<'de> de::Deserialize<'de> for TCRef {
-    fn deserialize<D>(d: D) -> Result<Self, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
+    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         d.deserialize_str(RefVisitor)
     }
 }
 
 impl Serialize for TCRef {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&format!("{}", self))
     }
 }
