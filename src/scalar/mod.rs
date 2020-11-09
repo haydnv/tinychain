@@ -536,6 +536,8 @@ impl ScalarVisitor {
         path: value::TCPathBuf,
         params: Scalar,
     ) -> Result<Scalar, E> {
+        debug!("Method {} on {}, params {}", path, subject, params);
+
         let method = if params.matches::<Object>() {
             Method::Post((subject, path), params.opt_cast_into().unwrap())
         } else {
@@ -568,12 +570,15 @@ impl ScalarVisitor {
     }
 
     fn visit_op_ref<E: de::Error>(self, link: Link, params: Scalar) -> Result<Scalar, E> {
+        debug!("OpRef to {}, params {}", link, params);
+
         let op_ref = if params.matches::<(Value, Scalar)>() {
             let (key, value) = params.opt_cast_into().unwrap();
             OpRef::Put((link, key, value))
         } else if params.matches::<(Value,)>() {
             debug!("GET ref, key is {}", params);
-            OpRef::Get((link, params.opt_cast_into().unwrap()))
+            let (key,): (Value,) = params.opt_cast_into().unwrap();
+            OpRef::Get((link, key))
         } else if params.matches::<Object>() {
             OpRef::Post((link, params.opt_cast_into().unwrap()))
         } else {
@@ -682,9 +687,9 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
             } else if let Ok(link) = key.parse::<link::Link>() {
                 debug!("key is a Link: {}", link);
 
-                if data == Value::None
+                if data == Scalar::Tuple(vec![])
                     || data == Value::Tuple(vec![])
-                    || data == Scalar::Tuple(vec![])
+                    || data == Value::None
                 {
                     return Ok(Scalar::Value(Value::TCString(link.into())));
                 }
@@ -732,9 +737,6 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                                 dtype.try_cast(other).map_err(de::Error::custom)
                             }
                         },
-                        _ if data == Value::None || data == Value::Tuple(vec![]) => {
-                            Ok(Scalar::Value(Value::TCString(link.into())))
-                        }
                         _ => self.visit_op_ref::<M::Error>(link, data),
                     }
                 } else {

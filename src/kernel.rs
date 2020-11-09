@@ -24,6 +24,7 @@ pub async fn get(txn: &Txn, path: &[PathSegment], id: Value) -> TCResult<State> 
         "chain" => Err(error::not_implemented("Instantiate Chain")),
         "collection" => {
             let ctype = CollectionType::from_path(path)?;
+            debug!("new Collection of type {} with schema {}", ctype, id);
             ctype.get(txn, id).map_ok(State::Collection).await
         }
         "value" => {

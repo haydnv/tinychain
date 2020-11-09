@@ -320,7 +320,7 @@ impl TryCastFrom<Vec<Scalar>> for Value {
         for s in tuple {
             match s {
                 Scalar::Value(_) => {}
-                Scalar::Tuple(nested) if !Value::can_cast_from(nested) => return false,
+                Scalar::Tuple(nested) if Value::can_cast_from(nested) => return true,
                 _ => return false,
             }
         }

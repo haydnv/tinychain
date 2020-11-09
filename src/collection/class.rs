@@ -199,6 +199,7 @@ impl CollectionClass for CollectionBaseType {
             Self::BTree => {
                 let schema = schema
                     .try_cast_into(|s| error::bad_request("Expected BTree schema but found", s))?;
+
                 BTreeFile::create(txn, schema)
                     .map_ok(CollectionBase::BTree)
                     .await

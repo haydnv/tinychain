@@ -1085,12 +1085,12 @@ impl From<Key> for Selector {
 }
 
 impl TryCastFrom<Value> for Selector {
-    fn can_cast_from(_value: &Value) -> bool {
-        unimplemented!()
+    fn can_cast_from(value: &Value) -> bool {
+        Key::can_cast_from(value)
     }
 
-    fn opt_cast_from(_value: Value) -> Option<Selector> {
-        unimplemented!()
+    fn opt_cast_from(value: Value) -> Option<Selector> {
+        Key::opt_cast_from(value).map(Selector::Key)
     }
 }
 

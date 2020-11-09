@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
+use log::debug;
+
 use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::scalar::*;
@@ -71,6 +73,8 @@ impl From<(ValueId, ValueType, usize)> for Column {
 
 impl TryCastFrom<Value> for Column {
     fn can_cast_from(value: &Value) -> bool {
+        debug!("Column::can_cast_from {}?", value);
+
         value.matches::<(ValueId, ValueType)>() || value.matches::<(ValueId, ValueType, u64)>()
     }
 
