@@ -27,9 +27,9 @@ pub trait CastInto<T> {
     fn cast_into(self) -> T;
 }
 
-impl<T> CastFrom<T> for T {
-    fn cast_from(value: T) -> Self {
-        value
+impl<F, T: From<F>> CastFrom<F> for T {
+    fn cast_from(f: F) -> T {
+        T::from(f)
     }
 }
 
@@ -355,6 +355,24 @@ impl TryCastFrom<Scalar> for Link {
     fn opt_cast_from(scalar: Scalar) -> Option<Link> {
         if let Scalar::Value(value) = scalar {
             Link::opt_cast_from(value)
+        } else {
+            None
+        }
+    }
+}
+
+impl TryCastFrom<Scalar> for Number {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        if let Scalar::Value(value) = scalar {
+            Number::can_cast_from(value)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Number> {
+        if let Scalar::Value(value) = scalar {
+            Number::opt_cast_from(value)
         } else {
             None
         }

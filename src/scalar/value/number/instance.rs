@@ -304,12 +304,6 @@ impl From<Float> for Complex {
     }
 }
 
-impl CastFrom<Float> for Complex {
-    fn cast_from(f: Float) -> Self {
-        f.into()
-    }
-}
-
 impl From<Int> for Complex {
     fn from(i: Int) -> Self {
         match i {
@@ -317,12 +311,6 @@ impl From<Int> for Complex {
             Int::I32(i) => Self::C32(num::Complex::new(i as f32, 0.0f32)),
             Int::I16(i) => Self::C32(num::Complex::new(i as f32, 0.0f32)),
         }
-    }
-}
-
-impl CastFrom<Int> for Complex {
-    fn cast_from(i: Int) -> Self {
-        i.into()
     }
 }
 
@@ -337,24 +325,12 @@ impl From<UInt> for Complex {
     }
 }
 
-impl CastFrom<UInt> for Complex {
-    fn cast_from(u: UInt) -> Self {
-        u.into()
-    }
-}
-
 impl From<Boolean> for Complex {
     fn from(b: Boolean) -> Self {
         match b {
             Boolean(true) => Self::C32(num::Complex::new(1.0f32, 0.0f32)),
             Boolean(false) => Self::C32(num::Complex::new(1.0f32, 0.0f32)),
         }
-    }
-}
-
-impl CastFrom<Boolean> for Complex {
-    fn cast_from(b: Boolean) -> Complex {
-        b.into()
     }
 }
 
@@ -549,12 +525,6 @@ impl From<Boolean> for Float {
     }
 }
 
-impl CastFrom<Boolean> for Float {
-    fn cast_from(b: Boolean) -> Self {
-        b.into()
-    }
-}
-
 impl From<f32> for Float {
     fn from(f: f32) -> Self {
         Self::F32(f)
@@ -577,12 +547,6 @@ impl From<Int> for Float {
     }
 }
 
-impl CastFrom<Int> for Float {
-    fn cast_from(i: Int) -> Self {
-        i.into()
-    }
-}
-
 impl From<UInt> for Float {
     fn from(u: UInt) -> Self {
         match u {
@@ -591,12 +555,6 @@ impl From<UInt> for Float {
             UInt::U16(u) => Self::F32(u as f32),
             UInt::U8(u) => Self::F32(u as f32),
         }
-    }
-}
-
-impl CastFrom<UInt> for Float {
-    fn cast_from(u: UInt) -> Self {
-        u.into()
     }
 }
 
@@ -753,12 +711,6 @@ impl CastFrom<Int> for i32 {
     }
 }
 
-impl CastFrom<Int> for i64 {
-    fn cast_from(i: Int) -> i64 {
-        i.into()
-    }
-}
-
 impl Eq for Int {}
 
 impl Add for Int {
@@ -857,24 +809,12 @@ impl From<UInt> for Int {
     }
 }
 
-impl CastFrom<UInt> for Int {
-    fn cast_from(u: UInt) -> Int {
-        u.into()
-    }
-}
-
 impl From<Boolean> for Int {
     fn from(b: Boolean) -> Int {
         match b {
             Boolean(true) => Int::I16(1),
             Boolean(false) => Int::I16(0),
         }
-    }
-}
-
-impl CastFrom<Boolean> for Int {
-    fn cast_from(b: Boolean) -> Int {
-        b.into()
     }
 }
 
@@ -1154,12 +1094,6 @@ impl From<Boolean> for UInt {
             Boolean(true) => UInt::U8(1),
             Boolean(false) => UInt::U8(0),
         }
-    }
-}
-
-impl CastFrom<Boolean> for UInt {
-    fn cast_from(b: Boolean) -> UInt {
-        b.into()
     }
 }
 

@@ -6,7 +6,9 @@ use futures::TryFutureExt;
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, TryCastInto, Value};
+use crate::scalar::{
+    label, CastInto, Link, PathSegment, Scalar, TCPathBuf, TryCastFrom, TryCastInto, Value,
+};
 use crate::transaction::{Transact, Txn};
 
 use super::btree::{BTreeFile, BTreeType};
@@ -15,15 +17,17 @@ use super::table::{TableBaseType, TableType};
 use super::tensor::{TensorBaseType, TensorType};
 use super::{Collection, CollectionBase, CollectionView};
 
-pub enum CollectionItem<I: Into<Scalar>, S: CollectionInstance> {
+pub enum CollectionItem<I: CastInto<Scalar> + TryCastFrom<Scalar>, S: CollectionInstance> {
     Scalar(I),
     Slice(S),
 }
 
-impl<I: Into<Scalar>, S: CollectionInstance> From<CollectionItem<I, S>> for State {
+impl<I: CastInto<Scalar> + TryCastFrom<Scalar>, S: CollectionInstance> From<CollectionItem<I, S>>
+    for State
+{
     fn from(ci: CollectionItem<I, S>) -> State {
         match ci {
-            CollectionItem::Scalar(s) => State::Scalar(s.into()),
+            CollectionItem::Scalar(s) => State::Scalar(s.cast_into()),
             CollectionItem::Slice(s) => State::Collection(s.into()),
         }
     }
@@ -38,7 +42,7 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send {
 
 #[async_trait]
 pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
-    type Item: Into<Scalar>;
+    type Item: CastInto<Scalar> + TryCastFrom<Scalar>;
     type Slice: CollectionInstance;
 
     async fn get(
