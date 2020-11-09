@@ -10,6 +10,7 @@ use crate::class::{Class, Instance, NativeClass, TCBoxTryFuture, TCResult, TCStr
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::{Link, PathSegment, Scalar, TCPathBuf, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -190,13 +191,14 @@ impl CollectionInstance for Table {
 
     async fn get(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get(txn, path, selector).await,
-            Self::View(view) => view.get(txn, path, selector).await,
+            Self::Base(base) => base.get(request, txn, path, selector).await,
+            Self::View(view) => view.get(request, txn, path, selector).await,
         }
     }
 
@@ -209,14 +211,15 @@ impl CollectionInstance for Table {
 
     async fn put(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.put(txn, path, selector, value).await,
-            Self::View(view) => view.put(txn, path, selector, value).await,
+            Self::Base(base) => base.put(request, txn, path, selector, value).await,
+            Self::View(view) => view.put(request, txn, path, selector, value).await,
         }
     }
 

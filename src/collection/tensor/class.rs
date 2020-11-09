@@ -11,6 +11,7 @@ use crate::collection::{
     Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
 };
 use crate::error;
+use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -144,12 +145,13 @@ impl CollectionInstance for TensorBase {
 
     async fn get(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         TensorView::from(self.clone())
-            .get(txn, path, selector)
+            .get(request, txn, path, selector)
             .await
     }
 
@@ -159,13 +161,14 @@ impl CollectionInstance for TensorBase {
 
     async fn put(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         TensorView::from(self.clone())
-            .put(txn, path, selector, value)
+            .put(request, txn, path, selector, value)
             .await
     }
 
@@ -311,7 +314,8 @@ impl CollectionInstance for TensorView {
 
     async fn get(
         &self,
-        txn: Txn,
+        _request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -338,7 +342,8 @@ impl CollectionInstance for TensorView {
 
     async fn put(
         &self,
-        txn: Txn,
+        _request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -354,7 +359,7 @@ impl CollectionInstance for TensorView {
             CollectionItem::Scalar(value) => {
                 self.write_value(txn.id().clone(), bounds, value).await
             }
-            CollectionItem::Slice(slice) => self.write(txn, bounds, slice).await,
+            CollectionItem::Slice(slice) => self.write(txn.clone(), bounds, slice).await,
         }
     }
 
@@ -530,13 +535,14 @@ impl CollectionInstance for Tensor {
 
     async fn get(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get(txn, path, selector).await,
-            Self::View(view) => view.get(txn, path, selector).await,
+            Self::Base(base) => base.get(request, txn, path, selector).await,
+            Self::View(view) => view.get(request, txn, path, selector).await,
         }
     }
 
@@ -549,14 +555,15 @@ impl CollectionInstance for Tensor {
 
     async fn put(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.put(txn, path, selector, value).await,
-            Self::View(view) => view.put(txn, path, selector, value).await,
+            Self::Base(base) => base.put(request, txn, path, selector, value).await,
+            Self::View(view) => view.put(request, txn, path, selector, value).await,
         }
     }
 

@@ -7,6 +7,7 @@ use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionBase, CollectionItem};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -75,7 +76,8 @@ impl CollectionInstance for Null {
 
     async fn get(
         &self,
-        _txn: Txn,
+        _request: &Request,
+        _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -88,7 +90,8 @@ impl CollectionInstance for Null {
 
     async fn put(
         &self,
-        _txn: Txn,
+        _request: &Request,
+        _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,

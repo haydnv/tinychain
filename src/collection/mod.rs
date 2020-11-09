@@ -5,6 +5,7 @@ use async_trait::async_trait;
 
 use crate::class::{Instance, TCResult, TCStream};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::{Number, PathSegment, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -50,12 +51,13 @@ impl class::CollectionInstance for CollectionBase {
 
     async fn get(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         let view: CollectionView = self.clone().into();
-        view.get(txn, path, selector).await
+        view.get(request, txn, path, selector).await
     }
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
@@ -69,13 +71,14 @@ impl class::CollectionInstance for CollectionBase {
 
     async fn put(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         let view: CollectionView = self.clone().into();
-        view.put(txn, path, selector, value).await
+        view.put(request, txn, path, selector, value).await
     }
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
@@ -168,13 +171,14 @@ impl class::CollectionInstance for CollectionView {
 
     async fn get(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
             Self::BTree(btree) => {
-                let item = match btree.get(txn, path, selector).await? {
+                let item = match btree.get(request, txn, path, selector).await? {
                     CollectionItem::Scalar(key) => {
                         CollectionItem::Scalar(Scalar::Value(Value::Tuple(key)))
                     }
@@ -198,7 +202,8 @@ impl class::CollectionInstance for CollectionView {
 
     async fn put(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
@@ -208,13 +213,13 @@ impl class::CollectionInstance for CollectionView {
                 CollectionItem::Scalar(value) => {
                     let value = value.try_into()?;
                     btree
-                        .put(txn, path, selector, CollectionItem::Scalar(value))
+                        .put(request, txn, path, selector, CollectionItem::Scalar(value))
                         .await
                 }
                 CollectionItem::Slice(slice) => {
                     let slice = slice.try_into()?;
                     btree
-                        .put(txn, path, selector, CollectionItem::Slice(slice))
+                        .put(request, txn, path, selector, CollectionItem::Slice(slice))
                         .await
                 }
             },
@@ -223,13 +228,13 @@ impl class::CollectionInstance for CollectionView {
                 CollectionItem::Scalar(value) => {
                     let value = value.try_into()?;
                     table
-                        .put(txn, path, selector, CollectionItem::Scalar(value))
+                        .put(request, txn, path, selector, CollectionItem::Scalar(value))
                         .await
                 }
                 CollectionItem::Slice(slice) => {
                     let slice = slice.try_into()?;
                     table
-                        .put(txn, path, selector, CollectionItem::Slice(slice))
+                        .put(request, txn, path, selector, CollectionItem::Slice(slice))
                         .await
                 }
             },
@@ -238,13 +243,13 @@ impl class::CollectionInstance for CollectionView {
                     let value = Value::try_from(value)?;
                     let number = Number::try_from(value)?;
                     tensor
-                        .put(txn, path, selector, CollectionItem::Scalar(number))
+                        .put(request, txn, path, selector, CollectionItem::Scalar(number))
                         .await
                 }
                 CollectionItem::Slice(slice) => {
                     let slice = slice.try_into()?;
                     tensor
-                        .put(txn, path, selector, CollectionItem::Slice(slice))
+                        .put(request, txn, path, selector, CollectionItem::Slice(slice))
                         .await
                 }
             },
@@ -348,13 +353,14 @@ impl class::CollectionInstance for Collection {
 
     async fn get(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Base(base) => base.get(txn, path, selector).await,
-            Self::View(view) => view.get(txn, path, selector).await,
+            Self::Base(base) => base.get(request, txn, path, selector).await,
+            Self::View(view) => view.get(request, txn, path, selector).await,
         }
     }
 
@@ -367,14 +373,15 @@ impl class::CollectionInstance for Collection {
 
     async fn put(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.put(txn, path, selector, value).await,
-            Self::View(view) => view.put(txn, path, selector, value).await,
+            Self::Base(base) => base.put(request, txn, path, selector, value).await,
+            Self::View(view) => view.put(request, txn, path, selector, value).await,
         }
     }
 

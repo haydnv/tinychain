@@ -6,6 +6,7 @@ use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -91,13 +92,14 @@ impl CollectionInstance for BTree {
 
     async fn get(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
         match self {
-            Self::Tree(tree) => tree.get(txn, path, selector).await,
-            Self::View(view) => view.get(txn, path, selector).await,
+            Self::Tree(tree) => tree.get(request, txn, path, selector).await,
+            Self::View(view) => view.get(request, txn, path, selector).await,
         }
     }
 
@@ -110,14 +112,15 @@ impl CollectionInstance for BTree {
 
     async fn put(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,
     ) -> TCResult<()> {
         match self {
-            Self::Tree(tree) => tree.put(txn, path, selector, value).await,
-            Self::View(view) => view.put(txn, path, selector, value).await,
+            Self::Tree(tree) => tree.put(request, txn, path, selector, value).await,
+            Self::View(view) => view.put(request, txn, path, selector, value).await,
         }
     }
 

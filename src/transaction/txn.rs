@@ -445,7 +445,7 @@ impl Txn {
                     State::Collection(collection) => {
                         debug!("Txn::resolve Collection {}: {}", path, key);
                         collection
-                            .get(self.clone(), &path[..], key)
+                            .get(request, self, &path[..], key)
                             .await
                             .map(State::from)
                     }
@@ -497,7 +497,7 @@ impl Txn {
                         self.mutate(chain.clone().into()).await;
 
                         chain
-                            .put(&request, self, path.as_slice(), key, value)
+                            .put(&request, self, &path[..], key, value)
                             .map_ok(State::from)
                             .await
                     }

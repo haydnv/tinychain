@@ -17,6 +17,7 @@ use crate::block::File;
 use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::{
     CastFrom, CastInto, PathSegment, Scalar, TryCastFrom, TryCastInto, Value, ValueClass, ValueType,
 };
@@ -234,7 +235,8 @@ impl CollectionInstance for BTreeSlice {
 
     async fn get(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         bounds: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -254,7 +256,9 @@ impl CollectionInstance for BTreeSlice {
             (Selector::Range(container, _), Selector::Range(contained, _))
                 if container.contains(contained, &schema)? =>
             {
-                self.source.get(txn, path, bounds.cast_into()).await
+                self.source
+                    .get(request, txn, path, bounds.cast_into())
+                    .await
             }
             _ => Err(error::bad_request(
                 &format!("BTreeSlice[{}] does not contain", &self.bounds),
@@ -275,7 +279,8 @@ impl CollectionInstance for BTreeSlice {
 
     async fn put(
         &self,
-        _txn: Txn,
+        _request: &Request,
+        _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
@@ -818,7 +823,8 @@ impl CollectionInstance for BTreeFile {
 
     async fn get(
         &self,
-        txn: Txn,
+        _request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         bounds: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -855,7 +861,8 @@ impl CollectionInstance for BTreeFile {
 
     async fn put(
         &self,
-        txn: Txn,
+        _request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
         key: CollectionItem<Self::Item, Self::Slice>,

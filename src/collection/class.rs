@@ -5,6 +5,7 @@ use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, TryCastInto, Value};
 use crate::transaction::{Transact, Txn};
 
@@ -42,7 +43,8 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
 
     async fn get(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>>;
@@ -51,7 +53,8 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
 
     async fn put(
         &self,
-        txn: Txn,
+        request: &Request,
+        txn: &Txn,
         path: &[PathSegment],
         selector: Value,
         value: CollectionItem<Self::Item, Self::Slice>,

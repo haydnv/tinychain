@@ -13,6 +13,7 @@ use crate::collection::class::CollectionInstance;
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::{Collection, CollectionItem, CollectionView};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value, ValueId};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -105,7 +106,8 @@ impl CollectionInstance for TableView {
 
     async fn get(
         &self,
-        _txn: Txn,
+        _request: &Request,
+        _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
     ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
@@ -118,7 +120,8 @@ impl CollectionInstance for TableView {
 
     async fn put(
         &self,
-        _txn: Txn,
+        _request: &Request,
+        _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
         _value: CollectionItem<Self::Item, Self::Slice>,
