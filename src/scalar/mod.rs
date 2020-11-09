@@ -512,6 +512,46 @@ struct ScalarVisitor {
 }
 
 impl ScalarVisitor {
+    fn visit_method<E>(
+        self,
+        subject: value::TCRef,
+        path: value::TCPathBuf,
+        params: Scalar,
+    ) -> Result<Scalar, E>
+    where
+        E: de::Error,
+    {
+        let method = if params.matches::<Object>() {
+            Method::Post((subject, path), params.opt_cast_into().unwrap())
+        } else {
+            let mut params: Vec<Scalar> = params.try_into().map_err(de::Error::custom)?;
+            if params.len() == 1 {
+                let key = params.pop().unwrap();
+                let key = key.try_cast_into(|v| {
+                    de::Error::custom(format!("GET Method key must be a Value, not {}", v))
+                })?;
+
+                Method::Get((subject, path), key)
+            } else if params.len() == 2 {
+                let value = params.pop().unwrap();
+                let key = params.pop().unwrap();
+
+                let key = key.try_cast_into(|v| {
+                    de::Error::custom(format!("PUT Method key must be a Value, not {}", v))
+                })?;
+
+                Method::Put((subject, path), (key, value))
+            } else {
+                return Err(de::Error::custom(format!(
+                    "Expected a Method but found: {}",
+                    Scalar::Tuple(params)
+                )));
+            }
+        };
+
+        Ok(Scalar::Op(Box::new(Op::Method(method))))
+    }
+
     fn visit_op_ref<E>(self, link: Link, params: Scalar) -> Result<Scalar, E>
     where
         E: de::Error,
@@ -655,32 +695,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                         )))))
                     }
                 } else {
-                    debug!("map is a Method with parameters {}", data);
-
-                    let method = if data.matches::<Object>() {
-                        Method::Post((subject, path), data.opt_cast_into().unwrap())
-                    } else {
-                        let mut data: Vec<Scalar> = data.try_into().map_err(de::Error::custom)?;
-                        if data.len() == 1 {
-                            let key = data.pop().unwrap().try_into().map_err(de::Error::custom)?;
-                            Method::Get((subject, path), key)
-                        } else if data.len() == 2 {
-                            let value = data.pop().unwrap();
-                            let key = data.pop().unwrap();
-                            debug!("key is {}", key);
-                            let key = key.try_cast_into(|v| {
-                                de::Error::custom(format!("Method key must be a Value, not {}", v))
-                            })?;
-                            Method::Put((subject, path), (key, value))
-                        } else {
-                            return Err(de::Error::custom(format!(
-                                "Expected a Method but found: {}",
-                                Scalar::Tuple(data)
-                            )));
-                        }
-                    };
-
-                    Ok(Scalar::Op(Box::new(Op::Method(method))))
+                    self.visit_method(subject, path, data)
                 };
             } else if let Ok(link) = key.parse::<link::Link>() {
                 debug!("key is a Link: {}", link);
