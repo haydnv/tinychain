@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::hash::Hash;
 use std::iter;
@@ -500,6 +500,14 @@ impl Txn {
                             .put(&request, self, &path[..], key, value)
                             .map_ok(State::from)
                             .await
+                    }
+                    State::Collection(collection) => {
+                        let key = key.try_cast_into(|v| error::bad_request("Invalid key", v))?;
+                        let value = value.try_into()?;
+                        collection
+                            .put(&request, self, &path[..], key, value)
+                            .await?;
+                        Ok(State::Collection(collection.clone()))
                     }
                     other => Err(error::not_implemented(format!(
                         "Txn::resolve Method::Put for {}",
