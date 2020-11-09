@@ -3,6 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use bytes::Bytes;
+use log::debug;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
@@ -319,6 +320,7 @@ impl TryCastFrom<Vec<Scalar>> for Value {
         for s in tuple {
             match s {
                 Scalar::Value(_) => {}
+                Scalar::Tuple(nested) if !Value::can_cast_from(nested) => return false,
                 _ => return false,
             }
         }
@@ -327,10 +329,20 @@ impl TryCastFrom<Vec<Scalar>> for Value {
     }
 
     fn opt_cast_from(mut tuple: Vec<Scalar>) -> Option<Value> {
+        debug!("cast into Value::Tuple from Scalar::Tuple");
+
         let mut values = Vec::with_capacity(tuple.len());
         for s in tuple.drain(..) {
+            debug!("item {}", s);
             match s {
                 Scalar::Value(value) => values.push(value),
+                Scalar::Tuple(nested) => {
+                    if let Some(nested) = Value::opt_cast_from(nested) {
+                        values.push(nested);
+                    } else {
+                        return None;
+                    }
+                }
                 _ => return None,
             }
         }

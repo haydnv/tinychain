@@ -3,6 +3,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::str::FromStr;
 
+use log::debug;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
@@ -332,6 +333,8 @@ impl TryCastFrom<Scalar> for Value {
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Value> {
+        debug!("cast into Value from {}", scalar);
+
         match scalar {
             Scalar::Value(value) => Some(value),
             Scalar::Tuple(tuple) => Value::opt_cast_from(tuple),
@@ -508,6 +511,27 @@ struct ScalarVisitor {
     value_visitor: value::ValueVisitor,
 }
 
+impl ScalarVisitor {
+    fn visit_op_ref<E>(self, link: Link, params: Scalar) -> Result<Scalar, E>
+    where
+        E: de::Error,
+    {
+        let op_ref = if params.matches::<(Value, Scalar)>() {
+            let (key, value) = params.opt_cast_into().unwrap();
+            OpRef::Put((link, key, value))
+        } else if params.matches::<(Value,)>() {
+            debug!("GET ref, key is {}", params);
+            OpRef::Get((link, params.opt_cast_into().unwrap()))
+        } else if params.matches::<Object>() {
+            OpRef::Post((link, params.opt_cast_into().unwrap()))
+        } else {
+            return Err(de::Error::custom(format!("invalid Op format: {}", params)));
+        };
+
+        Ok(Scalar::Op(Box::new(Op::Ref(op_ref))))
+    }
+}
+
 impl<'de> de::Visitor<'de> for ScalarVisitor {
     type Value = Scalar;
 
@@ -650,6 +674,8 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     Ok(Scalar::Op(Box::new(Op::Method(method))))
                 };
             } else if let Ok(link) = key.parse::<link::Link>() {
+                debug!("deserialize map: key is {}", link);
+
                 if data == Value::None
                     || data == Value::Tuple(vec![])
                     || data == Scalar::Tuple(vec![])
@@ -658,74 +684,64 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                 }
 
                 let path = link.path();
-                if path.len() > 1 && &path[0] == "sbin" {
+                return if path.len() > 1 && &path[0] == "sbin" {
                     match path[1].as_str() {
                         "value" | "op" | "tuple" | "object" => match data {
                             Scalar::Value(data) => match data {
                                 Value::Tuple(tuple) if &path[1] == "tuple" => {
-                                    return Ok(Scalar::Value(Value::Tuple(tuple)));
+                                    Ok(Scalar::Value(Value::Tuple(tuple)))
                                 }
                                 Value::Tuple(mut tuple) if tuple.len() == 1 => {
                                     let key = tuple.pop().unwrap();
                                     let dtype = ValueType::from_path(&link.path()[..])
                                         .map_err(de::Error::custom)?;
 
-                                    return dtype
+                                    dtype
                                         .try_cast(key)
                                         .map(Scalar::Value)
-                                        .map_err(de::Error::custom);
+                                        .map_err(de::Error::custom)
                                 }
                                 key => {
                                     let dtype = ValueType::from_path(&link.path()[..])
                                         .map_err(de::Error::custom)?;
 
-                                    return dtype
+                                    dtype
                                         .try_cast(key)
                                         .map(Scalar::Value)
-                                        .map_err(de::Error::custom);
+                                        .map_err(de::Error::custom)
                                 }
                             },
                             Scalar::Op(_) => {
-                                return Err(de::Error::custom("{<link>: <op>} does not make sense"))
+                                Err(de::Error::custom("{<link>: <op>} does not make sense"))
                             }
                             Scalar::Object(object) if path.len() == 2 && &path[1] == "object" => {
-                                return Ok(Scalar::Object(object));
+                                Ok(Scalar::Object(object))
                             }
                             Scalar::Object(object) => {
-                                return Ok(Scalar::Op(Box::new(Op::Ref(OpRef::Post((
-                                    link, object,
-                                ))))));
+                                Ok(Scalar::Op(Box::new(Op::Ref(OpRef::Post((link, object))))))
                             }
                             other => {
                                 let dtype = ScalarType::from_path(&link.path()[..])
                                     .map_err(de::Error::custom)?;
-                                return dtype.try_cast(other).map_err(de::Error::custom);
+                                dtype.try_cast(other).map_err(de::Error::custom)
                             }
                         },
                         _ if data == Value::None || data == Value::Tuple(vec![]) => {
-                            return Ok(Scalar::Value(Value::TCString(link.into())));
+                            Ok(Scalar::Value(Value::TCString(link.into())))
                         }
-                        _ => {}
+                        _ => self.visit_op_ref::<M::Error>(link, data),
                     }
                 } else {
-                    let op_ref = if data.matches::<(Value,)>() {
-                        OpRef::Get((link, data.opt_cast_into().unwrap()))
-                    } else if data.matches::<(Value, Scalar)>() {
-                        let (key, value) = data.opt_cast_into().unwrap();
-                        OpRef::Put((link, key, value))
-                    } else if data.matches::<Object>() {
-                        OpRef::Post((link, data.opt_cast_into().unwrap()))
-                    } else {
-                        return Err(de::Error::custom(format!("Invalid Op format: {}", data)));
-                    };
-
-                    return Ok(Scalar::Op(Box::new(Op::Ref(op_ref))));
+                    self.visit_op_ref::<M::Error>(link, data)
                 };
             }
         }
 
+        debug!("map is an Object");
+
         let mut map = HashMap::with_capacity(data.len());
         for (key, value) in data.drain() {
+            debug!("key {} value {}", key, value);
             let key: ValueId = key.parse().map_err(de::Error::custom)?;
             map.insert(key, value);
         }
