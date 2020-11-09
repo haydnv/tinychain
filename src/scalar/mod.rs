@@ -44,11 +44,11 @@ pub trait TryCastFrom<T>: Sized {
 
     fn opt_cast_from(value: T) -> Option<Self>;
 
-    fn try_cast_from<E: FnOnce(&T) -> error::TCError>(value: T, err: E) -> TCResult<Self> {
+    fn try_cast_from<Err, E: FnOnce(&T) -> Err>(value: T, on_err: E) -> Result<Self, Err> {
         if Self::can_cast_from(&value) {
             Ok(Self::opt_cast_from(value).unwrap())
         } else {
-            Err(err(&value))
+            Err(on_err(&value))
         }
     }
 }
@@ -58,11 +58,11 @@ pub trait TryCastInto<T>: Sized {
 
     fn opt_cast_into(self) -> Option<T>;
 
-    fn try_cast_into<E: FnOnce(&Self) -> error::TCError>(self, err: E) -> TCResult<T> {
+    fn try_cast_into<Err, E: FnOnce(&Self) -> Err>(self, on_err: E) -> Result<T, Err> {
         if self.can_cast_into() {
             Ok(self.opt_cast_into().unwrap())
         } else {
-            Err(err(&self))
+            Err(on_err(&self))
         }
     }
 }
@@ -627,9 +627,12 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
         if data.is_empty() {
             return Ok(Scalar::Object(Object::default()));
         } else if data.len() == 1 {
+            debug!("deserialize map of length 1");
             let (key, data) = data.clone().drain().next().unwrap();
 
             if key.starts_with('$') {
+                debug!("key is a Ref: {}", key);
+
                 let (subject, path) = if let Some(i) = key.find('/') {
                     let (subject, path) = key.split_at(i);
                     let subject = TCRef::from_str(subject).map_err(de::Error::custom)?;
@@ -652,6 +655,8 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                         )))))
                     }
                 } else {
+                    debug!("map is a Method with parameters {}", data);
+
                     let method = if data.matches::<Object>() {
                         Method::Post((subject, path), data.opt_cast_into().unwrap())
                     } else {
@@ -661,7 +666,11 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                             Method::Get((subject, path), key)
                         } else if data.len() == 2 {
                             let value = data.pop().unwrap();
-                            let key = data.pop().unwrap().try_into().map_err(de::Error::custom)?;
+                            let key = data.pop().unwrap();
+                            debug!("key is {}", key);
+                            let key = key.try_cast_into(|v| {
+                                de::Error::custom(format!("Method key must be a Value, not {}", v))
+                            })?;
                             Method::Put((subject, path), (key, value))
                         } else {
                             return Err(de::Error::custom(format!(
@@ -674,7 +683,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     Ok(Scalar::Op(Box::new(Op::Method(method))))
                 };
             } else if let Ok(link) = key.parse::<link::Link>() {
-                debug!("deserialize map: key is {}", link);
+                debug!("key is a Link: {}", link);
 
                 if data == Value::None
                     || data == Value::Tuple(vec![])
