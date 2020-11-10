@@ -188,7 +188,7 @@ You can define a function and call it like so:
 [
     ["guess", {"/sbin/op/def/get": ["n", [
             ["n_is_five", {"$n/eq": [5]}],
-            ["message", {"/sbin/op/ref/if": [{"$n_is_five": []}, "right", "wrong"]}]
+            ["message", {"/sbin/op/flow/if": [{"$n_is_five": []}, "right", "wrong"]}]
         ]]
     }],
     ["outcome", {"$guess": [6]}]
@@ -230,7 +230,7 @@ Of course, you can call an method on a generic `Object` just like any other:
         "es": "¡Hola!",
         "render": {"/sbin/op/def/get": ["lang", [
             ["is_spanish", {"$lang/eq": ["es"]}],
-            ["rendered", {"/sbin/op/ref/if": [{"$is_spanish": []}, {"$self/es": []}, {"$self/en": []}]}]
+            ["rendered", {"/sbin/op/flow/if": [{"$is_spanish": []}, {"$self/es": []}, {"$self/en": []}]}]
         ]]}
     }}],
     ["result", {"$greeting/render": ["es"]}]

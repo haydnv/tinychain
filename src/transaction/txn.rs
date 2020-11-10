@@ -395,7 +395,7 @@ impl Txn {
 
         match provider {
             Op::Def(op_def) => Err(error::not_implemented(format!("Txn::resolve {}", op_def))),
-            Op::Ref(OpRef::If(cond, then, or_else)) => {
+            Op::Flow(FlowControl::If(cond, then, or_else)) => {
                 let cond = provided
                     .get(cond.value_id())
                     .ok_or_else(|| error::not_found(cond))?;
@@ -620,9 +620,8 @@ fn is_resolved_scalar(scalar: &Scalar) -> bool {
     match scalar {
         Scalar::Object(object) => object.values().all(is_resolved_scalar),
         Scalar::Op(op) => match **op {
-            Op::Ref(_) => false,
-            Op::Method(_) => false,
-            _ => true,
+            Op::Def(_) => true,
+            _ => false,
         },
         Scalar::Value(value) => is_resolved_value(value),
         Scalar::Tuple(tuple) => tuple.iter().all(is_resolved_scalar),
@@ -648,6 +647,28 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
             deps.insert(tc_ref.clone());
         }
         Op::Def(OpDef::Post(_)) => {}
+        Op::Flow(FlowControl::If(cond, then, or_else)) => {
+            let cond_state = txn_state
+                .get(cond.value_id())
+                .ok_or_else(|| error::not_found(cond))?;
+
+            if is_resolved(cond_state) {
+                if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = cond_state {
+                    if b.into() {
+                        deps.extend(scalar_requires(then, txn_state)?);
+                    } else {
+                        deps.extend(scalar_requires(or_else, txn_state)?);
+                    }
+                } else {
+                    return Err(error::bad_request(
+                        "Expected a Boolean condition but found",
+                        cond_state,
+                    ));
+                }
+            } else {
+                deps.insert(cond.value_id().clone());
+            }
+        }
         Op::Method(method) => match method {
             Method::Get((subject, _path), key) => {
                 deps.insert(subject.value_id().clone());
@@ -670,28 +691,6 @@ fn requires(op: &Op, txn_state: &HashMap<ValueId, State>) -> TCResult<HashSet<Va
             }
         },
         Op::Ref(op_ref) => match op_ref {
-            OpRef::If(cond, then, or_else) => {
-                let cond_state = txn_state
-                    .get(cond.value_id())
-                    .ok_or_else(|| error::not_found(cond))?;
-                if is_resolved(cond_state) {
-                    if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = cond_state
-                    {
-                        if b.into() {
-                            deps.extend(scalar_requires(then, txn_state)?);
-                        } else {
-                            deps.extend(scalar_requires(or_else, txn_state)?);
-                        }
-                    } else {
-                        return Err(error::bad_request(
-                            "Expected a Boolean condition but found",
-                            cond_state,
-                        ));
-                    }
-                } else {
-                    deps.insert(cond.value_id().clone());
-                }
-            }
             OpRef::Get((_path, key)) => {
                 deps.extend(value_requires(key)?);
             }

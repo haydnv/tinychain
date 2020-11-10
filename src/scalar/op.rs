@@ -17,6 +17,128 @@ use super::{
 };
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub enum FlowControlType {
+    If,
+}
+
+impl Class for FlowControlType {
+    type Instance = FlowControl;
+}
+
+impl NativeClass for FlowControlType {
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
+
+        if suffix.len() == 1 {
+            match suffix[0].as_str() {
+                "if" => Ok(Self::If),
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            Err(error::path_not_found(suffix))
+        }
+    }
+
+    fn prefix() -> TCPathBuf {
+        OpType::prefix().append(label("flow"))
+    }
+}
+
+impl ScalarClass for FlowControlType {
+    type Instance = FlowControl;
+
+    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<FlowControl> {
+        FlowControl::try_cast_from(scalar.into(), |s| {
+            error::bad_request("Cannot cast into FlowControl from", s)
+        })
+    }
+}
+
+impl From<FlowControlType> for Link {
+    fn from(fct: FlowControlType) -> Link {
+        use FlowControlType as FCT;
+        let suffix = match fct {
+            FCT::If => label("if"),
+        };
+        FCT::prefix().append(suffix).into()
+    }
+}
+
+impl fmt::Display for FlowControlType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "type: control flow - {}",
+            match self {
+                Self::If => "if",
+            }
+        )
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub enum MethodType {
+    Get,
+    Put,
+    Post,
+}
+
+impl Class for MethodType {
+    type Instance = Method;
+}
+
+impl NativeClass for MethodType {
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
+
+        if suffix.len() == 1 {
+            match suffix[0].as_str() {
+                "get" => Ok(Self::Get),
+                "put" => Ok(Self::Put),
+                "post" => Ok(Self::Post),
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            Err(error::path_not_found(suffix))
+        }
+    }
+
+    fn prefix() -> TCPathBuf {
+        OpType::prefix().append(label("method"))
+    }
+}
+
+impl ScalarClass for MethodType {
+    type Instance = Method;
+
+    fn try_cast<S: Into<Scalar>>(&self, _scalar: S) -> TCResult<Method> {
+        Err(error::not_implemented("Cast Scalar into Method"))
+    }
+}
+
+impl From<MethodType> for Link {
+    fn from(mt: MethodType) -> Link {
+        let suffix = match mt {
+            MethodType::Get => label("get"),
+            MethodType::Put => label("put"),
+            MethodType::Post => label("post"),
+        };
+
+        MethodType::prefix().append(suffix).into()
+    }
+}
+
+impl fmt::Display for MethodType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Get => write!(f, "type: GET method"),
+            Self::Put => write!(f, "type: PUT method"),
+            Self::Post => write!(f, "type: POST method"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {
     Get,
     Put,
@@ -100,70 +222,7 @@ impl fmt::Display for OpDefType {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub enum MethodType {
-    Get,
-    Put,
-    Post,
-}
-
-impl Class for MethodType {
-    type Instance = Method;
-}
-
-impl NativeClass for MethodType {
-    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
-        let suffix = Self::prefix().try_suffix(path)?;
-
-        if suffix.len() == 1 {
-            match suffix[0].as_str() {
-                "get" => Ok(MethodType::Get),
-                "put" => Ok(MethodType::Put),
-                "post" => Ok(MethodType::Post),
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            Err(error::path_not_found(suffix))
-        }
-    }
-
-    fn prefix() -> TCPathBuf {
-        OpType::prefix().append(label("method"))
-    }
-}
-
-impl ScalarClass for MethodType {
-    type Instance = Method;
-
-    fn try_cast<S: Into<Scalar>>(&self, _scalar: S) -> TCResult<Method> {
-        Err(error::not_implemented("Cast Scalar into Method"))
-    }
-}
-
-impl From<MethodType> for Link {
-    fn from(mt: MethodType) -> Link {
-        let suffix = match mt {
-            MethodType::Get => label("get"),
-            MethodType::Put => label("put"),
-            MethodType::Post => label("post"),
-        };
-
-        MethodType::prefix().append(suffix).into()
-    }
-}
-
-impl fmt::Display for MethodType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Get => write!(f, "type: GET method"),
-            Self::Put => write!(f, "type: PUT method"),
-            Self::Post => write!(f, "type: POST method"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpRefType {
-    If,
     Get,
     Put,
     Post,
@@ -179,7 +238,6 @@ impl NativeClass for OpRefType {
 
         if suffix.len() == 1 {
             match suffix[0].as_str() {
-                "if" => Ok(OpRefType::If),
                 "get" => Ok(OpRefType::Get),
                 "put" => Ok(OpRefType::Put),
                 "post" => Ok(OpRefType::Post),
@@ -208,20 +266,18 @@ impl From<OpRefType> for Link {
     fn from(ort: OpRefType) -> Link {
         use OpRefType as ORT;
         let suffix = match ort {
-            ORT::If => label("if"),
             ORT::Get => label("get"),
             ORT::Put => label("put"),
             ORT::Post => label("post"),
         };
 
-        OpRefType::prefix().append(suffix).into()
+        ORT::prefix().append(suffix).into()
     }
 }
 
 impl fmt::Display for OpRefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::If => write!(f, "type: conditional Op"),
             Self::Get => write!(f, "type: GET Op ref"),
             Self::Put => write!(f, "type: PUT Op ref"),
             Self::Post => write!(f, "type: POST Op ref"),
@@ -232,6 +288,7 @@ impl fmt::Display for OpRefType {
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpType {
     Def(OpDefType),
+    Flow(FlowControlType),
     Method(MethodType),
     Ref(OpRefType),
 }
@@ -249,6 +306,7 @@ impl NativeClass for OpType {
         } else {
             match suffix[0].as_str() {
                 "def" => OpDefType::from_path(path).map(OpType::Def),
+                "flow" => FlowControlType::from_path(path).map(OpType::Flow),
                 "method" => MethodType::from_path(path).map(OpType::Method),
                 "ref" => OpRefType::from_path(path).map(OpType::Ref),
                 other => Err(error::not_found(other)),
@@ -268,6 +326,7 @@ impl ScalarClass for OpType {
         let scalar: Scalar = scalar.into();
         match self {
             Self::Def(odt) => odt.try_cast(scalar).map(Op::Def),
+            Self::Flow(fct) => fct.try_cast(scalar).map(Op::Flow),
             Self::Method(mt) => mt.try_cast(scalar).map(Op::Method),
             Self::Ref(ort) => ort.try_cast(scalar).map(Op::Ref),
         }
@@ -278,6 +337,7 @@ impl From<OpType> for Link {
     fn from(ot: OpType) -> Link {
         match ot {
             OpType::Def(odt) => odt.into(),
+            OpType::Flow(fct) => fct.into(),
             OpType::Method(mt) => mt.into(),
             OpType::Ref(ort) => ort.into(),
         }
@@ -288,8 +348,86 @@ impl fmt::Display for OpType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Def(odt) => write!(f, "{}", odt),
+            Self::Flow(fct) => write!(f, "{}", fct),
             Self::Method(mt) => write!(f, "{}", mt),
             Self::Ref(ort) => write!(f, "{}", ort),
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub enum FlowControl {
+    If(TCRef, Scalar, Scalar),
+}
+
+impl Instance for FlowControl {
+    type Class = FlowControlType;
+
+    fn class(&self) -> FlowControlType {
+        match self {
+            Self::If(_, _, _) => FlowControlType::If,
+        }
+    }
+}
+
+impl ScalarInstance for FlowControl {
+    type Class = FlowControlType;
+}
+
+impl TryCastFrom<Scalar> for FlowControl {
+    fn can_cast_from(s: &Scalar) -> bool {
+        s.matches::<(TCRef, Scalar, Scalar)>()
+    }
+
+    fn opt_cast_from(s: Scalar) -> Option<FlowControl> {
+        if s.matches::<(TCRef, Scalar, Scalar)>() {
+            let (cond, then, or_else) = s.opt_cast_into().unwrap();
+            Some(FlowControl::If(cond, then, or_else))
+        } else {
+            None
+        }
+    }
+}
+
+impl fmt::Display for FlowControl {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::If(cond, then, or_else) => {
+                write!(f, "If ({}) then {} else {}", cond, then, or_else)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub enum Method {
+    Get((TCRef, TCPathBuf), Value),
+    Put((TCRef, TCPathBuf), (Value, Scalar)),
+    Post((TCRef, TCPathBuf), Object),
+}
+
+impl Instance for Method {
+    type Class = MethodType;
+
+    fn class(&self) -> MethodType {
+        match self {
+            Self::Get(_, _) => MethodType::Get,
+            Self::Put(_, _) => MethodType::Put,
+            Self::Post(_, _) => MethodType::Post,
+        }
+    }
+}
+
+impl ScalarInstance for Method {
+    type Class = MethodType;
+}
+
+impl fmt::Display for Method {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Get((subject, path), _) => write!(f, "GET {}: {}", subject, path),
+            Self::Put((subject, path), (_, _)) => write!(f, "PUT {}{}", subject, path),
+            Self::Post((subject, path), _) => write!(f, "PUT {}{}", subject, path),
         }
     }
 }
@@ -406,46 +544,12 @@ impl fmt::Display for OpDef {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
-pub enum Method {
-    Get((TCRef, TCPathBuf), Value),
-    Put((TCRef, TCPathBuf), (Value, Scalar)),
-    Post((TCRef, TCPathBuf), Object),
-}
-
-impl Instance for Method {
-    type Class = MethodType;
-
-    fn class(&self) -> MethodType {
-        match self {
-            Self::Get(_, _) => MethodType::Get,
-            Self::Put(_, _) => MethodType::Put,
-            Self::Post(_, _) => MethodType::Post,
-        }
-    }
-}
-
-impl ScalarInstance for Method {
-    type Class = MethodType;
-}
-
-impl fmt::Display for Method {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Get((subject, path), _) => write!(f, "GET {}: {}", subject, path),
-            Self::Put((subject, path), (_, _)) => write!(f, "PUT {}{}", subject, path),
-            Self::Post((subject, path), _) => write!(f, "PUT {}{}", subject, path),
-        }
-    }
-}
-
 type GetRef = (Link, Value);
 type PutRef = (Link, Value, Scalar);
 type PostRef = (Link, Object);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {
-    If(TCRef, Scalar, Scalar),
     Get(GetRef),
     Put(PutRef),
     Post(PostRef),
@@ -456,10 +560,9 @@ impl Instance for OpRef {
 
     fn class(&self) -> OpRefType {
         match self {
-            Self::If(_, _, _) => OpRefType::If,
-            Self::Get((_, _)) => OpRefType::Get,
-            Self::Put((_, _, _)) => OpRefType::Put,
-            Self::Post((_, _)) => OpRefType::Post,
+            Self::Get(_) => OpRefType::Get,
+            Self::Put(_) => OpRefType::Put,
+            Self::Post(_) => OpRefType::Post,
         }
     }
 }
@@ -470,28 +573,17 @@ impl ScalarInstance for OpRef {
 
 impl TryCastFrom<Scalar> for OpRef {
     fn can_cast_from(s: &Scalar) -> bool {
-        s.matches::<(TCRef, Scalar, Scalar)>()
-            || s.matches::<(Link, Vec<(ValueId, Value)>)>()
-            || s.matches::<(Link, Value, Value)>()
-            || s.matches::<(Link, Value)>()
+        s.matches::<PostRef>() || s.matches::<PutRef>() || s.matches::<GetRef>()
     }
 
-    fn opt_cast_from(s: Scalar) -> Option<OpRef> {
-        if s.matches::<(TCRef, Scalar, Scalar)>() {
-            let (cond, then, or_else) = s.opt_cast_into().unwrap();
-            Some(OpRef::If(cond, then, or_else))
-        } else {
-            unimplemented!()
-        }
+    fn opt_cast_from(_s: Scalar) -> Option<OpRef> {
+        unimplemented!()
     }
 }
 
 impl fmt::Display for OpRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            OpRef::If(cond, then, or_else) => {
-                write!(f, "OpRef::If ({}) then {} else {}", cond, then, or_else)
-            }
             OpRef::Get((link, id)) => write!(f, "OpRef::Get {}: {}", link, id),
             OpRef::Put((path, id, val)) => write!(f, "OpRef::Put {}: {} <- {}", path, id, val),
             OpRef::Post((path, _)) => write!(f, "OpRef::Post {}", path),
@@ -502,6 +594,7 @@ impl fmt::Display for OpRef {
 #[derive(Clone, Eq, PartialEq)]
 pub enum Op {
     Def(OpDef),
+    Flow(FlowControl),
     Method(Method),
     Ref(OpRef),
 }
@@ -521,6 +614,7 @@ impl Instance for Op {
     fn class(&self) -> OpType {
         match self {
             Self::Def(op_def) => OpType::Def(op_def.class()),
+            Self::Flow(control) => OpType::Flow(control.class()),
             Self::Method(method) => OpType::Method(method.class()),
             Self::Ref(op_ref) => OpType::Ref(op_ref.class()),
         }
@@ -547,6 +641,7 @@ impl fmt::Display for Op {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Op::Def(op_def) => write!(f, "{}", op_def),
+            Op::Flow(control) => write!(f, "{}", control),
             Op::Method(method) => write!(f, "{}", method),
             Op::Ref(op_ref) => write!(f, "{}", op_ref),
         }

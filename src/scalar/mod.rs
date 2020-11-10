@@ -796,6 +796,16 @@ impl Serialize for Scalar {
                     )?;
                     map.end()
                 }
+                Op::Flow(control) => match control {
+                    FlowControl::If(cond, then, or_else) => {
+                        let mut map = s.serialize_map(Some(1))?;
+                        map.serialize_entry(
+                            &Link::from(control.class()).to_string(),
+                            &[&Scalar::Value(cond.clone().into()), then, or_else],
+                        )?;
+                        map.end()
+                    }
+                },
                 Op::Method(method) => {
                     let ((subject, path), args): ((TCRef, TCPathBuf), Scalar) = match method {
                         Method::Get(subject, arg) => (subject.clone(), vec![arg.clone()].into()),
@@ -808,14 +818,6 @@ impl Serialize for Scalar {
                     map.end()
                 }
                 Op::Ref(op_ref) => match op_ref {
-                    OpRef::If(cond, then, or_else) => {
-                        let mut map = s.serialize_map(Some(1))?;
-                        map.serialize_entry(
-                            &Link::from(op_ref.class()).to_string(),
-                            &[&Scalar::Value(cond.clone().into()), then, or_else],
-                        )?;
-                        map.end()
-                    }
                     OpRef::Get((path, key)) => {
                         let mut map = s.serialize_map(Some(1))?;
                         map.serialize_entry(&path.to_string(), key)?;
