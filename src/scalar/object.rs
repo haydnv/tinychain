@@ -10,10 +10,10 @@ use crate::error;
 use crate::request::Request;
 use crate::transaction::Txn;
 
-use super::{Op, PathSegment, Scalar, TCPath, Value, ValueId, ValueInstance};
+use super::{Id, Op, PathSegment, Scalar, TCPath, Value, ValueInstance};
 
 #[derive(Clone, Default, Eq, PartialEq)]
-pub struct Object(HashMap<ValueId, Scalar>);
+pub struct Object(HashMap<Id, Scalar>);
 
 impl Object {
     pub fn get<'a>(
@@ -67,16 +67,16 @@ impl Object {
 }
 
 impl Deref for Object {
-    type Target = HashMap<ValueId, Scalar>;
+    type Target = HashMap<Id, Scalar>;
 
-    fn deref(&'_ self) -> &'_ HashMap<ValueId, Scalar> {
+    fn deref(&'_ self) -> &'_ HashMap<Id, Scalar> {
         &self.0
     }
 }
 
 impl IntoIterator for Object {
-    type Item = (ValueId, Scalar);
-    type IntoIter = std::collections::hash_map::IntoIter<ValueId, Scalar>;
+    type Item = (Id, Scalar);
+    type IntoIter = std::collections::hash_map::IntoIter<Id, Scalar>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -89,14 +89,14 @@ impl Serialize for Object {
     }
 }
 
-impl From<HashMap<ValueId, Scalar>> for Object {
-    fn from(map: HashMap<ValueId, Scalar>) -> Object {
+impl From<HashMap<Id, Scalar>> for Object {
+    fn from(map: HashMap<Id, Scalar>) -> Object {
         Object(map)
     }
 }
 
-impl From<Object> for HashMap<ValueId, Scalar> {
-    fn from(object: Object) -> HashMap<ValueId, Scalar> {
+impl From<Object> for HashMap<Id, Scalar> {
+    fn from(object: Object) -> HashMap<Id, Scalar> {
         object.0
     }
 }

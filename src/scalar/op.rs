@@ -12,8 +12,8 @@ use crate::transaction::Txn;
 use super::link::{Link, TCPathBuf};
 use super::object::Object;
 use super::{
-    label, CastFrom, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TCRef,
-    TryCastFrom, TryCastInto, Value, ValueId,
+    label, CastFrom, Id, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TCRef,
+    TryCastFrom, TryCastInto, Value,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
@@ -180,7 +180,7 @@ impl ScalarClass for OpDefType {
             Self::Get => {
                 if scalar.matches::<GetOp>() {
                     Ok(OpDef::Get(scalar.opt_cast_into().unwrap()))
-                } else if scalar.matches::<Vec<(ValueId, Scalar)>>() {
+                } else if scalar.matches::<Vec<(Id, Scalar)>>() {
                     Ok(OpDef::Get((
                         label("key").into(),
                         scalar.opt_cast_into().unwrap(),
@@ -432,9 +432,9 @@ impl fmt::Display for Method {
     }
 }
 
-pub type GetOp = (ValueId, Vec<(ValueId, Scalar)>);
-pub type PutOp = (ValueId, ValueId, Vec<(ValueId, Scalar)>);
-pub type PostOp = Vec<(ValueId, Scalar)>;
+pub type GetOp = (Id, Vec<(Id, Scalar)>);
+pub type PutOp = (Id, Id, Vec<(Id, Scalar)>);
+pub type PostOp = Vec<(Id, Scalar)>;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDef {
@@ -478,7 +478,7 @@ impl OpDef {
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Post(def) = self {
-                let mut op: Vec<(ValueId, Scalar)> = data.into_iter().collect();
+                let mut op: Vec<(Id, Scalar)> = data.into_iter().collect();
                 op.extend(def.to_vec());
                 txn.execute(request, stream::iter(op.drain(..))).await
             } else {

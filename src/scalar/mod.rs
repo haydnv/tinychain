@@ -231,8 +231,8 @@ impl From<Value> for Scalar {
     }
 }
 
-impl From<ValueId> for Scalar {
-    fn from(id: ValueId) -> Scalar {
+impl From<Id> for Scalar {
+    fn from(id: Id) -> Scalar {
         Scalar::Value(id.into())
     }
 }
@@ -397,18 +397,18 @@ impl TryCastFrom<Scalar> for TCRef {
     }
 }
 
-impl TryCastFrom<Scalar> for ValueId {
+impl TryCastFrom<Scalar> for Id {
     fn can_cast_from(scalar: &Scalar) -> bool {
         if let Scalar::Value(value) = scalar {
-            ValueId::can_cast_from(value)
+            Id::can_cast_from(value)
         } else {
             false
         }
     }
 
-    fn opt_cast_from(scalar: Scalar) -> Option<ValueId> {
+    fn opt_cast_from(scalar: Scalar) -> Option<Id> {
         if let Scalar::Value(value) = scalar {
-            ValueId::opt_cast_from(value)
+            Id::opt_cast_from(value)
         } else {
             None
         }
@@ -750,7 +750,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
         let mut map = HashMap::with_capacity(data.len());
         for (key, value) in data.drain() {
             debug!("key {} value {}", key, value);
-            let key: ValueId = key.parse().map_err(de::Error::custom)?;
+            let key: Id = key.parse().map_err(de::Error::custom)?;
             map.insert(key, value);
         }
 

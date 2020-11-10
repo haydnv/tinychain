@@ -15,7 +15,7 @@ use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, TryCastInto, Value, ValueId};
+use crate::scalar::{label, Id, Link, PathSegment, Scalar, TCPathBuf, TryCastInto, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds, ColumnBound};
@@ -220,7 +220,7 @@ impl TableInstance for TableBase {
         }
     }
 
-    fn order_by(&self, columns: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
         match self {
             Self::Index(index) => index.order_by(columns, reverse),
             Self::ROIndex(index) => index.order_by(columns, reverse),
@@ -260,7 +260,7 @@ impl TableInstance for TableBase {
         }
     }
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
         match self {
             Self::Index(index) => index.validate_order(order),
             Self::ROIndex(index) => index.validate_order(order),
@@ -436,7 +436,7 @@ impl TableInstance for Index {
         self.schema.values()
     }
 
-    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
         if self.schema.starts_with(&order) {
             if reverse {
                 self.reversed()
@@ -492,7 +492,7 @@ impl TableInstance for Index {
         Ok(())
     }
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
         if !self.schema.starts_with(&order) {
             let order: Vec<String> = order.iter().map(|c| c.to_string()).collect();
             Err(error::bad_request(
@@ -544,13 +544,13 @@ impl ReadOnly {
     pub fn copy_from<'a>(
         source: Table,
         txn: Txn,
-        key_columns: Option<Vec<ValueId>>,
+        key_columns: Option<Vec<Id>>,
     ) -> TCBoxTryFuture<'a, ReadOnly> {
         Box::pin(async move {
             let source_schema: IndexSchema =
                 (source.key().to_vec(), source.values().to_vec()).into();
             let (schema, btree) = if let Some(columns) = key_columns {
-                let column_names: HashSet<&ValueId> = columns.iter().collect();
+                let column_names: HashSet<&Id> = columns.iter().collect();
                 let schema = source_schema.subset(column_names)?;
                 let btree =
                     BTreeFile::create(&txn.subcontext_tmp().await?, schema.clone().into()).await?;
@@ -595,7 +595,7 @@ impl TableInstance for ReadOnly {
         self.index.clone().count(txn_id).await
     }
 
-    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
         self.index.validate_order(&order)?;
 
         if reverse {
@@ -632,7 +632,7 @@ impl TableInstance for ReadOnly {
         self.index.validate_bounds(bounds)
     }
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
         self.index.validate_order(order)
     }
 }
@@ -646,7 +646,7 @@ impl From<ReadOnly> for Table {
 #[derive(Clone)]
 pub struct TableIndex {
     primary: Index,
-    auxiliary: BTreeMap<ValueId, Index>,
+    auxiliary: BTreeMap<Id, Index>,
 }
 
 impl TableIndex {
@@ -657,7 +657,7 @@ impl TableIndex {
         )
         .await?;
 
-        let auxiliary: BTreeMap<ValueId, Index> =
+        let auxiliary: BTreeMap<Id, Index> =
             try_join_all(schema.indices().iter().map(|(name, column_names)| {
                 Self::create_index(txn, schema.primary(), name.clone(), column_names.to_vec())
                     .map_ok(move |index| (name.clone(), index))
@@ -672,8 +672,8 @@ impl TableIndex {
     async fn create_index(
         txn: &Txn,
         primary: &IndexSchema,
-        name: ValueId,
-        key: Vec<ValueId>,
+        name: Id,
+        key: Vec<Id>,
     ) -> TCResult<Index> {
         if name.as_str() == PRIMARY_INDEX {
             return Err(error::bad_request(
@@ -682,7 +682,7 @@ impl TableIndex {
             ));
         }
 
-        let index_key_set: HashSet<&ValueId> = key.iter().collect();
+        let index_key_set: HashSet<&Id> = key.iter().collect();
         if index_key_set.len() != key.len() {
             return Err(error::bad_request(
                 &format!("Duplicate column in index {}", name),
@@ -693,7 +693,7 @@ impl TableIndex {
             ));
         }
 
-        let mut columns: HashMap<ValueId, Column> = primary
+        let mut columns: HashMap<Id, Column> = primary
             .columns()
             .iter()
             .cloned()
@@ -833,7 +833,7 @@ impl TableInstance for TableIndex {
         })
     }
 
-    fn order_by(&self, columns: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
         self.validate_order(&columns)?;
 
         if self.primary.validate_order(&columns).is_ok() {
@@ -904,7 +904,7 @@ impl TableInstance for TableIndex {
             return TableSlice::new(self.clone(), bounds).map(|t| t.into());
         }
 
-        let mut columns: Vec<ValueId> = self
+        let mut columns: Vec<Id> = self
             .primary
             .schema()
             .columns()
@@ -912,7 +912,7 @@ impl TableInstance for TableIndex {
             .map(|c| c.name())
             .cloned()
             .collect();
-        let bounds: Vec<(ValueId, ColumnBound)> = columns
+        let bounds: Vec<(Id, ColumnBound)> = columns
             .drain(..)
             .filter_map(|name| bounds.get(&name).map(|bound| (name, bound.clone())))
             .collect();
@@ -958,7 +958,7 @@ impl TableInstance for TableIndex {
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        let bounds: Vec<(ValueId, ColumnBound)> = self
+        let bounds: Vec<(Id, ColumnBound)> = self
             .primary
             .schema()
             .columns()
@@ -996,7 +996,7 @@ impl TableInstance for TableIndex {
         Ok(())
     }
 
-    fn validate_order(&self, mut order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, mut order: &[Id]) -> TCResult<()> {
         while !order.is_empty() {
             let initial = order.to_vec();
             for i in (1..order.len() + 1).rev() {

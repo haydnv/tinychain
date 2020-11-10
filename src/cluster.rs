@@ -92,7 +92,7 @@ impl Cluster {
         Err(error::not_implemented("Gateway::put"))
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Sync + Unpin>(
+    pub async fn post<S: Stream<Item = (Id, Scalar)> + Send + Sync + Unpin>(
         self,
         _request: &Request,
         _txn: &Txn,

@@ -12,11 +12,11 @@ use serde::de;
 use serde::ser::{SerializeMap, Serializer};
 
 use crate::error::{self, TCResult};
-use crate::scalar::{Label, TCString, TryCastFrom, Value, ValueId};
+use crate::scalar::{Id, Label, TCString, TryCastFrom, Value};
 
 const EMPTY_SLICE: &[usize] = &[];
 
-pub type PathSegment = ValueId;
+pub type PathSegment = Id;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
@@ -395,8 +395,7 @@ impl fmt::Display for Link {
 
 impl<'de> serde::Deserialize<'de> for Link {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Link, D::Error> {
-        let m: HashMap<String, HashMap<ValueId, Value>> =
-            de::Deserialize::deserialize(deserializer)?;
+        let m: HashMap<String, HashMap<Id, Value>> = de::Deserialize::deserialize(deserializer)?;
         if m.len() != 1 {
             Err(de::Error::custom(format!(
                 "Expected Link, found Map: {}",

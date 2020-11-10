@@ -45,8 +45,8 @@ pub async fn post(
     debug!("kernel::post {}", TCPath::from(path));
 
     if &path[0] == "sbin" && &path[1] == "transact" {
-        if data.matches::<Vec<(ValueId, Scalar)>>() {
-            let values: Vec<(ValueId, Scalar)> = data.opt_cast_into().unwrap();
+        if data.matches::<Vec<(Id, Scalar)>>() {
+            let values: Vec<(Id, Scalar)> = data.opt_cast_into().unwrap();
             txn.execute(request, stream::iter(values)).await
         } else if data.matches::<OpRef>() {
             Err(error::not_implemented("Resolve OpRef"))

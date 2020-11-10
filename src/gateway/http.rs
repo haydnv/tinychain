@@ -20,7 +20,7 @@ use crate::collection::class::CollectionInstance;
 use crate::error;
 use crate::request::Request;
 use crate::scalar::value::link::*;
-use crate::scalar::{Scalar, Value, ValueId};
+use crate::scalar::{Id, Scalar, Value};
 use crate::stream::json::JsonListStream;
 use crate::transaction::Txn;
 
@@ -105,7 +105,7 @@ impl Client {
         }
     }
 
-    pub async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + 'static>(
+    pub async fn post<S: Stream<Item = (Id, Scalar)> + Send + 'static>(
         &self,
         request: &Request,
         txn: &Txn,

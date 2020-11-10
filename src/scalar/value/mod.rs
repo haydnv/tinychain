@@ -135,8 +135,8 @@ impl From<TCRef> for Value {
     }
 }
 
-impl From<ValueId> for Value {
-    fn from(v: ValueId) -> Value {
+impl From<Id> for Value {
+    fn from(v: Id) -> Value {
         let s: TCString = v.into();
         s.into()
     }
@@ -282,24 +282,24 @@ impl TryFrom<Value> for TCString {
     }
 }
 
-impl TryFrom<Value> for ValueId {
+impl TryFrom<Value> for Id {
     type Error = error::TCError;
 
-    fn try_from(v: Value) -> TCResult<ValueId> {
+    fn try_from(v: Value) -> TCResult<Id> {
         match v {
             Value::TCString(s) => s.try_into(),
-            other => Err(error::bad_request("Expected ValueId, found", other)),
+            other => Err(error::bad_request("Expected Id, found", other)),
         }
     }
 }
 
-impl<'a> TryFrom<&'a Value> for &'a ValueId {
+impl<'a> TryFrom<&'a Value> for &'a Id {
     type Error = error::TCError;
 
-    fn try_from(v: &'a Value) -> TCResult<&'a ValueId> {
+    fn try_from(v: &'a Value) -> TCResult<&'a Id> {
         match v {
             Value::TCString(s) => s.try_into(),
-            other => Err(error::bad_request("Expected ValueId but found", other)),
+            other => Err(error::bad_request("Expected Id but found", other)),
         }
     }
 }
@@ -488,18 +488,18 @@ impl TryCastFrom<Value> for TCString {
     }
 }
 
-impl TryCastFrom<Value> for ValueId {
+impl TryCastFrom<Value> for Id {
     fn can_cast_from(value: &Value) -> bool {
         if let Value::TCString(s) = value {
-            ValueId::can_cast_from(s)
+            Id::can_cast_from(s)
         } else {
             false
         }
     }
 
-    fn opt_cast_from(value: Value) -> Option<ValueId> {
+    fn opt_cast_from(value: Value) -> Option<Id> {
         if let Value::TCString(s) = value {
-            ValueId::opt_cast_from(s)
+            Id::opt_cast_from(s)
         } else {
             None
         }

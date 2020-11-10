@@ -14,7 +14,7 @@ use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::{Collection, CollectionItem, CollectionView};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value, ValueId};
+use crate::scalar::{label, Id, Link, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds};
@@ -171,7 +171,7 @@ impl TableInstance for TableView {
         }
     }
 
-    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
         match self {
             Self::Aggregate(aggregate) => aggregate.order_by(order, reverse),
             Self::IndexSlice(index_slice) => index_slice.order_by(order, reverse),
@@ -270,7 +270,7 @@ impl TableInstance for TableView {
         }
     }
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
         match self {
             Self::Aggregate(aggregate) => aggregate.validate_order(order),
             Self::IndexSlice(index_slice) => index_slice.validate_order(order),
@@ -374,11 +374,11 @@ impl From<TableView> for Collection {
 #[derive(Clone)]
 pub struct Aggregate {
     source: Box<Table>,
-    columns: Vec<ValueId>,
+    columns: Vec<Id>,
 }
 
 impl Aggregate {
-    pub fn new(source: Table, columns: Vec<ValueId>) -> TCResult<Aggregate> {
+    pub fn new(source: Table, columns: Vec<Id>) -> TCResult<Aggregate> {
         let source = Box::new(source.order_by(columns.to_vec(), false)?);
         Ok(Aggregate { source, columns })
     }
@@ -395,11 +395,11 @@ impl TableInstance for Aggregate {
         self.source.values()
     }
 
-    fn group_by(&self, _columns: Vec<ValueId>) -> TCResult<Aggregate> {
+    fn group_by(&self, _columns: Vec<Id>) -> TCResult<Aggregate> {
         Err(error::unsupported(ERR_AGGREGATE_NESTED))
     }
 
-    fn order_by(&self, columns: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
         let source = Box::new(self.source.order_by(columns, reverse)?);
         Ok(Aggregate {
             source,
@@ -454,7 +454,7 @@ impl TableInstance for Aggregate {
         Err(error::unsupported(ERR_AGGREGATE_SLICE))
     }
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
         self.source.validate_order(order)
     }
 }
@@ -554,7 +554,7 @@ impl TableInstance for IndexSlice {
         Box::pin(async move { self.source.delete(&txn_id, self.range.into()).await })
     }
 
-    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
         if self.schema.starts_with(&order) {
             if reverse {
                 self.reversed()
@@ -610,7 +610,7 @@ impl TableInstance for IndexSlice {
         outer.contains(&inner, &schema.data_types()).map(|_| ())
     }
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
         if self.schema.starts_with(order) {
             Ok(())
         } else {
@@ -689,7 +689,7 @@ impl TableInstance for Limited {
         })
     }
 
-    fn order_by(&self, _order: Vec<ValueId>, _reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, _order: Vec<Id>, _reverse: bool) -> TCResult<Table> {
         Err(error::unsupported(ERR_LIMITED_ORDER))
     }
 
@@ -717,7 +717,7 @@ impl TableInstance for Limited {
         self.source.validate_bounds(bounds)
     }
 
-    fn validate_order(&self, _order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, _order: &[Id]) -> TCResult<()> {
         Err(error::unsupported(ERR_LIMITED_ORDER))
     }
 
@@ -848,7 +848,7 @@ impl TableInstance for Merged {
         }
     }
 
-    fn order_by(&self, columns: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
         match &self.left {
             MergeSource::Merge(merged) => merged.order_by(columns, reverse),
             MergeSource::Table(table_slice) => table_slice.order_by(columns, reverse),
@@ -889,7 +889,7 @@ impl TableInstance for Merged {
     fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
         Box::pin(async move {
             let key_columns = self.key().to_vec();
-            let key_names: Vec<ValueId> = key_columns.iter().map(|c| c.name()).cloned().collect();
+            let key_names: Vec<Id> = key_columns.iter().map(|c| c.name()).cloned().collect();
             let left = self.left.clone();
             let txn_id_clone = txn_id.clone();
             let rows = self
@@ -916,7 +916,7 @@ impl TableInstance for Merged {
         }
     }
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
         match &self.left {
             MergeSource::Merge(merge) => merge.validate_order(order),
             MergeSource::Table(table) => table.validate_order(order),
@@ -970,18 +970,18 @@ impl Transact for Merged {
 pub struct Selection {
     source: Box<Table>,
     schema: IndexSchema,
-    columns: Vec<ValueId>,
+    columns: Vec<Id>,
     indices: Vec<usize>,
 }
 
-impl<T: Into<Table>> TryFrom<(T, Vec<ValueId>)> for Selection {
+impl<T: Into<Table>> TryFrom<(T, Vec<Id>)> for Selection {
     type Error = error::TCError;
 
-    fn try_from(params: (T, Vec<ValueId>)) -> TCResult<Selection> {
+    fn try_from(params: (T, Vec<Id>)) -> TCResult<Selection> {
         let (source, columns) = params;
         let source: Table = source.into();
 
-        let column_set: HashSet<&ValueId> = columns.iter().collect();
+        let column_set: HashSet<&Id> = columns.iter().collect();
         if column_set.len() != columns.len() {
             return Err(error::bad_request(
                 "Tried to select duplicate column",
@@ -996,7 +996,7 @@ impl<T: Into<Table>> TryFrom<(T, Vec<ValueId>)> for Selection {
         let mut indices: Vec<usize> = Vec::with_capacity(columns.len());
         let mut schema: Vec<Column> = Vec::with_capacity(columns.len());
         let source_schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
-        let mut source_columns: HashMap<ValueId, Column> = source_schema.into();
+        let mut source_columns: HashMap<Id, Column> = source_schema.into();
 
         for (i, name) in columns.iter().enumerate() {
             let column = source_columns
@@ -1023,7 +1023,7 @@ impl TableInstance for Selection {
         self.source.clone().count(txn_id).await
     }
 
-    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
         self.validate_order(&order)?;
 
         let source = self.source.order_by(order, reverse).map(Box::new)?;
@@ -1065,15 +1065,15 @@ impl TableInstance for Selection {
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        let bounds_columns: HashSet<ValueId> = bounds.keys().cloned().collect();
-        let selected: HashSet<ValueId> = self
+        let bounds_columns: HashSet<Id> = bounds.keys().cloned().collect();
+        let selected: HashSet<Id> = self
             .schema
             .columns()
             .iter()
             .map(|c| c.name())
             .cloned()
             .collect();
-        let mut unknown: HashSet<&ValueId> = selected.difference(&bounds_columns).collect();
+        let mut unknown: HashSet<&Id> = selected.difference(&bounds_columns).collect();
         if !unknown.is_empty() {
             let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
             return Err(error::bad_request(
@@ -1085,16 +1085,16 @@ impl TableInstance for Selection {
         self.source.validate_bounds(bounds)
     }
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
-        let order_columns: HashSet<ValueId> = order.iter().cloned().collect();
-        let selected: HashSet<ValueId> = self
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
+        let order_columns: HashSet<Id> = order.iter().cloned().collect();
+        let selected: HashSet<Id> = self
             .schema
             .columns()
             .iter()
             .map(|c| c.name())
             .cloned()
             .collect();
-        let mut unknown: HashSet<&ValueId> = selected.difference(&order_columns).collect();
+        let mut unknown: HashSet<&Id> = selected.difference(&order_columns).collect();
         if !unknown.is_empty() {
             let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
             return Err(error::bad_request(
@@ -1167,7 +1167,7 @@ impl TableInstance for TableSlice {
         self.table.delete_row(txn_id, row)
     }
 
-    fn order_by(&self, order: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
         self.table.order_by(order, reverse)
     }
 
@@ -1205,7 +1205,7 @@ impl TableInstance for TableSlice {
             .map(|_| ())
     }
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
         self.table.validate_order(order)
     }
 

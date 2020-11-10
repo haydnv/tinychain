@@ -11,7 +11,7 @@ use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{Link, PathSegment, Scalar, TCPathBuf, Value, ValueId};
+use crate::scalar::{Id, Link, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::schema::{Column, Row, TableSchema};
@@ -108,14 +108,14 @@ pub trait TableInstance: Clone + Into<Table> + Sized + Send + 'static {
         Box::pin(future::ready(Err(error::unsupported(ERR_DELETE))))
     }
 
-    fn group_by(&self, columns: Vec<ValueId>) -> TCResult<view::Aggregate> {
+    fn group_by(&self, columns: Vec<Id>) -> TCResult<view::Aggregate> {
         view::Aggregate::new(self.clone().into(), columns)
     }
 
     fn index<'a>(
         &'a self,
         txn: Txn,
-        columns: Option<Vec<ValueId>>,
+        columns: Option<Vec<Id>>,
     ) -> TCBoxTryFuture<'a, index::ReadOnly> {
         Box::pin(index::ReadOnly::copy_from(
             self.clone().into(),
@@ -133,11 +133,11 @@ pub trait TableInstance: Clone + Into<Table> + Sized + Send + 'static {
         Ok(Arc::new(limited))
     }
 
-    fn order_by(&self, columns: Vec<ValueId>, reverse: bool) -> TCResult<Table>;
+    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table>;
 
     fn reversed(&self) -> TCResult<Table>;
 
-    fn select(&self, columns: Vec<ValueId>) -> TCResult<view::Selection> {
+    fn select(&self, columns: Vec<Id>) -> TCResult<view::Selection> {
         let selection = (self.clone().into(), columns).try_into()?;
         Ok(selection)
     }
@@ -150,7 +150,7 @@ pub trait TableInstance: Clone + Into<Table> + Sized + Send + 'static {
 
     fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()>;
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()>;
+    fn validate_order(&self, order: &[Id]) -> TCResult<()>;
 
     fn update<'a>(self, _txn: Txn, _value: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(future::ready(Err(error::unsupported(ERR_UPDATE))))
@@ -256,7 +256,7 @@ impl TableInstance for Table {
         }
     }
 
-    fn group_by(&self, columns: Vec<ValueId>) -> TCResult<view::Aggregate> {
+    fn group_by(&self, columns: Vec<Id>) -> TCResult<view::Aggregate> {
         match self {
             Self::Base(base) => base.group_by(columns),
             Self::View(view) => view.group_by(columns),
@@ -266,7 +266,7 @@ impl TableInstance for Table {
     fn index<'a>(
         &'a self,
         txn: Txn,
-        columns: Option<Vec<ValueId>>,
+        columns: Option<Vec<Id>>,
     ) -> TCBoxTryFuture<'a, index::ReadOnly> {
         match self {
             Self::Base(base) => base.index(txn, columns),
@@ -295,7 +295,7 @@ impl TableInstance for Table {
         }
     }
 
-    fn order_by(&self, columns: Vec<ValueId>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
         match self {
             Self::Base(base) => base.order_by(columns, reverse),
             Self::View(view) => view.order_by(columns, reverse),
@@ -309,7 +309,7 @@ impl TableInstance for Table {
         }
     }
 
-    fn select(&self, columns: Vec<ValueId>) -> TCResult<view::Selection> {
+    fn select(&self, columns: Vec<Id>) -> TCResult<view::Selection> {
         match self {
             Self::Base(base) => base.select(columns),
             Self::View(view) => view.select(columns),
@@ -337,7 +337,7 @@ impl TableInstance for Table {
         }
     }
 
-    fn validate_order(&self, order: &[ValueId]) -> TCResult<()> {
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
         match self {
             Self::Base(base) => base.validate_order(order),
             Self::View(view) => view.validate_order(order),

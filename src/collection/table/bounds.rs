@@ -6,7 +6,7 @@ use crate::class::{Instance, TCResult};
 use crate::collection::btree::BTreeRange;
 use crate::collection::schema::Column;
 use crate::error;
-use crate::scalar::{Value, ValueId, ValueType};
+use crate::scalar::{Id, Value, ValueType};
 
 #[derive(Clone)]
 pub enum ColumnBound {
@@ -59,7 +59,7 @@ impl fmt::Display for ColumnBound {
     }
 }
 
-pub type Bounds = HashMap<ValueId, ColumnBound>;
+pub type Bounds = HashMap<Id, ColumnBound>;
 
 pub fn all() -> Bounds {
     HashMap::new()
@@ -68,7 +68,7 @@ pub fn all() -> Bounds {
 pub fn btree_range(bounds: &Bounds, columns: &[Column]) -> TCResult<BTreeRange> {
     let mut start = Vec::with_capacity(bounds.len());
     let mut end = Vec::with_capacity(bounds.len());
-    let column_names: Vec<ValueId> = columns.iter().map(|c| c.name()).cloned().collect();
+    let column_names: Vec<Id> = columns.iter().map(|c| c.name()).cloned().collect();
 
     use Bound::*;
     for name in &column_names[0..bounds.len()] {
@@ -111,7 +111,7 @@ pub fn format(bounds: &Bounds) -> String {
 }
 
 pub fn validate(bounds: &Bounds, columns: &[Column]) -> TCResult<()> {
-    let column_names: HashSet<&ValueId> = columns.iter().map(|c| c.name()).collect();
+    let column_names: HashSet<&Id> = columns.iter().map(|c| c.name()).collect();
     for name in bounds.keys() {
         if !column_names.contains(name) {
             return Err(error::not_found(name));

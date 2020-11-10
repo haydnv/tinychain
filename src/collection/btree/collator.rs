@@ -4,7 +4,7 @@ use std::ops::Bound;
 
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::scalar::{Number, StringType, Value, ValueId, ValueType};
+use crate::scalar::{Id, Number, StringType, Value, ValueType};
 
 pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {
     left.expect(dtype, "for collation")?;
@@ -17,8 +17,8 @@ pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<
                 .ok_or_else(|| error::unsupported("Unsupported Number comparison"))
         }
         ValueType::TCString(StringType::Id) => {
-            let left: &ValueId = left.try_into()?;
-            let right: &ValueId = right.try_into()?;
+            let left: &Id = left.try_into()?;
+            let right: &Id = right.try_into()?;
             left.as_str()
                 .partial_cmp(right.as_str())
                 .ok_or_else(|| error::unsupported("Unsupported String comparison"))
@@ -162,8 +162,8 @@ impl Collator {
                 }
                 ValueType::TCString(st) => match st {
                     StringType::Id => {
-                        let left: &ValueId = (&key1[i]).try_into().unwrap();
-                        let right: &ValueId = (&key2[i]).try_into().unwrap();
+                        let left: &Id = (&key1[i]).try_into().unwrap();
+                        let right: &Id = (&key2[i]).try_into().unwrap();
                         match left.cmp(&right) {
                             Less => return Less,
                             Greater => return Greater,

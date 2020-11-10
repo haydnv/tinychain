@@ -114,20 +114,20 @@ pub const fn label(id: &'static str) -> Label {
     Label { id }
 }
 
-impl From<Label> for ValueId {
-    fn from(l: Label) -> ValueId {
-        ValueId {
+impl From<Label> for Id {
+    fn from(l: Label) -> Id {
+        Id {
             id: l.id.to_string(),
         }
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct ValueId {
+pub struct Id {
     id: String,
 }
 
-impl ValueId {
+impl Id {
     pub fn as_str(&self) -> &str {
         self.id.as_str()
     }
@@ -137,37 +137,37 @@ impl ValueId {
     }
 }
 
-impl From<Uuid> for ValueId {
-    fn from(id: Uuid) -> ValueId {
+impl From<Uuid> for Id {
+    fn from(id: Uuid) -> Id {
         id.to_hyphenated().to_string().parse().unwrap()
     }
 }
 
-impl From<usize> for ValueId {
-    fn from(u: usize) -> ValueId {
+impl From<usize> for Id {
+    fn from(u: usize) -> Id {
         u.to_string().parse().unwrap()
     }
 }
 
-impl From<u64> for ValueId {
-    fn from(i: u64) -> ValueId {
+impl From<u64> for Id {
+    fn from(i: u64) -> Id {
         i.to_string().parse().unwrap()
     }
 }
 
-impl<'de> de::Deserialize<'de> for ValueId {
+impl<'de> de::Deserialize<'de> for Id {
     fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        d.deserialize_any(ValueIdVisitor)
+        d.deserialize_any(IdVisitor)
     }
 }
 
-struct ValueIdVisitor;
+struct IdVisitor;
 
-impl<'de> de::Visitor<'de> for ValueIdVisitor {
-    type Value = ValueId;
+impl<'de> de::Visitor<'de> for IdVisitor {
+    type Value = Id;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Tinychain ValueId like {\"foo\": []}")
+        f.write_str("a Tinychain Id like {\"foo\": []}")
     }
 
     fn visit_map<M: de::MapAccess<'de>>(self, mut access: M) -> Result<Self::Value, M::Error> {
@@ -175,74 +175,74 @@ impl<'de> de::Visitor<'de> for ValueIdVisitor {
             let value: Vec<super::Value> = access.next_value()?;
             if value.is_empty() {
                 // TODO: call parsing logic a different way
-                ValueId::from_str(key).map_err(de::Error::custom)
+                Id::from_str(key).map_err(de::Error::custom)
             } else {
-                Err(de::Error::custom("Expected ValueId but found OpRef"))
+                Err(de::Error::custom("Expected Id but found OpRef"))
             }
         } else {
-            Err(de::Error::custom("Unable to parse ValueId"))
+            Err(de::Error::custom("Unable to parse Id"))
         }
     }
 
     fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
         // TODO: call parsing logic a different way
-        ValueId::from_str(s).map_err(de::Error::custom)
+        Id::from_str(s).map_err(de::Error::custom)
     }
 }
 
-impl Serialize for ValueId {
+impl Serialize for Id {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&self.id)
     }
 }
 
-impl PartialEq<Label> for ValueId {
+impl PartialEq<Label> for Id {
     fn eq(&self, other: &Label) -> bool {
         self.id == other.id
     }
 }
 
-impl PartialEq<str> for ValueId {
+impl PartialEq<str> for Id {
     fn eq(&self, other: &str) -> bool {
         &self.id == other
     }
 }
 
-impl PartialEq<ValueId> for &str {
-    fn eq(&self, other: &ValueId) -> bool {
+impl PartialEq<Id> for &str {
+    fn eq(&self, other: &Id) -> bool {
         self == &other.id
     }
 }
 
-impl FromStr for ValueId {
+impl FromStr for Id {
     type Err = error::TCError;
 
-    fn from_str(id: &str) -> TCResult<ValueId> {
+    fn from_str(id: &str) -> TCResult<Id> {
         validate_id(id)?;
-        Ok(ValueId { id: id.to_string() })
+        Ok(Id { id: id.to_string() })
     }
 }
 
-impl TryCastFrom<String> for ValueId {
+impl TryCastFrom<String> for Id {
     fn can_cast_from(id: &String) -> bool {
         validate_id(id).is_ok()
     }
 
-    // TODO: move parsing logic here and depend on opt_cast_from in ValueId::from_str
-    fn opt_cast_from(id: String) -> Option<ValueId> {
+    // TODO: move parsing logic here and depend on opt_cast_from in Id::from_str
+    fn opt_cast_from(id: String) -> Option<Id> {
         match id.parse() {
-            Ok(value_id) => Some(value_id),
+            Ok(id) => Some(id),
             Err(_) => None,
         }
     }
 }
 
-impl TryCastFrom<TCPathBuf> for ValueId {
+impl TryCastFrom<TCPathBuf> for Id {
     fn can_cast_from(path: &TCPathBuf) -> bool {
         path.as_slice().len() == 1
     }
 
-    fn opt_cast_from(path: TCPathBuf) -> Option<ValueId> {
+    fn opt_cast_from(path: TCPathBuf) -> Option<Id> {
         let mut segments = path.into_vec();
         if segments.len() == 1 {
             segments.pop()
@@ -252,7 +252,7 @@ impl TryCastFrom<TCPathBuf> for ValueId {
     }
 }
 
-impl fmt::Display for ValueId {
+impl fmt::Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.id)
     }
@@ -260,7 +260,7 @@ impl fmt::Display for ValueId {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCString {
-    Id(ValueId),
+    Id(Id),
     Link(Link),
     Ref(TCRef),
     UString(String),
@@ -321,8 +321,8 @@ impl From<TCPathBuf> for TCString {
     }
 }
 
-impl From<ValueId> for TCString {
-    fn from(id: ValueId) -> TCString {
+impl From<Id> for TCString {
+    fn from(id: Id) -> TCString {
         TCString::Id(id)
     }
 }
@@ -367,25 +367,25 @@ impl<'a> TryFrom<&'a TCString> for &'a String {
     }
 }
 
-impl TryFrom<TCString> for ValueId {
+impl TryFrom<TCString> for Id {
     type Error = error::TCError;
 
-    fn try_from(s: TCString) -> TCResult<ValueId> {
+    fn try_from(s: TCString) -> TCResult<Id> {
         match s {
             TCString::Id(id) => Ok(id),
-            TCString::UString(s) => ValueId::from_str(&s),
-            other => Err(error::bad_request("Expected ValueId but found", other)),
+            TCString::UString(s) => Id::from_str(&s),
+            other => Err(error::bad_request("Expected Id but found", other)),
         }
     }
 }
 
-impl<'a> TryFrom<&'a TCString> for &'a ValueId {
+impl<'a> TryFrom<&'a TCString> for &'a Id {
     type Error = error::TCError;
 
-    fn try_from(s: &'a TCString) -> TCResult<&'a ValueId> {
+    fn try_from(s: &'a TCString) -> TCResult<&'a Id> {
         match s {
             TCString::Id(id) => Ok(id),
-            other => Err(error::bad_request("Expected ValueId but found", other)),
+            other => Err(error::bad_request("Expected Id but found", other)),
         }
     }
 }
@@ -413,23 +413,23 @@ impl TryFrom<TCString> for TCRef {
     fn try_from(s: TCString) -> TCResult<TCRef> {
         match s {
             TCString::Ref(tc_ref) => Ok(tc_ref),
-            other => Err(error::bad_request("Expected ValueId but found", other)),
+            other => Err(error::bad_request("Expected Id but found", other)),
         }
     }
 }
 
-impl TryCastFrom<Link> for ValueId {
+impl TryCastFrom<Link> for Id {
     fn can_cast_from(link: &Link) -> bool {
         if link.host().is_none() {
-            ValueId::can_cast_from(link.path())
+            Id::can_cast_from(link.path())
         } else {
             false
         }
     }
 
-    fn opt_cast_from(link: Link) -> Option<ValueId> {
+    fn opt_cast_from(link: Link) -> Option<Id> {
         if link.host().is_none() {
-            ValueId::opt_cast_from(link.into_path())
+            Id::opt_cast_from(link.into_path())
         } else {
             None
         }
@@ -455,33 +455,33 @@ impl TryCastFrom<TCString> for Link {
     }
 }
 
-impl TryCastFrom<TCString> for ValueId {
+impl TryCastFrom<TCString> for Id {
     fn can_cast_from(s: &TCString) -> bool {
         match s {
             TCString::Id(_) => true,
-            TCString::Link(link) => ValueId::can_cast_from(link),
+            TCString::Link(link) => Id::can_cast_from(link),
             TCString::Ref(_) => true,
-            TCString::UString(s) => ValueId::can_cast_from(s),
+            TCString::UString(s) => Id::can_cast_from(s),
         }
     }
 
-    fn opt_cast_from(s: TCString) -> Option<ValueId> {
+    fn opt_cast_from(s: TCString) -> Option<Id> {
         match s {
             TCString::Id(id) => Some(id),
-            TCString::Link(link) => ValueId::opt_cast_from(link),
+            TCString::Link(link) => Id::opt_cast_from(link),
             TCString::Ref(tc_ref) => Some(tc_ref.into_id()),
-            TCString::UString(s) => ValueId::opt_cast_from(s),
+            TCString::UString(s) => Id::opt_cast_from(s),
         }
     }
 }
 
 impl TryCastFrom<TCString> for TCRef {
     fn can_cast_from(s: &TCString) -> bool {
-        ValueId::can_cast_from(s)
+        Id::can_cast_from(s)
     }
 
     fn opt_cast_from(s: TCString) -> Option<TCRef> {
-        ValueId::opt_cast_from(s).map(TCRef::from)
+        Id::opt_cast_from(s).map(TCRef::from)
     }
 }
 
@@ -510,7 +510,7 @@ impl fmt::Display for TCString {
 
 fn validate_id(id: &str) -> TCResult<()> {
     if id.is_empty() {
-        return Err(error::bad_request("ValueId cannot be empty", id));
+        return Err(error::bad_request("Id cannot be empty", id));
     }
 
     let filtered: &str = &id.chars().filter(|c| *c as u8 > 32).collect::<String>();

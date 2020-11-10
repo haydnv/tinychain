@@ -6,25 +6,25 @@ use serde::ser::Serializer;
 use serde::Serialize;
 
 use crate::error::{self, TCResult};
-use crate::scalar::ValueId;
+use crate::scalar::Id;
 
 #[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct TCRef {
-    to: ValueId,
+    to: Id,
 }
 
 impl TCRef {
-    pub fn into_id(self) -> ValueId {
+    pub fn into_id(self) -> Id {
         self.to
     }
 
-    pub fn value_id(&'_ self) -> &'_ ValueId {
+    pub fn id(&'_ self) -> &'_ Id {
         &self.to
     }
 }
 
-impl From<ValueId> for TCRef {
-    fn from(to: ValueId) -> TCRef {
+impl From<Id> for TCRef {
+    fn from(to: Id) -> TCRef {
         TCRef { to }
     }
 }
@@ -43,8 +43,8 @@ impl FromStr for TCRef {
     }
 }
 
-impl From<TCRef> for ValueId {
-    fn from(r: TCRef) -> ValueId {
+impl From<TCRef> for Id {
+    fn from(r: TCRef) -> Id {
         r.to
     }
 }

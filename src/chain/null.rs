@@ -7,7 +7,7 @@ use crate::collection::class::*;
 use crate::collection::CollectionBase;
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{PathSegment, Scalar, ScalarClass, Value, ValueId};
+use crate::scalar::{Id, PathSegment, Scalar, ScalarClass, Value};
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -118,7 +118,7 @@ impl ChainInstance for NullChain {
         Err(error::not_implemented("NullChain::put"))
     }
 
-    async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
+    async fn post<S: Stream<Item = (Id, Scalar)> + Send + Unpin>(
         &self,
         _request: &Request,
         _txn: &Txn,

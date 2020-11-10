@@ -13,13 +13,13 @@ use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::kernel;
 use crate::request::Request;
-use crate::scalar::{Link, LinkHost, Scalar, TCPath, TryCastInto, Value, ValueId};
+use crate::scalar::{Id, Link, LinkHost, Scalar, TCPath, TryCastInto, Value};
 use crate::transaction::{Txn, TxnServer};
 
 use super::http;
 use super::{Hosted, NetworkTime, Server};
 
-const ERR_BAD_POSTDATA: &str = "POST requires a list of (ValueId, Value) tuples, not";
+const ERR_BAD_POSTDATA: &str = "POST requires a list of (Id, Value) tuples, not";
 
 pub struct Gateway {
     peers: Vec<LinkHost>,
@@ -189,7 +189,7 @@ impl Gateway {
                 return kernel::post(request, txn, &subject.into_path()[..], data).await;
             }
 
-            let data: Vec<(ValueId, Scalar)> =
+            let data: Vec<(Id, Scalar)> =
                 data.try_cast_into(|v| error::bad_request(ERR_BAD_POSTDATA, v))?;
             let data = stream::iter(data);
 

@@ -12,7 +12,7 @@ use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::error;
-use crate::scalar::{label, Label, Value, ValueId, ValueType};
+use crate::scalar::{label, Id, Label, Value, ValueType};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
@@ -1337,7 +1337,7 @@ impl SparseAccessor for SparseTable {
         axes: Vec<usize>,
     ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
         Box::pin(async move {
-            let columns: Vec<ValueId> = axes.iter().map(|x| (*x).into()).collect();
+            let columns: Vec<Id> = axes.iter().map(|x| (*x).into()).collect();
             let filled_at = self
                 .table
                 .group_by(columns)?
@@ -1376,7 +1376,7 @@ impl SparseAccessor for SparseTable {
                 ));
             }
 
-            let selector: HashMap<ValueId, ColumnBound> = coord
+            let selector: HashMap<Id, ColumnBound> = coord
                 .iter()
                 .enumerate()
                 .map(|(axis, at)| (axis.into(), u64_to_value(*at).into()))
@@ -1406,7 +1406,7 @@ impl SparseAccessor for SparseTable {
         let value = value.into_type(self.dtype);
 
         Box::pin(async move {
-            let mut row: HashMap<ValueId, Value> = coord
+            let mut row: HashMap<Id, Value> = coord
                 .drain(..)
                 .enumerate()
                 .map(|(x, v)| (x.into(), Value::Number(Number::UInt(UInt::U64(v)))))
@@ -2022,7 +2022,7 @@ fn slice_table(mut table: Table, bounds: &'_ Bounds) -> TCBoxTryFuture<'_, Table
 
     Box::pin(async move {
         for (axis, axis_bound) in bounds.to_vec().into_iter().enumerate() {
-            let axis: ValueId = axis.into();
+            let axis: Id = axis.into();
             let column_bound = match axis_bound {
                 At(x) => table::ColumnBound::Is(u64_to_value(x)),
                 In(range) => {

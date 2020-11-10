@@ -7,17 +7,17 @@ use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::scalar::*;
 
-pub type Row = HashMap<ValueId, Value>;
+pub type Row = HashMap<Id, Value>;
 
 #[derive(Clone, PartialEq)]
 pub struct Column {
-    name: ValueId,
+    name: Id,
     dtype: ValueType,
     max_len: Option<usize>,
 }
 
 impl Column {
-    pub fn name(&'_ self) -> &'_ ValueId {
+    pub fn name(&'_ self) -> &'_ Id {
         &self.name
     }
 
@@ -30,10 +30,10 @@ impl Column {
     }
 }
 
-impl<Id: Into<ValueId>> From<(Id, NumberType)> for Column {
-    fn from(column: (Id, NumberType)) -> Column {
+impl<I: Into<Id>> From<(I, NumberType)> for Column {
+    fn from(column: (I, NumberType)) -> Column {
         let (name, dtype) = column;
-        let name: ValueId = name.into();
+        let name: Id = name.into();
         let dtype: ValueType = dtype.into();
         let max_len = None;
 
@@ -45,8 +45,8 @@ impl<Id: Into<ValueId>> From<(Id, NumberType)> for Column {
     }
 }
 
-impl From<(ValueId, ValueType)> for Column {
-    fn from(column: (ValueId, ValueType)) -> Column {
+impl From<(Id, ValueType)> for Column {
+    fn from(column: (Id, ValueType)) -> Column {
         let (name, dtype) = column;
         let max_len = None;
 
@@ -58,8 +58,8 @@ impl From<(ValueId, ValueType)> for Column {
     }
 }
 
-impl From<(ValueId, ValueType, usize)> for Column {
-    fn from(column: (ValueId, ValueType, usize)) -> Column {
+impl From<(Id, ValueType, usize)> for Column {
+    fn from(column: (Id, ValueType, usize)) -> Column {
         let (name, dtype, size) = column;
         let max_len = Some(size);
 
@@ -75,18 +75,18 @@ impl TryCastFrom<Value> for Column {
     fn can_cast_from(value: &Value) -> bool {
         debug!("Column::can_cast_from {}?", value);
 
-        value.matches::<(ValueId, ValueType)>() || value.matches::<(ValueId, ValueType, u64)>()
+        value.matches::<(Id, ValueType)>() || value.matches::<(Id, ValueType, u64)>()
     }
 
     fn opt_cast_from(value: Value) -> Option<Column> {
-        if value.matches::<(ValueId, ValueType)>() {
+        if value.matches::<(Id, ValueType)>() {
             let (name, dtype) = value.opt_cast_into().unwrap();
             Some(Column {
                 name,
                 dtype,
                 max_len: None,
             })
-        } else if value.matches::<(ValueId, ValueType, u64)>() {
+        } else if value.matches::<(Id, ValueType, u64)>() {
             let (name, dtype, max_len) = value.opt_cast_into().unwrap();
             Some(Column {
                 name,
@@ -158,8 +158,8 @@ impl IndexSchema {
         Ok(key)
     }
 
-    pub fn starts_with(&self, expected: &[ValueId]) -> bool {
-        let actual: Vec<ValueId> = self.columns().iter().map(|c| c.name()).cloned().collect();
+    pub fn starts_with(&self, expected: &[Id]) -> bool {
+        let actual: Vec<Id> = self.columns().iter().map(|c| c.name()).cloned().collect();
         for (a, e) in actual[0..expected.len()].iter().zip(expected.iter()) {
             if a != e {
                 return false;
@@ -169,7 +169,7 @@ impl IndexSchema {
         true
     }
 
-    pub fn subset(&self, key_columns: HashSet<&ValueId>) -> TCResult<IndexSchema> {
+    pub fn subset(&self, key_columns: HashSet<&Id>) -> TCResult<IndexSchema> {
         let key: Vec<Column> = self
             .key
             .iter()
@@ -187,9 +187,8 @@ impl IndexSchema {
         Ok((key, value).into())
     }
 
-    pub fn validate_columns(&self, columns: &[ValueId]) -> TCResult<()> {
-        let valid_columns: HashSet<ValueId> =
-            self.columns().iter().map(|c| c.name()).cloned().collect();
+    pub fn validate_columns(&self, columns: &[Id]) -> TCResult<()> {
+        let valid_columns: HashSet<Id> = self.columns().iter().map(|c| c.name()).cloned().collect();
         for column in columns {
             if !valid_columns.contains(column) {
                 return Err(error::not_found(column));
@@ -221,7 +220,7 @@ impl IndexSchema {
     }
 
     pub fn validate_row_partial(&self, row: &Row) -> TCResult<()> {
-        let columns: HashMap<ValueId, ValueType> = self
+        let columns: HashMap<Id, ValueType> = self
             .columns()
             .drain(..)
             .map(|c| (c.name, c.dtype))
@@ -239,10 +238,10 @@ impl IndexSchema {
     }
 
     pub fn validate_row(&self, row: &Row) -> TCResult<()> {
-        let expected: HashSet<ValueId> = self.columns().iter().map(|c| c.name()).cloned().collect();
-        let actual: HashSet<ValueId> = row.keys().cloned().collect();
-        let mut missing: Vec<&ValueId> = expected.difference(&actual).collect();
-        let mut extra: Vec<&ValueId> = actual.difference(&expected).collect();
+        let expected: HashSet<Id> = self.columns().iter().map(|c| c.name()).cloned().collect();
+        let actual: HashSet<Id> = row.keys().cloned().collect();
+        let mut missing: Vec<&Id> = expected.difference(&actual).collect();
+        let mut extra: Vec<&Id> = actual.difference(&expected).collect();
 
         if !missing.is_empty() {
             return Err(error::bad_request(
@@ -334,8 +333,8 @@ impl TryCastFrom<Value> for IndexSchema {
     }
 }
 
-impl From<IndexSchema> for HashMap<ValueId, Column> {
-    fn from(mut schema: IndexSchema) -> HashMap<ValueId, Column> {
+impl From<IndexSchema> for HashMap<Id, Column> {
+    fn from(mut schema: IndexSchema) -> HashMap<Id, Column> {
         schema
             .key
             .drain(..)
@@ -345,8 +344,8 @@ impl From<IndexSchema> for HashMap<ValueId, Column> {
     }
 }
 
-impl From<IndexSchema> for Vec<ValueId> {
-    fn from(mut schema: IndexSchema) -> Vec<ValueId> {
+impl From<IndexSchema> for Vec<Id> {
+    fn from(mut schema: IndexSchema) -> Vec<Id> {
         schema
             .key
             .drain(..)
@@ -383,11 +382,11 @@ impl fmt::Display for IndexSchema {
 #[derive(Clone)]
 pub struct TableSchema {
     primary: IndexSchema,
-    indices: BTreeMap<ValueId, Vec<ValueId>>,
+    indices: BTreeMap<Id, Vec<Id>>,
 }
 
 impl TableSchema {
-    pub fn indices(&'_ self) -> &'_ BTreeMap<ValueId, Vec<ValueId>> {
+    pub fn indices(&'_ self) -> &'_ BTreeMap<Id, Vec<Id>> {
         &self.indices
     }
 
@@ -405,7 +404,7 @@ impl From<IndexSchema> for TableSchema {
     }
 }
 
-impl<I: Iterator<Item = (ValueId, Vec<ValueId>)>> From<(IndexSchema, I)> for TableSchema {
+impl<I: Iterator<Item = (Id, Vec<Id>)>> From<(IndexSchema, I)> for TableSchema {
     fn from(schema: (IndexSchema, I)) -> TableSchema {
         TableSchema {
             primary: schema.0,
@@ -416,12 +415,12 @@ impl<I: Iterator<Item = (ValueId, Vec<ValueId>)>> From<(IndexSchema, I)> for Tab
 
 impl TryCastFrom<Value> for TableSchema {
     fn can_cast_from(value: &Value) -> bool {
-        value.matches::<(IndexSchema, Vec<(ValueId, Vec<ValueId>)>)>()
+        value.matches::<(IndexSchema, Vec<(Id, Vec<Id>)>)>()
     }
 
     fn opt_cast_from(value: Value) -> Option<TableSchema> {
         if let Some((primary, indices)) = value.opt_cast_into() {
-            let indices: Vec<(ValueId, Vec<ValueId>)> = indices;
+            let indices: Vec<(Id, Vec<Id>)> = indices;
             let indices = indices.into_iter().collect();
             Some(TableSchema { primary, indices })
         } else {

@@ -7,7 +7,7 @@ use futures::TryFutureExt;
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value, ValueId};
+use crate::scalar::{label, Id, Link, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 mod block;
@@ -108,7 +108,7 @@ pub trait ChainInstance: Instance {
         state: State,
     ) -> TCResult<()>;
 
-    async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
+    async fn post<S: Stream<Item = (Id, Scalar)> + Send + Unpin>(
         &self,
         request: &Request,
         txn: &Txn,
@@ -163,7 +163,7 @@ impl ChainInstance for Chain {
         }
     }
 
-    async fn post<S: Stream<Item = (ValueId, Scalar)> + Send + Unpin>(
+    async fn post<S: Stream<Item = (Id, Scalar)> + Send + Unpin>(
         &self,
         request: &Request,
         txn: &Txn,

@@ -8,7 +8,7 @@ use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::error::{self, TCResult};
 use crate::request::Request;
 use crate::scalar::{
-    self, label, Link, PathSegment, Scalar, TCPath, TCPathBuf, TryCastInto, Value, ValueId,
+    self, label, Id, Link, PathSegment, Scalar, TCPath, TCPathBuf, TryCastInto, Value,
 };
 use crate::transaction::Txn;
 
@@ -22,7 +22,7 @@ impl InstanceClassType {
         debug!("InstanceClassType::post {}", TCPath::from(path));
 
         if path == &Self::prefix()[..] {
-            let mut data: HashMap<ValueId, Scalar> = data.into();
+            let mut data: HashMap<Id, Scalar> = data.into();
 
             let extends = if let Some(extends) = data.remove(&label("extends").into()) {
                 let link = extends.try_cast_into(|v| {
@@ -44,7 +44,7 @@ impl InstanceClassType {
             } else {
                 Err(error::bad_request(
                     format!("{} got unrecognized parameters", Self::prefix()),
-                    Value::from(data.keys().cloned().collect::<Vec<ValueId>>()),
+                    Value::from(data.keys().cloned().collect::<Vec<Id>>()),
                 ))
             }
         } else {
