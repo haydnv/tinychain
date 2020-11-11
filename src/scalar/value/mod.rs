@@ -1,6 +1,5 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::str::FromStr;
 
 use bytes::Bytes;
 use log::debug;
@@ -15,14 +14,12 @@ use super::{Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto};
 pub mod class;
 pub mod link;
 pub mod number;
-pub mod reference;
 pub mod string;
 pub mod version;
 
 pub use class::*;
 pub use link::*;
 pub use number::*;
-pub use reference::*;
 pub use string::*;
 pub use version::*;
 
@@ -125,13 +122,6 @@ impl From<u64> for Value {
 impl From<TCString> for Value {
     fn from(s: TCString) -> Value {
         Value::TCString(s)
-    }
-}
-
-impl From<TCRef> for Value {
-    fn from(r: TCRef) -> Value {
-        let s: TCString = r.into();
-        s.into()
     }
 }
 
@@ -260,17 +250,6 @@ impl TryFrom<Value> for TCPathBuf {
     }
 }
 
-impl TryFrom<Value> for TCRef {
-    type Error = error::TCError;
-
-    fn try_from(v: Value) -> TCResult<TCRef> {
-        match v {
-            Value::TCString(s) => s.try_into(),
-            other => Err(error::bad_request("Expected Ref but found", other)),
-        }
-    }
-}
-
 impl TryFrom<Value> for TCString {
     type Error = error::TCError;
 
@@ -317,10 +296,12 @@ impl TryFrom<Value> for Vec<Value> {
 
 impl TryCastFrom<Vec<Scalar>> for Value {
     fn can_cast_from(tuple: &Vec<Scalar>) -> bool {
+        debug!("Value::can_cast_from({})?", Scalar::Tuple(tuple.to_vec()));
+
         for s in tuple {
             match s {
                 Scalar::Value(_) => {}
-                Scalar::Tuple(nested) if Value::can_cast_from(nested) => return true,
+                Scalar::Tuple(nested) if Value::can_cast_from(nested) => {}
                 _ => return false,
             }
         }
@@ -455,22 +436,6 @@ impl TryCastFrom<Value> for TCPathBuf {
             TCPathBuf::opt_cast_from(tc_string)
         } else {
             None
-        }
-    }
-}
-
-impl TryCastFrom<Value> for TCRef {
-    fn can_cast_from(value: &Value) -> bool {
-        match value {
-            Value::TCString(s) => TCRef::can_cast_from(s),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(value: Value) -> Option<TCRef> {
-        match value {
-            Value::TCString(s) => TCRef::opt_cast_from(s),
-            _ => None,
         }
     }
 }
@@ -683,16 +648,10 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
             let value: Value = access.next_value()?;
 
             if key.starts_with('$') {
-                let subject = TCRef::from_str(key).map_err(de::Error::custom)?;
-
-                if value == Value::Tuple(vec![]) || value == Value::None {
-                    Ok(Value::TCString(TCString::Ref(subject)))
-                } else {
-                    Err(de::Error::custom(format!(
-                        "Expected Value but found MethodRef: {}",
-                        value
-                    )))
-                }
+                Err(de::Error::custom(format!(
+                    "Expected Value but found Ref: {}",
+                    key
+                )))
             } else if let Ok(link) = key.parse::<link::Link>() {
                 let path = link.path();
 

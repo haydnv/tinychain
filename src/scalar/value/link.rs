@@ -557,7 +557,6 @@ impl TryCastFrom<TCString> for TCPathBuf {
         match s {
             TCString::Id(_) => true,
             TCString::Link(link) => link.host().is_none(),
-            TCString::Ref(_) => true,
             TCString::UString(ustring) => TCPathBuf::from_str(ustring).is_ok(),
         }
     }
@@ -566,7 +565,6 @@ impl TryCastFrom<TCString> for TCPathBuf {
         match s {
             TCString::Id(id) => Some(id.into()),
             TCString::Link(link) if link.host().is_none() => Some(link.into_path()),
-            TCString::Ref(tc_ref) => Some(tc_ref.into_id().into()),
             TCString::UString(ustring) => TCPathBuf::from_str(&ustring).ok(),
             _ => None,
         }

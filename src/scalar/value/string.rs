@@ -14,7 +14,6 @@ use crate::scalar::{Scalar, ScalarClass, ScalarInstance, TryCastFrom};
 
 use super::class::{ValueClass, ValueInstance, ValueType};
 use super::link::{Link, PathSegment, TCPath, TCPathBuf};
-use super::reference::TCRef;
 use super::Value;
 
 const EMPTY: &[usize] = &[];
@@ -28,7 +27,6 @@ const RESERVED_CHARS: [&str; 21] = [
 pub enum StringType {
     Id,
     Link,
-    Ref,
     UString,
 }
 
@@ -44,7 +42,6 @@ impl NativeClass for StringType {
             match suffix[0].as_str() {
                 "id" => Ok(StringType::Id),
                 "link" => Ok(StringType::Link),
-                "ref" => Ok(StringType::Ref),
                 "ustring" => Ok(StringType::UString),
                 other => Err(error::not_found(other)),
             }
@@ -87,7 +84,6 @@ impl From<StringType> for Link {
         let suffix = match st {
             Id => label("id"),
             Link => label("link"),
-            Ref => label("ref"),
             UString => label("ustring"),
         };
 
@@ -100,7 +96,6 @@ impl fmt::Display for StringType {
         match self {
             Self::Id => write!(f, "type Id"),
             Self::Link => write!(f, "type Link"),
-            Self::Ref => write!(f, "type Ref"),
             Self::UString => write!(f, "type UString"),
         }
     }
@@ -262,7 +257,6 @@ impl fmt::Display for Id {
 pub enum TCString {
     Id(Id),
     Link(Link),
-    Ref(TCRef),
     UString(String),
 }
 
@@ -273,7 +267,6 @@ impl Instance for TCString {
         match self {
             TCString::Id(_) => StringType::Id,
             TCString::Link(_) => StringType::Link,
-            TCString::Ref(_) => StringType::Ref,
             TCString::UString(_) => StringType::UString,
         }
     }
@@ -324,12 +317,6 @@ impl From<TCPathBuf> for TCString {
 impl From<Id> for TCString {
     fn from(id: Id) -> TCString {
         TCString::Id(id)
-    }
-}
-
-impl From<TCRef> for TCString {
-    fn from(r: TCRef) -> TCString {
-        TCString::Ref(r)
     }
 }
 
@@ -407,17 +394,6 @@ impl TryFrom<TCString> for TCPathBuf {
     }
 }
 
-impl TryFrom<TCString> for TCRef {
-    type Error = error::TCError;
-
-    fn try_from(s: TCString) -> TCResult<TCRef> {
-        match s {
-            TCString::Ref(tc_ref) => Ok(tc_ref),
-            other => Err(error::bad_request("Expected Id but found", other)),
-        }
-    }
-}
-
 impl TryCastFrom<Link> for Id {
     fn can_cast_from(link: &Link) -> bool {
         if link.host().is_none() {
@@ -448,7 +424,6 @@ impl TryCastFrom<TCString> for Link {
         match s {
             TCString::Id(id) => Some(TCPathBuf::from(id).into()),
             TCString::Link(link) => Some(link),
-            TCString::Ref(tc_ref) => Some(TCPathBuf::from(tc_ref.into_id()).into()),
             // TODO: move Link::from_str logic here and rely on this function in Link::from_str
             TCString::UString(s) => Link::from_str(&s).ok(),
         }
@@ -460,7 +435,6 @@ impl TryCastFrom<TCString> for Id {
         match s {
             TCString::Id(_) => true,
             TCString::Link(link) => Id::can_cast_from(link),
-            TCString::Ref(_) => true,
             TCString::UString(s) => Id::can_cast_from(s),
         }
     }
@@ -469,19 +443,8 @@ impl TryCastFrom<TCString> for Id {
         match s {
             TCString::Id(id) => Some(id),
             TCString::Link(link) => Id::opt_cast_from(link),
-            TCString::Ref(tc_ref) => Some(tc_ref.into_id()),
             TCString::UString(s) => Id::opt_cast_from(s),
         }
-    }
-}
-
-impl TryCastFrom<TCString> for TCRef {
-    fn can_cast_from(s: &TCString) -> bool {
-        Id::can_cast_from(s)
-    }
-
-    fn opt_cast_from(s: TCString) -> Option<TCRef> {
-        Id::opt_cast_from(s).map(TCRef::from)
     }
 }
 
@@ -502,7 +465,6 @@ impl fmt::Display for TCString {
         match self {
             TCString::Id(id) => write!(f, "{}", id),
             TCString::Link(l) => write!(f, "{}", l),
-            TCString::Ref(r) => write!(f, "{}", r),
             TCString::UString(u) => write!(f, "{}", u),
         }
     }

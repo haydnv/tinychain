@@ -8,7 +8,7 @@ use log::debug;
 use crate::class::{Instance, State, TCBoxTryFuture};
 use crate::error::{self, TCResult};
 use crate::request::Request;
-use crate::scalar::{self, Op, OpRef, PathSegment, Scalar, TCPath, Value, ValueInstance};
+use crate::scalar::{self, Key, Op, OpRef, PathSegment, Scalar, TCPath, Value, ValueInstance};
 use crate::transaction::Txn;
 
 use super::InstanceClass;
@@ -26,7 +26,7 @@ impl ObjectInstance {
         class: InstanceClass,
         schema: Value,
     ) -> TCResult<ObjectInstance> {
-        let ctr = OpRef::Get((class.extends(), schema));
+        let ctr = OpRef::Get((class.extends(), Key::Value(schema)));
         let parent = txn
             .resolve(request, HashMap::new(), ctr.into())
             .map_ok(Box::new)

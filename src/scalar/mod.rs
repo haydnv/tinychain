@@ -12,9 +12,11 @@ use crate::error;
 
 pub mod object;
 pub mod op;
+pub mod reference;
 pub mod value;
 
 pub use op::*;
+pub use reference::*;
 pub use value::*;
 
 pub type Object = object::Object;
@@ -105,8 +107,9 @@ pub trait ScalarClass: Class {
 pub enum ScalarType {
     Object,
     Op(op::OpType),
-    Value(ValueType),
+    Ref,
     Tuple,
+    Value(ValueType),
 }
 
 impl Class for ScalarType {
@@ -118,15 +121,21 @@ impl NativeClass for ScalarType {
         let suffix = Self::prefix().try_suffix(path)?;
 
         if suffix.is_empty() {
-            return Err(error::method_not_allowed(TCPath::from(path)));
-        }
-
-        match suffix[0].as_str() {
-            "object" if suffix.len() == 1 => Ok(ScalarType::Object),
-            "op" => op::OpType::from_path(path).map(ScalarType::Op),
-            "value" => ValueType::from_path(path).map(ScalarType::Value),
-            "tuple" if suffix.len() == 1 => Ok(ScalarType::Tuple),
-            other => Err(error::not_found(other)),
+            Err(error::method_not_allowed(TCPath::from(path)))
+        } else if suffix.len() == 1 {
+            match suffix[0].as_str() {
+                "object" if suffix.len() == 1 => Ok(ScalarType::Object),
+                "ref" if suffix.len() == 1 => Ok(ScalarType::Ref),
+                "tuple" if suffix.len() == 1 => Ok(ScalarType::Tuple),
+                "op" | "value" => Err(error::method_not_allowed(&suffix[0])),
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            match suffix[0].as_str() {
+                "op" => op::OpType::from_path(path).map(ScalarType::Op),
+                "value" => ValueType::from_path(path).map(ScalarType::Value),
+                other => Err(error::not_found(other)),
+            }
         }
     }
 
@@ -147,9 +156,13 @@ impl ScalarClass for ScalarType {
                 other => Err(error::bad_request("Cannot cast into Map from", other)),
             },
             Self::Op(ot) => ot.try_cast(scalar).map(Box::new).map(Scalar::Op),
-            Self::Value(vt) => vt.try_cast(scalar).map(Scalar::Value),
+            Self::Ref => TCRef::try_cast_from(scalar, |v| {
+                error::bad_request("Cannot cast into Ref from", v)
+            })
+            .map(Scalar::Ref),
             Self::Tuple => scalar
                 .try_cast_into(|v| error::not_implemented(format!("Cast into Tuple from {}", v))),
+            Self::Value(vt) => vt.try_cast(scalar).map(Scalar::Value),
         }
     }
 }
@@ -158,8 +171,9 @@ impl From<ScalarType> for Link {
     fn from(st: ScalarType) -> Link {
         match st {
             ScalarType::Object => ScalarType::prefix().append(label("object")).into(),
-            ScalarType::Tuple => ScalarType::prefix().append(label("tuple")).into(),
             ScalarType::Op(ot) => ot.into(),
+            ScalarType::Ref => ScalarType::prefix().append(label("ref")).into(),
+            ScalarType::Tuple => ScalarType::prefix().append(label("tuple")).into(),
             ScalarType::Value(vt) => vt.into(),
         }
     }
@@ -176,8 +190,9 @@ impl fmt::Display for ScalarType {
         match self {
             Self::Object => write!(f, "type Object (generic)"),
             Self::Op(ot) => write!(f, "{}", ot),
-            Self::Value(vt) => write!(f, "{}", vt),
+            Self::Ref => write!(f, "type Ref"),
             Self::Tuple => write!(f, "type Tuple"),
+            Self::Value(vt) => write!(f, "{}", vt),
         }
     }
 }
@@ -186,8 +201,9 @@ impl fmt::Display for ScalarType {
 pub enum Scalar {
     Object(Object),
     Op(Box<op::Op>),
-    Value(value::Value),
+    Ref(TCRef),
     Tuple(Vec<Scalar>),
+    Value(value::Value),
 }
 
 impl Instance for Scalar {
@@ -197,8 +213,9 @@ impl Instance for Scalar {
         match self {
             Self::Object(_) => ScalarType::Object,
             Self::Op(op) => ScalarType::Op(op.class()),
-            Self::Value(value) => ScalarType::Value(value.class()),
+            Self::Ref(_) => ScalarType::Ref,
             Self::Tuple(_) => ScalarType::Tuple,
+            Self::Value(value) => ScalarType::Value(value.class()),
         }
     }
 }
@@ -381,16 +398,16 @@ impl TryCastFrom<Scalar> for Number {
 
 impl TryCastFrom<Scalar> for TCRef {
     fn can_cast_from(scalar: &Scalar) -> bool {
-        if let Scalar::Value(value) = scalar {
-            TCRef::can_cast_from(value)
+        if let Scalar::Ref(_) = scalar {
+            true
         } else {
             false
         }
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<TCRef> {
-        if let Scalar::Value(value) = scalar {
-            TCRef::opt_cast_from(value)
+        if let Scalar::Ref(tc_ref) = scalar {
+            Some(tc_ref)
         } else {
             None
         }
@@ -399,18 +416,18 @@ impl TryCastFrom<Scalar> for TCRef {
 
 impl TryCastFrom<Scalar> for Id {
     fn can_cast_from(scalar: &Scalar) -> bool {
-        if let Scalar::Value(value) = scalar {
-            Id::can_cast_from(value)
-        } else {
-            false
+        match scalar {
+            Scalar::Value(value) => Id::can_cast_from(value),
+            Scalar::Ref(_) => true,
+            _ => false,
         }
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Id> {
-        if let Scalar::Value(value) = scalar {
-            Id::opt_cast_from(value)
-        } else {
-            None
+        match scalar {
+            Scalar::Value(value) => Id::opt_cast_from(value),
+            Scalar::Ref(tc_ref) => Some(tc_ref.into()),
+            _ => None,
         }
     }
 }
@@ -444,6 +461,8 @@ impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
 
 impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (T,) {
     fn can_cast_from(source: &Scalar) -> bool {
+        debug!("can cast from {}?", source);
+
         if let Scalar::Tuple(source) = source {
             if source.len() == 1 && T::can_cast_from(&source[0]) {
                 return true;
@@ -454,6 +473,8 @@ impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (T,) {
     }
 
     fn opt_cast_from(source: Scalar) -> Option<(T,)> {
+        debug!("cast from {}", source);
+
         if let Scalar::Tuple(mut source) = source {
             if source.len() == 1 {
                 return source.pop().unwrap().opt_cast_into().map(|item| (item,));
@@ -532,7 +553,7 @@ struct ScalarVisitor {
 impl ScalarVisitor {
     fn visit_method<E: de::Error>(
         self,
-        subject: value::TCRef,
+        subject: TCRef,
         path: value::TCPathBuf,
         params: Scalar,
     ) -> Result<Scalar, E> {
@@ -540,30 +561,18 @@ impl ScalarVisitor {
 
         let method = if params.matches::<Object>() {
             Method::Post((subject, path), params.opt_cast_into().unwrap())
+        } else if params.matches::<(Key, Scalar)>() {
+            Method::Put((subject, path), params.opt_cast_into().unwrap())
+        } else if params.matches::<(Key,)>() {
+            let (key,) = params.opt_cast_into().unwrap();
+            Method::Get((subject, path), key)
+        } else if params == Scalar::Tuple(vec![]) {
+            Method::Get((subject, path), Key::Value(Value::None))
         } else {
-            let mut params: Vec<Scalar> = params.try_into().map_err(de::Error::custom)?;
-            if params.len() == 1 {
-                let key = params.pop().unwrap();
-                let key = key.try_cast_into(|v| {
-                    de::Error::custom(format!("GET Method key must be a Value, not {}", v))
-                })?;
-
-                Method::Get((subject, path), key)
-            } else if params.len() == 2 {
-                let value = params.pop().unwrap();
-                let key = params.pop().unwrap();
-
-                let key = key.try_cast_into(|v| {
-                    de::Error::custom(format!("PUT Method key must be a Value, not {}", v))
-                })?;
-
-                Method::Put((subject, path), (key, value))
-            } else {
-                return Err(de::Error::custom(format!(
-                    "expected a Method but found: {}",
-                    Scalar::Tuple(params)
-                )));
-            }
+            return Err(de::Error::custom(format!(
+                "expected a Method but found {}",
+                params
+            )));
         };
 
         Ok(Scalar::Op(Box::new(Op::Method(method))))
@@ -572,12 +581,11 @@ impl ScalarVisitor {
     fn visit_op_ref<E: de::Error>(self, link: Link, params: Scalar) -> Result<Scalar, E> {
         debug!("OpRef to {}, params {}", link, params);
 
-        let op_ref = if params.matches::<(Value, Scalar)>() {
+        let op_ref = if params.matches::<(Key, Scalar)>() {
             let (key, value) = params.opt_cast_into().unwrap();
             OpRef::Put((link, key, value))
-        } else if params.matches::<(Value,)>() {
-            debug!("GET ref, key is {}", params);
-            let (key,): (Value,) = params.opt_cast_into().unwrap();
+        } else if params.matches::<(Key,)>() {
+            let (key,): (Key,) = params.opt_cast_into().unwrap();
             OpRef::Get((link, key))
         } else if params.matches::<Object>() {
             OpRef::Post((link, params.opt_cast_into().unwrap()))
@@ -593,9 +601,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
     type Value = Scalar;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(
-            "a Tinychain Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"slice_id\", \"$state\"]\"}",
-        )
+        f.write_str("a Tinychain Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"id\", \"$state\"]\"}")
     }
 
     fn visit_f32<E: de::Error>(self, value: f32) -> Result<Self::Value, E> {
@@ -672,14 +678,12 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     )
                 };
 
-                return if data == Scalar::Tuple(vec![]) || data == Scalar::Value(Value::None) {
+                debug!("{} data is {}", key, data);
+                return if data == Scalar::Tuple(vec![]) || data == Value::None {
                     if path == TCPathBuf::default() {
-                        Ok(Scalar::Value(subject.into()))
+                        Ok(Scalar::Ref(subject))
                     } else {
-                        Ok(Scalar::Op(Box::new(Op::Method(Method::Get(
-                            (subject, path),
-                            Value::None,
-                        )))))
+                        self.visit_method(subject, path, data)
                     }
                 } else {
                     self.visit_method(subject, path, data)
@@ -801,7 +805,7 @@ impl Serialize for Scalar {
                         let mut map = s.serialize_map(Some(1))?;
                         map.serialize_entry(
                             &Link::from(control.class()).to_string(),
-                            &[&Scalar::Value(cond.clone().into()), then, or_else],
+                            &(cond, then, or_else),
                         )?;
                         map.end()
                     }
@@ -825,10 +829,7 @@ impl Serialize for Scalar {
                     }
                     OpRef::Put((path, key, value)) => {
                         let mut map = s.serialize_map(Some(1))?;
-                        map.serialize_entry(
-                            &path.to_string(),
-                            &[&Scalar::Value(key.clone()), value],
-                        )?;
+                        map.serialize_entry(&path.to_string(), &(key, value))?;
                         map.end()
                     }
                     OpRef::Post((path, data)) => {
@@ -838,7 +839,7 @@ impl Serialize for Scalar {
                     }
                 },
             },
-            Scalar::Value(value) => value.serialize(s),
+            Scalar::Ref(tc_ref) => tc_ref.serialize(s),
             Scalar::Tuple(tuple) => {
                 let mut seq = s.serialize_seq(Some(tuple.len()))?;
                 for item in tuple {
@@ -846,6 +847,7 @@ impl Serialize for Scalar {
                 }
                 seq.end()
             }
+            Scalar::Value(value) => value.serialize(s),
         }
     }
 }
@@ -863,7 +865,7 @@ impl fmt::Display for Scalar {
                     .join(", ")
             ),
             Scalar::Op(op) => write!(f, "{}", op),
-            Scalar::Value(value) => write!(f, "{}", value),
+            Scalar::Ref(tc_ref) => write!(f, "{}", tc_ref),
             Scalar::Tuple(tuple) => write!(
                 f,
                 "[{}]",
@@ -873,6 +875,7 @@ impl fmt::Display for Scalar {
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
+            Scalar::Value(value) => write!(f, "{}", value),
         }
     }
 }

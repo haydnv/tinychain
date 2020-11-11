@@ -2,6 +2,7 @@ use std::fmt;
 
 use futures::stream;
 use log::debug;
+use serde::ser::{Serialize, Serializer};
 
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
 use crate::error;
@@ -400,9 +401,62 @@ impl fmt::Display for FlowControl {
 }
 
 #[derive(Clone, Eq, PartialEq)]
+pub enum Key {
+    Ref(TCRef),
+    Value(Value),
+}
+
+impl TryCastFrom<Scalar> for Key {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Ref(_) => true,
+            Scalar::Value(_) => true,
+            Scalar::Tuple(tuple) => Value::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Key> {
+        match scalar {
+            Scalar::Ref(tc_ref) => Some(Key::Ref(tc_ref)),
+            Scalar::Value(value) => Some(Key::Value(value)),
+            Scalar::Tuple(tuple) => Value::opt_cast_from(tuple).map(Key::Value),
+            _ => None,
+        }
+    }
+}
+
+impl From<Key> for Scalar {
+    fn from(key: Key) -> Scalar {
+        match key {
+            Key::Ref(tc_ref) => Scalar::Ref(tc_ref),
+            Key::Value(value) => Scalar::Value(value),
+        }
+    }
+}
+
+impl Serialize for Key {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Key::Ref(tc_ref) => tc_ref.serialize(s),
+            Key::Value(value) => value.serialize(s),
+        }
+    }
+}
+
+impl fmt::Display for Key {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Key::Ref(tc_ref) => write!(f, "{}", tc_ref),
+            Key::Value(value) => write!(f, "{}", value),
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub enum Method {
-    Get((TCRef, TCPathBuf), Value),
-    Put((TCRef, TCPathBuf), (Value, Scalar)),
+    Get((TCRef, TCPathBuf), Key),
+    Put((TCRef, TCPathBuf), (Key, Scalar)),
     Post((TCRef, TCPathBuf), Object),
 }
 
@@ -544,8 +598,8 @@ impl fmt::Display for OpDef {
     }
 }
 
-type GetRef = (Link, Value);
-type PutRef = (Link, Value, Scalar);
+type GetRef = (Link, Key);
+type PutRef = (Link, Key, Scalar);
 type PostRef = (Link, Object);
 
 #[derive(Clone, Eq, PartialEq)]

@@ -239,7 +239,7 @@ impl Txn {
                         }
 
                         debug!("Provider: {}", &op);
-                        for dep in requires(op, &graph)? {
+                        for dep in op_requires(op, &graph)? {
                             if dep == name {
                                 return Err(error::bad_request("Dependency cycle", dep));
                             }
@@ -264,29 +264,7 @@ impl Txn {
                     } else if let Scalar::Tuple(tuple) = scalar {
                         let mut ready = true;
                         for dep in tuple {
-                            if let Scalar::Value(Value::TCString(TCString::Ref(dep))) = dep {
-                                if dep.id() == &name {
-                                    return Err(error::bad_request("Dependency cycle", dep));
-                                }
-
-                                let dep_state =
-                                    graph.get(dep.id()).ok_or_else(|| error::not_found(&dep))?;
-
-                                if !is_resolved(dep_state) {
-                                    ready = false;
-                                    unvisited.push(dep.id().clone());
-                                }
-                            }
-                        }
-
-                        if ready {
-                            let resolved = dereference_state(&graph, scalar)?;
-                            graph.insert(name, resolved);
-                        }
-                    } else if let Scalar::Value(Value::Tuple(tuple)) = scalar {
-                        let mut ready = true;
-                        for dep in tuple {
-                            if let Value::TCString(TCString::Ref(dep)) = dep {
+                            if let Scalar::Ref(dep) = dep {
                                 if dep.id() == &name {
                                     return Err(error::bad_request("Dependency cycle", dep));
                                 }
@@ -412,10 +390,7 @@ impl Txn {
                 }
             }
             Op::Ref(OpRef::Get((link, key))) => {
-                let key = dereference_value_state(&provided, &key)
-                    .and_then(Scalar::try_from)
-                    .and_then(Value::try_from)?;
-
+                let key = dereference_value(&provided, key)?;
                 self.inner.gateway.get(request, self, &link, key).await
             }
             Op::Method(Method::Get((tc_ref, path), key)) => {
@@ -423,21 +398,17 @@ impl Txn {
                     .get(tc_ref.id())
                     .ok_or_else(|| error::not_found(tc_ref))?;
 
-                let key = dereference_value_state(&provided, &key)
-                    .and_then(Scalar::try_from)
-                    .and_then(Value::try_from)?;
-
-                debug!("Method::Get subject {} {}: {}", subject, path, key);
+                let key = dereference_value(&provided, key)?;
 
                 match subject {
                     State::Chain(chain) => {
                         debug!("Txn::resolve Chain {}: {}", path, key);
-                        chain.get(request, self, &path[..], key.clone()).await
+                        chain.get(request, self, &path[..], key).await
                     }
                     State::Cluster(cluster) => {
                         debug!("Txn::resolve Cluster {}: {}", path, key);
                         cluster
-                            .get(request, &self.inner.gateway, self, &path[..], key.clone())
+                            .get(request, &self.inner.gateway, self, &path[..], key)
                             .await
                     }
                     State::Collection(collection) => {
@@ -469,6 +440,7 @@ impl Txn {
                 }
             }
             Op::Ref(OpRef::Put((link, key, value))) => {
+                let key = dereference_value(&provided, key)?;
                 let value = dereference_state(&provided, &value)?;
                 self.inner
                     .gateway
@@ -482,6 +454,7 @@ impl Txn {
                     .get(&tc_ref.clone().into())
                     .ok_or_else(|| error::not_found(tc_ref))?;
 
+                let key = dereference_value(&provided, key)?;
                 let value = dereference_state(&provided, &value)?;
 
                 debug!(
@@ -500,8 +473,8 @@ impl Txn {
                             .await
                     }
                     State::Collection(collection) => {
-                        let key = key.try_cast_into(|v| error::bad_request("Invalid key", v))?;
                         let value = value.try_into()?;
+
                         collection
                             .put(&request, self, &path[..], key, value)
                             .await?;
@@ -569,31 +542,12 @@ impl Drop for Txn {
     }
 }
 
-fn dereference_value_state(provided: &HashMap<Id, State>, object: &Value) -> TCResult<State> {
-    match object {
-        Value::TCString(TCString::Ref(object)) => match provided.get(object.id()) {
-            Some(state) => Ok(state.clone()),
-            None => Err(error::not_found(object)),
-        },
-        Value::Tuple(tuple) => {
-            let tuple: TCResult<Vec<State>> = tuple
-                .iter()
-                .map(|val| dereference_value_state(provided, val))
-                .collect();
-
-            let tuple: TCResult<Vec<Value>> = tuple?.drain(..).map(Value::try_from).collect();
-            tuple
-                .map(Value::Tuple)
-                .map(Scalar::Value)
-                .map(State::Scalar)
-        }
-        other => Ok(State::Scalar(Scalar::Value(other.clone()))),
-    }
-}
-
 fn dereference_state(provided: &HashMap<Id, State>, object: &Scalar) -> TCResult<State> {
     match object {
-        Scalar::Value(value) => dereference_value_state(provided, value),
+        Scalar::Ref(tc_ref) => provided
+            .get(tc_ref.id())
+            .cloned()
+            .ok_or_else(|| error::not_found(tc_ref)),
         Scalar::Tuple(tuple) => {
             let tuple: TCResult<Vec<State>> = tuple
                 .iter()
@@ -604,6 +558,17 @@ fn dereference_state(provided: &HashMap<Id, State>, object: &Scalar) -> TCResult
             tuple.map(Scalar::Tuple).map(State::Scalar)
         }
         other => Ok(State::Scalar(other.clone())),
+    }
+}
+
+fn dereference_value(provided: &HashMap<Id, State>, key: Key) -> TCResult<Value> {
+    match key {
+        Key::Value(value) => Ok(value),
+        Key::Ref(tc_ref) => provided
+            .get(tc_ref.id())
+            .cloned()
+            .ok_or_else(|| error::not_found(tc_ref))
+            .and_then(Value::try_from),
     }
 }
 
@@ -621,30 +586,17 @@ fn is_resolved_scalar(scalar: &Scalar) -> bool {
             Op::Def(_) => true,
             _ => false,
         },
-        Scalar::Value(value) => is_resolved_value(value),
+        Scalar::Ref(_) => false,
         Scalar::Tuple(tuple) => tuple.iter().all(is_resolved_scalar),
+        Scalar::Value(_) => true,
     }
 }
 
-fn is_resolved_value(value: &Value) -> bool {
-    match value {
-        Value::TCString(TCString::Ref(_)) => false,
-        Value::Tuple(tuple) => tuple.iter().all(is_resolved_value),
-        _ => true,
-    }
-}
-
-fn requires(op: &Op, txn_state: &HashMap<Id, State>) -> TCResult<HashSet<Id>> {
+fn op_requires(op: &Op, txn_state: &HashMap<Id, State>) -> TCResult<HashSet<Id>> {
     let mut deps = HashSet::new();
 
     match op {
-        Op::Def(OpDef::Get((tc_ref, _))) => {
-            deps.insert(tc_ref.clone());
-        }
-        Op::Def(OpDef::Put((tc_ref, _, _))) => {
-            deps.insert(tc_ref.clone());
-        }
-        Op::Def(OpDef::Post(_)) => {}
+        Op::Def(_) => {}
         Op::Flow(FlowControl::If(cond, then, or_else)) => {
             let cond_state = txn_state
                 .get(cond.id())
@@ -670,11 +622,18 @@ fn requires(op: &Op, txn_state: &HashMap<Id, State>) -> TCResult<HashSet<Id>> {
         Op::Method(method) => match method {
             Method::Get((subject, _path), key) => {
                 deps.insert(subject.id().clone());
-                deps.extend(value_requires(key)?);
+
+                if let Key::Ref(key) = key {
+                    deps.insert(key.id().clone());
+                }
             }
             Method::Put((subject, _path), (key, value)) => {
                 deps.insert(subject.id().clone());
-                deps.extend(value_requires(key)?);
+
+                if let Key::Ref(key) = key {
+                    deps.insert(key.id().clone());
+                }
+
                 deps.extend(scalar_requires(value, txn_state)?);
             }
             Method::Post((subject, _path), params) => {
@@ -689,11 +648,15 @@ fn requires(op: &Op, txn_state: &HashMap<Id, State>) -> TCResult<HashSet<Id>> {
             }
         },
         Op::Ref(op_ref) => match op_ref {
-            OpRef::Get((_path, key)) => {
-                deps.extend(value_requires(key)?);
+            OpRef::Get((_path, Key::Ref(tc_ref))) => {
+                deps.insert(tc_ref.id().clone());
             }
+            OpRef::Get(_) => {}
             OpRef::Put((_path, key, value)) => {
-                deps.extend(value_requires(key)?);
+                if let Key::Ref(tc_ref) = key {
+                    deps.insert(tc_ref.id().clone());
+                }
+
                 deps.extend(scalar_requires(value, txn_state)?);
             }
             OpRef::Post((_path, params)) => {
@@ -718,9 +681,9 @@ fn scalar_requires(scalar: &Scalar, txn_state: &HashMap<Id, State>) -> TCResult<
         }
         Scalar::Op(op) => match &**op {
             Op::Def(_) => Ok(HashSet::new()),
-            other => requires(other, txn_state),
+            other => op_requires(other, txn_state),
         },
-        Scalar::Value(value) => value_requires(value),
+        Scalar::Ref(tc_ref) => Ok(iter::once(tc_ref.id().clone()).collect()),
         Scalar::Tuple(tuple) => {
             let mut required = HashSet::new();
             for s in tuple {
@@ -728,20 +691,7 @@ fn scalar_requires(scalar: &Scalar, txn_state: &HashMap<Id, State>) -> TCResult<
             }
             Ok(required)
         }
-    }
-}
-
-fn value_requires(value: &Value) -> TCResult<HashSet<Id>> {
-    match value {
-        Value::TCString(TCString::Ref(tc_ref)) => Ok(iter::once(tc_ref.id().clone()).collect()),
-        Value::Tuple(tuple) => {
-            let mut required = HashSet::new();
-            for s in tuple {
-                required.extend(value_requires(s)?);
-            }
-            Ok(required)
-        }
-        _ => Ok(HashSet::new()),
+        Scalar::Value(_) => Ok(HashSet::new()),
     }
 }
 

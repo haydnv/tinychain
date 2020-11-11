@@ -2,11 +2,13 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::de;
-use serde::ser::Serializer;
-use serde::Serialize;
+use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::error::{self, TCResult};
-use crate::scalar::Id;
+
+use super::Id;
+
+const EMPTY_SLICE: &[usize] = &[];
 
 #[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct TCRef {
@@ -40,6 +42,12 @@ impl FromStr for TCRef {
                 to: to[1..].parse()?,
             })
         }
+    }
+}
+
+impl PartialEq<Id> for TCRef {
+    fn eq(&self, other: &Id) -> bool {
+        self.id() == other
     }
 }
 
@@ -85,6 +93,8 @@ impl<'de> de::Deserialize<'de> for TCRef {
 
 impl Serialize for TCRef {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&format!("{}", self))
+        let mut map = s.serialize_map(Some(1))?;
+        map.serialize_entry(&self.to_string(), EMPTY_SLICE)?;
+        map.end()
     }
 }
