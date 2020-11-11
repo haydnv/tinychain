@@ -1,10 +1,12 @@
 use std::fmt;
 
+use serde::ser::{Serialize, Serializer};
+
 use crate::class::{Class, Instance, NativeClass, TCResult, TCType};
 use crate::error;
 use crate::scalar::{
     label, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TCPath, TCPathBuf,
-    TryCastInto,
+    TryCastFrom, TryCastInto,
 };
 
 pub mod flow;
@@ -55,7 +57,7 @@ impl ScalarClass for RefType {
 
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<TCRef> {
         match self {
-            Self::Flow(ft) => ft.try_cast(scalar).map(TCRef::Flow),
+            Self::Flow(ft) => ft.try_cast(scalar).map(Box::new).map(TCRef::Flow),
             Self::Id => {
                 let scalar: Scalar = scalar.into();
 
@@ -101,7 +103,7 @@ impl fmt::Display for RefType {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCRef {
-    Flow(FlowControl),
+    Flow(Box<FlowControl>),
     Id(IdRef),
     Method(Method),
     Op(OpRef),
@@ -133,6 +135,35 @@ impl From<IdRef> for TCRef {
 impl From<OpRef> for TCRef {
     fn from(op_ref: OpRef) -> TCRef {
         TCRef::Op(op_ref)
+    }
+}
+
+impl TryCastFrom<Scalar> for TCRef {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        if let Scalar::Ref(_) = scalar {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<TCRef> {
+        if let Scalar::Ref(tc_ref) = scalar {
+            Some(*tc_ref)
+        } else {
+            None
+        }
+    }
+}
+
+impl Serialize for TCRef {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Flow(control) => control.serialize(s),
+            Self::Id(id_ref) => id_ref.serialize(s),
+            Self::Method(method) => method.serialize(s),
+            Self::Op(op_ref) => op_ref.serialize(s),
+        }
     }
 }
 

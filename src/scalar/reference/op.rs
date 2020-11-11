@@ -1,6 +1,6 @@
 use std::fmt;
 
-use serde::ser::{Serialize, Serializer};
+use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::{Class, Instance, NativeClass, TCResult};
 use crate::error;
@@ -216,12 +216,36 @@ impl ScalarInstance for Method {
     type Class = MethodType;
 }
 
+impl Serialize for Method {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut map = s.serialize_map(Some(1))?;
+
+        match self {
+            Method::Get((subject, path), arg) => {
+                map.serialize_entry(&format!("{}{}", subject, path), &(arg,))
+            }
+            Method::Put((subject, path), args) => {
+                map.serialize_entry(&format!("{}{}", subject, path), args)
+            }
+            Method::Post((subject, path), args) => {
+                map.serialize_entry(&format!("{}{}", subject, path), args)
+            }
+        }?;
+
+        map.end()
+    }
+}
+
 impl fmt::Display for Method {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Get((subject, path), key) => write!(f, "GET {}: {}?key={}", subject, path, key),
-            Self::Put((subject, path), (key, value)) => write!(f, "PUT {}{}?key={} <- {}", subject, path, key, value),
-            Self::Post((subject, path), params) => write!(f, "POST {}{} args: {}", subject, path, params),
+            Self::Put((subject, path), (key, value)) => {
+                write!(f, "PUT {}{}?key={} <- {}", subject, path, key, value)
+            }
+            Self::Post((subject, path), params) => {
+                write!(f, "POST {}{} args: {}", subject, path, params)
+            }
         }
     }
 }
@@ -260,6 +284,28 @@ impl TryCastFrom<Scalar> for OpRef {
 
     fn opt_cast_from(_s: Scalar) -> Option<OpRef> {
         unimplemented!()
+    }
+}
+
+impl Serialize for OpRef {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            OpRef::Get((path, key)) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry(&path.to_string(), key)?;
+                map.end()
+            }
+            OpRef::Put((path, key, value)) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry(&path.to_string(), &(key, value))?;
+                map.end()
+            }
+            OpRef::Post((path, data)) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry(&path.to_string(), data)?;
+                map.end()
+            }
+        }
     }
 }
 

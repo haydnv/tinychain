@@ -328,149 +328,157 @@ impl Txn {
         self.inner.workspace.finalize(self.id()).await;
     }
 
-    pub async fn resolve(
-        &self,
-        request: &Request,
+    pub fn resolve<'a>(
+        &'a self,
+        request: &'a Request,
         provided: HashMap<Id, State>,
         provider: TCRef,
-    ) -> TCResult<State> {
-        validate_id(request, &self.inner.id)?;
+    ) -> TCBoxTryFuture<'a, State> {
+        Box::pin(async move {
+            validate_id(request, &self.inner.id)?;
 
-        debug!("Txn::resolve {}", provider);
+            debug!("Txn::resolve {}", provider);
 
-        match provider {
-            TCRef::Flow(FlowControl::If(cond, then, or_else)) => {
-                let cond = dereference_state(&provided, cond.id())?;
+            match provider {
+                TCRef::Flow(control) => match *control {
+                    FlowControl::If(cond, then, or_else) => {
+                        let cond = self.resolve(request, provided.clone(), cond).await?;
 
-                if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(cond)))) = cond {
-                    if cond.into() {
-                        Ok(State::Scalar(then))
-                    } else {
-                        Ok(State::Scalar(or_else))
-                    }
-                } else {
-                    Err(error::bad_request(
-                        "Expected a boolean condition but found",
-                        cond,
-                    ))
-                }
-            }
-            TCRef::Id(id_ref) => dereference_state_owned(&provided, id_ref.id()),
-            TCRef::Op(OpRef::Get((link, key))) => {
-                let key = dereference_value(&provided, key)?;
-                self.inner.gateway.get(request, self, &link, key).await
-            }
-            TCRef::Method(Method::Get((id_ref, path), key)) => {
-                let subject = dereference_state(&provided, id_ref.id())?;
-                let key = dereference_value(&provided, key)?;
-
-                match subject {
-                    State::Chain(chain) => {
-                        debug!("Txn::resolve Chain {}: {}", path, key);
-                        chain.get(request, self, &path[..], key).await
-                    }
-                    State::Cluster(cluster) => {
-                        debug!("Txn::resolve Cluster {}: {}", path, key);
-                        cluster
-                            .get(request, &self.inner.gateway, self, &path[..], key)
-                            .await
-                    }
-                    State::Collection(collection) => {
-                        debug!("Txn::resolve Collection {}: {}", path, key);
-                        collection
-                            .get(request, self, &path[..], key)
-                            .await
-                            .map(State::from)
-                    }
-                    State::Object(object) => object.get(request, self, &path[..], key).await,
-                    State::Scalar(scalar) => match scalar {
-                        Scalar::Object(object) => object.get(request, self, &path[..], key).await,
-                        Scalar::Op(op_def) => {
-                            if !&path[..].is_empty() {
-                                return Err(error::not_found(path));
+                        if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(cond)))) =
+                            cond
+                        {
+                            if cond.into() {
+                                Ok(State::Scalar(then))
+                            } else {
+                                Ok(State::Scalar(or_else))
                             }
-
-                            op_def.get(request, self, key, None).await
+                        } else {
+                            Err(error::bad_request(
+                                "Expected a boolean condition but found",
+                                cond,
+                            ))
                         }
-                        Scalar::Value(value) => value
-                            .get(path.as_slice(), key.clone())
-                            .map(Scalar::Value)
-                            .map(State::Scalar),
-                        other => Err(error::method_not_allowed(format!("GET: {}", other))),
-                    },
-                }
-            }
-            TCRef::Op(OpRef::Put((link, key, value))) => {
-                let key = dereference_value(&provided, key)?;
-                let value = dereference(&provided, &value)?;
-                self.inner
-                    .gateway
-                    .put(&request, self, &link, key, value)
-                    .await?;
-
-                Ok(().into())
-            }
-            TCRef::Method(Method::Put((id_ref, path), (key, value))) => {
-                let subject = dereference_state(&provided, id_ref.id())?;
-                let key = dereference_value(&provided, key)?;
-                let value = dereference(&provided, &value)?;
-
-                debug!(
-                    "Txn::resolve Method::Put {}{}: {} <- {}",
-                    subject, path, key, value
-                );
-
-                match subject {
-                    State::Scalar(scalar) => Err(error::method_not_allowed(scalar)),
-                    State::Chain(chain) => {
-                        self.mutate(chain.clone().into()).await;
-
-                        chain
-                            .put(&request, self, &path[..], key, value)
-                            .map_ok(State::from)
-                            .await
                     }
-                    State::Collection(collection) => {
-                        let value = value.try_into()?;
-
-                        collection
-                            .put(&request, self, &path[..], key, value)
-                            .await?;
-                        Ok(State::Collection(collection.clone()))
-                    }
-                    other => Err(error::not_implemented(format!(
-                        "Txn::resolve Method::Put for {}",
-                        other
-                    ))),
+                },
+                TCRef::Id(id_ref) => dereference_state_owned(&provided, id_ref.id()),
+                TCRef::Op(OpRef::Get((link, key))) => {
+                    let key = dereference_value(&provided, key)?;
+                    self.inner.gateway.get(request, self, &link, key).await
                 }
-            }
-            TCRef::Op(OpRef::Post((link, data))) => {
-                debug!("Txn::resolve POST {} <- {}", link, data);
+                TCRef::Method(Method::Get((id_ref, path), key)) => {
+                    let subject = dereference_state(&provided, id_ref.id())?;
+                    let key = dereference_value(&provided, key)?;
 
-                self.inner
-                    .gateway
-                    .post(request, self, link, data.into())
-                    .map_ok(State::from)
-                    .await
-            }
-            TCRef::Method(Method::Post((id_ref, path), data)) => {
-                let subject = dereference_state(&provided, id_ref.id())?;
-
-                match subject {
-                    State::Scalar(scalar) => match scalar {
-                        Scalar::Op(op_def) => {
-                            if !path.as_slice().is_empty() {
-                                return Err(error::not_found(path));
+                    match subject {
+                        State::Chain(chain) => {
+                            debug!("Txn::resolve Chain {}: {}", path, key);
+                            chain.get(request, self, &path[..], key).await
+                        }
+                        State::Cluster(cluster) => {
+                            debug!("Txn::resolve Cluster {}: {}", path, key);
+                            cluster
+                                .get(request, &self.inner.gateway, self, &path[..], key)
+                                .await
+                        }
+                        State::Collection(collection) => {
+                            debug!("Txn::resolve Collection {}: {}", path, key);
+                            collection
+                                .get(request, self, &path[..], key)
+                                .await
+                                .map(State::from)
+                        }
+                        State::Object(object) => object.get(request, self, &path[..], key).await,
+                        State::Scalar(scalar) => match scalar {
+                            Scalar::Object(object) => {
+                                object.get(request, self, &path[..], key).await
                             }
+                            Scalar::Op(op_def) => {
+                                if !&path[..].is_empty() {
+                                    return Err(error::not_found(path));
+                                }
 
-                            op_def.post(request, self, data).await
+                                op_def.get(request, self, key, None).await
+                            }
+                            Scalar::Value(value) => value
+                                .get(path.as_slice(), key.clone())
+                                .map(Scalar::Value)
+                                .map(State::Scalar),
+                            other => Err(error::method_not_allowed(format!("GET: {}", other))),
+                        },
+                    }
+                }
+                TCRef::Op(OpRef::Put((link, key, value))) => {
+                    let key = dereference_value(&provided, key)?;
+                    let value = dereference(&provided, &value)?;
+                    self.inner
+                        .gateway
+                        .put(&request, self, &link, key, value)
+                        .await?;
+
+                    Ok(().into())
+                }
+                TCRef::Method(Method::Put((id_ref, path), (key, value))) => {
+                    let subject = dereference_state(&provided, id_ref.id())?;
+                    let key = dereference_value(&provided, key)?;
+                    let value = dereference(&provided, &value)?;
+
+                    debug!(
+                        "Txn::resolve Method::Put {}{}: {} <- {}",
+                        subject, path, key, value
+                    );
+
+                    match subject {
+                        State::Scalar(scalar) => Err(error::method_not_allowed(scalar)),
+                        State::Chain(chain) => {
+                            self.mutate(chain.clone().into()).await;
+
+                            chain
+                                .put(&request, self, &path[..], key, value)
+                                .map_ok(State::from)
+                                .await
                         }
-                        other => Err(error::method_not_allowed(other)),
-                    },
-                    _ => Err(error::not_implemented("Txn::resolve Method::Post")),
+                        State::Collection(collection) => {
+                            let value = value.try_into()?;
+
+                            collection
+                                .put(&request, self, &path[..], key, value)
+                                .await?;
+                            Ok(State::Collection(collection.clone()))
+                        }
+                        other => Err(error::not_implemented(format!(
+                            "Txn::resolve Method::Put for {}",
+                            other
+                        ))),
+                    }
+                }
+                TCRef::Op(OpRef::Post((link, data))) => {
+                    debug!("Txn::resolve POST {} <- {}", link, data);
+
+                    self.inner
+                        .gateway
+                        .post(request, self, link, data.into())
+                        .map_ok(State::from)
+                        .await
+                }
+                TCRef::Method(Method::Post((id_ref, path), data)) => {
+                    let subject = dereference_state(&provided, id_ref.id())?;
+
+                    match subject {
+                        State::Scalar(scalar) => match scalar {
+                            Scalar::Op(op_def) => {
+                                if !path.as_slice().is_empty() {
+                                    return Err(error::not_found(path));
+                                }
+
+                                op_def.post(request, self, data).await
+                            }
+                            other => Err(error::method_not_allowed(other)),
+                        },
+                        _ => Err(error::not_implemented("Txn::resolve Method::Post")),
+                    }
                 }
             }
-        }
+        })
     }
 
     pub async fn mutate(&self, state: State) {
@@ -578,26 +586,39 @@ fn requires<'a>(
     let mut deps = HashSet::new();
 
     match scalar {
-        Scalar::Ref(tc_ref) => match &**tc_ref {
-            TCRef::Flow(control) => {
-                deps.extend(flow_requires(control, txn_state)?);
-            }
-            TCRef::Id(id_ref) => {
-                deps.insert(id_ref);
-            }
-            TCRef::Op(op_ref) => {
-                deps.extend(op_requires(op_ref, txn_state)?);
-            }
-            TCRef::Method(method) => {
-                deps.extend(method_requires(method, txn_state)?);
-            }
-        },
+        Scalar::Ref(tc_ref) => {
+            deps.extend(ref_requires(&**tc_ref, txn_state)?);
+        }
         Scalar::Tuple(tuple) => {
             for item in &tuple[..] {
                 deps.extend(requires(item, txn_state)?);
             }
         }
         _ => {}
+    }
+
+    Ok(deps)
+}
+
+fn ref_requires<'a>(
+    tc_ref: &'a TCRef,
+    txn_state: &'a HashMap<Id, State>,
+) -> TCResult<HashSet<&'a IdRef>> {
+    let mut deps = HashSet::new();
+
+    match tc_ref {
+        TCRef::Flow(control) => {
+            deps.extend(flow_requires(&**control, txn_state)?);
+        }
+        TCRef::Id(id_ref) => {
+            deps.insert(id_ref);
+        }
+        TCRef::Method(method) => {
+            deps.extend(method_requires(method, txn_state)?);
+        }
+        TCRef::Op(op_ref) => {
+            deps.extend(op_requires(op_ref, txn_state)?);
+        }
     }
 
     Ok(deps)
@@ -610,25 +631,8 @@ fn flow_requires<'a>(
     let mut deps = HashSet::new();
 
     match control {
-        FlowControl::If(cond, then, or_else) => {
-            let cond_state = dereference_state(txn_state, cond.id())?;
-
-            if is_resolved(cond_state) {
-                if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = cond_state {
-                    if b.into() {
-                        deps.extend(requires(then, txn_state)?);
-                    } else {
-                        deps.extend(requires(or_else, txn_state)?);
-                    }
-                } else {
-                    return Err(error::bad_request(
-                        "Expected a Boolean condition but found",
-                        cond_state,
-                    ));
-                }
-            } else {
-                deps.insert(cond);
-            }
+        FlowControl::If(cond, _, _) => {
+            deps.extend(ref_requires(cond, txn_state)?);
         }
     }
 

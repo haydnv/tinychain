@@ -1,12 +1,15 @@
 use std::fmt;
 
+use serde::ser::{Serialize, SerializeMap, Serializer};
+
 use crate::class::{Class, Instance, NativeClass, TCResult};
 use crate::error;
 use crate::scalar::{
-    label, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom, TryCastInto
+    label, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
+    TryCastInto,
 };
 
-use super::{IdRef, RefType};
+use super::{RefType, TCRef};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum FlowControlType {
@@ -70,7 +73,7 @@ impl fmt::Display for FlowControlType {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum FlowControl {
-    If(IdRef, Scalar, Scalar),
+    If(TCRef, Scalar, Scalar),
 }
 
 impl Instance for FlowControl {
@@ -89,15 +92,25 @@ impl ScalarInstance for FlowControl {
 
 impl TryCastFrom<Scalar> for FlowControl {
     fn can_cast_from(s: &Scalar) -> bool {
-        s.matches::<(IdRef, Scalar, Scalar)>()
+        s.matches::<(TCRef, Scalar, Scalar)>()
     }
 
     fn opt_cast_from(s: Scalar) -> Option<FlowControl> {
-        if s.matches::<(IdRef, Scalar, Scalar)>() {
-            let (cond, then, or_else) = s.opt_cast_into().unwrap();
-            Some(FlowControl::If(cond, then, or_else))
-        } else {
-            None
+        s.opt_cast_into()
+            .map(|(cond, then, or_else)| FlowControl::If(cond, then, or_else))
+    }
+}
+
+impl Serialize for FlowControl {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let class = Link::from(self.class()).to_string();
+
+        match self {
+            FlowControl::If(cond, then, or_else) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry(&class, &(cond, then, or_else))?;
+                map.end()
+            }
         }
     }
 }

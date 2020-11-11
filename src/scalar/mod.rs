@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use log::debug;
 use serde::de;
-use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+use serde::ser::{Serialize, SerializeSeq, Serializer};
 
 use crate::class::*;
 use crate::error;
@@ -795,53 +795,7 @@ impl Serialize for Scalar {
         match self {
             Scalar::Object(object) => object.serialize(s),
             Scalar::Op(op_def) => op_def.serialize(s),
-            Scalar::Ref(tc_ref) => match &**tc_ref {
-                TCRef::Flow(control) => match control {
-                    FlowControl::If(cond, then, or_else) => {
-                        let mut map = s.serialize_map(Some(1))?;
-                        map.serialize_entry(
-                            &Link::from(control.class()).to_string(),
-                            &(cond, then, or_else),
-                        )?;
-                        map.end()
-                    }
-                },
-                TCRef::Id(id_ref) => id_ref.serialize(s),
-                TCRef::Method(method) => {
-                    let mut map = s.serialize_map(Some(1))?;
-
-                    match method {
-                        Method::Get((subject, path), arg) => {
-                            map.serialize_entry(&format!("{}{}", subject, path), &(arg,))
-                        }
-                        Method::Put((subject, path), args) => {
-                            map.serialize_entry(&format!("{}{}", subject, path), args)
-                        }
-                        Method::Post((subject, path), args) => {
-                            map.serialize_entry(&format!("{}{}", subject, path), args)
-                        }
-                    }?;
-
-                    map.end()
-                }
-                TCRef::Op(op_ref) => match op_ref {
-                    OpRef::Get((path, key)) => {
-                        let mut map = s.serialize_map(Some(1))?;
-                        map.serialize_entry(&path.to_string(), key)?;
-                        map.end()
-                    }
-                    OpRef::Put((path, key, value)) => {
-                        let mut map = s.serialize_map(Some(1))?;
-                        map.serialize_entry(&path.to_string(), &(key, value))?;
-                        map.end()
-                    }
-                    OpRef::Post((path, data)) => {
-                        let mut map = s.serialize_map(Some(1))?;
-                        map.serialize_entry(&path.to_string(), data)?;
-                        map.end()
-                    }
-                },
-            },
+            Scalar::Ref(tc_ref) => tc_ref.serialize(s),
             Scalar::Tuple(tuple) => {
                 let mut seq = s.serialize_seq(Some(tuple.len()))?;
                 for item in tuple {
