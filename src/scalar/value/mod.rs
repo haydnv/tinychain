@@ -296,8 +296,6 @@ impl TryFrom<Value> for Vec<Value> {
 
 impl TryCastFrom<Vec<Scalar>> for Value {
     fn can_cast_from(tuple: &Vec<Scalar>) -> bool {
-        debug!("Value::can_cast_from({})?", Scalar::Tuple(tuple.to_vec()));
-
         for s in tuple {
             match s {
                 Scalar::Value(_) => {}
@@ -310,8 +308,6 @@ impl TryCastFrom<Vec<Scalar>> for Value {
     }
 
     fn opt_cast_from(mut tuple: Vec<Scalar>) -> Option<Value> {
-        debug!("cast into Value::Tuple from Scalar::Tuple");
-
         let mut values = Vec::with_capacity(tuple.len());
         for s in tuple.drain(..) {
             debug!("item {}", s);

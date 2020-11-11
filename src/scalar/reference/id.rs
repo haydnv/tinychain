@@ -5,8 +5,7 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::error::{self, TCResult};
-
-use super::Id;
+use crate::scalar::Id;
 
 const EMPTY_SLICE: &[usize] = &[];
 
