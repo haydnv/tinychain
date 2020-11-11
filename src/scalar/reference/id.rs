@@ -10,11 +10,11 @@ use crate::scalar::Id;
 const EMPTY_SLICE: &[usize] = &[];
 
 #[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct TCRef {
+pub struct IdRef {
     to: Id,
 }
 
-impl TCRef {
+impl IdRef {
     pub fn into_id(self) -> Id {
         self.to
     }
@@ -24,39 +24,39 @@ impl TCRef {
     }
 }
 
-impl From<Id> for TCRef {
-    fn from(to: Id) -> TCRef {
-        TCRef { to }
+impl From<Id> for IdRef {
+    fn from(to: Id) -> IdRef {
+        IdRef { to }
     }
 }
 
-impl FromStr for TCRef {
+impl FromStr for IdRef {
     type Err = error::TCError;
 
-    fn from_str(to: &str) -> TCResult<TCRef> {
+    fn from_str(to: &str) -> TCResult<IdRef> {
         if !to.starts_with('$') || to.len() < 2 {
             Err(error::bad_request("Invalid Ref", to))
         } else {
-            Ok(TCRef {
+            Ok(IdRef {
                 to: to[1..].parse()?,
             })
         }
     }
 }
 
-impl PartialEq<Id> for TCRef {
+impl PartialEq<Id> for IdRef {
     fn eq(&self, other: &Id) -> bool {
         self.id() == other
     }
 }
 
-impl From<TCRef> for Id {
-    fn from(r: TCRef) -> Id {
+impl From<IdRef> for Id {
+    fn from(r: IdRef) -> Id {
         r.to
     }
 }
 
-impl fmt::Display for TCRef {
+impl fmt::Display for IdRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "${}", self.to)
     }
@@ -65,7 +65,7 @@ impl fmt::Display for TCRef {
 struct RefVisitor;
 
 impl<'de> de::Visitor<'de> for RefVisitor {
-    type Value = TCRef;
+    type Value = IdRef;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("A reference to a local variable (e.g. '$foo')")
@@ -84,13 +84,13 @@ impl<'de> de::Visitor<'de> for RefVisitor {
     }
 }
 
-impl<'de> de::Deserialize<'de> for TCRef {
+impl<'de> de::Deserialize<'de> for IdRef {
     fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         d.deserialize_str(RefVisitor)
     }
 }
 
-impl Serialize for TCRef {
+impl Serialize for IdRef {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut map = s.serialize_map(Some(1))?;
         map.serialize_entry(&self.to_string(), EMPTY_SLICE)?;

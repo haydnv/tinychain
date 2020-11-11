@@ -13,8 +13,8 @@ use crate::transaction::Txn;
 use super::link::{Link, TCPathBuf};
 use super::object::Object;
 use super::{
-    label, CastFrom, Id, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TCRef,
-    TryCastFrom, TryCastInto, Value,
+    label, CastFrom, Id, IdRef, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType,
+    TCRef, TryCastFrom, TryCastInto, Value,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
@@ -358,7 +358,7 @@ impl fmt::Display for OpType {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum FlowControl {
-    If(TCRef, Scalar, Scalar),
+    If(IdRef, Scalar, Scalar),
 }
 
 impl Instance for FlowControl {
@@ -377,11 +377,11 @@ impl ScalarInstance for FlowControl {
 
 impl TryCastFrom<Scalar> for FlowControl {
     fn can_cast_from(s: &Scalar) -> bool {
-        s.matches::<(TCRef, Scalar, Scalar)>()
+        s.matches::<(IdRef, Scalar, Scalar)>()
     }
 
     fn opt_cast_from(s: Scalar) -> Option<FlowControl> {
-        if s.matches::<(TCRef, Scalar, Scalar)>() {
+        if s.matches::<(IdRef, Scalar, Scalar)>() {
             let (cond, then, or_else) = s.opt_cast_into().unwrap();
             Some(FlowControl::If(cond, then, or_else))
         } else {
@@ -402,7 +402,7 @@ impl fmt::Display for FlowControl {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Key {
-    Ref(TCRef),
+    Ref(IdRef),
     Value(Value),
 }
 
@@ -418,7 +418,7 @@ impl TryCastFrom<Scalar> for Key {
 
     fn opt_cast_from(scalar: Scalar) -> Option<Key> {
         match scalar {
-            Scalar::Ref(tc_ref) => Some(Key::Ref(tc_ref)),
+            Scalar::Ref(TCRef::Id(id_ref)) => Some(Key::Ref(id_ref)),
             Scalar::Value(value) => Some(Key::Value(value)),
             Scalar::Tuple(tuple) => Value::opt_cast_from(tuple).map(Key::Value),
             _ => None,
@@ -429,7 +429,7 @@ impl TryCastFrom<Scalar> for Key {
 impl From<Key> for Scalar {
     fn from(key: Key) -> Scalar {
         match key {
-            Key::Ref(tc_ref) => Scalar::Ref(tc_ref),
+            Key::Ref(id_ref) => Scalar::Ref(TCRef::Id(id_ref)),
             Key::Value(value) => Scalar::Value(value),
         }
     }
@@ -455,9 +455,9 @@ impl fmt::Display for Key {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Method {
-    Get((TCRef, TCPathBuf), Key),
-    Put((TCRef, TCPathBuf), (Key, Scalar)),
-    Post((TCRef, TCPathBuf), Object),
+    Get((IdRef, TCPathBuf), Key),
+    Put((IdRef, TCPathBuf), (Key, Scalar)),
+    Post((IdRef, TCPathBuf), Object),
 }
 
 impl Instance for Method {

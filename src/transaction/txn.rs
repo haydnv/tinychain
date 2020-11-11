@@ -264,7 +264,7 @@ impl Txn {
                     } else if let Scalar::Tuple(tuple) = scalar {
                         let mut ready = true;
                         for dep in tuple {
-                            if let Scalar::Ref(dep) = dep {
+                            if let Scalar::Ref(TCRef::Id(dep)) = dep {
                                 if dep.id() == &name {
                                     return Err(error::bad_request("Dependency cycle", dep));
                                 }
@@ -544,10 +544,12 @@ impl Drop for Txn {
 
 fn dereference_state(provided: &HashMap<Id, State>, object: &Scalar) -> TCResult<State> {
     match object {
-        Scalar::Ref(tc_ref) => provided
-            .get(tc_ref.id())
-            .cloned()
-            .ok_or_else(|| error::not_found(tc_ref)),
+        Scalar::Ref(tc_ref) => match tc_ref {
+            TCRef::Id(id_ref) => provided
+                .get(id_ref.id())
+                .cloned()
+                .ok_or_else(|| error::not_found(id_ref)),
+        },
         Scalar::Tuple(tuple) => {
             let tuple: TCResult<Vec<State>> = tuple
                 .iter()
@@ -683,7 +685,9 @@ fn scalar_requires(scalar: &Scalar, txn_state: &HashMap<Id, State>) -> TCResult<
             Op::Def(_) => Ok(HashSet::new()),
             other => op_requires(other, txn_state),
         },
-        Scalar::Ref(tc_ref) => Ok(iter::once(tc_ref.id().clone()).collect()),
+        Scalar::Ref(tc_ref) => match tc_ref {
+            TCRef::Id(id_ref) => Ok(iter::once(id_ref.id().clone()).collect()),
+        },
         Scalar::Tuple(tuple) => {
             let mut required = HashSet::new();
             for s in tuple {
