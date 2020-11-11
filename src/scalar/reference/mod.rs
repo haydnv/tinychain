@@ -8,12 +8,17 @@ use crate::scalar::{
 };
 
 pub mod id;
+pub mod op;
 
 pub use id::*;
+pub use op::*;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RefType {
+    Flow(FlowControlType),
     Id,
+    Method(MethodType),
+    Op(OpRefType),
 }
 
 impl Class for RefType {
@@ -26,13 +31,15 @@ impl NativeClass for RefType {
 
         if suffix.is_empty() {
             Err(error::method_not_allowed(TCPath::from(path)))
-        } else if suffix.len() == 1 {
+        } else if suffix.len() == 1 && &suffix[0] == "id" {
+            Ok(RefType::Id)
+        } else {
             match suffix[0].as_str() {
-                "id" if suffix.len() == 1 => Ok(RefType::Id),
+                "flow" => FlowControlType::from_path(path).map(RefType::Flow),
+                "method" => MethodType::from_path(path).map(RefType::Method),
+                "op" => OpRefType::from_path(path).map(RefType::Op),
                 other => Err(error::not_found(other)),
             }
-        } else {
-            Err(error::path_not_found(suffix))
         }
     }
 
@@ -45,20 +52,30 @@ impl ScalarClass for RefType {
     type Instance = TCRef;
 
     fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<TCRef> {
-        let scalar: Scalar = scalar.into();
-
         match self {
-            Self::Id => scalar
-                .try_cast_into(|v| error::bad_request("Cannot cast into Ref from", v))
-                .map(TCRef::Id),
+            Self::Flow(ft) => ft.try_cast(scalar).map(TCRef::Flow),
+            Self::Id => {
+                let scalar: Scalar = scalar.into();
+
+                scalar
+                    .try_cast_into(|v| error::bad_request("Cannot cast into Ref from", v))
+                    .map(TCRef::Id)
+            }
+            Self::Method(mt) => mt.try_cast(scalar).map(TCRef::Method),
+            Self::Op(ort) => ort.try_cast(scalar).map(TCRef::Op),
         }
     }
 }
 
 impl From<RefType> for Link {
     fn from(rt: RefType) -> Link {
+        use RefType as RT;
+
         match rt {
-            RefType::Id => RefType::prefix().append(label("id")).into(),
+            RT::Flow(ft) => ft.into(),
+            RT::Id => RefType::prefix().append(label("id")).into(),
+            RT::Method(mt) => mt.into(),
+            RT::Op(ort) => ort.into(),
         }
     }
 }
@@ -72,14 +89,20 @@ impl From<RefType> for TCType {
 impl fmt::Display for RefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Flow(ft) => write!(f, "{}", ft),
             Self::Id => write!(f, "type Ref"),
+            Self::Method(mt) => write!(f, "{}", mt),
+            Self::Op(ort) => write!(f, "{}", ort),
         }
     }
 }
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCRef {
+    Flow(FlowControl),
     Id(IdRef),
+    Method(Method),
+    Op(OpRef),
 }
 
 impl Instance for TCRef {
@@ -87,7 +110,10 @@ impl Instance for TCRef {
 
     fn class(&self) -> RefType {
         match self {
+            TCRef::Flow(control) => RefType::Flow(control.class()),
             TCRef::Id(_) => RefType::Id,
+            TCRef::Method(method) => RefType::Method(method.class()),
+            TCRef::Op(op_ref) => RefType::Op(op_ref.class()),
         }
     }
 }
@@ -102,10 +128,19 @@ impl From<IdRef> for TCRef {
     }
 }
 
+impl From<OpRef> for TCRef {
+    fn from(op_ref: OpRef) -> TCRef {
+        TCRef::Op(op_ref)
+    }
+}
+
 impl fmt::Display for TCRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Flow(control) => write!(f, "{}", control),
             Self::Id(id_ref) => write!(f, "{}", id_ref),
+            Self::Method(method) => write!(f, "{}", method),
+            Self::Op(op_ref) => write!(f, "{}", op_ref),
         }
     }
 }

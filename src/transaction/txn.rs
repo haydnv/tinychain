@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::hash::Hash;
-use std::iter;
 use std::slice;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -211,11 +210,7 @@ impl Txn {
 
         let mut pending = FuturesUnordered::new();
 
-        while !is_resolved(
-            graph
-                .get(&capture)
-                .ok_or_else(|| error::not_found(&capture))?,
-        ) {
+        while !is_resolved(dereference_state(&graph, &capture)?) {
             let mut visited = HashSet::new();
             let mut unvisited = Vec::with_capacity(graph.len());
             unvisited.push(capture.clone());
@@ -229,59 +224,33 @@ impl Txn {
 
                 debug!("Txn::execute {} (#{})", &name, visited.len());
 
-                let state = graph.get(&name).ok_or_else(|| error::not_found(&name))?;
+                let state = dereference_state(&graph, &name)?;
                 if let State::Scalar(scalar) = state {
                     let mut ready = true;
 
-                    if let Scalar::Op(op) = scalar {
-                        if op.is_def() {
-                            continue;
+                    for dep in requires(&scalar, &graph)? {
+                        debug!("requires {}", dep);
+                        let dep_state = dereference_state(&graph, dep.id())?;
+
+                        if !is_resolved(dep_state) {
+                            ready = false;
+                            unvisited.push(dep.id().clone());
                         }
+                    }
 
-                        debug!("Provider: {}", &op);
-                        for dep in op_requires(op, &graph)? {
-                            if dep == name {
-                                return Err(error::bad_request("Dependency cycle", dep));
-                            }
-
-                            debug!("requires {}", dep);
-                            let dep_state =
-                                graph.get(&dep).ok_or_else(|| error::not_found(&dep))?;
-
-                            if !is_resolved(dep_state) {
-                                ready = false;
-                                unvisited.push(dep);
-                            }
-                        }
-
-                        if ready {
-                            debug!("queueing dep {}: {}", name, state);
+                    if ready {
+                        if let Scalar::Ref(tc_ref) = scalar {
+                            let tc_ref = (&**tc_ref).clone();
                             pending.push(
-                                self.resolve(request, graph.clone(), *op.clone())
+                                self.resolve(request, graph.clone(), tc_ref)
                                     .map(|r| (name, r)),
                             );
-                        }
-                    } else if let Scalar::Tuple(tuple) = scalar {
-                        let mut ready = true;
-                        for dep in tuple {
-                            if let Scalar::Ref(TCRef::Id(dep)) = dep {
-                                if dep.id() == &name {
-                                    return Err(error::bad_request("Dependency cycle", dep));
-                                }
-
-                                let dep_state =
-                                    graph.get(dep.id()).ok_or_else(|| error::not_found(&dep))?;
-
-                                if !is_resolved(dep_state) {
-                                    ready = false;
-                                    unvisited.push(dep.id().clone());
-                                }
-                            }
-                        }
-
-                        if ready {
-                            let resolved = dereference_state(&graph, scalar)?;
-                            graph.insert(name, resolved);
+                        } else if let Scalar::Object(object) = scalar {
+                            let object = dereference_object(&graph, object)?;
+                            graph.insert(name, Scalar::Object(object).into());
+                        } else if let Scalar::Tuple(tuple) = scalar {
+                            let tuple = dereference_tuple(&graph, tuple)?;
+                            graph.insert(name, Scalar::Tuple(tuple).into());
                         }
                     }
                 }
@@ -363,18 +332,15 @@ impl Txn {
         &self,
         request: &Request,
         provided: HashMap<Id, State>,
-        provider: Op,
+        provider: TCRef,
     ) -> TCResult<State> {
         validate_id(request, &self.inner.id)?;
 
         debug!("Txn::resolve {}", provider);
 
         match provider {
-            Op::Def(op_def) => Err(error::not_implemented(format!("Txn::resolve {}", op_def))),
-            Op::Flow(FlowControl::If(cond, then, or_else)) => {
-                let cond = provided
-                    .get(cond.id())
-                    .ok_or_else(|| error::not_found(cond))?;
+            TCRef::Flow(FlowControl::If(cond, then, or_else)) => {
+                let cond = dereference_state(&provided, cond.id())?;
 
                 if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(cond)))) = cond {
                     if cond.into() {
@@ -389,15 +355,13 @@ impl Txn {
                     ))
                 }
             }
-            Op::Ref(OpRef::Get((link, key))) => {
+            TCRef::Id(id_ref) => dereference_state_owned(&provided, id_ref.id()),
+            TCRef::Op(OpRef::Get((link, key))) => {
                 let key = dereference_value(&provided, key)?;
                 self.inner.gateway.get(request, self, &link, key).await
             }
-            Op::Method(Method::Get((tc_ref, path), key)) => {
-                let subject = provided
-                    .get(tc_ref.id())
-                    .ok_or_else(|| error::not_found(tc_ref))?;
-
+            TCRef::Method(Method::Get((id_ref, path), key)) => {
+                let subject = dereference_state(&provided, id_ref.id())?;
                 let key = dereference_value(&provided, key)?;
 
                 match subject {
@@ -421,16 +385,13 @@ impl Txn {
                     State::Object(object) => object.get(request, self, &path[..], key).await,
                     State::Scalar(scalar) => match scalar {
                         Scalar::Object(object) => object.get(request, self, &path[..], key).await,
-                        Scalar::Op(op) => match &**op {
-                            Op::Def(op_def) => {
-                                if !&path[..].is_empty() {
-                                    return Err(error::not_found(path));
-                                }
-
-                                op_def.get(request, self, key, None).await
+                        Scalar::Op(op_def) => {
+                            if !&path[..].is_empty() {
+                                return Err(error::not_found(path));
                             }
-                            other => Err(error::method_not_allowed(other)),
-                        },
+
+                            op_def.get(request, self, key, None).await
+                        }
                         Scalar::Value(value) => value
                             .get(path.as_slice(), key.clone())
                             .map(Scalar::Value)
@@ -439,9 +400,9 @@ impl Txn {
                     },
                 }
             }
-            Op::Ref(OpRef::Put((link, key, value))) => {
+            TCRef::Op(OpRef::Put((link, key, value))) => {
                 let key = dereference_value(&provided, key)?;
-                let value = dereference_state(&provided, &value)?;
+                let value = dereference(&provided, &value)?;
                 self.inner
                     .gateway
                     .put(&request, self, &link, key, value)
@@ -449,13 +410,10 @@ impl Txn {
 
                 Ok(().into())
             }
-            Op::Method(Method::Put((tc_ref, path), (key, value))) => {
-                let subject = provided
-                    .get(&tc_ref.clone().into())
-                    .ok_or_else(|| error::not_found(tc_ref))?;
-
+            TCRef::Method(Method::Put((id_ref, path), (key, value))) => {
+                let subject = dereference_state(&provided, id_ref.id())?;
                 let key = dereference_value(&provided, key)?;
-                let value = dereference_state(&provided, &value)?;
+                let value = dereference(&provided, &value)?;
 
                 debug!(
                     "Txn::resolve Method::Put {}{}: {} <- {}",
@@ -486,7 +444,7 @@ impl Txn {
                     ))),
                 }
             }
-            Op::Ref(OpRef::Post((link, data))) => {
+            TCRef::Op(OpRef::Post((link, data))) => {
                 debug!("Txn::resolve POST {} <- {}", link, data);
 
                 self.inner
@@ -495,23 +453,18 @@ impl Txn {
                     .map_ok(State::from)
                     .await
             }
-            Op::Method(Method::Post((subject, path), data)) => {
-                let subject = provided
-                    .get(&subject.clone().into())
-                    .ok_or_else(|| error::not_found(subject))?;
+            TCRef::Method(Method::Post((id_ref, path), data)) => {
+                let subject = dereference_state(&provided, id_ref.id())?;
 
                 match subject {
                     State::Scalar(scalar) => match scalar {
-                        Scalar::Op(op) => match &**op {
-                            Op::Def(op_def) => {
-                                if !path.as_slice().is_empty() {
-                                    return Err(error::not_found(path));
-                                }
-
-                                op_def.post(request, self, data).await
+                        Scalar::Op(op_def) => {
+                            if !path.as_slice().is_empty() {
+                                return Err(error::not_found(path));
                             }
-                            other => Err(error::method_not_allowed(other)),
-                        },
+
+                            op_def.post(request, self, data).await
+                        }
                         other => Err(error::method_not_allowed(other)),
                     },
                     _ => Err(error::not_implemented("Txn::resolve Method::Post")),
@@ -542,35 +495,63 @@ impl Drop for Txn {
     }
 }
 
-fn dereference_state(provided: &HashMap<Id, State>, object: &Scalar) -> TCResult<State> {
-    match object {
-        Scalar::Ref(tc_ref) => match tc_ref {
-            TCRef::Id(id_ref) => provided
-                .get(id_ref.id())
-                .cloned()
-                .ok_or_else(|| error::not_found(id_ref)),
+fn dereference(provided: &HashMap<Id, State>, scalar: &Scalar) -> TCResult<State> {
+    match scalar {
+        Scalar::Ref(tc_ref) => match &**tc_ref {
+            TCRef::Id(id_ref) => dereference_state_owned(provided, id_ref.id()),
+            other => Err(error::not_implemented(format!("dereference {}", other))),
         },
-        Scalar::Tuple(tuple) => {
-            let tuple: TCResult<Vec<State>> = tuple
-                .iter()
-                .map(|val| dereference_state(provided, val))
-                .collect();
-
-            let tuple: TCResult<Vec<Scalar>> = tuple?.drain(..).map(Scalar::try_from).collect();
-            tuple.map(Scalar::Tuple).map(State::Scalar)
-        }
-        other => Ok(State::Scalar(other.clone())),
+        other => dereference_scalar(provided, other).map(State::Scalar),
     }
+}
+
+fn dereference_scalar(provided: &HashMap<Id, State>, scalar: &Scalar) -> TCResult<Scalar> {
+    match scalar {
+        Scalar::Object(object) => dereference_object(provided, object).map(Scalar::Object),
+        Scalar::Op(op_ref) => Err(error::not_implemented(format!(
+            "dereference_scalar {}",
+            op_ref
+        ))),
+        Scalar::Ref(tc_ref) => match &**tc_ref {
+            TCRef::Id(id_ref) => {
+                dereference_state_owned(provided, id_ref.id()).and_then(Scalar::try_from)
+            }
+            other => Err(error::not_implemented(format!("dereference {}", other))),
+        },
+        Scalar::Tuple(tuple) => dereference_tuple(provided, tuple).map(Scalar::Tuple),
+        other => Ok(other.clone()),
+    }
+}
+
+fn dereference_state<'a>(provided: &'a HashMap<Id, State>, id: &'a Id) -> TCResult<&'a State> {
+    provided.get(id).ok_or_else(|| error::not_found(id))
+}
+
+fn dereference_state_owned(provided: &HashMap<Id, State>, id: &Id) -> TCResult<State> {
+    provided
+        .get(id)
+        .cloned()
+        .ok_or_else(|| error::not_found(id))
+}
+
+fn dereference_object(_provided: &HashMap<Id, State>, _object: &Object) -> TCResult<Object> {
+    Err(error::not_implemented("dereference_object"))
+}
+
+fn dereference_tuple(provided: &HashMap<Id, State>, tuple: &[Scalar]) -> TCResult<Vec<Scalar>> {
+    let mut dereferenced = Vec::with_capacity(tuple.len());
+    for item in tuple {
+        dereferenced.push(dereference_scalar(provided, item)?);
+    }
+    Ok(dereferenced)
 }
 
 fn dereference_value(provided: &HashMap<Id, State>, key: Key) -> TCResult<Value> {
     match key {
         Key::Value(value) => Ok(value),
-        Key::Ref(tc_ref) => provided
-            .get(tc_ref.id())
-            .cloned()
-            .ok_or_else(|| error::not_found(tc_ref))
-            .and_then(Value::try_from),
+        Key::Ref(id_ref) => {
+            dereference_state_owned(provided, id_ref.id()).and_then(Value::try_from)
+        }
     }
 }
 
@@ -584,32 +565,60 @@ fn is_resolved(state: &State) -> bool {
 fn is_resolved_scalar(scalar: &Scalar) -> bool {
     match scalar {
         Scalar::Object(object) => object.values().all(is_resolved_scalar),
-        Scalar::Op(op) => match **op {
-            Op::Def(_) => true,
-            _ => false,
-        },
         Scalar::Ref(_) => false,
         Scalar::Tuple(tuple) => tuple.iter().all(is_resolved_scalar),
-        Scalar::Value(_) => true,
+        _ => true,
     }
 }
 
-fn op_requires(op: &Op, txn_state: &HashMap<Id, State>) -> TCResult<HashSet<Id>> {
+fn requires<'a>(
+    scalar: &'a Scalar,
+    txn_state: &'a HashMap<Id, State>,
+) -> TCResult<HashSet<&'a IdRef>> {
     let mut deps = HashSet::new();
 
-    match op {
-        Op::Def(_) => {}
-        Op::Flow(FlowControl::If(cond, then, or_else)) => {
-            let cond_state = txn_state
-                .get(cond.id())
-                .ok_or_else(|| error::not_found(cond))?;
+    match scalar {
+        Scalar::Ref(tc_ref) => match &**tc_ref {
+            TCRef::Flow(control) => {
+                deps.extend(flow_requires(control, txn_state)?);
+            }
+            TCRef::Id(id_ref) => {
+                deps.insert(id_ref);
+            }
+            TCRef::Op(op_ref) => {
+                deps.extend(op_requires(op_ref, txn_state)?);
+            }
+            TCRef::Method(method) => {
+                deps.extend(method_requires(method, txn_state)?);
+            }
+        },
+        Scalar::Tuple(tuple) => {
+            for item in &tuple[..] {
+                deps.extend(requires(item, txn_state)?);
+            }
+        }
+        _ => {}
+    }
+
+    Ok(deps)
+}
+
+fn flow_requires<'a>(
+    control: &'a FlowControl,
+    txn_state: &'a HashMap<Id, State>,
+) -> TCResult<HashSet<&'a IdRef>> {
+    let mut deps = HashSet::new();
+
+    match control {
+        FlowControl::If(cond, then, or_else) => {
+            let cond_state = dereference_state(txn_state, cond.id())?;
 
             if is_resolved(cond_state) {
                 if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = cond_state {
                     if b.into() {
-                        deps.extend(scalar_requires(then, txn_state)?);
+                        deps.extend(requires(then, txn_state)?);
                     } else {
-                        deps.extend(scalar_requires(or_else, txn_state)?);
+                        deps.extend(requires(or_else, txn_state)?);
                     }
                 } else {
                     return Err(error::bad_request(
@@ -618,85 +627,72 @@ fn op_requires(op: &Op, txn_state: &HashMap<Id, State>) -> TCResult<HashSet<Id>>
                     ));
                 }
             } else {
-                deps.insert(cond.id().clone());
+                deps.insert(cond);
             }
         }
-        Op::Method(method) => match method {
-            Method::Get((subject, _path), key) => {
-                deps.insert(subject.id().clone());
-
-                if let Key::Ref(key) = key {
-                    deps.insert(key.id().clone());
-                }
-            }
-            Method::Put((subject, _path), (key, value)) => {
-                deps.insert(subject.id().clone());
-
-                if let Key::Ref(key) = key {
-                    deps.insert(key.id().clone());
-                }
-
-                deps.extend(scalar_requires(value, txn_state)?);
-            }
-            Method::Post((subject, _path), params) => {
-                deps.insert(subject.id().clone());
-                deps.extend(params.iter().filter_map(|(name, dep)| {
-                    if is_resolved_scalar(dep) {
-                        None
-                    } else {
-                        Some(name.clone())
-                    }
-                }));
-            }
-        },
-        Op::Ref(op_ref) => match op_ref {
-            OpRef::Get((_path, Key::Ref(tc_ref))) => {
-                deps.insert(tc_ref.id().clone());
-            }
-            OpRef::Get(_) => {}
-            OpRef::Put((_path, key, value)) => {
-                if let Key::Ref(tc_ref) = key {
-                    deps.insert(tc_ref.id().clone());
-                }
-
-                deps.extend(scalar_requires(value, txn_state)?);
-            }
-            OpRef::Post((_path, params)) => {
-                for provider in params.values() {
-                    deps.extend(scalar_requires(provider, txn_state)?);
-                }
-            }
-        },
     }
 
     Ok(deps)
 }
 
-fn scalar_requires(scalar: &Scalar, txn_state: &HashMap<Id, State>) -> TCResult<HashSet<Id>> {
-    match scalar {
-        Scalar::Object(object) => {
-            let mut required = HashSet::new();
-            for s in object.values() {
-                required.extend(scalar_requires(s, txn_state)?);
+fn method_requires<'a>(
+    method: &'a Method,
+    txn_state: &'a HashMap<Id, State>,
+) -> TCResult<HashSet<&'a IdRef>> {
+    let mut deps = HashSet::new();
+
+    match method {
+        Method::Get((subject, _path), key) => {
+            deps.insert(subject);
+
+            if let Key::Ref(key) = key {
+                deps.insert(key);
             }
-            Ok(required)
         }
-        Scalar::Op(op) => match &**op {
-            Op::Def(_) => Ok(HashSet::new()),
-            other => op_requires(other, txn_state),
-        },
-        Scalar::Ref(tc_ref) => match tc_ref {
-            TCRef::Id(id_ref) => Ok(iter::once(id_ref.id().clone()).collect()),
-        },
-        Scalar::Tuple(tuple) => {
-            let mut required = HashSet::new();
-            for s in tuple {
-                required.extend(scalar_requires(s, txn_state)?);
+        Method::Put((subject, _path), (key, value)) => {
+            deps.insert(subject);
+
+            if let Key::Ref(key) = key {
+                deps.insert(key);
             }
-            Ok(required)
+
+            deps.extend(requires(value, txn_state)?);
         }
-        Scalar::Value(_) => Ok(HashSet::new()),
+        Method::Post((subject, _path), _params) => {
+            deps.insert(subject);
+        }
     }
+
+    Ok(deps)
+}
+
+fn op_requires<'a>(
+    op_ref: &'a OpRef,
+    txn_state: &'a HashMap<Id, State>,
+) -> TCResult<HashSet<&'a IdRef>> {
+    let mut deps = HashSet::new();
+
+    match op_ref {
+        OpRef::Get((_path, key)) => {
+            if let Key::Ref(tc_ref) = key {
+                deps.insert(tc_ref);
+            }
+        }
+        OpRef::Put((_path, key, value)) => {
+            if let Key::Ref(tc_ref) = key {
+                deps.insert(tc_ref);
+            }
+
+            deps.extend(requires(value, txn_state)?);
+        }
+        OpRef::Post((_path, params)) => {
+            for provider in params.values() {
+                deps.extend(requires(provider, txn_state)?);
+            }
+        }
+    }
+
+    Ok(deps)
 }
 
 fn validate_id(request: &Request, expected: &TxnId) -> TCResult<()> {

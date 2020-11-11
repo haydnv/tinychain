@@ -5,7 +5,7 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::error::{self, TCResult};
-use crate::scalar::Id;
+use crate::scalar::{Id, TCString, TryCastFrom, Value};
 
 const EMPTY_SLICE: &[usize] = &[];
 
@@ -47,6 +47,30 @@ impl FromStr for IdRef {
 impl PartialEq<Id> for IdRef {
     fn eq(&self, other: &Id) -> bool {
         self.id() == other
+    }
+}
+
+impl TryCastFrom<Value> for IdRef {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::TCString(tc_string) => match tc_string {
+                TCString::Id(_) => true,
+                TCString::UString(ustring) => IdRef::from_str(ustring).is_ok(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<IdRef> {
+        match value {
+            Value::TCString(tc_string) => match tc_string {
+                TCString::Id(id) => Some(id.into()),
+                TCString::UString(ustring) => IdRef::from_str(&ustring).ok(),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 }
 

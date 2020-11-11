@@ -153,7 +153,7 @@ value assigned in the function definition. To return multiple values, we can use
 [
     ["one", {"/sbin/value/number/int/32": 1}],
     ["two", {"/sbin/value/number/int/32": 2}],
-    ["onetwo", {"/sbin/value/tuple": [
+    ["onetwo", {"/sbin/tuple": [
         {"$one": []},
         {"$two": []}
     ]}]
@@ -186,9 +186,9 @@ You can define a function and call it like so:
 
 ```json
 [
-    ["guess", {"/sbin/op/def/get": ["n", [
+    ["guess", {"/sbin/op/get": ["n", [
             ["n_is_five", {"$n/eq": [5]}],
-            ["message", {"/sbin/op/flow/if": [{"$n_is_five": []}, "right", "wrong"]}]
+            ["message", {"/sbin/ref/flow/if": [{"$n_is_five": []}, "right", "wrong"]}]
         ]]
     }],
     ["outcome", {"$guess": [6]}]
@@ -210,7 +210,7 @@ example with a new method called `radians`:
 {
     "lat": 40.689,
     "lng": -74.044,
-    "radians": {"/sbin/op/def/get": [
+    "radians": {"/sbin/op/get": [
         ["pi", 3.14159],
         ["radians_per_degree", {"$pi/div": [180]}],
         ["coord_radians", {
@@ -228,9 +228,9 @@ Of course, you can call an method on a generic `Object` just like any other:
     ["greeting", {"/sbin/object": {
         "en": "Hello!",
         "es": "¡Hola!",
-        "render": {"/sbin/op/def/get": ["lang", [
+        "render": {"/sbin/op/get": ["lang", [
             ["is_spanish", {"$lang/eq": ["es"]}],
-            ["rendered", {"/sbin/op/flow/if": [{"$is_spanish": []}, {"$self/es": []}, {"$self/en": []}]}]
+            ["rendered", {"/sbin/ref/flow/if": [{"$is_spanish": []}, {"$self/es": []}, {"$self/en": []}]}]
         ]]}
     }}],
     ["result", {"$greeting/render": ["es"]}]
@@ -248,7 +248,7 @@ enable the application handling the data to make very specific assumptions. For 
     ["Meter", {"/sbin/object/class": {
         "extends": "/sbin/value/number",
         "proto": {
-            "feet": {"/sbin/op/def/get": [
+            "feet": {"/sbin/op/get": [
                 ["ft", {"$self/mul": [3.28]}]
             ]}
         }

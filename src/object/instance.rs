@@ -8,7 +8,7 @@ use log::debug;
 use crate::class::{Instance, State, TCBoxTryFuture};
 use crate::error::{self, TCResult};
 use crate::request::Request;
-use crate::scalar::{self, Key, Op, OpRef, PathSegment, Scalar, TCPath, Value, ValueInstance};
+use crate::scalar::{self, Key, OpRef, PathSegment, Scalar, TCPath, Value, ValueInstance};
 use crate::transaction::Txn;
 
 use super::InstanceClass;
@@ -48,14 +48,9 @@ impl ObjectInstance {
             let proto = self.class.proto().deref();
             match proto.get(&path[0]) {
                 Some(scalar) => match scalar {
-                    Scalar::Op(op) if path.len() == 1 => match &**op {
-                        Op::Def(op_def) => op_def.get(request, txn, key, Some(self)).await,
-                        other => Err(error::not_implemented(format!(
-                            "ObjectInstance::get {}",
-                            other
-                        ))),
-                    },
-                    Scalar::Op(_) => Err(error::path_not_found(&path[1..])),
+                    Scalar::Op(op_def) if path.len() == 1 => {
+                        op_def.get(request, txn, key, Some(self)).await
+                    }
                     Scalar::Value(value) => value
                         .get(&path[1..], key)
                         .map(Scalar::Value)

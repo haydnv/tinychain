@@ -10,7 +10,7 @@ use crate::error;
 use crate::request::Request;
 use crate::transaction::Txn;
 
-use super::{Id, Op, PathSegment, Scalar, TCPath, Value, ValueInstance};
+use super::{Id, PathSegment, Scalar, TCPath, Value, ValueInstance};
 
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct Object(HashMap<Id, Scalar>);
@@ -32,14 +32,11 @@ impl Object {
 
             match self.0.get(&path[0]) {
                 Some(scalar) => match scalar {
-                    Scalar::Op(op) => match &**op {
-                        Op::Def(op_def) => {
-                            op_def
-                                .get(request, txn, key, Some(&self.clone().into()))
-                                .await
-                        }
-                        other => Err(error::not_implemented(other)),
-                    },
+                    Scalar::Op(op_def) => {
+                        op_def
+                            .get(request, txn, key, Some(&self.clone().into()))
+                            .await
+                    }
 
                     Scalar::Value(value) => value
                         .get(&path[1..], key)
