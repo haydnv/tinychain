@@ -6,7 +6,7 @@ use std::slice;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use futures::future::{self, FutureExt, TryFutureExt};
+use futures::future::{self, try_join_all, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
 use log::debug;
 use rand::Rng;
@@ -341,8 +341,15 @@ impl Txn {
 
             match provider {
                 TCRef::Flow(control) => match *control {
-                    FlowControl::If(cond, then, or_else) => {
-                        let cond = self.resolve(request, provided.clone(), cond).await?;
+                    FlowControl::After((mut when, then)) => {
+                        let when = when
+                            .drain(..)
+                            .map(|tc_ref| self.resolve(request, provided.clone(), tc_ref));
+                        try_join_all(when).await?;
+                        Ok(State::Scalar(Scalar::Ref(Box::new(then))))
+                    }
+                    FlowControl::If((cond, then, or_else)) => {
+                        let cond = self.resolve(request, provided, cond).await?;
 
                         if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(cond)))) =
                             cond
@@ -442,8 +449,8 @@ impl Txn {
 
                             collection
                                 .put(&request, self, &path[..], key, value)
-                                .await?;
-                            Ok(State::Collection(collection.clone()))
+                                .map_ok(State::from)
+                                .await
                         }
                         other => Err(error::not_implemented(format!(
                             "Txn::resolve Method::Put for {}",
@@ -507,9 +514,9 @@ fn dereference(provided: &HashMap<Id, State>, scalar: &Scalar) -> TCResult<State
     match scalar {
         Scalar::Ref(tc_ref) => match &**tc_ref {
             TCRef::Id(id_ref) => dereference_state_owned(provided, id_ref.id()),
-            other => Err(error::not_implemented(format!("dereference {}", other))),
+            _ => dereference_scalar(provided, scalar).map(State::Scalar),
         },
-        other => dereference_scalar(provided, other).map(State::Scalar),
+        _ => dereference_scalar(provided, scalar).map(State::Scalar),
     }
 }
 
@@ -524,7 +531,7 @@ fn dereference_scalar(provided: &HashMap<Id, State>, scalar: &Scalar) -> TCResul
             TCRef::Id(id_ref) => {
                 dereference_state_owned(provided, id_ref.id()).and_then(Scalar::try_from)
             }
-            other => Err(error::not_implemented(format!("dereference {}", other))),
+            other => Ok(Scalar::Ref(Box::new(other.clone()))),
         },
         Scalar::Tuple(tuple) => dereference_tuple(provided, tuple).map(Scalar::Tuple),
         other => Ok(other.clone()),
@@ -631,7 +638,12 @@ fn flow_requires<'a>(
     let mut deps = HashSet::new();
 
     match control {
-        FlowControl::If(cond, _, _) => {
+        FlowControl::After((when, _)) => {
+            for tc_ref in when {
+                deps.extend(ref_requires(tc_ref, txn_state)?);
+            }
+        }
+        FlowControl::If((cond, _, _)) => {
             deps.extend(ref_requires(cond, txn_state)?);
         }
     }
