@@ -113,11 +113,13 @@ impl Collator {
     }
 
     pub fn bisect_right_range(&self, keys: &[&[Value]], range: &[Bound<Value>]) -> usize {
-        if keys.is_empty() || range.is_empty() {
-            return 0;
+        if keys.is_empty() {
+            0
+        } else if range.is_empty() {
+            keys.len()
+        } else {
+            Self::_bisect_right(keys, |key| self.compare_bound(key, range, Greater))
         }
-
-        Self::_bisect_right(keys, |key| self.compare_bound(key, range, Greater))
     }
 
     fn _bisect_right<'a, F: Fn(&'a [Value]) -> Ordering>(keys: &'a [&'a [Value]], cmp: F) -> usize {
