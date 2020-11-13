@@ -384,7 +384,7 @@ impl Txn {
                         .map_ok(State::from)
                         .await
                 }
-            }
+            },
         }
     }
 

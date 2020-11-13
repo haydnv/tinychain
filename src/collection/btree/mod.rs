@@ -18,9 +18,7 @@ use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{
-    CastFrom, CastInto, PathSegment, Scalar, TryCastFrom, TryCastInto, Value, ValueClass, ValueType,
-};
+use crate::scalar::*;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -124,7 +122,7 @@ fn format_schema(schema: &[Column]) -> String {
     format!("[{}]", schema.join(", "))
 }
 
-fn validate_key(key: &[Value], schema: &[Column]) -> TCResult<()> {
+fn validate_key(key: Key, schema: &[Column]) -> TCResult<Key> {
     if key.len() != schema.len() {
         return Err(error::bad_request(
             &format!("Invalid key {} for schema", Value::Tuple(key.to_vec())),
@@ -135,14 +133,16 @@ fn validate_key(key: &[Value], schema: &[Column]) -> TCResult<()> {
     validate_prefix(key, schema)
 }
 
-fn validate_selector(selector: &Selector, schema: &[Column]) -> TCResult<()> {
+fn validate_selector(selector: Selector, schema: &[Column]) -> TCResult<Selector> {
     match selector {
-        Selector::Key(key) => validate_prefix(key, schema),
-        Selector::Range(range, _) => validate_range(range, schema),
+        Selector::Key(key) => validate_prefix(key, schema).map(Selector::Key),
+        Selector::Range(range, reverse) => {
+            validate_range(range, schema).map(|range| Selector::Range(range, reverse))
+        }
     }
 }
 
-fn validate_prefix(prefix: &[Value], schema: &[Column]) -> TCResult<()> {
+fn validate_prefix(prefix: Key, schema: &[Column]) -> TCResult<Key> {
     if prefix.len() > schema.len() {
         return Err(error::bad_request(
             &format!(
@@ -153,57 +153,50 @@ fn validate_prefix(prefix: &[Value], schema: &[Column]) -> TCResult<()> {
         ));
     }
 
-    for (val, col) in prefix.iter().zip(&schema[0..prefix.len()]) {
-        if !val.is_a(*col.dtype()) {
-            return Err(error::bad_request(
-                &format!("Expected {} for {}, found", col.dtype(), col.name()),
-                val,
-            ));
-        }
+    prefix
+        .into_iter()
+        .zip(schema)
+        .map(|(value, column)| {
+            let value = column.dtype().try_cast(value)?;
 
-        let key_size = bincode::serialized_size(&val)?;
-        if let Some(size) = col.max_len() {
-            if key_size as usize > *size {
-                return Err(error::bad_request(
-                    "Column value exceeds the maximum length",
-                    col.name(),
-                ));
+            let key_size = bincode::serialized_size(&value)?;
+            if let Some(size) = column.max_len() {
+                if key_size as usize > *size {
+                    return Err(error::bad_request(
+                        "Column value exceeds the maximum lendth",
+                        column.name(),
+                    ));
+                }
             }
-        }
-    }
 
-    Ok(())
+            Ok(value)
+        })
+        .collect()
 }
 
-fn validate_range(range: &BTreeRange, schema: &[Column]) -> TCResult<()> {
+fn validate_range(range: BTreeRange, schema: &[Column]) -> TCResult<BTreeRange> {
     use Bound::*;
 
-    let expect = |column: &Column, value: &Value| {
-        value.expect(
-            *column.dtype(),
-            format!("for column {} in BTreeRange", column.name()),
-        )
+    let cast = |(bound, column): (Bound<Value>, &Column)| {
+        let value = match bound {
+            Unbounded => Unbounded,
+            Included(value) => Included(column.dtype().try_cast(value)?),
+            Excluded(value) => Excluded(column.dtype().try_cast(value)?),
+        };
+        Ok(value)
     };
 
-    for (i, column) in schema.iter().enumerate() {
-        if i < range.0.len() {
-            match &range.0[i] {
-                Unbounded => {}
-                Included(value) => expect(column, value)?,
-                Excluded(value) => expect(column, value)?,
-            }
-        }
+    let cast_range = |range: Vec<Bound<Value>>| {
+        range
+            .into_iter()
+            .zip(schema)
+            .map(cast)
+            .collect::<TCResult<Vec<Bound<Value>>>>()
+    };
 
-        if i < range.1.len() {
-            match &range.1[i] {
-                Unbounded => {}
-                Included(value) => expect(column, value)?,
-                Excluded(value) => expect(column, value)?,
-            }
-        }
-    }
-
-    Ok(())
+    let start = cast_range(range.0)?;
+    let end = cast_range(range.1)?;
+    Ok(BTreeRange(start, end))
 }
 
 type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Unpin>>>;
@@ -246,7 +239,7 @@ impl CollectionInstance for BTreeSlice {
 
         let bounds: Selector =
             bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
-        validate_selector(&bounds, self.source.schema())?;
+        let bounds = validate_selector(bounds, self.source.schema())?;
 
         let schema: Vec<ValueType> = self.source.schema().iter().map(|c| *c.dtype()).collect();
         match (&self.bounds, &bounds) {
@@ -425,7 +418,7 @@ impl BTreeFile {
     }
 
     pub async fn slice(self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>> {
-        validate_selector(&selector, self.schema())?;
+        let selector = validate_selector(selector, self.schema())?;
 
         let root_id = self.root.read(&txn_id).await?;
         let root = self
@@ -636,7 +629,7 @@ impl BTreeFile {
         source: S,
     ) -> TCResult<()> {
         source
-            .and_then(|k| future::ready(validate_key(&k, self.schema()).map(|()| k)))
+            .and_then(|k| future::ready(validate_key(k, self.schema())))
             .map_ok(|key| self.insert(txn_id, key))
             .try_buffer_unordered(2 * self.order)
             .fold(Ok(()), |_, r| future::ready(r))
@@ -649,7 +642,7 @@ impl BTreeFile {
         source: S,
     ) -> TCResult<()> {
         source
-            .map(|k| validate_key(&k, self.schema()).map(|()| k))
+            .map(|k| validate_key(k, self.schema()))
             .map_ok(|key| self.insert(txn_id, key))
             .try_buffer_unordered(2 * self.order)
             .fold(Ok(()), |_, r| future::ready(r))
@@ -834,8 +827,7 @@ impl CollectionInstance for BTreeFile {
 
         let bounds: Selector =
             bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
-
-        validate_selector(&bounds, self.schema())?;
+        let bounds = validate_selector(bounds, self.schema())?;
 
         if let Selector::Key(key) = bounds {
             let mut slice = self
@@ -881,8 +873,8 @@ impl CollectionInstance for BTreeFile {
         let selector: Selector =
             selector.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
 
-        validate_selector(&selector, self.schema())?;
-        validate_key(&key, self.schema())?;
+        let selector = validate_selector(selector, self.schema())?;
+        let key = validate_key(key, self.schema())?;
 
         match selector {
             Selector::Key(selector)
