@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::block::File;
-use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
+use crate::block::{BlockData, BlockId, BlockOwned, BlockOwnedMut};
 use crate::class::{Instance, State, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
 use crate::request::Request;
@@ -426,20 +426,6 @@ impl BTreeFile {
         &self.schema
     }
 
-    async fn get_root<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<Block<'a, Node>> {
-        self.root
-            .read(txn_id)
-            .and_then(|root_id| self.file.get_block(txn_id, (*root_id).clone()))
-            .await
-    }
-
-    pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
-        Box::pin(async move {
-            let root = self.get_root(txn.id()).await?;
-            Ok(root.keys.is_empty())
-        })
-    }
-
     pub fn len<'a>(self, txn_id: TxnId, selector: Selector) -> TCBoxTryFuture<'a, u64> {
         Box::pin(async move {
             let slice = self.slice(txn_id, selector).await?;
@@ -602,15 +588,14 @@ impl BTreeFile {
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let root_id = self.root.read(txn_id).await?;
-            self._update(txn_id, (*root_id).clone(), bounds, value)
-                .await
+            self._update(txn_id, &root_id, bounds, value).await
         })
     }
 
     fn _update<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        node_id: NodeId,
+        node_id: &'a NodeId,
         bounds: &'a Selector,
         value: &'a [Value],
     ) -> TCBoxTryFuture<'a, ()> {
@@ -637,15 +622,14 @@ impl BTreeFile {
                     let mut updates = Vec::with_capacity(r - l);
                     for (i, child_id) in children.iter().enumerate().take(r).skip(l) {
                         node.keys[i] = value.into();
-                        updates.push(self._update(txn_id, child_id.clone(), bounds, value));
+                        updates.push(self._update(txn_id, child_id, bounds, value));
                     }
 
-                    let last_update = self._update(txn_id, children[r].clone(), bounds, value);
+                    let last_update = self._update(txn_id, &children[r], bounds, value);
                     try_join(try_join_all(updates), last_update).await?;
                     Ok(())
                 } else {
-                    self._update(txn_id, children[r].clone(), bounds, value)
-                        .await
+                    self._update(txn_id, &children[r], bounds, value).await
                 }
             }
         })
@@ -680,8 +664,11 @@ impl BTreeFile {
     pub fn insert<'a>(&'a self, txn_id: &'a TxnId, key: Key) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let root_id = self.root.read(txn_id).await?;
-            let root_id_clone = (*root_id).clone();
-            let root = self.file.get_block(txn_id, root_id_clone).await?;
+            let root = self
+                .file
+                .clone()
+                .get_block_owned(txn_id.clone(), (*root_id).clone())
+                .await?;
 
             debug!(
                 "insert into BTree node with {} keys and {} children (order is {})",
@@ -699,6 +686,7 @@ impl BTreeFile {
                 new_root.children.push(old_root_id.clone());
                 let new_root = self
                     .file
+                    .clone()
                     .create_block(txn_id.clone(), (*root_id).clone(), new_root)
                     .await?
                     .upgrade()
@@ -720,7 +708,7 @@ impl BTreeFile {
     fn _insert<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        node: Block<'a, Node>,
+        node: BlockOwned<Node>,
         key: Key,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
@@ -739,16 +727,23 @@ impl BTreeFile {
 
                 Ok(())
             } else {
-                let child_id = node.children[i].clone();
-                let mut child = self.file.get_block(txn_id, child_id.clone()).await?;
+                let mut child = self
+                    .file
+                    .clone()
+                    .get_block_owned(txn_id.clone(), node.children[i].clone())
+                    .await?;
                 if child.keys.len() == (2 * self.order) - 1 {
                     let node = self
-                        .split_child(txn_id, child_id, node.upgrade().await?, i)
+                        .split_child(txn_id, node.children[i].clone(), node.upgrade().await?, i)
                         .await?;
 
                     if i == node.keys.len() {
                         let child_id = node.children[i + 1].clone();
-                        child = self.file.get_block(txn_id, child_id).await?;
+                        child = self
+                            .file
+                            .clone()
+                            .get_block_owned(txn_id.clone(), child_id)
+                            .await?;
                     }
                 }
 
@@ -761,16 +756,17 @@ impl BTreeFile {
         &'a self,
         txn_id: &'a TxnId,
         node_id: NodeId,
-        mut node: BlockMut<'a, Node>,
+        mut node: BlockOwnedMut<Node>,
         i: usize,
-    ) -> TCResult<Block<'a, Node>> {
-        let child_id = node.children[i].clone();
+    ) -> TCResult<BlockOwned<Node>> {
+        let child_id = node.children[i].clone(); // needed due to mutable borrow below
         let mut child = self
             .file
-            .get_block(txn_id, child_id)
+            .get_block(txn_id, &child_id)
             .await?
             .upgrade()
             .await?;
+
         debug!(
             "child to split has {} keys and {} children",
             child.keys.len(),
@@ -798,6 +794,7 @@ impl BTreeFile {
         );
 
         self.file
+            .clone()
             .create_block(txn_id.clone(), new_node_id, new_node)
             .await?;
 
@@ -818,7 +815,7 @@ impl BTreeFile {
         bounds: &'a Selector,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
-            let node = self.file.get_block(txn_id, node_id).await?;
+            let node = self.file.get_block(txn_id, &node_id).await?;
             let (l, r) = bounds.bisect(&node.keys, &self.collator);
 
             if node.leaf {
@@ -834,22 +831,21 @@ impl BTreeFile {
 
                 Ok(())
             } else {
-                let children = node.children.to_vec();
-
                 if r > l {
                     let mut node = node.upgrade().await?;
                     let mut deletes = Vec::with_capacity(r - l);
-                    for i in l..r {
+
+                    for i in 0..node.children.len() {
                         node.keys[i].deleted = true;
-                        deletes.push(self._delete(txn_id, children[i].clone(), bounds));
+                        deletes.push(self._delete(txn_id, node.children[i].clone(), bounds));
                     }
                     node.rebalance = true;
 
-                    let last_delete = self._delete(txn_id, children[r].clone(), bounds);
+                    let last_delete = self._delete(txn_id, node.children[r].clone(), bounds);
                     try_join(try_join_all(deletes), last_delete).await?;
                     Ok(())
                 } else {
-                    self._delete(txn_id, children[r].clone(), bounds).await
+                    self._delete(txn_id, node.children[r].clone(), bounds).await
                 }
             }
         })
@@ -859,7 +855,8 @@ impl BTreeFile {
         use num::integer::div_ceil;
         use std::collections::VecDeque;
 
-        let root = self.get_root(txn_id).await?;
+        let root_id = self.root.read(txn_id).await?;
+        let root = self.file.get_block(txn_id, &root_id).await?;
         let order = self.order;
 
         assert!(self.collator.is_sorted(&root.keys()));
@@ -870,7 +867,7 @@ impl BTreeFile {
 
         let mut unvisited: VecDeque<NodeId> = root.children.iter().cloned().collect();
         while let Some(node_id) = unvisited.pop_front() {
-            let node = self.file.get_block(txn_id, node_id).await?;
+            let node = self.file.get_block(txn_id, &node_id).await?;
 
             assert!(!node.keys.is_empty());
             assert!(self.collator.is_sorted(&node.keys()));
@@ -883,15 +880,9 @@ impl BTreeFile {
                 assert!(node.children.len() >= div_ceil(order, 2));
 
                 for i in 0..node.keys.len() {
-                    let child_at_i = self
-                        .file
-                        .get_block(txn_id, node.children[i].clone())
-                        .await?;
+                    let child_at_i = self.file.get_block(txn_id, &node.children[i]).await?;
 
-                    let child_after_i = self
-                        .file
-                        .get_block(txn_id, node.children[i + 1].clone())
-                        .await?;
+                    let child_after_i = self.file.get_block(txn_id, &node.children[i + 1]).await?;
 
                     assert!(!child_at_i.keys.is_empty());
                     assert!(!child_after_i.keys.is_empty());
@@ -906,6 +897,8 @@ impl BTreeFile {
                     );
                 }
             }
+
+            unvisited.extend(node.children.iter().cloned());
         }
 
         Ok(())
@@ -965,9 +958,9 @@ impl CollectionInstance for BTreeFile {
     }
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        self.get_root(txn.id())
-            .await
-            .map(|root| root.keys.is_empty())
+        let root_id = self.root.read(txn.id()).await?;
+        let root = self.file.get_block(txn.id(), &root_id).await?;
+        Ok(root.keys.is_empty())
     }
 
     async fn put(

@@ -24,12 +24,16 @@ pub type File<B> = file::File<B>;
 
 pub struct Block<'a, B: BlockData> {
     file: &'a File<B>,
-    block_id: BlockId, // TODO: can this be borrowed?
+    block_id: &'a BlockId,
     lock: TxnLockReadGuard<B>,
 }
 
 impl<'a, B: BlockData> Block<'a, B> {
-    pub fn new(file: &'a File<B>, block_id: BlockId, lock: TxnLockReadGuard<B>) -> Block<'a, B> {
+    pub fn new(
+        file: &'a File<B>,
+        block_id: &'a BlockId,
+        lock: TxnLockReadGuard<B>,
+    ) -> Block<'a, B> {
         Block {
             file,
             block_id,
@@ -71,7 +75,7 @@ impl<'a, B: BlockData> fmt::Display for Block<'a, B> {
 
 pub struct BlockMut<'a, B: BlockData> {
     file: &'a File<B>,
-    block_id: BlockId,
+    block_id: &'a BlockId,
     lock: TxnLockWriteGuard<B>,
 }
 
@@ -139,6 +143,16 @@ pub struct BlockOwnedMut<B: BlockData> {
     file: Arc<File<B>>,
     block_id: BlockId,
     lock: TxnLockWriteGuard<B>,
+}
+
+impl<B: BlockData> BlockOwnedMut<B> {
+    pub async fn downgrade(self, txn_id: &TxnId) -> TCResult<BlockOwned<B>> {
+        Ok(BlockOwned {
+            file: self.file,
+            block_id: self.block_id,
+            lock: self.lock.downgrade(txn_id).await?,
+        })
+    }
 }
 
 impl<B: BlockData> Deref for BlockOwnedMut<B> {

@@ -72,11 +72,11 @@ impl<T: BlockData> File<T> {
     }
 
     pub async fn create_block(
-        &self,
+        self: Arc<Self>,
         txn_id: TxnId,
         block_id: BlockId,
         data: T,
-    ) -> TCResult<Block<'_, T>> {
+    ) -> TCResult<BlockOwned<T>> {
         if &block_id == TXN_CACHE {
             return Err(error::bad_request("This name is reserved", block_id));
         }
@@ -92,15 +92,15 @@ impl<T: BlockData> File<T> {
 
         let txn_lock = self.cache.write().await.insert(block_id.clone(), data);
         let lock = txn_lock.read(&txn_id).await?;
-        Ok(Block::new(self, block_id, lock))
+        Ok(BlockOwned::new(self, block_id, lock))
     }
 
     pub async fn get_block<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        block_id: BlockId,
+        block_id: &'a BlockId,
     ) -> TCResult<Block<'a, T>> {
-        let lock = self.lock_block(txn_id, &block_id).await?;
+        let lock = self.lock_block(txn_id, block_id).await?;
         let block = Block::new(self, block_id, lock);
         Ok(block)
     }
