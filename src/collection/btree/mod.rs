@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
-use std::ops::Bound;
+use std::ops::{Bound, Deref};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -60,7 +60,12 @@ impl From<Vec<Value>> for NodeKey {
 
 impl fmt::Display for NodeKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BTree node key: {}", Value::Tuple(self.value.to_vec()))
+        write!(
+            f,
+            "BTree node key: {}{}",
+            Value::Tuple(self.value.to_vec()),
+            if self.deleted { " (DELETED)" } else { "" }
+        )
     }
 }
 
@@ -111,7 +116,23 @@ impl BlockData for Node {
 
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "(BTree node with {} keys)", self.keys.len())
+        if self.leaf {
+            writeln!(f, "leaf node:")?;
+        } else {
+            writeln!(f, "non-leaf node:")?;
+        }
+
+        write!(
+            f,
+            "\tkeys: {}",
+            self.keys
+                .iter()
+                .map(|k| k.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        )?;
+
+        write!(f, "\t {} children", self.children.len())
     }
 }
 
@@ -445,6 +466,7 @@ impl BTreeFile {
                 l,
                 r
             );
+
             if l == r && l < node.keys.len() {
                 if node.keys[l].deleted {
                     Box::pin(stream::empty())
@@ -655,10 +677,16 @@ impl BTreeFile {
             let root_id_clone = (*root_id).clone();
             let root = self.file.get_block(txn_id, root_id_clone).await?;
 
+            debug!(
+                "insert into BTree node with {} keys and {} children (order is {})",
+                root.keys.len(),
+                root.children.len(),
+                self.order
+            );
+
             if root.keys.len() == (2 * self.order) - 1 {
                 let mut root_id = root_id.upgrade().await?;
                 let old_root_id = (*root_id).clone();
-                let old_root = root.upgrade().await?;
 
                 (*root_id) = self.file.unique_id(&txn_id).await?;
                 let mut new_root = Node::new(false, None);
@@ -666,9 +694,16 @@ impl BTreeFile {
                 let new_root = self
                     .file
                     .create_block(txn_id.clone(), (*root_id).clone(), new_root)
+                    .await?
+                    .upgrade()
                     .await?;
 
-                self.split_child(txn_id, old_root_id, old_root, 0).await?;
+                let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
+                debug!(
+                    "new root has {} keys and {} children",
+                    new_root.keys.len(),
+                    new_root.children.len()
+                );
                 self._insert(txn_id, new_root, key).await
             } else {
                 self._insert(txn_id, root, key).await
@@ -685,6 +720,8 @@ impl BTreeFile {
         Box::pin(async move {
             let keys = &node.keys;
             let i = self.collator.bisect_left(&node.values(), &key);
+            debug!("insert at index {} into {}", i, node.deref());
+
             if node.leaf {
                 if i == node.keys.len()
                     || self.collator.compare(&keys[i].value, &key) != Ordering::Equal
@@ -702,12 +739,11 @@ impl BTreeFile {
                 let child_id = node.children[i].clone();
                 let mut child = self.file.get_block(txn_id, child_id.clone()).await?;
                 if child.keys.len() == (2 * self.order) - 1 {
-                    let this_key = &node.keys[i].value.to_vec();
                     let node = self
                         .split_child(txn_id, child_id, node.upgrade().await?, i)
                         .await?;
 
-                    if self.collator.compare(&key, &this_key) == Ordering::Greater {
+                    if i == node.keys.len() {
                         let child_id = node.children[i + 1].clone();
                         child = self.file.get_block(txn_id, child_id).await?;
                     }
@@ -732,19 +768,36 @@ impl BTreeFile {
             .await?
             .upgrade()
             .await?;
+        debug!(
+            "child to split has {} keys and {} children",
+            child.keys.len(),
+            child.children.len()
+        );
+
         let new_node_id = self.file.unique_id(&txn_id).await?;
 
         node.children.insert(i + 1, new_node_id.clone());
         node.keys.insert(i, child.keys.remove(self.order - 1));
 
-        let mut new_node = Node::new(node.leaf, Some(node_id));
+        let mut new_node = Node::new(child.leaf, Some(node_id));
         new_node.keys = child.keys.drain((self.order - 1)..).collect();
-        if !child.leaf {
+
+        if child.leaf {
+            debug!("child is a leaf node");
+        } else {
             new_node.children = child.children.drain(self.order..).collect();
         }
+
+        debug!(
+            "new node has {} keys and {} children",
+            new_node.keys.len(),
+            new_node.children.len()
+        );
+
         self.file
             .create_block(txn_id.clone(), new_node_id, new_node)
             .await?;
+
         node.downgrade(&txn_id).await
     }
 
