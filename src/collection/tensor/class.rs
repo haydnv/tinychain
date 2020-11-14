@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{
     Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
@@ -149,7 +149,7 @@ impl CollectionInstance for TensorBase {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<State> {
         TensorView::from(self.clone())
             .get(request, txn, path, selector)
             .await
@@ -165,7 +165,7 @@ impl CollectionInstance for TensorBase {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-        value: CollectionItem<Self::Item, Self::Slice>,
+        value: State,
     ) -> TCResult<()> {
         TensorView::from(self.clone())
             .put(request, txn, path, selector, value)
@@ -318,7 +318,7 @@ impl CollectionInstance for TensorView {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<State> {
         if !path.is_empty() {
             return Err(error::path_not_found(path));
         }
@@ -329,10 +329,10 @@ impl CollectionInstance for TensorView {
         if bounds.is_coord() {
             let coord: Vec<u64> = bounds.try_into()?;
             let value = self.read_value(&txn, &coord).await?;
-            Ok(CollectionItem::Scalar(value))
+            Ok(State::Scalar(Scalar::Value(Value::Number(value))))
         } else {
             let slice = self.slice(bounds)?;
-            Ok(CollectionItem::Slice(slice))
+            Ok(State::Collection(slice.into()))
         }
     }
 
@@ -346,7 +346,7 @@ impl CollectionInstance for TensorView {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-        value: CollectionItem<Self::Item, Self::Slice>,
+        value: State,
     ) -> TCResult<()> {
         if !path.is_empty() {
             return Err(error::path_not_found(path));
@@ -356,10 +356,19 @@ impl CollectionInstance for TensorView {
             .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
 
         match value {
-            CollectionItem::Scalar(value) => {
+            State::Scalar(Scalar::Value(Value::Number(value))) => {
                 self.write_value(txn.id().clone(), bounds, value).await
             }
-            CollectionItem::Slice(slice) => self.write(txn.clone(), bounds, slice).await,
+            State::Collection(Collection::Base(CollectionBase::Tensor(tensor))) => {
+                self.write(txn.clone(), bounds, tensor.into()).await
+            }
+            State::Collection(Collection::View(CollectionView::Tensor(tensor))) => {
+                self.write(txn.clone(), bounds, tensor.into()).await
+            }
+            other => Err(error::bad_request(
+                "Not a valid Tensor value or slice",
+                other,
+            )),
         }
     }
 
@@ -539,7 +548,7 @@ impl CollectionInstance for Tensor {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<State> {
         match self {
             Self::Base(base) => base.get(request, txn, path, selector).await,
             Self::View(view) => view.get(request, txn, path, selector).await,
@@ -559,7 +568,7 @@ impl CollectionInstance for Tensor {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-        value: CollectionItem<Self::Item, Self::Slice>,
+        value: State,
     ) -> TCResult<()> {
         match self {
             Self::Base(base) => base.put(request, txn, path, selector, value).await,
@@ -646,6 +655,15 @@ impl From<Tensor> for Collection {
         match tensor {
             Tensor::Base(base) => Collection::Base(CollectionBase::Tensor(base)),
             Tensor::View(view) => Collection::View(CollectionView::Tensor(view.into())),
+        }
+    }
+}
+
+impl From<Tensor> for TensorView {
+    fn from(tensor: Tensor) -> TensorView {
+        match tensor {
+            Tensor::Base(base) => base.into(),
+            Tensor::View(view) => view,
         }
     }
 }

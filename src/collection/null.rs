@@ -3,9 +3,9 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::stream;
 
-use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::*;
-use crate::collection::{Collection, CollectionBase, CollectionItem};
+use crate::collection::{Collection, CollectionBase};
 use crate::error;
 use crate::request::Request;
 use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value};
@@ -80,7 +80,7 @@ impl CollectionInstance for Null {
         _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<State> {
         Err(error::unsupported("Null Collection has no contents to GET"))
     }
 
@@ -94,7 +94,7 @@ impl CollectionInstance for Null {
         _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
-        _value: CollectionItem<Self::Item, Self::Slice>,
+        _value: State,
     ) -> TCResult<()> {
         Err(error::unsupported("Null Collection cannot be modified"))
     }

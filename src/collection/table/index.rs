@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::convert::TryInto;
 use std::fmt;
 use std::iter;
 use std::sync::Arc;
@@ -8,7 +7,7 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
-use crate::class::{Class, Instance, NativeClass, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{self, BTreeFile};
 use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
@@ -126,7 +125,7 @@ impl CollectionInstance for TableBase {
         _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<State> {
         Err(error::not_implemented("TableBase::get"))
     }
 
@@ -141,23 +140,13 @@ impl CollectionInstance for TableBase {
     async fn put(
         &self,
         _request: &Request,
-        txn: &Txn,
+        _txn: &Txn,
         path: &[PathSegment],
-        selector: Value,
-        value: CollectionItem<Self::Item, Self::Slice>,
+        _selector: Value,
+        _value: State,
     ) -> TCResult<()> {
         if path.is_empty() {
-            let key: Vec<Value> = selector.try_into()?;
-            match value {
-                CollectionItem::Scalar(value) => match self {
-                    Self::Index(_) => Err(error::not_implemented("Index::put")),
-                    Self::ROIndex(_) => {
-                        Err(error::unsupported("Cannot write to a read-only index"))
-                    }
-                    Self::Table(table) => table.insert(txn.id().clone(), key, value).await,
-                },
-                _ => Err(error::not_implemented("TableBase::put")),
-            }
+            Err(error::not_implemented("TableBase::put"))
         } else {
             Err(error::path_not_found(path))
         }

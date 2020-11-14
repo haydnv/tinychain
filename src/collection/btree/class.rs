@@ -2,7 +2,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 
-use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
@@ -96,7 +96,7 @@ impl CollectionInstance for BTree {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<State> {
         match self {
             Self::Tree(tree) => tree.get(request, txn, path, selector).await,
             Self::View(view) => view.get(request, txn, path, selector).await,
@@ -116,7 +116,7 @@ impl CollectionInstance for BTree {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-        value: CollectionItem<Self::Item, Self::Slice>,
+        value: State,
     ) -> TCResult<()> {
         match self {
             Self::Tree(tree) => tree.put(request, txn, path, selector, value).await,

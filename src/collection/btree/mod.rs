@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::block::File;
 use crate::block::{Block, BlockData, BlockId, BlockMut, BlockOwned};
-use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Instance, State, TCBoxTryFuture, TCResult, TCStream};
 use crate::error;
 use crate::request::Request;
 use crate::scalar::*;
@@ -232,7 +232,7 @@ impl CollectionInstance for BTreeSlice {
         txn: &Txn,
         path: &[PathSegment],
         bounds: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<State> {
         if !path.is_empty() {
             return Err(error::path_not_found(path));
         }
@@ -244,7 +244,7 @@ impl CollectionInstance for BTreeSlice {
         let schema: Vec<ValueType> = self.source.schema().iter().map(|c| *c.dtype()).collect();
         match (&self.bounds, &bounds) {
             (Selector::Key(this), Selector::Key(that)) if this == that => {
-                Ok(CollectionItem::Slice(self.clone()))
+                Ok(State::Collection(Collection::View(self.clone().into())))
             }
             (Selector::Range(container, _), Selector::Range(contained, _))
                 if container.contains(contained, &schema)? =>
@@ -276,7 +276,7 @@ impl CollectionInstance for BTreeSlice {
         _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
-        _value: CollectionItem<Self::Item, Self::Slice>,
+        _value: State,
     ) -> TCResult<()> {
         Err(error::unsupported(
             "BTreeSlice is immutable; write to the source BTree instead",
@@ -820,14 +820,16 @@ impl CollectionInstance for BTreeFile {
         txn: &Txn,
         path: &[PathSegment],
         bounds: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
-        if !path.is_empty() {
-            return Err(error::path_not_found(path));
-        }
-
+    ) -> TCResult<State> {
         let bounds: Selector =
             bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
         let bounds = validate_selector(bounds, self.schema())?;
+
+        if path.len() == 1 && &path[0] == "count" {
+            return Err(error::not_implemented("BTreeFile::count"));
+        } else if !path.is_empty() {
+            return Err(error::path_not_found(path));
+        }
 
         if let Selector::Key(key) = bounds {
             let mut slice = self
@@ -836,12 +838,14 @@ impl CollectionInstance for BTreeFile {
                 .await?;
 
             if let Some(key) = slice.next().await {
-                Ok(CollectionItem::Scalar(key))
+                Ok(State::Scalar(Scalar::Value(Value::Tuple(key))))
             } else {
                 Err(error::not_found(Value::Tuple(key)))
             }
         } else {
-            Ok(CollectionItem::Slice(BTreeSlice::new(self.clone(), bounds)))
+            Ok(State::Collection(Collection::View(
+                BTreeSlice::new(self.clone(), bounds).into(),
+            )))
         }
     }
 
@@ -857,23 +861,24 @@ impl CollectionInstance for BTreeFile {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-        key: CollectionItem<Self::Item, Self::Slice>,
+        key: State,
     ) -> TCResult<()> {
         if !path.is_empty() {
             return Err(error::path_not_found(path));
         }
 
-        let key = match key {
-            CollectionItem::Scalar(key) => key,
-            CollectionItem::Slice(_) => {
-                return Err(error::unsupported("BTree::put(<slice>) is not supported"));
-            }
-        };
-
         let selector: Selector =
             selector.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
-
         let selector = validate_selector(selector, self.schema())?;
+
+        let key = match key {
+            State::Collection(_) => Err(error::not_implemented("BTree::put(<collection>)")),
+            State::Scalar(scalar) => {
+                scalar.try_cast_into(|v| error::bad_request("Invalid BTree key", v))
+            }
+            other => Err(error::bad_request("Invalid BTree key(s)", other)),
+        }?;
+
         let key = validate_key(key, self.schema())?;
 
         match selector {

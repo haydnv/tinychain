@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -18,44 +17,6 @@ use super::table::{TableBaseType, TableType};
 use super::tensor::{TensorBaseType, TensorType};
 use super::{Collection, CollectionBase, CollectionView};
 
-pub enum CollectionItem<I: CastInto<Scalar> + TryCastFrom<Scalar>, S: CollectionInstance> {
-    Scalar(I),
-    Slice(S),
-}
-
-impl<I: CastInto<Scalar> + TryCastFrom<Scalar>, S: CollectionInstance> From<CollectionItem<I, S>>
-    for State
-{
-    fn from(ci: CollectionItem<I, S>) -> State {
-        match ci {
-            CollectionItem::Scalar(s) => State::Scalar(s.cast_into()),
-            CollectionItem::Slice(s) => State::Collection(s.into()),
-        }
-    }
-}
-
-impl<I: CastInto<Scalar> + TryCastFrom<Scalar>, S: CollectionInstance> TryFrom<State>
-    for CollectionItem<I, S>
-{
-    type Error = error::TCError;
-
-    fn try_from(state: State) -> TCResult<CollectionItem<I, S>> {
-        match state {
-            State::Collection(_) => Err(error::not_implemented(
-                "CollectionInstance::Slice from Collection",
-            )),
-            State::Scalar(scalar) => I::try_cast_from(scalar, |v| {
-                error::bad_request("Wrong type of collection item", v)
-            })
-            .map(CollectionItem::Scalar),
-            other => Err(error::bad_request(
-                "Collection item must be a scalar or a collection slice, not",
-                other,
-            )),
-        }
-    }
-}
-
 #[async_trait]
 pub trait CollectionClass: Class + Into<CollectionType> + Send {
     type Instance: CollectionInstance;
@@ -74,7 +35,7 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>>;
+    ) -> TCResult<State>;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool>;
 
@@ -84,7 +45,7 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-        value: CollectionItem<Self::Item, Self::Slice>,
+        value: State,
     ) -> TCResult<()>;
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>>;

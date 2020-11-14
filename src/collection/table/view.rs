@@ -11,7 +11,7 @@ use crate::class::*;
 use crate::collection::btree::{BTreeFile, BTreeRange};
 use crate::collection::class::CollectionInstance;
 use crate::collection::schema::{Column, IndexSchema, Row};
-use crate::collection::{Collection, CollectionItem, CollectionView};
+use crate::collection::{Collection, CollectionView};
 use crate::error;
 use crate::request::Request;
 use crate::scalar::{label, Id, Link, PathSegment, Scalar, TCPathBuf, Value};
@@ -110,7 +110,7 @@ impl CollectionInstance for TableView {
         _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<State> {
         Err(error::not_implemented("TableBase::get"))
     }
 
@@ -124,7 +124,7 @@ impl CollectionInstance for TableView {
         _txn: &Txn,
         _path: &[PathSegment],
         _selector: Value,
-        _value: CollectionItem<Self::Item, Self::Slice>,
+        _value: State,
     ) -> TCResult<()> {
         Err(error::not_implemented("TableBase::put"))
     }

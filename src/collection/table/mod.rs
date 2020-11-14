@@ -6,9 +6,9 @@ use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
 
-use crate::class::{Class, Instance, NativeClass, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
-use crate::collection::{Collection, CollectionBase, CollectionItem, CollectionView};
+use crate::collection::{Collection, CollectionBase, CollectionView};
 use crate::error;
 use crate::request::Request;
 use crate::scalar::{Id, Link, PathSegment, Scalar, TCPathBuf, Value};
@@ -195,7 +195,7 @@ impl CollectionInstance for Table {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-    ) -> TCResult<CollectionItem<Self::Item, Self::Slice>> {
+    ) -> TCResult<State> {
         match self {
             Self::Base(base) => base.get(request, txn, path, selector).await,
             Self::View(view) => view.get(request, txn, path, selector).await,
@@ -215,7 +215,7 @@ impl CollectionInstance for Table {
         txn: &Txn,
         path: &[PathSegment],
         selector: Value,
-        value: CollectionItem<Self::Item, Self::Slice>,
+        value: State,
     ) -> TCResult<()> {
         match self {
             Self::Base(base) => base.put(request, txn, path, selector, value).await,
