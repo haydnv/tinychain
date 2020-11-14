@@ -693,11 +693,6 @@ impl BTreeFile {
                     .await?;
 
                 let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
-                debug!(
-                    "new root has {} keys and {} children",
-                    new_root.keys.len(),
-                    new_root.children.len()
-                );
                 self._insert(txn_id, new_root, key).await
             } else {
                 self._insert(txn_id, root, key).await
@@ -714,17 +709,21 @@ impl BTreeFile {
         Box::pin(async move {
             let keys = node.keys();
             let i = self.collator.bisect_left(&node.keys, &key);
+
+            if i < node.keys.len() && self.collator.compare(&node.keys[i], &key) == Ordering::Equal {
+                if node.keys[i].deleted {
+                    let mut node = node.upgrade().await?;
+                    node.keys[i].deleted = false;
+                }
+
+                return Ok(());
+            }
+
             debug!("insert at index {} into {}", i, node.deref());
 
             if node.leaf {
-                if i < node.keys.len() && self.collator.compare(&keys[i], &key) == Ordering::Equal {
-                    let mut node = node.upgrade().await?;
-                    node.keys[i].deleted = false;
-                } else {
-                    let mut node = node.upgrade().await?;
-                    node.keys.insert(i, key.into());
-                }
-
+                let mut node = node.upgrade().await?;
+                node.keys.insert(i, key.into());
                 Ok(())
             } else {
                 let mut child = self
@@ -732,17 +731,17 @@ impl BTreeFile {
                     .clone()
                     .get_block_owned(txn_id.clone(), node.children[i].clone())
                     .await?;
+
                 if child.keys.len() == (2 * self.order) - 1 {
                     let node = self
                         .split_child(txn_id, node.children[i].clone(), node.upgrade().await?, i)
                         .await?;
 
-                    if i == node.keys.len() {
-                        let child_id = node.children[i + 1].clone();
+                    if self.collator.compare(&key, &node.keys[i]) == Ordering::Greater {
                         child = self
                             .file
                             .clone()
-                            .get_block_owned(txn_id.clone(), child_id)
+                            .get_block_owned(txn_id.clone(), node.children[i + 1].clone())
                             .await?;
                     }
                 }
@@ -787,11 +786,9 @@ impl BTreeFile {
             new_node.children = child.children.drain(self.order..).collect();
         }
 
-        debug!(
-            "new node has {} keys and {} children",
-            new_node.keys.len(),
-            new_node.children.len()
-        );
+        debug!("child: {}", child.deref());
+        debug!("node: {}", node.deref());
+        debug!("new node: {}", new_node);
 
         self.file
             .clone()
@@ -889,16 +886,17 @@ impl BTreeFile {
                     assert!(
                         self.collator
                             .compare(child_at_i.keys.last().unwrap(), &node.keys[i])
-                            != Ordering::Greater
+                            == Ordering::Less
                     );
                     assert!(
                         self.collator.compare(&child_after_i.keys[0], &node.keys[i])
-                            != Ordering::Less
+                            == Ordering::Greater
                     );
                 }
             }
 
             unvisited.extend(node.children.iter().cloned());
+            debug!("node {} is valid", node_id);
         }
 
         Ok(())
