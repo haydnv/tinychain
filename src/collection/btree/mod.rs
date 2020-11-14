@@ -826,7 +826,11 @@ impl CollectionInstance for BTreeFile {
         let bounds = validate_selector(bounds, self.schema())?;
 
         if path.len() == 1 && &path[0] == "count" {
-            return Err(error::not_implemented("BTreeFile::count"));
+            return self
+                .clone()
+                .len(txn.id().clone(), bounds)
+                .map_ok(|len| State::Scalar(Number::from(len).into()))
+                .await;
         } else if !path.is_empty() {
             return Err(error::path_not_found(path));
         }
@@ -1083,11 +1087,15 @@ impl From<Key> for Selector {
 
 impl TryCastFrom<Value> for Selector {
     fn can_cast_from(value: &Value) -> bool {
-        Key::can_cast_from(value)
+        value == &Value::None || Key::can_cast_from(value)
     }
 
     fn opt_cast_from(value: Value) -> Option<Selector> {
-        Key::opt_cast_from(value).map(Selector::Key)
+        if value == Value::None {
+            Some(Selector::Key(vec![]))
+        } else {
+            Key::opt_cast_from(value).map(Selector::Key)
+        }
     }
 }
 
