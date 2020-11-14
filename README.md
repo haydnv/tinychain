@@ -107,7 +107,7 @@ path/to/tinychain --http_port=8702
 First, use your favorite text editor to create a simple "Hello, World!" program:
 
 ```json
-{"/sbin/value/string/ustring": "Hello, World!"}
+"Hello, World!"
 ```
 
 Save this program to `myapp.json` and run it with cURL:
@@ -130,8 +130,8 @@ the contents of `myapp.json` with this:
 
 ```json
 [
-    ["one", {"/sbin/value/number/int/32": 1}],
-    ["two", {"/sbin/value/number/int/32": 2}]
+    ["one", 1],
+    ["two", 2]
 ]
 ```
 
@@ -139,11 +139,7 @@ When you run this, you'll only see:
 
 ```json
 $ curl "http://127.0.0.1:8702/sbin/transact" -d @myapp.json 
-{
-  "/sbin/value/number/uint/64": [
-    2
-  ]
-}
+2
 ```
 
 That's because Tinychain interpreted this as an executable function, and only returned the last
@@ -151,8 +147,8 @@ value assigned in the function definition. To return multiple values, we can use
 
 ```json
 [
-    ["one", {"/sbin/value/number/int/32": 1}],
-    ["two", {"/sbin/value/number/int/32": 2}],
+    ["one", 1],
+    ["two", 2],
     ["onetwo", {"/sbin/tuple": [
         {"$one": []},
         {"$two": []}
@@ -165,8 +161,8 @@ transaction context. `Ref`s are useful for calling object methods--for example, 
 
 ```json
 [
-    ["one", {"/sbin/value/number/int/32": 1}],
-    ["two", {"/sbin/value/number/int/32": 2}],
+    ["one", 1],
+    ["two", 2],
     ["add_result", {"$one/add": [{"$two": []}]}]
 ]
 ```
@@ -175,11 +171,7 @@ This should produce:
 
 ```bash
 $ curl "http://127.0.0.1:8702/sbin/transact" -d @myapp.json 
-{
-  "/sbin/value/number/int/32": [
-    3
-  ]
-}
+3
 ```
 
 You can define a function and call it like so:

@@ -732,11 +732,7 @@ impl Serialize for Value {
                 let c: link::Link = c.clone().into();
                 c.serialize(s)
             }
-            Value::Number(n) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(&Link::from(n.class()).into_path(), n)?;
-                map.end()
-            }
+            Value::Number(n) => n.serialize(s),
             Value::TCString(tc_string) => tc_string.serialize(s),
             Value::Tuple(v) => {
                 let mut seq = s.serialize_seq(Some(v.len()))?;
