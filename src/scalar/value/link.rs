@@ -594,14 +594,6 @@ pub struct TCPath<'a> {
     inner: &'a [PathSegment],
 }
 
-impl<'a> TCPath<'a> {
-    pub fn into_owned(self) -> TCPathBuf {
-        TCPathBuf {
-            segments: self.inner.to_vec(),
-        }
-    }
-}
-
 impl<'a> From<&'a [PathSegment]> for TCPath<'a> {
     fn from(inner: &'a [PathSegment]) -> TCPath<'a> {
         TCPath { inner }
