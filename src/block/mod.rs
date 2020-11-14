@@ -24,7 +24,7 @@ pub type File<B> = file::File<B>;
 
 pub struct Block<'a, B: BlockData> {
     file: &'a File<B>,
-    block_id: BlockId,
+    block_id: BlockId, // TODO: can this be borrowed?
     lock: TxnLockReadGuard<B>,
 }
 

@@ -102,7 +102,6 @@ impl<T: BlockData> File<T> {
     ) -> TCResult<Block<'a, T>> {
         let lock = self.lock_block(txn_id, &block_id).await?;
         let block = Block::new(self, block_id, lock);
-        debug!("got block {}", &block);
         Ok(block)
     }
 

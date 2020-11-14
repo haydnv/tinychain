@@ -43,6 +43,14 @@ struct NodeKey {
     deleted: bool,
 }
 
+impl Deref for NodeKey {
+    type Target = [Value];
+
+    fn deref(&self) -> &[Value] {
+        &self.value
+    }
+}
+
 impl From<&[Value]> for NodeKey {
     fn from(values: &[Value]) -> NodeKey {
         values.to_vec().into()
@@ -89,8 +97,9 @@ impl Node {
         }
     }
 
-    fn values(&self) -> Vec<&[Value]> {
-        self.keys.iter().map(|k| &k.value[..]).collect()
+    // TODO: is there a way to return a borrowed slice of self.keys?
+    fn keys(&self) -> Vec<&[Value]> {
+        self.keys.iter().map(Deref::deref).collect()
     }
 }
 
@@ -456,13 +465,12 @@ impl BTreeFile {
     }
 
     fn _slice(self, txn_id: TxnId, node: BlockOwned<Node>, range: BTreeRange) -> TCStream<Key> {
-        let keys = node.values();
-        let (l, r) = range.bisect(&keys, &self.collator);
+        let (l, r) = range.bisect(&node.keys(), &self.collator);
 
         if node.leaf {
             debug!(
                 "_slice BTree node with {} keys from {} to {}",
-                keys.len(),
+                node.keys.len(),
                 l,
                 r
             );
@@ -471,7 +479,7 @@ impl BTreeFile {
                 if node.keys[l].deleted {
                     Box::pin(stream::empty())
                 } else {
-                    Box::pin(stream::once(future::ready(keys[l].to_vec())))
+                    Box::pin(stream::once(future::ready(node.keys[l].to_vec())))
                 }
             } else {
                 let keys: Vec<Key> = node.keys[l..r]
@@ -529,8 +537,7 @@ impl BTreeFile {
         node: BlockOwned<Node>,
         range: BTreeRange,
     ) -> TCStream<Key> {
-        let keys = node.values();
-        let (l, r) = range.bisect(&keys, &self.collator);
+        let (l, r) = range.bisect(&node.keys(), &self.collator);
 
         if node.leaf {
             let keys: Vec<Key> = node.keys[l..r]
@@ -609,8 +616,7 @@ impl BTreeFile {
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let node = self.file.get_block(txn_id, node_id).await?;
-            let keys = node.values();
-            let (l, r) = bounds.bisect(&keys, &self.collator);
+            let (l, r) = bounds.bisect(&node.keys(), &self.collator);
 
             if node.leaf {
                 if l == r {
@@ -718,21 +724,17 @@ impl BTreeFile {
         key: Key,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
-            let keys = &node.keys;
-            let i = self.collator.bisect_left(&node.values(), &key);
+            let keys = node.keys();
+            let i = self.collator.bisect_left(&node.keys(), &key);
             debug!("insert at index {} into {}", i, node.deref());
 
             if node.leaf {
-                if i < node.keys.len()
-                    && self.collator.compare(&keys[i].value, &key) == Ordering::Equal
-                {
+                if i < node.keys.len() && self.collator.compare(&keys[i], &key) == Ordering::Equal {
                     let mut node = node.upgrade().await?;
                     node.keys[i].deleted = false;
                 } else {
                     let mut node = node.upgrade().await?;
                     node.keys.insert(i, key.into());
-                    debug!("BTree node now has {} keys", node.keys.len());
-                    assert!(self.collator.is_sorted(&node.values()));
                 }
 
                 Ok(())
@@ -817,8 +819,7 @@ impl BTreeFile {
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let node = self.file.get_block(txn_id, node_id).await?;
-            let keys = node.values();
-            let (l, r) = bounds.bisect(&keys, &self.collator);
+            let (l, r) = bounds.bisect(&node.keys(), &self.collator);
 
             if node.leaf {
                 if l == r {
@@ -852,6 +853,61 @@ impl BTreeFile {
                 }
             }
         })
+    }
+
+    async fn assert_valid(&self, txn_id: &TxnId) -> TCResult<()> {
+        use num::integer::div_ceil;
+        use std::collections::VecDeque;
+
+        let root = self.get_root(txn_id).await?;
+        let order = self.order;
+
+        assert!(self.collator.is_sorted(&root.keys()));
+        assert!(root.children.len() <= 2 * order);
+        if !root.leaf {
+            assert!(root.children.len() >= 2);
+        }
+
+        let mut unvisited: VecDeque<NodeId> = root.children.iter().cloned().collect();
+        while let Some(node_id) = unvisited.pop_front() {
+            let node = self.file.get_block(txn_id, node_id).await?;
+
+            assert!(!node.keys.is_empty());
+            assert!(self.collator.is_sorted(&node.keys()));
+            assert!(node.children.len() <= 2 * order);
+
+            if node.leaf {
+                assert!(node.children.is_empty());
+            } else {
+                assert!(node.children.len() == node.keys.len() + 1);
+                assert!(node.children.len() >= div_ceil(order, 2));
+
+                for i in 0..node.keys.len() {
+                    let child_at_i = self
+                        .file
+                        .get_block(txn_id, node.children[i].clone())
+                        .await?;
+                    let child_after_i = self
+                        .file
+                        .get_block(txn_id, node.children[i + 1].clone())
+                        .await?;
+
+                    assert!(!child_at_i.keys.is_empty());
+                    assert!(!child_after_i.keys.is_empty());
+                    assert!(
+                        self.collator
+                            .compare(child_at_i.keys.last().unwrap(), &node.keys[i])
+                            != Ordering::Greater
+                    );
+                    assert!(
+                        self.collator.compare(&child_after_i.keys[0], &node.keys[i])
+                            != Ordering::Less
+                    );
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -939,14 +995,19 @@ impl CollectionInstance for BTreeFile {
 
         let key = validate_key(key, self.schema())?;
 
-        match selector {
+        let result = match selector {
             Selector::Key(selector)
                 if self.collator.compare(&selector, &key) == Ordering::Equal =>
             {
                 self.insert(txn.id(), key).await
             }
             selector => self.update(txn.id(), &selector, &key).await,
-        }
+        };
+
+        #[cfg(debug_assertions)]
+        self.assert_valid(txn.id()).await?;
+
+        result
     }
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
