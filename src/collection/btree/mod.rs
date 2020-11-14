@@ -465,7 +465,7 @@ impl BTreeFile {
     }
 
     fn _slice(self, txn_id: TxnId, node: BlockOwned<Node>, range: BTreeRange) -> TCStream<Key> {
-        let (l, r) = range.bisect(&node.keys(), &self.collator);
+        let (l, r) = range.bisect(&node.keys[..], &self.collator);
 
         if node.leaf {
             debug!(
@@ -537,7 +537,7 @@ impl BTreeFile {
         node: BlockOwned<Node>,
         range: BTreeRange,
     ) -> TCStream<Key> {
-        let (l, r) = range.bisect(&node.keys(), &self.collator);
+        let (l, r) = range.bisect(&node.keys, &self.collator);
 
         if node.leaf {
             let keys: Vec<Key> = node.keys[l..r]
@@ -616,7 +616,7 @@ impl BTreeFile {
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let node = self.file.get_block(txn_id, node_id).await?;
-            let (l, r) = bounds.bisect(&node.keys(), &self.collator);
+            let (l, r) = bounds.bisect(&node.keys, &self.collator);
 
             if node.leaf {
                 if l == r {
@@ -725,7 +725,7 @@ impl BTreeFile {
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let keys = node.keys();
-            let i = self.collator.bisect_left(&node.keys(), &key);
+            let i = self.collator.bisect_left(&node.keys, &key);
             debug!("insert at index {} into {}", i, node.deref());
 
             if node.leaf {
@@ -819,7 +819,7 @@ impl BTreeFile {
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let node = self.file.get_block(txn_id, node_id).await?;
-            let (l, r) = bounds.bisect(&node.keys(), &self.collator);
+            let (l, r) = bounds.bisect(&node.keys, &self.collator);
 
             if node.leaf {
                 if l == r {
@@ -887,6 +887,7 @@ impl BTreeFile {
                         .file
                         .get_block(txn_id, node.children[i].clone())
                         .await?;
+
                     let child_after_i = self
                         .file
                         .get_block(txn_id, node.children[i + 1].clone())
@@ -1051,7 +1052,11 @@ impl BTreeRange {
         BTreeRange(vec![], vec![])
     }
 
-    fn bisect(&self, keys: &[&[Value]], collator: &collator::Collator) -> (usize, usize) {
+    fn bisect<V: Deref<Target = [Value]>>(
+        &self,
+        keys: &[V],
+        collator: &collator::Collator,
+    ) -> (usize, usize) {
         (
             collator.bisect_left_range(keys, &self.0),
             collator.bisect_right_range(keys, &self.1),
@@ -1176,7 +1181,11 @@ impl Selector {
         Selector::Range(range, true)
     }
 
-    fn bisect(&self, keys: &[&[Value]], collator: &collator::Collator) -> (usize, usize) {
+    fn bisect<V: Deref<Target = [Value]>>(
+        &self,
+        keys: &[V],
+        collator: &collator::Collator,
+    ) -> (usize, usize) {
         match self {
             Selector::Key(key) => {
                 let l = collator.bisect_left(keys, &key);

@@ -1,6 +1,6 @@
 use std::cmp::Ordering::{self, *};
 use std::convert::TryInto;
-use std::ops::Bound;
+use std::ops::{Bound, Deref};
 
 use crate::class::{Instance, TCResult};
 use crate::error;
@@ -70,7 +70,7 @@ impl Collator {
         true
     }
 
-    pub fn bisect_left(&self, keys: &[&[Value]], key: &[Value]) -> usize {
+    pub fn bisect_left<V: Deref<Target = [Value]>>(&self, keys: &[V], key: &[Value]) -> usize {
         if keys.is_empty() || key.is_empty() {
             return 0;
         }
@@ -78,7 +78,11 @@ impl Collator {
         Self::_bisect_left(keys, |at| self.compare(at, key))
     }
 
-    pub fn bisect_left_range(&self, keys: &[&[Value]], range: &[Bound<Value>]) -> usize {
+    pub fn bisect_left_range<V: Deref<Target = [Value]>>(
+        &self,
+        keys: &[V],
+        range: &[Bound<Value>],
+    ) -> usize {
         if keys.is_empty() || range.is_empty() {
             return 0;
         }
@@ -86,7 +90,10 @@ impl Collator {
         Self::_bisect_left(keys, |key| self.compare_bound(key, range, Less))
     }
 
-    fn _bisect_left<'a, F: Fn(&'a [Value]) -> Ordering>(keys: &'a [&'a [Value]], cmp: F) -> usize {
+    fn _bisect_left<'a, V: Deref<Target = [Value]>, F: Fn(&'a [Value]) -> Ordering>(
+        keys: &'a [V],
+        cmp: F,
+    ) -> usize {
         let mut start = 0;
         let mut end = keys.len();
 
@@ -103,7 +110,7 @@ impl Collator {
         start
     }
 
-    pub fn bisect_right(&self, keys: &[&[Value]], key: &[Value]) -> usize {
+    pub fn bisect_right<V: Deref<Target = [Value]>>(&self, keys: &[V], key: &[Value]) -> usize {
         if keys.is_empty() {
             return 0;
         }
@@ -111,7 +118,11 @@ impl Collator {
         Self::_bisect_right(keys, |at| self.compare(at, key))
     }
 
-    pub fn bisect_right_range(&self, keys: &[&[Value]], range: &[Bound<Value>]) -> usize {
+    pub fn bisect_right_range<V: Deref<Target = [Value]>>(
+        &self,
+        keys: &[V],
+        range: &[Bound<Value>],
+    ) -> usize {
         if keys.is_empty() {
             0
         } else if range.is_empty() {
@@ -121,7 +132,10 @@ impl Collator {
         }
     }
 
-    fn _bisect_right<'a, F: Fn(&'a [Value]) -> Ordering>(keys: &'a [&'a [Value]], cmp: F) -> usize {
+    fn _bisect_right<'a, V: Deref<Target = [Value]>, F: Fn(&'a [Value]) -> Ordering>(
+        keys: &'a [V],
+        cmp: F,
+    ) -> usize {
         let mut start = 0;
         let mut end = keys.len();
 
