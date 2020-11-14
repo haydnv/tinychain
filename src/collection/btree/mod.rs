@@ -723,15 +723,16 @@ impl BTreeFile {
             debug!("insert at index {} into {}", i, node.deref());
 
             if node.leaf {
-                if i == node.keys.len()
-                    || self.collator.compare(&keys[i].value, &key) != Ordering::Equal
+                if i < node.keys.len()
+                    && self.collator.compare(&keys[i].value, &key) == Ordering::Equal
                 {
+                    let mut node = node.upgrade().await?;
+                    node.keys[i].deleted = false;
+                } else {
                     let mut node = node.upgrade().await?;
                     node.keys.insert(i, key.into());
                     debug!("BTree node now has {} keys", node.keys.len());
-                } else if keys[i].value == key && keys[i].deleted {
-                    let mut node = node.upgrade().await?;
-                    node.keys[i].deleted = false;
+                    assert!(self.collator.is_sorted(&node.values()));
                 }
 
                 Ok(())

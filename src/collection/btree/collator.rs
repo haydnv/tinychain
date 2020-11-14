@@ -60,6 +60,16 @@ impl Collator {
         }
     }
 
+    pub fn is_sorted(&self, keys: &[&[Value]]) -> bool {
+        for i in 1..keys.len() {
+            if self.compare(keys[i], keys[i - 1]) == Less {
+                return false;
+            }
+        }
+
+        true
+    }
+
     pub fn bisect_left(&self, keys: &[&[Value]], key: &[Value]) -> usize {
         if keys.is_empty() || key.is_empty() {
             return 0;
@@ -77,31 +87,20 @@ impl Collator {
     }
 
     fn _bisect_left<'a, F: Fn(&'a [Value]) -> Ordering>(keys: &'a [&'a [Value]], cmp: F) -> usize {
-        let start_relation = cmp(&keys[0]);
-        let end_relation = cmp(&keys[keys.len() - 1]);
-        if start_relation == Greater || start_relation == Equal {
-            0
-        } else if end_relation == Less {
-            keys.len()
-        } else {
-            let mut start = 0;
-            let mut end = keys.len() - 1;
-            while start < end {
-                let mid = (start + end) / 2;
-                match cmp(&keys[mid]) {
-                    Less => start = mid,
-                    Greater => end = mid,
-                    Equal if mid == 0 => return 0,
-                    Equal => match cmp(&keys[mid - 1]) {
-                        Equal => end = mid - 1,
-                        Less => start = mid,
-                        Greater => panic!("Tried to collate a non-sorted Vec!"),
-                    },
-                }
-            }
+        let mut start = 0;
+        let mut end = keys.len();
 
-            start
+        while start < end {
+            let mid = (start + end) / 2;
+
+            if cmp(&keys[mid]) == Less {
+                start = mid + 1;
+            } else {
+                end = mid;
+            }
         }
+
+        start
     }
 
     pub fn bisect_right(&self, keys: &[&[Value]], key: &[Value]) -> usize {
@@ -123,31 +122,20 @@ impl Collator {
     }
 
     fn _bisect_right<'a, F: Fn(&'a [Value]) -> Ordering>(keys: &'a [&'a [Value]], cmp: F) -> usize {
-        let start_relation = cmp(&keys[0]);
-        let end_relation = cmp(&keys[keys.len() - 1]);
-        if start_relation == Less {
-            0
-        } else if end_relation == Greater || end_relation == Equal {
-            keys.len()
-        } else {
-            let mut start = 0;
-            let mut end = keys.len() - 1;
-            while start < end {
-                let mid = (start + end) / 2;
-                match cmp(&keys[mid]) {
-                    Less => start = mid,
-                    Greater => end = mid,
-                    Equal if mid == keys.len() - 1 => end = mid,
-                    Equal => match cmp(&keys[mid + 1]) {
-                        Greater => end = mid,
-                        Equal => start = mid + 1,
-                        Less => panic!("Tried to collate a non-sorted Vec!"),
-                    },
-                }
-            }
+        let mut start = 0;
+        let mut end = keys.len();
 
-            end
+        while start < end {
+            let mid = (start + end) / 2;
+
+            if cmp(&keys[mid]) == Greater {
+                end = mid - 1;
+            } else {
+                start = mid;
+            }
         }
+
+        end
     }
 
     pub fn compare(&self, key1: &[Value], key2: &[Value]) -> Ordering {
