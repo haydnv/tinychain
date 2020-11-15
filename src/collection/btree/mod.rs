@@ -969,29 +969,36 @@ impl CollectionInstance for BTreeFile {
             selector.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
         let selector = validate_selector(selector, self.schema())?;
 
-        let key = match key {
-            State::Collection(_) => Err(error::not_implemented("BTree::put(<collection>)")),
-            State::Scalar(scalar) => {
-                scalar.try_cast_into(|v| error::bad_request("Invalid BTree key", v))
+        if selector == Selector::default() {
+            match key {
+                State::Collection(collection) => {
+                    let keys = collection.to_stream(txn.clone()).await?;
+                    let keys = keys
+                        .map(|s| s.try_cast_into(|k| error::bad_request("Invalid BTree key", k)));
+                    self.try_insert_from(txn.id(), keys).await?;
+                }
+                State::Scalar(scalar) if scalar.matches::<Vec<Key>>() => {
+                    let keys: Vec<Key> = scalar.opt_cast_into().unwrap();
+                    self.insert_from(txn.id(), stream::iter(keys.into_iter()))
+                        .await?;
+                }
+                State::Scalar(scalar) if scalar.matches::<Key>() => {
+                    let key: Key = scalar.opt_cast_into().unwrap();
+                    let key = validate_key(key, self.schema())?;
+                    self.insert(txn.id(), key).await?;
+                }
+                other => {
+                    return Err(error::bad_request("Invalid key for BTree", other));
+                }
             }
-            other => Err(error::bad_request("Invalid BTree key(s)", other)),
-        }?;
-
-        let key = validate_key(key, self.schema())?;
-
-        let result = match selector {
-            Selector::Key(selector)
-                if self.collator.compare(&selector, &key) == Ordering::Equal =>
-            {
-                self.insert(txn.id(), key).await
-            }
-            selector => self.update(txn.id(), &selector, &key).await,
-        };
+        } else {
+            return Err(error::not_implemented("Support for BTree selector"));
+        }
 
         #[cfg(debug_assertions)]
         self.assert_valid(txn.id()).await?;
 
-        result
+        Ok(())
     }
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
@@ -1027,7 +1034,7 @@ impl From<BTreeFile> for Collection {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct BTreeRange(Vec<Bound<Value>>, Vec<Bound<Value>>);
 
 impl BTreeRange {
@@ -1149,7 +1156,7 @@ impl From<(Vec<Bound<Value>>, Vec<Bound<Value>>)> for BTreeRange {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Selector {
     Key(Key),
     Range(BTreeRange, bool),
@@ -1177,6 +1184,12 @@ impl Selector {
             }
             Selector::Range(range, _) => range.bisect(keys, collator),
         }
+    }
+}
+
+impl Default for Selector {
+    fn default() -> Selector {
+        Selector::Key(vec![])
     }
 }
 
