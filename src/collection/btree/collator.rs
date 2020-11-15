@@ -60,9 +60,9 @@ impl Collator {
         }
     }
 
-    pub fn is_sorted(&self, keys: &[&[Value]]) -> bool {
+    pub fn is_sorted<V: Deref<Target = [Value]>>(&self, keys: &[V]) -> bool {
         for i in 1..keys.len() {
-            if self.compare(keys[i], keys[i - 1]) == Less {
+            if self.compare(&keys[i], &keys[i - 1]) == Less {
                 return false;
             }
         }

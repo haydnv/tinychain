@@ -96,11 +96,6 @@ impl Node {
             rebalance: false,
         }
     }
-
-    // TODO: is there a way to return a borrowed slice of self.keys?
-    fn keys(&self) -> Vec<&[Value]> {
-        self.keys.iter().map(Deref::deref).collect()
-    }
 }
 
 impl TryFrom<Bytes> for Node {
@@ -409,12 +404,13 @@ impl BTreeFile {
             .await?;
 
         let collator = collator::Collator::new(schema.iter().map(|c| *c.dtype()).collect())?;
+
         Ok(BTreeFile {
             file,
             schema,
             order,
             collator,
-            root: TxnLock::new("BTree root".to_string(), root.into()),
+            root: TxnLock::new("BTree root", root.into()),
         })
     }
 
@@ -707,10 +703,10 @@ impl BTreeFile {
         key: Key,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
-            let keys = node.keys();
             let i = self.collator.bisect_left(&node.keys, &key);
 
-            if i < node.keys.len() && self.collator.compare(&node.keys[i], &key) == Ordering::Equal {
+            if i < node.keys.len() && self.collator.compare(&node.keys[i], &key) == Ordering::Equal
+            {
                 if node.keys[i].deleted {
                     let mut node = node.upgrade().await?;
                     node.keys[i].deleted = false;
@@ -786,10 +782,6 @@ impl BTreeFile {
             new_node.children = child.children.drain(self.order..).collect();
         }
 
-        debug!("child: {}", child.deref());
-        debug!("node: {}", node.deref());
-        debug!("new node: {}", new_node);
-
         self.file
             .clone()
             .create_block(txn_id.clone(), new_node_id, new_node)
@@ -856,7 +848,7 @@ impl BTreeFile {
         let root = self.file.get_block(txn_id, &root_id).await?;
         let order = self.order;
 
-        assert!(self.collator.is_sorted(&root.keys()));
+        assert!(self.collator.is_sorted(&root.keys));
         assert!(root.children.len() <= 2 * order);
         if !root.leaf {
             assert!(root.children.len() >= 2);
@@ -867,7 +859,7 @@ impl BTreeFile {
             let node = self.file.get_block(txn_id, &node_id).await?;
 
             assert!(!node.keys.is_empty());
-            assert!(self.collator.is_sorted(&node.keys()));
+            assert!(self.collator.is_sorted(&node.keys));
             assert!(node.children.len() <= 2 * order);
 
             if node.leaf {
