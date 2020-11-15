@@ -704,7 +704,6 @@ impl BTreeFile {
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let i = self.collator.bisect_left(&node.keys, &key);
-
             if i < node.keys.len() && self.collator.compare(&node.keys[i], &key) == Ordering::Equal
             {
                 if node.keys[i].deleted {
@@ -733,12 +732,23 @@ impl BTreeFile {
                         .split_child(txn_id, node.children[i].clone(), node.upgrade().await?, i)
                         .await?;
 
-                    if self.collator.compare(&key, &node.keys[i]) == Ordering::Greater {
-                        child = self
-                            .file
-                            .clone()
-                            .get_block_owned(txn_id.clone(), node.children[i + 1].clone())
-                            .await?;
+                    match self.collator.compare(&key, &node.keys[i]) {
+                        Ordering::Less => {}
+                        Ordering::Equal => {
+                            if node.keys[i].deleted {
+                                let mut node = node.upgrade().await?;
+                                node.keys[i].deleted = false;
+                            }
+
+                            return Ok(());
+                        }
+                        Ordering::Greater => {
+                            child = self
+                                .file
+                                .clone()
+                                .get_block_owned(txn_id.clone(), node.children[i + 1].clone())
+                                .await?;
+                        }
                     }
                 }
 
