@@ -1,21 +1,48 @@
 use std::fmt;
 
 use async_trait::async_trait;
+use futures::Stream;
 
-use crate::class::{Class, NativeClass, TCResult};
+use crate::class::{Class, NativeClass, TCResult, TCStream};
 use crate::collection::class::*;
+use crate::collection::schema::Column;
 use crate::error;
 use crate::scalar::{label, Link, PathSegment, TCPathBuf, Value};
-use crate::transaction::Txn;
+use crate::transaction::{Txn, TxnId};
 
-use super::BTree;
+use super::{BTree, BTreeRange, Key, Selector};
 
-pub trait BTreeInstance {}
+#[async_trait]
+pub trait BTreeInstance {
+    async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()>;
+
+    async fn insert(&self, txn_id: &TxnId, key: Key) -> TCResult<()>;
+
+    async fn insert_from<S: Stream<Item = Key> + Send>(
+        &self,
+        txn_id: &TxnId,
+        source: S,
+    ) -> TCResult<()>;
+
+    async fn try_insert_from<S: Stream<Item = TCResult<Key>> + Send>(
+        &self,
+        txn_id: &TxnId,
+        source: S,
+    ) -> TCResult<()>;
+
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool>;
+
+    async fn len(&self, txn_id: TxnId, range: BTreeRange) -> TCResult<u64>;
+
+    fn schema(&'_ self) -> &'_ [Column];
+
+    async fn slice(&self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>>;
+}
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum BTreeType {
     Tree,
-    Slice,
+    View,
 }
 
 impl Class for BTreeType {
@@ -63,7 +90,7 @@ impl fmt::Display for BTreeType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Tree => write!(f, "class BTree"),
-            Self::Slice => write!(f, "class BTreeSlice"),
+            Self::View => write!(f, "class BTreeView"),
         }
     }
 }

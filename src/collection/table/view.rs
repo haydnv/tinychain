@@ -8,7 +8,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, join};
 
 use crate::class::*;
-use crate::collection::btree::{BTreeFile, BTreeRange};
+use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
 use crate::collection::class::CollectionInstance;
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::{Collection, CollectionView};
@@ -523,7 +523,7 @@ impl IndexSlice {
         let outer = bounds::btree_range(&self.bounds, &columns)?;
         let inner = bounds::btree_range(&bounds, &columns)?;
 
-        if outer.contains(&inner, &self.schema.data_types())? {
+        if outer.contains(&inner, &self.schema.columns())? {
             let mut slice = self.clone();
             slice.bounds = bounds;
             Ok(slice)
@@ -544,14 +544,11 @@ impl TableInstance for IndexSlice {
     type Stream = TCStream<Vec<Value>>;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.source
-            .clone()
-            .len(txn_id, self.range.clone().into())
-            .await
+        self.source.len(txn_id, self.range.clone()).await
     }
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move { self.source.delete(&txn_id, self.range.into()).await })
+        Box::pin(async move { self.source.delete(&txn_id, self.range).await })
     }
 
     fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
@@ -593,13 +590,8 @@ impl TableInstance for IndexSlice {
 
     fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
-            self.source
-                .update(
-                    txn.id(),
-                    self.range.into(),
-                    &self.schema.row_into_values(value, true)?,
-                )
-                .await
+            let key = self.schema.row_into_values(value, true)?;
+            self.source.update(txn.id(), self.range, &key).await
         })
     }
 
@@ -607,7 +599,7 @@ impl TableInstance for IndexSlice {
         let schema = self.schema();
         let outer = bounds::btree_range(&self.bounds, &schema.columns())?;
         let inner = bounds::btree_range(&bounds, &schema.columns())?;
-        outer.contains(&inner, &schema.data_types()).map(|_| ())
+        outer.contains(&inner, &schema.columns()).map(|_| ())
     }
 
     fn validate_order(&self, order: &[Id]) -> TCResult<()> {

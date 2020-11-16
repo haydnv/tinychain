@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::{self, join, try_join, try_join_all, Future, TryFutureExt};
+use futures::future::{self, join, try_join, try_join_all, Future};
 use futures::stream::{self, FuturesOrdered, Stream, StreamExt, TryStreamExt};
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -15,20 +15,15 @@ use uuid::Uuid;
 
 use crate::block::File;
 use crate::block::{BlockData, BlockId, BlockOwned, BlockOwnedMut};
-use crate::class::{Instance, State, TCBoxTryFuture, TCResult, TCStream};
-use crate::collection::class::*;
+use crate::class::{TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::schema::{Column, RowSchema};
-use crate::collection::{Collection, CollectionBase};
 use crate::error;
-use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::collator::Collator;
-use super::{
-    validate_key, validate_range, BTreeInstance, BTreeRange, BTreeSlice, BTreeType, Key, Selector,
-};
+use super::{validate_key, validate_range, BTreeInstance, BTreeRange, Key, Selector};
 
 type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Unpin>>>;
 
@@ -212,35 +207,6 @@ impl BTreeFile {
         &self.collator
     }
 
-    pub fn schema(&'_ self) -> &'_ [Column] {
-        &self.schema
-    }
-
-    pub async fn len(self, txn_id: TxnId, selector: Selector) -> TCResult<u64> {
-        let slice = self.slice(txn_id, selector).await?;
-        Ok(slice.fold(0u64, |len, _| future::ready(len + 1)).await)
-    }
-
-    pub async fn slice(self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>> {
-        let (range, reverse) = selector.into_inner();
-        let range = validate_range(range, self.schema())?;
-
-        let root_id = self.root.read(&txn_id).await?;
-        let root = self
-            .file
-            .clone()
-            .get_block_owned(txn_id.clone(), (*root_id).clone())
-            .await?;
-
-        let slice = if reverse {
-            self._slice_reverse(txn_id, root, range)
-        } else {
-            self._slice(txn_id, root, range)
-        };
-
-        Ok(slice)
-    }
-
     fn _slice(self, txn_id: TxnId, node: BlockOwned<Node>, range: BTreeRange) -> TCStream<Key> {
         let (l, r) = bisect(&range, &node.keys[..], &self.collator);
 
@@ -419,69 +385,6 @@ impl BTreeFile {
         })
     }
 
-    pub async fn try_insert_from<S: Stream<Item = TCResult<Key>>>(
-        &self,
-        txn_id: &TxnId,
-        source: S,
-    ) -> TCResult<()> {
-        source
-            .and_then(|k| future::ready(validate_key(k, self.schema())))
-            .map_ok(|key| self.insert(txn_id, key))
-            .try_buffer_unordered(2 * self.order)
-            .fold(Ok(()), |_, r| future::ready(r))
-            .await
-    }
-
-    pub async fn insert_from<S: Stream<Item = Key>>(
-        &self,
-        txn_id: &TxnId,
-        source: S,
-    ) -> TCResult<()> {
-        source
-            .map(|k| validate_key(k, self.schema()))
-            .map_ok(|key| self.insert(txn_id, key))
-            .try_buffer_unordered(2 * self.order)
-            .fold(Ok(()), |_, r| future::ready(r))
-            .await
-    }
-
-    pub async fn insert(&self, txn_id: &TxnId, key: Key) -> TCResult<()> {
-        let root_id = self.root.read(txn_id).await?;
-        let root = self
-            .file
-            .clone()
-            .get_block_owned(txn_id.clone(), (*root_id).clone())
-            .await?;
-
-        debug!(
-            "insert into BTree node with {} keys and {} children (order is {})",
-            root.keys.len(),
-            root.children.len(),
-            self.order
-        );
-
-        if root.keys.len() == (2 * self.order) - 1 {
-            let mut root_id = root_id.upgrade().await?;
-            let old_root_id = (*root_id).clone();
-
-            (*root_id) = self.file.unique_id(&txn_id).await?;
-            let mut new_root = Node::new(false, None);
-            new_root.children.push(old_root_id.clone());
-            let new_root = self
-                .file
-                .clone()
-                .create_block(txn_id.clone(), (*root_id).clone(), new_root)
-                .await?
-                .upgrade()
-                .await?;
-
-            let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
-            self._insert(txn_id, new_root, key).await
-        } else {
-            self._insert(txn_id, root, key).await
-        }
-    }
-
     fn _insert<'a>(
         &'a self,
         txn_id: &'a TxnId,
@@ -586,12 +489,6 @@ impl BTreeFile {
         node.downgrade(&txn_id).await
     }
 
-    pub async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
-        let range = validate_range(range, self.schema())?;
-        let root_id = self.root.read(txn_id).await?;
-        self._delete(txn_id, (*root_id).clone(), &range).await
-    }
-
     fn _delete<'a>(
         &'a self,
         txn_id: &'a TxnId,
@@ -689,42 +586,75 @@ impl BTreeFile {
     }
 }
 
-impl Instance for BTreeFile {
-    type Class = BTreeType;
-
-    fn class(&self) -> BTreeType {
-        BTreeType::Tree
-    }
-}
-
 #[async_trait]
-impl CollectionInstance for BTreeFile {
-    type Item = Key;
-    type Slice = BTreeSlice;
-
-    async fn get(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        range: Value,
-    ) -> TCResult<State> {
-        let range: BTreeRange =
-            range.try_cast_into(|v| error::bad_request("Invalid BTree range", v))?;
+impl BTreeInstance for BTreeFile {
+    async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
         let range = validate_range(range, self.schema())?;
+        let root_id = self.root.read(txn_id).await?;
+        self._delete(txn_id, (*root_id).clone(), &range).await
+    }
 
-        if path.len() == 1 && &path[0] == "count" {
-            return self
+    async fn insert(&self, txn_id: &TxnId, key: Key) -> TCResult<()> {
+        let root_id = self.root.read(txn_id).await?;
+        let root = self
+            .file
+            .clone()
+            .get_block_owned(txn_id.clone(), (*root_id).clone())
+            .await?;
+
+        debug!(
+            "insert into BTree node with {} keys and {} children (order is {})",
+            root.keys.len(),
+            root.children.len(),
+            self.order
+        );
+
+        if root.keys.len() == (2 * self.order) - 1 {
+            let mut root_id = root_id.upgrade().await?;
+            let old_root_id = (*root_id).clone();
+
+            (*root_id) = self.file.unique_id(&txn_id).await?;
+            let mut new_root = Node::new(false, None);
+            new_root.children.push(old_root_id.clone());
+            let new_root = self
+                .file
                 .clone()
-                .len(txn.id().clone(), range.into())
-                .map_ok(|len| State::Scalar(Number::from(len).into()))
-                .await;
-        } else if !path.is_empty() {
-            return Err(error::path_not_found(path));
-        }
+                .create_block(txn_id.clone(), (*root_id).clone(), new_root)
+                .await?
+                .upgrade()
+                .await?;
 
-        let slice = Collection::View(BTreeSlice::new(self.clone(), range.into()).into());
-        Ok(State::Collection(slice))
+            let new_root = self.split_child(txn_id, old_root_id, new_root, 0).await?;
+            self._insert(txn_id, new_root, key).await
+        } else {
+            self._insert(txn_id, root, key).await
+        }
+    }
+
+    async fn insert_from<S: Stream<Item = Key> + Send>(
+        &self,
+        txn_id: &TxnId,
+        source: S,
+    ) -> TCResult<()> {
+        source
+            .map(|k| validate_key(k, self.schema()))
+            .map_ok(|key| self.insert(txn_id, key))
+            .try_buffer_unordered(2 * self.order)
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
+    }
+
+    async fn try_insert_from<S: Stream<Item = TCResult<Key>> + Send>(
+        &self,
+        txn_id: &TxnId,
+        source: S,
+    ) -> TCResult<()> {
+        source
+            .and_then(|k| future::ready(validate_key(k, self.schema())))
+            .map_ok(|key| self.insert(txn_id, key))
+            .try_buffer_unordered(2 * self.order)
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
     }
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
@@ -733,67 +663,35 @@ impl CollectionInstance for BTreeFile {
         Ok(root.keys.is_empty())
     }
 
-    async fn put(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        range: Value,
-        key: State,
-    ) -> TCResult<()> {
-        if !path.is_empty() {
-            return Err(error::path_not_found(path));
-        }
+    async fn len(&self, txn_id: TxnId, range: BTreeRange) -> TCResult<u64> {
+        let slice = self.slice(txn_id, range.into()).await?;
+        Ok(slice.fold(0u64, |len, _| future::ready(len + 1)).await)
+    }
 
-        let range: BTreeRange =
-            range.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
+    fn schema(&'_ self) -> &'_ [Column] {
+        &self.schema
+    }
+
+    async fn slice(&self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>> {
+        let (range, reverse) = selector.into_inner();
         let range = validate_range(range, self.schema())?;
 
-        if range == BTreeRange::default() {
-            match key {
-                State::Collection(collection) => {
-                    let keys = collection.to_stream(txn.clone()).await?;
-                    let keys = keys
-                        .map(|s| s.try_cast_into(|k| error::bad_request("Invalid BTree key", k)));
-                    self.try_insert_from(txn.id(), keys).await?;
-                }
-                State::Scalar(scalar) if scalar.matches::<Vec<Key>>() => {
-                    let keys: Vec<Key> = scalar.opt_cast_into().unwrap();
-                    self.insert_from(txn.id(), stream::iter(keys.into_iter()))
-                        .await?;
-                }
-                State::Scalar(scalar) if scalar.matches::<Key>() => {
-                    let key: Key = scalar.opt_cast_into().unwrap();
-                    let key = validate_key(key, self.schema())?;
-                    self.insert(txn.id(), key).await?;
-                }
-                other => {
-                    return Err(error::bad_request("Invalid key for BTree", other));
-                }
-            }
-        } else {
-            return Err(error::not_implemented("BTree::update"));
-        }
-
-        #[cfg(debug_assertions)]
-        self.assert_valid(txn.id()).await?;
-
-        Ok(())
-    }
-
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        let stream = self
+        let root_id = self.root.read(&txn_id).await?;
+        let root = self
+            .file
             .clone()
-            .slice(txn.id().clone(), Selector::default())
-            .await?
-            .map(Value::Tuple)
-            .map(Scalar::Value);
+            .get_block_owned(txn_id.clone(), (*root_id).clone())
+            .await?;
 
-        Ok(Box::pin(stream))
+        let slice = if reverse {
+            self.clone()._slice_reverse(txn_id, root, range)
+        } else {
+            self.clone()._slice(txn_id, root, range)
+        };
+
+        Ok(slice)
     }
 }
-
-impl BTreeInstance for BTreeFile {}
 
 #[async_trait]
 impl Transact for BTreeFile {
@@ -807,12 +705,6 @@ impl Transact for BTreeFile {
 
     async fn finalize(&self, txn_id: &TxnId) {
         join(self.file.finalize(txn_id), self.root.finalize(txn_id)).await;
-    }
-}
-
-impl From<BTreeFile> for Collection {
-    fn from(btree_file: BTreeFile) -> Collection {
-        Collection::Base(CollectionBase::BTree(btree_file))
     }
 }
 

@@ -3,7 +3,7 @@ use std::ops::Bound;
 
 use crate::collection::schema::Column;
 use crate::error::TCResult;
-use crate::scalar::{CastFrom, ScalarClass, TryCastFrom, Value, ValueType};
+use crate::scalar::{CastFrom, ScalarClass, TryCastFrom, Value};
 
 use super::collator;
 use super::Key;
@@ -12,7 +12,7 @@ use super::Key;
 pub struct BTreeRange(Vec<Bound<Value>>, Vec<Bound<Value>>);
 
 impl BTreeRange {
-    pub fn contains(&self, other: &BTreeRange, schema: &[ValueType]) -> TCResult<bool> {
+    pub fn contains(&self, other: &BTreeRange, schema: &[Column]) -> TCResult<bool> {
         if other.0.len() < self.0.len() {
             return Ok(false);
         }
@@ -25,46 +25,50 @@ impl BTreeRange {
         use Bound::*;
         use Ordering::*;
 
-        for (dtype, (outer, inner)) in schema[0..self.0.len()]
+        for (col, (outer, inner)) in schema[0..self.0.len()]
             .iter()
             .zip(self.0.iter().zip(other.0[0..self.0.len()].iter()))
         {
+            let dtype = *col.dtype();
+
             match (outer, inner) {
                 (Unbounded, _) => {}
                 (_, Unbounded) => return Ok(false),
-                (Excluded(o), Excluded(i)) if compare_value(&o, &i, *dtype)? == Greater => {
+                (Excluded(o), Excluded(i)) if compare_value(&o, &i, dtype)? == Greater => {
                     return Ok(false)
                 }
-                (Included(o), Included(i)) if compare_value(&o, &i, *dtype)? == Greater => {
+                (Included(o), Included(i)) if compare_value(&o, &i, dtype)? == Greater => {
                     return Ok(false)
                 }
-                (Included(o), Excluded(i)) if compare_value(&o, &i, *dtype)? == Greater => {
+                (Included(o), Excluded(i)) if compare_value(&o, &i, dtype)? == Greater => {
                     return Ok(false)
                 }
-                (Excluded(o), Included(i)) if compare_value(&o, &i, *dtype)? != Less => {
+                (Excluded(o), Included(i)) if compare_value(&o, &i, dtype)? != Less => {
                     return Ok(false)
                 }
                 _ => {}
             }
         }
 
-        for (dtype, (outer, inner)) in schema[0..self.1.len()]
+        for (col, (outer, inner)) in schema[0..self.1.len()]
             .iter()
             .zip(self.1.iter().zip(other.1[0..self.1.len()].iter()))
         {
+            let dtype = *col.dtype();
+
             match (outer, inner) {
                 (Unbounded, _) => {}
                 (_, Unbounded) => return Ok(false),
-                (Excluded(o), Excluded(i)) if compare_value(&o, &i, *dtype)? == Less => {
+                (Excluded(o), Excluded(i)) if compare_value(&o, &i, dtype)? == Less => {
                     return Ok(false)
                 }
-                (Included(o), Included(i)) if compare_value(&o, &i, *dtype)? == Less => {
+                (Included(o), Included(i)) if compare_value(&o, &i, dtype)? == Less => {
                     return Ok(false)
                 }
-                (Included(o), Excluded(i)) if compare_value(&o, &i, *dtype)? == Less => {
+                (Included(o), Excluded(i)) if compare_value(&o, &i, dtype)? == Less => {
                     return Ok(false)
                 }
-                (Excluded(o), Included(i)) if compare_value(&o, &i, *dtype)? != Greater => {
+                (Excluded(o), Included(i)) if compare_value(&o, &i, dtype)? != Greater => {
                     return Ok(false)
                 }
                 _ => {}
@@ -72,6 +76,12 @@ impl BTreeRange {
         }
 
         Ok(true)
+    }
+
+    pub fn is_key(&self, schema: &[Column]) -> bool {
+        self.0.len() == self.1.len()
+            && self.0.len() == schema.len()
+            && self.0.iter().zip(self.1.iter()).all(|(l, r)| l == r)
     }
 
     pub fn start(&'_ self) -> &'_ [Bound<Value>] {
@@ -183,5 +193,12 @@ impl From<BTreeRange> for Selector {
             range,
             reverse: false,
         }
+    }
+}
+
+impl From<(BTreeRange, bool)> for Selector {
+    fn from(range: (BTreeRange, bool)) -> Selector {
+        let (range, reverse) = range;
+        Selector { range, reverse }
     }
 }

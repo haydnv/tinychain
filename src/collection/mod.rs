@@ -16,6 +16,9 @@ pub mod schema;
 pub mod table;
 pub mod tensor;
 
+use btree::BTreeInstance;
+use class::CollectionInstance;
+
 pub type CollectionType = class::CollectionType;
 pub type CollectionBaseType = class::CollectionBaseType;
 
@@ -44,7 +47,7 @@ impl Instance for CollectionBase {
 }
 
 #[async_trait]
-impl class::CollectionInstance for CollectionBase {
+impl CollectionInstance for CollectionBase {
     type Item = Scalar;
     type Slice = CollectionView;
 
@@ -82,7 +85,7 @@ impl class::CollectionInstance for CollectionBase {
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
-            Self::BTree(btree) => btree.to_stream(txn).await,
+            Self::BTree(btree) => BTree::from(btree.clone()).to_stream(txn).await,
             Self::Null(null) => null.to_stream(txn).await,
             Self::Table(table) => table.to_stream(txn).await,
             Self::Tensor(tensor) => tensor.to_stream(txn).await,
@@ -164,7 +167,7 @@ impl Instance for CollectionView {
 }
 
 #[async_trait]
-impl class::CollectionInstance for CollectionView {
+impl CollectionInstance for CollectionView {
     type Item = Scalar;
     type Slice = CollectionView;
 
@@ -183,7 +186,7 @@ impl class::CollectionInstance for CollectionView {
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
-            Self::BTree(btree) => btree.is_empty(txn).await,
+            Self::BTree(btree) => CollectionInstance::is_empty(btree, txn).await,
             Self::Null(null) => null.is_empty(txn).await,
             Self::Table(table) => table.is_empty(txn).await,
             Self::Tensor(tensor) => tensor.is_empty(txn).await,
@@ -297,7 +300,7 @@ impl Instance for Collection {
 }
 
 #[async_trait]
-impl class::CollectionInstance for Collection {
+impl CollectionInstance for Collection {
     type Item = Scalar;
     type Slice = CollectionView;
 

@@ -121,14 +121,6 @@ impl IndexSchema {
         [&self.key[..], &self.values[..]].concat()
     }
 
-    pub fn data_types(&self) -> Vec<ValueType> {
-        self.key
-            .iter()
-            .map(|c| c.dtype)
-            .chain(self.values.iter().map(|c| c.dtype))
-            .collect()
-    }
-
     pub fn key(&'_ self) -> &'_ [Column] {
         &self.key
     }

@@ -27,7 +27,7 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send {
 #[async_trait]
 pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
     type Item: CastInto<Scalar> + TryCastFrom<Scalar>;
-    type Slice: CollectionInstance;
+    type Slice;
 
     async fn get(
         &self,

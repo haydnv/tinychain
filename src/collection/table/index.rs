@@ -8,7 +8,7 @@ use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCStream};
-use crate::collection::btree::{self, BTreeFile};
+use crate::collection::btree::{self, BTreeFile, BTreeInstance};
 use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::{Collection, CollectionBase};
@@ -342,20 +342,17 @@ impl Index {
             self.schema.validate_key(&key)?;
 
             let range = btree::BTreeRange::from(key);
-            let mut rows = self.btree.clone().slice(txn_id, range.into()).await?;
+            let mut rows = self.btree.slice(txn_id, range.into()).await?;
             Ok(rows.next().await)
         })
     }
 
-    pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
-        self.btree.is_empty(txn)
+    pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        self.btree.is_empty(txn).await
     }
 
     pub async fn len(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.btree
-            .clone()
-            .len(txn_id, btree::Selector::default())
-            .await
+        self.btree.len(txn_id, btree::BTreeRange::default()).await
     }
 
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
@@ -386,8 +383,7 @@ impl Index {
         let outer = bounds::btree_range(&outer, &self.schema().columns())?;
         let inner = bounds::btree_range(&inner, &self.schema().columns())?;
 
-        let dtypes = self.schema.data_types();
-        if outer.contains(&inner, &dtypes)? {
+        if outer.contains(&inner, &self.schema.columns())? {
             Ok(())
         } else {
             Err(error::bad_request(
@@ -711,8 +707,8 @@ impl TableIndex {
         Ok(Index { btree, schema })
     }
 
-    pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
-        self.primary.is_empty(txn)
+    pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        self.primary.is_empty(txn).await
     }
 
     pub fn primary(&'_ self) -> &'_ Index {
