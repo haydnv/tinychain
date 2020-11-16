@@ -2,9 +2,11 @@ use std::cmp::Ordering::{self, *};
 use std::convert::TryInto;
 use std::ops::{Bound, Deref};
 
+use log::debug;
+
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::scalar::{Id, Number, StringType, Value, ValueType};
+use crate::scalar::{Id, Number, StringType, TCString, Value, ValueType};
 
 pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {
     left.expect(dtype, "for collation")?;
@@ -143,9 +145,9 @@ impl Collator {
             let mid = (start + end) / 2;
 
             if cmp(&keys[mid]) == Greater {
-                end = mid - 1;
+                end = mid;
             } else {
-                start = mid;
+                start = mid + 1;
             }
         }
 
@@ -211,24 +213,45 @@ impl Collator {
             match self.schema[i] {
                 ValueType::Number(_) => match &range[i] {
                     Unbounded => {}
-                    Included(value) => {
-                        let left: Number = key[i].clone().try_into().unwrap();
-                        let right = value.clone().try_into().unwrap();
-                        if left < right {
-                            return Less;
-                        } else if left > right {
-                            return Greater;
+                    Included(value) => match (&key[i], value) {
+                        (Value::Number(left), Value::Number(right)) if left < right => return Less,
+                        (Value::Number(left), Value::Number(right)) if left > right => {
+                            return Greater
+                        }
+                        _ => {}
+                    },
+                    Excluded(value) => {
+                        return match (&key[i], value) {
+                            (Value::Number(left), Value::Number(right)) if left < right => Less,
+                            (Value::Number(left), Value::Number(right)) if left > right => Greater,
+                            _ => excluded_ordering,
                         }
                     }
+                },
+                ValueType::TCString(StringType::UString) => match &range[i] {
+                    Unbounded => {}
+                    Included(value) => match (&key[i], value) {
+                        (
+                            Value::TCString(TCString::UString(left)),
+                            Value::TCString(TCString::UString(right)),
+                        ) if left < right => return Less,
+                        (
+                            Value::TCString(TCString::UString(left)),
+                            Value::TCString(TCString::UString(right)),
+                        ) if left > right => return Greater,
+                        _ => {}
+                    },
                     Excluded(value) => {
-                        let left: Number = key[i].clone().try_into().unwrap();
-                        let right = value.clone().try_into().unwrap();
-                        if left < right {
-                            return Less;
-                        } else if left > right {
-                            return Greater;
-                        } else {
-                            return excluded_ordering;
+                        return match (&key[i], value) {
+                            (
+                                Value::TCString(TCString::UString(left)),
+                                Value::TCString(TCString::UString(right)),
+                            ) if left < right => Less,
+                            (
+                                Value::TCString(TCString::UString(left)),
+                                Value::TCString(TCString::UString(right)),
+                            ) if left > right => Greater,
+                            _ => excluded_ordering,
                         }
                     }
                 },
