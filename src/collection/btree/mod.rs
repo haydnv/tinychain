@@ -158,15 +158,6 @@ fn validate_key(key: Key, schema: &[Column]) -> TCResult<Key> {
     validate_prefix(key, schema)
 }
 
-fn validate_selector(selector: Selector, schema: &[Column]) -> TCResult<Selector> {
-    match selector {
-        Selector::Key(key) => validate_prefix(key, schema).map(Selector::Key),
-        Selector::Range(range, reverse) => {
-            validate_range(range, schema).map(|range| Selector::Range(range, reverse))
-        }
-    }
-}
-
 fn validate_prefix(prefix: Key, schema: &[Column]) -> TCResult<Key> {
     if prefix.len() > schema.len() {
         return Err(error::bad_request(
@@ -256,32 +247,30 @@ impl CollectionInstance for BTreeSlice {
         request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        bounds: Value,
+        range: Value,
     ) -> TCResult<State> {
         if !path.is_empty() {
             return Err(error::path_not_found(path));
         }
 
-        let bounds: Selector =
-            bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
-        let bounds = validate_selector(bounds, self.source.schema())?;
+        let range: BTreeRange =
+            range.try_cast_into(|v| error::bad_request("Invalid BTree range", v))?;
+        let range = validate_range(range, self.source.schema())?;
 
         let schema: Vec<ValueType> = self.source.schema().iter().map(|c| *c.dtype()).collect();
-        match (&self.bounds, &bounds) {
-            (Selector::Key(this), Selector::Key(that)) if this == that => {
-                Ok(State::Collection(Collection::View(self.clone().into())))
-            }
-            (Selector::Range(container, _), Selector::Range(contained, _))
-                if container.contains(contained, &schema)? =>
-            {
-                self.source
-                    .get(request, txn, path, bounds.cast_into())
-                    .await
-            }
-            _ => Err(error::bad_request(
+        let selector = Selector::from(range); // TODO: support reverse order
+
+        if self.bounds == selector {
+            Ok(State::Collection(Collection::View(self.clone().into())))
+        } else if self.bounds.range.contains(&selector.range, &schema)? {
+            self.source
+                .get(request, txn, path, selector.range.cast_into())
+                .await
+        } else {
+            Err(error::bad_request(
                 &format!("BTreeSlice[{}] does not contain", &self.bounds),
-                &bounds,
-            )),
+                &selector,
+            ))
         }
     }
 
@@ -430,7 +419,7 @@ impl BTreeFile {
     }
 
     pub async fn slice(self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>> {
-        let selector = validate_selector(selector, self.schema())?;
+        let range = validate_range(selector.range, self.schema())?;
 
         let root_id = self.root.read(&txn_id).await?;
         let root = self
@@ -439,11 +428,13 @@ impl BTreeFile {
             .get_block_owned(txn_id.clone(), (*root_id).clone())
             .await?;
 
-        Ok(match selector {
-            Selector::Key(key) => self._slice(txn_id, root, key.into()),
-            Selector::Range(range, false) => self._slice(txn_id, root, range),
-            Selector::Range(range, true) => self._slice_reverse(txn_id, root, range),
-        })
+        let slice = if selector.reverse {
+            self._slice_reverse(txn_id, root, range)
+        } else {
+            self._slice(txn_id, root, range)
+        };
+
+        Ok(slice)
     }
 
     fn _slice(self, txn_id: TxnId, node: BlockOwned<Node>, range: BTreeRange) -> TCStream<Key> {
@@ -578,12 +569,13 @@ impl BTreeFile {
     pub fn update<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        bounds: &'a Selector,
+        range: BTreeRange,
         value: &'a [Value],
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
+            let range = validate_range(range, self.schema())?;
             let root_id = self.root.read(txn_id).await?;
-            self._update(txn_id, &root_id, bounds, value).await
+            self._update(txn_id, &root_id, &range, value).await
         })
     }
 
@@ -591,12 +583,12 @@ impl BTreeFile {
         &'a self,
         txn_id: &'a TxnId,
         node_id: &'a NodeId,
-        bounds: &'a Selector,
+        range: &'a BTreeRange,
         value: &'a [Value],
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let node = self.file.get_block(txn_id, node_id).await?;
-            let (l, r) = bounds.bisect(&node.keys, &self.collator);
+            let (l, r) = range.bisect(&node.keys, &self.collator);
 
             if node.leaf {
                 if l == r {
@@ -617,14 +609,14 @@ impl BTreeFile {
                     let mut updates = Vec::with_capacity(r - l);
                     for (i, child_id) in children.iter().enumerate().take(r).skip(l) {
                         node.keys[i] = value.into();
-                        updates.push(self._update(txn_id, child_id, bounds, value));
+                        updates.push(self._update(txn_id, child_id, range, value));
                     }
 
-                    let last_update = self._update(txn_id, &children[r], bounds, value);
+                    let last_update = self._update(txn_id, &children[r], range, value);
                     try_join(try_join_all(updates), last_update).await?;
                     Ok(())
                 } else {
-                    self._update(txn_id, &children[r], bounds, value).await
+                    self._update(txn_id, &children[r], range, value).await
                 }
             }
         })
@@ -799,10 +791,11 @@ impl BTreeFile {
         node.downgrade(&txn_id).await
     }
 
-    pub fn delete<'a>(&'a self, txn_id: &'a TxnId, bounds: Selector) -> TCBoxTryFuture<'a, ()> {
+    pub fn delete<'a>(&'a self, txn_id: &'a TxnId, range: BTreeRange) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
+            let range = validate_range(range, self.schema())?;
             let root_id = self.root.read(txn_id).await?;
-            self._delete(txn_id, (*root_id).clone(), &bounds).await
+            self._delete(txn_id, (*root_id).clone(), &range).await
         })
     }
 
@@ -810,11 +803,11 @@ impl BTreeFile {
         &'a self,
         txn_id: &'a TxnId,
         node_id: NodeId,
-        bounds: &'a Selector,
+        range: &'a BTreeRange,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let node = self.file.get_block(txn_id, &node_id).await?;
-            let (l, r) = bounds.bisect(&node.keys, &self.collator);
+            let (l, r) = range.bisect(&node.keys, &self.collator);
 
             if node.leaf {
                 if l == r {
@@ -834,16 +827,16 @@ impl BTreeFile {
 
                 for i in 0..node.children.len() {
                     node.keys[i].deleted = true;
-                    deletes.push(self._delete(txn_id, node.children[i].clone(), bounds));
+                    deletes.push(self._delete(txn_id, node.children[i].clone(), range));
                 }
                 node.rebalance = true;
 
-                let last_delete = self._delete(txn_id, node.children[r].clone(), bounds);
+                let last_delete = self._delete(txn_id, node.children[r].clone(), range);
                 try_join(try_join_all(deletes), last_delete).await?;
 
                 Ok(())
             } else {
-                self._delete(txn_id, node.children[r].clone(), bounds).await
+                self._delete(txn_id, node.children[r].clone(), range).await
             }
         })
     }
@@ -921,41 +914,24 @@ impl CollectionInstance for BTreeFile {
         _request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        bounds: Value,
+        range: Value,
     ) -> TCResult<State> {
-        let bounds: Selector =
-            bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
-        let bounds = validate_selector(bounds, self.schema())?;
-
-        debug!("BTree::get {}, selector is {}", TCPath::from(path), bounds);
+        let range: BTreeRange =
+            range.try_cast_into(|v| error::bad_request("Invalid BTree range", v))?;
+        let range = validate_range(range, self.schema())?;
 
         if path.len() == 1 && &path[0] == "count" {
             return self
                 .clone()
-                .len(txn.id().clone(), bounds)
+                .len(txn.id().clone(), range.into())
                 .map_ok(|len| State::Scalar(Number::from(len).into()))
                 .await;
         } else if !path.is_empty() {
             return Err(error::path_not_found(path));
         }
 
-        match bounds {
-            Selector::Key(key) if key.len() == self.schema.len() => {
-                let mut slice = self
-                    .clone()
-                    .slice(txn.id().clone(), Selector::Key(key.to_vec()))
-                    .await?;
-
-                if let Some(key) = slice.next().await {
-                    Ok(State::Scalar(Scalar::Value(Value::Tuple(key))))
-                } else {
-                    Err(error::not_found(Value::Tuple(key)))
-                }
-            }
-            bounds => Ok(State::Collection(Collection::View(
-                BTreeSlice::new(self.clone(), bounds).into(),
-            ))),
-        }
+        let slice = Collection::View(BTreeSlice::new(self.clone(), range.into()).into());
+        Ok(State::Collection(slice))
     }
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
@@ -969,18 +945,18 @@ impl CollectionInstance for BTreeFile {
         _request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        selector: Value,
+        range: Value,
         key: State,
     ) -> TCResult<()> {
         if !path.is_empty() {
             return Err(error::path_not_found(path));
         }
 
-        let selector: Selector =
-            selector.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
-        let selector = validate_selector(selector, self.schema())?;
+        let range: BTreeRange =
+            range.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
+        let range = validate_range(range, self.schema())?;
 
-        if selector == Selector::default() {
+        if range == BTreeRange::default() {
             match key {
                 State::Collection(collection) => {
                     let keys = collection.to_stream(txn.clone()).await?;
@@ -1003,7 +979,7 @@ impl CollectionInstance for BTreeFile {
                 }
             }
         } else {
-            return Err(error::not_implemented("Support for BTree selector"));
+            return Err(error::not_implemented("BTree::update"));
         }
 
         #[cfg(debug_assertions)]
@@ -1015,7 +991,7 @@ impl CollectionInstance for BTreeFile {
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         let stream = self
             .clone()
-            .slice(txn.id().clone(), Selector::all())
+            .slice(txn.id().clone(), Selector::default())
             .await?
             .map(Value::Tuple)
             .map(Scalar::Value);
@@ -1153,6 +1129,12 @@ impl BTreeRange {
     }
 }
 
+impl Default for BTreeRange {
+    fn default() -> BTreeRange {
+        BTreeRange(vec![], vec![])
+    }
+}
+
 impl From<Key> for BTreeRange {
     fn from(mut key: Key) -> BTreeRange {
         let start = key.iter().cloned().map(Bound::Included).collect();
@@ -1167,83 +1149,59 @@ impl From<(Vec<Bound<Value>>, Vec<Bound<Value>>)> for BTreeRange {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
-pub enum Selector {
-    Key(Key),
-    Range(BTreeRange, bool),
-}
-
-impl Selector {
-    pub fn all() -> Selector {
-        Selector::Range(BTreeRange::all(), false)
+impl TryCastFrom<Value> for BTreeRange {
+    fn can_cast_from(value: &Value) -> bool {
+        value == &Value::None || Key::can_cast_from(value)
     }
 
-    pub fn reverse(range: BTreeRange) -> Selector {
-        Selector::Range(range, true)
-    }
-
-    fn bisect<V: Deref<Target = [Value]>>(
-        &self,
-        keys: &[V],
-        collator: &collator::Collator,
-    ) -> (usize, usize) {
-        match self {
-            Selector::Key(key) => {
-                let l = collator.bisect_left(keys, &key);
-                let r = collator.bisect_right(keys, &key);
-                (l, r)
-            }
-            Selector::Range(range, _) => range.bisect(keys, collator),
+    fn opt_cast_from(value: Value) -> Option<BTreeRange> {
+        if value == Value::None {
+            Some(BTreeRange::default())
+        } else {
+            Key::opt_cast_from(value).map(BTreeRange::from)
         }
     }
 }
 
+impl CastFrom<BTreeRange> for Value {
+    fn cast_from(_s: BTreeRange) -> Value {
+        unimplemented!()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct Selector {
+    range: BTreeRange,
+    reverse: bool,
+}
+
 impl Default for Selector {
     fn default() -> Selector {
-        Selector::Key(vec![])
+        Selector {
+            range: BTreeRange::default(),
+            reverse: false,
+        }
     }
 }
 
 impl From<BTreeRange> for Selector {
     fn from(range: BTreeRange) -> Selector {
-        Selector::Range(range, false)
-    }
-}
-
-impl From<Key> for Selector {
-    fn from(key: Key) -> Selector {
-        Selector::Key(key)
-    }
-}
-
-impl TryCastFrom<Value> for Selector {
-    fn can_cast_from(value: &Value) -> bool {
-        value == &Value::None || Key::can_cast_from(value)
-    }
-
-    fn opt_cast_from(value: Value) -> Option<Selector> {
-        if value == Value::None {
-            Some(Selector::Key(vec![]))
-        } else {
-            Key::opt_cast_from(value).map(Selector::Key)
+        Selector {
+            range,
+            reverse: false,
         }
-    }
-}
-
-impl CastFrom<Selector> for Value {
-    fn cast_from(_s: Selector) -> Value {
-        unimplemented!()
     }
 }
 
 impl fmt::Display for Selector {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Key(key) => write!(f, "key: {}", Value::Tuple(key.to_vec())),
-            Self::Range(range, reverse) if *reverse => {
-                write!(f, "range: {}, {}", range.end(), range.start())
-            }
-            Self::Range(range, _) => write!(f, "range: {}, {}", range.start(), range.end()),
+        let start = self.range.start();
+        let end = self.range.end();
+
+        if self.reverse {
+            write!(f, "range: {}, {}", end, start)
+        } else {
+            write!(f, "range: {}, {}", start, end)
         }
     }
 }

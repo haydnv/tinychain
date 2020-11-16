@@ -180,7 +180,7 @@ impl From<BTree> for BTreeSlice {
             BTree::View(slice) => slice,
             BTree::Tree(btree) => BTreeSlice {
                 source: btree,
-                bounds: Selector::all(),
+                bounds: Selector::default(),
             },
         }
     }

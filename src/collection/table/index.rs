@@ -341,12 +341,9 @@ impl Index {
         Box::pin(async move {
             self.schema.validate_key(&key)?;
 
-            let mut rows = self.btree.clone().slice(txn_id, key.into()).await?;
-            if let Some(row) = rows.next().await {
-                Ok(Some(row))
-            } else {
-                Ok(None)
-            }
+            let range = btree::BTreeRange::from(key);
+            let mut rows = self.btree.clone().slice(txn_id, range.into()).await?;
+            Ok(rows.next().await)
         })
     }
 
@@ -355,7 +352,7 @@ impl Index {
     }
 
     pub fn len(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        self.btree.clone().len(txn_id, btree::Selector::all())
+        self.btree.clone().len(txn_id, btree::Selector::default())
     }
 
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
@@ -407,13 +404,17 @@ impl TableInstance for Index {
     }
 
     fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move { self.btree.delete(&txn_id, btree::Selector::all()).await })
+        Box::pin(async move {
+            self.btree
+                .delete(&txn_id, btree::BTreeRange::default())
+                .await
+        })
     }
 
     fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let key = self.schema.row_into_values(row, false)?;
-            self.btree.delete(txn_id, btree::Selector::Key(key)).await
+            self.btree.delete(txn_id, key.into()).await
         })
     }
 
@@ -453,7 +454,7 @@ impl TableInstance for Index {
         Box::pin(async move {
             self.btree
                 .clone()
-                .slice(txn_id, btree::Selector::all())
+                .slice(txn_id, btree::Selector::default())
                 .await
         })
     }
@@ -496,9 +497,9 @@ impl TableInstance for Index {
     fn update<'a>(self, txn: Txn, row: Row) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             let key: btree::Key = self.schema().row_into_values(row, false)?;
-            self.btree
-                .update(txn.id(), &btree::Selector::all(), &key)
-                .await
+            let range = btree::BTreeRange::from(key.to_vec());
+
+            self.btree.update(txn.id(), range, &key).await
         })
     }
 }

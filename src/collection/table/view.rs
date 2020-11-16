@@ -596,7 +596,7 @@ impl TableInstance for IndexSlice {
             self.source
                 .update(
                     txn.id(),
-                    &self.range.into(),
+                    self.range.into(),
                     &self.schema.row_into_values(value, true)?,
                 )
                 .await
