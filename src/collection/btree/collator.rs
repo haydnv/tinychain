@@ -2,8 +2,6 @@ use std::cmp::Ordering::{self, *};
 use std::convert::TryInto;
 use std::ops::{Bound, Deref};
 
-use log::debug;
-
 use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::scalar::{Id, Number, StringType, TCString, Value, ValueType};

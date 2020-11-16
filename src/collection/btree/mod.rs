@@ -449,14 +449,9 @@ impl BTreeFile {
     fn _slice(self, txn_id: TxnId, node: BlockOwned<Node>, range: BTreeRange) -> TCStream<Key> {
         let (l, r) = range.bisect(&node.keys[..], &self.collator);
 
-        if node.leaf {
-            debug!(
-                "_slice BTree node with {} keys from {} to {}",
-                node.keys.len(),
-                l,
-                r
-            );
+        debug!("_slice {} from {} to {}", node.deref(), l, r);
 
+        if node.leaf {
             if l == r && l < node.keys.len() {
                 if node.keys[l].deleted {
                     Box::pin(stream::empty())
@@ -469,7 +464,7 @@ impl BTreeFile {
                     .filter(|k| !k.deleted)
                     .map(|k| k.value.to_vec())
                     .collect();
-                debug!("_slice BTree node with {} keys not deleted", keys.len());
+
                 Box::pin(stream::iter(keys))
             }
         } else {
@@ -479,6 +474,7 @@ impl BTreeFile {
                 let txn_id = txn_id.clone();
                 let child_id = node.children[i].clone();
                 let range = range.clone();
+
                 let selection = Box::pin(async move {
                     let node = this
                         .file
@@ -486,6 +482,7 @@ impl BTreeFile {
                         .get_block_owned(txn_id.clone(), child_id)
                         .await
                         .unwrap();
+
                     this._slice(txn_id, node, range)
                 });
                 selected.push(Box::pin(selection));
@@ -498,6 +495,7 @@ impl BTreeFile {
             }
 
             let last_child_id = node.children[r].clone();
+
             let selection = Box::pin(async move {
                 let node = self
                     .file
@@ -505,6 +503,7 @@ impl BTreeFile {
                     .get_block_owned(txn_id.clone(), last_child_id)
                     .await
                     .unwrap();
+
                 self._slice(txn_id, node, range)
             });
             selected.push(Box::pin(selection));
@@ -829,23 +828,22 @@ impl BTreeFile {
                 node.rebalance = true;
 
                 Ok(())
-            } else {
-                if r > l {
-                    let mut node = node.upgrade().await?;
-                    let mut deletes = Vec::with_capacity(r - l);
+            } else if r > l {
+                let mut node = node.upgrade().await?;
+                let mut deletes = Vec::with_capacity(r - l);
 
-                    for i in 0..node.children.len() {
-                        node.keys[i].deleted = true;
-                        deletes.push(self._delete(txn_id, node.children[i].clone(), bounds));
-                    }
-                    node.rebalance = true;
-
-                    let last_delete = self._delete(txn_id, node.children[r].clone(), bounds);
-                    try_join(try_join_all(deletes), last_delete).await?;
-                    Ok(())
-                } else {
-                    self._delete(txn_id, node.children[r].clone(), bounds).await
+                for i in 0..node.children.len() {
+                    node.keys[i].deleted = true;
+                    deletes.push(self._delete(txn_id, node.children[i].clone(), bounds));
                 }
+                node.rebalance = true;
+
+                let last_delete = self._delete(txn_id, node.children[r].clone(), bounds);
+                try_join(try_join_all(deletes), last_delete).await?;
+
+                Ok(())
+            } else {
+                self._delete(txn_id, node.children[r].clone(), bounds).await
             }
         })
     }
@@ -929,6 +927,8 @@ impl CollectionInstance for BTreeFile {
             bounds.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
         let bounds = validate_selector(bounds, self.schema())?;
 
+        debug!("BTree::get {}, selector is {}", TCPath::from(path), bounds);
+
         if path.len() == 1 && &path[0] == "count" {
             return self
                 .clone()
@@ -939,21 +939,22 @@ impl CollectionInstance for BTreeFile {
             return Err(error::path_not_found(path));
         }
 
-        if let Selector::Key(key) = bounds {
-            let mut slice = self
-                .clone()
-                .slice(txn.id().clone(), Selector::Key(key.to_vec()))
-                .await?;
+        match bounds {
+            Selector::Key(key) if key.len() == self.schema.len() => {
+                let mut slice = self
+                    .clone()
+                    .slice(txn.id().clone(), Selector::Key(key.to_vec()))
+                    .await?;
 
-            if let Some(key) = slice.next().await {
-                Ok(State::Scalar(Scalar::Value(Value::Tuple(key))))
-            } else {
-                Err(error::not_found(Value::Tuple(key)))
+                if let Some(key) = slice.next().await {
+                    Ok(State::Scalar(Scalar::Value(Value::Tuple(key))))
+                } else {
+                    Err(error::not_found(Value::Tuple(key)))
+                }
             }
-        } else {
-            Ok(State::Collection(Collection::View(
+            bounds => Ok(State::Collection(Collection::View(
                 BTreeSlice::new(self.clone(), bounds).into(),
-            )))
+            ))),
         }
     }
 
