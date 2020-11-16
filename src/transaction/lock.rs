@@ -101,7 +101,9 @@ impl<T: Mutate> Drop for TxnLockReadGuard<T> {
                     waker.wake()
                 }
 
-                lock.state.wakers.shrink_to_fit()
+                lock.state.wakers.shrink_to_fit();
+
+                debug!("freed lock on {}", self.lock.name);
             }
             _ => panic!("TxnLockReadGuard count updated incorrectly!"),
         }
@@ -167,6 +169,7 @@ impl<T: Mutate> Drop for TxnLockWriteGuard<T> {
         }
 
         lock.state.wakers.shrink_to_fit();
+        debug!("freed write lock on {}", self.lock.name);
     }
 }
 
@@ -254,6 +257,9 @@ impl<T: Mutate> TxnLock<T> {
             }
 
             *lock.state.readers.entry(txn_id.clone()).or_insert(0) += 1;
+
+            debug!("got read lock on {}", self.name);
+
             Ok(Some(TxnLockReadGuard {
                 txn_id: txn_id.clone(),
                 lock: self.clone(),
