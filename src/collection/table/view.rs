@@ -480,7 +480,7 @@ impl IndexSlice {
             source,
             schema,
             bounds: bounds::all(),
-            range: BTreeRange::all(),
+            range: BTreeRange::default(),
             reverse,
         }
     }

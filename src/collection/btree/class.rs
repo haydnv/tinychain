@@ -10,7 +10,7 @@ use crate::request::Request;
 use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::{BTreeFile, BTreeSlice, Key, Selector};
+use super::{BTreeFile, BTreeSlice, Key};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum BTreeType {
@@ -171,17 +171,5 @@ impl From<BTreeSlice> for BTree {
 impl From<BTree> for Collection {
     fn from(btree: BTree) -> Collection {
         Collection::View(CollectionView::BTree(btree))
-    }
-}
-
-impl From<BTree> for BTreeSlice {
-    fn from(btree: BTree) -> BTreeSlice {
-        match btree {
-            BTree::View(slice) => slice,
-            BTree::Tree(btree) => BTreeSlice {
-                source: btree,
-                bounds: Selector::default(),
-            },
-        }
     }
 }

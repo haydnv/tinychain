@@ -351,8 +351,11 @@ impl Index {
         self.btree.is_empty(txn)
     }
 
-    pub fn len(&self, txn_id: TxnId) -> TCBoxTryFuture<u64> {
-        self.btree.clone().len(txn_id, btree::Selector::default())
+    pub async fn len(&self, txn_id: TxnId) -> TCResult<u64> {
+        self.btree
+            .clone()
+            .len(txn_id, btree::Selector::default())
+            .await
     }
 
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
