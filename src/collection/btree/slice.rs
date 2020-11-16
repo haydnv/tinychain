@@ -9,7 +9,9 @@ use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::{validate_range, BTree, BTreeFile, BTreeRange, BTreeType, Key, Selector};
+use super::{
+    validate_range, BTree, BTreeFile, BTreeInstance, BTreeRange, BTreeType, Key, Selector,
+};
 
 #[derive(Clone)]
 pub struct BTreeSlice {
@@ -102,6 +104,8 @@ impl CollectionInstance for BTreeSlice {
     }
 }
 
+impl BTreeInstance for BTreeSlice {}
+
 #[async_trait]
 impl Transact for BTreeSlice {
     async fn commit(&self, _txn_id: &TxnId) {
@@ -120,9 +124,9 @@ impl Transact for BTreeSlice {
 impl From<BTree> for BTreeSlice {
     fn from(btree: BTree) -> BTreeSlice {
         match btree {
-            BTree::View(slice) => slice,
+            BTree::View(slice) => slice.into_inner(),
             BTree::Tree(btree) => BTreeSlice {
-                source: btree,
+                source: btree.into_inner(),
                 bounds: Selector::default(),
             },
         }
@@ -137,6 +141,6 @@ impl From<BTreeSlice> for Collection {
 
 impl From<BTreeSlice> for CollectionView {
     fn from(btree_slice: BTreeSlice) -> CollectionView {
-        CollectionView::BTree(BTree::View(btree_slice))
+        CollectionView::BTree(BTree::View(btree_slice.into()))
     }
 }

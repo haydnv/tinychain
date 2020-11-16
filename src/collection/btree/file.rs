@@ -26,7 +26,9 @@ use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::collator::Collator;
-use super::{validate_key, validate_range, BTreeRange, BTreeSlice, BTreeType, Key, Selector};
+use super::{
+    validate_key, validate_range, BTreeInstance, BTreeRange, BTreeSlice, BTreeType, Key, Selector,
+};
 
 type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Unpin>>>;
 
@@ -790,6 +792,8 @@ impl CollectionInstance for BTreeFile {
         Ok(Box::pin(stream))
     }
 }
+
+impl BTreeInstance for BTreeFile {}
 
 #[async_trait]
 impl Transact for BTreeFile {
