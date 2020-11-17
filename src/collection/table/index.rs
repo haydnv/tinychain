@@ -14,7 +14,7 @@ use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{label, Id, Link, PathSegment, Scalar, TCPathBuf, TryCastInto, Value};
+use crate::scalar::{label, Id, Link, Object, PathSegment, Scalar, TCPathBuf, TryCastInto, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds, ColumnBound};
@@ -135,6 +135,16 @@ impl CollectionInstance for TableBase {
             Self::ROIndex(index) => index.is_empty(txn).await,
             Self::Table(table) => table.is_empty(txn).await,
         }
+    }
+
+    async fn post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _params: Object,
+    ) -> TCResult<State> {
+        Err(error::not_implemented("TableBase::post"))
     }
 
     async fn put(

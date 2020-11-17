@@ -7,7 +7,7 @@ use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCTy
 use crate::error;
 use crate::request::Request;
 use crate::scalar::{
-    label, CastInto, Link, PathSegment, Scalar, TCPathBuf, TryCastFrom, TryCastInto, Value,
+    label, CastInto, Link, Object, PathSegment, Scalar, TCPathBuf, TryCastFrom, TryCastInto, Value,
 };
 use crate::transaction::{Transact, Txn};
 
@@ -38,6 +38,14 @@ pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
     ) -> TCResult<State>;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool>;
+
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State>;
 
     async fn put(
         &self,

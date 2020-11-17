@@ -159,6 +159,18 @@ impl CollectionInstance for TensorBase {
         TensorView::from(self.clone()).is_empty(txn).await
     }
 
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        TensorView::from(self.clone())
+            .post(request, txn, path, params)
+            .await
+    }
+
     async fn put(
         &self,
         request: &Request,
@@ -338,6 +350,16 @@ impl CollectionInstance for TensorView {
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         self.any(txn.clone()).map_ok(|any| !any).await
+    }
+
+    async fn post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _params: Object,
+    ) -> TCResult<State> {
+        Err(error::not_implemented("TensorView::post"))
     }
 
     async fn put(
@@ -559,6 +581,19 @@ impl CollectionInstance for Tensor {
         match self {
             Self::Base(base) => base.is_empty(txn).await,
             Self::View(view) => view.is_empty(txn).await,
+        }
+    }
+
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        match self {
+            Self::Base(base) => base.post(request, txn, path, params).await,
+            Self::View(view) => view.post(request, txn, path, params).await,
         }
     }
 

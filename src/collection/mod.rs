@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::class::{Instance, State, TCResult, TCStream};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{PathSegment, Scalar, Value};
+use crate::scalar::{Object, PathSegment, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 pub mod btree;
@@ -68,6 +68,25 @@ impl CollectionInstance for CollectionBase {
             Self::Null(null) => null.is_empty(txn).await,
             Self::Table(table) => table.is_empty(txn).await,
             Self::Tensor(tensor) => tensor.is_empty(txn).await,
+        }
+    }
+
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        match self {
+            Self::BTree(btree) => {
+                BTree::from(btree.clone())
+                    .post(request, txn, path, params)
+                    .await
+            }
+            Self::Null(null) => null.post(request, txn, path, params).await,
+            Self::Table(table) => table.post(request, txn, path, params).await,
+            Self::Tensor(tensor) => tensor.post(request, txn, path, params).await,
         }
     }
 
@@ -190,6 +209,21 @@ impl CollectionInstance for CollectionView {
             Self::Null(null) => null.is_empty(txn).await,
             Self::Table(table) => table.is_empty(txn).await,
             Self::Tensor(tensor) => tensor.is_empty(txn).await,
+        }
+    }
+
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        match self {
+            Self::BTree(btree) => btree.post(request, txn, path, params).await,
+            Self::Null(null) => null.post(request, txn, path, params).await,
+            Self::Table(table) => table.post(request, txn, path, params).await,
+            Self::Tensor(tensor) => tensor.post(request, txn, path, params).await,
         }
     }
 
@@ -321,6 +355,19 @@ impl CollectionInstance for Collection {
         match self {
             Self::Base(base) => base.is_empty(txn).await,
             Self::View(view) => view.is_empty(txn).await,
+        }
+    }
+
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        match self {
+            Self::Base(base) => base.post(request, txn, path, params).await,
+            Self::View(view) => view.post(request, txn, path, params).await,
         }
     }
 

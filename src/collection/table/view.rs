@@ -14,7 +14,7 @@ use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::{Collection, CollectionView};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{label, Id, Link, PathSegment, Scalar, TCPathBuf, Value};
+use crate::scalar::{label, Id, Link, Object, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds};
@@ -116,6 +116,16 @@ impl CollectionInstance for TableView {
 
     async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
         Err(error::not_implemented("TableBase::is_empty"))
+    }
+
+    async fn post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _params: Object,
+    ) -> TCResult<State> {
+        Err(error::not_implemented("TableView::post"))
     }
 
     async fn put(

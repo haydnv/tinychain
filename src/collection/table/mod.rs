@@ -11,7 +11,7 @@ use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionView};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{Id, Link, PathSegment, Scalar, TCPathBuf, Value};
+use crate::scalar::{Id, Link, Object, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::schema::{Column, Row, TableSchema};
@@ -206,6 +206,19 @@ impl CollectionInstance for Table {
         match self {
             Self::Base(base) => base.is_empty(txn).await,
             Self::View(view) => view.is_empty(txn).await,
+        }
+    }
+
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        match self {
+            Self::Base(base) => base.post(request, txn, path, params).await,
+            Self::View(view) => view.post(request, txn, path, params).await,
         }
     }
 

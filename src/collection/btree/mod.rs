@@ -205,6 +205,16 @@ impl CollectionInstance for BTree {
         }
     }
 
+    async fn post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _params: Object,
+    ) -> TCResult<State> {
+        Err(error::not_implemented("BTree::post"))
+    }
+
     async fn put(
         &self,
         _request: &Request,

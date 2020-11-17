@@ -8,7 +8,7 @@ use crate::collection::class::*;
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value};
+use crate::scalar::{label, Link, Object, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 #[derive(Clone, Eq, PartialEq)]
@@ -86,6 +86,16 @@ impl CollectionInstance for Null {
 
     async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
         Ok(true)
+    }
+
+    async fn post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _params: Object,
+    ) -> TCResult<State> {
+        Err(error::not_implemented("Null::post"))
     }
 
     async fn put(
