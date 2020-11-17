@@ -13,10 +13,12 @@ use crate::error;
 pub mod object;
 pub mod op;
 pub mod reference;
+pub mod slice;
 pub mod value;
 
 pub use op::*;
 pub use reference::*;
+pub use slice::*;
 pub use value::*;
 
 pub type Object = object::Object;
