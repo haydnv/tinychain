@@ -146,7 +146,10 @@ pub enum Key {
 impl TryCastFrom<Scalar> for Key {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
-            Scalar::Ref(_) => true,
+            Scalar::Ref(tc_ref) => match &**tc_ref {
+                TCRef::Id(_) => true,
+                _ => false,
+            },
             Scalar::Value(_) => true,
             Scalar::Tuple(tuple) => Value::can_cast_from(tuple),
             _ => false,
@@ -239,7 +242,7 @@ impl Serialize for Method {
 impl fmt::Display for Method {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Get((subject, path), key) => write!(f, "GET {}: {}?key={}", subject, path, key),
+            Self::Get((subject, path), key) => write!(f, "GET {}{}?key={}", subject, path, key),
             Self::Put((subject, path), (key, value)) => {
                 write!(f, "PUT {}{}?key={} <- {}", subject, path, key, value)
             }
@@ -312,8 +315,8 @@ impl Serialize for OpRef {
 impl fmt::Display for OpRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            OpRef::Get((link, id)) => write!(f, "OpRef::Get {}: {}", link, id),
-            OpRef::Put((path, id, val)) => write!(f, "OpRef::Put {}: {} <- {}", path, id, val),
+            OpRef::Get((link, id)) => write!(f, "OpRef::Get {}?key={}", link, id),
+            OpRef::Put((path, id, val)) => write!(f, "OpRef::Put {}?key={} <- {}", path, id, val),
             OpRef::Post((path, _)) => write!(f, "OpRef::Post {}", path),
         }
     }
