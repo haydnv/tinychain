@@ -27,7 +27,8 @@ pub use slice::*;
 
 pub type Key = Vec<Value>;
 
-const ERR_OUT_OF_BOUNDS: &str = "Requested range is outside the bounds of the containing view (hint: try slicing the base BTree instead)";
+const ERR_OUT_OF_BOUNDS: &str = "Requested range is outside the bounds of the containing view \
+(hint: try slicing the base BTree instead)";
 
 fn format_schema(schema: &[Column]) -> String {
     let schema: Vec<String> = schema.iter().map(|c| c.to_string()).collect();
@@ -112,13 +113,26 @@ impl BTree {
     fn btree_slice(&self, selector: Selector) -> TCResult<BTreeSlice> {
         match self {
             Self::Tree(tree) => Ok(BTreeSlice::new(tree.clone().into_inner(), selector)),
+            Self::View(view) if selector.range() == &BTreeRange::default() => {
+                let (range, reverse) = view.selector().clone().into_inner();
+                let reverse = reverse ^ selector.reverse();
+                Ok(BTreeSlice::new(
+                    view.source().clone(),
+                    (range, reverse).into(),
+                ))
+            }
             Self::View(view)
                 if view
                     .selector()
                     .range()
                     .contains(selector.range(), self.schema())? =>
             {
-                Ok(BTreeSlice::new(view.source().clone(), selector))
+                let (range, reverse) = selector.into_inner();
+                let reverse = reverse ^ view.selector().reverse();
+                Ok(BTreeSlice::new(
+                    view.source().clone(),
+                    (range, reverse).into(),
+                ))
             }
             Self::View(_) => Err(error::bad_request(ERR_OUT_OF_BOUNDS, "(btree range)")),
         }

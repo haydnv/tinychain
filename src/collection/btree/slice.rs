@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use futures::stream::Stream;
 
+use log::debug;
+
 use crate::class::{TCResult, TCStream};
 use crate::collection::schema::Column;
 use crate::collection::{Collection, CollectionView};
@@ -22,6 +24,10 @@ pub struct BTreeSlice {
 
 impl BTreeSlice {
     pub fn new(source: BTreeFile, bounds: Selector) -> BTreeSlice {
+        assert!(bounds != Selector::default());
+
+        debug!("new BTreeSlice with bounds {}", bounds);
+
         BTreeSlice { source, bounds }
     }
 
@@ -76,7 +82,7 @@ impl BTreeInstance for BTreeSlice {
         } else if self.bounds.range().contains(&range, self.schema())? {
             self.source.len(txn_id, range).await
         } else {
-            Err(error::bad_request(ERR_RANGE, "(btree range)"))
+            Err(error::bad_request(ERR_RANGE, range))
         }
     }
 
@@ -88,6 +94,12 @@ impl BTreeInstance for BTreeSlice {
         if selector.range() == &BTreeRange::default() {
             let reverse = selector.reverse() ^ self.bounds.reverse();
 
+            debug!(
+                "BTreeSlice::slice {} (reverse: {})",
+                self.bounds.range(),
+                reverse
+            );
+
             self.source
                 .slice(txn_id, (self.bounds.range().clone(), reverse).into())
                 .await
@@ -96,9 +108,11 @@ impl BTreeInstance for BTreeSlice {
             .range()
             .contains(selector.range(), self.schema())?
         {
+            debug!("BTreeSlice::slice with constrained bounds");
+
             self.source.slice(txn_id, selector).await
         } else {
-            Err(error::bad_request(ERR_RANGE, "(btree range)"))
+            Err(error::bad_request(ERR_RANGE, selector.range()))
         }
     }
 }

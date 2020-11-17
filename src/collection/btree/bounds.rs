@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt;
 use std::ops::Bound;
 
 use crate::collection::schema::Column;
@@ -13,6 +14,10 @@ pub struct BTreeRange(Vec<Bound<Value>>, Vec<Bound<Value>>);
 
 impl BTreeRange {
     pub fn contains(&self, other: &BTreeRange, schema: &[Column]) -> TCResult<bool> {
+        if other == &Self::default() {
+            return Ok(true);
+        }
+
         if other.0.len() < self.0.len() {
             return Ok(false);
         }
@@ -158,6 +163,28 @@ impl CastFrom<BTreeRange> for Value {
     }
 }
 
+impl fmt::Display for BTreeRange {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.0.is_empty() && self.1.is_empty() {
+            return write!(f, "BTreeRange::default");
+        }
+
+        let to_str = |bounds: &[Bound<Value>]| {
+            bounds
+                .iter()
+                .map(|bound| match bound {
+                    Bound::Included(value) => format!("including: {}", value),
+                    Bound::Excluded(value) => format!("excluding: {}", value),
+                    Bound::Unbounded => format!("unbounded"),
+                })
+                .collect::<Vec<String>>()
+                .join(", ")
+        };
+
+        write!(f, "BTreeRange: ({}, {})", to_str(&self.0), to_str(&self.1))
+    }
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct Selector {
     range: BTreeRange,
@@ -200,5 +227,15 @@ impl From<(BTreeRange, bool)> for Selector {
     fn from(range: (BTreeRange, bool)) -> Selector {
         let (range, reverse) = range;
         Selector { range, reverse }
+    }
+}
+
+impl fmt::Display for Selector {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "BTree selector with range {} (reverse: {})",
+            self.range, self.reverse
+        )
     }
 }
