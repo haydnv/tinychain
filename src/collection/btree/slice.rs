@@ -86,7 +86,8 @@ impl BTreeInstance for BTreeSlice {
 
     async fn slice(&self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>> {
         if selector.range() == &BTreeRange::default() {
-            let (_, reverse) = selector.into_inner();
+            let reverse = selector.reverse() ^ self.bounds.reverse();
+
             self.source
                 .slice(txn_id, (self.bounds.range().clone(), reverse).into())
                 .await
