@@ -263,4 +263,9 @@ impl Collator {
             Equal
         }
     }
+
+    pub fn contains(&self, start: &[Bound<Value>], end: &[Bound<Value>], key: &[Value]) -> bool {
+        self.compare_bound(key, start, Less) == Equal
+            && self.compare_bound(key, end, Greater) == Equal
+    }
 }

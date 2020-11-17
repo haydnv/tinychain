@@ -214,10 +214,14 @@ impl BTreeFile {
 
         if node.leaf {
             if l == r && l < node.keys.len() {
-                if node.keys[l].deleted {
-                    Box::pin(stream::empty())
-                } else {
+                if !node.keys[l].deleted
+                    && self
+                        .collator
+                        .contains(range.start(), range.end(), &node.keys[l])
+                {
                     Box::pin(stream::once(future::ready(node.keys[l].to_vec())))
+                } else {
+                    Box::pin(stream::empty())
                 }
             } else {
                 let keys: Vec<Key> = node.keys[l..r]
