@@ -281,12 +281,14 @@ impl BTreeFile {
     ) -> TCStream<Key> {
         let (l, r) = bisect(&range, &node.keys, &self.collator);
 
+        debug!("_slice_reverse {} from {} to {}", node.deref(), l, r);
+
         if node.leaf {
             let keys: Vec<Key> = node.keys[l..r]
                 .iter()
                 .filter(|k| !k.deleted)
-                .map(|k| k.value.to_vec())
                 .rev()
+                .map(|k| k.value.to_vec())
                 .collect();
 
             Box::pin(stream::iter(keys))
@@ -304,6 +306,7 @@ impl BTreeFile {
                     .get_block_owned(txn_id_clone.clone(), last_child)
                     .await
                     .unwrap();
+
                 this._slice_reverse(txn_id_clone, node, range_clone)
             });
             selected.push(Box::pin(selection));
@@ -323,13 +326,14 @@ impl BTreeFile {
                         .unwrap();
                     this._slice_reverse(txn_id, node, range)
                 });
-                selected.push(Box::pin(selection));
 
                 if !node.keys[i].deleted {
                     let key_at_i = node.keys[i].value.to_vec();
                     let key_at_i: TCStream<Key> = Box::pin(stream::once(future::ready(key_at_i)));
                     selected.push(Box::pin(future::ready(key_at_i)));
                 }
+
+                selected.push(Box::pin(selection));
             }
 
             Box::pin(selected.flatten())
