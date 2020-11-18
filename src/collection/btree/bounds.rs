@@ -1,16 +1,15 @@
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::Bound;
 
 use crate::collection::schema::Column;
 use crate::error::TCResult;
-use crate::scalar::{CastFrom, ScalarClass, TryCastFrom, Value};
+use crate::scalar::{Bound, CastFrom, ScalarClass, TryCastFrom, Value};
 
 use super::collator;
 use super::Key;
 
 #[derive(Clone, Eq, PartialEq)]
-pub struct BTreeRange(Vec<Bound<Value>>, Vec<Bound<Value>>);
+pub struct BTreeRange(Vec<Bound>, Vec<Bound>);
 
 impl BTreeRange {
     pub fn contains(&self, other: &BTreeRange, schema: &[Column]) -> TCResult<bool> {
@@ -39,18 +38,10 @@ impl BTreeRange {
             match (outer, inner) {
                 (Unbounded, _) => {}
                 (_, Unbounded) => return Ok(false),
-                (Excluded(o), Excluded(i)) if compare_value(&o, &i, dtype)? == Greater => {
-                    return Ok(false)
-                }
-                (Included(o), Included(i)) if compare_value(&o, &i, dtype)? == Greater => {
-                    return Ok(false)
-                }
-                (Included(o), Excluded(i)) if compare_value(&o, &i, dtype)? == Greater => {
-                    return Ok(false)
-                }
-                (Excluded(o), Included(i)) if compare_value(&o, &i, dtype)? != Less => {
-                    return Ok(false)
-                }
+                (Ex(o), Ex(i)) if compare_value(&o, &i, dtype)? == Greater => return Ok(false),
+                (In(o), In(i)) if compare_value(&o, &i, dtype)? == Greater => return Ok(false),
+                (In(o), Ex(i)) if compare_value(&o, &i, dtype)? == Greater => return Ok(false),
+                (Ex(o), In(i)) if compare_value(&o, &i, dtype)? != Less => return Ok(false),
                 _ => {}
             }
         }
@@ -64,18 +55,10 @@ impl BTreeRange {
             match (outer, inner) {
                 (Unbounded, _) => {}
                 (_, Unbounded) => return Ok(false),
-                (Excluded(o), Excluded(i)) if compare_value(&o, &i, dtype)? == Less => {
-                    return Ok(false)
-                }
-                (Included(o), Included(i)) if compare_value(&o, &i, dtype)? == Less => {
-                    return Ok(false)
-                }
-                (Included(o), Excluded(i)) if compare_value(&o, &i, dtype)? == Less => {
-                    return Ok(false)
-                }
-                (Excluded(o), Included(i)) if compare_value(&o, &i, dtype)? != Greater => {
-                    return Ok(false)
-                }
+                (Ex(o), Ex(i)) if compare_value(&o, &i, dtype)? == Less => return Ok(false),
+                (In(o), In(i)) if compare_value(&o, &i, dtype)? == Less => return Ok(false),
+                (In(o), Ex(i)) if compare_value(&o, &i, dtype)? == Less => return Ok(false),
+                (Ex(o), In(i)) if compare_value(&o, &i, dtype)? != Greater => return Ok(false),
                 _ => {}
             }
         }
@@ -89,11 +72,11 @@ impl BTreeRange {
             && self.0.iter().zip(self.1.iter()).all(|(l, r)| l == r)
     }
 
-    pub fn start(&'_ self) -> &'_ [Bound<Value>] {
+    pub fn start(&'_ self) -> &'_ [Bound] {
         &self.0
     }
 
-    pub fn end(&'_ self) -> &'_ [Bound<Value>] {
+    pub fn end(&'_ self) -> &'_ [Bound] {
         &self.1
     }
 }
@@ -101,21 +84,21 @@ impl BTreeRange {
 pub fn validate_range(range: BTreeRange, schema: &[Column]) -> TCResult<BTreeRange> {
     use Bound::*;
 
-    let cast = |(bound, column): (Bound<Value>, &Column)| {
+    let cast = |(bound, column): (Bound, &Column)| {
         let value = match bound {
             Unbounded => Unbounded,
-            Included(value) => Included(column.dtype().try_cast(value)?),
-            Excluded(value) => Excluded(column.dtype().try_cast(value)?),
+            In(value) => In(column.dtype().try_cast(value)?),
+            Ex(value) => Ex(column.dtype().try_cast(value)?),
         };
         Ok(value)
     };
 
-    let cast_range = |range: Vec<Bound<Value>>| {
+    let cast_range = |range: Vec<Bound>| {
         range
             .into_iter()
             .zip(schema)
             .map(cast)
-            .collect::<TCResult<Vec<Bound<Value>>>>()
+            .collect::<TCResult<Vec<Bound>>>()
     };
 
     let start = cast_range(range.0)?;
@@ -131,14 +114,14 @@ impl Default for BTreeRange {
 
 impl From<Key> for BTreeRange {
     fn from(mut key: Key) -> BTreeRange {
-        let start = key.iter().cloned().map(Bound::Included).collect();
-        let end = key.drain(..).map(Bound::Included).collect();
+        let start = key.iter().cloned().map(Bound::In).collect();
+        let end = key.drain(..).map(Bound::In).collect();
         BTreeRange(start, end)
     }
 }
 
-impl From<(Vec<Bound<Value>>, Vec<Bound<Value>>)> for BTreeRange {
-    fn from(params: (Vec<Bound<Value>>, Vec<Bound<Value>>)) -> BTreeRange {
+impl From<(Vec<Bound>, Vec<Bound>)> for BTreeRange {
+    fn from(params: (Vec<Bound>, Vec<Bound>)) -> BTreeRange {
         BTreeRange(params.0, params.1)
     }
 }
@@ -169,14 +152,10 @@ impl fmt::Display for BTreeRange {
             return write!(f, "BTreeRange::default");
         }
 
-        let to_str = |bounds: &[Bound<Value>]| {
+        let to_str = |bounds: &[Bound]| {
             bounds
                 .iter()
-                .map(|bound| match bound {
-                    Bound::Included(value) => format!("including: {}", value),
-                    Bound::Excluded(value) => format!("excluding: {}", value),
-                    Bound::Unbounded => format!("unbounded"),
-                })
+                .map(|bound| bound.to_string())
                 .collect::<Vec<String>>()
                 .join(", ")
         };

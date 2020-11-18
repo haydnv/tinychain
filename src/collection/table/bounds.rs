@@ -1,17 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::ops::Bound;
 
 use crate::class::{Instance, TCResult};
 use crate::collection::btree::BTreeRange;
 use crate::collection::schema::Column;
 use crate::error;
-use crate::scalar::{Id, Value, ValueType};
+use crate::scalar::{Bound, Id, Value, ValueType};
 
 #[derive(Clone)]
 pub enum ColumnBound {
     Is(Value),
-    In(Bound<Value>, Bound<Value>),
+    In(Bound, Bound),
 }
 
 impl ColumnBound {
@@ -19,13 +18,13 @@ impl ColumnBound {
         match self {
             Self::Is(value) => value.expect(dtype, err_context),
             Self::In(start, end) => match start {
-                Bound::Included(value) => value.expect(dtype, err_context),
-                Bound::Excluded(value) => value.expect(dtype, err_context),
+                Bound::In(value) => value.expect(dtype, err_context),
+                Bound::Ex(value) => value.expect(dtype, err_context),
                 Bound::Unbounded => Ok(()),
             }
             .and_then(|_| match end {
-                Bound::Included(value) => value.expect(dtype, err_context),
-                Bound::Excluded(value) => value.expect(dtype, err_context),
+                Bound::In(value) => value.expect(dtype, err_context),
+                Bound::Ex(value) => value.expect(dtype, err_context),
                 Bound::Unbounded => Ok(()),
             }),
         }
@@ -46,13 +45,13 @@ impl fmt::Display for ColumnBound {
             Self::In(start, end) => {
                 match start {
                     Bound::Unbounded => write!(f, "[...")?,
-                    Bound::Included(value) => write!(f, "[{},", value)?,
-                    Bound::Excluded(value) => write!(f, "({},", value)?,
+                    Bound::In(value) => write!(f, "[{},", value)?,
+                    Bound::Ex(value) => write!(f, "({},", value)?,
                 };
                 match end {
                     Bound::Unbounded => write!(f, "...]"),
-                    Bound::Included(value) => write!(f, "{}]", value),
-                    Bound::Excluded(value) => write!(f, "{})", value),
+                    Bound::In(value) => write!(f, "{}]", value),
+                    Bound::Ex(value) => write!(f, "{})", value),
                 }
             }
         }
@@ -78,8 +77,8 @@ pub fn btree_range(bounds: &Bounds, columns: &[Column]) -> TCResult<BTreeRange> 
             .ok_or_else(|| error::not_found(name))?;
         match bound {
             ColumnBound::Is(value) => {
-                start.push(Included(value.clone()));
-                end.push(Included(value));
+                start.push(In(value.clone()));
+                end.push(In(value));
             }
             ColumnBound::In(s, e) => {
                 start.push(s);

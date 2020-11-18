@@ -1,10 +1,10 @@
 use std::cmp::Ordering::{self, *};
 use std::convert::TryInto;
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::scalar::{Id, Number, StringType, TCString, Value, ValueType};
+use crate::scalar::{Bound, Id, Number, StringType, TCString, Value, ValueType};
 
 pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {
     left.expect(dtype, "for collation")?;
@@ -81,7 +81,7 @@ impl Collator {
     pub fn bisect_left_range<V: Deref<Target = [Value]>>(
         &self,
         keys: &[V],
-        range: &[Bound<Value>],
+        range: &[Bound],
     ) -> usize {
         if keys.is_empty() || range.is_empty() {
             return 0;
@@ -121,7 +121,7 @@ impl Collator {
     pub fn bisect_right_range<V: Deref<Target = [Value]>>(
         &self,
         keys: &[V],
-        range: &[Bound<Value>],
+        range: &[Bound],
     ) -> usize {
         if keys.is_empty() {
             0
@@ -202,8 +202,8 @@ impl Collator {
     pub fn compare_bound(
         &self,
         key: &[Value],
-        range: &[Bound<Value>],
-        excluded_ordering: Ordering,
+        range: &[Bound],
+        exclude_order: Ordering,
     ) -> Ordering {
         use Bound::*;
 
@@ -211,24 +211,24 @@ impl Collator {
             match self.schema[i] {
                 ValueType::Number(_) => match &range[i] {
                     Unbounded => {}
-                    Included(value) => match (&key[i], value) {
+                    In(value) => match (&key[i], value) {
                         (Value::Number(left), Value::Number(right)) if left < right => return Less,
                         (Value::Number(left), Value::Number(right)) if left > right => {
                             return Greater
                         }
                         _ => {}
                     },
-                    Excluded(value) => {
+                    Ex(value) => {
                         return match (&key[i], value) {
                             (Value::Number(left), Value::Number(right)) if left < right => Less,
                             (Value::Number(left), Value::Number(right)) if left > right => Greater,
-                            _ => excluded_ordering,
+                            _ => exclude_order,
                         }
                     }
                 },
                 ValueType::TCString(StringType::UString) => match &range[i] {
                     Unbounded => {}
-                    Included(value) => match (&key[i], value) {
+                    In(value) => match (&key[i], value) {
                         (
                             Value::TCString(TCString::UString(left)),
                             Value::TCString(TCString::UString(right)),
@@ -239,7 +239,7 @@ impl Collator {
                         ) if left > right => return Greater,
                         _ => {}
                     },
-                    Excluded(value) => {
+                    Ex(value) => {
                         return match (&key[i], value) {
                             (
                                 Value::TCString(TCString::UString(left)),
@@ -249,7 +249,7 @@ impl Collator {
                                 Value::TCString(TCString::UString(left)),
                                 Value::TCString(TCString::UString(right)),
                             ) if left > right => Greater,
-                            _ => excluded_ordering,
+                            _ => exclude_order,
                         }
                     }
                 },
@@ -258,13 +258,13 @@ impl Collator {
         }
 
         if key.is_empty() && range.iter().filter(|b| *b != &Bound::Unbounded).count() > 0 {
-            excluded_ordering
+            exclude_order
         } else {
             Equal
         }
     }
 
-    pub fn contains(&self, start: &[Bound<Value>], end: &[Bound<Value>], key: &[Value]) -> bool {
+    pub fn contains(&self, start: &[Bound], end: &[Bound], key: &[Value]) -> bool {
         self.compare_bound(key, start, Less) == Equal
             && self.compare_bound(key, end, Greater) == Equal
     }

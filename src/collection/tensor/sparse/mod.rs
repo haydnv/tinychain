@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter;
-use std::ops::Bound;
 use std::sync::Arc;
 
 use futures::future::{self, TryFutureExt};
@@ -12,7 +11,7 @@ use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::error;
-use crate::scalar::{label, Id, Label, Value, ValueType};
+use crate::scalar::{label, Bound, Id, Label, Value, ValueType};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
@@ -2026,8 +2025,8 @@ fn slice_table(mut table: Table, bounds: &'_ Bounds) -> TCBoxTryFuture<'_, Table
             let column_bound = match axis_bound {
                 At(x) => table::ColumnBound::Is(u64_to_value(x)),
                 In(range) => {
-                    let start = Bound::Included(u64_to_value(range.start));
-                    let end = Bound::Excluded(u64_to_value(range.end));
+                    let start = Bound::In(u64_to_value(range.start));
+                    let end = Bound::Ex(u64_to_value(range.end));
                     table::ColumnBound::In(start, end)
                 }
                 _ => todo!(),

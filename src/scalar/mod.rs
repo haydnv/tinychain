@@ -216,7 +216,7 @@ impl Scalar {
         match self {
             Self::Value(value) => value.is_none(),
             Self::Tuple(tuple) => tuple.is_empty(),
-            _ => false
+            _ => false,
         }
     }
 }

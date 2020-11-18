@@ -75,7 +75,10 @@ impl ScalarClass for SliceType {
                     BoundType::In => Ok(Slice::Bound(Bound::In(value))),
                     BoundType::Ex => Ok(Slice::Bound(Bound::Ex(value))),
                     BoundType::Un if value.is_none() => Ok(Slice::Bound(Bound::Unbounded)),
-                    BoundType::Un => Err(error::bad_request("Unbounded requires None as a value, not", value))
+                    BoundType::Un => Err(error::bad_request(
+                        "Unbounded requires None as a value, not",
+                        value,
+                    )),
                 }
             }
             Self::Range => {
