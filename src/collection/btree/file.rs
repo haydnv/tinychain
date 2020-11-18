@@ -507,6 +507,8 @@ impl BTreeFile {
             let node = self.file.get_block(txn_id, &node_id).await?;
             let (l, r) = bisect(range, &node.keys, &self.collator);
 
+            debug!("delete from {} [{}..{}]", node.deref(), l, r);
+
             if node.leaf {
                 if l == r {
                     return Ok(());
@@ -523,7 +525,7 @@ impl BTreeFile {
                 let mut node = node.upgrade().await?;
                 let mut deletes = Vec::with_capacity(r - l);
 
-                for i in 0..node.keys.len() {
+                for i in l..r {
                     node.keys[i].deleted = true;
                     deletes.push(self._delete(txn_id, node.children[i].clone(), range));
                 }
