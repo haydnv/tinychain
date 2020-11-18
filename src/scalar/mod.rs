@@ -211,6 +211,16 @@ pub enum Scalar {
     Value(value::Value),
 }
 
+impl Scalar {
+    pub fn is_none(&self) -> bool {
+        match self {
+            Self::Value(value) => value.is_none(),
+            Self::Tuple(tuple) => tuple.is_empty(),
+            _ => false
+        }
+    }
+}
+
 impl Instance for Scalar {
     type Class = ScalarType;
 
@@ -578,7 +588,7 @@ impl ScalarVisitor {
         } else if params.matches::<(Key,)>() {
             let (key,) = params.opt_cast_into().unwrap();
             Method::Get((subject, path), key)
-        } else if params == Scalar::Tuple(vec![]) {
+        } else if params.is_none() {
             Method::Get((subject, path), Key::Value(Value::None))
         } else {
             return Err(de::Error::custom(format!(
@@ -691,7 +701,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                 };
 
                 debug!("{} data is {}", key, data);
-                return if data == Scalar::Tuple(vec![]) || data == Value::None {
+                return if data.is_none() {
                     if path == TCPathBuf::default() {
                         Ok(Scalar::Ref(Box::new(subject.into())))
                     } else {
@@ -703,10 +713,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
             } else if let Ok(link) = key.parse::<link::Link>() {
                 debug!("key is a Link: {}", link);
 
-                if data == Scalar::Tuple(vec![])
-                    || data == Value::Tuple(vec![])
-                    || data == Value::None
-                {
+                if data.is_none() {
                     return Ok(Scalar::Value(Value::TCString(link.into())));
                 }
 

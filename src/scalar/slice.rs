@@ -14,6 +14,7 @@ use super::{
 pub enum BoundType {
     In,
     Ex,
+    Un,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
@@ -44,6 +45,7 @@ impl NativeClass for SliceType {
                 "bound" => match suffix[1].as_str() {
                     "in" => Ok(SliceType::Bound(BoundType::In)),
                     "ex" => Ok(SliceType::Bound(BoundType::Ex)),
+                    "un" => Ok(SliceType::Bound(BoundType::Un)),
                     other => Err(error::not_found(other)),
                 },
                 other => Err(error::not_found(other)),
@@ -72,11 +74,14 @@ impl ScalarClass for SliceType {
                 match bt {
                     BoundType::In => Ok(Slice::Bound(Bound::In(value))),
                     BoundType::Ex => Ok(Slice::Bound(Bound::Ex(value))),
+                    BoundType::Un if value.is_none() => Ok(Slice::Bound(Bound::Unbounded)),
+                    BoundType::Un => Err(error::bad_request("Unbounded requires None as a value, not", value))
                 }
             }
             Self::Range => {
                 let (start, end): (Bound, Bound) =
                     scalar.try_cast_into(|v| error::bad_request("Invalid Range", v))?;
+
                 Ok(Slice::Range(start, end))
             }
         }
@@ -87,16 +92,19 @@ impl From<SliceType> for Link {
     fn from(st: SliceType) -> Link {
         let prefix = SliceType::prefix();
 
-        match st {
+        let path = match st {
             SliceType::Bound(bt) => {
                 let prefix = prefix.append(label("bound"));
                 match bt {
-                    BoundType::In => prefix.append(label("in")).into(),
-                    BoundType::Ex => prefix.append(label("ex")).into(),
+                    BoundType::In => prefix.append(label("in")),
+                    BoundType::Ex => prefix.append(label("ex")),
+                    BoundType::Un => prefix.append(label("un")),
                 }
             }
-            SliceType::Range => prefix.append(label("range")).into(),
-        }
+            SliceType::Range => prefix.append(label("range")),
+        };
+
+        path.into()
     }
 }
 
@@ -106,6 +114,7 @@ impl fmt::Display for SliceType {
             Self::Bound(bt) => match bt {
                 BoundType::In => write!(f, "type Bound (inclusive)"),
                 BoundType::Ex => write!(f, "type Bound (exclusive)"),
+                BoundType::Un => write!(f, "type Bound (unbounded)"),
             },
             Self::Range => write!(f, "type Range"),
         }
@@ -116,6 +125,21 @@ impl fmt::Display for SliceType {
 pub enum Bound {
     In(Value),
     Ex(Value),
+    Unbounded,
+}
+
+impl Serialize for Bound {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let (class, value) = match self {
+            Self::In(value) => (BoundType::In, value),
+            Self::Ex(value) => (BoundType::Ex, value),
+            Self::Unbounded => (BoundType::Un, &Value::None),
+        };
+
+        let mut map = s.serialize_map(Some(1))?;
+        map.serialize_entry(&Link::from(SliceType::Bound(class)).to_string(), value)?;
+        map.end()
+    }
 }
 
 impl fmt::Display for Bound {
@@ -123,15 +147,7 @@ impl fmt::Display for Bound {
         match self {
             Self::In(value) => write!(f, "include({})", value),
             Self::Ex(value) => write!(f, "exclude({})", value),
-        }
-    }
-}
-
-impl Bound {
-    pub fn value(&'_ self) -> &'_ Value {
-        match self {
-            Self::In(value) => value,
-            Self::Ex(value) => value,
+            Self::Unbounded => write!(f, "unbounded"),
         }
     }
 }
@@ -166,6 +182,7 @@ impl Instance for Slice {
             Self::Bound(bound) => SliceType::Bound(match bound {
                 Bound::In(_) => BoundType::In,
                 Bound::Ex(_) => BoundType::Ex,
+                Bound::Unbounded => BoundType::Un,
             }),
             Self::Range(_, _) => SliceType::Range,
         }
@@ -178,24 +195,14 @@ impl ScalarInstance for Slice {
 
 impl Serialize for Slice {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let class = Link::from(self.class()).to_string();
-
-        let mut map = s.serialize_map(Some(1))?;
         match self {
-            Self::Bound(bound) => {
-                map.serialize_entry(
-                    &class,
-                    match bound {
-                        Bound::In(value) => value,
-                        Bound::Ex(value) => value,
-                    },
-                )?;
-            }
+            Self::Bound(bound) => bound.serialize(s),
             Self::Range(start, end) => {
-                map.serialize_entry(&class, &[start.value(), end.value()])?
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry(&Link::from(self.class()).to_string(), &[start, end])?;
+                map.end()
             }
-        };
-        map.end()
+        }
     }
 }
 

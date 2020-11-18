@@ -37,6 +37,16 @@ pub enum Value {
     Tuple(Vec<Value>),
 }
 
+impl Value {
+    pub fn is_none(&self) -> bool {
+        match self {
+            Self::None => true,
+            Self::Tuple(tuple) => tuple.is_empty(),
+            _ => false,
+        }
+    }
+}
+
 impl Instance for Value {
     type Class = class::ValueType;
 
