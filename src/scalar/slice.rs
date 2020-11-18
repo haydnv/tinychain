@@ -180,11 +180,17 @@ impl Range {
 
 impl TryCastFrom<Scalar> for Range {
     fn can_cast_from(scalar: &Scalar) -> bool {
-        scalar.matches::<(Bound, Bound)>()
+        if let Scalar::Slice(Slice::Range(_)) = scalar {
+            true
+        } else {
+            scalar.matches::<(Bound, Bound)>()
+        }
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Range> {
-        if scalar.matches::<(Bound, Bound)>() {
+        if let Scalar::Slice(Slice::Range(range)) = scalar {
+            Some(range)
+        } else if scalar.matches::<(Bound, Bound)>() {
             let (start, end) = scalar.opt_cast_into().unwrap();
             Some(Range(start, end))
         } else {

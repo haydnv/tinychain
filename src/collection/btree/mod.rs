@@ -30,6 +30,8 @@ pub type Key = Vec<Value>;
 const ERR_OUT_OF_BOUNDS: &str = "Requested range is outside the bounds of the containing view \
 (hint: try slicing the base BTree instead)";
 
+const ERR_INVALID_RANGE: &str = "Invalid BTree range";
+
 fn format_schema(schema: &[Column]) -> String {
     let schema: Vec<String> = schema.iter().map(|c| c.to_string()).collect();
     format!("[{}]", schema.join(", "))
@@ -137,37 +139,18 @@ impl BTree {
             Self::View(_) => Err(error::bad_request(ERR_OUT_OF_BOUNDS, "(btree range)")),
         }
     }
-}
 
-impl Instance for BTree {
-    type Class = BTreeType;
-
-    fn class(&self) -> BTreeType {
-        match self {
-            Self::Tree(_) => BTreeType::Tree,
-            Self::View(_) => BTreeType::View,
-        }
-    }
-}
-
-#[async_trait]
-impl CollectionInstance for BTree {
-    type Item = Key;
-    type Slice = BTreeSlice;
-
-    async fn get(
+    async fn route(
         &self,
         _request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        range: Value,
+        range: BTreeRange,
     ) -> TCResult<State> {
-        let range: BTreeRange =
-            range.try_cast_into(|v| error::bad_request("Invalid BTree range", v))?;
-        let range = validate_range(range, self.schema())?;
-
         if path.is_empty() {
-            if range.is_key(self.schema()) {
+            if range == BTreeRange::default() {
+                Ok(State::Collection(self.clone().into()))
+            } else if range.is_key(self.schema()) {
                 let mut slice = self.slice(txn.id().clone(), range.into()).await?;
                 slice
                     .next()
@@ -197,6 +180,35 @@ impl CollectionInstance for BTree {
             Err(error::path_not_found(path))
         }
     }
+}
+
+impl Instance for BTree {
+    type Class = BTreeType;
+
+    fn class(&self) -> BTreeType {
+        match self {
+            Self::Tree(_) => BTreeType::Tree,
+            Self::View(_) => BTreeType::View,
+        }
+    }
+}
+
+#[async_trait]
+impl CollectionInstance for BTree {
+    type Item = Key;
+    type Slice = BTreeSlice;
+
+    async fn get(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        range: Value,
+    ) -> TCResult<State> {
+        let range = BTreeRange::try_cast_from(range, |v| error::bad_request(ERR_INVALID_RANGE, v))?;
+        let range = validate_range(range, self.schema())?;
+        self.route(request, txn, path, range).await
+    }
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
@@ -207,12 +219,18 @@ impl CollectionInstance for BTree {
 
     async fn post(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _params: Object,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        mut params: Object,
     ) -> TCResult<State> {
-        Err(error::not_implemented("BTree::post"))
+        let range = params
+            .remove(&label("where").into())
+            .unwrap_or_else(|| Scalar::from(()));
+
+        let range = BTreeRange::try_cast_from(range, |s| error::bad_request(ERR_INVALID_RANGE, s))?;
+        let range = validate_range(range, self.schema())?;
+        self.route(request, txn, path, range).await
     }
 
     async fn put(
@@ -237,6 +255,7 @@ impl CollectionInstance for BTree {
                     let keys = collection.to_stream(txn.clone()).await?;
                     let keys = keys
                         .map(|s| s.try_cast_into(|k| error::bad_request("Invalid BTree key", k)));
+
                     self.try_insert_from(txn.id(), keys).await?;
                 }
                 State::Scalar(scalar) if scalar.matches::<Vec<Key>>() => {

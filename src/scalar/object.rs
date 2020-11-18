@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 use log::debug;
 use serde::ser::{Serialize, Serializer};
@@ -68,6 +68,12 @@ impl Deref for Object {
 
     fn deref(&'_ self) -> &'_ HashMap<Id, Scalar> {
         &self.0
+    }
+}
+
+impl DerefMut for Object {
+    fn deref_mut(&'_ mut self) -> &'_ mut HashMap<Id, Scalar> {
+        &mut self.0
     }
 }
 

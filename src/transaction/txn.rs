@@ -516,6 +516,7 @@ impl Txn {
         let subject = dereference_state(&provided, subject.id())?;
 
         match subject {
+            State::Collection(collection) => collection.post(request, self, path, params).await,
             State::Scalar(scalar) => match scalar {
                 Scalar::Op(op_def) => {
                     if !path.is_empty() {

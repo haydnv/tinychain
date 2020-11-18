@@ -264,6 +264,12 @@ impl From<Id> for Scalar {
     }
 }
 
+impl From<()> for Scalar {
+    fn from(_: ()) -> Scalar {
+        Scalar::Value(Value::None)
+    }
+}
+
 impl<T1: Into<Scalar>, T2: Into<Scalar>> From<(T1, T2)> for Scalar {
     fn from(tuple: (T1, T2)) -> Scalar {
         Scalar::Tuple(vec![tuple.0.into(), tuple.1.into()])
@@ -720,8 +726,8 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                 let path = link.path();
                 return if path.len() > 1 && &path[0] == "sbin" {
                     match path[1].as_str() {
-                        "value" | "object" | "op" | "ref" | "tuple" => match data {
-                            Scalar::Value(data) => match data {
+                        "value" | "object" | "op" | "ref" | "slice" | "tuple" => match data {
+                            Scalar::Value(data) if &path[1] != "slice" => match data {
                                 Value::Tuple(tuple) if &path[1] == "tuple" => {
                                     Ok(Scalar::Value(Value::Tuple(tuple)))
                                 }

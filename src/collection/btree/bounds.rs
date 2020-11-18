@@ -3,7 +3,7 @@ use std::fmt;
 
 use crate::collection::schema::Column;
 use crate::error::TCResult;
-use crate::scalar::{Bound, CastFrom, ScalarClass, TryCastFrom, Value};
+use crate::scalar::*;
 
 use super::collator;
 use super::Key;
@@ -107,42 +107,80 @@ pub fn validate_range(range: BTreeRange, schema: &[Column]) -> TCResult<BTreeRan
 }
 
 impl Default for BTreeRange {
-    fn default() -> BTreeRange {
-        BTreeRange(vec![], vec![])
+    fn default() -> Self {
+        Self(vec![], vec![])
     }
 }
 
 impl From<Key> for BTreeRange {
-    fn from(mut key: Key) -> BTreeRange {
+    fn from(mut key: Key) -> Self {
         let start = key.iter().cloned().map(Bound::In).collect();
         let end = key.drain(..).map(Bound::In).collect();
-        BTreeRange(start, end)
+        Self(start, end)
     }
 }
 
 impl From<(Vec<Bound>, Vec<Bound>)> for BTreeRange {
-    fn from(params: (Vec<Bound>, Vec<Bound>)) -> BTreeRange {
-        BTreeRange(params.0, params.1)
+    fn from(params: (Vec<Bound>, Vec<Bound>)) -> Self {
+        Self(params.0, params.1)
+    }
+}
+
+impl From<Vec<Range>> for BTreeRange {
+    fn from(range: Vec<Range>) -> Self {
+        Self::from(range.into_iter().map(Range::into_inner).unzip())
     }
 }
 
 impl TryCastFrom<Value> for BTreeRange {
     fn can_cast_from(value: &Value) -> bool {
-        value == &Value::None || Key::can_cast_from(value)
+        if value == &Value::None || Key::can_cast_from(value) {
+            true
+        } else if let Value::Tuple(tuple) = value {
+            tuple.iter().all(|v| v.is_none())
+        } else {
+            false
+        }
     }
 
     fn opt_cast_from(value: Value) -> Option<BTreeRange> {
         if value == Value::None {
             Some(BTreeRange::default())
+        } else if let Value::Tuple(tuple) = value {
+            if tuple.iter().all(|v| v.is_none()) {
+                Some(BTreeRange::default())
+            } else {
+                None
+            }
         } else {
             Key::opt_cast_from(value).map(BTreeRange::from)
         }
     }
 }
 
-impl CastFrom<BTreeRange> for Value {
-    fn cast_from(_s: BTreeRange) -> Value {
-        unimplemented!()
+impl TryCastFrom<Scalar> for BTreeRange {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Value(value) => Self::can_cast_from(value),
+            range if range.matches::<Vec<Range>>() => true,
+            Scalar::Tuple(tuple) => Value::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<BTreeRange> {
+        match scalar {
+            Scalar::Value(value) => Self::opt_cast_from(value),
+            range if range.matches::<Vec<Range>>() => {
+                let range: Vec<Range> = range.opt_cast_into().unwrap();
+                Some(Self::from(range))
+            }
+            Scalar::Tuple(tuple) if Value::can_cast_from(&tuple) => {
+                let value = Value::opt_cast_from(tuple).unwrap();
+                Self::opt_cast_from(value)
+            }
+            _ => None,
+        }
     }
 }
 
