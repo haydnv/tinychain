@@ -241,13 +241,15 @@ impl CollectionInstance for BTree {
         range: Value,
         key: State,
     ) -> TCResult<()> {
-        if !path.is_empty() {
-            return Err(error::path_not_found(path));
-        }
-
         let range: BTreeRange =
             range.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
         let range = validate_range(range, self.schema())?;
+
+        if path.len() == 1 && &path[0] == "delete" {
+            return self.delete(txn.id(), range).await;
+        } else if !path.is_empty() {
+            return Err(error::path_not_found(path));
+        }
 
         if range == BTreeRange::default() {
             match key {

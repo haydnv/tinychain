@@ -523,7 +523,7 @@ impl BTreeFile {
                 let mut node = node.upgrade().await?;
                 let mut deletes = Vec::with_capacity(r - l);
 
-                for i in 0..node.children.len() {
+                for i in 0..node.keys.len() {
                     node.keys[i].deleted = true;
                     deletes.push(self._delete(txn_id, node.children[i].clone(), range));
                 }
