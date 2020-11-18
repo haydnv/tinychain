@@ -11,10 +11,10 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::{BTree, BTreeFile, BTreeInstance, BTreeRange, Key, Selector};
 
-pub const ERR_RANGE: &str = "The requested range is outside the bounds of this BTreeSlice \
-(hint: try calling the parent BTree instead)";
+pub const ERR_BOUNDS: &str = "Requested range is outside the bounds of the containing view \
+(hint: try slicing the base BTree instead)";
 
-const ERR_WRITE: &str = "BTreeSlice does not support writes (try writing to the parent BTree)";
+const ERR_INSERT: &str = "BTreeSlice does not support insert";
 
 #[derive(Clone)]
 pub struct BTreeSlice {
@@ -42,12 +42,20 @@ impl BTreeSlice {
 
 #[async_trait]
 impl BTreeInstance for BTreeSlice {
-    async fn delete(&self, _txn_id: &TxnId, _range: BTreeRange) -> TCResult<()> {
-        Err(error::unsupported(ERR_WRITE))
+    async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
+        if range == BTreeRange::default() {
+            self.source
+                .delete(txn_id, self.bounds.range().clone())
+                .await
+        } else if self.bounds.range().contains(&range, self.schema())? {
+            self.source.delete(txn_id, range).await
+        } else {
+            Err(error::bad_request(ERR_BOUNDS, range))
+        }
     }
 
     async fn insert(&self, _txn_id: &TxnId, _key: Key) -> TCResult<()> {
-        Err(error::unsupported(ERR_WRITE))
+        Err(error::unsupported(ERR_INSERT))
     }
 
     async fn insert_from<S: Stream<Item = Key> + Send>(
@@ -55,7 +63,7 @@ impl BTreeInstance for BTreeSlice {
         _txn_id: &TxnId,
         _source: S,
     ) -> TCResult<()> {
-        Err(error::unsupported(ERR_WRITE))
+        Err(error::unsupported(ERR_INSERT))
     }
 
     async fn try_insert_from<S: Stream<Item = TCResult<Key>> + Send>(
@@ -63,7 +71,7 @@ impl BTreeInstance for BTreeSlice {
         _txn_id: &TxnId,
         _source: S,
     ) -> TCResult<()> {
-        Err(error::unsupported(ERR_WRITE))
+        Err(error::unsupported(ERR_INSERT))
     }
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
@@ -82,7 +90,7 @@ impl BTreeInstance for BTreeSlice {
         } else if self.bounds.range().contains(&range, self.schema())? {
             self.source.len(txn_id, range).await
         } else {
-            Err(error::bad_request(ERR_RANGE, range))
+            Err(error::bad_request(ERR_BOUNDS, range))
         }
     }
 
@@ -112,7 +120,7 @@ impl BTreeInstance for BTreeSlice {
 
             self.source.slice(txn_id, selector).await
         } else {
-            Err(error::bad_request(ERR_RANGE, selector.range()))
+            Err(error::bad_request(ERR_BOUNDS, selector.range()))
         }
     }
 }

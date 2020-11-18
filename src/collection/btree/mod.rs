@@ -27,9 +27,6 @@ pub use slice::*;
 
 pub type Key = Vec<Value>;
 
-const ERR_OUT_OF_BOUNDS: &str = "Requested range is outside the bounds of the containing view \
-(hint: try slicing the base BTree instead)";
-
 const ERR_INVALID_RANGE: &str = "Invalid BTree range";
 
 fn format_schema(schema: &[Column]) -> String {
@@ -136,7 +133,7 @@ impl BTree {
                     (range, reverse).into(),
                 ))
             }
-            Self::View(_) => Err(error::bad_request(ERR_OUT_OF_BOUNDS, "(btree range)")),
+            Self::View(_) => Err(error::bad_request(ERR_BOUNDS, selector.range())),
         }
     }
 
@@ -230,7 +227,12 @@ impl CollectionInstance for BTree {
 
         let range = BTreeRange::try_cast_from(range, |s| error::bad_request(ERR_INVALID_RANGE, s))?;
         let range = validate_range(range, self.schema())?;
-        self.route(request, txn, path, range).await
+
+        if path.len() == 1 && &path[0] == "delete" {
+            self.delete(txn.id(), range).map_ok(State::from).await
+        } else {
+            self.route(request, txn, path, range).await
+        }
     }
 
     async fn put(
