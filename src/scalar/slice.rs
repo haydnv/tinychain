@@ -81,12 +81,10 @@ impl ScalarClass for SliceType {
                     )),
                 }
             }
-            Self::Range => {
-                let (start, end): (Bound, Bound) =
-                    scalar.try_cast_into(|v| error::bad_request("Invalid Range", v))?;
-
-                Ok(Slice::Range(start, end))
-            }
+            Self::Range => Range::try_cast_from(scalar, |s| {
+                error::bad_request("Cannot cast into Range from", s)
+            })
+            .map(Slice::Range),
         }
     }
 }
@@ -131,6 +129,22 @@ pub enum Bound {
     Unbounded,
 }
 
+impl TryCastFrom<Scalar> for Bound {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Slice(Slice::Bound(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Bound> {
+        match scalar {
+            Scalar::Slice(Slice::Bound(bound)) => Some(bound),
+            _ => None,
+        }
+    }
+}
+
 impl Serialize for Bound {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let (class, value) = match self {
@@ -155,26 +169,51 @@ impl fmt::Display for Bound {
     }
 }
 
-impl TryCastFrom<Scalar> for Bound {
+#[derive(Clone, Eq, PartialEq)]
+pub struct Range(Bound, Bound);
+
+impl Range {
+    pub fn into_inner(self) -> (Bound, Bound) {
+        (self.0, self.1)
+    }
+}
+
+impl TryCastFrom<Scalar> for Range {
     fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Slice(Slice::Bound(_)) => true,
-            _ => false,
-        }
+        scalar.matches::<(Bound, Bound)>()
     }
 
-    fn opt_cast_from(scalar: Scalar) -> Option<Bound> {
-        match scalar {
-            Scalar::Slice(Slice::Bound(bound)) => Some(bound),
-            _ => None,
+    fn opt_cast_from(scalar: Scalar) -> Option<Range> {
+        if scalar.matches::<(Bound, Bound)>() {
+            let (start, end) = scalar.opt_cast_into().unwrap();
+            Some(Range(start, end))
+        } else {
+            None
         }
+    }
+}
+
+impl Serialize for Range {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut map = s.serialize_map(Some(1))?;
+        map.serialize_entry(
+            &Link::from(SliceType::Range).to_string(),
+            &[&self.0, &self.1],
+        )?;
+        map.end()
+    }
+}
+
+impl fmt::Display for Range {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Range({}, {})", self.0, self.1)
     }
 }
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Slice {
     Bound(Bound),
-    Range(Bound, Bound),
+    Range(Range),
 }
 
 impl Instance for Slice {
@@ -187,7 +226,7 @@ impl Instance for Slice {
                 Bound::Ex(_) => BoundType::Ex,
                 Bound::Unbounded => BoundType::Un,
             }),
-            Self::Range(_, _) => SliceType::Range,
+            Self::Range(_) => SliceType::Range,
         }
     }
 }
@@ -200,11 +239,7 @@ impl Serialize for Slice {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::Bound(bound) => bound.serialize(s),
-            Self::Range(start, end) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(&Link::from(self.class()).to_string(), &[start, end])?;
-                map.end()
-            }
+            Self::Range(range) => range.serialize(s),
         }
     }
 }
@@ -213,7 +248,7 @@ impl fmt::Display for Slice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Bound(bound) => fmt::Display::fmt(bound, f),
-            Self::Range(start, end) => write!(f, "Range({}, {})", start, end),
+            Self::Range(range) => fmt::Display::fmt(range, f),
         }
     }
 }
