@@ -161,23 +161,21 @@ impl TryCastFrom<Value> for BTreeRange {
 impl TryCastFrom<Scalar> for BTreeRange {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
-            Scalar::Value(value) => Self::can_cast_from(value),
             range if range.matches::<Vec<Range>>() => true,
-            Scalar::Tuple(tuple) => Value::can_cast_from(tuple),
+            key if key.matches::<Key>() => true,
             _ => false,
         }
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<BTreeRange> {
         match scalar {
-            Scalar::Value(value) => Self::opt_cast_from(value),
             range if range.matches::<Vec<Range>>() => {
                 let range: Vec<Range> = range.opt_cast_into().unwrap();
                 Some(Self::from(range))
             }
-            Scalar::Tuple(tuple) if Value::can_cast_from(&tuple) => {
-                let value = Value::opt_cast_from(tuple).unwrap();
-                Self::opt_cast_from(value)
+            key if key.matches::<Key>() => {
+                let key = Key::opt_cast_from(key).unwrap();
+                Some(Self::from(key))
             }
             _ => None,
         }
