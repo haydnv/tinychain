@@ -110,6 +110,7 @@ pub enum ScalarType {
     Object,
     Op(OpDefType),
     Ref(RefType),
+    Slice(SliceType),
     Tuple,
     Value(ValueType),
 }
@@ -128,13 +129,14 @@ impl NativeClass for ScalarType {
             match suffix[0].as_str() {
                 "object" => Ok(ScalarType::Object),
                 "tuple" => Ok(ScalarType::Tuple),
-                "op" | "ref" | "value" => Err(error::method_not_allowed(&suffix[0])),
+                "op" | "ref" | "slice" | "value" => Err(error::method_not_allowed(&suffix[0])),
                 other => Err(error::not_found(other)),
             }
         } else {
             match suffix[0].as_str() {
                 "op" => OpDefType::from_path(path).map(ScalarType::Op),
                 "ref" => RefType::from_path(path).map(ScalarType::Ref),
+                "slice" => SliceType::from_path(path).map(ScalarType::Slice),
                 "value" => ValueType::from_path(path).map(ScalarType::Value),
                 other => Err(error::not_found(other)),
             }
@@ -159,6 +161,7 @@ impl ScalarClass for ScalarType {
             },
             Self::Op(odt) => odt.try_cast(scalar).map(Box::new).map(Scalar::Op),
             Self::Ref(rt) => rt.try_cast(scalar).map(Box::new).map(Scalar::Ref),
+            Self::Slice(st) => st.try_cast(scalar).map(Scalar::Slice),
             Self::Tuple => scalar
                 .try_cast_into(|v| error::not_implemented(format!("Cast into Tuple from {}", v))),
             Self::Value(vt) => vt.try_cast(scalar).map(Scalar::Value),
@@ -172,6 +175,7 @@ impl From<ScalarType> for Link {
             ScalarType::Object => ScalarType::prefix().append(label("object")).into(),
             ScalarType::Op(odt) => odt.into(),
             ScalarType::Ref(rt) => rt.into(),
+            ScalarType::Slice(st) => st.into(),
             ScalarType::Tuple => ScalarType::prefix().append(label("tuple")).into(),
             ScalarType::Value(vt) => vt.into(),
         }
@@ -190,6 +194,7 @@ impl fmt::Display for ScalarType {
             Self::Object => write!(f, "type Object (generic)"),
             Self::Op(odt) => write!(f, "{}", odt),
             Self::Ref(rt) => write!(f, "{}", rt),
+            Self::Slice(st) => write!(f, "{}", st),
             Self::Tuple => write!(f, "type Tuple"),
             Self::Value(vt) => write!(f, "{}", vt),
         }
@@ -201,6 +206,7 @@ pub enum Scalar {
     Object(Object),
     Op(Box<OpDef>),
     Ref(Box<TCRef>),
+    Slice(Slice),
     Tuple(Vec<Scalar>),
     Value(value::Value),
 }
@@ -213,6 +219,7 @@ impl Instance for Scalar {
             Self::Object(_) => ScalarType::Object,
             Self::Op(op) => ScalarType::Op(op.class()),
             Self::Ref(tc_ref) => ScalarType::Ref(tc_ref.class()),
+            Self::Slice(slice) => ScalarType::Slice(slice.class()),
             Self::Tuple(_) => ScalarType::Tuple,
             Self::Value(value) => ScalarType::Value(value.class()),
         }
@@ -798,6 +805,7 @@ impl Serialize for Scalar {
             Scalar::Object(object) => object.serialize(s),
             Scalar::Op(op_def) => op_def.serialize(s),
             Scalar::Ref(tc_ref) => tc_ref.serialize(s),
+            Scalar::Slice(slice) => slice.serialize(s),
             Scalar::Tuple(tuple) => {
                 let mut seq = s.serialize_seq(Some(tuple.len()))?;
                 for item in tuple {
@@ -824,6 +832,7 @@ impl fmt::Display for Scalar {
             ),
             Scalar::Op(op) => write!(f, "{}", op),
             Scalar::Ref(tc_ref) => write!(f, "{}", tc_ref),
+            Scalar::Slice(slice) => write!(f, "{}", slice),
             Scalar::Tuple(tuple) => write!(
                 f,
                 "[{}]",
