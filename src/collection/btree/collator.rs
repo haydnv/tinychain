@@ -4,7 +4,7 @@ use std::ops::Deref;
 
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::scalar::{Bound, Id, Number, StringType, TCString, Value, ValueType};
+use crate::scalar::{Bound, Id, Number, NumberType, StringType, TCString, Value, ValueType};
 
 pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {
     left.expect(dtype, "for collation")?;
@@ -53,6 +53,9 @@ impl Collator {
     pub fn supports(dtype: ValueType) -> bool {
         use ValueType::*;
         match dtype {
+            // don't support generic types (yet)
+            Value => false,
+            Number(NumberType::Number) => false,
             Number(_) => true,
             TCString(StringType::Id) => true,
             TCString(StringType::UString) => true,
