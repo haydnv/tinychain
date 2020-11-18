@@ -183,11 +183,30 @@ impl TryCastFrom<Scalar> for Range {
         if let Scalar::Slice(Slice::Range(_)) = scalar {
             true
         } else {
-            scalar.matches::<(Bound, Bound)>() || scalar.matches::<(Value, Value)>()
+            scalar.matches::<(Bound, Bound)>()
+                || scalar.matches::<(Value, Value)>()
+                || scalar.matches::<(Value, Bound)>()
+                || scalar.matches::<(Bound, Value)>()
         }
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Range> {
+        let start_bound = |val: Value| {
+            if val.is_none() {
+                Bound::Unbounded
+            } else {
+                Bound::In(val)
+            }
+        };
+
+        let end_bound = |val: Value| {
+            if val.is_none() {
+                Bound::Unbounded
+            } else {
+                Bound::Ex(val)
+            }
+        };
+
         if let Scalar::Slice(Slice::Range(range)) = scalar {
             Some(range)
         } else if scalar.matches::<(Bound, Bound)>() {
@@ -195,20 +214,13 @@ impl TryCastFrom<Scalar> for Range {
             Some(Range(start, end))
         } else if scalar.matches::<(Value, Value)>() {
             let (start, end): (Value, Value) = scalar.opt_cast_into().unwrap();
-
-            let start = if start.is_none() {
-                Bound::Unbounded
-            } else {
-                Bound::In(start)
-            };
-
-            let end = if end.is_none() {
-                Bound::Unbounded
-            } else {
-                Bound::Ex(end)
-            };
-
-            Some(Range(start, end))
+            Some(Range(start_bound(start), end_bound(end)))
+        } else if scalar.matches::<(Value, Bound)>() {
+            let (start, end): (Value, Bound) = scalar.opt_cast_into().unwrap();
+            Some(Range(start_bound(start), end))
+        } else if scalar.matches::<(Bound, Value)>() {
+            let (start, end): (Bound, Value) = scalar.opt_cast_into().unwrap();
+            Some(Range(start, end_bound(end)))
         } else {
             None
         }
