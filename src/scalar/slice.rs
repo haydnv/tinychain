@@ -183,7 +183,7 @@ impl TryCastFrom<Scalar> for Range {
         if let Scalar::Slice(Slice::Range(_)) = scalar {
             true
         } else {
-            scalar.matches::<(Bound, Bound)>()
+            scalar.matches::<(Bound, Bound)>() || scalar.matches::<(Value, Value)>()
         }
     }
 
@@ -192,6 +192,22 @@ impl TryCastFrom<Scalar> for Range {
             Some(range)
         } else if scalar.matches::<(Bound, Bound)>() {
             let (start, end) = scalar.opt_cast_into().unwrap();
+            Some(Range(start, end))
+        } else if scalar.matches::<(Value, Value)>() {
+            let (start, end): (Value, Value) = scalar.opt_cast_into().unwrap();
+
+            let start = if start.is_none() {
+                Bound::Unbounded
+            } else {
+                Bound::In(start)
+            };
+
+            let end = if end.is_none() {
+                Bound::Unbounded
+            } else {
+                Bound::Ex(end)
+            };
+
             Some(Range(start, end))
         } else {
             None
