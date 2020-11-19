@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use futures::stream::Stream;
+use futures::stream::{Stream, StreamExt};
 
 use log::debug;
 
@@ -9,7 +9,7 @@ use crate::collection::{Collection, CollectionView};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::{BTree, BTreeFile, BTreeInstance, BTreeRange, Key, Selector};
+use super::{BTree, BTreeFile, BTreeInstance, BTreeRange, Key};
 
 pub const ERR_BOUNDS: &str = "Requested range is outside the bounds of the containing view \
 (hint: try slicing the base BTree instead)";
@@ -19,24 +19,51 @@ const ERR_INSERT: &str = "BTreeSlice does not support insert";
 #[derive(Clone)]
 pub struct BTreeSlice {
     source: BTreeFile,
-    bounds: Selector,
+    range: BTreeRange,
+    reverse: bool,
 }
 
 impl BTreeSlice {
-    pub fn new(source: BTreeFile, bounds: Selector) -> BTreeSlice {
-        assert!(bounds != Selector::default());
+    pub fn new(source: BTree, range: BTreeRange, reverse: bool) -> TCResult<BTreeSlice> {
+        match source {
+            BTree::Tree(tree) => {
+                debug!(
+                    "BTreeSlice from source tree with range {} (reverse: {})",
+                    range, reverse
+                );
+                let source = tree.into_inner();
+                Ok(Self {
+                    source,
+                    range,
+                    reverse,
+                })
+            }
+            BTree::View(view) => {
+                let view = view.into_inner();
+                let source = view.source.clone();
+                let reverse = view.reverse ^ reverse;
+                debug!(
+                    "BTreeSlice from view with range {} (reverse: {})",
+                    range, reverse
+                );
 
-        debug!("new BTreeSlice with bounds {}", bounds);
-
-        BTreeSlice { source, bounds }
-    }
-
-    pub fn selector(&'_ self) -> &'_ Selector {
-        &self.bounds
-    }
-
-    pub fn source(&'_ self) -> &'_ BTreeFile {
-        &self.source
+                if range == BTreeRange::default() {
+                    Ok(Self {
+                        source,
+                        range: view.range,
+                        reverse,
+                    })
+                } else if view.range.contains(&range, view.schema())? {
+                    Ok(Self {
+                        source,
+                        range,
+                        reverse,
+                    })
+                } else {
+                    Err(error::bad_request(ERR_BOUNDS, range))
+                }
+            }
+        }
     }
 }
 
@@ -44,10 +71,8 @@ impl BTreeSlice {
 impl BTreeInstance for BTreeSlice {
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
         if range == BTreeRange::default() {
-            self.source
-                .delete(txn_id, self.bounds.range().clone())
-                .await
-        } else if self.bounds.range().contains(&range, self.schema())? {
+            self.source.delete(txn_id, self.range.clone()).await
+        } else if self.range.contains(&range, self.schema())? {
             self.source.delete(txn_id, range).await
         } else {
             Err(error::bad_request(ERR_BOUNDS, range))
@@ -75,19 +100,17 @@ impl BTreeInstance for BTreeSlice {
     }
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        let count = self
-            .source
-            .clone()
-            .len(txn.id().clone(), self.bounds.range().clone())
+        let mut rows = self
+            .stream(txn.id().clone(), self.range.clone(), self.reverse)
             .await?;
-
-        Ok(count == 0)
+        let empty = rows.next().await.is_none();
+        Ok(empty)
     }
 
     async fn len(&self, txn_id: TxnId, range: BTreeRange) -> TCResult<u64> {
         if range == BTreeRange::default() {
-            self.source.len(txn_id, self.bounds.range().clone()).await
-        } else if self.bounds.range().contains(&range, self.schema())? {
+            self.source.len(txn_id, self.range.clone()).await
+        } else if self.range.contains(&range, self.schema())? {
             self.source.len(txn_id, range).await
         } else {
             Err(error::bad_request(ERR_BOUNDS, range))
@@ -98,29 +121,33 @@ impl BTreeInstance for BTreeSlice {
         self.source.schema()
     }
 
-    async fn slice(&self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>> {
-        if selector.range() == &BTreeRange::default() {
-            let reverse = selector.reverse() ^ self.bounds.reverse();
+    async fn stream(
+        &self,
+        txn_id: TxnId,
+        range: BTreeRange,
+        reverse: bool,
+    ) -> TCResult<TCStream<Key>> {
+        debug!(
+            "reverse: {} ^ {} = {}",
+            reverse,
+            self.reverse,
+            reverse ^ self.reverse
+        );
+        let reverse = reverse ^ self.reverse;
 
-            debug!(
-                "BTreeSlice::slice {} (reverse: {})",
-                self.bounds.range(),
-                reverse
-            );
-
+        if range == BTreeRange::default() {
+            debug!("BTreeSlice::slice {} (reverse: {})", &self.range, reverse);
             self.source
-                .slice(txn_id, (self.bounds.range().clone(), reverse).into())
+                .stream(txn_id, self.range.clone(), reverse)
                 .await
-        } else if self
-            .bounds
-            .range()
-            .contains(selector.range(), self.schema())?
-        {
-            debug!("BTreeSlice::slice with constrained bounds");
-
-            self.source.slice(txn_id, selector).await
+        } else if self.range.contains(&range, self.schema())? {
+            debug!(
+                "BTreeSlice::slice with constrained bounds: {} (reverse: {})",
+                range, reverse
+            );
+            self.source.stream(txn_id, range, reverse).await
         } else {
-            Err(error::bad_request(ERR_BOUNDS, selector.range()))
+            Err(error::bad_request(ERR_BOUNDS, range))
         }
     }
 }
@@ -137,18 +164,6 @@ impl Transact for BTreeSlice {
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.source.finalize(txn_id).await
-    }
-}
-
-impl From<BTree> for BTreeSlice {
-    fn from(btree: BTree) -> BTreeSlice {
-        match btree {
-            BTree::View(slice) => slice.into_inner(),
-            BTree::Tree(btree) => BTreeSlice {
-                source: btree.into_inner(),
-                bounds: Selector::default(),
-            },
-        }
     }
 }
 

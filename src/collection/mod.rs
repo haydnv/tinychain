@@ -16,14 +16,11 @@ pub mod schema;
 pub mod table;
 pub mod tensor;
 
-use btree::BTreeInstance;
-use class::CollectionInstance;
-
 pub type CollectionType = class::CollectionType;
 pub type CollectionBaseType = class::CollectionBaseType;
 
-pub type BTree = btree::BTree;
-pub type BTreeSlice = btree::BTreeSlice;
+pub use btree::*;
+pub use class::*;
 
 #[derive(Clone)]
 pub enum CollectionBase {
@@ -289,17 +286,6 @@ impl TryFrom<CollectionView> for BTree {
     fn try_from(view: CollectionView) -> TCResult<BTree> {
         match view {
             CollectionView::BTree(btree) => Ok(btree),
-            other => Err(error::bad_request("Expected BTree but found", other)),
-        }
-    }
-}
-
-impl TryFrom<CollectionView> for BTreeSlice {
-    type Error = error::TCError;
-
-    fn try_from(view: CollectionView) -> TCResult<BTreeSlice> {
-        match view {
-            CollectionView::BTree(btree) => Ok(btree.into()),
             other => Err(error::bad_request("Expected BTree but found", other)),
         }
     }

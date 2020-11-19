@@ -109,34 +109,6 @@ pub enum BTree {
 }
 
 impl BTree {
-    fn btree_slice(&self, selector: Selector) -> TCResult<BTreeSlice> {
-        match self {
-            Self::Tree(tree) => Ok(BTreeSlice::new(tree.clone().into_inner(), selector)),
-            Self::View(view) if selector.range() == &BTreeRange::default() => {
-                let (range, reverse) = view.selector().clone().into_inner();
-                let reverse = reverse ^ selector.reverse();
-                Ok(BTreeSlice::new(
-                    view.source().clone(),
-                    (range, reverse).into(),
-                ))
-            }
-            Self::View(view)
-                if view
-                    .selector()
-                    .range()
-                    .contains(selector.range(), self.schema())? =>
-            {
-                let (range, reverse) = selector.into_inner();
-                let reverse = reverse ^ view.selector().reverse();
-                Ok(BTreeSlice::new(
-                    view.source().clone(),
-                    (range, reverse).into(),
-                ))
-            }
-            Self::View(_) => Err(error::bad_request(ERR_BOUNDS, selector.range())),
-        }
-    }
-
     async fn route(
         &self,
         _request: &Request,
@@ -148,28 +120,23 @@ impl BTree {
             if range == BTreeRange::default() {
                 Ok(State::Collection(self.clone().into()))
             } else if range.is_key(self.schema()) {
-                let mut slice = self.slice(txn.id().clone(), range.into()).await?;
-                slice
-                    .next()
-                    .await
-                    .ok_or_else(|| error::not_found("(btree key)"))
+                let mut rows = self.stream(txn.id().clone(), range, false).await?;
+                let row = rows.next().await;
+                row.ok_or_else(|| error::not_found("(btree key)"))
                     .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key))))
             } else {
-                let selector = Selector::from(range);
-                self.btree_slice(selector)
-                    .map(|slice| State::Collection(slice.into()))
+                let slice = BTreeSlice::new(self.clone(), range, false)?;
+                Ok(State::Collection(slice.into()))
             }
         } else if path.len() == 1 {
             match path[0].as_str() {
                 "count" => {
-                    self.len(txn.id().clone(), range)
-                        .map_ok(|len| State::Scalar(Number::from(len).into()))
-                        .await
+                    let len = self.len(txn.id().clone(), range).await?;
+                    Ok(State::Scalar(Number::from(len).into()))
                 }
                 "reverse" => {
-                    let selector = Selector::from((range, true));
-                    self.btree_slice(selector)
-                        .map(|slice| State::Collection(slice.into()))
+                    let slice = BTreeSlice::new(self.clone(), range, true)?;
+                    Ok(State::Collection(slice.into()))
                 }
                 other => Err(error::not_found(other)),
             }
@@ -285,7 +252,7 @@ impl CollectionInstance for BTree {
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         let stream = self
-            .slice(txn.id().clone(), Selector::default())
+            .stream(txn.id().clone(), BTreeRange::default(), false)
             .await?
             .map(Value::Tuple)
             .map(Scalar::Value);
@@ -353,10 +320,15 @@ impl BTreeInstance for BTree {
         }
     }
 
-    async fn slice(&self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>> {
+    async fn stream(
+        &self,
+        txn_id: TxnId,
+        range: BTreeRange,
+        reverse: bool,
+    ) -> TCResult<TCStream<Key>> {
         match self {
-            Self::Tree(tree) => tree.slice(txn_id, selector).await,
-            Self::View(view) => view.slice(txn_id, selector).await,
+            Self::Tree(tree) => tree.stream(txn_id, range, reverse).await,
+            Self::View(view) => view.stream(txn_id, range, reverse).await,
         }
     }
 }

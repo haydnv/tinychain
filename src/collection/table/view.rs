@@ -590,7 +590,7 @@ impl TableInstance for IndexSlice {
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
         self.source
-            .slice(txn_id.clone(), self.range.clone().into())
+            .stream(txn_id.clone(), self.range.clone(), self.reverse)
             .await
     }
 

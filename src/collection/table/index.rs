@@ -350,9 +350,7 @@ impl Index {
     pub fn get(&self, txn_id: TxnId, key: Vec<Value>) -> TCBoxTryFuture<Option<Vec<Value>>> {
         Box::pin(async move {
             self.schema.validate_key(&key)?;
-
-            let range = btree::BTreeRange::from(key);
-            let mut rows = self.btree.slice(txn_id, range.into()).await?;
+            let mut rows = self.btree.stream(txn_id, key.into(), false).await?;
             Ok(rows.next().await)
         })
     }
@@ -456,7 +454,9 @@ impl TableInstance for Index {
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        self.btree.slice(txn_id, btree::Selector::default()).await
+        self.btree
+            .stream(txn_id, btree::BTreeRange::default(), false)
+            .await
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {

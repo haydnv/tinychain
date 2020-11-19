@@ -10,7 +10,7 @@ use crate::error;
 use crate::scalar::{label, Link, PathSegment, TCPathBuf, Value};
 use crate::transaction::{Txn, TxnId};
 
-use super::{BTree, BTreeRange, Key, Selector};
+use super::{BTree, BTreeRange, Key};
 
 #[async_trait]
 pub trait BTreeInstance {
@@ -36,7 +36,12 @@ pub trait BTreeInstance {
 
     fn schema(&'_ self) -> &'_ [Column];
 
-    async fn slice(&self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>>;
+    async fn stream(
+        &self,
+        txn_id: TxnId,
+        range: BTreeRange,
+        reverse: bool,
+    ) -> TCResult<TCStream<Key>>;
 }
 
 #[derive(Clone, Eq, PartialEq)]

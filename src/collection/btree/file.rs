@@ -23,7 +23,7 @@ use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::collator::Collator;
-use super::{validate_key, validate_range, BTreeInstance, BTreeRange, Key, Selector};
+use super::{validate_key, validate_range, BTreeInstance, BTreeRange, Key};
 
 type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Unpin>>>;
 
@@ -674,7 +674,7 @@ impl BTreeInstance for BTreeFile {
     }
 
     async fn len(&self, txn_id: TxnId, range: BTreeRange) -> TCResult<u64> {
-        let slice = self.slice(txn_id, range.into()).await?;
+        let slice = self.stream(txn_id, range, false).await?;
         Ok(slice.fold(0u64, |len, _| future::ready(len + 1)).await)
     }
 
@@ -682,8 +682,12 @@ impl BTreeInstance for BTreeFile {
         &self.schema
     }
 
-    async fn slice(&self, txn_id: TxnId, selector: Selector) -> TCResult<TCStream<Key>> {
-        let (range, reverse) = selector.into_inner();
+    async fn stream(
+        &self,
+        txn_id: TxnId,
+        range: BTreeRange,
+        reverse: bool,
+    ) -> TCResult<TCStream<Key>> {
         let range = validate_range(range, self.schema())?;
 
         let root_id = self.root.read(&txn_id).await?;
