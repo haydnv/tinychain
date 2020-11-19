@@ -6,14 +6,15 @@ use futures::Stream;
 use crate::class::{Class, NativeClass, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::schema::Column;
+use crate::collection::Collection;
 use crate::error;
 use crate::scalar::{label, Link, PathSegment, TCPathBuf, Value};
-use crate::transaction::{Txn, TxnId};
+use crate::transaction::{Transact, Txn, TxnId};
 
 use super::{BTree, BTreeRange, Key};
 
 #[async_trait]
-pub trait BTreeInstance {
+pub trait BTreeInstance: Clone + Into<BTree> + Into<Collection> + Transact {
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()>;
 
     async fn insert(&self, txn_id: &TxnId, key: Key) -> TCResult<()>;

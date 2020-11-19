@@ -17,6 +17,7 @@ use crate::block::File;
 use crate::block::{BlockData, BlockId, BlockOwned, BlockOwnedMut};
 use crate::class::{TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::schema::{Column, RowSchema};
+use crate::collection::{Collection, CollectionBase};
 use crate::error;
 use crate::scalar::*;
 use crate::transaction::lock::{Mutable, TxnLock};
@@ -719,6 +720,12 @@ impl Transact for BTreeFile {
 
     async fn finalize(&self, txn_id: &TxnId) {
         join(self.file.finalize(txn_id), self.root.finalize(txn_id)).await;
+    }
+}
+
+impl From<BTreeFile> for Collection {
+    fn from(btree: BTreeFile) -> Collection {
+        Collection::Base(CollectionBase::BTree(btree))
     }
 }
 

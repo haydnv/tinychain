@@ -108,41 +108,39 @@ pub enum BTree {
     View(BTreeImpl<BTreeSlice>),
 }
 
-impl BTree {
-    async fn route(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        range: BTreeRange,
-    ) -> TCResult<State> {
-        if path.is_empty() {
-            if range == BTreeRange::default() {
-                Ok(State::Collection(self.clone().into()))
-            } else if range.is_key(self.schema()) {
-                let mut rows = self.stream(txn.id().clone(), range, false).await?;
-                let row = rows.next().await;
-                row.ok_or_else(|| error::not_found("(btree key)"))
-                    .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key))))
-            } else {
-                let slice = BTreeSlice::new(self.clone(), range, false)?;
+async fn route<T: BTreeInstance>(
+    btree: &T,
+    _request: &Request,
+    txn: &Txn,
+    path: &[PathSegment],
+    range: BTreeRange,
+) -> TCResult<State> {
+    if path.is_empty() {
+        if range == BTreeRange::default() {
+            Ok(State::Collection(btree.clone().into()))
+        } else if range.is_key(btree.schema()) {
+            let mut rows = btree.stream(txn.id().clone(), range, false).await?;
+            let row = rows.next().await;
+            row.ok_or_else(|| error::not_found("(btree key)"))
+                .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key))))
+        } else {
+            let slice = BTreeSlice::new(btree.clone().into(), range, false)?;
+            Ok(State::Collection(slice.into()))
+        }
+    } else if path.len() == 1 {
+        match path[0].as_str() {
+            "count" => {
+                let len = btree.len(txn.id().clone(), range).await?;
+                Ok(State::Scalar(Number::from(len).into()))
+            }
+            "reverse" => {
+                let slice = BTreeSlice::new(btree.clone().into(), range, true)?;
                 Ok(State::Collection(slice.into()))
             }
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "count" => {
-                    let len = self.len(txn.id().clone(), range).await?;
-                    Ok(State::Scalar(Number::from(len).into()))
-                }
-                "reverse" => {
-                    let slice = BTreeSlice::new(self.clone(), range, true)?;
-                    Ok(State::Collection(slice.into()))
-                }
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            Err(error::path_not_found(path))
+            other => Err(error::not_found(other)),
         }
+    } else {
+        Err(error::path_not_found(path))
     }
 }
 
@@ -158,7 +156,7 @@ impl Instance for BTree {
 }
 
 #[async_trait]
-impl CollectionInstance for BTree {
+impl<T: BTreeInstance> CollectionInstance for T {
     type Item = Key;
     type Slice = BTreeSlice;
 
@@ -171,14 +169,11 @@ impl CollectionInstance for BTree {
     ) -> TCResult<State> {
         let range = BTreeRange::try_cast_from(range, |v| error::bad_request(ERR_INVALID_RANGE, v))?;
         let range = validate_range(range, self.schema())?;
-        self.route(request, txn, path, range).await
+        route(self, request, txn, path, range).await
     }
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        match self {
-            Self::Tree(tree) => tree.is_empty(txn).await,
-            Self::View(view) => view.is_empty(txn).await,
-        }
+        BTreeInstance::is_empty(self, txn).await
     }
 
     async fn post(
@@ -198,7 +193,7 @@ impl CollectionInstance for BTree {
         if path.len() == 1 && &path[0] == "delete" {
             self.delete(txn.id(), range).map_ok(State::from).await
         } else {
-            self.route(request, txn, path, range).await
+            route(self, request, txn, path, range).await
         }
     }
 
@@ -301,8 +296,8 @@ impl BTreeInstance for BTree {
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
-            Self::Tree(tree) => tree.is_empty(txn).await,
-            Self::View(view) => view.is_empty(txn).await,
+            Self::Tree(tree) => BTreeInstance::is_empty(tree.deref(), txn).await,
+            Self::View(view) => BTreeInstance::is_empty(view.deref(), txn).await,
         }
     }
 

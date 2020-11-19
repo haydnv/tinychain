@@ -356,7 +356,7 @@ impl Index {
     }
 
     pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        self.btree.is_empty(txn).await
+        BTreeInstance::is_empty(&self.btree, txn).await
     }
 
     pub async fn len(&self, txn_id: TxnId) -> TCResult<u64> {

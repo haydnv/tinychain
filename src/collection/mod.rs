@@ -16,9 +16,6 @@ pub mod schema;
 pub mod table;
 pub mod tensor;
 
-pub type CollectionType = class::CollectionType;
-pub type CollectionBaseType = class::CollectionBaseType;
-
 pub use btree::*;
 pub use class::*;
 
@@ -55,13 +52,17 @@ impl CollectionInstance for CollectionBase {
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<State> {
-        let view: CollectionView = self.clone().into();
-        view.get(request, txn, path, selector).await
+        match self {
+            Self::BTree(btree) => btree.get(request, txn, path, selector).await,
+            Self::Null(null) => null.get(request, txn, path, selector).await,
+            Self::Table(table) => table.get(request, txn, path, selector).await,
+            Self::Tensor(tensor) => tensor.get(request, txn, path, selector).await,
+        }
     }
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
-            Self::BTree(btree) => btree.is_empty(txn).await,
+            Self::BTree(btree) => CollectionInstance::is_empty(btree, txn).await,
             Self::Null(null) => null.is_empty(txn).await,
             Self::Table(table) => table.is_empty(txn).await,
             Self::Tensor(tensor) => tensor.is_empty(txn).await,
@@ -76,11 +77,7 @@ impl CollectionInstance for CollectionBase {
         params: Object,
     ) -> TCResult<State> {
         match self {
-            Self::BTree(btree) => {
-                BTree::from(btree.clone())
-                    .post(request, txn, path, params)
-                    .await
-            }
+            Self::BTree(btree) => btree.post(request, txn, path, params).await,
             Self::Null(null) => null.post(request, txn, path, params).await,
             Self::Table(table) => table.post(request, txn, path, params).await,
             Self::Tensor(tensor) => tensor.post(request, txn, path, params).await,
@@ -95,13 +92,17 @@ impl CollectionInstance for CollectionBase {
         selector: Value,
         value: State,
     ) -> TCResult<()> {
-        let view: CollectionView = self.clone().into();
-        view.put(request, txn, path, selector, value).await
+        match self {
+            Self::BTree(btree) => btree.put(request, txn, path, selector, value).await,
+            Self::Null(null) => null.put(request, txn, path, selector, value).await,
+            Self::Table(table) => table.put(request, txn, path, selector, value).await,
+            Self::Tensor(tensor) => tensor.put(request, txn, path, selector, value).await,
+        }
     }
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
-            Self::BTree(btree) => BTree::from(btree.clone()).to_stream(txn).await,
+            Self::BTree(btree) => btree.to_stream(txn).await,
             Self::Null(null) => null.to_stream(txn).await,
             Self::Table(table) => table.to_stream(txn).await,
             Self::Tensor(tensor) => tensor.to_stream(txn).await,

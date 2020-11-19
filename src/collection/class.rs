@@ -3,7 +3,7 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
+use crate::class::{Class, NativeClass, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::request::Request;
 use crate::scalar::{
@@ -25,7 +25,7 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send {
 }
 
 #[async_trait]
-pub trait CollectionInstance: Instance + Into<Collection> + Transact + Send {
+pub trait CollectionInstance: Into<Collection> + Transact + Send {
     type Item: CastInto<Scalar> + TryCastFrom<Scalar>;
     type Slice;
 
