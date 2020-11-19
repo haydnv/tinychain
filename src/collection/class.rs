@@ -13,7 +13,7 @@ use crate::transaction::Txn;
 
 use super::btree::{BTreeFile, BTreeImpl, BTreeType};
 use super::null::{Null, NullType};
-use super::table::{TableBaseType, TableType};
+use super::table::{TableBaseType, TableImpl, TableType};
 use super::tensor::{TensorBaseType, TensorType};
 use super::{Collection, CollectionBase, CollectionView};
 
@@ -175,7 +175,12 @@ impl CollectionClass for CollectionBaseType {
                     .await
             }
             Self::Null => Ok(CollectionBase::Null(Null::create())),
-            Self::Table(tt) => tt.get(txn, schema).map_ok(CollectionBase::Table).await,
+            Self::Table(tt) => {
+                tt.get(txn, schema)
+                    .map_ok(TableImpl::from)
+                    .map_ok(CollectionBase::Table)
+                    .await
+            }
             Self::Tensor(tt) => tt.get(txn, schema).map_ok(CollectionBase::Tensor).await,
         }
     }

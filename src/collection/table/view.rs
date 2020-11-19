@@ -9,12 +9,10 @@ use futures::{future, join};
 
 use crate::class::*;
 use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
-use crate::collection::class::CollectionInstance;
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::{Collection, CollectionView};
 use crate::error;
-use crate::request::Request;
-use crate::scalar::{label, Id, Link, Object, PathSegment, Scalar, TCPathBuf, Value};
+use crate::scalar::{label, Id, Link, PathSegment, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds};
@@ -96,51 +94,6 @@ impl Instance for TableView {
             Self::Selection(_) => Selection,
             Self::TableSlice(_) => TableSlice,
         }
-    }
-}
-
-#[async_trait]
-impl CollectionInstance for TableView {
-    type Item = Vec<Value>;
-    type Slice = TableView;
-
-    async fn get(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _selector: Value,
-    ) -> TCResult<State> {
-        Err(error::not_implemented("TableBase::get"))
-    }
-
-    async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
-        Err(error::not_implemented("TableBase::is_empty"))
-    }
-
-    async fn post(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _params: Object,
-    ) -> TCResult<State> {
-        Err(error::not_implemented("TableView::post"))
-    }
-
-    async fn put(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _selector: Value,
-        _value: State,
-    ) -> TCResult<()> {
-        Err(error::not_implemented("TableBase::put"))
-    }
-
-    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Scalar>> {
-        Err(error::not_implemented("TableBase::to_stream"))
     }
 }
 
@@ -369,7 +322,7 @@ impl TryFrom<CollectionView> for TableView {
 
     fn try_from(view: CollectionView) -> TCResult<TableView> {
         match view {
-            CollectionView::Table(Table::View(view)) => Ok(view),
+            CollectionView::Table(Table::View(view)) => Ok(view.into_inner()),
             other => Err(error::bad_request("Expected TableView but found", other)),
         }
     }
@@ -377,7 +330,7 @@ impl TryFrom<CollectionView> for TableView {
 
 impl From<TableView> for Collection {
     fn from(view: TableView) -> Collection {
-        Collection::View(CollectionView::Table(Table::View(view)))
+        Collection::View(CollectionView::Table(Table::View(view.into())))
     }
 }
 
@@ -470,7 +423,7 @@ impl TableInstance for Aggregate {
 
 impl From<Aggregate> for Table {
     fn from(aggregate: Aggregate) -> Self {
-        Self::View(aggregate.into())
+        Self::View(TableView::from(aggregate).into())
     }
 }
 
@@ -621,7 +574,7 @@ impl TableInstance for IndexSlice {
 
 impl From<IndexSlice> for Table {
     fn from(index_slice: IndexSlice) -> Self {
-        Self::View(index_slice.into())
+        Self::View(TableView::from(index_slice).into())
     }
 }
 
@@ -731,7 +684,7 @@ impl TableInstance for Limited {
 
 impl From<Limited> for Table {
     fn from(limited: Limited) -> Table {
-        Table::View(limited.into())
+        Table::View(TableView::from(limited).into())
     }
 }
 
@@ -935,7 +888,7 @@ impl TableInstance for Merged {
 
 impl From<Merged> for Table {
     fn from(merged: Merged) -> Table {
-        Table::View(merged.into())
+        Table::View(TableView::from(merged).into())
     }
 }
 
@@ -1095,7 +1048,7 @@ impl TableInstance for Selection {
 
 impl From<Selection> for Table {
     fn from(selection: Selection) -> Self {
-        Self::View(selection.into())
+        Self::View(TableView::from(selection).into())
     }
 }
 
@@ -1212,7 +1165,7 @@ impl TableInstance for TableSlice {
 
 impl From<TableSlice> for Table {
     fn from(table_slice: TableSlice) -> Table {
-        Table::View(table_slice.into())
+        Table::View(TableView::from(table_slice).into())
     }
 }
 

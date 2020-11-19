@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -154,9 +155,79 @@ pub trait TableInstance: Clone + Into<Table> + Sized + Send + 'static {
 }
 
 #[derive(Clone)]
+pub struct TableImpl<T: TableInstance> {
+    inner: T,
+}
+
+impl<T: TableInstance> TableImpl<T> {
+    fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+#[async_trait]
+impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
+    type Item = Vec<Value>;
+    type Slice = TableView;
+
+    async fn get(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _selector: Value,
+    ) -> TCResult<State> {
+        Err(error::not_implemented("TableImpl::get"))
+    }
+
+    async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
+        Err(error::not_implemented("TableImpl::is_empty"))
+    }
+
+    async fn post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _params: Object,
+    ) -> TCResult<State> {
+        Err(error::not_implemented("TableImpl::post"))
+    }
+
+    async fn put(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _selector: Value,
+        _value: State,
+    ) -> TCResult<()> {
+        Err(error::not_implemented("TableImpl::put"))
+    }
+
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Scalar>> {
+        Err(error::not_implemented("TableImpl::to_stream"))
+    }
+}
+
+impl<T: TableInstance> Deref for TableImpl<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.inner
+    }
+}
+
+impl<T: TableInstance> From<T> for TableImpl<T> {
+    fn from(inner: T) -> TableImpl<T> {
+        Self { inner }
+    }
+}
+
+#[derive(Clone)]
 pub enum Table {
-    Base(TableBase),
-    View(TableView),
+    Base(TableImpl<TableBase>),
+    View(TableImpl<TableView>),
 }
 
 impl Table {
@@ -249,8 +320,8 @@ impl TableInstance for Table {
 
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.delete(txn_id).await,
-            Self::View(view) => view.delete(txn_id).await,
+            Self::Base(base) => base.into_inner().delete(txn_id).await,
+            Self::View(view) => view.into_inner().delete(txn_id).await,
         }
     }
 
@@ -326,8 +397,8 @@ impl TableInstance for Table {
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
         match self {
-            Self::Base(base) => base.stream(txn_id).await,
-            Self::View(view) => view.stream(txn_id).await,
+            Self::Base(base) => base.into_inner().stream(txn_id).await,
+            Self::View(view) => view.into_inner().stream(txn_id).await,
         }
     }
 
@@ -347,8 +418,8 @@ impl TableInstance for Table {
 
     async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.update(txn, value).await,
-            Self::View(view) => view.update(txn, value).await,
+            Self::Base(base) => base.into_inner().update(txn, value).await,
+            Self::View(view) => view.into_inner().update(txn, value).await,
         }
     }
 
@@ -386,13 +457,13 @@ impl Transact for Table {
 
 impl From<TableBase> for Table {
     fn from(base: TableBase) -> Table {
-        Table::Base(base)
+        Table::Base(base.into())
     }
 }
 
 impl From<TableView> for Table {
     fn from(view: TableView) -> Table {
-        Table::View(view)
+        Table::View(view.into())
     }
 }
 

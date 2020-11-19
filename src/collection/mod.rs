@@ -18,12 +18,13 @@ pub mod tensor;
 
 pub use btree::*;
 pub use class::*;
+pub use table::*;
 
 #[derive(Clone)]
 pub enum CollectionBase {
     BTree(BTreeImpl<BTreeFile>),
     Null(null::Null),
-    Table(table::TableBase),
+    Table(TableImpl<TableBase>),
     Tensor(tensor::class::TensorBase),
 }
 

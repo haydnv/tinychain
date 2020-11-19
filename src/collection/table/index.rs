@@ -7,19 +7,18 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
-use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::btree::{self, BTreeFile, BTreeInstance};
 use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
-use crate::request::Request;
-use crate::scalar::{label, Id, Link, Object, PathSegment, Scalar, TCPathBuf, TryCastInto, Value};
+use crate::scalar::{label, Id, Link, PathSegment, TCPathBuf, TryCastInto, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds, ColumnBound};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
-use super::{Table, TableInstance, TableType, TableView};
+use super::{Table, TableImpl, TableInstance, TableType};
 
 const PRIMARY_INDEX: &str = "primary";
 
@@ -97,9 +96,9 @@ impl fmt::Display for TableBaseType {
 
 #[derive(Clone)]
 pub enum TableBase {
-    Index(Index),
-    ROIndex(ReadOnly),
-    Table(TableIndex),
+    Index(TableImpl<Index>),
+    ROIndex(TableImpl<ReadOnly>),
+    Table(TableImpl<TableIndex>),
 }
 
 impl Instance for TableBase {
@@ -111,67 +110,6 @@ impl Instance for TableBase {
             Self::ROIndex(_) => TableBaseType::ReadOnly,
             Self::Table(_) => TableBaseType::Table,
         }
-    }
-}
-
-#[async_trait]
-impl CollectionInstance for TableBase {
-    type Item = Vec<Value>;
-    type Slice = TableView;
-
-    async fn get(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _selector: Value,
-    ) -> TCResult<State> {
-        Err(error::not_implemented("TableBase::get"))
-    }
-
-    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        match self {
-            Self::Index(index) => index.is_empty(txn).await,
-            Self::ROIndex(index) => index.is_empty(txn).await,
-            Self::Table(table) => table.is_empty(txn).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _params: Object,
-    ) -> TCResult<State> {
-        Err(error::not_implemented("TableBase::post"))
-    }
-
-    async fn put(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        path: &[PathSegment],
-        _selector: Value,
-        _value: State,
-    ) -> TCResult<()> {
-        if path.is_empty() {
-            Err(error::not_implemented("TableBase::put"))
-        } else {
-            Err(error::path_not_found(path))
-        }
-    }
-
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        let txn_id = txn.id().clone();
-
-        let stream = match self {
-            Self::Index(index) => index.clone().stream(txn_id).await?,
-            Self::ROIndex(index) => index.clone().stream(txn_id).await?,
-            Self::Table(table) => table.clone().stream(txn_id).await?,
-        };
-
-        Ok(Box::pin(stream.map(Scalar::from)))
     }
 }
 
@@ -189,9 +127,9 @@ impl TableInstance for TableBase {
 
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         match self {
-            Self::Index(index) => index.delete(txn_id).await,
-            Self::ROIndex(index) => index.delete(txn_id).await,
-            Self::Table(table) => table.delete(txn_id).await,
+            Self::Index(index) => index.into_inner().clone().delete(txn_id).await,
+            Self::ROIndex(index) => index.into_inner().clone().delete(txn_id).await,
+            Self::Table(table) => table.into_inner().clone().delete(txn_id).await,
         }
     }
 
@@ -245,9 +183,9 @@ impl TableInstance for TableBase {
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
         match self {
-            Self::Index(index) => index.stream(txn_id).await,
-            Self::ROIndex(index) => index.stream(txn_id).await,
-            Self::Table(table) => table.stream(txn_id).await,
+            Self::Index(index) => index.into_inner().stream(txn_id).await,
+            Self::ROIndex(index) => index.into_inner().stream(txn_id).await,
+            Self::Table(table) => table.into_inner().stream(txn_id).await,
         }
     }
 
@@ -269,9 +207,9 @@ impl TableInstance for TableBase {
 
     async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
         match self {
-            Self::Index(index) => index.update(txn, value).await,
-            Self::ROIndex(index) => index.update(txn, value).await,
-            Self::Table(table) => table.update(txn, value).await,
+            Self::Index(index) => index.into_inner().update(txn, value).await,
+            Self::ROIndex(index) => index.into_inner().update(txn, value).await,
+            Self::Table(table) => table.into_inner().update(txn, value).await,
         }
     }
 
@@ -313,25 +251,25 @@ impl Transact for TableBase {
 
 impl From<Index> for TableBase {
     fn from(index: Index) -> Self {
-        Self::Index(index)
+        Self::Index(index.into())
     }
 }
 
 impl From<ReadOnly> for TableBase {
     fn from(index: ReadOnly) -> Self {
-        Self::ROIndex(index)
+        Self::ROIndex(index.into())
     }
 }
 
 impl From<TableIndex> for TableBase {
     fn from(index: TableIndex) -> Self {
-        Self::Table(index)
+        Self::Table(index.into())
     }
 }
 
 impl From<TableBase> for Collection {
     fn from(table: TableBase) -> Collection {
-        Collection::Base(CollectionBase::Table(table))
+        Collection::Base(CollectionBase::Table(table.into()))
     }
 }
 
@@ -504,7 +442,7 @@ impl TableInstance for Index {
 
 impl From<Index> for Table {
     fn from(index: Index) -> Table {
-        Table::Base(index.into())
+        Table::Base(TableBase::from(index).into())
     }
 }
 
@@ -627,7 +565,7 @@ impl TableInstance for ReadOnly {
 
 impl From<ReadOnly> for Table {
     fn from(index: ReadOnly) -> Table {
-        Table::Base(index.into())
+        Table::Base(TableBase::from(index).into())
     }
 }
 
@@ -1026,7 +964,7 @@ impl TableInstance for TableIndex {
 
 impl From<TableIndex> for Table {
     fn from(index: TableIndex) -> Table {
-        Table::Base(index.into())
+        Table::Base(TableBase::from(index).into())
     }
 }
 
