@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
 
-use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionView};
 use crate::error;
@@ -100,28 +100,20 @@ pub trait TableInstance: Clone + Into<Table> + Sized + Send + 'static {
         Ok(count)
     }
 
-    fn delete<'a>(self, _txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_DELETE))))
+    async fn delete(self, _txn_id: TxnId) -> TCResult<()> {
+        Err(error::unsupported(ERR_DELETE))
     }
 
-    fn delete_row<'a>(&'a self, _txn_id: &'a TxnId, _row: Row) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_DELETE))))
+    async fn delete_row(&self, _txn_id: &TxnId, _row: Row) -> TCResult<()> {
+        Err(error::unsupported(ERR_DELETE))
     }
 
     fn group_by(&self, columns: Vec<Id>) -> TCResult<view::Aggregate> {
         view::Aggregate::new(self.clone().into(), columns)
     }
 
-    fn index<'a>(
-        &'a self,
-        txn: Txn,
-        columns: Option<Vec<Id>>,
-    ) -> TCBoxTryFuture<'a, index::ReadOnly> {
-        Box::pin(index::ReadOnly::copy_from(
-            self.clone().into(),
-            txn,
-            columns,
-        ))
+    async fn index(&self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly> {
+        index::ReadOnly::copy_from(self.clone().into(), txn, columns).await
     }
 
     fn key(&'_ self) -> &'_ [Column];
@@ -146,18 +138,18 @@ pub trait TableInstance: Clone + Into<Table> + Sized + Send + 'static {
         Err(error::unsupported(ERR_SLICE))
     }
 
-    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream>;
+    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream>;
 
     fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()>;
 
     fn validate_order(&self, order: &[Id]) -> TCResult<()>;
 
-    fn update<'a>(self, _txn: Txn, _value: Row) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_UPDATE))))
+    async fn update(self, _txn: Txn, _value: Row) -> TCResult<()> {
+        Err(error::unsupported(ERR_UPDATE))
     }
 
-    fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCBoxTryFuture<()> {
-        Box::pin(future::ready(Err(error::unsupported(ERR_UPDATE))))
+    async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
+        Err(error::unsupported(ERR_UPDATE))
     }
 }
 
@@ -255,17 +247,17 @@ impl TableInstance for Table {
         }
     }
 
-    fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
+    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.delete(txn_id),
-            Self::View(view) => view.delete(txn_id),
+            Self::Base(base) => base.delete(txn_id).await,
+            Self::View(view) => view.delete(txn_id).await,
         }
     }
 
-    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
+    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.delete_row(txn_id, row),
-            Self::View(view) => view.delete_row(txn_id, row),
+            Self::Base(base) => base.delete_row(txn_id, row).await,
+            Self::View(view) => view.delete_row(txn_id, row).await,
         }
     }
 
@@ -276,14 +268,10 @@ impl TableInstance for Table {
         }
     }
 
-    fn index<'a>(
-        &'a self,
-        txn: Txn,
-        columns: Option<Vec<Id>>,
-    ) -> TCBoxTryFuture<'a, index::ReadOnly> {
+    async fn index(&self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly> {
         match self {
-            Self::Base(base) => base.index(txn, columns),
-            Self::View(view) => view.index(txn, columns),
+            Self::Base(base) => base.index(txn, columns).await,
+            Self::View(view) => view.index(txn, columns).await,
         }
     }
 
@@ -336,10 +324,10 @@ impl TableInstance for Table {
         }
     }
 
-    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
         match self {
-            Self::Base(base) => base.stream(txn_id),
-            Self::View(view) => view.stream(txn_id),
+            Self::Base(base) => base.stream(txn_id).await,
+            Self::View(view) => view.stream(txn_id).await,
         }
     }
 
@@ -357,17 +345,17 @@ impl TableInstance for Table {
         }
     }
 
-    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
+    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.update(txn, value),
-            Self::View(view) => view.update(txn, value),
+            Self::Base(base) => base.update(txn, value).await,
+            Self::View(view) => view.update(txn, value).await,
         }
     }
 
-    fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCBoxTryFuture<()> {
+    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
         match self {
-            Self::Base(base) => base.update_row(txn_id, row, value),
-            Self::View(view) => view.update_row(txn_id, row, value),
+            Self::Base(base) => base.update_row(txn_id, row, value).await,
+            Self::View(view) => view.update_row(txn_id, row, value).await,
         }
     }
 }

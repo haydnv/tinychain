@@ -187,19 +187,19 @@ impl TableInstance for TableBase {
         }
     }
 
-    fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
+    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         match self {
-            Self::Index(index) => index.delete(txn_id),
-            Self::ROIndex(index) => index.delete(txn_id),
-            Self::Table(table) => table.delete(txn_id),
+            Self::Index(index) => index.delete(txn_id).await,
+            Self::ROIndex(index) => index.delete(txn_id).await,
+            Self::Table(table) => table.delete(txn_id).await,
         }
     }
 
-    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
+    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
         match self {
-            Self::Index(index) => index.delete_row(txn_id, row),
-            Self::ROIndex(index) => index.delete_row(txn_id, row),
-            Self::Table(table) => table.delete_row(txn_id, row),
+            Self::Index(index) => index.delete_row(txn_id, row).await,
+            Self::ROIndex(index) => index.delete_row(txn_id, row).await,
+            Self::Table(table) => table.delete_row(txn_id, row).await,
         }
     }
 
@@ -243,11 +243,11 @@ impl TableInstance for TableBase {
         }
     }
 
-    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
         match self {
-            Self::Index(index) => index.stream(txn_id),
-            Self::ROIndex(index) => index.stream(txn_id),
-            Self::Table(table) => table.stream(txn_id),
+            Self::Index(index) => index.stream(txn_id).await,
+            Self::ROIndex(index) => index.stream(txn_id).await,
+            Self::Table(table) => table.stream(txn_id).await,
         }
     }
 
@@ -267,19 +267,19 @@ impl TableInstance for TableBase {
         }
     }
 
-    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
+    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
         match self {
-            Self::Index(index) => index.update(txn, value),
-            Self::ROIndex(index) => index.update(txn, value),
-            Self::Table(table) => table.update(txn, value),
+            Self::Index(index) => index.update(txn, value).await,
+            Self::ROIndex(index) => index.update(txn, value).await,
+            Self::Table(table) => table.update(txn, value).await,
         }
     }
 
-    fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCBoxTryFuture<()> {
+    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
         match self {
-            Self::Index(index) => index.update_row(txn_id, row, value),
-            Self::ROIndex(index) => index.update_row(txn_id, row, value),
-            Self::Table(table) => table.update_row(txn_id, row, value),
+            Self::Index(index) => index.update_row(txn_id, row, value).await,
+            Self::ROIndex(index) => index.update_row(txn_id, row, value).await,
+            Self::Table(table) => table.update_row(txn_id, row, value).await,
         }
     }
 }
@@ -412,19 +412,15 @@ impl TableInstance for Index {
         self.len(txn_id).await
     }
 
-    fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            self.btree
-                .delete(&txn_id, btree::BTreeRange::default())
-                .await
-        })
+    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+        self.btree
+            .delete(&txn_id, btree::BTreeRange::default())
+            .await
     }
 
-    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            let key = self.schema.row_into_values(row, false)?;
-            self.btree.delete(txn_id, key.into()).await
-        })
+    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+        let key = self.schema.row_into_values(row, false)?;
+        self.btree.delete(txn_id, key.into()).await
     }
 
     fn key(&'_ self) -> &'_ [Column] {
@@ -459,13 +455,8 @@ impl TableInstance for Index {
         self.index_slice(bounds).map(|is| is.into())
     }
 
-    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
-        Box::pin(async move {
-            self.btree
-                .clone()
-                .slice(txn_id, btree::Selector::default())
-                .await
-        })
+    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+        self.btree.slice(txn_id, btree::Selector::default()).await
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -503,13 +494,11 @@ impl TableInstance for Index {
         }
     }
 
-    fn update<'a>(self, txn: Txn, row: Row) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            let key: btree::Key = self.schema().row_into_values(row, false)?;
-            let range = btree::BTreeRange::from(key.to_vec());
+    async fn update(self, txn: Txn, row: Row) -> TCResult<()> {
+        let key: btree::Key = self.schema().row_into_values(row, false)?;
+        let range = btree::BTreeRange::from(key.to_vec());
 
-            self.btree.update(txn.id(), range, &key).await
-        })
+        self.btree.update(txn.id(), range, &key).await
     }
 }
 
@@ -623,8 +612,8 @@ impl TableInstance for ReadOnly {
             .map(|index| ReadOnly { index }.into())
     }
 
-    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
-        Box::pin(async move { self.index.clone().stream(txn_id).await })
+    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+        self.index.clone().stream(txn_id).await
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -804,32 +793,28 @@ impl TableInstance for TableIndex {
         self.primary.count(txn_id).await
     }
 
-    fn delete<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
-            deletes.push(self.primary.delete(txn_id.clone()));
-            for index in self.auxiliary.values() {
-                deletes.push(index.clone().delete(txn_id.clone()));
-            }
+    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+        let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
+        deletes.push(self.primary.delete(txn_id.clone()));
+        for index in self.auxiliary.values() {
+            deletes.push(index.clone().delete(txn_id.clone()));
+        }
 
-            try_join_all(deletes).await?;
-            Ok(())
-        })
+        try_join_all(deletes).await?;
+        Ok(())
     }
 
-    fn delete_row<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            self.primary.schema().validate_row(&row)?;
+    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+        self.primary.schema().validate_row(&row)?;
 
-            let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
-            for index in self.auxiliary.values() {
-                deletes.push(index.delete_row(txn_id, row.clone()));
-            }
-            deletes.push(self.primary.delete_row(txn_id, row));
-            try_join_all(deletes).await?;
+        let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
+        for index in self.auxiliary.values() {
+            deletes.push(index.delete_row(txn_id, row.clone()));
+        }
+        deletes.push(self.primary.delete_row(txn_id, row));
+        try_join_all(deletes).await?;
 
-            Ok(())
-        })
+        Ok(())
     }
 
     fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
@@ -952,8 +937,8 @@ impl TableInstance for TableIndex {
         }
     }
 
-    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
-        self.primary.stream(txn_id)
+    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+        self.primary.stream(txn_id).await
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -1021,23 +1006,21 @@ impl TableInstance for TableIndex {
         Ok(())
     }
 
-    fn update<'a>(self, txn: Txn, value: Row) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            let schema = self.primary.schema();
-            schema.validate_row_partial(&value)?;
+    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
+        let schema = self.primary.schema();
+        schema.validate_row_partial(&value)?;
 
-            let index = self.clone().index(txn.clone(), None).await?;
+        let index = self.clone().index(txn.clone(), None).await?;
 
-            let txn_id = txn.id();
-            index
-                .stream(txn_id.clone())
-                .await?
-                .map(|row| schema.values_into_row(row))
-                .map_ok(|row| self.upsert(txn_id, row))
-                .try_buffer_unordered(2)
-                .try_fold((), |_, _| future::ready(Ok(())))
-                .await
-        })
+        let txn_id = txn.id();
+        index
+            .stream(txn_id.clone())
+            .await?
+            .map(|row| schema.values_into_row(row))
+            .map_ok(|row| self.upsert(txn_id, row))
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
     }
 }
 
