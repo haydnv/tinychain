@@ -725,7 +725,7 @@ impl Transact for BTreeFile {
 
 impl From<BTreeFile> for Collection {
     fn from(btree: BTreeFile) -> Collection {
-        Collection::Base(CollectionBase::BTree(btree))
+        Collection::Base(CollectionBase::BTree(btree.into()))
     }
 }
 

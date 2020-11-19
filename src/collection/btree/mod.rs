@@ -86,77 +86,46 @@ impl<T: BTreeInstance> BTreeImpl<T> {
     pub fn into_inner(self) -> T {
         self.inner
     }
-}
 
-impl<T: BTreeInstance> Deref for BTreeImpl<T> {
-    type Target = T;
-
-    fn deref(&'_ self) -> &'_ T {
-        &self.inner
-    }
-}
-
-impl<T: BTreeInstance> From<T> for BTreeImpl<T> {
-    fn from(inner: T) -> BTreeImpl<T> {
-        BTreeImpl { inner }
-    }
-}
-
-#[derive(Clone)]
-pub enum BTree {
-    Tree(BTreeImpl<BTreeFile>),
-    View(BTreeImpl<BTreeSlice>),
-}
-
-async fn route<T: BTreeInstance>(
-    btree: &T,
-    _request: &Request,
-    txn: &Txn,
-    path: &[PathSegment],
-    range: BTreeRange,
-) -> TCResult<State> {
-    if path.is_empty() {
-        if range == BTreeRange::default() {
-            Ok(State::Collection(btree.clone().into()))
-        } else if range.is_key(btree.schema()) {
-            let mut rows = btree.stream(txn.id().clone(), range, false).await?;
-            let row = rows.next().await;
-            row.ok_or_else(|| error::not_found("(btree key)"))
-                .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key))))
-        } else {
-            let slice = BTreeSlice::new(btree.clone().into(), range, false)?;
-            Ok(State::Collection(slice.into()))
-        }
-    } else if path.len() == 1 {
-        match path[0].as_str() {
-            "count" => {
-                let len = btree.len(txn.id().clone(), range).await?;
-                Ok(State::Scalar(Number::from(len).into()))
-            }
-            "reverse" => {
-                let slice = BTreeSlice::new(btree.clone().into(), range, true)?;
+    async fn route(
+        &self,
+        _request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        range: BTreeRange,
+    ) -> TCResult<State> {
+        if path.is_empty() {
+            if range == BTreeRange::default() {
+                Ok(State::Collection(self.inner.clone().into()))
+            } else if range.is_key(self.schema()) {
+                let mut rows = self.stream(txn.id().clone(), range, false).await?;
+                let row = rows.next().await;
+                row.ok_or_else(|| error::not_found("(btree key)"))
+                    .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key))))
+            } else {
+                let slice = BTreeSlice::new(self.inner.clone().into(), range, false)?;
                 Ok(State::Collection(slice.into()))
             }
-            other => Err(error::not_found(other)),
-        }
-    } else {
-        Err(error::path_not_found(path))
-    }
-}
-
-impl Instance for BTree {
-    type Class = BTreeType;
-
-    fn class(&self) -> BTreeType {
-        match self {
-            Self::Tree(_) => BTreeType::Tree,
-            Self::View(_) => BTreeType::View,
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "count" => {
+                    let len = self.len(txn.id().clone(), range).await?;
+                    Ok(State::Scalar(Number::from(len).into()))
+                }
+                "reverse" => {
+                    let slice = BTreeSlice::new(self.inner.clone().into(), range, true)?;
+                    Ok(State::Collection(slice.into()))
+                }
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            Err(error::path_not_found(path))
         }
     }
 }
 
 #[async_trait]
-impl<T: BTreeInstance> CollectionInstance for T {
+impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
     type Item = Key;
     type Slice = BTreeSlice;
 
@@ -169,11 +138,11 @@ impl<T: BTreeInstance> CollectionInstance for T {
     ) -> TCResult<State> {
         let range = BTreeRange::try_cast_from(range, |v| error::bad_request(ERR_INVALID_RANGE, v))?;
         let range = validate_range(range, self.schema())?;
-        route(self, request, txn, path, range).await
+        self.route(request, txn, path, range).await
     }
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        BTreeInstance::is_empty(self, txn).await
+        BTreeInstance::is_empty(self.deref(), txn).await
     }
 
     async fn post(
@@ -193,7 +162,7 @@ impl<T: BTreeInstance> CollectionInstance for T {
         if path.len() == 1 && &path[0] == "delete" {
             self.delete(txn.id(), range).map_ok(State::from).await
         } else {
-            route(self, request, txn, path, range).await
+            self.route(request, txn, path, range).await
         }
     }
 
@@ -253,6 +222,97 @@ impl<T: BTreeInstance> CollectionInstance for T {
             .map(Scalar::Value);
 
         Ok(Box::pin(stream))
+    }
+}
+
+impl<T: BTreeInstance> Deref for BTreeImpl<T> {
+    type Target = T;
+
+    fn deref(&'_ self) -> &'_ T {
+        &self.inner
+    }
+}
+
+impl<T: BTreeInstance> From<T> for BTreeImpl<T> {
+    fn from(inner: T) -> BTreeImpl<T> {
+        BTreeImpl { inner }
+    }
+}
+
+#[derive(Clone)]
+pub enum BTree {
+    Tree(BTreeImpl<BTreeFile>),
+    View(BTreeImpl<BTreeSlice>),
+}
+
+#[async_trait]
+impl CollectionInstance for BTree {
+    type Item = Scalar;
+    type Slice = CollectionView;
+
+    async fn get(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        selector: Value,
+    ) -> TCResult<State> {
+        match self {
+            Self::Tree(tree) => tree.get(request, txn, path, selector).await,
+            Self::View(view) => view.get(request, txn, path, selector).await,
+        }
+    }
+
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        match self {
+            Self::Tree(tree) => CollectionInstance::is_empty(tree, txn).await,
+            Self::View(view) => CollectionInstance::is_empty(view, txn).await,
+        }
+    }
+
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        match self {
+            Self::Tree(tree) => tree.post(request, txn, path, params).await,
+            Self::View(view) => view.post(request, txn, path, params).await,
+        }
+    }
+
+    async fn put(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        selector: Value,
+        value: State,
+    ) -> TCResult<()> {
+        match self {
+            Self::Tree(tree) => tree.put(request, txn, path, selector, value).await,
+            Self::View(view) => view.put(request, txn, path, selector, value).await,
+        }
+    }
+
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+        match self {
+            Self::Tree(tree) => tree.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
+        }
+    }
+}
+
+impl Instance for BTree {
+    type Class = BTreeType;
+
+    fn class(&self) -> BTreeType {
+        match self {
+            Self::Tree(_) => BTreeType::Tree,
+            Self::View(_) => BTreeType::View,
+        }
     }
 }
 

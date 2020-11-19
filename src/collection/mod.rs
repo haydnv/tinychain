@@ -21,7 +21,7 @@ pub use class::*;
 
 #[derive(Clone)]
 pub enum CollectionBase {
-    BTree(btree::BTreeFile),
+    BTree(BTreeImpl<BTreeFile>),
     Null(null::Null),
     Table(table::TableBase),
     Tensor(tensor::class::TensorBase),
@@ -140,17 +140,6 @@ impl Transact for CollectionBase {
     }
 }
 
-impl From<CollectionBase> for CollectionView {
-    fn from(base: CollectionBase) -> CollectionView {
-        match base {
-            CollectionBase::BTree(btree) => CollectionView::BTree(btree.into()),
-            CollectionBase::Null(null) => CollectionView::Null(null),
-            CollectionBase::Table(table) => CollectionView::Table(table.into()),
-            CollectionBase::Tensor(tensor) => CollectionView::Tensor(tensor.into()),
-        }
-    }
-}
-
 impl fmt::Display for CollectionBase {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -164,7 +153,7 @@ impl fmt::Display for CollectionBase {
 
 #[derive(Clone)]
 pub enum CollectionView {
-    BTree(btree::BTree),
+    BTree(BTree),
     Null(null::Null),
     Table(table::Table),
     Tensor(tensor::Tensor),

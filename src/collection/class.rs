@@ -9,9 +9,9 @@ use crate::request::Request;
 use crate::scalar::{
     label, CastInto, Link, Object, PathSegment, Scalar, TCPathBuf, TryCastFrom, TryCastInto, Value,
 };
-use crate::transaction::{Transact, Txn};
+use crate::transaction::Txn;
 
-use super::btree::{BTreeFile, BTreeType};
+use super::btree::{BTreeFile, BTreeImpl, BTreeType};
 use super::null::{Null, NullType};
 use super::table::{TableBaseType, TableType};
 use super::tensor::{TensorBaseType, TensorType};
@@ -19,13 +19,13 @@ use super::{Collection, CollectionBase, CollectionView};
 
 #[async_trait]
 pub trait CollectionClass: Class + Into<CollectionType> + Send {
-    type Instance: CollectionInstance;
+    type Instance;
 
     async fn get(&self, txn: &Txn, schema: Value) -> TCResult<<Self as CollectionClass>::Instance>;
 }
 
 #[async_trait]
-pub trait CollectionInstance: Into<Collection> + Transact + Send {
+pub trait CollectionInstance {
     type Item: CastInto<Scalar> + TryCastFrom<Scalar>;
     type Slice;
 
@@ -170,6 +170,7 @@ impl CollectionClass for CollectionBaseType {
                     .try_cast_into(|s| error::bad_request("Expected BTree schema but found", s))?;
 
                 BTreeFile::create(txn, schema)
+                    .map_ok(BTreeImpl::from)
                     .map_ok(CollectionBase::BTree)
                     .await
             }
