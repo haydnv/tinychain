@@ -641,6 +641,7 @@ impl TableIndex {
             .cloned()
             .map(|c| (c.name().clone(), c))
             .collect();
+
         let key: Vec<Column> = key
             .iter()
             .map(|c| columns.remove(&c).ok_or_else(|| error::not_found(c)))
@@ -779,6 +780,18 @@ impl TableInstance for TableIndex {
         Ok(())
     }
 
+    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+        TableIndex::insert(self, txn_id, key, value).await
+    }
+
+    fn key(&'_ self) -> &'_ [Column] {
+        self.primary.key()
+    }
+
+    fn values(&'_ self) -> &'_ [Column] {
+        self.primary.key()
+    }
+
     fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
         self.validate_order(&columns)?;
 
@@ -829,14 +842,6 @@ impl TableInstance for TableIndex {
                 ));
             }
         }
-    }
-
-    fn key(&'_ self) -> &'_ [Column] {
-        self.primary.key()
-    }
-
-    fn values(&'_ self) -> &'_ [Column] {
-        self.primary.key()
     }
 
     fn reversed(&self) -> TCResult<Table> {
@@ -903,6 +908,27 @@ impl TableInstance for TableIndex {
         self.primary.stream(txn_id).await
     }
 
+    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
+        let schema = self.primary.schema();
+        schema.validate_row_partial(&value)?;
+
+        let index = self.clone().index(txn.clone(), None).await?;
+
+        let txn_id = txn.id();
+        index
+            .stream(txn_id.clone())
+            .await?
+            .map(|row| schema.values_into_row(row))
+            .map_ok(|row| self.upsert(txn_id, row))
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+
+    async fn upsert(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+        TableIndex::upsert(self, txn_id, row).await
+    }
+
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
         let bounds: Vec<(Id, ColumnBound)> = self
             .primary
@@ -966,23 +992,6 @@ impl TableInstance for TableIndex {
         }
 
         Ok(())
-    }
-
-    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
-        let schema = self.primary.schema();
-        schema.validate_row_partial(&value)?;
-
-        let index = self.clone().index(txn.clone(), None).await?;
-
-        let txn_id = txn.id();
-        index
-            .stream(txn_id.clone())
-            .await?
-            .map(|row| schema.values_into_row(row))
-            .map_ok(|row| self.upsert(txn_id, row))
-            .try_buffer_unordered(2)
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await
     }
 }
 

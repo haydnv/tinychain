@@ -22,6 +22,7 @@ mod index;
 mod view;
 
 const ERR_DELETE: &str = "Deletion is not supported by instance of";
+const ERR_INSERT: &str = "Insertion is not supported by instance of";
 const ERR_SLICE: &str = "Slicing is not supported by instance of";
 const ERR_UPDATE: &str = "Update is not supported by instance of";
 
@@ -114,6 +115,10 @@ pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static
         index::ReadOnly::copy_from(self.clone().into(), txn, columns).await
     }
 
+    async fn insert(&self, _txn_id: TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
+        Err(error::bad_request(ERR_INSERT, self.class()))
+    }
+
     fn key(&'_ self) -> &'_ [Column];
 
     fn values(&'_ self) -> &'_ [Column];
@@ -148,6 +153,10 @@ pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static
 
     async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
         Err(error::bad_request(ERR_UPDATE, self.class()))
+    }
+
+    async fn upsert(&self, _txn_id: &TxnId, _row: Row) -> TCResult<()> {
+        Err(error::bad_request(ERR_INSERT, self.class()))
     }
 }
 
