@@ -407,13 +407,17 @@ impl<I: Iterator<Item = (Id, Vec<Id>)>> From<(IndexSchema, I)> for TableSchema {
 
 impl TryCastFrom<Value> for TableSchema {
     fn can_cast_from(value: &Value) -> bool {
-        value.matches::<(IndexSchema, Vec<(Id, Vec<Id>)>)>()
+        value.matches::<(IndexSchema, Vec<(Id, Vec<Id>)>)>() || value.matches::<IndexSchema>()
     }
 
     fn opt_cast_from(value: Value) -> Option<TableSchema> {
-        if let Some((primary, indices)) = value.opt_cast_into() {
-            let indices: Vec<(Id, Vec<Id>)> = indices;
+        if value.matches::<(IndexSchema, Vec<(Id, Vec<Id>)>)>() {
+            let (primary, indices): (IndexSchema, Vec<(Id, Vec<Id>)>) = value.opt_cast_into().unwrap();
             let indices = indices.into_iter().collect();
+            Some(TableSchema { primary, indices })
+        } else if value.matches::<IndexSchema>() {
+            let primary = value.opt_cast_into().unwrap();
+            let indices = BTreeMap::new();
             Some(TableSchema { primary, indices })
         } else {
             None
