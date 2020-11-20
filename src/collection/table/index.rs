@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 
-use crate::class::{Class, Instance, NativeClass, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
 use crate::collection::btree::{self, BTreeFile, BTreeInstance};
 use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
@@ -285,12 +285,10 @@ impl Index {
         Ok(Index { btree, schema })
     }
 
-    pub fn get(&self, txn_id: TxnId, key: Vec<Value>) -> TCBoxTryFuture<Option<Vec<Value>>> {
-        Box::pin(async move {
-            self.schema.validate_key(&key)?;
-            let mut rows = self.btree.stream(txn_id, key.into(), false).await?;
-            Ok(rows.next().await)
-        })
+    pub async fn get(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<Option<Vec<Value>>> {
+        self.schema.validate_key(&key)?;
+        let mut rows = self.btree.stream(txn_id, key.into(), false).await?;
+        Ok(rows.next().await)
     }
 
     pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
@@ -306,16 +304,9 @@ impl Index {
         IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)
     }
 
-    fn insert<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        row: Row,
-        reject_extra_columns: bool,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            let key = self.schema().row_into_values(row, reject_extra_columns)?;
-            self.btree.insert(txn_id, key).await
-        })
+    async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
+        let key = self.schema().row_into_values(row, reject_extra_columns)?;
+        self.btree.insert(txn_id, key).await
     }
 
     pub fn schema(&'_ self) -> &'_ IndexSchema {
@@ -475,39 +466,37 @@ pub struct ReadOnly {
 }
 
 impl ReadOnly {
-    pub fn copy_from<'a>(
+    pub async fn copy_from(
         source: Table,
         txn: Txn,
         key_columns: Option<Vec<Id>>,
-    ) -> TCBoxTryFuture<'a, ReadOnly> {
-        Box::pin(async move {
-            let source_schema: IndexSchema =
-                (source.key().to_vec(), source.values().to_vec()).into();
-            let (schema, btree) = if let Some(columns) = key_columns {
-                let column_names: HashSet<&Id> = columns.iter().collect();
-                let schema = source_schema.subset(column_names)?;
-                let btree =
-                    BTreeFile::create(&txn.subcontext_tmp().await?, schema.clone().into()).await?;
+    ) -> TCResult<ReadOnly> {
+        let source_schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
-                let rows = source.select(columns)?.stream(txn.id().clone()).await?;
-                btree.insert_from(txn.id(), rows).await?;
-                (schema, btree)
-            } else {
-                let btree =
-                    BTreeFile::create(&txn.subcontext_tmp().await?, source_schema.clone().into())
-                        .await?;
+        let (schema, btree) = if let Some(columns) = key_columns {
+            let column_names: HashSet<&Id> = columns.iter().collect();
+            let schema = source_schema.subset(column_names)?;
+            let btree =
+                BTreeFile::create(&txn.subcontext_tmp().await?, schema.clone().into()).await?;
 
-                let rows = source.stream(txn.id().clone()).await?;
-                btree.insert_from(txn.id(), rows).await?;
-                (source_schema, btree)
-            };
+            let rows = source.select(columns)?.stream(txn.id().clone()).await?;
+            btree.insert_from(txn.id(), rows).await?;
+            (schema, btree)
+        } else {
+            let btree =
+                BTreeFile::create(&txn.subcontext_tmp().await?, source_schema.clone().into())
+                    .await?;
 
-            let index = Index { schema, btree };
+            let rows = source.stream(txn.id().clone()).await?;
+            btree.insert_from(txn.id(), rows).await?;
+            (source_schema, btree)
+        };
 
-            index
-                .index_slice(bounds::all())
-                .map(|index| ReadOnly { index })
-        })
+        let index = Index { schema, btree };
+
+        index
+            .index_slice(bounds::all())
+            .map(|index| ReadOnly { index })
     }
 
     pub fn into_reversed(self) -> ReadOnly {
@@ -516,8 +505,8 @@ impl ReadOnly {
         }
     }
 
-    pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
-        self.index.is_empty(txn)
+    pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        self.index.is_empty(txn).await
     }
 }
 
@@ -686,57 +675,40 @@ impl TableIndex {
         ))
     }
 
-    pub fn get<'a>(
-        &'a self,
-        txn_id: TxnId,
-        key: Vec<Value>,
-    ) -> TCBoxTryFuture<'a, Option<Vec<Value>>> {
-        self.primary.get(txn_id, key)
+    pub async fn get(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<Option<Vec<Value>>> {
+        self.primary.get(txn_id, key).await
     }
 
-    pub fn get_owned<'a>(
-        self,
-        txn_id: TxnId,
-        key: Vec<Value>,
-    ) -> TCBoxTryFuture<'a, Option<Vec<Value>>> {
-        Box::pin(async move { self.get(txn_id, key).await })
+    pub async fn get_owned(self, txn_id: TxnId, key: Vec<Value>) -> TCResult<Option<Vec<Value>>> {
+        self.get(txn_id, key).await
     }
 
-    pub fn insert<'a>(
-        &'a self,
-        txn_id: TxnId,
-        key: Vec<Value>,
-        value: Vec<Value>,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            if self.get(txn_id.clone(), key.to_vec()).await?.is_some() {
-                let key: Vec<String> = key.iter().map(|v| v.to_string()).collect();
-                Err(error::bad_request(
-                    "Tried to insert but this key already exists",
-                    format!("[{}]", key.join(", ")),
-                ))
-            } else {
-                let mut values = key;
-                values.extend(value);
-                let row = self.primary.schema().values_into_row(values)?;
-                self.upsert(&txn_id, row).await
-            }
-        })
+    pub async fn insert(&self, txn_id: TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+        if self.get(txn_id.clone(), key.to_vec()).await?.is_some() {
+            let key: Vec<String> = key.iter().map(|v| v.to_string()).collect();
+            Err(error::bad_request(
+                "Tried to insert but this key already exists",
+                format!("[{}]", key.join(", ")),
+            ))
+        } else {
+            let mut values = key;
+            values.extend(value);
+            let row = self.primary.schema().values_into_row(values)?;
+            self.upsert(&txn_id, row).await
+        }
     }
 
-    pub fn upsert<'a>(&'a self, txn_id: &'a TxnId, row: Row) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            self.delete_row(txn_id, row.clone()).await?;
+    pub async fn upsert(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+        self.delete_row(txn_id, row.clone()).await?;
 
-            let mut inserts = Vec::with_capacity(self.auxiliary.len() + 1);
-            inserts.push(self.primary.insert(txn_id, row.clone(), true));
-            for index in self.auxiliary.values() {
-                inserts.push(index.insert(txn_id, row.clone(), false));
-            }
+        let mut inserts = Vec::with_capacity(self.auxiliary.len() + 1);
+        inserts.push(self.primary.insert(txn_id, row.clone(), true));
+        for index in self.auxiliary.values() {
+            inserts.push(index.insert(txn_id, row.clone(), false));
+        }
 
-            try_join_all(inserts).await?;
-            Ok(())
-        })
+        try_join_all(inserts).await?;
+        Ok(())
     }
 }
 

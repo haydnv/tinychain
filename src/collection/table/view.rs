@@ -188,14 +188,14 @@ impl TableInstance for TableView {
         }
     }
 
-    fn stream<'a>(self, txn_id: TxnId) -> TCBoxTryFuture<'a, Self::Stream> {
+    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
         match self {
-            Self::Aggregate(aggregate) => aggregate.stream(txn_id),
-            Self::IndexSlice(index_slice) => index_slice.stream(txn_id),
-            Self::Limit(limited) => limited.stream(txn_id),
-            Self::Merge(merged) => merged.stream(txn_id),
-            Self::Selection(columns) => columns.stream(txn_id),
-            Self::TableSlice(table_slice) => table_slice.stream(txn_id),
+            Self::Aggregate(aggregate) => aggregate.stream(txn_id).await,
+            Self::IndexSlice(index_slice) => index_slice.stream(txn_id).await,
+            Self::Limit(limited) => limited.stream(txn_id).await,
+            Self::Merge(merged) => merged.stream(txn_id).await,
+            Self::Selection(columns) => columns.stream(txn_id).await,
+            Self::TableSlice(table_slice) => table_slice.stream(txn_id).await,
         }
     }
 
@@ -480,11 +480,9 @@ impl IndexSlice {
         self
     }
 
-    pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
-        Box::pin(async move {
-            let count = self.count(txn.id().clone()).await?;
-            Ok(count == 0)
-        })
+    pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        let mut rows = self.clone().stream(txn.id().clone()).await?;
+        Ok(rows.next().await.is_none())
     }
 
     pub fn slice_index(&self, bounds: Bounds) -> TCResult<IndexSlice> {
