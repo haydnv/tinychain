@@ -412,7 +412,8 @@ impl TryCastFrom<Value> for TableSchema {
 
     fn opt_cast_from(value: Value) -> Option<TableSchema> {
         if value.matches::<(IndexSchema, Vec<(Id, Vec<Id>)>)>() {
-            let (primary, indices): (IndexSchema, Vec<(Id, Vec<Id>)>) = value.opt_cast_into().unwrap();
+            let (primary, indices): (IndexSchema, Vec<(Id, Vec<Id>)>) =
+                value.opt_cast_into().unwrap();
             let indices = indices.into_iter().collect();
             Some(TableSchema { primary, indices })
         } else if value.matches::<IndexSchema>() {

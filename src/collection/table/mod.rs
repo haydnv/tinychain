@@ -205,8 +205,10 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
         Err(error::not_implemented("TableImpl::put"))
     }
 
-    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Scalar>> {
-        Err(error::not_implemented("TableImpl::to_stream"))
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+        let rows = self.inner.clone().stream(txn.id().clone()).await?;
+        let rows = Box::pin(rows.map(Value::Tuple).map(Scalar::Value));
+        Ok(rows)
     }
 }
 
