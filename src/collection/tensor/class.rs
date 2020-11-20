@@ -81,9 +81,13 @@ impl CollectionClass for TensorBaseType {
                         .iter()
                         .map(|n| n.class())
                         .fold(NumberType::Bool, Ord::max);
-                    let block_list =
-                        BlockListFile::from_values(txn, shape, dtype, stream::iter(data.into_iter()))
-                            .await?;
+                    let block_list = BlockListFile::from_values(
+                        txn,
+                        shape,
+                        dtype,
+                        stream::iter(data.into_iter()),
+                    )
+                    .await?;
                     Ok(TensorBase::Dense(block_list))
                 } else {
                     Err(error::bad_request(ERR_CREATE_DENSE, schema))

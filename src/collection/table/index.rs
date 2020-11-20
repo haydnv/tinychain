@@ -691,12 +691,13 @@ impl TableIndex {
                 format!("[{}]", key.join(", ")),
             ))
         } else {
-            let row = self.primary.schema().key_value_into_row(key, value)?;
-            self.upsert(&txn_id, row).await
+            self.upsert(&txn_id, key, value).await
         }
     }
 
-    pub async fn upsert(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
+    pub async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+        let row = self.primary.schema().key_value_into_row(key, value)?;
+
         self.delete_row(txn_id, row.clone()).await?;
 
         let mut inserts = Vec::with_capacity(self.auxiliary.len() + 1);
@@ -889,15 +890,15 @@ impl TableInstance for TableIndex {
         index
             .stream(txn_id.clone())
             .await?
-            .map(|row| schema.values_into_row(row))
-            .map_ok(|row| self.upsert(txn_id, row))
+            .map(|row| schema.key_value_from(row))
+            .map(|(key, value)| Ok(self.upsert(txn_id, key, value)))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
 
-    async fn upsert(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
-        TableIndex::upsert(self, txn_id, row).await
+    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+        TableIndex::upsert(self, txn_id, key, value).await
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {

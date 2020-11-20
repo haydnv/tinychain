@@ -86,7 +86,10 @@ impl From<ArrayExt<bool>> for Vec<Number> {
 impl From<ArrayExt<bool>> for Bytes {
     fn from(array: ArrayExt<bool>) -> Bytes {
         let data: Vec<bool> = array.into();
-        let data: Vec<u8> = data.into_iter().map(|i| if i { 1u8 } else { 0u8 }).collect();
+        let data: Vec<u8> = data
+            .into_iter()
+            .map(|i| if i { 1u8 } else { 0u8 })
+            .collect();
         data.into()
     }
 }

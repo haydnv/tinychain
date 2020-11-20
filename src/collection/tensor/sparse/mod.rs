@@ -1405,14 +1405,14 @@ impl SparseAccessor for SparseTable {
         let value = value.into_type(self.dtype);
 
         Box::pin(async move {
-            let mut row: HashMap<Id, Value> = coord
+            let key = coord
                 .into_iter()
-                .enumerate()
-                .map(|(x, v)| (x.into(), Value::Number(Number::UInt(UInt::U64(v)))))
+                .map(Number::from)
+                .map(Value::Number)
                 .collect();
-
-            row.insert(VALUE.into(), value.into());
-            self.table.upsert(&txn_id, row).await
+            self.table
+                .upsert(&txn_id, key, vec![Value::Number(value)])
+                .await
         })
     }
 }

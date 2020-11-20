@@ -49,7 +49,12 @@ trait BlockList: TensorInstance + Transact + 'static {
                 .block_stream(txn)
                 .await?
                 .and_then(|array| future::ready(Ok(array.into_values())))
-                .map_ok(|values| values.into_iter().map(Ok).collect::<Vec<TCResult<Number>>>())
+                .map_ok(|values| {
+                    values
+                        .into_iter()
+                        .map(Ok)
+                        .collect::<Vec<TCResult<Number>>>()
+                })
                 .map_ok(stream::iter)
                 .try_flatten();
 
@@ -414,48 +419,47 @@ impl BlockList for BlockListFile {
                 af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
             );
 
-            let selected =
-                stream::iter(bounds.affected())
-                    .chunks(PER_BLOCK)
-                    .then(move |coords| {
-                        let (block_ids, af_indices, af_offsets, num_coords) =
-                            coord_block(coords.into_iter(), &coord_bounds, PER_BLOCK, ndim);
+            let selected = stream::iter(bounds.affected())
+                .chunks(PER_BLOCK)
+                .then(move |coords| {
+                    let (block_ids, af_indices, af_offsets, num_coords) =
+                        coord_block(coords.into_iter(), &coord_bounds, PER_BLOCK, ndim);
 
-                        let this = self.clone();
-                        let txn = txn.clone();
+                    let this = self.clone();
+                    let txn = txn.clone();
 
-                        Box::pin(async move {
-                            let mut start = 0.0f64;
-                            let mut values = vec![];
-                            for block_id in block_ids {
-                                let (block_offsets, new_start) = block_offsets(
-                                    &af_indices,
-                                    &af_offsets,
-                                    num_coords,
-                                    start,
-                                    block_id,
-                                );
+                    Box::pin(async move {
+                        let mut start = 0.0f64;
+                        let mut values = vec![];
+                        for block_id in block_ids {
+                            let (block_offsets, new_start) = block_offsets(
+                                &af_indices,
+                                &af_offsets,
+                                num_coords,
+                                start,
+                                block_id,
+                            );
 
-                                match this
-                                    .file
-                                    .clone()
-                                    .get_block(txn.id(), &block_id.into())
-                                    .await
-                                {
-                                    Ok(block) => {
-                                        let array: &Array = block.deref().try_into().unwrap();
-                                        values.extend(array.get(block_offsets));
-                                    }
-                                    Err(cause) => return stream::iter(vec![Err(cause)]),
+                            match this
+                                .file
+                                .clone()
+                                .get_block(txn.id(), &block_id.into())
+                                .await
+                            {
+                                Ok(block) => {
+                                    let array: &Array = block.deref().try_into().unwrap();
+                                    values.extend(array.get(block_offsets));
                                 }
-
-                                start = new_start;
+                                Err(cause) => return stream::iter(vec![Err(cause)]),
                             }
 
-                            let values: Vec<TCResult<Number>> = values.into_iter().map(Ok).collect();
-                            stream::iter(values)
-                        })
-                    });
+                            start = new_start;
+                        }
+
+                        let values: Vec<TCResult<Number>> = values.into_iter().map(Ok).collect();
+                        stream::iter(values)
+                    })
+                });
 
             let selected: TCTryStream<Number> = Box::pin(selected.flatten());
             Ok(selected)

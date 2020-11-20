@@ -150,6 +150,12 @@ impl IndexSchema {
         Ok(key)
     }
 
+    pub fn key_value_from(&self, mut row: Vec<Value>) -> (Vec<Value>, Vec<Value>) {
+        assert!(self.len() == row.len());
+        let value = row.split_off(self.key.len());
+        (row, value)
+    }
+
     pub fn starts_with(&self, expected: &[Id]) -> bool {
         let actual: Vec<Id> = self.columns().iter().map(|c| c.name()).cloned().collect();
         for (a, e) in actual[0..expected.len()].iter().zip(expected.iter()) {

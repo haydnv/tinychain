@@ -155,7 +155,7 @@ pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static
         Err(error::bad_request(ERR_UPDATE, self.class()))
     }
 
-    async fn upsert(&self, _txn_id: &TxnId, _row: Row) -> TCResult<()> {
+    async fn upsert(&self, _txn_id: &TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
         Err(error::bad_request(ERR_INSERT, self.class()))
     }
 }
