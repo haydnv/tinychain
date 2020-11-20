@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::iter;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -141,6 +142,14 @@ impl TableInstance for TableBase {
         }
     }
 
+    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+        match self {
+            Self::Index(index) => TableInstance::insert(index.deref(), txn_id, key, value).await,
+            Self::ROIndex(index) => TableInstance::insert(index.deref(), txn_id, key, value).await,
+            Self::Table(table) => TableInstance::insert(table.deref(), txn_id, key, value).await,
+        }
+    }
+
     fn key(&'_ self) -> &'_ [Column] {
         match self {
             Self::Index(index) => index.key(),
@@ -189,22 +198,6 @@ impl TableInstance for TableBase {
         }
     }
 
-    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.validate_bounds(bounds),
-            Self::ROIndex(index) => index.validate_bounds(bounds),
-            Self::Table(table) => table.validate_bounds(bounds),
-        }
-    }
-
-    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.validate_order(order),
-            Self::ROIndex(index) => index.validate_order(order),
-            Self::Table(table) => table.validate_order(order),
-        }
-    }
-
     async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
         match self {
             Self::Index(index) => index.into_inner().update(txn, value).await,
@@ -218,6 +211,30 @@ impl TableInstance for TableBase {
             Self::Index(index) => index.update_row(txn_id, row, value).await,
             Self::ROIndex(index) => index.update_row(txn_id, row, value).await,
             Self::Table(table) => table.update_row(txn_id, row, value).await,
+        }
+    }
+
+    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+        match self {
+            Self::Index(index) => TableInstance::upsert(index.deref(), txn_id, key, value).await,
+            Self::ROIndex(index) => TableInstance::upsert(index.deref(), txn_id, key, value).await,
+            Self::Table(table) => TableInstance::upsert(table.deref(), txn_id, key, value).await,
+        }
+    }
+
+    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.validate_bounds(bounds),
+            Self::ROIndex(index) => index.validate_bounds(bounds),
+            Self::Table(table) => table.validate_bounds(bounds),
+        }
+    }
+
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.validate_order(order),
+            Self::ROIndex(index) => index.validate_order(order),
+            Self::Table(table) => table.validate_order(order),
         }
     }
 }

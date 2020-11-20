@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future;
 use futures::{Stream, StreamExt};
+use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
@@ -203,12 +204,29 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
     async fn put(
         &self,
         _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _selector: Value,
-        _value: State,
+        txn: &Txn,
+        path: &[PathSegment],
+        selector: Value,
+        value: State,
     ) -> TCResult<()> {
-        Err(error::not_implemented("TableImpl::put"))
+        if !path.is_empty() {
+            return Err(error::path_not_found(path));
+        }
+
+        debug!("{}::put", self.class());
+
+        let key = match selector {
+            Value::Tuple(key) => key,
+            other => vec![other],
+        };
+
+        let value = Value::try_from(value)?;
+        let value = match value {
+            Value::Tuple(value) => value,
+            other => vec![other],
+        };
+
+        self.upsert(txn.id(), key, value).await
     }
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
@@ -354,6 +372,13 @@ impl TableInstance for Table {
         }
     }
 
+    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+        match self {
+            Self::Base(base) => base.insert(txn_id, key, value).await,
+            Self::View(view) => view.insert(txn_id, key, value).await,
+        }
+    }
+
     fn key(&'_ self) -> &'_ [Column] {
         match self {
             Self::Base(base) => base.key(),
@@ -407,6 +432,15 @@ impl TableInstance for Table {
         match self {
             Self::Base(base) => base.into_inner().stream(txn_id).await,
             Self::View(view) => view.into_inner().stream(txn_id).await,
+        }
+    }
+
+    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+        debug!("{}::upsert", self.class());
+
+        match self {
+            Self::Base(base) => base.upsert(txn_id, key, value).await,
+            Self::View(view) => view.upsert(txn_id, key, value).await,
         }
     }
 
