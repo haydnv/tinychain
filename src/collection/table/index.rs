@@ -340,6 +340,14 @@ impl Index {
     }
 }
 
+impl Instance for Index {
+    type Class = TableBaseType;
+
+    fn class(&self) -> Self::Class {
+        Self::Class::Index
+    }
+}
+
 #[async_trait]
 impl TableInstance for Index {
     type Stream = TCStream<Vec<Value>>;
@@ -510,6 +518,14 @@ impl ReadOnly {
 
     pub fn is_empty<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, bool> {
         self.index.is_empty(txn)
+    }
+}
+
+impl Instance for ReadOnly {
+    type Class = TableBaseType;
+
+    fn class(&self) -> Self::Class {
+        Self::Class::ReadOnly
     }
 }
 
@@ -720,6 +736,14 @@ impl TableIndex {
             try_join_all(inserts).await?;
             Ok(())
         })
+    }
+}
+
+impl Instance for TableIndex {
+    type Class = TableBaseType;
+
+    fn class(&self) -> Self::Class {
+        Self::Class::Table
     }
 }
 

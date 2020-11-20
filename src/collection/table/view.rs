@@ -85,14 +85,13 @@ impl Instance for TableView {
     type Class = TableViewType;
 
     fn class(&self) -> Self::Class {
-        use TableViewType::*;
         match self {
-            Self::Aggregate(_) => Aggregate,
-            Self::IndexSlice(_) => IndexSlice,
-            Self::Limit(_) => Limit,
-            Self::Merge(_) => Merge,
-            Self::Selection(_) => Selection,
-            Self::TableSlice(_) => TableSlice,
+            Self::Aggregate(aggregate) => aggregate.class(),
+            Self::IndexSlice(index_slice) => index_slice.class(),
+            Self::Limit(limit) => limit.class(),
+            Self::Merge(merge) => merge.class(),
+            Self::Selection(selection) => selection.class(),
+            Self::TableSlice(table_slice) => table_slice.class(),
         }
     }
 }
@@ -347,6 +346,14 @@ impl Aggregate {
     }
 }
 
+impl Instance for Aggregate {
+    type Class = TableViewType;
+
+    fn class(&self) -> Self::Class {
+        Self::Class::Aggregate
+    }
+}
+
 #[async_trait]
 impl TableInstance for Aggregate {
     type Stream = TCStream<Vec<Value>>;
@@ -501,6 +508,14 @@ impl IndexSlice {
     }
 }
 
+impl Instance for IndexSlice {
+    type Class = TableViewType;
+
+    fn class(&self) -> Self::Class {
+        Self::Class::IndexSlice
+    }
+}
+
 #[async_trait]
 impl TableInstance for IndexSlice {
     type Stream = TCStream<Vec<Value>>;
@@ -612,6 +627,14 @@ impl TryFrom<(Table, u64)> for Limited {
             source: Box::new(source),
             limit,
         })
+    }
+}
+
+impl Instance for Limited {
+    type Class = TableViewType;
+
+    fn class(&self) -> Self::Class {
+        Self::Class::Limit
     }
 }
 
@@ -765,6 +788,14 @@ impl Merged {
             left: self.left.clone().into_reversed(),
             right: self.right.clone().into_reversed(),
         })
+    }
+}
+
+impl Instance for Merged {
+    type Class = TableViewType;
+
+    fn class(&self) -> Self::Class {
+        Self::Class::Merge
     }
 }
 
@@ -956,6 +987,14 @@ impl<T: Into<Table>> TryFrom<(T, Vec<Id>)> for Selection {
     }
 }
 
+impl Instance for Selection {
+    type Class = TableViewType;
+
+    fn class(&self) -> Self::Class {
+        Self::Class::Selection
+    }
+}
+
 #[async_trait]
 impl TableInstance for Selection {
     type Stream = TCStream<Vec<Value>>;
@@ -1076,6 +1115,14 @@ impl TableSlice {
             bounds: self.bounds,
             reversed: !self.reversed,
         }
+    }
+}
+
+impl Instance for TableSlice {
+    type Class = TableViewType;
+
+    fn class(&self) -> Self::Class {
+        Self::Class::TableSlice
     }
 }
 
