@@ -113,9 +113,9 @@ impl Default for BTreeRange {
 }
 
 impl From<Key> for BTreeRange {
-    fn from(mut key: Key) -> Self {
+    fn from(key: Key) -> Self {
         let start = key.iter().cloned().map(Bound::In).collect();
-        let end = key.drain(..).map(Bound::In).collect();
+        let end = key.into_iter().map(Bound::In).collect();
         Self(start, end)
     }
 }

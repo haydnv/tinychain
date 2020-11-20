@@ -75,14 +75,14 @@ impl CollectionClass for TensorBaseType {
                     let block_list = BlockListFile::constant(txn, shape, dtype.zero()).await?;
                     Ok(TensorBase::Dense(block_list))
                 } else if schema.matches::<Vec<Number>>() {
-                    let mut data: Vec<Number> = schema.opt_cast_into().unwrap();
+                    let data: Vec<Number> = schema.opt_cast_into().unwrap();
                     let shape = vec![data.len() as u64].into();
                     let dtype = data
                         .iter()
                         .map(|n| n.class())
                         .fold(NumberType::Bool, Ord::max);
                     let block_list =
-                        BlockListFile::from_values(txn, shape, dtype, stream::iter(data.drain(..)))
+                        BlockListFile::from_values(txn, shape, dtype, stream::iter(data.into_iter()))
                             .await?;
                     Ok(TensorBase::Dense(block_list))
                 } else {

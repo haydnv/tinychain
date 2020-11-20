@@ -295,10 +295,10 @@ impl From<(Vec<u64>, Vec<u64>)> for Bounds {
 }
 
 impl From<(AxisBounds, Vec<u64>)> for Bounds {
-    fn from(mut tuple: (AxisBounds, Vec<u64>)) -> Bounds {
+    fn from(tuple: (AxisBounds, Vec<u64>)) -> Bounds {
         let mut axes = Vec::with_capacity(tuple.1.len() + 1);
         axes.push(tuple.0);
-        for axis in tuple.1.drain(..) {
+        for axis in tuple.1.into_iter() {
             axes.push(axis.into());
         }
         Bounds { axes }
@@ -319,9 +319,9 @@ impl TryCastFrom<Value> for Bounds {
 impl TryFrom<Bounds> for Vec<u64> {
     type Error = error::TCError;
 
-    fn try_from(mut bounds: Bounds) -> TCResult<Vec<u64>> {
+    fn try_from(bounds: Bounds) -> TCResult<Vec<u64>> {
         let mut coord = Vec::with_capacity(bounds.len());
-        for bound in bounds.axes.drain(..) {
+        for bound in bounds.axes.into_iter() {
             match bound {
                 AxisBounds::At(x) => coord.push(x),
                 other => {

@@ -543,13 +543,13 @@ impl Transpose {
         coord
     }
 
-    pub fn map_coord_axes(&self, mut partial_source_coord: Vec<u64>, axes: &[usize]) -> Vec<u64> {
+    pub fn map_coord_axes(&self, partial_source_coord: Vec<u64>, axes: &[usize]) -> Vec<u64> {
         assert!(partial_source_coord.len() == axes.len());
 
         let mut source_coord: HashMap<usize, u64> = axes
             .iter()
             .cloned()
-            .zip(partial_source_coord.drain(..))
+            .zip(partial_source_coord.into_iter())
             .collect();
 
         let mut coord = Vec::with_capacity(self.shape.len());

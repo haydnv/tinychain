@@ -277,8 +277,8 @@ impl<T1: Into<Scalar>, T2: Into<Scalar>> From<(T1, T2)> for Scalar {
 }
 
 impl<T: Into<Scalar>> From<Vec<T>> for Scalar {
-    fn from(mut v: Vec<T>) -> Scalar {
-        Scalar::Tuple(v.drain(..).map(|i| i.into()).collect())
+    fn from(v: Vec<T>) -> Scalar {
+        Scalar::Tuple(v.into_iter().map(|i| i.into()).collect())
     }
 }
 
@@ -331,9 +331,9 @@ impl<T: TryFrom<Scalar, Error = error::TCError>> TryFrom<Scalar> for Vec<T> {
     type Error = error::TCError;
 
     fn try_from(source: Scalar) -> TCResult<Vec<T>> {
-        let mut source: Vec<Scalar> = source.try_into()?;
+        let source: Vec<Scalar> = source.try_into()?;
         let mut items = Vec::with_capacity(source.len());
-        for item in source.drain(..) {
+        for item in source.into_iter() {
             items.push(item.try_into()?);
         }
         Ok(items)
@@ -470,9 +470,9 @@ impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Vec<T>> {
-        if let Scalar::Tuple(mut values) = scalar {
+        if let Scalar::Tuple(values) = scalar {
             let mut cast: Vec<T> = Vec::with_capacity(values.len());
-            for val in values.drain(..) {
+            for val in values.into_iter() {
                 if let Some(val) = val.opt_cast_into() {
                     cast.push(val)
                 } else {

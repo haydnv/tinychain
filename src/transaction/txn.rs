@@ -396,9 +396,9 @@ impl Txn {
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             match control {
-                FlowControl::After((mut when, then)) => {
+                FlowControl::After((when, then)) => {
                     let when = when
-                        .drain(..)
+                        .into_iter()
                         .map(|tc_ref| self.resolve(request, provided.clone(), tc_ref));
                     try_join_all(when).await?;
                     Ok(State::Scalar(Scalar::Ref(Box::new(then))))

@@ -214,7 +214,7 @@ impl IndexSchema {
     pub fn validate_row_partial(&self, row: &Row) -> TCResult<()> {
         let columns: HashMap<Id, ValueType> = self
             .columns()
-            .drain(..)
+            .into_iter()
             .map(|c| (c.name, c.dtype))
             .collect();
 
@@ -232,14 +232,14 @@ impl IndexSchema {
     pub fn validate_row(&self, row: &Row) -> TCResult<()> {
         let expected: HashSet<Id> = self.columns().iter().map(|c| c.name()).cloned().collect();
         let actual: HashSet<Id> = row.keys().cloned().collect();
-        let mut missing: Vec<&Id> = expected.difference(&actual).collect();
-        let mut extra: Vec<&Id> = actual.difference(&expected).collect();
+        let missing: Vec<&Id> = expected.difference(&actual).collect();
+        let extra: Vec<&Id> = actual.difference(&expected).collect();
 
         if !missing.is_empty() {
             return Err(error::bad_request(
                 "Row is missing columns",
                 missing
-                    .drain(..)
+                    .into_iter()
                     .map(|c| (*c).to_string())
                     .collect::<Vec<String>>()
                     .join(", "),
@@ -250,7 +250,7 @@ impl IndexSchema {
             return Err(error::bad_request(
                 "Row contains unrecognized columns",
                 extra
-                    .drain(..)
+                    .into_iter()
                     .map(|c| (*c).to_string())
                     .collect::<Vec<String>>()
                     .join(", "),
@@ -335,33 +335,33 @@ impl TryCastFrom<Value> for IndexSchema {
 }
 
 impl From<IndexSchema> for HashMap<Id, Column> {
-    fn from(mut schema: IndexSchema) -> HashMap<Id, Column> {
+    fn from(schema: IndexSchema) -> HashMap<Id, Column> {
         schema
             .key
-            .drain(..)
-            .chain(schema.values.drain(..))
+            .into_iter()
+            .chain(schema.values.into_iter())
             .map(|c| (c.name.clone(), c))
             .collect()
     }
 }
 
 impl From<IndexSchema> for Vec<Id> {
-    fn from(mut schema: IndexSchema) -> Vec<Id> {
+    fn from(schema: IndexSchema) -> Vec<Id> {
         schema
             .key
-            .drain(..)
-            .chain(schema.values.drain(..))
+            .into_iter()
+            .chain(schema.values.into_iter())
             .map(|c| c.name)
             .collect()
     }
 }
 
 impl From<IndexSchema> for RowSchema {
-    fn from(mut schema: IndexSchema) -> RowSchema {
+    fn from(schema: IndexSchema) -> RowSchema {
         schema
             .key
-            .drain(..)
-            .chain(schema.values.drain(..))
+            .into_iter()
+            .chain(schema.values.into_iter())
             .collect()
     }
 }

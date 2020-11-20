@@ -49,7 +49,7 @@ trait BlockList: TensorInstance + Transact + 'static {
                 .block_stream(txn)
                 .await?
                 .and_then(|array| future::ready(Ok(array.into_values())))
-                .map_ok(|mut values| values.drain(..).map(Ok).collect::<Vec<TCResult<Number>>>())
+                .map_ok(|values| values.into_iter().map(Ok).collect::<Vec<TCResult<Number>>>())
                 .map_ok(stream::iter)
                 .try_flatten();
 
@@ -417,9 +417,9 @@ impl BlockList for BlockListFile {
             let selected =
                 stream::iter(bounds.affected())
                     .chunks(PER_BLOCK)
-                    .then(move |mut coords| {
+                    .then(move |coords| {
                         let (block_ids, af_indices, af_offsets, num_coords) =
-                            coord_block(coords.drain(..), &coord_bounds, PER_BLOCK, ndim);
+                            coord_block(coords.into_iter(), &coord_bounds, PER_BLOCK, ndim);
 
                         let this = self.clone();
                         let txn = txn.clone();
@@ -452,7 +452,7 @@ impl BlockList for BlockListFile {
                                 start = new_start;
                             }
 
-                            let values: Vec<TCResult<Number>> = values.drain(..).map(Ok).collect();
+                            let values: Vec<TCResult<Number>> = values.into_iter().map(Ok).collect();
                             stream::iter(values)
                         })
                     });
@@ -1254,7 +1254,7 @@ impl BlockList for BlockListSparse {
                     let txn = txn.clone();
 
                     Box::pin(async move {
-                        let mut filled: Vec<(Vec<u64>, Number)> = source
+                        let filled: Vec<(Vec<u64>, Number)> = source
                             .reshape(vec![source_size].into())?
                             .slice(Bounds::from(vec![AxisBounds::In(start..end)]))?
                             .filled(txn)
@@ -1267,9 +1267,9 @@ impl BlockList for BlockListSparse {
                             return Ok(block);
                         }
 
-                        let (mut coords, values): (Vec<Vec<u64>>, Vec<Number>) =
-                            filled.drain(..).unzip();
-                        let coords: Vec<u64> = coords.drain(..).flatten().collect();
+                        let (coords, values): (Vec<Vec<u64>>, Vec<Number>) =
+                            filled.into_iter().unzip();
+                        let coords: Vec<u64> = coords.into_iter().flatten().collect();
                         let coords = af::Array::new(
                             &coords,
                             af::Dim4::new(&[ndim as u64, coords.len() as u64, 1, 1]),

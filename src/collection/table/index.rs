@@ -825,7 +825,7 @@ impl TableInstance for TableIndex {
             return TableSlice::new(self.clone(), bounds).map(|t| t.into());
         }
 
-        let mut columns: Vec<Id> = self
+        let columns: Vec<Id> = self
             .primary
             .schema()
             .columns()
@@ -833,8 +833,9 @@ impl TableInstance for TableIndex {
             .map(|c| c.name())
             .cloned()
             .collect();
+
         let bounds: Vec<(Id, ColumnBound)> = columns
-            .drain(..)
+            .into_iter()
             .filter_map(|name| bounds.get(&name).map(|bound| (name, bound.clone())))
             .collect();
 

@@ -90,13 +90,14 @@ pub fn btree_range(bounds: &Bounds, columns: &[Column]) -> TCResult<BTreeRange> 
     Ok((start, end).into())
 }
 
-pub fn from_key(mut key: Vec<Value>, key_columns: &[Column]) -> Bounds {
+pub fn from_key(key: Vec<Value>, key_columns: &[Column]) -> Bounds {
     assert!(key.len() == key_columns.len());
+
     key_columns
         .iter()
         .map(|c| c.name())
         .cloned()
-        .zip(key.drain(..).map(|v| v.into()))
+        .zip(key.into_iter().map(|v| v.into()))
         .collect()
 }
 

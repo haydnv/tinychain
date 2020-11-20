@@ -152,8 +152,8 @@ impl<T: Into<Value>> From<Option<T>> for Value {
 }
 
 impl<T: Into<Value>> From<Vec<T>> for Value {
-    fn from(mut v: Vec<T>) -> Value {
-        Value::Tuple(v.drain(..).map(|i| i.into()).collect())
+    fn from(v: Vec<T>) -> Value {
+        Value::Tuple(v.into_iter().map(|i| i.into()).collect())
     }
 }
 
@@ -317,9 +317,9 @@ impl TryCastFrom<Vec<Scalar>> for Value {
         true
     }
 
-    fn opt_cast_from(mut tuple: Vec<Scalar>) -> Option<Value> {
+    fn opt_cast_from(tuple: Vec<Scalar>) -> Option<Value> {
         let mut values = Vec::with_capacity(tuple.len());
-        for s in tuple.drain(..) {
+        for s in tuple.into_iter() {
             debug!("item {}", s);
             match s {
                 Scalar::Value(value) => values.push(value),
@@ -505,9 +505,9 @@ impl<T: TryCastFrom<Value>> TryCastFrom<Value> for Vec<T> {
     }
 
     fn opt_cast_from(value: Value) -> Option<Vec<T>> {
-        if let Value::Tuple(mut values) = value {
+        if let Value::Tuple(values) = value {
             let mut cast: Vec<T> = Vec::with_capacity(values.len());
-            for val in values.drain(..) {
+            for val in values.into_iter() {
                 if let Some(val) = val.opt_cast_into() {
                     cast.push(val)
                 } else {

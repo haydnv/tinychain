@@ -1399,14 +1399,14 @@ impl SparseAccessor for SparseTable {
     fn write_value<'a>(
         &'a self,
         txn_id: TxnId,
-        mut coord: Vec<u64>,
+        coord: Vec<u64>,
         value: Number,
     ) -> TCBoxTryFuture<'a, ()> {
         let value = value.into_type(self.dtype);
 
         Box::pin(async move {
             let mut row: HashMap<Id, Value> = coord
-                .drain(..)
+                .into_iter()
                 .enumerate()
                 .map(|(x, v)| (x.into(), Value::Number(Number::UInt(UInt::U64(v)))))
                 .collect();

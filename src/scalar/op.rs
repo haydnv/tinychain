@@ -131,7 +131,7 @@ impl OpDef {
 
                 data.push((key_id.clone(), Scalar::Value(key).into()));
                 data.extend(def.to_vec().into_iter().map(|(k, v)| (k, State::Scalar(v))));
-                txn.execute(request, stream::iter(data.drain(..))).await
+                txn.execute(request, stream::iter(data.into_iter())).await
             } else {
                 Err(error::method_not_allowed(self))
             }
@@ -148,7 +148,7 @@ impl OpDef {
             if let Self::Post(def) = self {
                 let mut op: Vec<(Id, Scalar)> = data.into_iter().collect();
                 op.extend(def.to_vec());
-                txn.execute(request, stream::iter(op.drain(..))).await
+                txn.execute(request, stream::iter(op.into_iter())).await
             } else {
                 Err(error::method_not_allowed(self))
             }

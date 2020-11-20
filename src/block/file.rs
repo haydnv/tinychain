@@ -167,7 +167,7 @@ impl<T: BlockData> Transact for File<T> {
 
         self.listing.commit(txn_id).await;
 
-        let mut mutated: Vec<BlockId> = self
+        let mutated: Vec<BlockId> = self
             .mutated
             .write(txn_id.clone())
             .await
@@ -187,7 +187,7 @@ impl<T: BlockData> Transact for File<T> {
         let txn_dir = pending.create_or_get_dir(&txn_id.to_path()).unwrap();
 
         let copy_ops = mutated
-            .drain(..)
+            .into_iter()
             .filter_map(|block_id| cache.get(&block_id).map(|lock| (block_id, lock)))
             .map(|(block_id, lock)| {
                 let dir_lock = txn_dir.write();

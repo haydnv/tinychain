@@ -367,9 +367,9 @@ impl super::Server for Server {
     }
 }
 
-fn encode_query_string(mut data: Vec<(&str, &str)>) -> String {
+fn encode_query_string(data: Vec<(&str, &str)>) -> String {
     let mut query_string = url::form_urlencoded::Serializer::new(String::new());
-    for (name, value) in data.drain(..) {
+    for (name, value) in data.into_iter() {
         query_string.append_pair(name, value);
     }
     query_string.finish()

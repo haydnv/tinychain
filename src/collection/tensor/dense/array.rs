@@ -85,8 +85,8 @@ impl From<ArrayExt<bool>> for Vec<Number> {
 
 impl From<ArrayExt<bool>> for Bytes {
     fn from(array: ArrayExt<bool>) -> Bytes {
-        let mut data: Vec<bool> = array.into();
-        let data: Vec<u8> = data.drain(..).map(|i| if i { 1u8 } else { 0u8 }).collect();
+        let data: Vec<bool> = array.into();
+        let data: Vec<u8> = data.into_iter().map(|i| if i { 1u8 } else { 0u8 }).collect();
         data.into()
     }
 }
@@ -101,9 +101,9 @@ impl From<ArrayExt<num::Complex<f32>>> for Vec<Number> {
 
 impl From<ArrayExt<num::Complex<f32>>> for Bytes {
     fn from(array: ArrayExt<num::Complex<f32>>) -> Bytes {
-        let mut data: Vec<num::Complex<f32>> = array.into();
+        let data: Vec<num::Complex<f32>> = array.into();
         let data: Vec<Vec<u8>> = data
-            .drain(..)
+            .into_iter()
             .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
             .collect();
         data.into_iter().flatten().collect::<Vec<u8>>().into()
@@ -120,9 +120,9 @@ impl From<ArrayExt<num::Complex<f64>>> for Vec<Number> {
 
 impl From<ArrayExt<num::Complex<f64>>> for Bytes {
     fn from(array: ArrayExt<num::Complex<f64>>) -> Bytes {
-        let mut data: Vec<num::Complex<f64>> = array.into();
+        let data: Vec<num::Complex<f64>> = array.into();
         let data: Vec<Vec<u8>> = data
-            .drain(..)
+            .into_iter()
             .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
             .collect();
         data.into_iter().flatten().collect::<Vec<u8>>().into()
@@ -139,8 +139,8 @@ impl From<ArrayExt<f32>> for Vec<Number> {
 
 impl From<ArrayExt<f32>> for Bytes {
     fn from(array: ArrayExt<f32>) -> Bytes {
-        let mut data: Vec<f32> = array.into();
-        let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        let data: Vec<f32> = array.into();
+        let data: Vec<[u8; 4]> = data.into_iter().map(|b| b.to_be_bytes()).collect();
         data[..].concat().into()
     }
 }
@@ -155,8 +155,8 @@ impl From<ArrayExt<f64>> for Vec<Number> {
 
 impl From<ArrayExt<f64>> for Bytes {
     fn from(array: ArrayExt<f64>) -> Bytes {
-        let mut data: Vec<f64> = array.into();
-        let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        let data: Vec<f64> = array.into();
+        let data: Vec<[u8; 8]> = data.into_iter().map(|b| b.to_be_bytes()).collect();
         data[..].concat().into()
     }
 }
@@ -171,8 +171,8 @@ impl From<ArrayExt<i16>> for Vec<Number> {
 
 impl From<ArrayExt<i16>> for Bytes {
     fn from(array: ArrayExt<i16>) -> Bytes {
-        let mut data: Vec<i16> = array.into();
-        let data: Vec<[u8; 2]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        let data: Vec<i16> = array.into();
+        let data: Vec<[u8; 2]> = data.into_iter().map(|b| b.to_be_bytes()).collect();
         data[..].concat().into()
     }
 }
@@ -187,8 +187,8 @@ impl From<ArrayExt<i32>> for Vec<Number> {
 
 impl From<ArrayExt<i32>> for Bytes {
     fn from(array: ArrayExt<i32>) -> Bytes {
-        let mut data: Vec<i32> = array.into();
-        let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        let data: Vec<i32> = array.into();
+        let data: Vec<[u8; 4]> = data.into_iter().map(|b| b.to_be_bytes()).collect();
         data[..].concat().into()
     }
 }
@@ -203,8 +203,8 @@ impl From<ArrayExt<i64>> for Vec<Number> {
 
 impl From<ArrayExt<i64>> for Bytes {
     fn from(array: ArrayExt<i64>) -> Bytes {
-        let mut data: Vec<i64> = array.into();
-        let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        let data: Vec<i64> = array.into();
+        let data: Vec<[u8; 8]> = data.into_iter().map(|b| b.to_be_bytes()).collect();
         data[..].concat().into()
     }
 }
@@ -234,8 +234,8 @@ impl From<ArrayExt<u16>> for Vec<Number> {
 
 impl From<ArrayExt<u16>> for Bytes {
     fn from(array: ArrayExt<u16>) -> Bytes {
-        let mut data: Vec<u16> = array.into();
-        let data: Vec<[u8; 2]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        let data: Vec<u16> = array.into();
+        let data: Vec<[u8; 2]> = data.into_iter().map(|b| b.to_be_bytes()).collect();
         data[..].concat().into()
     }
 }
@@ -250,8 +250,8 @@ impl From<ArrayExt<u32>> for Vec<Number> {
 
 impl From<ArrayExt<u32>> for Bytes {
     fn from(array: ArrayExt<u32>) -> Bytes {
-        let mut data: Vec<u32> = array.into();
-        let data: Vec<[u8; 4]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        let data: Vec<u32> = array.into();
+        let data: Vec<[u8; 4]> = data.into_iter().map(|b| b.to_be_bytes()).collect();
         data[..].concat().into()
     }
 }
@@ -266,8 +266,8 @@ impl From<ArrayExt<u64>> for Vec<Number> {
 
 impl From<ArrayExt<u64>> for Bytes {
     fn from(array: ArrayExt<u64>) -> Bytes {
-        let mut data: Vec<u64> = array.into();
-        let data: Vec<[u8; 8]> = data.drain(..).map(|b| b.to_be_bytes()).collect();
+        let data: Vec<u64> = array.into();
+        let data: Vec<[u8; 8]> = data.into_iter().map(|b| b.to_be_bytes()).collect();
         data[..].concat().into()
     }
 }
@@ -1725,12 +1725,12 @@ fn dim4(size: usize) -> af::Dim4 {
     af::Dim4::new(&[size as u64, 1, 1, 1])
 }
 
-fn vec_into<D, S: Into<D>>(mut source: Vec<S>) -> Vec<D> {
-    source.drain(..).map(|i| i.into()).collect()
+fn vec_into<D, S: Into<D>>(source: Vec<S>) -> Vec<D> {
+    source.into_iter().map(|i| i.into()).collect()
 }
 
-fn vec_try_into<D: TryFrom<S, Error = error::TCError>, S>(mut source: Vec<S>) -> TCResult<Vec<D>> {
-    source.drain(..).map(|i| i.try_into()).collect()
+fn vec_try_into<D: TryFrom<S, Error = error::TCError>, S>(source: Vec<S>) -> TCResult<Vec<D>> {
+    source.into_iter().map(|i| i.try_into()).collect()
 }
 
 fn err_corrupt<T: fmt::Display>(info: T) -> error::TCError {
