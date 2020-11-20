@@ -21,12 +21,9 @@ mod bounds;
 mod index;
 mod view;
 
-const ERR_DELETE: &str =
-    "This table view does not support deletion (try deleting a slice of the source table)";
-const ERR_SLICE: &str =
-    "This table view does not support slicing (consider slicing the source table directly)";
-const ERR_UPDATE: &str =
-    "This table view does not support updates (consider updating a slice of the source table)";
+const ERR_DELETE: &str = "Deletion is not supported by instance of";
+const ERR_SLICE: &str = "Slicing is not supported by instance of";
+const ERR_UPDATE: &str = "Update is not supported by instance of";
 
 pub type ColumnBound = bounds::ColumnBound;
 pub type TableBase = index::TableBase;
@@ -102,11 +99,11 @@ pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static
     }
 
     async fn delete(self, _txn_id: TxnId) -> TCResult<()> {
-        Err(error::unsupported(ERR_DELETE))
+        Err(error::bad_request(ERR_DELETE, self.class()))
     }
 
     async fn delete_row(&self, _txn_id: &TxnId, _row: Row) -> TCResult<()> {
-        Err(error::unsupported(ERR_DELETE))
+        Err(error::bad_request(ERR_DELETE, self.class()))
     }
 
     fn group_by(&self, columns: Vec<Id>) -> TCResult<view::Aggregate> {
@@ -136,7 +133,7 @@ pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static
     }
 
     fn slice(&self, _bounds: bounds::Bounds) -> TCResult<Table> {
-        Err(error::unsupported(ERR_SLICE))
+        Err(error::bad_request(ERR_SLICE, self.class()))
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream>;
@@ -146,11 +143,11 @@ pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static
     fn validate_order(&self, order: &[Id]) -> TCResult<()>;
 
     async fn update(self, _txn: Txn, _value: Row) -> TCResult<()> {
-        Err(error::unsupported(ERR_UPDATE))
+        Err(error::bad_request(ERR_UPDATE, self.class()))
     }
 
     async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
-        Err(error::unsupported(ERR_UPDATE))
+        Err(error::bad_request(ERR_UPDATE, self.class()))
     }
 }
 
