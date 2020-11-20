@@ -133,27 +133,36 @@ impl IndexSchema {
         self.key.len() + self.values.len()
     }
 
-    pub fn key_from_row(&self, row: &Row) -> TCResult<Vec<Value>> {
+    pub fn key_from_row(&self, mut row: Row) -> TCResult<Vec<Value>> {
         let mut key = Vec::with_capacity(self.key.len());
         for column in &self.key {
-            if let Some(value) = row.get(&column.name) {
-                value.expect(column.dtype, format!("for table schema {}", self))?;
-                key.push(value.clone())
-            } else {
-                return Err(error::bad_request(
-                    "Row has no value for key column",
-                    &column.name,
-                ));
-            }
+            let value = row.remove(&column.name).ok_or_else(|| {
+                error::bad_request("Row has no value for key column", &column.name)
+            })?;
+
+            let value = column.dtype.try_cast(value)?;
+            key.push(value)
         }
 
         Ok(key)
     }
 
-    pub fn key_value_from(&self, mut row: Vec<Value>) -> (Vec<Value>, Vec<Value>) {
+    pub fn key_values_from(&self, mut row: Vec<Value>) -> (Vec<Value>, Vec<Value>) {
         assert!(self.len() == row.len());
         let value = row.split_off(self.key.len());
         (row, value)
+    }
+
+    pub fn merge_values(&self, mut values: Vec<Value>, row: &Row) -> Vec<Value> {
+        assert!(self.values.len() == values.len());
+
+        for (i, col) in self.values.iter().enumerate() {
+            if let Some(new_val) = row.get(&col.name) {
+                values[i] = new_val.clone();
+            }
+        }
+
+        values
     }
 
     pub fn starts_with(&self, expected: &[Id]) -> bool {
@@ -217,25 +226,26 @@ impl IndexSchema {
         Ok(())
     }
 
-    pub fn validate_row_partial(&self, row: &Row) -> TCResult<()> {
+    pub fn validate_row_partial(&self, row: Row) -> TCResult<Row> {
+        let mut validated = Row::new();
         let columns: HashMap<Id, ValueType> = self
             .columns()
             .into_iter()
             .map(|c| (c.name, c.dtype))
             .collect();
 
-        for (col_name, value) in row {
-            if let Some(dtype) = columns.get(col_name) {
-                value.expect(*dtype, format!("for table with schema {}", self))?;
-            } else {
-                return Err(error::not_found(col_name));
-            }
+        for (col_name, value) in row.into_iter() {
+            let dtype = columns
+                .get(&col_name)
+                .ok_or(error::bad_request("No such column", &col_name))?;
+            let value = dtype.try_cast(value)?;
+            validated.insert(col_name, value);
         }
 
-        Ok(())
+        Ok(validated)
     }
 
-    pub fn validate_row(&self, row: &Row) -> TCResult<()> {
+    pub fn validate_row(&self, row: Row) -> TCResult<Row> {
         let expected: HashSet<Id> = self.columns().iter().map(|c| c.name()).cloned().collect();
         let actual: HashSet<Id> = row.keys().cloned().collect();
         let missing: Vec<&Id> = expected.difference(&actual).collect();
@@ -272,7 +282,7 @@ impl IndexSchema {
             let value = row
                 .remove(&column.name)
                 .ok_or_else(|| error::bad_request("Missing value for column", &column.name))?;
-            value.expect(column.dtype, format!("for table with schema {}", self))?;
+            let value = column.dtype.try_cast(value)?;
             key.push(value);
         }
 
@@ -292,27 +302,19 @@ impl IndexSchema {
         Ok(key)
     }
 
-    pub fn key_value_into_row(&self, key: Vec<Value>, value: Vec<Value>) -> TCResult<Row> {
+    pub fn key_values_into_row(&self, key: Vec<Value>, value: Vec<Value>) -> TCResult<Row> {
         let mut values = key;
         values.extend(value);
         self.values_into_row(values)
     }
 
     pub fn values_into_row(&self, values: Vec<Value>) -> TCResult<Row> {
-        if values.len() > self.len() {
-            return Err(error::bad_request(
-                "Too many values provided for a row with schema",
-                self,
-            ));
-        }
+        assert!(values.len() == self.len());
 
         let mut row = HashMap::new();
-        for (column, value) in self.columns()[0..values.len()]
-            .iter()
-            .zip(values.into_iter())
-        {
-            value.expect(column.dtype, format!("for table with schema {}", self))?;
-            row.insert(column.name.clone(), value);
+        for (column, value) in self.columns().into_iter().zip(values.into_iter()) {
+            let value = column.dtype.try_cast(value)?;
+            row.insert(column.name, value);
         }
 
         Ok(row)

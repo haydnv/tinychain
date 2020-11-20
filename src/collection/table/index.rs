@@ -142,11 +142,11 @@ impl TableInstance for TableBase {
         }
     }
 
-    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
         match self {
-            Self::Index(index) => TableInstance::insert(index.deref(), txn_id, key, value).await,
-            Self::ROIndex(index) => TableInstance::insert(index.deref(), txn_id, key, value).await,
-            Self::Table(table) => TableInstance::insert(table.deref(), txn_id, key, value).await,
+            Self::Index(index) => TableInstance::insert(index.deref(), txn_id, key, values).await,
+            Self::ROIndex(index) => TableInstance::insert(index.deref(), txn_id, key, values).await,
+            Self::Table(table) => TableInstance::insert(table.deref(), txn_id, key, values).await,
         }
     }
 
@@ -214,11 +214,11 @@ impl TableInstance for TableBase {
         }
     }
 
-    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
         match self {
-            Self::Index(index) => TableInstance::upsert(index.deref(), txn_id, key, value).await,
-            Self::ROIndex(index) => TableInstance::upsert(index.deref(), txn_id, key, value).await,
-            Self::Table(table) => TableInstance::upsert(table.deref(), txn_id, key, value).await,
+            Self::Index(index) => TableInstance::upsert(index.deref(), txn_id, key, values).await,
+            Self::ROIndex(index) => TableInstance::upsert(index.deref(), txn_id, key, values).await,
+            Self::Table(table) => TableInstance::upsert(table.deref(), txn_id, key, values).await,
         }
     }
 
@@ -700,7 +700,7 @@ impl TableIndex {
         self.get(txn_id, key).await
     }
 
-    pub async fn insert(&self, txn_id: TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+    pub async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
         if self.get(txn_id.clone(), key.to_vec()).await?.is_some() {
             let key: Vec<String> = key.iter().map(|v| v.to_string()).collect();
             Err(error::bad_request(
@@ -708,12 +708,17 @@ impl TableIndex {
                 format!("[{}]", key.join(", ")),
             ))
         } else {
-            self.upsert(&txn_id, key, value).await
+            self.upsert(&txn_id, key, values).await
         }
     }
 
-    pub async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
-        let row = self.primary.schema().key_value_into_row(key, value)?;
+    pub async fn upsert(
+        &self,
+        txn_id: &TxnId,
+        key: Vec<Value>,
+        values: Vec<Value>,
+    ) -> TCResult<()> {
+        let row = self.primary.schema().key_values_into_row(key, values)?;
 
         self.delete_row(txn_id, row.clone()).await?;
 
@@ -756,7 +761,7 @@ impl TableInstance for TableIndex {
     }
 
     async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
-        self.primary.schema().validate_row(&row)?;
+        let row = self.primary.schema().validate_row(row)?;
 
         let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
         for index in self.auxiliary.values() {
@@ -768,8 +773,8 @@ impl TableInstance for TableIndex {
         Ok(())
     }
 
-    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
-        TableIndex::insert(self, txn_id, key, value).await
+    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
+        TableIndex::insert(self, txn_id, key, values).await
     }
 
     fn key(&'_ self) -> &'_ [Column] {
@@ -897,9 +902,18 @@ impl TableInstance for TableIndex {
         self.primary.stream(txn_id).await
     }
 
-    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
+    async fn update(self, txn: Txn, row: Row) -> TCResult<()> {
+        for col in self.primary.schema().key() {
+            if row.contains_key(col.name()) {
+                return Err(error::bad_request(
+                    "Cannot update the value of a primary key column",
+                    col.name(),
+                ));
+            }
+        }
+
         let schema = self.primary.schema();
-        schema.validate_row_partial(&value)?;
+        let row = schema.validate_row_partial(row)?;
 
         let index = self.clone().index(txn.clone(), None).await?;
 
@@ -907,15 +921,18 @@ impl TableInstance for TableIndex {
         index
             .stream(txn_id.clone())
             .await?
-            .map(|row| schema.key_value_from(row))
-            .map(|(key, value)| Ok(self.upsert(txn_id, key, value)))
+            .map(|row| schema.key_values_from(row))
+            .map(|(key, values)| {
+                let updated_values = schema.merge_values(values, &row);
+                Ok(self.upsert(txn_id, key, updated_values))
+            })
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
 
-    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
-        TableIndex::upsert(self, txn_id, key, value).await
+    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
+        TableIndex::upsert(self, txn_id, key, values).await
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
