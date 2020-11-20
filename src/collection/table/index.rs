@@ -989,7 +989,7 @@ impl Transact for TableIndex {
         let mut rollbacks = Vec::with_capacity(self.auxiliary.len() + 1);
         rollbacks.push(self.primary.rollback(txn_id));
         for index in self.auxiliary.values() {
-            rollbacks.push(index.commit(txn_id));
+            rollbacks.push(index.rollback(txn_id));
         }
 
         join_all(rollbacks).await;
@@ -999,7 +999,7 @@ impl Transact for TableIndex {
         let mut cleanups = Vec::with_capacity(self.auxiliary.len() + 1);
         cleanups.push(self.primary.finalize(txn_id));
         for index in self.auxiliary.values() {
-            cleanups.push(index.commit(txn_id));
+            cleanups.push(index.finalize(txn_id));
         }
 
         join_all(cleanups).await;
