@@ -807,7 +807,7 @@ impl TableInstance for Merged {
         self.clone()
             .stream(txn_id.clone())
             .await?
-            .map(|values| schema.values_into_row(values))
+            .map(|row| schema.values_into_row(row))
             .map_ok(|row| self.delete_row(&txn_id, row))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -900,7 +900,7 @@ impl TableInstance for Merged {
         self.clone()
             .stream(txn.id().clone())
             .await?
-            .map(|values| schema.values_into_row(values))
+            .map(|row| schema.values_into_row(row))
             .map_ok(|row| self.update_row(txn.id().clone(), row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))

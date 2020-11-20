@@ -286,7 +286,13 @@ impl IndexSchema {
         Ok(key)
     }
 
-    pub fn values_into_row(&self, mut values: Vec<Value>) -> TCResult<Row> {
+    pub fn key_value_into_row(&self, key: Vec<Value>, value: Vec<Value>) -> TCResult<Row> {
+        let mut values = key;
+        values.extend(value);
+        self.values_into_row(values)
+    }
+
+    pub fn values_into_row(&self, values: Vec<Value>) -> TCResult<Row> {
         if values.len() > self.len() {
             return Err(error::bad_request(
                 "Too many values provided for a row with schema",
@@ -295,7 +301,10 @@ impl IndexSchema {
         }
 
         let mut row = HashMap::new();
-        for (column, value) in self.columns()[0..values.len()].iter().zip(values.drain(..)) {
+        for (column, value) in self.columns()[0..values.len()]
+            .iter()
+            .zip(values.into_iter())
+        {
             value.expect(column.dtype, format!("for table with schema {}", self))?;
             row.insert(column.name.clone(), value);
         }

@@ -691,9 +691,7 @@ impl TableIndex {
                 format!("[{}]", key.join(", ")),
             ))
         } else {
-            let mut values = key;
-            values.extend(value);
-            let row = self.primary.schema().values_into_row(values)?;
+            let row = self.primary.schema().key_value_into_row(key, value)?;
             self.upsert(&txn_id, row).await
         }
     }
