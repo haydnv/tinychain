@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::sync::Arc;
@@ -603,22 +603,13 @@ impl Transact for IndexSlice {
 #[derive(Clone)]
 pub struct Limited {
     source: Box<Table>,
-    limit: usize,
+    limit: u64,
 }
 
-impl TryFrom<(Table, u64)> for Limited {
-    type Error = error::TCError;
-
-    fn try_from(params: (Table, u64)) -> TCResult<Limited> {
-        let (source, limit) = params;
-        let limit: usize = limit.try_into().map_err(|_| {
-            error::internal("This host architecture does not support a 64-bit stream limit")
-        })?;
-
-        Ok(Limited {
-            source: Box::new(source),
-            limit,
-        })
+impl Limited {
+    pub fn new<T: Into<Table>>(source: T, limit: u64) -> Limited {
+        let source = Box::new(source.into());
+        Limited { source, limit }
     }
 }
 
@@ -670,7 +661,7 @@ impl TableInstance for Limited {
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
         let rows = self.source.clone().stream(txn_id).await?;
-        let rows: TCStream<Vec<Value>> = Box::pin(rows.take(self.limit));
+        let rows: TCStream<Vec<Value>> = Box::pin(rows.take(self.limit as usize));
         Ok(rows)
     }
 

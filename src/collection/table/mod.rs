@@ -1,7 +1,6 @@
 use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future;
@@ -128,9 +127,8 @@ pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static
 
     fn values(&'_ self) -> &'_ [Column];
 
-    fn limit(&self, limit: u64) -> TCResult<Arc<view::Limited>> {
-        let limited = view::Limited::try_from((self.clone().into(), limit))?;
-        Ok(Arc::new(limited))
+    fn limit(&self, limit: u64) -> view::Limited {
+        view::Limited::new(self.clone().into(), limit)
     }
 
     fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table>;
@@ -193,6 +191,11 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
             Ok(State::from(table))
         } else if path.len() == 1 {
             match path[0].as_str() {
+                "limit" => {
+                    let limit =
+                        selector.try_cast_into(|v| error::bad_request("Invalid limit", v))?;
+                    Ok(State::from(Table::from(self.limit(limit))))
+                }
                 "select" => {
                     let columns = if selector.matches::<Vec<Id>>() {
                         selector.opt_cast_into().unwrap()
@@ -433,7 +436,7 @@ impl TableInstance for Table {
         }
     }
 
-    fn limit(&self, limit: u64) -> TCResult<Arc<view::Limited>> {
+    fn limit(&self, limit: u64) -> view::Limited {
         match self {
             Self::Base(base) => base.limit(limit),
             Self::View(view) => view.limit(limit),
