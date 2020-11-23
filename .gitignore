@@ -10,4 +10,5 @@ Cargo.lock
 **/*.rs.bk
 
 # IDE metadata
+.idea
 .project

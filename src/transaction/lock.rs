@@ -358,7 +358,7 @@ impl<T: Mutate> Transact for TxnLock<T> {
                 None
             };
 
-			#[allow(clippy::async_yields_async)]
+            #[allow(clippy::async_yields_async)]
             if let Some(new_value) = new_value {
                 let value = unsafe { &mut *lock.value.get() };
                 value.converge(new_value)

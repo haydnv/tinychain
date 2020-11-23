@@ -459,7 +459,7 @@ impl IndexSlice {
 
         assert!(source.schema() == &columns[..]);
 
-        bounds::validate(&bounds, &columns)?;
+        let bounds = bounds::validate(bounds, &columns)?;
         let range = bounds::btree_range(&bounds, &columns)?;
 
         Ok(IndexSlice {

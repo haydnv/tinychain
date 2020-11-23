@@ -99,6 +99,12 @@ impl TryCastFrom<Value> for Column {
     }
 }
 
+impl<'a> From<&'a Column> for (&'a Id, ValueType) {
+    fn from(col: &'a Column) -> (&'a Id, ValueType) {
+        (&col.name, col.dtype)
+    }
+}
+
 impl fmt::Display for Column {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.max_len {

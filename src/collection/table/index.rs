@@ -317,7 +317,7 @@ impl Index {
     }
 
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
-        bounds::validate(&bounds, &self.schema().columns())?;
+        let bounds = bounds::validate(bounds, &self.schema().columns())?;
         IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)
     }
 
@@ -331,8 +331,8 @@ impl Index {
     }
 
     pub fn validate_slice_bounds(&self, outer: Bounds, inner: Bounds) -> TCResult<()> {
-        bounds::validate(&outer, &self.schema().columns())?;
-        bounds::validate(&inner, &self.schema().columns())?;
+        let outer = bounds::validate(outer, &self.schema().columns())?;
+        let inner = bounds::validate(inner, &self.schema().columns())?;
 
         let outer = bounds::btree_range(&outer, &self.schema().columns())?;
         let inner = bounds::btree_range(&inner, &self.schema().columns())?;
@@ -414,11 +414,11 @@ impl TableInstance for Index {
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        bounds::validate(bounds, &self.schema().columns())?;
+        let bounds = bounds::validate(bounds.clone(), &self.schema().columns())?;
 
-        for (column, (bound_column, bound_range)) in self.schema.columns()[0..bounds.len()]
+        for (column, bound_column) in self.schema.columns()[0..bounds.len()]
             .iter()
-            .zip(bounds.iter())
+            .zip(bounds.keys())
         {
             if column.name() != bound_column {
                 return Err(error::bad_request(
@@ -429,8 +429,6 @@ impl TableInstance for Index {
                     bound_column,
                 ));
             }
-
-            bound_range.expect(*column.dtype(), &format!("for column {}", column.name()))?;
         }
 
         Ok(())

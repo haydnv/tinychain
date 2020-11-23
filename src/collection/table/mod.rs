@@ -13,7 +13,7 @@ use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionView};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{Id, Link, Object, PathSegment, Scalar, TCPathBuf, Value};
+use crate::scalar::{Id, Link, Object, PathSegment, Scalar, TCPathBuf, TryCastFrom, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::schema::{Column, Row, TableSchema};
@@ -27,7 +27,8 @@ const ERR_INSERT: &str = "Insertion is not supported by instance of";
 const ERR_SLICE: &str = "Slicing is not supported by instance of";
 const ERR_UPDATE: &str = "Update is not supported by instance of";
 
-pub type ColumnBound = bounds::ColumnBound;
+pub use bounds::*;
+
 pub type TableBase = index::TableBase;
 pub type TableBaseType = index::TableBaseType;
 pub type TableIndex = index::TableIndex;
@@ -138,13 +139,13 @@ pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static
         Ok(selection)
     }
 
-    fn slice(&self, _bounds: bounds::Bounds) -> TCResult<Table> {
+    fn slice(&self, _bounds: Bounds) -> TCResult<Table> {
         Err(error::bad_request(ERR_SLICE, self.class()))
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream>;
 
-    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()>;
+    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()>;
 
     fn validate_order(&self, order: &[Id]) -> TCResult<()>;
 
@@ -195,10 +196,20 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
         &self,
         _request: &Request,
         _txn: &Txn,
-        _path: &[PathSegment],
-        _params: Object,
+        path: &[PathSegment],
+        params: Object,
     ) -> TCResult<State> {
-        Err(error::not_implemented("TableImpl::post"))
+        if path.is_empty() {
+            Err(error::method_not_allowed("Table: POST /"))
+        } else if path.len() == 1 {
+            let _bounds = Bounds::try_cast_from(params, |v| {
+                error::bad_request("Cannot cast into Table Bounds from", v)
+            })?;
+
+            Err(error::not_implemented("TableImpl::post"))
+        } else {
+            Err(error::path_not_found(path))
+        }
     }
 
     async fn put(
@@ -421,7 +432,7 @@ impl TableInstance for Table {
         }
     }
 
-    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Table> {
+    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
         match self {
             Self::Base(base) => base.slice(bounds),
             Self::View(view) => view.slice(bounds),
@@ -444,7 +455,7 @@ impl TableInstance for Table {
         }
     }
 
-    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()> {
+    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
         match self {
             Self::Base(base) => base.validate_bounds(bounds),
             Self::View(view) => view.validate_bounds(bounds),

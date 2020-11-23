@@ -1,11 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 
-use crate::class::{Instance, TCResult};
 use crate::collection::btree::BTreeRange;
 use crate::collection::schema::Column;
-use crate::error;
-use crate::scalar::{Bound, Id, Value, ValueType};
+use crate::error::{self, TCResult};
+use crate::scalar::{
+    Bound, Id, Object, Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto, Value,
+    ValueType,
+};
 
 #[derive(Clone)]
 pub enum ColumnBound {
@@ -13,27 +15,25 @@ pub enum ColumnBound {
     In(Bound, Bound),
 }
 
-impl ColumnBound {
-    pub fn expect<M: fmt::Display>(&self, dtype: ValueType, err_context: &M) -> TCResult<()> {
-        match self {
-            Self::Is(value) => value.expect(dtype, err_context),
-            Self::In(start, end) => match start {
-                Bound::In(value) => value.expect(dtype, err_context),
-                Bound::Ex(value) => value.expect(dtype, err_context),
-                Bound::Unbounded => Ok(()),
-            }
-            .and_then(|_| match end {
-                Bound::In(value) => value.expect(dtype, err_context),
-                Bound::Ex(value) => value.expect(dtype, err_context),
-                Bound::Unbounded => Ok(()),
-            }),
-        }
+impl From<Value> for ColumnBound {
+    fn from(value: Value) -> Self {
+        Self::Is(value)
     }
 }
 
-impl From<Value> for ColumnBound {
-    fn from(value: Value) -> ColumnBound {
-        ColumnBound::Is(value)
+impl TryCastFrom<Scalar> for ColumnBound {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        scalar.matches::<Value>() || scalar.matches::<(Bound, Bound)>()
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<ColumnBound> {
+        if scalar.matches::<(Bound, Bound)>() {
+            scalar
+                .opt_cast_into()
+                .map(|(start, end)| ColumnBound::In(start, end))
+        } else {
+            scalar.opt_cast_into().map(ColumnBound::Is)
+        }
     }
 }
 
@@ -101,6 +101,26 @@ pub fn from_key(key: Vec<Value>, key_columns: &[Column]) -> Bounds {
         .collect()
 }
 
+impl TryCastFrom<Object> for Bounds {
+    fn can_cast_from(object: &Object) -> bool {
+        object.values().all(|v| v.matches::<ColumnBound>())
+    }
+
+    fn opt_cast_from(object: Object) -> Option<Bounds> {
+        let mut bounds = HashMap::new();
+
+        for (id, bound) in object.into_iter() {
+            if let Some(bound) = bound.opt_cast_into() {
+                bounds.insert(id, bound);
+            } else {
+                return None;
+            }
+        }
+
+        Some(bounds)
+    }
+}
+
 pub fn format(bounds: &Bounds) -> String {
     let bounds: Vec<String> = bounds
         .iter()
@@ -110,13 +130,31 @@ pub fn format(bounds: &Bounds) -> String {
     format!("{{{}}}", bounds.join(", "))
 }
 
-pub fn validate(bounds: &Bounds, columns: &[Column]) -> TCResult<()> {
-    let column_names: HashSet<&Id> = columns.iter().map(|c| c.name()).collect();
-    for name in bounds.keys() {
-        if !column_names.contains(name) {
+pub fn validate(bounds: Bounds, columns: &[Column]) -> TCResult<Bounds> {
+    let try_cast_bound = |bound: Bound, dtype: ValueType| match bound {
+        Bound::In(val) => dtype.try_cast(val).map(Bound::In),
+        Bound::Ex(val) => dtype.try_cast(val).map(Bound::Ex),
+        Bound::Unbounded => Ok(Bound::Unbounded),
+    };
+
+    let mut validated = Bounds::new();
+    let columns: HashMap<&Id, ValueType> = columns.iter().map(|c| c.into()).collect();
+    for (name, bound) in bounds.into_iter() {
+        if let Some(dtype) = columns.get(&name) {
+            let bound = match bound {
+                ColumnBound::Is(value) => dtype.try_cast(value).map(ColumnBound::Is)?,
+                ColumnBound::In(start, end) => {
+                    let start = try_cast_bound(start, *dtype)?;
+                    let end = try_cast_bound(end, *dtype)?;
+                    ColumnBound::In(start, end)
+                }
+            };
+
+            validated.insert(name, bound);
+        } else {
             return Err(error::not_found(name));
         }
     }
 
-    Ok(())
+    Ok(validated)
 }
