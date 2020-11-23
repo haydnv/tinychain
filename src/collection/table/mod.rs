@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -13,7 +13,10 @@ use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionView};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{Id, Link, Object, PathSegment, Scalar, TCPathBuf, TryCastFrom, Value};
+use crate::scalar::{
+    Id, Link, Object, PathSegment, Scalar, ScalarInstance, TCPathBuf, TryCastFrom, TryCastInto,
+    Value,
+};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::schema::{Column, Row, TableSchema};
@@ -135,7 +138,7 @@ pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static
     fn reversed(&self) -> TCResult<Table>;
 
     fn select(&self, columns: Vec<Id>) -> TCResult<view::Selection> {
-        let selection = (self.clone().into(), columns).try_into()?;
+        let selection = view::Selection::new(self.clone().into(), columns)?;
         Ok(selection)
     }
 
@@ -182,10 +185,31 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
         &self,
         _request: &Request,
         _txn: &Txn,
-        _path: &[PathSegment],
-        _selector: Value,
+        path: &[PathSegment],
+        selector: Value,
     ) -> TCResult<State> {
-        Err(error::not_implemented("TableImpl::get"))
+        if path.is_empty() {
+            let table: Table = self.inner.clone().into();
+            Ok(State::from(table))
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "select" => {
+                    let columns = if selector.matches::<Vec<Id>>() {
+                        selector.opt_cast_into().unwrap()
+                    } else {
+                        let name = selector
+                            .try_cast_into(|v| error::bad_request("Invalid column name", v))?;
+
+                        vec![name]
+                    };
+
+                    self.select(columns).map(Table::from).map(State::from)
+                }
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            Err(error::path_not_found(path))
+        }
     }
 
     async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
@@ -202,11 +226,16 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
         if path.is_empty() {
             Err(error::method_not_allowed("Table: POST /"))
         } else if path.len() == 1 {
-            let bounds = Bounds::try_cast_from(params, |v| {
-                error::bad_request("Cannot cast into Table Bounds from", v)
-            })?;
+            match path[0].as_str() {
+                "where" => {
+                    let bounds = Bounds::try_cast_from(params, |v| {
+                        error::bad_request("Cannot cast into Table Bounds from", v)
+                    })?;
 
-            self.slice(bounds).map(State::from)
+                    self.slice(bounds).map(State::from)
+                }
+                other => Err(error::not_found(other)),
+            }
         } else {
             Err(error::path_not_found(path))
         }

@@ -21,10 +21,10 @@ impl From<Value> for ColumnBound {
     }
 }
 
-impl From<(Bound,Bound)> for ColumnBound {
+impl From<(Bound, Bound)> for ColumnBound {
     fn from(range: (Bound, Bound)) -> Self {
         let (start, end) = range;
-        Self::In(Range(start,end))
+        Self::In(Range(start, end))
     }
 }
 

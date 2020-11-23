@@ -780,7 +780,7 @@ impl TableInstance for TableIndex {
     }
 
     fn values(&'_ self) -> &'_ [Column] {
-        self.primary.key()
+        self.primary.values()
     }
 
     fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
@@ -900,39 +900,6 @@ impl TableInstance for TableIndex {
         self.primary.stream(txn_id).await
     }
 
-    async fn update(self, txn: Txn, row: Row) -> TCResult<()> {
-        for col in self.primary.schema().key() {
-            if row.contains_key(col.name()) {
-                return Err(error::bad_request(
-                    "Cannot update the value of a primary key column",
-                    col.name(),
-                ));
-            }
-        }
-
-        let schema = self.primary.schema();
-        let row = schema.validate_row_partial(row)?;
-
-        let index = self.clone().index(txn.clone(), None).await?;
-
-        let txn_id = txn.id();
-        index
-            .stream(txn_id.clone())
-            .await?
-            .map(|row| schema.key_values_from(row))
-            .map(|(key, values)| {
-                let updated_values = schema.merge_values(values, &row);
-                Ok(self.upsert(txn_id, key, updated_values))
-            })
-            .try_buffer_unordered(2)
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await
-    }
-
-    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
-        TableIndex::upsert(self, txn_id, key, values).await
-    }
-
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
         let bounds: Vec<(Id, ColumnBound)> = self
             .primary
@@ -996,6 +963,39 @@ impl TableInstance for TableIndex {
         }
 
         Ok(())
+    }
+
+    async fn update(self, txn: Txn, row: Row) -> TCResult<()> {
+        for col in self.primary.schema().key() {
+            if row.contains_key(col.name()) {
+                return Err(error::bad_request(
+                    "Cannot update the value of a primary key column",
+                    col.name(),
+                ));
+            }
+        }
+
+        let schema = self.primary.schema();
+        let row = schema.validate_row_partial(row)?;
+
+        let index = self.clone().index(txn.clone(), None).await?;
+
+        let txn_id = txn.id();
+        index
+            .stream(txn_id.clone())
+            .await?
+            .map(|row| schema.key_values_from(row))
+            .map(|(key, values)| {
+                let updated_values = schema.merge_values(values, &row);
+                Ok(self.upsert(txn_id, key, updated_values))
+            })
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+
+    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
+        TableIndex::upsert(self, txn_id, key, values).await
     }
 }
 
