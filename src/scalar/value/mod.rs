@@ -18,6 +18,7 @@ pub mod string;
 pub mod version;
 
 pub use class::*;
+use itertools::__std_iter::FromIterator;
 pub use link::*;
 pub use number::*;
 pub use string::*;
@@ -148,6 +149,16 @@ impl<T: Into<Value>> From<Option<T>> for Value {
             Some(val) => val.into(),
             None => Value::None,
         }
+    }
+}
+
+impl<T: Into<Value>> FromIterator<T> for Value {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Value {
+        let mut tuple = vec![];
+        for item in iter {
+            tuple.push(item.into());
+        }
+        Value::Tuple(tuple)
     }
 }
 
