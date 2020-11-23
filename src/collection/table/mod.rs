@@ -196,16 +196,12 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
                         selector.try_cast_into(|v| error::bad_request("Invalid limit", v))?;
                     Ok(State::from(Table::from(self.limit(limit))))
                 }
+                "order_by" => {
+                    let columns = try_into_columns(selector)?;
+                    self.order_by(columns, false).map(Table::from).map(State::from)
+                }
                 "select" => {
-                    let columns = if selector.matches::<Vec<Id>>() {
-                        selector.opt_cast_into().unwrap()
-                    } else {
-                        let name = selector
-                            .try_cast_into(|v| error::bad_request("Invalid column name", v))?;
-
-                        vec![name]
-                    };
-
+                    let columns = try_into_columns(selector)?;
                     self.select(columns).map(Table::from).map(State::from)
                 }
                 other => Err(error::not_found(other)),
@@ -478,15 +474,6 @@ impl TableInstance for Table {
         }
     }
 
-    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
-        debug!("{}::upsert", self.class());
-
-        match self {
-            Self::Base(base) => base.upsert(txn_id, key, value).await,
-            Self::View(view) => view.upsert(txn_id, key, value).await,
-        }
-    }
-
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
         match self {
             Self::Base(base) => base.validate_bounds(bounds),
@@ -512,6 +499,15 @@ impl TableInstance for Table {
         match self {
             Self::Base(base) => base.update_row(txn_id, row, value).await,
             Self::View(view) => view.update_row(txn_id, row, value).await,
+        }
+    }
+
+    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, value: Vec<Value>) -> TCResult<()> {
+        debug!("{}::upsert", self.class());
+
+        match self {
+            Self::Base(base) => base.upsert(txn_id, key, value).await,
+            Self::View(view) => view.upsert(txn_id, key, value).await,
         }
     }
 }
@@ -564,5 +560,16 @@ impl From<Table> for Collection {
 impl From<Table> for State {
     fn from(table: Table) -> State {
         State::Collection(table.into())
+    }
+}
+
+fn try_into_columns(selector: Value) -> TCResult<Vec<Id>> {
+    if selector.matches::<Vec<Id>>() {
+        Ok(selector.opt_cast_into().unwrap())
+    } else {
+        let name = selector
+            .try_cast_into(|v| error::bad_request("Invalid column name", v))?;
+
+        Ok(vec![name])
     }
 }
