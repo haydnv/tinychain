@@ -202,11 +202,11 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
         if path.is_empty() {
             Err(error::method_not_allowed("Table: POST /"))
         } else if path.len() == 1 {
-            let _bounds = Bounds::try_cast_from(params, |v| {
+            let bounds = Bounds::try_cast_from(params, |v| {
                 error::bad_request("Cannot cast into Table Bounds from", v)
             })?;
 
-            Err(error::not_implemented("TableImpl::post"))
+            self.slice(bounds).map(State::from)
         } else {
             Err(error::path_not_found(path))
         }
@@ -524,7 +524,13 @@ impl From<Table> for Collection {
     fn from(table: Table) -> Collection {
         match table {
             Table::Base(base) => Collection::Base(CollectionBase::Table(base)),
-            _ => Collection::View(CollectionView::Table(table)),
+            view => Collection::View(CollectionView::Table(view)),
         }
+    }
+}
+
+impl From<Table> for State {
+    fn from(table: Table) -> State {
+        State::Collection(table.into())
     }
 }

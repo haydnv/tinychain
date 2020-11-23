@@ -170,7 +170,7 @@ impl fmt::Display for Bound {
 }
 
 #[derive(Clone, Eq, PartialEq)]
-pub struct Range(Bound, Bound);
+pub struct Range(pub Bound, pub Bound);
 
 impl Range {
     pub fn into_inner(self) -> (Bound, Bound) {

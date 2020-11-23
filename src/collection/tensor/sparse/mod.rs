@@ -2027,7 +2027,7 @@ fn slice_table(mut table: Table, bounds: &'_ Bounds) -> TCBoxTryFuture<'_, Table
                 In(range) => {
                     let start = Bound::In(u64_to_value(range.start));
                     let end = Bound::Ex(u64_to_value(range.end));
-                    table::ColumnBound::In(start, end)
+                    (start, end).into()
                 }
                 _ => todo!(),
             };

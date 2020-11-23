@@ -5,14 +5,14 @@ use crate::collection::btree::BTreeRange;
 use crate::collection::schema::Column;
 use crate::error::{self, TCResult};
 use crate::scalar::{
-    Bound, Id, Object, Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto, Value,
+    Bound, Id, Object, Range, Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto, Value,
     ValueType,
 };
 
 #[derive(Clone)]
 pub enum ColumnBound {
     Is(Value),
-    In(Bound, Bound),
+    In(Range),
 }
 
 impl From<Value> for ColumnBound {
@@ -21,16 +21,21 @@ impl From<Value> for ColumnBound {
     }
 }
 
+impl From<(Bound,Bound)> for ColumnBound {
+    fn from(range: (Bound, Bound)) -> Self {
+        let (start, end) = range;
+        Self::In(Range(start,end))
+    }
+}
+
 impl TryCastFrom<Scalar> for ColumnBound {
     fn can_cast_from(scalar: &Scalar) -> bool {
-        scalar.matches::<Value>() || scalar.matches::<(Bound, Bound)>()
+        scalar.matches::<Value>() || scalar.matches::<Range>()
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<ColumnBound> {
-        if scalar.matches::<(Bound, Bound)>() {
-            scalar
-                .opt_cast_into()
-                .map(|(start, end)| ColumnBound::In(start, end))
+        if scalar.matches::<Range>() {
+            scalar.opt_cast_into().map(ColumnBound::In)
         } else {
             scalar.opt_cast_into().map(ColumnBound::Is)
         }
@@ -41,8 +46,8 @@ impl fmt::Display for ColumnBound {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Is(value) => write!(f, "{}", value),
-            Self::In(Bound::Unbounded, Bound::Unbounded) => write!(f, "[...]"),
-            Self::In(start, end) => {
+            Self::In(Range(Bound::Unbounded, Bound::Unbounded)) => write!(f, "[...]"),
+            Self::In(Range(start, end)) => {
                 match start {
                     Bound::Unbounded => write!(f, "[...")?,
                     Bound::In(value) => write!(f, "[{},", value)?,
@@ -80,7 +85,7 @@ pub fn btree_range(bounds: &Bounds, columns: &[Column]) -> TCResult<BTreeRange> 
                 start.push(In(value.clone()));
                 end.push(In(value));
             }
-            ColumnBound::In(s, e) => {
+            ColumnBound::In(Range(s, e)) => {
                 start.push(s);
                 end.push(e);
             }
@@ -91,7 +96,7 @@ pub fn btree_range(bounds: &Bounds, columns: &[Column]) -> TCResult<BTreeRange> 
 }
 
 pub fn from_key(key: Vec<Value>, key_columns: &[Column]) -> Bounds {
-    assert!(key.len() == key_columns.len());
+    assert_eq!(key.len(), key_columns.len());
 
     key_columns
         .iter()
@@ -143,10 +148,10 @@ pub fn validate(bounds: Bounds, columns: &[Column]) -> TCResult<Bounds> {
         if let Some(dtype) = columns.get(&name) {
             let bound = match bound {
                 ColumnBound::Is(value) => dtype.try_cast(value).map(ColumnBound::Is)?,
-                ColumnBound::In(start, end) => {
+                ColumnBound::In(Range(start, end)) => {
                     let start = try_cast_bound(start, *dtype)?;
                     let end = try_cast_bound(end, *dtype)?;
-                    ColumnBound::In(start, end)
+                    ColumnBound::In(Range(start, end))
                 }
             };
 
