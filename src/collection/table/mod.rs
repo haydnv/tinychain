@@ -261,20 +261,14 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
         value: State,
     ) -> TCResult<()> {
         if path.is_empty() {
-            let key = match selector {
-                Value::Tuple(key) => key,
-                other => vec![other],
-            };
-
-            let value = value.try_cast_into(|v| error::bad_request("Invalid row value", v))?;
-            let value = match value {
-                Value::Tuple(value) => value,
-                other => vec![other],
-            };
-
-            self.upsert(txn.id(), key, value).await
+            let (key, values) = try_into_row(selector, value)?;
+            self.upsert(txn.id(), key, values).await
         } else if path.len() == 1 {
             match path[0].as_str() {
+                "insert" => {
+                    let (key, values) = try_into_row(selector, value)?;
+                    self.insert(txn.id().clone(), key, values).await
+                }
                 "delete" => {
                     if selector.is_none() && value.is_none() {
                         self.inner.clone().delete(txn.id().clone()).await
@@ -585,6 +579,21 @@ impl From<Table> for State {
     fn from(table: Table) -> State {
         State::Collection(table.into())
     }
+}
+
+fn try_into_row(selector: Value, values: State) -> TCResult<(Vec<Value>, Vec<Value>)> {
+    let key = match selector {
+        Value::Tuple(key) => key,
+        other => vec![other],
+    };
+
+    let values = Value::try_cast_from(values, |v| error::bad_request("Invalid row value", v))?;
+    let values = match values {
+        Value::Tuple(values) => values,
+        other => vec![other],
+    };
+
+    Ok((key, values))
 }
 
 fn try_into_columns(selector: Value) -> TCResult<Vec<Id>> {
