@@ -261,24 +261,36 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
         selector: Value,
         value: State,
     ) -> TCResult<()> {
-        if !path.is_empty() {
+        if path.is_empty() {
+            let key = match selector {
+                Value::Tuple(key) => key,
+                other => vec![other],
+            };
+
+            let value = Value::try_from(value)?;
+            let value = match value {
+                Value::Tuple(value) => value,
+                other => vec![other],
+            };
+
+            self.upsert(txn.id(), key, value).await
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "delete" => {
+                    if selector.is_none() && value.is_none() {
+                        self.inner.clone().delete(txn.id().clone()).await
+                    } else {
+                        Err(error::bad_request(
+                            "Table::PUT /delete expected no arguments but found",
+                            format!("{}: {}", selector, value),
+                        ))
+                    }
+                }
+                other => Err(error::not_found(other)),
+            }
+        } else {
             return Err(error::path_not_found(path));
         }
-
-        debug!("{}::put", self.class());
-
-        let key = match selector {
-            Value::Tuple(key) => key,
-            other => vec![other],
-        };
-
-        let value = Value::try_from(value)?;
-        let value = match value {
-            Value::Tuple(value) => value,
-            other => vec![other],
-        };
-
-        self.upsert(txn.id(), key, value).await
     }
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {

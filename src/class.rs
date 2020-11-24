@@ -157,6 +157,15 @@ pub enum State {
     Scalar(Scalar),
 }
 
+impl State {
+    pub fn is_none(&self) -> bool {
+        match self {
+            Self::Scalar(scalar) => scalar.is_none(),
+            _ => false,
+        }
+    }
+}
+
 impl Instance for State {
     type Class = TCType;
 
