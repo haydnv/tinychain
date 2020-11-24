@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 
@@ -267,7 +266,7 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
                 other => vec![other],
             };
 
-            let value = Value::try_from(value)?;
+            let value = value.try_cast_into(|v| error::bad_request("Invalid row value", v))?;
             let value = match value {
                 Value::Tuple(value) => value,
                 other => vec![other],

@@ -6,7 +6,7 @@ use log::debug;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-use crate::class::{Instance, NativeClass, TCResult, TCType};
+use crate::class::{Instance, NativeClass, State, TCResult, TCType};
 use crate::error;
 
 use super::{Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto};
@@ -171,6 +171,24 @@ impl<T: Into<Value>> From<Vec<T>> for Value {
 impl<T1: Into<Value>, T2: Into<Value>> From<(T1, T2)> for Value {
     fn from(tuple: (T1, T2)) -> Value {
         Value::Tuple(vec![tuple.0.into(), tuple.1.into()])
+    }
+}
+
+impl TryCastFrom<State> for Value {
+    fn can_cast_from(state: &State) -> bool {
+        if let State::Scalar(scalar) = state {
+            Value::can_cast_from(scalar)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Value> {
+        if let State::Scalar(scalar) = state {
+            Value::opt_cast_from(scalar)
+        } else {
+            None
+        }
     }
 }
 

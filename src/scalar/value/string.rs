@@ -165,6 +165,11 @@ impl<'de> de::Visitor<'de> for IdVisitor {
         f.write_str("a Tinychain Id like {\"foo\": []}")
     }
 
+    fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+        // TODO: call parsing logic a different way
+        Id::from_str(s).map_err(de::Error::custom)
+    }
+
     fn visit_map<M: de::MapAccess<'de>>(self, mut access: M) -> Result<Self::Value, M::Error> {
         if let Some(key) = access.next_key::<&str>()? {
             let value: Vec<super::Value> = access.next_value()?;
@@ -177,11 +182,6 @@ impl<'de> de::Visitor<'de> for IdVisitor {
         } else {
             Err(de::Error::custom("Unable to parse Id"))
         }
-    }
-
-    fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
-        // TODO: call parsing logic a different way
-        Id::from_str(s).map_err(de::Error::custom)
     }
 }
 
