@@ -3,11 +3,30 @@ use std::fmt;
 
 use log::debug;
 
-use crate::class::{Instance, TCResult};
-use crate::error;
+use crate::error::{self, TCResult};
 use crate::scalar::*;
 
 pub type Row = HashMap<Id, Value>;
+
+impl TryCastFrom<Object> for Row {
+    fn can_cast_from(object: &Object) -> bool {
+        object.values().all(Value::can_cast_from)
+    }
+
+    fn opt_cast_from(object: Object) -> Option<Row> {
+        let mut row = Row::new();
+
+        for (id, value) in object.into_iter() {
+            if let Some(value) = value.opt_cast_into() {
+                row.insert(id, value);
+            } else {
+                return None;
+            }
+        }
+
+        Some(row)
+    }
+}
 
 #[derive(Clone, PartialEq)]
 pub struct Column {
@@ -139,38 +158,46 @@ impl IndexSchema {
         self.key.len() + self.values.len()
     }
 
-    pub fn key_from_row(&self, mut row: Row) -> TCResult<Vec<Value>> {
-        let mut key = Vec::with_capacity(self.key.len());
-        for column in &self.key {
-            let value = row.remove(&column.name).ok_or_else(|| {
-                error::bad_request("Row has no value for key column", &column.name)
-            })?;
+    pub fn key_values_from_row(&self, mut row: Row) -> TCResult<(Vec<Value>, Vec<Value>)> {
+        if self.len() != row.len() {
+            return Err(error::bad_request("Invalid row for schema", self));
+        }
 
+        let mut key = Vec::with_capacity(self.key().len());
+        for col in self.key() {
+            let value = row.remove(col.name()).ok_or(error::not_found(col.name()))?;
+            key.push(value);
+        }
+
+        let mut values = Vec::with_capacity(self.values().len());
+        for col in self.values() {
+            let value = row.remove(col.name()).ok_or(error::not_found(col.name()))?;
+            values.push(value);
+        }
+
+        Ok((key, values))
+    }
+
+    pub fn row_from_key_values(&self, key: Vec<Value>, values: Vec<Value>) -> TCResult<Row> {
+        assert_eq!(key.len(), self.key.len());
+        assert_eq!(values.len(), self.values.len());
+
+        let mut row = key;
+        row.extend(values);
+        self.row_from_values(row)
+    }
+
+    pub fn row_from_values(&self, values: Vec<Value>) -> TCResult<Row> {
+        assert_eq!(values.len(), self.len());
+
+        let mut row = HashMap::new();
+        for (column, value) in self.columns().into_iter().zip(values.into_iter()) {
             let value = column.dtype.try_cast(value)?;
-            key.push(value)
+            row.insert(column.name, value);
         }
 
-        Ok(key)
+        Ok(row)
     }
-
-    pub fn key_values_from(&self, mut row: Vec<Value>) -> (Vec<Value>, Vec<Value>) {
-        assert!(self.len() == row.len());
-        let value = row.split_off(self.key.len());
-        (row, value)
-    }
-
-    pub fn merge_values(&self, mut values: Vec<Value>, row: &Row) -> Vec<Value> {
-        assert!(self.values.len() == values.len());
-
-        for (i, col) in self.values.iter().enumerate() {
-            if let Some(new_val) = row.get(&col.name) {
-                values[i] = new_val.clone();
-            }
-        }
-
-        values
-    }
-
     pub fn starts_with(&self, expected: &[Id]) -> bool {
         let actual: Vec<Id> = self.columns().iter().map(|c| c.name()).cloned().collect();
         for (a, e) in actual[0..expected.len()].iter().zip(expected.iter()) {
@@ -211,7 +238,7 @@ impl IndexSchema {
         Ok(())
     }
 
-    pub fn validate_key(&self, key: &[Value]) -> TCResult<()> {
+    pub fn validate_key(&self, key: Vec<Value>) -> TCResult<Vec<Value>> {
         if key.len() != self.key.len() {
             let key_columns: Vec<String> = self.key.iter().map(|c| c.to_string()).collect();
             return Err(error::bad_request(
@@ -220,16 +247,13 @@ impl IndexSchema {
             ));
         }
 
-        for (val, col) in key.iter().zip(self.key.iter()) {
-            if !val.is_a(col.dtype) {
-                return Err(error::bad_request(
-                    &format!("Expected {} for column {}, found", col.dtype, col.name),
-                    val,
-                ));
-            }
+        let mut validated = Vec::with_capacity(key.len());
+        for (val, col) in key.into_iter().zip(self.key.iter()) {
+            let value = col.dtype.try_cast(val)?;
+            validated.push(value);
         }
 
-        Ok(())
+        Ok(validated)
     }
 
     pub fn validate_row_partial(&self, row: Row) -> TCResult<Row> {
@@ -282,7 +306,7 @@ impl IndexSchema {
         self.validate_row_partial(row)
     }
 
-    pub fn row_into_values(&self, mut row: Row, reject_extras: bool) -> TCResult<Vec<Value>> {
+    pub fn values_from_row(&self, mut row: Row, reject_extras: bool) -> TCResult<Vec<Value>> {
         let mut key = Vec::with_capacity(self.len());
         for column in self.columns() {
             let value = row
@@ -306,24 +330,6 @@ impl IndexSchema {
         }
 
         Ok(key)
-    }
-
-    pub fn key_values_into_row(&self, key: Vec<Value>, value: Vec<Value>) -> TCResult<Row> {
-        let mut values = key;
-        values.extend(value);
-        self.values_into_row(values)
-    }
-
-    pub fn values_into_row(&self, values: Vec<Value>) -> TCResult<Row> {
-        assert!(values.len() == self.len());
-
-        let mut row = HashMap::new();
-        for (column, value) in self.columns().into_iter().zip(values.into_iter()) {
-            let value = column.dtype.try_cast(value)?;
-            row.insert(column.name, value);
-        }
-
-        Ok(row)
     }
 }
 

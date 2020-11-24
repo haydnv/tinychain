@@ -469,7 +469,7 @@ impl TryCastFrom<Value> for TCString {
     fn opt_cast_from(value: Value) -> Option<TCString> {
         match value {
             Value::TCString(s) => Some(s),
-            _ => None
+            _ => None,
         }
     }
 }

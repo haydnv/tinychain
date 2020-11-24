@@ -574,7 +574,7 @@ impl TableInstance for IndexSlice {
     }
 
     async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
-        let key = self.schema.row_into_values(value, true)?;
+        let key = self.schema.values_from_row(value, true)?;
         self.source.update(txn.id(), self.range, &key).await
     }
 }
@@ -636,7 +636,7 @@ impl TableInstance for Limited {
 
         self.stream(txn_id.clone())
             .await?
-            .map(|row| schema.values_into_row(row))
+            .map(|row| schema.row_from_values(row))
             .map_ok(|row| source.delete_row(&txn_id, row))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -680,7 +680,7 @@ impl TableInstance for Limited {
 
         self.stream(txn_id.clone())
             .await?
-            .map(|row| schema.values_into_row(row))
+            .map(|row| schema.row_from_values(row))
             .map_ok(|row| source.update_row(txn_id.clone(), row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -792,7 +792,7 @@ impl TableInstance for Merged {
         self.clone()
             .stream(txn_id.clone())
             .await?
-            .map(|row| schema.values_into_row(row))
+            .map(|row| schema.row_from_values(row))
             .map_ok(|row| self.delete_row(&txn_id, row))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -885,7 +885,7 @@ impl TableInstance for Merged {
         self.clone()
             .stream(txn.id().clone())
             .await?
-            .map(|row| schema.values_into_row(row))
+            .map(|row| schema.row_from_values(row))
             .map_ok(|row| self.update_row(txn.id().clone(), row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -1122,7 +1122,7 @@ impl TableInstance for TableSlice {
         self.clone()
             .stream(txn_id.clone())
             .await?
-            .map(|row| schema.values_into_row(row))
+            .map(|row| schema.row_from_values(row))
             .map_ok(|row| self.delete_row(&txn_id, row))
             .try_buffer_unordered(2)
             .fold(Ok(()), |_, r| future::ready(r))
@@ -1159,7 +1159,11 @@ impl TableInstance for TableSlice {
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
         let slice = self.table.primary().slice(self.bounds.clone())?;
 
-        slice.stream(txn_id).await
+        if self.reversed {
+            slice.reversed()?.stream(txn_id).await
+        } else {
+            slice.stream(txn_id).await
+        }
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -1179,7 +1183,7 @@ impl TableInstance for TableSlice {
         self.clone()
             .stream(txn_id.clone())
             .await?
-            .map(|row| schema.values_into_row(row))
+            .map(|row| schema.row_from_values(row))
             .map_ok(|row| self.update_row(txn_id.clone(), row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))

@@ -303,7 +303,7 @@ impl Index {
     }
 
     pub async fn get(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<Option<Vec<Value>>> {
-        self.schema.validate_key(&key)?;
+        let key = self.schema.validate_key(key)?;
         let mut rows = self.btree.stream(txn_id, key.into(), false).await?;
         Ok(rows.next().await)
     }
@@ -322,7 +322,7 @@ impl Index {
     }
 
     async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
-        let key = self.schema().row_into_values(row, reject_extra_columns)?;
+        let key = self.schema().values_from_row(row, reject_extra_columns)?;
         self.btree.insert(txn_id, key).await
     }
 
@@ -371,7 +371,7 @@ impl TableInstance for Index {
     }
 
     async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
-        let key = self.schema.row_into_values(row, false)?;
+        let key = self.schema.values_from_row(row, false)?;
         self.btree.delete(txn_id, key.into()).await
     }
 
@@ -447,10 +447,10 @@ impl TableInstance for Index {
     }
 
     async fn update(self, txn: Txn, row: Row) -> TCResult<()> {
-        let key: btree::Key = self.schema().row_into_values(row, false)?;
-        let range = btree::BTreeRange::from(key.to_vec());
-
-        self.btree.update(txn.id(), range, &key).await
+        let key: btree::Key = self.schema().values_from_row(row, false)?;
+        self.btree
+            .update(txn.id(), btree::BTreeRange::default(), &key)
+            .await
     }
 }
 
@@ -716,9 +716,12 @@ impl TableIndex {
         key: Vec<Value>,
         values: Vec<Value>,
     ) -> TCResult<()> {
-        let row = self.primary.schema().key_values_into_row(key, values)?;
+        if let Some(row) = self.get(txn_id.clone(), key.to_vec()).await? {
+            let row = self.primary.schema.row_from_values(row)?;
+            self.delete_row(txn_id, row.clone()).await?;
+        }
 
-        self.delete_row(txn_id, row.clone()).await?;
+        let row = self.primary.schema().row_from_key_values(key, values)?;
 
         let mut inserts = Vec::with_capacity(self.auxiliary.len() + 1);
         inserts.push(self.primary.insert(txn_id, row.clone(), true));
@@ -965,9 +968,9 @@ impl TableInstance for TableIndex {
         Ok(())
     }
 
-    async fn update(self, txn: Txn, row: Row) -> TCResult<()> {
+    async fn update(self, txn: Txn, update: Row) -> TCResult<()> {
         for col in self.primary.schema().key() {
-            if row.contains_key(col.name()) {
+            if update.contains_key(col.name()) {
                 return Err(error::bad_request(
                     "Cannot update the value of a primary key column",
                     col.name(),
@@ -976,7 +979,7 @@ impl TableInstance for TableIndex {
         }
 
         let schema = self.primary.schema();
-        let row = schema.validate_row_partial(row)?;
+        let update = schema.validate_row_partial(update)?;
 
         let index = self.clone().index(txn.clone(), None).await?;
 
@@ -984,13 +987,20 @@ impl TableInstance for TableIndex {
         index
             .stream(txn_id.clone())
             .await?
-            .map(|row| schema.key_values_from(row))
-            .map(|(key, values)| {
-                let updated_values = schema.merge_values(values, &row);
-                Ok(self.upsert(txn_id, key, updated_values))
-            })
+            .map(|values| schema.row_from_values(values))
+            .map_ok(|row| self.update_row(txn_id.clone(), row, update.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+
+    async fn update_row(&self, txn_id: TxnId, row: Row, update: Row) -> TCResult<()> {
+        let mut updated_row = row.clone();
+        updated_row.extend(update);
+        let (key, values) = self.primary.schema.key_values_from_row(updated_row)?;
+        let txn_id_clone = txn_id.clone();
+        self.delete_row(&txn_id, row)
+            .and_then(|()| self.insert(txn_id_clone, key, values))
             .await
     }
 

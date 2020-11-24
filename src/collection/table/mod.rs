@@ -3,7 +3,7 @@ use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use futures::future;
+use futures::future::{self, TryFutureExt};
 use futures::{Stream, StreamExt};
 use log::debug;
 
@@ -198,8 +198,11 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
                 }
                 "order_by" => {
                     let columns = try_into_columns(selector)?;
-                    self.order_by(columns, false).map(Table::from).map(State::from)
+                    self.order_by(columns, false)
+                        .map(Table::from)
+                        .map(State::from)
                 }
+                "reverse" => self.reversed().map(State::from),
                 "select" => {
                     let columns = try_into_columns(selector)?;
                     self.select(columns).map(Table::from).map(State::from)
@@ -218,7 +221,7 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
     async fn post(
         &self,
         _request: &Request,
-        _txn: &Txn,
+        txn: &Txn,
         path: &[PathSegment],
         params: Object,
     ) -> TCResult<State> {
@@ -226,6 +229,16 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
             Err(error::method_not_allowed("Table: POST /"))
         } else if path.len() == 1 {
             match path[0].as_str() {
+                "update" => {
+                    let update =
+                        params.try_cast_into(|v| error::bad_request("Invalid update", v))?;
+
+                    self.inner
+                        .clone()
+                        .update(txn.clone(), update)
+                        .map_ok(State::from)
+                        .await
+                }
                 "where" => {
                     let bounds = Bounds::try_cast_from(params, |v| {
                         error::bad_request("Cannot cast into Table Bounds from", v)
@@ -567,8 +580,7 @@ fn try_into_columns(selector: Value) -> TCResult<Vec<Id>> {
     if selector.matches::<Vec<Id>>() {
         Ok(selector.opt_cast_into().unwrap())
     } else {
-        let name = selector
-            .try_cast_into(|v| error::bad_request("Invalid column name", v))?;
+        let name = selector.try_cast_into(|v| error::bad_request("Invalid column name", v))?;
 
         Ok(vec![name])
     }
