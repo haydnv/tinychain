@@ -458,14 +458,18 @@ impl TryCastFrom<Value> for TCPathBuf {
 }
 
 impl TryCastFrom<Value> for TCString {
-    fn can_cast_from(_value: &Value) -> bool {
-        true
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::TCString(_) = value {
+            true
+        } else {
+            false
+        }
     }
 
     fn opt_cast_from(value: Value) -> Option<TCString> {
         match value {
             Value::TCString(s) => Some(s),
-            other => Some(TCString::UString(other.to_string())),
+            _ => None
         }
     }
 }
