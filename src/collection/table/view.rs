@@ -5,7 +5,7 @@ use std::iter::FromIterator;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::{future, join};
 
 use crate::class::*;
@@ -345,6 +345,11 @@ impl Aggregate {
         let source = Box::new(source.order_by(columns.to_vec(), false)?);
         Ok(Aggregate { source, columns })
     }
+
+    async fn stream_inner(&self, txn_id: TxnId) -> TCResult<impl Stream<Item = Vec<Value>>> {
+        let source = self.source.select(self.columns.to_vec())?;
+        source.stream(txn_id).await
+    }
 }
 
 impl Instance for Aggregate {
@@ -391,13 +396,7 @@ impl TableInstance for Aggregate {
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let first = self
-            .source
-            .clone()
-            .stream(txn_id.clone())
-            .await?
-            .next()
-            .await;
+        let first = self.stream_inner(txn_id.clone()).await?.next().await;
         let first = if let Some(first) = first {
             first
         } else {
@@ -405,9 +404,9 @@ impl TableInstance for Aggregate {
             return Ok(stream);
         };
 
-        let left = stream::once(future::ready(first))
-            .chain(self.source.clone().stream(txn_id.clone()).await?);
-        let right = self.source.clone().stream(txn_id).await?;
+        let left =
+            stream::once(future::ready(first)).chain(self.stream_inner(txn_id.clone()).await?);
+        let right = self.stream_inner(txn_id).await?;
         let aggregate = left.zip(right).filter_map(|(l, r)| {
             if l == r {
                 future::ready(None)

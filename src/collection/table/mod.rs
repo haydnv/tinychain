@@ -190,6 +190,10 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
             Ok(State::from(table))
         } else if path.len() == 1 {
             match path[0].as_str() {
+                "group_by" => {
+                    let columns: Vec<Id> = try_into_columns(selector)?;
+                    self.group_by(columns).map(Table::from).map(State::from)
+                }
                 "limit" => {
                     let limit =
                         selector.try_cast_into(|v| error::bad_request("Invalid limit", v))?;
