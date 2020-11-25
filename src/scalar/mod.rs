@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::iter::FromIterator;
 use std::str::FromStr;
 
 use log::debug;
@@ -241,44 +242,54 @@ impl ScalarInstance for Scalar {
 }
 
 impl From<Number> for Scalar {
-    fn from(n: Number) -> Scalar {
+    fn from(n: Number) -> Self {
         Scalar::Value(Value::Number(n))
     }
 }
 
 impl From<Object> for Scalar {
-    fn from(object: Object) -> Scalar {
+    fn from(object: Object) -> Self {
         Scalar::Object(object)
     }
 }
 
 impl From<Value> for Scalar {
-    fn from(value: Value) -> Scalar {
+    fn from(value: Value) -> Self {
         Scalar::Value(value)
     }
 }
 
 impl From<Id> for Scalar {
-    fn from(id: Id) -> Scalar {
+    fn from(id: Id) -> Self {
         Scalar::Value(id.into())
     }
 }
 
 impl From<()> for Scalar {
-    fn from(_: ()) -> Scalar {
+    fn from(_: ()) -> Self {
         Scalar::Value(Value::None)
     }
 }
 
 impl<T1: Into<Scalar>, T2: Into<Scalar>> From<(T1, T2)> for Scalar {
-    fn from(tuple: (T1, T2)) -> Scalar {
+    fn from(tuple: (T1, T2)) -> Self {
         Scalar::Tuple(vec![tuple.0.into(), tuple.1.into()])
     }
 }
 
 impl<T: Into<Scalar>> From<Vec<T>> for Scalar {
-    fn from(v: Vec<T>) -> Scalar {
+    fn from(v: Vec<T>) -> Self {
         Scalar::Tuple(v.into_iter().map(|i| i.into()).collect())
+    }
+}
+
+impl<T: Into<Scalar>> FromIterator<T> for Scalar {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut tuple = vec![];
+        for item in iter {
+            tuple.push(item.into());
+        }
+        Self::Tuple(tuple)
     }
 }
 
