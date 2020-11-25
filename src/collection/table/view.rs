@@ -937,26 +937,27 @@ impl Selection {
         if column_set.len() != columns.len() {
             return Err(error::bad_request(
                 "Tried to select duplicate column",
-                columns
-                    .iter()
-                    .map(|name| name.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
+                Value::from_iter(columns.into_iter())
             ));
         }
 
         let mut indices: Vec<usize> = Vec::with_capacity(columns.len());
         let mut schema: Vec<Column> = Vec::with_capacity(columns.len());
-        let source_schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
-        let mut source_columns: HashMap<Id, Column> = source_schema.into();
+        let source_columns = [source.key(), source.values()].concat();
+        let source_indices: HashMap<&Id, usize> = source_columns
+            .iter()
+            .enumerate()
+            .map(|(i, col)| (col.name(), i))
+            .collect();
 
-        for (i, name) in columns.iter().enumerate() {
-            let column = source_columns
-                .remove(name)
-                .ok_or_else(|| error::not_found(name))?;
-            indices.push(i);
-            schema.push(column);
+        for name in columns.iter() {
+            let index = *source_indices
+                .get(name)
+                .ok_or(error::not_found(format!("Column {}", name)))?;
+
+            indices.push(index);
+            schema.push(source_columns[index].clone());
         }
 
         Ok(Selection {
