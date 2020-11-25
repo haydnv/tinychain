@@ -42,6 +42,15 @@ impl TryCastFrom<Scalar> for ColumnBound {
     }
 }
 
+impl From<ColumnBound> for Scalar {
+    fn from(bound: ColumnBound) -> Scalar {
+        match bound {
+            ColumnBound::Is(value) => Scalar::Value(value),
+            ColumnBound::In(range) => Scalar::Slice(range.into()),
+        }
+    }
+}
+
 impl fmt::Display for ColumnBound {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
