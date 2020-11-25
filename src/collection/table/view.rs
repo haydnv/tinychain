@@ -7,13 +7,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::{future, join};
+use log::debug;
 
 use crate::class::*;
 use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::{Collection, CollectionView};
 use crate::error;
-use crate::scalar::{label, Id, Link, PathSegment, TCPathBuf, Value};
+use crate::scalar::{label, Id, Link, Object, PathSegment, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds};
@@ -599,6 +600,16 @@ impl Transact for IndexSlice {
     }
 }
 
+impl fmt::Display for IndexSlice {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "IndexSlice with bounds {}",
+            Object::from_iter(self.bounds.clone())
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct Limited {
     source: Box<Table>,
@@ -754,6 +765,15 @@ impl Transact for MergeSource {
     }
 }
 
+impl fmt::Display for MergeSource {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Table(table) => write!(f, "MergeSource::Table({})", table),
+            Self::Merge(merged) => write!(f, "MergeSource::Merge({})", merged),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Merged {
     left: MergeSource,
@@ -762,7 +782,16 @@ pub struct Merged {
 
 impl Merged {
     pub fn new(left: MergeSource, right: IndexSlice) -> Merged {
+        debug!("Merged::new({}, {})", &left, &right);
+
         Merged { left, right }
+    }
+
+    fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
+        match &self.left {
+            MergeSource::Merge(merged) => merged.index_slice(bounds),
+            MergeSource::Table(table_slice) => table_slice.index_slice(bounds),
+        }
     }
 
     fn as_reversed(&self) -> Arc<Self> {
@@ -834,13 +863,8 @@ impl TableInstance for Merged {
         .into())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
-        // TODO: reject bounds which lie outside the bounds of the table slice
-
-        match &self.left {
-            MergeSource::Merge(merged) => merged.slice(bounds),
-            MergeSource::Table(table) => table.slice(bounds),
-        }
+    fn slice(&self, _bounds: Bounds) -> TCResult<Table> {
+        Err(error::not_implemented("Slicing a slice"))
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
@@ -864,11 +888,8 @@ impl TableInstance for Merged {
         Ok(rows)
     }
 
-    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        match &self.left {
-            MergeSource::Merge(merge) => merge.validate_bounds(bounds),
-            MergeSource::Table(table) => table.validate_bounds(bounds),
-        }
+    fn validate_bounds(&self, _bounds: &Bounds) -> TCResult<()> {
+        Err(error::not_implemented("Slicing a slice"))
     }
 
     fn validate_order(&self, order: &[Id]) -> TCResult<()> {
@@ -917,6 +938,12 @@ impl Transact for Merged {
 
     async fn finalize(&self, txn_id: &TxnId) {
         join!(self.left.finalize(txn_id), self.right.finalize(txn_id));
+    }
+}
+
+impl fmt::Display for Merged {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Merged({}, {})", &self.left, &self.right)
     }
 }
 
@@ -1090,6 +1117,11 @@ impl TableSlice {
         })
     }
 
+    pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
+        let index = self.table.supporting_index(&bounds)?;
+        index.index_slice(bounds)
+    }
+
     fn into_reversed(self) -> TableSlice {
         TableSlice {
             table: self.table,
@@ -1213,5 +1245,15 @@ impl Transact for TableSlice {
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.table.finalize(txn_id).await
+    }
+}
+
+impl fmt::Display for TableSlice {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "TableSlice with bounds {}",
+            Object::from_iter(self.bounds.clone())
+        )
     }
 }

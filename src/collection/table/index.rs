@@ -791,11 +791,11 @@ impl TableInstance for TableIndex {
 
         if self.primary.validate_order(&columns).is_ok() {
             let ordered = TableSlice::new(self.clone(), bounds::all())?;
-            if reverse {
-                return ordered.reversed();
+            return if reverse {
+                ordered.reversed()
             } else {
-                return Ok(ordered.into());
-            }
+                Ok(ordered.into())
+            };
         }
 
         let selection = TableSlice::new(self.clone(), bounds::all())?;
@@ -872,7 +872,8 @@ impl TableInstance for TableIndex {
         let mut bounds = &bounds[..];
         loop {
             let initial = bounds.len();
-            for i in (1..bounds.len() + 1).rev() {
+            let mut i = bounds.len();
+            while i > 0 {
                 let subset: Bounds = bounds[..i].iter().cloned().collect();
 
                 for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
@@ -890,6 +891,8 @@ impl TableInstance for TableIndex {
                         break;
                     }
                 }
+
+                i = i - 1;
             }
 
             if bounds.len() == initial {
