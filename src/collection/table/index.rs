@@ -198,6 +198,22 @@ impl TableInstance for TableBase {
         }
     }
 
+    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.validate_bounds(bounds),
+            Self::ROIndex(index) => index.validate_bounds(bounds),
+            Self::Table(table) => table.validate_bounds(bounds),
+        }
+    }
+
+    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
+        match self {
+            Self::Index(index) => index.validate_order(order),
+            Self::ROIndex(index) => index.validate_order(order),
+            Self::Table(table) => table.validate_order(order),
+        }
+    }
+
     async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
         match self {
             Self::Index(index) => index.into_inner().update(txn, value).await,
@@ -219,22 +235,6 @@ impl TableInstance for TableBase {
             Self::Index(index) => TableInstance::upsert(index.deref(), txn_id, key, values).await,
             Self::ROIndex(index) => TableInstance::upsert(index.deref(), txn_id, key, values).await,
             Self::Table(table) => TableInstance::upsert(table.deref(), txn_id, key, values).await,
-        }
-    }
-
-    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.validate_bounds(bounds),
-            Self::ROIndex(index) => index.validate_bounds(bounds),
-            Self::Table(table) => table.validate_bounds(bounds),
-        }
-    }
-
-    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.validate_order(order),
-            Self::ROIndex(index) => index.validate_order(order),
-            Self::Table(table) => table.validate_order(order),
         }
     }
 }
@@ -541,6 +541,14 @@ impl TableInstance for ReadOnly {
         self.index.clone().count(txn_id).await
     }
 
+    fn key(&'_ self) -> &'_ [Column] {
+        self.index.key()
+    }
+
+    fn values(&'_ self) -> &'_ [Column] {
+        self.index.values()
+    }
+
     fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
         self.index.validate_order(&order)?;
 
@@ -553,14 +561,6 @@ impl TableInstance for ReadOnly {
 
     fn reversed(&self) -> TCResult<Table> {
         Ok(self.clone().into_reversed().into())
-    }
-
-    fn key(&'_ self) -> &'_ [Column] {
-        self.index.key()
-    }
-
-    fn values(&'_ self) -> &'_ [Column] {
-        self.index.values()
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Table> {
