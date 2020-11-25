@@ -269,6 +269,12 @@ impl ScalarInstance for Slice {
     type Class = SliceType;
 }
 
+impl From<Range> for Slice {
+    fn from(range: Range) -> Slice {
+        Slice::Range(range)
+    }
+}
+
 impl Serialize for Slice {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
