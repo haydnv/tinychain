@@ -876,7 +876,7 @@ impl TableInstance for TableIndex {
                     if index.validate_bounds(&subset).is_ok() {
                         bounds = &bounds[i..];
 
-                        let index_slice = self.primary.index_slice(subset)?;
+                        let index_slice = index.index_slice(subset)?;
                         let merged = Merged::new(merge_source, index_slice);
 
                         if bounds.is_empty() {
