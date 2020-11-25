@@ -14,7 +14,7 @@ use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
-use crate::scalar::{label, Id, Link, PathSegment, TCPathBuf, TryCastInto, Value};
+use crate::scalar::{label, Id, Link, PathSegment, Scalar, TCPathBuf, TryCastInto, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds, ColumnBound};
@@ -804,8 +804,9 @@ impl TableInstance for TableIndex {
         let mut columns = &columns[..];
         loop {
             let initial = columns.to_vec();
+
             let mut i = columns.len();
-            loop {
+            while i > 0 {
                 let subset = &columns[..i];
 
                 for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
@@ -832,10 +833,9 @@ impl TableInstance for TableIndex {
             }
 
             if columns == &initial[..] {
-                let order: Vec<String> = columns.iter().map(|id| id.to_string()).collect();
                 return Err(error::bad_request(
                     "This table has no index to support the order",
-                    order.join(", "),
+                    Value::from_iter(columns.to_vec()),
                 ));
             }
         }
@@ -893,10 +893,9 @@ impl TableInstance for TableIndex {
             }
 
             if bounds.len() == initial {
-                let order: Vec<String> = bounds.iter().map(|(name, _)| name.to_string()).collect();
                 return Err(error::bad_request(
                     "This table has no index to support selection bounds on",
-                    order.join(", "),
+                    Scalar::from_iter(bounds.to_vec()),
                 ));
             }
         }
