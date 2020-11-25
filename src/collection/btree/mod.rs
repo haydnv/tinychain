@@ -22,6 +22,7 @@ mod slice;
 
 pub use bounds::*;
 pub use class::*;
+pub use collator::*;
 pub use file::*;
 pub use slice::*;
 

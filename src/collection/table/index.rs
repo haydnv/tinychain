@@ -302,6 +302,10 @@ impl Index {
         Ok(Index { btree, schema })
     }
 
+    pub fn btree(&'_ self) -> &'_ BTreeFile {
+        &self.btree
+    }
+
     pub async fn get(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<Option<Vec<Value>>> {
         let key = self.schema.validate_key(key)?;
         let mut rows = self.btree.stream(txn_id, key.into(), false).await?;
@@ -317,7 +321,7 @@ impl Index {
     }
 
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
-        let bounds = bounds::validate(bounds, &self.schema().columns())?;
+        let bounds = bounds.validate(&self.schema.columns())?;
         IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)
     }
 
@@ -331,11 +335,9 @@ impl Index {
     }
 
     pub fn validate_slice_bounds(&self, outer: Bounds, inner: Bounds) -> TCResult<()> {
-        let outer = bounds::validate(outer, &self.schema().columns())?;
-        let inner = bounds::validate(inner, &self.schema().columns())?;
-
-        let outer = bounds::btree_range(&outer, &self.schema().columns())?;
-        let inner = bounds::btree_range(&inner, &self.schema().columns())?;
+        let columns = &self.schema.columns();
+        let outer = outer.validate(columns)?.into_btree_range(&columns)?;
+        let inner = inner.validate(columns)?.into_btree_range(&columns)?;
 
         if outer.contains(&inner, &self.schema.columns())? {
             Ok(())
@@ -414,7 +416,7 @@ impl TableInstance for Index {
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        let bounds = bounds::validate(bounds.clone(), &self.schema().columns())?;
+        let bounds = bounds.clone().validate(&self.schema.columns())?;
 
         for (column, bound_column) in self.schema.columns()[0..bounds.len()]
             .iter()
@@ -510,7 +512,7 @@ impl ReadOnly {
         let index = Index { schema, btree };
 
         index
-            .index_slice(bounds::all())
+            .index_slice(Bounds::default())
             .map(|index| ReadOnly { index })
     }
 
@@ -669,6 +671,17 @@ impl TableIndex {
         self.primary.is_empty(txn).await
     }
 
+    pub fn merge_bounds(&self, all_bounds: Vec<Bounds>) -> TCResult<Bounds> {
+        let collator = self.primary.btree().collator();
+
+        let mut merged = Bounds::default();
+        for bounds in all_bounds {
+            merged = merged.merge(bounds, collator)?;
+        }
+
+        Ok(merged)
+    }
+
     pub fn primary(&'_ self) -> &'_ Index {
         &self.primary
     }
@@ -686,7 +699,7 @@ impl TableIndex {
 
         Err(error::bad_request(
             "This table has no index which supports bounds",
-            super::bounds::format(bounds),
+            bounds,
         ))
     }
 
@@ -790,7 +803,7 @@ impl TableInstance for TableIndex {
         self.validate_order(&columns)?;
 
         if self.primary.validate_order(&columns).is_ok() {
-            let ordered = TableSlice::new(self.clone(), bounds::all())?;
+            let ordered = TableSlice::new(self.clone(), Bounds::default())?;
             return if reverse {
                 ordered.reversed()
             } else {
@@ -798,7 +811,7 @@ impl TableInstance for TableIndex {
             };
         }
 
-        let selection = TableSlice::new(self.clone(), bounds::all())?;
+        let selection = TableSlice::new(self.clone(), Bounds::default())?;
         let mut merge_source = MergeSource::Table(selection);
 
         let mut columns = &columns[..];
@@ -813,7 +826,7 @@ impl TableInstance for TableIndex {
                     if index.validate_order(subset).is_ok() {
                         columns = &columns[i..];
 
-                        let index_slice = index.index_slice(bounds::all())?;
+                        let index_slice = index.index_slice(Bounds::default())?;
                         let merged = Merged::new(merge_source, index_slice);
 
                         if columns.is_empty() {
@@ -866,7 +879,7 @@ impl TableInstance for TableIndex {
             .filter_map(|name| bounds.get(&name).map(|bound| (name, bound.clone())))
             .collect();
 
-        let selection = TableSlice::new(self.clone(), bounds::all())?;
+        let selection = TableSlice::new(self.clone(), Bounds::default())?;
         let mut merge_source = MergeSource::Table(selection);
 
         let mut bounds = &bounds[..];
@@ -874,7 +887,8 @@ impl TableInstance for TableIndex {
             let initial = bounds.len();
             let mut i = bounds.len();
             while i > 0 {
-                let subset: Bounds = bounds[..i].iter().cloned().collect();
+                let subset: HashMap<Id, ColumnBound> = bounds[..i].iter().cloned().collect();
+                let subset = Bounds::from(subset);
 
                 for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
                     if index.validate_bounds(&subset).is_ok() {
@@ -927,7 +941,8 @@ impl TableInstance for TableIndex {
 
             let mut i = bounds.len();
             loop {
-                let subset: Bounds = bounds[..i].iter().cloned().collect();
+                let subset: HashMap<Id, ColumnBound> = bounds[..i].iter().cloned().collect();
+                let subset = Bounds::from(subset);
 
                 if self.primary.validate_bounds(&subset).is_ok() {
                     bounds = &bounds[i..];

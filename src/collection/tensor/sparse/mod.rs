@@ -1383,7 +1383,7 @@ impl SparseAccessor for SparseTable {
 
             let mut slice = self
                 .table
-                .slice(selector)?
+                .slice(selector.into())?
                 .select(vec![VALUE.into()])?
                 .stream(txn.id().clone())
                 .await?;
@@ -2032,7 +2032,8 @@ fn slice_table(mut table: Table, bounds: &'_ Bounds) -> TCBoxTryFuture<'_, Table
                 _ => todo!(),
             };
 
-            table = table.slice(iter::once((axis, column_bound)).collect())?
+            let bounds: HashMap<Id, ColumnBound> = iter::once((axis, column_bound)).collect();
+            table = table.slice(bounds.into())?
         }
 
         Ok(table)

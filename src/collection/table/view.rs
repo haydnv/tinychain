@@ -14,7 +14,7 @@ use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::{Collection, CollectionView};
 use crate::error;
-use crate::scalar::{label, Id, Link, Object, PathSegment, TCPathBuf, Value};
+use crate::scalar::{label, Id, Link, PathSegment, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{self, Bounds};
@@ -449,7 +449,7 @@ impl IndexSlice {
         IndexSlice {
             source,
             schema,
-            bounds: bounds::all(),
+            bounds: Bounds::default(),
             range: BTreeRange::default(),
             reverse,
         }
@@ -460,8 +460,8 @@ impl IndexSlice {
 
         assert!(source.schema() == &columns[..]);
 
-        let bounds = bounds::validate(bounds, &columns)?;
-        let range = bounds::btree_range(&bounds, &columns)?;
+        let bounds = bounds.validate(&columns)?;
+        let range = bounds.clone().into_btree_range(&columns)?;
 
         Ok(IndexSlice {
             source,
@@ -470,6 +470,10 @@ impl IndexSlice {
             range,
             reverse: false,
         })
+    }
+
+    pub fn bounds(&'_ self) -> &'_ Bounds {
+        &self.bounds
     }
 
     pub fn schema(&'_ self) -> &'_ IndexSchema {
@@ -488,8 +492,8 @@ impl IndexSlice {
 
     pub fn slice_index(&self, bounds: Bounds) -> TCResult<IndexSlice> {
         let columns = self.schema().columns();
-        let outer = bounds::btree_range(&self.bounds, &columns)?;
-        let inner = bounds::btree_range(&bounds, &columns)?;
+        let outer = bounds.clone().into_btree_range(&columns)?;
+        let inner = bounds.clone().into_btree_range(&columns)?;
 
         if outer.contains(&inner, &self.schema.columns())? {
             let mut slice = self.clone();
@@ -497,11 +501,8 @@ impl IndexSlice {
             Ok(slice)
         } else {
             Err(error::bad_request(
-                &format!(
-                    "IndexSlice with bounds {} does not contain",
-                    bounds::format(&self.bounds)
-                ),
-                bounds::format(&bounds),
+                &format!("IndexSlice with bounds {} does not contain", self.bounds),
+                bounds,
             ))
         }
     }
@@ -557,8 +558,8 @@ impl TableInstance for IndexSlice {
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
         let schema = self.schema();
-        let outer = bounds::btree_range(&self.bounds, &schema.columns())?;
-        let inner = bounds::btree_range(&bounds, &schema.columns())?;
+        let outer = bounds.clone().into_btree_range(&schema.columns())?;
+        let inner = bounds.clone().into_btree_range(&schema.columns())?;
         outer.contains(&inner, &schema.columns()).map(|_| ())
     }
 
@@ -602,11 +603,7 @@ impl Transact for IndexSlice {
 
 impl fmt::Display for IndexSlice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "IndexSlice with bounds {}",
-            Object::from_iter(self.bounds.clone())
-        )
+        write!(f, "IndexSlice with bounds {}", self.bounds)
     }
 }
 
@@ -726,6 +723,13 @@ pub enum MergeSource {
 }
 
 impl MergeSource {
+    fn bounds(&'_ self) -> Vec<&'_ Bounds> {
+        match self {
+            Self::Table(table) => vec![table.bounds()],
+            Self::Merge(merged) => merged.bounds(),
+        }
+    }
+
     fn into_reversed(self) -> MergeSource {
         match self {
             Self::Table(table_slice) => Self::Table(table_slice.into_reversed()),
@@ -737,6 +741,13 @@ impl MergeSource {
         match self {
             Self::Table(table) => table.slice(bounds),
             Self::Merge(merged) => merged.slice(bounds),
+        }
+    }
+
+    fn source(&'_ self) -> &'_ TableIndex {
+        match self {
+            Self::Table(table_slice) => table_slice.table(),
+            Self::Merge(merged) => merged.source(),
         }
     }
 }
@@ -786,6 +797,18 @@ impl Merged {
 
         Merged { left, right }
     }
+    fn as_reversed(&self) -> Arc<Self> {
+        Arc::new(Merged {
+            left: self.left.clone().into_reversed(),
+            right: self.right.clone().into_reversed(),
+        })
+    }
+
+    fn bounds(&'_ self) -> Vec<&'_ Bounds> {
+        let mut bounds = self.left.bounds();
+        bounds.push(self.right.bounds());
+        bounds
+    }
 
     fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
         match &self.left {
@@ -794,11 +817,8 @@ impl Merged {
         }
     }
 
-    fn as_reversed(&self) -> Arc<Self> {
-        Arc::new(Merged {
-            left: self.left.clone().into_reversed(),
-            right: self.right.clone().into_reversed(),
-        })
+    fn source(&'_ self) -> &'_ TableIndex {
+        self.left.source()
     }
 }
 
@@ -863,8 +883,12 @@ impl TableInstance for Merged {
         .into())
     }
 
-    fn slice(&self, _bounds: Bounds) -> TCResult<Table> {
-        Err(error::not_implemented("Slicing a slice"))
+    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+        let mut bounds_seq: Vec<Bounds> = self.bounds().into_iter().cloned().collect();
+        bounds_seq.push(bounds);
+
+        let bounds = self.source().merge_bounds(bounds_seq)?;
+        self.source().slice(bounds)
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
@@ -877,7 +901,7 @@ impl TableInstance for Merged {
             .select(key_names)?
             .stream(txn_id.clone())
             .await?
-            .map(move |key| bounds::from_key(key, &key_columns))
+            .map(move |key| Bounds::from_key(key, &key_columns))
             .map(move |bounds| left.clone().slice(bounds))
             .map(|slice| slice.unwrap())
             .then(move |slice| slice.stream(txn_id_clone.clone()))
@@ -1117,9 +1141,17 @@ impl TableSlice {
         })
     }
 
+    pub fn bounds(&'_ self) -> &'_ Bounds {
+        &self.bounds
+    }
+
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
         let index = self.table.supporting_index(&bounds)?;
         index.index_slice(bounds)
+    }
+
+    pub fn table(&'_ self) -> &'_ TableIndex {
+        &self.table
     }
 
     fn into_reversed(self) -> TableSlice {
@@ -1250,10 +1282,6 @@ impl Transact for TableSlice {
 
 impl fmt::Display for TableSlice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "TableSlice with bounds {}",
-            Object::from_iter(self.bounds.clone())
-        )
+        write!(f, "TableSlice with bounds {}", self.bounds)
     }
 }

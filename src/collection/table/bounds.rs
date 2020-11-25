@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::iter::FromIterator;
+use std::ops::Deref;
 
-use crate::collection::btree::BTreeRange;
+use crate::collection::btree::{BTreeRange, Collator};
 use crate::collection::schema::Column;
 use crate::error::{self, TCResult};
 use crate::scalar::{
@@ -72,47 +74,97 @@ impl fmt::Display for ColumnBound {
     }
 }
 
-pub type Bounds = HashMap<Id, ColumnBound>;
-
-pub fn all() -> Bounds {
-    HashMap::new()
+#[derive(Clone, Default)]
+pub struct Bounds {
+    inner: HashMap<Id, ColumnBound>,
 }
 
-pub fn btree_range(bounds: &Bounds, columns: &[Column]) -> TCResult<BTreeRange> {
-    let mut start = Vec::with_capacity(bounds.len());
-    let mut end = Vec::with_capacity(bounds.len());
-    let column_names: Vec<Id> = columns.iter().map(|c| c.name()).cloned().collect();
+impl Bounds {
+    pub fn from_key(key: Vec<Value>, key_columns: &[Column]) -> Self {
+        assert_eq!(key.len(), key_columns.len());
 
-    use Bound::*;
-    for name in &column_names[0..bounds.len()] {
-        let bound = bounds
-            .get(&name)
+        let inner = key_columns
+            .iter()
+            .map(|c| c.name())
             .cloned()
-            .ok_or_else(|| error::not_found(name))?;
-        match bound {
-            ColumnBound::Is(value) => {
-                start.push(In(value.clone()));
-                end.push(In(value));
-            }
-            ColumnBound::In(Range(s, e)) => {
-                start.push(s);
-                end.push(e);
-            }
-        }
+            .zip(key.into_iter().map(|v| v.into()))
+            .collect();
+
+        Self { inner }
     }
 
-    Ok((start, end).into())
+    pub fn into_btree_range(mut self, columns: &[Column]) -> TCResult<BTreeRange> {
+        let mut start = Vec::with_capacity(self.len());
+        let mut end = Vec::with_capacity(self.len());
+
+        use Bound::*;
+        for column in &columns[0..self.len()] {
+            let bound = self
+                .inner
+                .remove(column.name())
+                .ok_or_else(|| error::not_found(column.name()))?;
+
+            match bound {
+                ColumnBound::Is(value) => {
+                    start.push(In(value.clone()));
+                    end.push(In(value));
+                }
+                ColumnBound::In(Range(s, e)) => {
+                    start.push(s);
+                    end.push(e);
+                }
+            }
+        }
+
+        Ok((start, end).into())
+    }
+
+    pub fn merge(self, _other: Self, _collator: &Collator) -> TCResult<Self> {
+        Err(error::not_implemented("Bounds::merge"))
+    }
+
+    pub fn validate(self, columns: &[Column]) -> TCResult<Bounds> {
+        let try_cast_bound = |bound: Bound, dtype: ValueType| match bound {
+            Bound::In(val) => dtype.try_cast(val).map(Bound::In),
+            Bound::Ex(val) => dtype.try_cast(val).map(Bound::Ex),
+            Bound::Unbounded => Ok(Bound::Unbounded),
+        };
+
+        let mut validated = HashMap::new();
+        let columns: HashMap<&Id, ValueType> = columns.iter().map(|c| c.into()).collect();
+        for (name, bound) in self.inner.into_iter() {
+            if let Some(dtype) = columns.get(&name) {
+                let bound = match bound {
+                    ColumnBound::Is(value) => dtype.try_cast(value).map(ColumnBound::Is)?,
+                    ColumnBound::In(Range(start, end)) => {
+                        let start = try_cast_bound(start, *dtype)?;
+                        let end = try_cast_bound(end, *dtype)?;
+                        ColumnBound::In(Range(start, end))
+                    }
+                };
+
+                validated.insert(name, bound);
+            } else {
+                return Err(error::not_found(name));
+            }
+        }
+
+        Ok(validated.into())
+    }
 }
 
-pub fn from_key(key: Vec<Value>, key_columns: &[Column]) -> Bounds {
-    assert_eq!(key.len(), key_columns.len());
+impl Deref for Bounds {
+    type Target = HashMap<Id, ColumnBound>;
 
-    key_columns
-        .iter()
-        .map(|c| c.name())
-        .cloned()
-        .zip(key.into_iter().map(|v| v.into()))
-        .collect()
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl From<HashMap<Id, ColumnBound>> for Bounds {
+    fn from(inner: HashMap<Id, ColumnBound>) -> Self {
+        Self { inner }
+    }
 }
 
 impl TryCastFrom<Object> for Bounds {
@@ -131,44 +183,12 @@ impl TryCastFrom<Object> for Bounds {
             }
         }
 
-        Some(bounds)
+        Some(Bounds::from(bounds))
     }
 }
 
-pub fn format(bounds: &Bounds) -> String {
-    let bounds: Vec<String> = bounds
-        .iter()
-        .map(|(k, v)| format!("{}: {}", k, v))
-        .collect();
-
-    format!("{{{}}}", bounds.join(", "))
-}
-
-pub fn validate(bounds: Bounds, columns: &[Column]) -> TCResult<Bounds> {
-    let try_cast_bound = |bound: Bound, dtype: ValueType| match bound {
-        Bound::In(val) => dtype.try_cast(val).map(Bound::In),
-        Bound::Ex(val) => dtype.try_cast(val).map(Bound::Ex),
-        Bound::Unbounded => Ok(Bound::Unbounded),
-    };
-
-    let mut validated = Bounds::new();
-    let columns: HashMap<&Id, ValueType> = columns.iter().map(|c| c.into()).collect();
-    for (name, bound) in bounds.into_iter() {
-        if let Some(dtype) = columns.get(&name) {
-            let bound = match bound {
-                ColumnBound::Is(value) => dtype.try_cast(value).map(ColumnBound::Is)?,
-                ColumnBound::In(Range(start, end)) => {
-                    let start = try_cast_bound(start, *dtype)?;
-                    let end = try_cast_bound(end, *dtype)?;
-                    ColumnBound::In(Range(start, end))
-                }
-            };
-
-            validated.insert(name, bound);
-        } else {
-            return Err(error::not_found(name));
-        }
+impl fmt::Display for Bounds {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&Object::from_iter(self.inner.clone()), f)
     }
-
-    Ok(validated)
 }
