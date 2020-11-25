@@ -937,7 +937,7 @@ impl Selection {
         if column_set.len() != columns.len() {
             return Err(error::bad_request(
                 "Tried to select duplicate column",
-                Value::from_iter(columns.into_iter())
+                Value::from_iter(columns.into_iter()),
             ));
         }
 

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
-use std::iter;
+use std::iter::{self, FromIterator};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -919,22 +919,35 @@ impl TableInstance for TableIndex {
         let mut bounds = &bounds[..];
         while !bounds.is_empty() {
             let initial = bounds.len();
-            for i in (1..bounds.len() + 1).rev() {
+
+            let mut i = bounds.len();
+            loop {
                 let subset: Bounds = bounds[..i].iter().cloned().collect();
 
-                for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
+                if self.primary.validate_bounds(&subset).is_ok() {
+                    bounds = &bounds[i..];
+                    break;
+                }
+
+                for index in self.auxiliary.values() {
                     if index.validate_bounds(&subset).is_ok() {
                         bounds = &bounds[i..];
                         break;
                     }
+                }
+
+                if bounds.is_empty() {
+                    break;
+                } else {
+                    i = i - 1;
                 }
             }
 
             if bounds.len() == initial {
                 let order: Vec<String> = bounds.iter().map(|(name, _)| name.to_string()).collect();
                 return Err(error::bad_request(
-                    "This table has no index to support selection bounds on",
-                    order.join(", "),
+                    format!("This table has no index to support selection bounds on {}--available indices are", order.join(", ")),
+                    Value::from_iter(self.auxiliary.keys().cloned()),
                 ));
             }
         }
