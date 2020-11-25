@@ -804,28 +804,31 @@ impl TableInstance for TableIndex {
         let mut columns = &columns[..];
         loop {
             let initial = columns.to_vec();
-            for i in (1..columns.len() + 1).rev() {
+            let mut i = columns.len();
+            loop {
                 let subset = &columns[..i];
 
                 for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
                     if index.validate_order(subset).is_ok() {
                         columns = &columns[i..];
 
-                        let index_slice = self.primary.index_slice(bounds::all())?;
+                        let index_slice = index.index_slice(bounds::all())?;
                         let merged = Merged::new(merge_source, index_slice);
 
                         if columns.is_empty() {
-                            if reverse {
-                                return merged.reversed();
+                            return if reverse {
+                                merged.reversed()
                             } else {
-                                return Ok(merged.into());
-                            }
+                                Ok(merged.into())
+                            };
                         }
 
                         merge_source = MergeSource::Merge(Arc::new(merged));
                         break;
                     }
                 }
+
+                i = i - 1;
             }
 
             if columns == &initial[..] {
@@ -958,14 +961,26 @@ impl TableInstance for TableIndex {
     fn validate_order(&self, mut order: &[Id]) -> TCResult<()> {
         while !order.is_empty() {
             let initial = order.to_vec();
-            for i in (1..order.len() + 1).rev() {
+            let mut i = order.len();
+            loop {
                 let subset = &order[..i];
 
-                for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
+                if self.primary.validate_order(subset).is_ok() {
+                    order = &order[i..];
+                    break;
+                }
+
+                for index in self.auxiliary.values() {
                     if index.validate_order(subset).is_ok() {
                         order = &order[i..];
                         break;
                     }
+                }
+
+                if order.is_empty() {
+                    break;
+                } else {
+                    i = i - 1;
                 }
             }
 
