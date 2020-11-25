@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
 use log::debug;
@@ -74,6 +75,19 @@ impl Deref for Object {
 impl DerefMut for Object {
     fn deref_mut(&'_ mut self) -> &'_ mut HashMap<Id, Scalar> {
         &mut self.0
+    }
+}
+
+impl<T: Into<Scalar>> FromIterator<(Id, T)> for Object {
+    fn from_iter<I: IntoIterator<Item = (Id, T)>>(iter: I) -> Self {
+        let mut object = HashMap::new();
+
+        for (id, attr) in iter {
+            let scalar = attr.into();
+            object.insert(id, scalar);
+        }
+
+        Object(object)
     }
 }
 
