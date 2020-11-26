@@ -761,6 +761,13 @@ impl MergeSource {
             Self::Merge(merged) => merged.source(),
         }
     }
+
+    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        match self {
+            Self::Table(table) => table.validate_bounds(bounds),
+            Self::Merge(merged) => merged.validate_bounds(bounds),
+        }
+    }
 }
 
 #[async_trait]
@@ -899,14 +906,17 @@ impl TableInstance for Merged {
         let key_columns = self.key().to_vec();
         let key_names: Vec<Id> = key_columns.iter().map(|c| c.name()).cloned().collect();
         let left = self.left.clone();
+        let left_clone = self.left.clone();
         let txn_id_clone = txn_id.clone();
+
         let rows = self
             .right
             .select(key_names)?
             .stream(txn_id.clone())
             .await?
             .map(move |key| Bounds::from_key(key, &key_columns))
-            .map(move |bounds| left.clone().slice(bounds))
+            .filter(move |bounds| future::ready(left.validate_bounds(bounds).is_ok()))
+            .map(move |bounds| left_clone.clone().slice(bounds))
             .map(|slice| slice.unwrap())
             .then(move |slice| slice.stream(txn_id_clone.clone()))
             .map(|stream| stream.unwrap())
@@ -916,8 +926,12 @@ impl TableInstance for Merged {
         Ok(rows)
     }
 
-    fn validate_bounds(&self, _bounds: &Bounds) -> TCResult<()> {
-        Err(error::not_implemented("Slicing a slice"))
+    fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        let mut bounds_seq: Vec<Bounds> = self.bounds().into_iter().cloned().collect();
+        bounds_seq.push(bounds.clone());
+
+        let bounds = self.source().merge_bounds(bounds_seq)?;
+        self.source().validate_bounds(&bounds)
     }
 
     fn validate_order(&self, order: &[Id]) -> TCResult<()> {
@@ -1239,6 +1253,8 @@ impl TableInstance for TableSlice {
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        debug!("Table::validate_bounds {}", bounds);
+
         let index = self.table.supporting_index(&self.bounds)?;
         index
             .validate_slice_bounds(self.bounds.clone(), bounds.clone())

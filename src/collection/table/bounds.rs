@@ -3,6 +3,8 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::ops::Deref;
 
+use log::debug;
+
 use crate::class::Instance;
 use crate::collection::btree::{BTreeRange, Collator};
 use crate::collection::schema::Column;
@@ -40,6 +42,12 @@ impl ColumnBound {
                 Self::In(inner) => outer.contains_range(inner, collator),
             },
         }
+    }
+}
+
+impl Default for ColumnBound {
+    fn default() -> Self {
+        Self::In(Range::default())
     }
 }
 
@@ -147,10 +155,15 @@ impl Bounds {
         Ok((start, end).into())
     }
 
+    pub fn into_inner(self) -> HashMap<Id, ColumnBound> {
+        self.inner
+    }
+
     pub fn merge(&mut self, other: Self, collator: &Collator) -> TCResult<()> {
         for (col_name, inner) in other.inner.into_iter() {
             if let Some(outer) = self.get(&col_name) {
                 if !outer.contains(&inner, collator) {
+                    debug!("{} does not contain {}", outer, inner);
                     return Err(error::bad_request("Out of bounds", inner));
                 }
             }

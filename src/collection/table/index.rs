@@ -435,14 +435,20 @@ impl TableInstance for Index {
             ));
         }
 
-        let ordered: Vec<&ColumnBound> = columns
-            .iter()
-            .filter_map(|col| bounds.get(col.name()))
-            .collect();
-
-        for bound in &ordered[..ordered.len() - 1] {
+        let mut range_bound = false;
+        let mut bounds_to_check = bounds.clone().into_inner();
+        for column in columns {
+            let bound = bounds_to_check.remove(column.name()).unwrap_or_default();
             if let ColumnBound::In(_) = bound {
-                return Err(error::bad_request("Index does not support bounds", bounds));
+                if range_bound {
+                    return Err(error::bad_request("Index does not support bounds", bounds));
+                } else {
+                    range_bound = true;
+                }
+            }
+
+            if bounds_to_check.is_empty() {
+                return Ok(());
             }
         }
 
@@ -903,24 +909,38 @@ impl TableInstance for TableIndex {
             let initial = bounds.len();
             let mut i = bounds.len();
             while i > 0 {
-                let subset: HashMap<Id, ColumnBound> = bounds[..i].iter().cloned().collect();
+                let subset: HashMap<Id, ColumnBound> = bounds[..i].to_vec().into_iter().collect();
                 let subset = Bounds::from(subset);
 
-                for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
-                    if index.validate_bounds(&subset).is_ok() {
-                        bounds = &bounds[i..];
+                if self.primary.validate_bounds(&subset).is_ok() {
+                    debug!("primary key can slice {}", subset);
 
-                        let index_slice = index.index_slice(subset)?;
-                        let merged = Merged::new(merge_source, index_slice);
+                    let index_slice = self.primary.index_slice(subset)?;
+                    let merged = Merged::new(merge_source, index_slice);
 
-                        if bounds.is_empty() {
-                            return Ok(merged.into());
-                        }
-
-                        merge_source = MergeSource::Merge(Arc::new(merged));
-                        break;
+                    bounds = &bounds[i..];
+                    if bounds.is_empty() {
+                        return Ok(merged.into());
                     }
-                }
+
+                    merge_source = MergeSource::Merge(Arc::new(merged));
+                } else {
+                    for (name, index) in self.auxiliary.iter() {
+                        if index.validate_bounds(&subset).is_ok() {
+                            debug!("index {} can slice {}", name, subset);
+                            let index_slice = index.index_slice(subset)?;
+                            let merged = Merged::new(merge_source, index_slice);
+
+                            bounds = &bounds[i..];
+                            if bounds.is_empty() {
+                                return Ok(merged.into());
+                            }
+
+                            merge_source = MergeSource::Merge(Arc::new(merged));
+                            break;
+                        }
+                    }
+                };
 
                 i = i - 1;
             }

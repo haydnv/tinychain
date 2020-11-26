@@ -282,6 +282,15 @@ impl Range {
     }
 }
 
+impl Default for Range {
+    fn default() -> Self {
+        Self {
+            start: Bound::Unbounded,
+            end: Bound::Unbounded,
+        }
+    }
+}
+
 impl TryCastFrom<Scalar> for Range {
     fn can_cast_from(scalar: &Scalar) -> bool {
         if let Scalar::Slice(Slice::Range(_)) = scalar {
