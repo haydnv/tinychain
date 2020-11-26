@@ -53,7 +53,10 @@ impl BTreeSlice {
                         range: view.range,
                         reverse,
                     })
-                } else if view.range.contains(&range, view.schema())? {
+                } else if view
+                    .range
+                    .contains(&range, view.schema(), source.collator())
+                {
                     Ok(Self {
                         source,
                         range,
@@ -72,7 +75,10 @@ impl BTreeInstance for BTreeSlice {
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
         if range == BTreeRange::default() {
             self.source.delete(txn_id, self.range.clone()).await
-        } else if self.range.contains(&range, self.schema())? {
+        } else if self
+            .range
+            .contains(&range, self.schema(), self.source.collator())
+        {
             self.source.delete(txn_id, range).await
         } else {
             Err(error::bad_request(ERR_BOUNDS, range))
@@ -110,7 +116,10 @@ impl BTreeInstance for BTreeSlice {
     async fn len(&self, txn_id: TxnId, range: BTreeRange) -> TCResult<u64> {
         if range == BTreeRange::default() {
             self.source.len(txn_id, self.range.clone()).await
-        } else if self.range.contains(&range, self.schema())? {
+        } else if self
+            .range
+            .contains(&range, self.schema(), self.source.collator())
+        {
             self.source.len(txn_id, range).await
         } else {
             Err(error::bad_request(ERR_BOUNDS, range))
@@ -140,7 +149,10 @@ impl BTreeInstance for BTreeSlice {
             self.source
                 .stream(txn_id, self.range.clone(), reverse)
                 .await
-        } else if self.range.contains(&range, self.schema())? {
+        } else if self
+            .range
+            .contains(&range, self.schema(), self.source.collator())
+        {
             debug!(
                 "BTreeSlice::slice with constrained bounds: {} (reverse: {})",
                 range, reverse

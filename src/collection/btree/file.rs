@@ -193,7 +193,7 @@ impl BTreeFile {
             .create_block(txn.id().clone(), root.clone(), Node::new(true, None))
             .await?;
 
-        let collator = Collator::new(schema.iter().map(|c| *c.dtype()).collect())?;
+        let collator = Collator::new(schema.iter().map(|c| c.dtype()).collect())?;
 
         Ok(BTreeFile {
             file,

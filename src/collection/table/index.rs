@@ -7,6 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
+use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
 use crate::collection::btree::{self, BTreeFile, BTreeInstance};
@@ -339,12 +340,12 @@ impl Index {
         let outer = outer.validate(columns)?.into_btree_range(&columns)?;
         let inner = inner.validate(columns)?.into_btree_range(&columns)?;
 
-        if outer.contains(&inner, &self.schema.columns())? {
+        if outer.contains(&inner, &self.schema.columns(), self.btree.collator()) {
             Ok(())
         } else {
             Err(error::bad_request(
                 "Slice does not contain requested bounds",
-                "",
+                inner,
             ))
         }
     }
@@ -416,20 +417,29 @@ impl TableInstance for Index {
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        let bounds = bounds.clone().validate(&self.schema.columns())?;
+        if bounds.is_empty() {
+            return Ok(());
+        }
 
-        for (column, bound_column) in self.schema.columns()[0..bounds.len()]
+        let columns = self.schema.columns();
+        let column_names: HashSet<&Id> = columns.iter().map(|col| col.name()).collect();
+        let bound_column_names: HashSet<&Id> = bounds.keys().collect();
+        let extra: HashSet<&&Id> = bound_column_names.difference(&column_names).collect();
+        if !extra.is_empty() {
+            return Err(error::bad_request(
+                "Index has no such columns",
+                Value::from_iter(extra.into_iter().map(Deref::deref).cloned()),
+            ));
+        }
+
+        let ordered: Vec<&ColumnBound> = columns
             .iter()
-            .zip(bounds.keys())
-        {
-            if column.name() != bound_column {
-                return Err(error::bad_request(
-                    &format!(
-                        "Expected column {} in index range selector but found",
-                        column.name()
-                    ),
-                    bound_column,
-                ));
+            .filter_map(|col| bounds.get(col.name()))
+            .collect();
+
+        for bound in &ordered[..ordered.len() - 1] {
+            if let ColumnBound::In(_) = bound {
+                return Err(error::bad_request("Index does not support bounds", bounds));
             }
         }
 
@@ -862,8 +872,11 @@ impl TableInstance for TableIndex {
 
     fn slice(&self, bounds: Bounds) -> TCResult<Table> {
         if self.primary.validate_bounds(&bounds).is_ok() {
+            debug!("primary key can slice bounds {}...", bounds);
             return TableSlice::new(self.clone(), bounds).map(|t| t.into());
         }
+
+        debug!("primary key cannot slice bounds {}", bounds);
 
         let columns: Vec<Id> = self
             .primary
@@ -923,6 +936,10 @@ impl TableInstance for TableIndex {
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        if self.primary.validate_bounds(bounds).is_ok() {
+            return Ok(());
+        }
+
         let bounds: Vec<(Id, ColumnBound)> = self
             .primary
             .schema()

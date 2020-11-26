@@ -5,65 +5,46 @@ use crate::collection::schema::Column;
 use crate::error::TCResult;
 use crate::scalar::*;
 
-use super::collator;
+use super::collator::Collator;
 use super::Key;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct BTreeRange(Vec<Bound>, Vec<Bound>);
 
 impl BTreeRange {
-    pub fn contains(&self, other: &BTreeRange, schema: &[Column]) -> TCResult<bool> {
-        if other == &Self::default() {
-            return Ok(true);
-        }
-
-        if other.0.len() < self.0.len() {
-            return Ok(false);
-        }
-
-        if other.1.len() < self.1.len() {
-            return Ok(false);
-        }
-
-        use collator::compare_value;
+    pub fn contains(&self, other: &BTreeRange, schema: &[Column], collator: &Collator) -> bool {
         use Bound::*;
         use Ordering::*;
 
-        for (col, (outer, inner)) in schema[0..self.0.len()]
-            .iter()
-            .zip(self.0.iter().zip(other.0[0..self.0.len()].iter()))
-        {
-            let dtype = *col.dtype();
+        for (col, (outer, inner)) in schema.iter().zip(self.0.iter().zip(&other.0)) {
+            let dtype = col.dtype();
 
             match (outer, inner) {
                 (Unbounded, _) => {}
-                (_, Unbounded) => return Ok(false),
-                (Ex(o), Ex(i)) if compare_value(&o, &i, dtype)? == Greater => return Ok(false),
-                (In(o), In(i)) if compare_value(&o, &i, dtype)? == Greater => return Ok(false),
-                (In(o), Ex(i)) if compare_value(&o, &i, dtype)? == Greater => return Ok(false),
-                (Ex(o), In(i)) if compare_value(&o, &i, dtype)? != Less => return Ok(false),
+                (_, Unbounded) => return false,
+                (Ex(o), Ex(i)) if collator.compare_value(dtype, &o, &i) == Greater => return false,
+                (In(o), In(i)) if collator.compare_value(dtype, &o, &i) == Greater => return false,
+                (In(o), Ex(i)) if collator.compare_value(dtype, &o, &i) == Greater => return false,
+                (Ex(o), In(i)) if collator.compare_value(dtype, &o, &i) != Less => return false,
                 _ => {}
             }
         }
 
-        for (col, (outer, inner)) in schema[0..self.1.len()]
-            .iter()
-            .zip(self.1.iter().zip(other.1[0..self.1.len()].iter()))
-        {
-            let dtype = *col.dtype();
+        for (col, (outer, inner)) in schema.iter().zip(self.1.iter().zip(&other.1)) {
+            let dtype = col.dtype();
 
             match (outer, inner) {
                 (Unbounded, _) => {}
-                (_, Unbounded) => return Ok(false),
-                (Ex(o), Ex(i)) if compare_value(&o, &i, dtype)? == Less => return Ok(false),
-                (In(o), In(i)) if compare_value(&o, &i, dtype)? == Less => return Ok(false),
-                (In(o), Ex(i)) if compare_value(&o, &i, dtype)? == Less => return Ok(false),
-                (Ex(o), In(i)) if compare_value(&o, &i, dtype)? != Greater => return Ok(false),
+                (_, Unbounded) => return false,
+                (Ex(o), Ex(i)) if collator.compare_value(dtype, &o, &i) == Less => return false,
+                (In(o), In(i)) if collator.compare_value(dtype, &o, &i) == Less => return false,
+                (In(o), Ex(i)) if collator.compare_value(dtype, &o, &i) == Less => return false,
+                (Ex(o), In(i)) if collator.compare_value(dtype, &o, &i) != Greater => return false,
                 _ => {}
             }
         }
 
-        Ok(true)
+        true
     }
 
     pub fn is_key(&self, schema: &[Column]) -> bool {

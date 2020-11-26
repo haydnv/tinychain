@@ -1281,7 +1281,7 @@ impl SparseTable {
             ));
         }
 
-        let dtype = *actual_value[0].dtype();
+        let dtype = actual_value[0].dtype();
         if let ValueType::Number(dtype) = dtype {
             Ok(SparseTable {
                 table,

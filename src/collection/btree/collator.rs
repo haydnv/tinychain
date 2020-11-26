@@ -6,34 +6,6 @@ use crate::class::{Instance, TCResult};
 use crate::error;
 use crate::scalar::{Bound, Id, Number, NumberType, StringType, TCString, Value, ValueType};
 
-pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<Ordering> {
-    left.expect(dtype, "for collation")?;
-    right.expect(dtype, "for collation")?;
-    match dtype {
-        ValueType::Number(_) => {
-            let left: Number = left.try_into()?;
-            let right: Number = right.try_into()?;
-            left.partial_cmp(&right)
-                .ok_or_else(|| error::unsupported("Unsupported Number comparison"))
-        }
-        ValueType::TCString(StringType::Id) => {
-            let left: &Id = left.try_into()?;
-            let right: &Id = right.try_into()?;
-            left.as_str()
-                .partial_cmp(right.as_str())
-                .ok_or_else(|| error::unsupported("Unsupported String comparison"))
-        }
-        ValueType::TCString(StringType::UString) => {
-            // TODO: support localized strings
-            let left: &String = left.try_into()?;
-            let right: &String = right.try_into()?;
-            left.partial_cmp(right)
-                .ok_or_else(|| error::unsupported("Unsupported String comparison"))
-        }
-        other => Err(error::bad_request("Collator does not support", other)),
-    }
-}
-
 #[derive(Clone)]
 pub struct Collator {
     schema: Vec<ValueType>,
@@ -158,8 +130,8 @@ impl Collator {
     pub fn compare(&self, key1: &[Value], key2: &[Value]) -> Ordering {
         for i in 0..Ord::min(key1.len(), key2.len()) {
             match self.compare_value(self.schema[i], &key1[i], &key2[i]) {
-                Equal => {},
-                rel => return rel
+                Equal => {}
+                rel => return rel,
             };
         }
 

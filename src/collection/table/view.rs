@@ -495,7 +495,7 @@ impl IndexSlice {
         let outer = bounds.clone().into_btree_range(&columns)?;
         let inner = bounds.clone().into_btree_range(&columns)?;
 
-        if outer.contains(&inner, &self.schema.columns())? {
+        if outer.contains(&inner, &self.schema.columns(), self.source.collator()) {
             let mut slice = self.clone();
             slice.bounds = bounds;
             Ok(slice)
@@ -560,7 +560,15 @@ impl TableInstance for IndexSlice {
         let schema = self.schema();
         let outer = bounds.clone().into_btree_range(&schema.columns())?;
         let inner = bounds.clone().into_btree_range(&schema.columns())?;
-        outer.contains(&inner, &schema.columns()).map(|_| ())
+
+        if outer.contains(&inner, &schema.columns(), self.source.collator()) {
+            Ok(())
+        } else {
+            Err(error::bad_request(
+                "IndexSlice does not support bounds",
+                bounds,
+            ))
+        }
     }
 
     fn validate_order(&self, order: &[Id]) -> TCResult<()> {
@@ -1214,7 +1222,8 @@ impl TableInstance for TableSlice {
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let slice = self.table.primary().slice(self.bounds.clone())?;
+        let index = self.table.supporting_index(&self.bounds)?;
+        let slice = index.slice(self.bounds.clone())?;
 
         if self.reversed {
             slice.reversed()?.stream(txn_id).await

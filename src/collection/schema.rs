@@ -40,8 +40,8 @@ impl Column {
         &self.name
     }
 
-    pub fn dtype(&'_ self) -> &'_ ValueType {
-        &self.dtype
+    pub fn dtype(&self) -> ValueType {
+        self.dtype
     }
 
     pub fn max_len(&'_ self) -> &'_ Option<usize> {
