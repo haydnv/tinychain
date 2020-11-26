@@ -127,18 +127,17 @@ impl Bounds {
         let mut end = Vec::with_capacity(self.len());
 
         use Bound::*;
-        for column in &columns[0..self.len()] {
-            let bound = self
-                .inner
-                .remove(column.name())
-                .ok_or_else(|| error::not_found(column.name()))?;
-
-            match bound {
-                ColumnBound::Is(value) => {
+        for column in columns {
+            match self.inner.remove(column.name()) {
+                None => {
+                    start.push(Unbounded);
+                    end.push(Unbounded);
+                }
+                Some(ColumnBound::Is(value)) => {
                     start.push(In(value.clone()));
                     end.push(In(value));
                 }
-                ColumnBound::In(Range { start: s, end: e }) => {
+                Some(ColumnBound::In(Range { start: s, end: e })) => {
                     start.push(s);
                     end.push(e);
                 }

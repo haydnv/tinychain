@@ -456,6 +456,7 @@ impl IndexSlice {
     }
 
     pub fn new(source: BTreeFile, schema: IndexSchema, bounds: Bounds) -> TCResult<IndexSlice> {
+        debug!("IndexSlice::new with bounds {}", bounds);
         let columns = schema.columns();
 
         assert!(source.schema() == &columns[..]);
@@ -551,6 +552,8 @@ impl TableInstance for IndexSlice {
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+        debug!("IndexSlice::stream");
+
         self.source
             .stream(txn_id.clone(), self.range.clone(), self.reverse)
             .await
@@ -1135,6 +1138,7 @@ impl TableSlice {
     pub fn new(table: TableIndex, bounds: Bounds) -> TCResult<TableSlice> {
         table.validate_bounds(&bounds)?;
 
+        debug!("TableSlice::new w/bounds {}", bounds);
         Ok(TableSlice {
             table,
             bounds,
@@ -1222,6 +1226,8 @@ impl TableInstance for TableSlice {
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+        debug!("TableSlice::stream");
+
         let index = self.table.supporting_index(&self.bounds)?;
         let slice = index.slice(self.bounds.clone())?;
 

@@ -322,6 +322,7 @@ impl Index {
     }
 
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
+        debug!("Index::index_slice");
         let bounds = bounds.validate(&self.schema.columns())?;
         IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)
     }
@@ -411,6 +412,8 @@ impl TableInstance for Index {
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+        debug!("Index::stream");
+
         self.btree
             .stream(txn_id, btree::BTreeRange::default(), false)
             .await
