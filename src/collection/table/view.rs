@@ -810,13 +810,6 @@ impl Merged {
         bounds
     }
 
-    fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
-        match &self.left {
-            MergeSource::Merge(merged) => merged.index_slice(bounds),
-            MergeSource::Table(table_slice) => table_slice.index_slice(bounds),
-        }
-    }
-
     fn source(&'_ self) -> &'_ TableIndex {
         self.left.source()
     }

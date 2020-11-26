@@ -3,6 +3,7 @@ use std::fmt;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::{Class, Instance, NativeClass, TCType};
+use crate::collection::Collator;
 use crate::error::{self, TCResult};
 
 use super::{
@@ -170,11 +171,114 @@ impl fmt::Display for Bound {
 }
 
 #[derive(Clone, Eq, PartialEq)]
-pub struct Range(pub Bound, pub Bound);
+pub struct Range {
+    pub start: Bound,
+    pub end: Bound,
+}
 
 impl Range {
+    pub fn contains_range(&self, inner: &Self, collator: &Collator) -> bool {
+        use std::cmp::Ordering::*;
+
+        match &self.start {
+            Bound::Unbounded => {}
+            Bound::In(outer) => match &inner.start {
+                Bound::Unbounded => return false,
+                Bound::In(inner) => {
+                    if collator.compare_value(outer.class(), inner, outer) == Less {
+                        return false;
+                    }
+                }
+                Bound::Ex(inner) => {
+                    if collator.compare_value(outer.class(), inner, outer) != Greater {
+                        return false;
+                    }
+                }
+            },
+            Bound::Ex(outer) => match &inner.start {
+                Bound::Unbounded => return false,
+                Bound::In(inner) => {
+                    if collator.compare_value(outer.class(), inner, outer) != Greater {
+                        return false;
+                    }
+                }
+                Bound::Ex(inner) => {
+                    if collator.compare_value(outer.class(), inner, outer) == Less {
+                        return false;
+                    }
+                }
+            },
+        }
+
+        match &self.end {
+            Bound::Unbounded => {}
+            Bound::In(outer) => match &inner.end {
+                Bound::Unbounded => return false,
+                Bound::In(inner) => {
+                    if collator.compare_value(outer.class(), inner, outer) == Greater {
+                        return false;
+                    }
+                }
+                Bound::Ex(inner) => {
+                    if collator.compare_value(outer.class(), inner, outer) != Less {
+                        return false;
+                    }
+                }
+            },
+            Bound::Ex(outer) => match &inner.end {
+                Bound::Unbounded => return false,
+                Bound::In(inner) => {
+                    if collator.compare_value(outer.class(), inner, outer) != Less {
+                        return false;
+                    }
+                }
+                Bound::Ex(inner) => {
+                    if collator.compare_value(outer.class(), inner, outer) == Greater {
+                        return false;
+                    }
+                }
+            },
+        }
+
+        true
+    }
+
+    pub fn contains_value(&self, value: &Value, collator: &Collator) -> bool {
+        use std::cmp::Ordering::*;
+
+        match &self.start {
+            Bound::Unbounded => {}
+            Bound::In(outer) => {
+                if collator.compare_value(value.class(), value, outer) == Less {
+                    return false;
+                }
+            }
+            Bound::Ex(outer) => {
+                if collator.compare_value(value.class(), value, outer) != Greater {
+                    return false;
+                }
+            }
+        }
+
+        match &self.end {
+            Bound::Unbounded => {}
+            Bound::In(outer) => {
+                if collator.compare_value(value.class(), value, outer) == Greater {
+                    return false;
+                }
+            }
+            Bound::Ex(outer) => {
+                if collator.compare_value(value.class(), value, outer) != Less {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
     pub fn into_inner(self) -> (Bound, Bound) {
-        (self.0, self.1)
+        (self.start, self.end)
     }
 }
 
@@ -190,7 +294,7 @@ impl TryCastFrom<Scalar> for Range {
         }
     }
 
-    fn opt_cast_from(scalar: Scalar) -> Option<Range> {
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         let start_bound = |val: Value| {
             if val.is_none() {
                 Bound::Unbounded
@@ -211,16 +315,19 @@ impl TryCastFrom<Scalar> for Range {
             Some(range)
         } else if scalar.matches::<(Bound, Bound)>() {
             let (start, end) = scalar.opt_cast_into().unwrap();
-            Some(Range(start, end))
+            Some(Self { start, end })
         } else if scalar.matches::<(Value, Value)>() {
             let (start, end): (Value, Value) = scalar.opt_cast_into().unwrap();
-            Some(Range(start_bound(start), end_bound(end)))
+            let (start, end) = (start_bound(start), end_bound(end));
+            Some(Self { start, end })
         } else if scalar.matches::<(Value, Bound)>() {
             let (start, end): (Value, Bound) = scalar.opt_cast_into().unwrap();
-            Some(Range(start_bound(start), end))
+            let start = start_bound(start);
+            Some(Self { start, end })
         } else if scalar.matches::<(Bound, Value)>() {
             let (start, end): (Bound, Value) = scalar.opt_cast_into().unwrap();
-            Some(Range(start, end_bound(end)))
+            let end = end_bound(end);
+            Some(Self { start, end })
         } else {
             None
         }
@@ -232,7 +339,7 @@ impl Serialize for Range {
         let mut map = s.serialize_map(Some(1))?;
         map.serialize_entry(
             &Link::from(SliceType::Range).to_string(),
-            &[&self.0, &self.1],
+            &[&self.start, &self.end],
         )?;
         map.end()
     }
@@ -240,7 +347,7 @@ impl Serialize for Range {
 
 impl fmt::Display for Range {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Range({}, {})", self.0, self.1)
+        write!(f, "Range({}, {})", self.start, self.end)
     }
 }
 

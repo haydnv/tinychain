@@ -1,5 +1,5 @@
 use std::cmp::Ordering::{self, *};
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::ops::Deref;
 
 use crate::class::{Instance, TCResult};
@@ -11,9 +11,9 @@ pub fn compare_value(left: &Value, right: &Value, dtype: ValueType) -> TCResult<
     right.expect(dtype, "for collation")?;
     match dtype {
         ValueType::Number(_) => {
-            let left: &Number = left.try_into()?;
-            let right: &Number = right.try_into()?;
-            left.partial_cmp(right)
+            let left: Number = left.try_into()?;
+            let right: Number = right.try_into()?;
+            left.partial_cmp(&right)
                 .ok_or_else(|| error::unsupported("Unsupported Number comparison"))
         }
         ValueType::TCString(StringType::Id) => {
@@ -157,40 +157,10 @@ impl Collator {
 
     pub fn compare(&self, key1: &[Value], key2: &[Value]) -> Ordering {
         for i in 0..Ord::min(key1.len(), key2.len()) {
-            match self.schema[i] {
-                ValueType::Number(_) => {
-                    let left: Number = key1[i].clone().try_into().unwrap();
-                    let right: Number = key2[i].clone().try_into().unwrap();
-                    if left < right {
-                        return Less;
-                    } else if left > right {
-                        return Greater;
-                    }
-                }
-                ValueType::TCString(st) => match st {
-                    StringType::Id => {
-                        let left: &Id = (&key1[i]).try_into().unwrap();
-                        let right: &Id = (&key2[i]).try_into().unwrap();
-                        match left.cmp(&right) {
-                            Less => return Less,
-                            Greater => return Greater,
-                            _ => {}
-                        }
-                    }
-                    StringType::UString => {
-                        // TODO: add support for localized collation
-                        let left: &String = (&key1[i]).try_into().unwrap();
-                        let right: &String = (&key2[i]).try_into().unwrap();
-                        match left.cmp(&right) {
-                            Less => return Less,
-                            Greater => return Greater,
-                            _ => {}
-                        }
-                    }
-                    _ => panic!("Collator::compare does not support {}", self.schema[i]),
-                },
-                _ => panic!("Collator::compare does not support {}", self.schema[i]),
-            }
+            match self.compare_value(self.schema[i], &key1[i], &key2[i]) {
+                Equal => {},
+                rel => return rel
+            };
         }
 
         if key1.is_empty() && !key2.is_empty() {
@@ -265,6 +235,48 @@ impl Collator {
         } else {
             Equal
         }
+    }
+
+    pub fn compare_value(&self, dtype: ValueType, left: &Value, right: &Value) -> Ordering {
+        assert_eq!(dtype, left.class());
+        assert_eq!(dtype, right.class());
+
+        match dtype {
+            ValueType::Number(_) => {
+                let left = Number::try_from(left).unwrap();
+                let right = Number::try_from(right).unwrap();
+                if left < right {
+                    return Less;
+                } else if left > right {
+                    return Greater;
+                }
+            }
+            ValueType::TCString(st) => match st {
+                StringType::Id => {
+                    let left: &Id = left.try_into().unwrap();
+                    let right: &Id = right.try_into().unwrap();
+                    match left.cmp(&right) {
+                        Less => return Less,
+                        Greater => return Greater,
+                        _ => {}
+                    }
+                }
+                StringType::UString => {
+                    // TODO: add support for localized collation
+                    let left: &String = left.try_into().unwrap();
+                    let right: &String = right.try_into().unwrap();
+                    match left.cmp(&right) {
+                        Less => return Less,
+                        Greater => return Greater,
+                        _ => {}
+                    }
+                }
+                _ => panic!("Collator::compare does not support {}", dtype),
+            },
+            _ => panic!("Collator::compare does not support {}", dtype),
+        }
+
+        Equal
     }
 
     pub fn contains(&self, start: &[Bound], end: &[Bound], key: &[Value]) -> bool {

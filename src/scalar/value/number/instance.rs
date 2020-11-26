@@ -14,7 +14,7 @@ use crate::scalar::{
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{NumberClass, NumberInstance};
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Boolean(bool);
 
 impl Instance for Boolean {
@@ -37,16 +37,16 @@ impl NumberInstance for Boolean {
     type Abs = Self;
     type Class = BooleanType;
 
+    fn into_type(self, _dtype: BooleanType) -> Boolean {
+        self
+    }
+
     fn abs(self) -> Self {
         self
     }
 
     fn and(self, other: Self) -> Self {
         Boolean(self.0 && other.0)
-    }
-
-    fn into_type(self, _dtype: BooleanType) -> Boolean {
-        self
     }
 
     fn not(self) -> Self {
@@ -146,7 +146,7 @@ impl Serialize for Boolean {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Complex {
     C32(num::Complex<f32>),
     C64(num::Complex<f64>),
@@ -175,13 +175,6 @@ impl NumberInstance for Complex {
     type Abs = Float;
     type Class = ComplexType;
 
-    fn abs(self) -> Float {
-        match self {
-            Self::C32(c) => Float::F32(c.norm_sqr()),
-            Self::C64(c) => Float::F64(c.norm_sqr()),
-        }
-    }
-
     fn into_type(self, dtype: ComplexType) -> Complex {
         use ComplexType::*;
         match dtype {
@@ -193,6 +186,13 @@ impl NumberInstance for Complex {
                 Self::C32(c) => Self::C64(num::Complex::new(c.re as f64, c.im as f64)),
                 this => this,
             },
+        }
+    }
+
+    fn abs(self) -> Float {
+        match self {
+            Self::C32(c) => Float::F32(c.norm_sqr()),
+            Self::C64(c) => Float::F64(c.norm_sqr()),
         }
     }
 }
@@ -383,7 +383,7 @@ impl fmt::Display for Complex {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Float {
     F32(f32),
     F64(f64),
@@ -412,13 +412,6 @@ impl NumberInstance for Float {
     type Abs = Float;
     type Class = FloatType;
 
-    fn abs(self) -> Float {
-        match self {
-            Self::F32(f) => Self::F32(f.abs()),
-            Self::F64(f) => Self::F64(f.abs()),
-        }
-    }
-
     fn into_type(self, dtype: FloatType) -> Float {
         use FloatType::*;
         match dtype {
@@ -430,6 +423,13 @@ impl NumberInstance for Float {
                 Self::F32(f) => Self::F64(f as f64),
                 this => this,
             },
+        }
+    }
+
+    fn abs(self) -> Float {
+        match self {
+            Self::F32(f) => Self::F32(f.abs()),
+            Self::F64(f) => Self::F64(f.abs()),
         }
     }
 }
@@ -596,7 +596,7 @@ impl fmt::Display for Float {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Int {
     I16(i16),
     I32(i32),
@@ -627,14 +627,6 @@ impl NumberInstance for Int {
     type Abs = Self;
     type Class = IntType;
 
-    fn abs(self) -> Self {
-        match self {
-            Self::I16(i) => Int::I16(i.abs()),
-            Self::I32(i) => Int::I32(i.abs()),
-            Self::I64(i) => Int::I64(i.abs()),
-        }
-    }
-
     fn into_type(self, dtype: IntType) -> Int {
         use IntType::*;
         match dtype {
@@ -653,6 +645,14 @@ impl NumberInstance for Int {
                 Self::I32(i) => Self::I64(i as i64),
                 this => this,
             },
+        }
+    }
+
+    fn abs(self) -> Self {
+        match self {
+            Self::I16(i) => Int::I16(i.abs()),
+            Self::I32(i) => Int::I32(i.abs()),
+            Self::I64(i) => Int::I64(i.abs()),
         }
     }
 }
@@ -870,7 +870,7 @@ impl fmt::Display for Int {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum UInt {
     U8(u8),
     U16(u16),
@@ -903,10 +903,6 @@ impl NumberInstance for UInt {
     type Abs = Self;
     type Class = UIntType;
 
-    fn abs(self) -> UInt {
-        self
-    }
-
     fn into_type(self, dtype: UIntType) -> UInt {
         use UIntType::*;
         match dtype {
@@ -935,6 +931,10 @@ impl NumberInstance for UInt {
                 this => this,
             },
         }
+    }
+
+    fn abs(self) -> UInt {
+        self
     }
 }
 
@@ -1198,7 +1198,7 @@ impl fmt::Display for UInt {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Number {
     Bool(Boolean),
     Complex(Complex),

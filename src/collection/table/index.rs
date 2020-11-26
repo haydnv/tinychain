@@ -676,7 +676,7 @@ impl TableIndex {
 
         let mut merged = Bounds::default();
         for bounds in all_bounds {
-            merged = merged.merge(bounds, collator)?;
+            merged.merge(bounds, collator)?;
         }
 
         Ok(merged)

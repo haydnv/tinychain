@@ -236,12 +236,12 @@ impl TryFrom<Value> for Number {
     }
 }
 
-impl<'a> TryFrom<&'a Value> for &'a Number {
+impl<'a> TryFrom<&'a Value> for Number {
     type Error = error::TCError;
 
-    fn try_from(v: &'a Value) -> TCResult<&'a Number> {
+    fn try_from(v: &'a Value) -> TCResult<Number> {
         match v {
-            Value::Number(n) => Ok(n),
+            Value::Number(n) => Ok(*n),
             other => Err(error::bad_request("Expected Number but found", other)),
         }
     }

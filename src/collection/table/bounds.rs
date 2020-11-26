@@ -3,6 +3,7 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::ops::Deref;
 
+use crate::class::Instance;
 use crate::collection::btree::{BTreeRange, Collator};
 use crate::collection::schema::Column;
 use crate::error::{self, TCResult};
@@ -10,11 +11,36 @@ use crate::scalar::{
     Bound, Id, Object, Range, Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto, Value,
     ValueType,
 };
+use std::cmp::Ordering;
 
 #[derive(Clone)]
 pub enum ColumnBound {
     Is(Value),
     In(Range),
+}
+
+impl ColumnBound {
+    fn contains(&self, inner: &Self, collator: &Collator) -> bool {
+        use Ordering::*;
+
+        match self {
+            Self::Is(outer) => match inner {
+                Self::Is(inner) => collator.compare_value(outer.class(), outer, inner) == Equal,
+                Self::In(Range {
+                    start: Bound::In(start),
+                    end: Bound::In(end),
+                }) => {
+                    collator.compare_value(outer.class(), outer, start) == Equal
+                        && collator.compare_value(outer.class(), outer, end) == Equal
+                }
+                _ => false,
+            },
+            Self::In(outer) => match inner {
+                Self::Is(inner) => outer.contains_value(inner, collator),
+                Self::In(inner) => outer.contains_range(inner, collator),
+            },
+        }
+    }
 }
 
 impl From<Value> for ColumnBound {
@@ -26,7 +52,7 @@ impl From<Value> for ColumnBound {
 impl From<(Bound, Bound)> for ColumnBound {
     fn from(range: (Bound, Bound)) -> Self {
         let (start, end) = range;
-        Self::In(Range(start, end))
+        Self::In(Range { start, end })
     }
 }
 
@@ -57,8 +83,11 @@ impl fmt::Display for ColumnBound {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Is(value) => write!(f, "{}", value),
-            Self::In(Range(Bound::Unbounded, Bound::Unbounded)) => write!(f, "[...]"),
-            Self::In(Range(start, end)) => {
+            Self::In(Range {
+                start: Bound::Unbounded,
+                end: Bound::Unbounded,
+            }) => write!(f, "[...]"),
+            Self::In(Range { start, end }) => {
                 match start {
                     Bound::Unbounded => write!(f, "[...")?,
                     Bound::In(value) => write!(f, "[{},", value)?,
@@ -109,7 +138,7 @@ impl Bounds {
                     start.push(In(value.clone()));
                     end.push(In(value));
                 }
-                ColumnBound::In(Range(s, e)) => {
+                ColumnBound::In(Range { start: s, end: e }) => {
                     start.push(s);
                     end.push(e);
                 }
@@ -119,8 +148,18 @@ impl Bounds {
         Ok((start, end).into())
     }
 
-    pub fn merge(self, _other: Self, _collator: &Collator) -> TCResult<Self> {
-        Err(error::not_implemented("Bounds::merge"))
+    pub fn merge(&mut self, other: Self, collator: &Collator) -> TCResult<()> {
+        for (col_name, inner) in other.inner.into_iter() {
+            if let Some(outer) = self.get(&col_name) {
+                if !outer.contains(&inner, collator) {
+                    return Err(error::bad_request("Out of bounds", inner));
+                }
+            }
+
+            self.inner.insert(col_name, inner);
+        }
+
+        Ok(())
     }
 
     pub fn validate(self, columns: &[Column]) -> TCResult<Bounds> {
@@ -136,10 +175,10 @@ impl Bounds {
             if let Some(dtype) = columns.get(&name) {
                 let bound = match bound {
                     ColumnBound::Is(value) => dtype.try_cast(value).map(ColumnBound::Is)?,
-                    ColumnBound::In(Range(start, end)) => {
+                    ColumnBound::In(Range { start, end }) => {
                         let start = try_cast_bound(start, *dtype)?;
                         let end = try_cast_bound(end, *dtype)?;
-                        ColumnBound::In(Range(start, end))
+                        ColumnBound::In(Range { start, end })
                     }
                 };
 

@@ -162,6 +162,12 @@ impl TryCastFrom<TCType> for ValueType {
     }
 }
 
+impl fmt::Debug for ValueType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ValueType::*;
