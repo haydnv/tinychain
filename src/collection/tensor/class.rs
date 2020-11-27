@@ -2,7 +2,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::stream::{self, StreamExt};
+use futures::stream::StreamExt;
 use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
@@ -19,9 +19,6 @@ use super::bounds::{Bounds, Shape};
 use super::dense::BlockListFile;
 use super::sparse::SparseTable;
 use super::{DenseTensor, SparseTensor, TensorBoolean, TensorIO, TensorTransform};
-
-const ERR_CREATE_DENSE: &str = "DenseTensor can be constructed with (NumberType, Shape) or \
-(Number, ...), not";
 
 pub trait TensorInstance: Send {
     fn dtype(&self) -> NumberType;
@@ -68,32 +65,21 @@ impl CollectionClass for TensorBaseType {
     type Instance = TensorBase;
 
     async fn get(&self, txn: &Txn, schema: Value) -> TCResult<TensorBase> {
+        let (dtype, shape): (NumberType, Shape) = schema.try_cast_into(|v| {
+            error::bad_request("Tensor schema is (NumberType, Shape), not", v)
+        })?;
+
         match self {
             Self::Dense => {
-                if schema.matches::<(NumberType, Shape)>() {
-                    let (dtype, shape): (NumberType, Shape) = schema.opt_cast_into().unwrap();
-                    let block_list = BlockListFile::constant(txn, shape, dtype.zero()).await?;
-                    Ok(TensorBase::Dense(block_list))
-                } else if schema.matches::<Vec<Number>>() {
-                    let data: Vec<Number> = schema.opt_cast_into().unwrap();
-                    let shape = vec![data.len() as u64].into();
-                    let dtype = data
-                        .iter()
-                        .map(|n| n.class())
-                        .fold(NumberType::Bool, Ord::max);
-                    let block_list = BlockListFile::from_values(
-                        txn,
-                        shape,
-                        dtype,
-                        stream::iter(data.into_iter()),
-                    )
-                    .await?;
-                    Ok(TensorBase::Dense(block_list))
-                } else {
-                    Err(error::bad_request(ERR_CREATE_DENSE, schema))
-                }
+                BlockListFile::constant(txn, shape, dtype.zero())
+                    .map_ok(TensorBase::Dense)
+                    .await
             }
-            Self::Sparse => todo!(),
+            Self::Sparse => {
+                SparseTable::create(txn, shape, dtype)
+                    .map_ok(TensorBase::Sparse)
+                    .await
+            }
         }
     }
 }
