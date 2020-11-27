@@ -734,17 +734,17 @@ pub enum MergeSource {
 }
 
 impl MergeSource {
-    fn bounds(&'_ self) -> Vec<&'_ Bounds> {
+    fn bounds(&'_ self) -> &'_ Bounds {
         match self {
-            Self::Table(table) => vec![table.bounds()],
-            Self::Merge(merged) => merged.bounds(),
+            Self::Table(table) => table.bounds(),
+            Self::Merge(merged) => &merged.bounds,
         }
     }
 
     fn into_reversed(self) -> MergeSource {
         match self {
             Self::Table(table_slice) => Self::Table(table_slice.into_reversed()),
-            Self::Merge(merged) => Self::Merge(merged.as_reversed()),
+            Self::Merge(merged) => Self::Merge(Arc::new(merged.as_reversed())),
         }
     }
 
@@ -807,25 +807,28 @@ impl fmt::Display for MergeSource {
 pub struct Merged {
     left: MergeSource,
     right: IndexSlice,
+    bounds: Bounds,
 }
 
 impl Merged {
-    pub fn new(left: MergeSource, right: IndexSlice) -> Merged {
+    pub fn new(left: MergeSource, right: IndexSlice) -> TCResult<Merged> {
         debug!("Merged::new({}, {})", &left, &right);
 
-        Merged { left, right }
-    }
-    fn as_reversed(&self) -> Arc<Self> {
-        Arc::new(Merged {
-            left: self.left.clone().into_reversed(),
-            right: self.right.clone().into_reversed(),
-        })
+        left.source()
+            .merge_bounds(vec![left.bounds().clone(), right.bounds().clone()])
+            .map(|bounds| Merged {
+                left,
+                right,
+                bounds,
+            })
     }
 
-    fn bounds(&'_ self) -> Vec<&'_ Bounds> {
-        let mut bounds = self.left.bounds();
-        bounds.push(self.right.bounds());
-        bounds
+    fn as_reversed(&self) -> Merged {
+        Merged {
+            left: self.left.clone().into_reversed(),
+            right: self.right.clone().into_reversed(),
+            bounds: self.bounds.clone(),
+        }
     }
 
     fn source(&'_ self) -> &'_ TableIndex {
@@ -887,18 +890,14 @@ impl TableInstance for Merged {
     }
 
     fn reversed(&self) -> TCResult<Table> {
-        Ok(Merged {
-            left: self.left.clone().into_reversed(),
-            right: self.right.clone().into_reversed(),
-        }
-        .into())
+        Ok(self.as_reversed().into())
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Table> {
-        let mut bounds_seq: Vec<Bounds> = self.bounds().into_iter().cloned().collect();
-        bounds_seq.push(bounds);
+        let bounds = self
+            .source()
+            .merge_bounds(vec![self.bounds.clone(), bounds])?;
 
-        let bounds = self.source().merge_bounds(bounds_seq)?;
         self.source().slice(bounds)
     }
 
@@ -927,10 +926,9 @@ impl TableInstance for Merged {
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
-        let mut bounds_seq: Vec<Bounds> = self.bounds().into_iter().cloned().collect();
-        bounds_seq.push(bounds.clone());
-
-        let bounds = self.source().merge_bounds(bounds_seq)?;
+        let bounds = self
+            .source()
+            .merge_bounds(vec![self.bounds.clone(), bounds.clone()])?;
         self.source().validate_bounds(&bounds)
     }
 

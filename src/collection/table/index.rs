@@ -846,7 +846,7 @@ impl TableInstance for TableIndex {
                         columns = &columns[i..];
 
                         let index_slice = index.index_slice(Bounds::default())?;
-                        let merged = Merged::new(merge_source, index_slice);
+                        let merged = Merged::new(merge_source, index_slice)?;
 
                         if columns.is_empty() {
                             return if reverse {
@@ -916,7 +916,7 @@ impl TableInstance for TableIndex {
                     debug!("primary key can slice {}", subset);
 
                     let index_slice = self.primary.index_slice(subset)?;
-                    let merged = Merged::new(merge_source, index_slice);
+                    let merged = Merged::new(merge_source, index_slice)?;
 
                     bounds = &bounds[i..];
                     if bounds.is_empty() {
@@ -929,7 +929,7 @@ impl TableInstance for TableIndex {
                         if index.validate_bounds(&subset).is_ok() {
                             debug!("index {} can slice {}", name, subset);
                             let index_slice = index.index_slice(subset)?;
-                            let merged = Merged::new(merge_source, index_slice);
+                            let merged = Merged::new(merge_source, index_slice)?;
 
                             bounds = &bounds[i..];
                             if bounds.is_empty() {
