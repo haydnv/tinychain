@@ -2,8 +2,8 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::stream::StreamExt;
-use futures::TryFutureExt;
+use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::{future, TryFutureExt};
 
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::*;
@@ -36,6 +36,23 @@ pub enum TensorBaseType {
     Sparse,
 }
 
+impl TensorBaseType {
+    async fn zeros(&self, txn: &Txn, dtype: NumberType, shape: Shape) -> TCResult<TensorBase> {
+        match self {
+            Self::Dense => {
+                BlockListFile::constant(txn, shape, dtype.zero())
+                    .map_ok(TensorBase::Dense)
+                    .await
+            }
+            Self::Sparse => {
+                SparseTable::create(txn, shape, dtype)
+                    .map_ok(TensorBase::Sparse)
+                    .await
+            }
+        }
+    }
+}
+
 impl Class for TensorBaseType {
     type Instance = TensorBase;
 }
@@ -65,21 +82,26 @@ impl CollectionClass for TensorBaseType {
     type Instance = TensorBase;
 
     async fn get(&self, txn: &Txn, schema: Value) -> TCResult<TensorBase> {
-        let (dtype, shape): (NumberType, Shape) = schema.try_cast_into(|v| {
-            error::bad_request("Tensor schema is (NumberType, Shape), not", v)
-        })?;
+        if schema.matches::<(NumberType, Shape)>() {
+            let (dtype, shape) = schema.opt_cast_into().unwrap();
+            self.zeros(txn, dtype, shape).await
+        } else if schema.matches::<(NumberType, Shape, Vec<(Vec<u64>, Number)>)>() {
+            let (dtype, shape, values): (NumberType, Shape, Vec<(Vec<u64>, Number)>) =
+                schema.opt_cast_into().unwrap();
+            let tensor = self.zeros(txn, dtype, shape).await?;
 
-        match self {
-            Self::Dense => {
-                BlockListFile::constant(txn, shape, dtype.zero())
-                    .map_ok(TensorBase::Dense)
-                    .await
-            }
-            Self::Sparse => {
-                SparseTable::create(txn, shape, dtype)
-                    .map_ok(TensorBase::Sparse)
-                    .await
-            }
+            let view = TensorView::from(tensor.clone());
+            stream::iter(values)
+                .then(|(coord, value)| view.write_value_at(txn.id().clone(), coord, value))
+                .try_fold((), |(), ()| future::ready(Ok(())))
+                .await?;
+
+            Ok(tensor)
+        } else {
+            Err(error::bad_request(
+                "Tensor schema is (NumberType, Shape), not",
+                schema,
+            ))
         }
     }
 }
