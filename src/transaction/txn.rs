@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::iter::FromIterator;
 use std::hash::Hash;
+use std::iter::FromIterator;
 use std::slice;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -254,7 +254,11 @@ impl Txn {
             }
 
             let current_state = graph.clone();
-            let mut pending = FuturesUnordered::from_iter(pending.into_iter().map(|(name, tc_ref)| self.resolve(request, &current_state, tc_ref).map(|r| (name, r))));
+            let mut pending =
+                FuturesUnordered::from_iter(pending.into_iter().map(|(name, tc_ref)| {
+                    self.resolve(request, &current_state, tc_ref)
+                        .map(|r| (name, r))
+                }));
             while let Some((name, result)) = pending.next().await {
                 if let Err(cause) = &result {
                     debug!("Error resolving {}: {}", name, cause);
