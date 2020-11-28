@@ -91,10 +91,45 @@ impl CollectionClass for TensorBaseType {
             let tensor = self.zeros(txn, dtype, shape).await?;
 
             let view = TensorView::from(tensor.clone());
-            stream::iter(values)
-                .then(|(coord, value)| view.write_value_at(txn.id().clone(), coord, value))
+            let zero = dtype.zero();
+            stream::iter(values.into_iter().filter(|(_, value)| value != &zero))
+                .map(|(coord, value)| Ok(view.write_value_at(txn.id().clone(), coord, value)))
+                .try_buffer_unordered(2usize)
                 .try_fold((), |(), ()| future::ready(Ok(())))
                 .await?;
+
+            Ok(tensor)
+        } else if schema.matches::<(NumberType, Shape, Value)>() {
+            let (dtype, shape, values): (NumberType, Shape, Value) =
+                schema.opt_cast_into().unwrap();
+
+            let values = flatten_ndarray(values)?;
+            if shape.size() != values.len() as u64 {
+                return Err(error::bad_request(
+                    format!(
+                        "Tensor with shape {} has {} values but found",
+                        shape,
+                        shape.size()
+                    ),
+                    values.len(),
+                ));
+            }
+
+            let bounds = Bounds::all(&shape);
+            let tensor = self.zeros(txn, dtype, shape).await?;
+
+            let view = TensorView::from(tensor.clone());
+            let zero = dtype.zero();
+            stream::iter(
+                bounds
+                    .affected()
+                    .zip(values)
+                    .filter(|(_, value)| value != &zero),
+            )
+            .map(|(coord, value)| Ok(view.write_value_at(txn.id().clone(), coord, value)))
+            .try_buffer_unordered(2usize)
+            .try_fold((), |(), ()| future::ready(Ok(())))
+            .await?;
 
             Ok(tensor)
         } else {
@@ -712,5 +747,23 @@ impl From<Tensor> for TensorView {
             Tensor::Base(base) => base.into(),
             Tensor::View(view) => view,
         }
+    }
+}
+
+fn flatten_ndarray(values: Value) -> TCResult<Vec<Number>> {
+    if values.matches::<Vec<Number>>() {
+        values.try_cast_into(|v| error::bad_request("Invalid ndarray", v))
+    } else if values.matches::<Vec<Value>>() {
+        let values: Vec<Value> = values.opt_cast_into().unwrap();
+        let mut ndarray = vec![];
+        for value in values.into_iter() {
+            ndarray.extend(flatten_ndarray(value)?);
+        }
+        Ok(ndarray)
+    } else {
+        Err(error::bad_request(
+            "Expected an n-dimensional array of numbers but found",
+            values,
+        ))
     }
 }
