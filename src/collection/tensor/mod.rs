@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
-use crate::class::{TCBoxTryFuture, TCResult};
-use crate::error;
+use crate::class::TCBoxTryFuture;
+use crate::error::{self, TCResult};
 use crate::scalar::value::number::*;
 use crate::transaction::{Txn, TxnId};
 
@@ -24,10 +24,11 @@ pub type TensorBaseType = class::TensorBaseType;
 pub type TensorView = class::TensorView;
 pub type TensorType = class::TensorType;
 
+#[async_trait]
 pub trait TensorBoolean: class::TensorInstance + Sized {
-    fn all(&self, txn: Txn) -> TCBoxTryFuture<bool>;
+    async fn all(&self, txn: Txn) -> TCResult<bool>;
 
-    fn any(&self, txn: Txn) -> TCBoxTryFuture<bool>;
+    async fn any(&self, txn: Txn) -> TCResult<bool>;
 
     fn and(&self, other: &Self) -> TCResult<Self>;
 
@@ -53,27 +54,22 @@ pub trait TensorCompare: class::TensorInstance + Sized {
     fn ne(&self, other: &Self) -> TCResult<Self>;
 }
 
+#[async_trait]
 pub trait TensorIO: class::TensorInstance + Sized {
-    fn mask<'a>(&'a self, txn: &'a Txn, other: Self) -> TCBoxTryFuture<'a, ()>;
+    async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()>;
 
-    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
+    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number>;
 
-    fn write<'a>(&'a self, txn: Txn, bounds: bounds::Bounds, value: Self)
-        -> TCBoxTryFuture<'a, ()>;
+    async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: Self) -> TCResult<()>;
 
-    fn write_value(
+    async fn write_value(
         &self,
         txn_id: TxnId,
         bounds: bounds::Bounds,
         value: Number,
-    ) -> TCBoxTryFuture<()>;
+    ) -> TCResult<()>;
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()>;
+    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
 }
 
 pub trait TensorMath: class::TensorInstance + Sized {
@@ -108,18 +104,19 @@ pub trait TensorTransform: class::TensorInstance + Sized {
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
 }
 
+#[async_trait]
 impl TensorBoolean for TensorView {
-    fn all(&self, txn: Txn) -> TCBoxTryFuture<bool> {
+    async fn all(&self, txn: Txn) -> TCResult<bool> {
         match self {
-            Self::Dense(dense) => dense.all(txn),
-            Self::Sparse(sparse) => sparse.all(txn),
+            Self::Dense(dense) => dense.all(txn).await,
+            Self::Sparse(sparse) => sparse.all(txn).await,
         }
     }
 
-    fn any(&'_ self, txn: Txn) -> TCBoxTryFuture<'_, bool> {
+    async fn any(&self, txn: Txn) -> TCResult<bool> {
         match self {
-            Self::Dense(dense) => dense.any(txn),
-            Self::Sparse(sparse) => sparse.any(txn),
+            Self::Dense(dense) => dense.any(txn).await,
+            Self::Sparse(sparse) => sparse.any(txn).await,
         }
     }
 
@@ -249,62 +246,63 @@ impl TensorCompare for TensorView {
     }
 }
 
+#[async_trait]
 impl TensorIO for TensorView {
-    fn mask<'a>(&'a self, txn: &'a Txn, other: Self) -> TCBoxTryFuture<'a, ()> {
+    async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()> {
         match (self, &other) {
-            (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()),
-            (Self::Sparse(l), Self::Sparse(r)) => l.mask(txn, r.clone()),
-            (Self::Sparse(l), Self::Dense(r)) => l.mask(txn, SparseTensor::from_dense(r.clone())),
-            (Self::Dense(l), Self::Sparse(r)) => l.mask(txn, DenseTensor::from_sparse(r.clone())),
+            (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()).await,
+            (Self::Sparse(l), Self::Sparse(r)) => l.mask(txn, r.clone()).await,
+            (Self::Sparse(l), Self::Dense(r)) => {
+                l.mask(txn, SparseTensor::from_dense(r.clone())).await
+            }
+            (Self::Dense(l), Self::Sparse(r)) => {
+                l.mask(txn, DenseTensor::from_sparse(r.clone())).await
+            }
         }
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
         match self {
-            Self::Dense(dense) => dense.read_value(txn, coord),
-            Self::Sparse(sparse) => sparse.read_value(txn, coord),
+            Self::Dense(dense) => dense.read_value(txn, coord).await,
+            Self::Sparse(sparse) => sparse.read_value(txn, coord).await,
         }
     }
 
-    fn write<'a>(
-        &'a self,
-        txn: Txn,
-        bounds: bounds::Bounds,
-        value: Self,
-    ) -> TCBoxTryFuture<'a, ()> {
+    async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: Self) -> TCResult<()> {
         match self {
             Self::Dense(this) => match value {
-                Self::Dense(that) => this.write(txn, bounds, that),
-                Self::Sparse(that) => this.write(txn, bounds, DenseTensor::from_sparse(that)),
+                Self::Dense(that) => this.write(txn, bounds, that).await,
+                Self::Sparse(that) => {
+                    this.write(txn, bounds, DenseTensor::from_sparse(that))
+                        .await
+                }
             },
             Self::Sparse(this) => match value {
-                Self::Dense(that) => this.write(txn, bounds, SparseTensor::from_dense(that)),
-                Self::Sparse(that) => this.write(txn, bounds, that),
+                Self::Dense(that) => {
+                    this.write(txn, bounds, SparseTensor::from_dense(that))
+                        .await
+                }
+                Self::Sparse(that) => this.write(txn, bounds, that).await,
             },
         }
     }
 
-    fn write_value(
+    async fn write_value(
         &self,
         txn_id: TxnId,
         bounds: bounds::Bounds,
         value: Number,
-    ) -> TCBoxTryFuture<()> {
+    ) -> TCResult<()> {
         match self {
-            Self::Dense(dense) => dense.write_value(txn_id, bounds, value),
-            Self::Sparse(sparse) => sparse.write_value(txn_id, bounds, value),
+            Self::Dense(dense) => dense.write_value(txn_id, bounds, value).await,
+            Self::Sparse(sparse) => sparse.write_value(txn_id, bounds, value).await,
         }
     }
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
         match self {
-            Self::Dense(dense) => dense.write_value_at(txn_id, coord, value),
-            Self::Sparse(sparse) => sparse.write_value_at(txn_id, coord, value),
+            Self::Dense(dense) => dense.write_value_at(txn_id, coord, value).await,
+            Self::Sparse(sparse) => sparse.write_value_at(txn_id, coord, value).await,
         }
     }
 }

@@ -1643,34 +1643,31 @@ impl TensorInstance for SparseTensor {
     }
 }
 
+#[async_trait]
 impl TensorBoolean for SparseTensor {
-    fn all(&self, txn: Txn) -> TCBoxTryFuture<bool> {
-        Box::pin(async move {
-            let mut coords = self
-                .accessor
-                .clone()
-                .filled(txn)
-                .await?
-                .map_ok(|(coord, _)| coord)
-                .zip(stream::iter(Bounds::all(self.shape()).affected()))
-                .map(|(r, expected)| r.map(|actual| (actual, expected)));
+    async fn all(&self, txn: Txn) -> TCResult<bool> {
+        let mut coords = self
+            .accessor
+            .clone()
+            .filled(txn)
+            .await?
+            .map_ok(|(coord, _)| coord)
+            .zip(stream::iter(Bounds::all(self.shape()).affected()))
+            .map(|(r, expected)| r.map(|actual| (actual, expected)));
 
-            while let Some(result) = coords.next().await {
-                let (actual, expected) = result?;
-                if actual != expected {
-                    return Ok(false);
-                }
+        while let Some(result) = coords.next().await {
+            let (actual, expected) = result?;
+            if actual != expected {
+                return Ok(false);
             }
+        }
 
-            Ok(true)
-        })
+        Ok(true)
     }
 
-    fn any(&'_ self, txn: Txn) -> TCBoxTryFuture<'_, bool> {
-        Box::pin(async move {
-            let mut filled = self.accessor.clone().filled(txn).await?;
-            Ok(filled.next().await.is_some())
-        })
+    async fn any(&self, txn: Txn) -> TCResult<bool> {
+        let mut filled = self.accessor.clone().filled(txn).await?;
+        Ok(filled.next().await.is_some())
     }
 
     fn and(&self, other: &Self) -> TCResult<Self> {
@@ -1721,65 +1718,50 @@ impl TensorCompare for SparseTensor {
     }
 }
 
+#[async_trait]
 impl TensorIO for SparseTensor {
-    fn mask<'a>(&'a self, txn: &'a Txn, other: Self) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            let zero = self.dtype().zero();
-            let txn_id = txn.id().clone();
-            other
-                .filled(txn.clone())
-                .await?
-                .map_ok(|(coord, _)| self.write_value_at(txn_id.clone(), coord, zero.clone()))
-                .try_buffer_unordered(2)
-                .try_fold((), |_, _| future::ready(Ok(())))
-                .await
-        })
+    async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()> {
+        let zero = self.dtype().zero();
+        let txn_id = txn.id().clone();
+        other
+            .filled(txn.clone())
+            .await?
+            .map_ok(|(coord, _)| self.write_value_at(txn_id.clone(), coord, zero.clone()))
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        self.accessor.read_value(txn, coord)
+    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        self.accessor.read_value(txn, coord).await
     }
 
-    fn write<'a>(&'a self, txn: Txn, bounds: Bounds, other: Self) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            let slice = self.slice(bounds)?;
-            let other = other
-                .broadcast(slice.shape().clone())?
-                .as_type(self.dtype())?;
+    async fn write(&self, txn: Txn, bounds: Bounds, other: Self) -> TCResult<()> {
+        let slice = self.slice(bounds)?;
+        let other = other
+            .broadcast(slice.shape().clone())?
+            .as_type(self.dtype())?;
 
-            let txn_id = txn.id().clone();
-            other
-                .filled(txn)
-                .await?
-                .map_ok(|(coord, value)| slice.write_value_at(txn_id.clone(), coord, value))
-                .try_buffer_unordered(2)
-                .try_fold((), |_, _| future::ready(Ok(())))
-                .await
-        })
+        let txn_id = txn.id().clone();
+        other
+            .filled(txn)
+            .await?
+            .map_ok(|(coord, value)| slice.write_value_at(txn_id.clone(), coord, value))
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
     }
 
-    fn write_value(
-        &'_ self,
-        txn_id: TxnId,
-        bounds: Bounds,
-        value: Number,
-    ) -> TCBoxTryFuture<'_, ()> {
-        Box::pin(async move {
-            stream::iter(bounds.affected())
-                .map(|coord| Ok(self.write_value_at(txn_id.clone(), coord, value.clone())))
-                .try_buffer_unordered(2)
-                .try_fold((), |_, _| future::ready(Ok(())))
-                .await
-        })
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+        stream::iter(bounds.affected())
+            .map(|coord| Ok(self.write_value_at(txn_id.clone(), coord, value.clone())))
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
     }
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        self.accessor.write_value(txn_id, coord, value)
+    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+        self.accessor.write_value(txn_id, coord, value).await
     }
 }
 

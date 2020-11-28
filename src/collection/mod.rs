@@ -187,8 +187,9 @@ impl CollectionInstance for CollectionView {
     ) -> TCResult<State> {
         match self {
             Self::BTree(btree) => btree.get(request, txn, path, selector).await,
+            Self::Null(null) => null.get(request, txn, path, selector).await,
             Self::Table(table) => table.get(request, txn, path, selector).await,
-            _ => Err(error::not_implemented("CollectionView::get")),
+            Self::Tensor(tensor) => tensor.get(request, txn, path, selector).await,
         }
     }
 

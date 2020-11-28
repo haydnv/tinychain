@@ -1597,31 +1597,28 @@ impl TensorInstance for DenseTensor {
     }
 }
 
+#[async_trait]
 impl TensorBoolean for DenseTensor {
-    fn all(&self, txn: Txn) -> TCBoxTryFuture<bool> {
-        Box::pin(async move {
-            let mut blocks = self.blocks.clone().block_stream(txn).await?;
-            while let Some(array) = blocks.next().await {
-                if !array?.all() {
-                    return Ok(false);
-                }
+    async fn all(&self, txn: Txn) -> TCResult<bool> {
+        let mut blocks = self.blocks.clone().block_stream(txn).await?;
+        while let Some(array) = blocks.next().await {
+            if !array?.all() {
+                return Ok(false);
             }
+        }
 
-            Ok(true)
-        })
+        Ok(true)
     }
 
-    fn any(&'_ self, txn: Txn) -> TCBoxTryFuture<'_, bool> {
-        Box::pin(async move {
-            let mut blocks = self.blocks.clone().block_stream(txn).await?;
-            while let Some(array) = blocks.next().await {
-                if array?.any() {
-                    return Ok(true);
-                }
+    async fn any(&self, txn: Txn) -> TCResult<bool> {
+        let mut blocks = self.blocks.clone().block_stream(txn).await?;
+        while let Some(array) = blocks.next().await {
+            if array?.any() {
+                return Ok(true);
             }
+        }
 
-            Ok(false)
-        })
+        Ok(false)
     }
 
     fn and(&self, other: &Self) -> TCResult<Self> {
@@ -1743,56 +1740,45 @@ impl TensorMath for DenseTensor {
     }
 }
 
+#[async_trait]
 impl TensorIO for DenseTensor {
-    fn mask<'a>(&'a self, _txn: &'a Txn, _other: Self) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move { Err(error::not_implemented("DenseTensor::mask")) })
+    async fn mask(&self, _txn: &Txn, _other: Self) -> TCResult<()> {
+        Err(error::not_implemented("DenseTensor::mask"))
     }
 
-    fn read_value<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<Number> {
-        self.blocks.read_value_at(txn, coord)
+    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        self.blocks.read_value_at(txn, coord).await
     }
 
-    fn write<'a>(&'a self, txn: Txn, bounds: Bounds, other: Self) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            let slice = self.slice(bounds)?;
-            let other = other
-                .broadcast(slice.shape().clone())?
-                .as_type(self.dtype())?;
+    async fn write(&self, txn: Txn, bounds: Bounds, other: Self) -> TCResult<()> {
+        let slice = self.slice(bounds)?;
+        let other = other
+            .broadcast(slice.shape().clone())?
+            .as_type(self.dtype())?;
 
-            let txn_id = txn.id().clone();
-            let txn_id_clone = txn_id.clone();
-            stream::iter(Bounds::all(slice.shape()).affected())
-                .map(move |coord| {
-                    Ok(other
-                        .clone()
-                        .read_value_owned(txn.clone(), coord.to_vec())
-                        .map_ok(|value| (coord, value)))
-                })
-                .try_buffer_unordered(2)
-                .and_then(|(coord, value)| slice.write_value_at(txn_id_clone.clone(), coord, value))
-                .try_fold((), |_, _| future::ready(Ok(())))
-                .await?;
+        let txn_id = txn.id().clone();
+        let txn_id_clone = txn_id.clone();
+        stream::iter(Bounds::all(slice.shape()).affected())
+            .map(move |coord| {
+                Ok(other
+                    .clone()
+                    .read_value_owned(txn.clone(), coord.to_vec())
+                    .map_ok(|value| (coord, value)))
+            })
+            .try_buffer_unordered(2)
+            .and_then(|(coord, value)| slice.write_value_at(txn_id_clone.clone(), coord, value))
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
 
-            Ok(())
-        })
+        Ok(())
     }
 
-    fn write_value(
-        &'_ self,
-        txn_id: TxnId,
-        bounds: Bounds,
-        value: Number,
-    ) -> TCBoxTryFuture<'_, ()> {
-        self.blocks.clone().write_value(txn_id, bounds, value)
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+        self.blocks.clone().write_value(txn_id, bounds, value).await
     }
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        self.blocks.write_value_at(txn_id, coord, value)
+    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+        self.blocks.write_value_at(txn_id, coord, value).await
     }
 }
 
