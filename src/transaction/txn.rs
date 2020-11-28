@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::iter::FromIterator;
 use std::hash::Hash;
 use std::slice;
 use std::str::FromStr;
@@ -208,9 +209,8 @@ impl Txn {
         let capture =
             capture.ok_or_else(|| error::unsupported("Cannot execute empty operation"))?;
 
-        let mut pending = FuturesUnordered::new();
-
         while !is_resolved(dereference_state(&graph, &capture)?) {
+            let mut pending = vec![];
             let mut visited = HashSet::new();
             let mut unvisited = Vec::with_capacity(graph.len());
             unvisited.push(capture.clone());
@@ -241,10 +241,7 @@ impl Txn {
                     if ready {
                         if let Scalar::Ref(tc_ref) = scalar {
                             let tc_ref = (&**tc_ref).clone();
-                            pending.push(
-                                self.resolve(request, graph.clone(), tc_ref)
-                                    .map(|r| (name, r)),
-                            );
+                            pending.push((name, tc_ref));
                         } else if let Scalar::Object(object) = scalar {
                             let object = dereference_object(&graph, object)?;
                             graph.insert(name, Scalar::Object(object).into());
@@ -256,6 +253,8 @@ impl Txn {
                 }
             }
 
+            let current_state = graph.clone();
+            let mut pending = FuturesUnordered::from_iter(pending.into_iter().map(|(name, tc_ref)| self.resolve(request, &current_state, tc_ref).map(|r| (name, r))));
             while let Some((name, result)) = pending.next().await {
                 if let Err(cause) = &result {
                     debug!("Error resolving {}: {}", name, cause);
@@ -331,7 +330,7 @@ impl Txn {
     pub async fn resolve(
         &self,
         request: &Request,
-        provided: HashMap<Id, State>,
+        provided: &HashMap<Id, State>,
         provider: TCRef,
     ) -> TCResult<State> {
         validate_id(request, &self.inner.id)?;
@@ -391,7 +390,7 @@ impl Txn {
     fn resolve_flow<'a>(
         &'a self,
         request: &'a Request,
-        provided: HashMap<Id, State>,
+        provided: &'a HashMap<Id, State>,
         control: FlowControl,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
@@ -399,7 +398,8 @@ impl Txn {
                 FlowControl::After((when, then)) => {
                     let when = when
                         .into_iter()
-                        .map(|tc_ref| self.resolve(request, provided.clone(), tc_ref));
+                        .map(|tc_ref| self.resolve(request, provided, tc_ref));
+
                     try_join_all(when).await?;
                     Ok(State::Scalar(Scalar::Ref(Box::new(then))))
                 }
@@ -426,7 +426,7 @@ impl Txn {
     async fn resolve_get(
         &self,
         request: &Request,
-        provided: HashMap<Id, State>,
+        provided: &HashMap<Id, State>,
         subject: IdRef,
         path: &[PathSegment],
         key: Key,
@@ -470,7 +470,7 @@ impl Txn {
     async fn resolve_put(
         &self,
         request: &Request,
-        provided: HashMap<Id, State>,
+        provided: &HashMap<Id, State>,
         subject: IdRef,
         path: &[PathSegment],
         key: Key,
@@ -508,7 +508,7 @@ impl Txn {
     async fn resolve_post(
         &self,
         request: &Request,
-        provided: HashMap<Id, State>,
+        provided: &HashMap<Id, State>,
         subject: IdRef,
         path: &[PathSegment],
         params: Object,

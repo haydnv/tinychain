@@ -28,7 +28,7 @@ impl ObjectInstance {
     ) -> TCResult<ObjectInstance> {
         let ctr = OpRef::Get((class.extends(), Key::Value(schema)));
         let parent = txn
-            .resolve(request, HashMap::new(), ctr.into())
+            .resolve(request, &HashMap::new(), ctr.into())
             .map_ok(Box::new)
             .await?;
 
