@@ -1240,6 +1240,21 @@ pub struct SparseTable {
 }
 
 impl SparseTable {
+    pub async fn constant(txn: &Txn, shape: Shape, value: Number) -> TCResult<SparseTable> {
+        let bounds = Bounds::all(&shape);
+        let table = Self::create(txn, shape, value.class()).await?;
+
+        if value != value.class().zero() {
+            stream::iter(bounds.affected())
+                .map(|coord| Ok(table.write_value(txn.id().clone(), coord, value.clone())))
+                .try_buffer_unordered(2usize)
+                .try_fold((), |(), ()| future::ready(Ok(())))
+                .await?;
+        }
+
+        Ok(table)
+    }
+
     pub async fn create(txn: &Txn, shape: Shape, dtype: NumberType) -> TCResult<SparseTable> {
         let table = Self::create_table(txn, shape.len(), dtype).await?;
 

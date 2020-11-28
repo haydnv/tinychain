@@ -37,6 +37,21 @@ pub enum TensorBaseType {
 }
 
 impl TensorBaseType {
+    async fn constant(&self, txn: &Txn, shape: Shape, number: Number) -> TCResult<TensorBase> {
+        match self {
+            Self::Dense => {
+                BlockListFile::constant(txn, shape, number)
+                    .map_ok(TensorBase::Dense)
+                    .await
+            }
+            Self::Sparse => {
+                SparseTable::constant(txn, shape, number)
+                    .map_ok(TensorBase::Sparse)
+                    .await
+            }
+        }
+    }
+
     async fn zeros(&self, txn: &Txn, dtype: NumberType, shape: Shape) -> TCResult<TensorBase> {
         match self {
             Self::Dense => {
@@ -85,6 +100,11 @@ impl CollectionClass for TensorBaseType {
         if schema.matches::<(NumberType, Shape)>() {
             let (dtype, shape) = schema.opt_cast_into().unwrap();
             self.zeros(txn, dtype, shape).await
+        } else if schema.matches::<(NumberType, Shape, Number)>() {
+            let (dtype, shape, number): (NumberType, Shape, Number) =
+                schema.opt_cast_into().unwrap();
+            let number = dtype.try_cast(number).unwrap();
+            self.constant(txn, shape, number).await
         } else if schema.matches::<(NumberType, Shape, Vec<(Vec<u64>, Number)>)>() {
             let (dtype, shape, values): (NumberType, Shape, Vec<(Vec<u64>, Number)>) =
                 schema.opt_cast_into().unwrap();
