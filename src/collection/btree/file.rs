@@ -237,7 +237,7 @@ impl BTreeFile {
             let mut selected: Selection = FuturesOrdered::new();
             for i in l..r {
                 let this = self.clone();
-                let txn_id = txn_id.clone();
+                let txn_id = txn_id;
                 let child_id = node.children[i].clone();
                 let range = range.clone();
 
@@ -245,7 +245,7 @@ impl BTreeFile {
                     let node = this
                         .file
                         .clone()
-                        .get_block_owned(txn_id.clone(), child_id)
+                        .get_block_owned(txn_id, child_id)
                         .await
                         .unwrap();
 
@@ -266,7 +266,7 @@ impl BTreeFile {
                 let node = self
                     .file
                     .clone()
-                    .get_block_owned(txn_id.clone(), last_child_id)
+                    .get_block_owned(txn_id, last_child_id)
                     .await
                     .unwrap();
 
@@ -301,7 +301,7 @@ impl BTreeFile {
             let mut selected: Selection = FuturesOrdered::new();
 
             let this = self.clone();
-            let txn_id_clone = txn_id.clone();
+            let txn_id_clone = txn_id;
             let range_clone = range.clone();
             let last_child = node.children[r].clone();
             let selection = Box::pin(async move {
@@ -319,14 +319,14 @@ impl BTreeFile {
             let children = node.children.to_vec();
             for i in (l..r).rev() {
                 let this = self.clone();
-                let txn_id = txn_id.clone();
+                let txn_id = txn_id;
                 let child_id = children[i].clone();
                 let range = range.clone();
                 let selection = Box::pin(async move {
                     let node = this
                         .file
                         .clone()
-                        .get_block_owned(txn_id.clone(), child_id)
+                        .get_block_owned(txn_id, child_id)
                         .await
                         .unwrap();
                     this._slice_reverse(txn_id, node, range)
@@ -422,7 +422,7 @@ impl BTreeFile {
                 let mut child = self
                     .file
                     .clone()
-                    .get_block_owned(txn_id.clone(), node.children[i].clone())
+                    .get_block_owned(*txn_id, node.children[i].clone())
                     .await?;
 
                 if child.keys.len() == (2 * self.order) - 1 {
@@ -444,7 +444,7 @@ impl BTreeFile {
                             child = self
                                 .file
                                 .clone()
-                                .get_block_owned(txn_id.clone(), node.children[i + 1].clone())
+                                .get_block_owned(*txn_id, node.children[i + 1].clone())
                                 .await?;
                         }
                     }
@@ -492,7 +492,7 @@ impl BTreeFile {
 
         self.file
             .clone()
-            .create_block(txn_id.clone(), new_node_id, new_node)
+            .create_block(*txn_id, new_node_id, new_node)
             .await?;
 
         node.downgrade(&txn_id).await
@@ -567,7 +567,7 @@ impl BTreeFile {
             if node.leaf {
                 assert!(node.children.is_empty());
             } else {
-                assert!(node.children.len() == node.keys.len() + 1);
+                assert_eq!(node.children.len(), node.keys.len() + 1);
                 assert!(node.children.len() >= div_ceil(order, 2));
 
                 for i in 0..node.keys.len() {
@@ -577,14 +577,14 @@ impl BTreeFile {
 
                     assert!(!child_at_i.keys.is_empty());
                     assert!(!child_after_i.keys.is_empty());
-                    assert!(
+                    assert_eq!(
                         self.collator
-                            .compare(child_at_i.keys.last().unwrap(), &node.keys[i])
-                            == Ordering::Less
+                            .compare(child_at_i.keys.last().unwrap(), &node.keys[i]),
+                        Ordering::Less
                     );
-                    assert!(
-                        self.collator.compare(&child_after_i.keys[0], &node.keys[i])
-                            == Ordering::Greater
+                    assert_eq!(
+                        self.collator.compare(&child_after_i.keys[0], &node.keys[i]),
+                        Ordering::Greater
                     );
                 }
             }
@@ -610,7 +610,7 @@ impl BTreeInstance for BTreeFile {
         let root = self
             .file
             .clone()
-            .get_block_owned(txn_id.clone(), (*root_id).clone())
+            .get_block_owned(*txn_id, (*root_id).clone())
             .await?;
 
         debug!(
@@ -630,7 +630,7 @@ impl BTreeInstance for BTreeFile {
             let new_root = self
                 .file
                 .clone()
-                .create_block(txn_id.clone(), (*root_id).clone(), new_root)
+                .create_block(*txn_id, (*root_id).clone(), new_root)
                 .await?
                 .upgrade()
                 .await?;
@@ -695,7 +695,7 @@ impl BTreeInstance for BTreeFile {
         let root = self
             .file
             .clone()
-            .get_block_owned(txn_id.clone(), (*root_id).clone())
+            .get_block_owned(txn_id, (*root_id).clone())
             .await?;
 
         let slice = if reverse {

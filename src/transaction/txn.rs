@@ -28,7 +28,7 @@ use super::Transact;
 
 const INVALID_ID: &str = "Invalid transaction ID";
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct TxnId {
     timestamp: u128, // nanoseconds since Unix epoch
     nonce: u16,
@@ -129,7 +129,7 @@ impl Txn {
     ) -> TCResult<Txn> {
         let context = id.to_path();
         let dir = workspace
-            .create_dir(id.clone(), slice::from_ref(&context))
+            .create_dir(id, slice::from_ref(&context))
             .await?;
 
         debug!("new Txn: {}", id);
@@ -153,7 +153,7 @@ impl Txn {
     {
         self.inner
             .dir
-            .create_file(self.inner.id.clone(), self.inner.context.clone())
+            .create_file(self.inner.id, self.inner.context.clone())
             .await
     }
 
@@ -165,7 +165,7 @@ impl Txn {
             .await?;
 
         let subcontext = Arc::new(Inner {
-            id: self.inner.id.clone(),
+            id: self.inner.id,
             workspace: self.inner.dir.clone(),
             dir,
             context: subcontext,

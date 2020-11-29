@@ -397,7 +397,7 @@ impl TableInstance for Aggregate {
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let first = self.stream_inner(txn_id.clone()).await?.next().await;
+        let first = self.stream_inner(txn_id).await?.next().await;
         let first = if let Some(first) = first {
             first
         } else {
@@ -405,8 +405,7 @@ impl TableInstance for Aggregate {
             return Ok(stream);
         };
 
-        let left =
-            stream::once(future::ready(first)).chain(self.stream_inner(txn_id.clone()).await?);
+        let left = stream::once(future::ready(first)).chain(self.stream_inner(txn_id).await?);
         let right = self.stream_inner(txn_id).await?;
         let aggregate = left.zip(right).filter_map(|(l, r)| {
             if l == r {
@@ -555,7 +554,7 @@ impl TableInstance for IndexSlice {
         debug!("IndexSlice::stream");
 
         self.source
-            .stream(txn_id.clone(), self.range.clone(), self.reverse)
+            .stream(txn_id, self.range.clone(), self.reverse)
             .await
     }
 
@@ -652,7 +651,7 @@ impl TableInstance for Limited {
         let source = self.source.clone();
         let schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
-        self.stream(txn_id.clone())
+        self.stream(txn_id)
             .await?
             .map(|row| schema.row_from_values(row))
             .map_ok(|row| source.delete_row(&txn_id, row))
@@ -696,10 +695,10 @@ impl TableInstance for Limited {
         let schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
         let txn_id = txn.id().clone();
 
-        self.stream(txn_id.clone())
+        self.stream(txn_id)
             .await?
             .map(|row| schema.row_from_values(row))
-            .map_ok(|row| source.update_row(txn_id.clone(), row, value.clone()))
+            .map_ok(|row| source.update_row(txn_id, row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
@@ -852,7 +851,7 @@ impl TableInstance for Merged {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
         self.clone()
-            .stream(txn_id.clone())
+            .stream(txn_id)
             .await?
             .map(|row| schema.row_from_values(row))
             .map_ok(|row| self.delete_row(&txn_id, row))
@@ -906,12 +905,12 @@ impl TableInstance for Merged {
         let key_names: Vec<Id> = key_columns.iter().map(|c| c.name()).cloned().collect();
         let left = self.left.clone();
         let left_clone = self.left.clone();
-        let txn_id_clone = txn_id.clone();
+        let txn_id_clone = txn_id;
 
         let rows = self
             .right
             .select(key_names)?
-            .stream(txn_id.clone())
+            .stream(txn_id)
             .await?
             .map(move |key| Bounds::from_key(key, &key_columns))
             .filter(move |bounds| future::ready(left.validate_bounds(bounds).is_ok()))
@@ -1201,7 +1200,7 @@ impl TableInstance for TableSlice {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
         self.clone()
-            .stream(txn_id.clone())
+            .stream(txn_id)
             .await?
             .map(|row| schema.row_from_values(row))
             .map_ok(|row| self.delete_row(&txn_id, row))
@@ -1267,10 +1266,10 @@ impl TableInstance for TableSlice {
         let txn_id = txn.id().clone();
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
         self.clone()
-            .stream(txn_id.clone())
+            .stream(txn_id)
             .await?
             .map(|row| schema.row_from_values(row))
-            .map_ok(|row| self.update_row(txn_id.clone(), row, value.clone()))
+            .map_ok(|row| self.update_row(txn_id, row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await

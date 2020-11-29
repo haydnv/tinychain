@@ -65,7 +65,7 @@ impl<T: Mutate> TxnLockReadGuard<T> {
 
     pub fn upgrade(self) -> TxnLockWriteFuture<T> {
         TxnLockWriteFuture {
-            txn_id: self.txn_id.clone(),
+            txn_id: self.txn_id,
             lock: self.lock.clone(),
         }
     }
@@ -253,15 +253,15 @@ impl<T: Mutate> TxnLock<T> {
                 );
                 let value_at_txn_id =
                     UnsafeCell::new(unsafe { (&*lock.value.get()).diverge(txn_id) });
-                lock.value_at.insert(txn_id.clone(), value_at_txn_id);
+                lock.value_at.insert(*txn_id, value_at_txn_id);
             }
 
-            *lock.state.readers.entry(txn_id.clone()).or_insert(0) += 1;
+            *lock.state.readers.entry(*txn_id).or_insert(0) += 1;
 
             debug!("got read lock on {}", self.name);
 
             Ok(Some(TxnLockReadGuard {
-                txn_id: txn_id.clone(),
+                txn_id: *txn_id,
                 lock: self.clone(),
             }))
         }
@@ -274,7 +274,7 @@ impl<T: Mutate> TxnLock<T> {
         }
     }
 
-    pub fn try_write<'a>(&self, txn_id: &'a TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
+    pub fn try_write(&self, txn_id: &TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
         debug!("TxnLock::try_write {} at {}", &self.name, txn_id);
 
         let lock = &mut self.inner.lock().unwrap();
@@ -307,14 +307,14 @@ impl<T: Mutate> TxnLock<T> {
             _ => {
                 debug!("reserving write lock for {} at {}", &self.name, txn_id);
                 // Otherwise, copy the value to be mutated in this transaction.
-                lock.state.reserved = Some(txn_id.clone());
+                lock.state.reserved = Some(*txn_id);
                 if !lock.value_at.contains_key(txn_id) {
                     let mutation = UnsafeCell::new(unsafe { (&*lock.value.get()).diverge(txn_id) });
-                    lock.value_at.insert(txn_id.clone(), mutation);
+                    lock.value_at.insert(*txn_id, mutation);
                 }
 
                 Ok(Some(TxnLockWriteGuard {
-                    txn_id: txn_id.clone(),
+                    txn_id: *txn_id,
                     lock: self.clone(),
                 }))
             }
@@ -347,7 +347,7 @@ impl<T: Mutate> Transact for TxnLock<T> {
             }
 
             debug!("got inner lock for {}: {}", &self.name, txn_id);
-            lock.state.last_commit = Some(txn_id.clone());
+            lock.state.last_commit = Some(*txn_id);
             debug!("freed write lock reservation {} at {}", &self.name, txn_id);
 
             debug!("updating value of {}", &self.name);

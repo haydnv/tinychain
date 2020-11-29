@@ -81,7 +81,7 @@ impl<T: BlockData> File<T> {
             return Err(error::bad_request("This name is reserved", block_id));
         }
 
-        let mut listing = self.listing.write(txn_id.clone()).await?;
+        let mut listing = self.listing.write(txn_id).await?;
         if listing.contains(&block_id) {
             return Err(error::bad_request(
                 "There is already a block called",
@@ -167,13 +167,7 @@ impl<T: BlockData> Transact for File<T> {
 
         self.listing.commit(txn_id).await;
 
-        let mutated: Vec<BlockId> = self
-            .mutated
-            .write(txn_id.clone())
-            .await
-            .unwrap()
-            .drain()
-            .collect();
+        let mutated: Vec<BlockId> = self.mutated.write(*txn_id).await.unwrap().drain().collect();
         self.mutated.commit(txn_id).await;
 
         let cache = self.cache.read().await;

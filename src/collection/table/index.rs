@@ -731,7 +731,7 @@ impl TableIndex {
     }
 
     pub async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
-        if self.get(txn_id.clone(), key.to_vec()).await?.is_some() {
+        if self.get(txn_id, key.to_vec()).await?.is_some() {
             let key: Vec<String> = key.iter().map(|v| v.to_string()).collect();
             Err(error::bad_request(
                 "Tried to insert but this key already exists",
@@ -748,7 +748,7 @@ impl TableIndex {
         key: Vec<Value>,
         values: Vec<Value>,
     ) -> TCResult<()> {
-        if let Some(row) = self.get(txn_id.clone(), key.to_vec()).await? {
+        if let Some(row) = self.get(*txn_id, key.to_vec()).await? {
             let row = self.primary.schema.row_from_values(row)?;
             self.delete_row(txn_id, row.clone()).await?;
         }
@@ -784,9 +784,9 @@ impl TableInstance for TableIndex {
 
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
-        deletes.push(self.primary.delete(txn_id.clone()));
+        deletes.push(self.primary.delete(txn_id));
         for index in self.auxiliary.values() {
-            deletes.push(index.clone().delete(txn_id.clone()));
+            deletes.push(index.clone().delete(txn_id));
         }
 
         try_join_all(deletes).await?;
@@ -1070,10 +1070,10 @@ impl TableInstance for TableIndex {
 
         let txn_id = txn.id();
         index
-            .stream(txn_id.clone())
+            .stream(*txn_id)
             .await?
             .map(|values| schema.row_from_values(values))
-            .map_ok(|row| self.update_row(txn_id.clone(), row, update.clone()))
+            .map_ok(|row| self.update_row(*txn_id, row, update.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
@@ -1083,7 +1083,7 @@ impl TableInstance for TableIndex {
         let mut updated_row = row.clone();
         updated_row.extend(update);
         let (key, values) = self.primary.schema.key_values_from_row(updated_row)?;
-        let txn_id_clone = txn_id.clone();
+        let txn_id_clone = txn_id;
         self.delete_row(&txn_id, row)
             .and_then(|()| self.insert(txn_id_clone, key, values))
             .await

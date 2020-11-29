@@ -219,7 +219,7 @@ impl Dir {
                     TCPath::from(path),
                 ))
             } else if path.len() == 1 {
-                let mut contents = self.contents.write(txn_id.clone()).await?;
+                let mut contents = self.contents.write(txn_id).await?;
                 match contents.entries.entry(path[0].clone()) {
                     Entry::Vacant(entry) => {
                         let fs_dir = self.cache.write().await.create_dir(path[0].clone())?;
@@ -249,7 +249,7 @@ impl Dir {
     where
         Arc<File<T>>: Into<DirEntry>,
     {
-        let mut contents = self.contents.write(txn_id.clone()).await?;
+        let mut contents = self.contents.write(txn_id).await?;
         match contents.entries.entry(name) {
             Entry::Vacant(entry) => {
                 let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
@@ -273,7 +273,7 @@ impl Dir {
             if let Some(dir) = self.get_dir(txn_id, path).await? {
                 Ok(dir)
             } else {
-                self.create_dir(txn_id.clone(), path).await
+                self.create_dir(*txn_id, path).await
             }
         })
     }

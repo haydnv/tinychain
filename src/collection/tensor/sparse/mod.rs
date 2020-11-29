@@ -40,7 +40,7 @@ trait SparseAccessor: TensorInstance + Transact + 'static {
             let txn_id = txn.id().clone();
             self.filled(txn)
                 .await?
-                .map_ok(|(coord, value)| accessor.write_value(txn_id.clone(), coord, value))
+                .map_ok(|(coord, value)| accessor.write_value(txn_id, coord, value))
                 .try_buffer_unordered(2)
                 .try_fold((), |_, _| future::ready(Ok(())))
                 .await?;
@@ -1631,7 +1631,7 @@ impl SparseTensor {
         accessor
             .filled(txn)
             .await?
-            .map_ok(|(coord, value)| condensed.write_value_at(txn_id.clone(), coord, value))
+            .map_ok(|(coord, value)| condensed.write_value_at(txn_id, coord, value))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
@@ -1741,7 +1741,7 @@ impl TensorIO for SparseTensor {
         other
             .filled(txn.clone())
             .await?
-            .map_ok(|(coord, _)| self.write_value_at(txn_id.clone(), coord, zero.clone()))
+            .map_ok(|(coord, _)| self.write_value_at(txn_id, coord, zero.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
@@ -1761,7 +1761,7 @@ impl TensorIO for SparseTensor {
         other
             .filled(txn)
             .await?
-            .map_ok(|(coord, value)| slice.write_value_at(txn_id.clone(), coord, value))
+            .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
@@ -1769,7 +1769,7 @@ impl TensorIO for SparseTensor {
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
         stream::iter(bounds.affected())
-            .map(|coord| Ok(self.write_value_at(txn_id.clone(), coord, value.clone())))
+            .map(|coord| Ok(self.write_value_at(txn_id, coord, value.clone())))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await

@@ -492,7 +492,7 @@ impl BlockList for BlockListFile {
 
                     let this = self.clone();
                     let value = value.clone();
-                    let txn_id = txn_id.clone();
+                    let txn_id = txn_id;
 
                     Ok(async move {
                         let mut start = 0.0f64;
@@ -1098,7 +1098,7 @@ impl BlockList for BlockListReshape {
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             stream::iter(bounds.affected())
-                .map(|coord| Ok(self.write_value_at(txn_id.clone(), coord, value.clone())))
+                .map(|coord| Ok(self.write_value_at(txn_id, coord, value.clone())))
                 .try_buffer_unordered(2)
                 .try_fold((), |_, _| future::ready(Ok(())))
                 .await
@@ -1757,7 +1757,7 @@ impl TensorIO for DenseTensor {
             .as_type(self.dtype())?;
 
         let txn_id = txn.id().clone();
-        let txn_id_clone = txn_id.clone();
+        let txn_id_clone = txn_id;
         stream::iter(Bounds::all(slice.shape()).affected())
             .map(move |coord| {
                 Ok(other
