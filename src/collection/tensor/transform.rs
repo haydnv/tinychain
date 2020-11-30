@@ -442,7 +442,7 @@ impl Slice {
     pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
         let mut source_coord = Vec::with_capacity(self.source_shape.len());
         let mut source_axis = 0;
-        for axis in 0..self.shape.len() {
+        for axis in 0..self.source_shape.len() {
             if let Some(elided) = self.elided.get(&axis) {
                 source_coord.push(*elided);
             } else {

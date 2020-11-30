@@ -107,10 +107,10 @@ impl fmt::Display for AxisBounds {
             In(range) => write!(f, "[{}, {})", range.start, range.end),
             Of(indices) => write!(
                 f,
-                "({})",
+                "{{{}}}",
                 indices
                     .iter()
-                    .map(|i| format!("{}", i))
+                    .map(|i| i.to_string())
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
