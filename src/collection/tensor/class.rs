@@ -398,20 +398,30 @@ impl CollectionInstance for TensorView {
         path: &[PathSegment],
         selector: Value,
     ) -> TCResult<State> {
-        if !path.is_empty() {
-            return Err(error::path_not_found(path));
-        }
+        if path.is_empty() {
+            let bounds: Bounds = selector
+                .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
 
-        let bounds: Bounds = selector
-            .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
-
-        if bounds.is_coord() {
-            let coord: Vec<u64> = bounds.try_into()?;
-            let value = self.read_value(&txn, &coord).await?;
-            Ok(State::Scalar(Scalar::Value(Value::Number(value))))
+            if bounds.is_coord() {
+                let coord: Vec<u64> = bounds.try_into()?;
+                let value = self.read_value(&txn, &coord).await?;
+                Ok(State::Scalar(Scalar::Value(Value::Number(value))))
+            } else {
+                let slice = self.slice(bounds)?;
+                Ok(State::Collection(slice.into()))
+            }
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "as_type" => {
+                    let dtype: NumberType =
+                        selector.try_cast_into(|v| error::bad_request("Invalid NumberType", v))?;
+                    let cast = self.as_type(dtype)?;
+                    Ok(State::Collection(cast.into()))
+                }
+                other => Err(error::not_found(other)),
+            }
         } else {
-            let slice = self.slice(bounds)?;
-            Ok(State::Collection(slice.into()))
+            Err(error::path_not_found(path))
         }
     }
 

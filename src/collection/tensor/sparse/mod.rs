@@ -1852,10 +1852,8 @@ impl TensorTransform for SparseTensor {
             return Ok(self.clone());
         }
 
-        let accessor = Arc::new(SparseCast {
-            source: self.accessor.clone(),
-            dtype: self.dtype(),
-        });
+        let source = self.accessor.clone();
+        let accessor = Arc::new(SparseCast { source, dtype });
 
         Ok(SparseTensor { accessor })
     }
