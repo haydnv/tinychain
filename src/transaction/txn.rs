@@ -107,7 +107,6 @@ impl fmt::Display for TxnId {
 
 struct Inner {
     id: TxnId,
-    workspace: Arc<Dir>,
     dir: Arc<Dir>,
     context: Id,
     gateway: Arc<Gateway>,
@@ -123,20 +122,16 @@ pub struct Txn {
 impl Txn {
     pub async fn new(
         gateway: Arc<Gateway>,
-        workspace: Arc<Dir>,
+        dir: Arc<Dir>,
         id: TxnId,
         txn_server: mpsc::UnboundedSender<TxnId>,
     ) -> TCResult<Txn> {
         let context = id.to_path();
-        let dir = workspace
-            .create_dir(id, slice::from_ref(&context))
-            .await?;
 
         debug!("new Txn: {}", id);
 
         let inner = Arc::new(Inner {
             id,
-            workspace,
             dir,
             context,
             gateway,
@@ -166,7 +161,6 @@ impl Txn {
 
         let subcontext = Arc::new(Inner {
             id: self.inner.id,
-            workspace: self.inner.dir.clone(),
             dir,
             context: subcontext,
             gateway: self.inner.gateway.clone(),
@@ -254,11 +248,17 @@ impl Txn {
             }
 
             let current_state = graph.clone();
-            let mut pending =
-                FuturesUnordered::from_iter(pending.into_iter().map(|(name, tc_ref)| {
-                    self.resolve(request, &current_state, tc_ref)
-                        .map(|r| (name, r))
-                }));
+            let pending = pending.into_iter().map(|(name, tc_ref)| async {
+                match self.subcontext(name.clone()).await {
+                    Ok(cxt) => {
+                        cxt.resolve(request, &current_state, tc_ref)
+                            .map(|r| (name, r))
+                            .await
+                    }
+                    Err(cause) => (name, Err(cause)),
+                }
+            });
+            let mut pending = FuturesUnordered::from_iter(pending);
             while let Some((name, result)) = pending.next().await {
                 if let Err(cause) = &result {
                     debug!("Error resolving {}: {}", name, cause);
@@ -310,12 +310,6 @@ impl Txn {
     pub async fn finalize(&self) {
         debug!("finalize!");
 
-        self.inner
-            .workspace
-            .delete(self.id().clone(), self.id().to_path())
-            .await
-            .unwrap();
-
         future::join_all(
             self.inner
                 .mutated
@@ -327,8 +321,6 @@ impl Txn {
                 }),
         )
         .await;
-
-        self.inner.workspace.finalize(self.id()).await;
     }
 
     pub async fn resolve(
