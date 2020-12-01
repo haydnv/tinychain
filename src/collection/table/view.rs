@@ -1232,6 +1232,7 @@ impl TableInstance for TableSlice {
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+        let bounds = self.table.merge_bounds(vec![self.bounds.clone(), bounds])?;
         self.validate_bounds(&bounds)?;
         self.table.slice(bounds)
     }

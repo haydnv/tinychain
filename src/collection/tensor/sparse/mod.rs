@@ -237,6 +237,14 @@ impl SparseAccessor for SparseBroadcast {
         self.broadcast_coords(txn, filled, num_coords).await
     }
 
+    async fn filled_at(
+        self: Arc<Self>,
+        txn: Txn,
+        axes: Vec<usize>,
+    ) -> TCResult<TCTryStream<Vec<u64>>> {
+        group_axes(self, txn, axes).await
+    }
+
     async fn filled_count(self: Arc<Self>, txn: Txn) -> TCResult<u64> {
         let filled = self.source.clone().filled(txn).await?;
         let rebase = self.rebase.clone();
@@ -245,14 +253,6 @@ impl SparseAccessor for SparseBroadcast {
                 future::ready(Ok(count + rebase.map_bounds(coord.into()).size()))
             })
             .await
-    }
-
-    async fn filled_at(
-        self: Arc<Self>,
-        txn: Txn,
-        axes: Vec<usize>,
-    ) -> TCResult<TCTryStream<Vec<u64>>> {
-        group_axes(self, txn, axes).await
     }
 
     async fn filled_in(self: Arc<Self>, txn: Txn, bounds: Bounds) -> TCResult<SparseStream> {
@@ -1826,28 +1826,26 @@ fn group_axes<'a>(
     })
 }
 
-fn slice_table(mut table: Table, bounds: &'_ Bounds) -> TCBoxTryFuture<'_, Table> {
+async fn slice_table(mut table: Table, bounds: &'_ Bounds) -> TCResult<Table> {
     use AxisBounds::*;
 
-    Box::pin(async move {
-        for (axis, axis_bound) in bounds.to_vec().into_iter().enumerate() {
-            let axis: Id = axis.into();
-            let column_bound = match axis_bound {
-                At(x) => table::ColumnBound::Is(u64_to_value(x)),
-                In(range) => {
-                    let start = Bound::In(u64_to_value(range.start));
-                    let end = Bound::Ex(u64_to_value(range.end));
-                    (start, end).into()
-                }
-                _ => todo!(),
-            };
+    for (axis, axis_bound) in bounds.to_vec().into_iter().enumerate() {
+        let axis: Id = axis.into();
+        let column_bound = match axis_bound {
+            At(x) => table::ColumnBound::Is(u64_to_value(x)),
+            In(range) => {
+                let start = Bound::In(u64_to_value(range.start));
+                let end = Bound::Ex(u64_to_value(range.end));
+                (start, end).into()
+            }
+            _ => todo!(),
+        };
 
-            let bounds: HashMap<Id, ColumnBound> = iter::once((axis, column_bound)).collect();
-            table = table.slice(bounds.into())?
-        }
+        let bounds: HashMap<Id, ColumnBound> = iter::once((axis, column_bound)).collect();
+        table = table.slice(bounds.into())?
+    }
 
-        Ok(table)
-    })
+    Ok(table)
 }
 
 fn u64_to_value(u: u64) -> Value {
