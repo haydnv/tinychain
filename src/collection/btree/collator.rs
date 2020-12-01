@@ -256,3 +256,21 @@ impl Collator {
             && self.compare_bound(key, end, Greater) == Equal
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scalar::UIntType;
+
+    #[test]
+    fn test_compare() {
+        let u64_type = ValueType::Number(NumberType::UInt(UIntType::U64));
+        let collator = Collator {
+            schema: vec![u64_type, u64_type],
+        };
+        let start = vec![Bound::In(0u64.into()), Bound::In(1u64.into())];
+        let end = vec![Bound::Ex(2u64.into()), Bound::Ex(5u64.into())];
+        let key = vec![0u64.into(), 5u64.into()];
+        assert!(!collator.contains(&start, &end, &key));
+    }
+}

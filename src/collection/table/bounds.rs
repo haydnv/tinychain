@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::iter::FromIterator;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 use log::debug;
 
@@ -41,6 +41,13 @@ impl ColumnBound {
                 Self::Is(inner) => outer.contains_value(inner, collator),
                 Self::In(inner) => outer.contains_range(inner, collator),
             },
+        }
+    }
+
+    pub fn is_range(&self) -> bool {
+        match self {
+            ColumnBound::In(_) => true,
+            _ => false,
         }
     }
 }
@@ -209,6 +216,12 @@ impl Deref for Bounds {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl DerefMut for Bounds {
+    fn deref_mut(&'_ mut self) -> &'_ mut Self::Target {
+        &mut self.inner
     }
 }
 

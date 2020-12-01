@@ -551,7 +551,7 @@ impl TableInstance for IndexSlice {
     }
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        debug!("IndexSlice::stream");
+        debug!("IndexSlice::stream where {}", self.range);
 
         self.source
             .stream(txn_id, self.range.clone(), self.reverse)
@@ -907,6 +907,9 @@ impl TableInstance for Merged {
         let left_clone = self.left.clone();
         let txn_id_clone = txn_id;
 
+        debug!("Merged::stream from right {}", &self.right);
+        debug!("left is {}", &self.left);
+
         let rows = self
             .right
             .select(key_names)?
@@ -928,6 +931,7 @@ impl TableInstance for Merged {
         let bounds = self
             .source()
             .merge_bounds(vec![self.bounds.clone(), bounds.clone()])?;
+
         self.source().validate_bounds(&bounds)
     }
 
@@ -1098,6 +1102,7 @@ impl TableInstance for Selection {
             .map(|c| c.name())
             .cloned()
             .collect();
+
         let mut unknown: HashSet<&Id> = selected.difference(&bounds_columns).collect();
         if !unknown.is_empty() {
             let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
@@ -1119,6 +1124,7 @@ impl TableInstance for Selection {
             .map(|c| c.name())
             .cloned()
             .collect();
+
         let mut unknown: HashSet<&Id> = selected.difference(&order_columns).collect();
         if !unknown.is_empty() {
             let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();

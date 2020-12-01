@@ -6,6 +6,7 @@ use std::sync::Arc;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
+use log::debug;
 
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::schema::{Column, IndexSchema};
@@ -905,12 +906,18 @@ impl TensorInstance for SparseSlice {
 #[async_trait]
 impl SparseAccessor for SparseSlice {
     async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
+        debug!(
+            "SparseSlice::filled, source bounds: {}",
+            self.rebase.bounds()
+        );
+
         let rebase = self.rebase.clone();
         let filled = self
             .source
             .clone()
             .filled_in(txn, rebase.bounds().clone())
             .await?
+            .inspect_ok(|(coord, value)| debug!("source coord: {:?} = {}", coord, value))
             .map_ok(move |(coord, value)| (rebase.map_coord(coord), value));
 
         let filled: SparseStream = Box::pin(filled);

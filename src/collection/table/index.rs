@@ -425,31 +425,31 @@ impl TableInstance for Index {
         }
 
         let columns = self.schema.columns();
-        let column_names: HashSet<&Id> = columns.iter().map(|col| col.name()).collect();
-        let bound_column_names: HashSet<&Id> = bounds.keys().collect();
-        let extra: HashSet<&&Id> = bound_column_names.difference(&column_names).collect();
-        if !extra.is_empty() {
+        let mut bounds = bounds.clone();
+        let mut ordered_bounds = Vec::with_capacity(columns.len());
+        for column in columns {
+            let bound = bounds.remove(column.name()).unwrap_or_default();
+            ordered_bounds.push(bound);
+
+            if bounds.is_empty() {
+                break;
+            }
+        }
+
+        if !bounds.is_empty() {
             return Err(error::bad_request(
-                "Index has no such columns",
-                Value::from_iter(extra.into_iter().map(Deref::deref).cloned()),
+                "Index has no such columns: {}",
+                Value::from_iter(bounds.keys().cloned()),
             ));
         }
 
-        let mut range_bound = false;
-        let mut bounds_to_check = bounds.clone().into_inner();
-        for column in columns {
-            let bound = bounds_to_check.remove(column.name()).unwrap_or_default();
-            if let ColumnBound::In(_) = bound {
-                if range_bound {
-                    return Err(error::bad_request("Index does not support bounds", bounds));
-                } else {
-                    range_bound = true;
-                }
-            }
-
-            if bounds_to_check.is_empty() {
-                return Ok(());
-            }
+        if ordered_bounds[..ordered_bounds.len() - 1]
+            .iter()
+            .any(ColumnBound::is_range)
+        {
+            return Err(error::unsupported(
+                "Index bounds must include a maximum of one range, only on the rightmost column",
+            ));
         }
 
         Ok(())
