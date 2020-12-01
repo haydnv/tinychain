@@ -21,6 +21,7 @@ use super::*;
 mod combine;
 
 use combine::SparseCombine;
+use std::ops::Deref;
 
 const VALUE: Label = label("value");
 
@@ -1768,11 +1769,15 @@ impl TensorIO for SparseTensor {
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
-        stream::iter(bounds.affected())
-            .map(|coord| Ok(self.write_value_at(txn_id, coord, value.clone())))
-            .try_buffer_unordered(2)
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await
+        if self.shape().is_empty() {
+            self.write_value_at(txn_id, vec![], value).await
+        } else {
+            stream::iter(bounds.affected())
+                .map(|coord| Ok(self.write_value_at(txn_id, coord, value.clone())))
+                .try_buffer_unordered(2)
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await
+        }
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
@@ -1877,7 +1882,7 @@ impl TensorTransform for SparseTensor {
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self> {
-        if bounds == Bounds::all(self.shape()) {
+        if bounds.deref() == Bounds::all(self.shape()).deref() {
             return Ok(self.clone());
         }
 

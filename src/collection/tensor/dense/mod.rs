@@ -404,7 +404,7 @@ impl BlockList for BlockListFile {
         bounds: Bounds,
     ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         Box::pin(async move {
-            if bounds == self.shape().all() {
+            if bounds.deref() == self.shape().all().deref() {
                 return self.value_stream(txn).await;
             }
 
@@ -1853,7 +1853,7 @@ impl TensorTransform for DenseTensor {
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self> {
-        if bounds == Bounds::all(self.shape()) {
+        if bounds.deref() == Bounds::all(self.shape()).deref() {
             return Ok(self.clone());
         }
 

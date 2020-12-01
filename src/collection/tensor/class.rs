@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::iter::FromIterator;
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -399,8 +400,12 @@ impl CollectionInstance for TensorView {
         selector: Value,
     ) -> TCResult<State> {
         if path.is_empty() {
-            let bounds: Bounds = selector
-                .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
+            let bounds = if selector.is_none() {
+                Bounds::all(self.shape())
+            } else {
+                selector
+                    .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?
+            };
 
             if bounds.is_coord() {
                 let coord: Vec<u64> = bounds.try_into()?;
@@ -433,10 +438,35 @@ impl CollectionInstance for TensorView {
         &self,
         _request: &Request,
         _txn: &Txn,
-        _path: &[PathSegment],
-        _params: Object,
+        path: &[PathSegment],
+        mut params: Object,
     ) -> TCResult<State> {
-        Err(error::not_implemented("TensorView::post"))
+        if path.is_empty() {
+            Err(error::method_not_allowed("Tensor::POST /"))
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "slice" => {
+                    let bounds = params
+                        .remove(&label("bounds").into())
+                        .ok_or(error::bad_request("Missing parameter", "bounds"))?;
+                    let bounds = Bounds::from_scalar(self.shape(), bounds)?;
+
+                    if params.is_empty() {
+                        self.slice(bounds)
+                            .map(Collection::from)
+                            .map(State::Collection)
+                    } else {
+                        Err(error::bad_request(
+                            "Unrecognized parameters",
+                            Scalar::from_iter(params),
+                        ))
+                    }
+                }
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            Err(error::path_not_found(path))
+        }
     }
 
     async fn put(
@@ -451,8 +481,11 @@ impl CollectionInstance for TensorView {
             return Err(error::path_not_found(path));
         }
 
-        let bounds: Bounds = selector
-            .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?;
+        let bounds = if selector.is_none() {
+            Bounds::all(self.shape())
+        } else {
+            selector.try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?
+        };
 
         match value {
             State::Scalar(Scalar::Value(Value::Number(value))) => {

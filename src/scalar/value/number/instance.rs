@@ -1571,6 +1571,16 @@ impl TryFrom<Number> for Int {
     }
 }
 
+impl TryCastFrom<Number> for i64 {
+    fn can_cast_from(number: &Number) -> bool {
+        Int::can_cast_from(number)
+    }
+
+    fn opt_cast_from(number: Number) -> Option<i64> {
+        Int::opt_cast_from(number).map(i64::from)
+    }
+}
+
 impl TryFrom<Number> for UInt {
     type Error = error::TCError;
 

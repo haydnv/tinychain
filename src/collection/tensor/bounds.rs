@@ -1,13 +1,13 @@
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter;
-use std::ops;
+use std::ops::{self, Deref, DerefMut};
 
 use itertools::{Itertools, MultiProduct};
 
 use crate::class::TCResult;
 use crate::error;
-use crate::scalar::{ScalarInstance, TryCastFrom, TryCastInto, Value};
+use crate::scalar::{Bound, Scalar, ScalarInstance, Slice, TryCastFrom, TryCastInto, Value};
 
 pub type Coords = MultiProduct<AxisIter>;
 
@@ -124,6 +124,97 @@ pub struct Bounds {
 }
 
 impl Bounds {
+    fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
+        let bound = i64::try_cast_from(bound, |v| error::bad_request("Invalid bound", v))?;
+        if bound.abs() as u64 > dim {
+            return Err(error::bad_request(
+                format!("Index out of bounds for dimension {}", dim),
+                bound,
+            ));
+        }
+
+        if bound < 0 {
+            Ok(dim - bound.abs() as u64)
+        } else {
+            Ok(bound as u64)
+        }
+    }
+
+    pub fn from_scalar(shape: &Shape, scalar: Scalar) -> TCResult<Bounds> {
+        match scalar {
+            Scalar::Tuple(bounds) => {
+                let mut axes = Vec::with_capacity(shape.len());
+
+                for (axis, bound) in bounds.into_iter().enumerate() {
+                    let bound = match bound {
+                        bound if bound.is_none() => AxisBounds::In(0..shape[axis]),
+                        Scalar::Slice(Slice::Range(range)) => {
+                            let start = match range.start {
+                                Bound::Unbounded => 0,
+                                Bound::In(start) => Self::cast_bound(shape[axis], start)?,
+                                Bound::Ex(start) => Self::cast_bound(shape[1], start)? + 1,
+                            };
+
+                            let end = match range.end {
+                                Bound::Unbounded => shape[axis],
+                                Bound::In(end) => Self::cast_bound(shape[axis], end)?,
+                                Bound::Ex(end) => Self::cast_bound(shape[1], end)?,
+                            };
+
+                            AxisBounds::In(start..end)
+                        }
+                        Scalar::Value(Value::Tuple(indices)) => {
+                            let indices = shape[..]
+                                .iter()
+                                .zip(indices.into_iter())
+                                .map(|(dim, i)| Self::cast_bound(*dim, i.into()))
+                                .collect::<TCResult<Vec<u64>>>()?;
+                            AxisBounds::Of(indices)
+                        }
+                        Scalar::Value(i) => {
+                            let i = Self::cast_bound(shape[axis], i)?;
+                            AxisBounds::At(i)
+                        }
+                        other => {
+                            return Err(error::bad_request(
+                                format!("Invalid bound for axis {}", axis),
+                                other,
+                            ));
+                        }
+                    };
+
+                    axes.push(bound);
+                }
+
+                Ok(Bounds { axes })
+            }
+            Scalar::Value(Value::Tuple(bounds)) => {
+                let mut axes = Vec::with_capacity(shape.len());
+                for (axis, bound) in bounds.into_iter().enumerate() {
+                    let bound = match bound {
+                        Value::Tuple(indices) => {
+                            let indices = shape[..]
+                                .iter()
+                                .zip(indices.into_iter())
+                                .map(|(dim, i)| Self::cast_bound(*dim, i.into()))
+                                .collect::<TCResult<Vec<u64>>>()?;
+                            AxisBounds::Of(indices)
+                        }
+                        value => {
+                            let i = Self::cast_bound(shape[axis], value)?;
+                            AxisBounds::At(i)
+                        }
+                    };
+
+                    axes.push(bound);
+                }
+
+                Ok(Bounds { axes })
+            }
+            other => Err(error::bad_request("Invalid Tensor bounds", other)),
+        }
+    }
+
     pub fn all(shape: &Shape) -> Bounds {
         shape
             .0
@@ -172,18 +263,6 @@ impl Bounds {
         })
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.axes.is_empty()
-    }
-
-    pub fn iter(&'_ self) -> impl Iterator<Item = (usize, &'_ AxisBounds)> {
-        self.axes.iter().enumerate()
-    }
-
-    pub fn len(&self) -> usize {
-        self.axes.len()
-    }
-
     pub fn ndim(&self) -> usize {
         let mut ndim = 0;
         use AxisBounds::*;
@@ -204,10 +283,6 @@ impl Bounds {
         }
     }
 
-    pub fn remove(&mut self, axis: usize) {
-        self.axes.remove(axis);
-    }
-
     pub fn size(&self) -> u64 {
         if self.is_empty() {
             return 0;
@@ -224,41 +299,19 @@ impl Bounds {
 
         size
     }
+}
 
-    pub fn to_vec(&self) -> Vec<AxisBounds> {
-        self.axes.to_vec()
+impl Deref for Bounds {
+    type Target = Vec<AxisBounds>;
+
+    fn deref(&'_ self) -> &'_ Self::Target {
+        &self.axes
     }
 }
 
-impl PartialEq for Bounds {
-    fn eq(&self, other: &Bounds) -> bool {
-        if self.len() != other.len() {
-            return false;
-        }
-
-        for axis in 0..self.len() {
-            if self[axis] != other[axis] {
-                return false;
-            }
-        }
-
-        true
-    }
-}
-
-impl Eq for Bounds {}
-
-impl<Idx: std::slice::SliceIndex<[AxisBounds]>> ops::Index<Idx> for Bounds {
-    type Output = Idx::Output;
-
-    fn index(&self, i: Idx) -> &Self::Output {
-        &self.axes[i]
-    }
-}
-
-impl<Idx: std::slice::SliceIndex<[AxisBounds]>> ops::IndexMut<Idx> for Bounds {
-    fn index_mut(&mut self, i: Idx) -> &mut Self::Output {
-        &mut self.axes[i]
+impl DerefMut for Bounds {
+    fn deref_mut(&'_ mut self) -> &'_ mut Self::Target {
+        &mut self.axes
     }
 }
 
@@ -405,20 +458,22 @@ impl Shape {
         true
     }
 
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn remove(&mut self, axis: usize) -> u64 {
-        self.0.remove(axis)
-    }
-
     pub fn size(&self) -> u64 {
         self.0.iter().product()
     }
+}
 
-    pub fn to_vec(&self) -> Vec<u64> {
-        self.0.to_vec()
+impl Deref for Shape {
+    type Target = Vec<u64>;
+
+    fn deref(&'_ self) -> &'_ Vec<u64> {
+        &self.0
+    }
+}
+
+impl DerefMut for Shape {
+    fn deref_mut(&'_ mut self) -> &'_ mut Vec<u64> {
+        &mut self.0
     }
 }
 
@@ -429,14 +484,6 @@ impl PartialEq for Shape {
 }
 
 impl Eq for Shape {}
-
-impl<Idx: std::slice::SliceIndex<[u64]>> ops::Index<Idx> for Shape {
-    type Output = Idx::Output;
-
-    fn index(&self, i: Idx) -> &Self::Output {
-        &self.0[i]
-    }
-}
 
 impl From<Vec<u64>> for Shape {
     fn from(shape: Vec<u64>) -> Shape {

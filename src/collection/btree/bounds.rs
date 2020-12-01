@@ -177,6 +177,11 @@ impl fmt::Display for BTreeRange {
                 .join(", ")
         };
 
-        write!(f, "BTreeRange: ({}, {})", to_str(&self.0), to_str(&self.1))
+        write!(
+            f,
+            "BTreeRange: (from: {}, to: {})",
+            to_str(&self.0),
+            to_str(&self.1)
+        )
     }
 }

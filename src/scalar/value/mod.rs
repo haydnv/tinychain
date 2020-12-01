@@ -403,6 +403,24 @@ impl TryCastFrom<Value> for Number {
     }
 }
 
+impl TryCastFrom<Value> for i64 {
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::Number(n) = value {
+            i64::can_cast_from(n)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<i64> {
+        if let Value::Number(n) = value {
+            i64::opt_cast_from(n)
+        } else {
+            None
+        }
+    }
+}
+
 impl TryCastFrom<Value> for u64 {
     fn can_cast_from(value: &Value) -> bool {
         if let Value::Number(n) = value {
