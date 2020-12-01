@@ -405,16 +405,19 @@ impl TableInstance for Aggregate {
             return Ok(stream);
         };
 
-        let left = stream::once(future::ready(first)).chain(self.stream_inner(txn_id).await?);
+        let left =
+            stream::once(future::ready(first.clone())).chain(self.stream_inner(txn_id).await?);
         let right = self.stream_inner(txn_id).await?;
         let aggregate = left.zip(right).filter_map(|(l, r)| {
+            debug!("group {:?}, {:?}?", l, r);
             if l == r {
                 future::ready(None)
             } else {
                 future::ready(Some(r))
             }
         });
-        let aggregate: TCStream<Vec<Value>> = Box::pin(aggregate);
+        let aggregate: TCStream<Vec<Value>> =
+            Box::pin(stream::once(future::ready(first)).chain(aggregate));
 
         Ok(aggregate)
     }
