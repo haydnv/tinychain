@@ -68,8 +68,7 @@ impl<T: af::HasAfEnum> ArrayInstance for ArrayExt<T> {
 impl<T: af::HasAfEnum + Clone + Default> From<ArrayExt<T>> for Vec<T> {
     fn from(array: ArrayExt<T>) -> Vec<T> {
         let len = array.0.elements();
-        let mut v: Vec<T> = Vec::with_capacity(len);
-        v.resize(len, T::default());
+        let mut v = vec![T::default(); len];
         array.0.host(&mut v);
         v
     }
@@ -109,6 +108,7 @@ impl From<ArrayExt<num::Complex<f32>>> for Bytes {
             .into_iter()
             .map(|b| [b.re.to_be_bytes(), b.im.to_be_bytes()].concat())
             .collect();
+
         data.into_iter().flatten().collect::<Vec<u8>>().into()
     }
 }

@@ -5,6 +5,7 @@ use std::iter::FromIterator;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, TryFutureExt};
+use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::*;
@@ -427,6 +428,19 @@ impl CollectionInstance for TensorView {
                     let axis = selector.try_cast_into(|v| error::bad_request("Invalid axis", v))?;
                     let expansion = self.expand_dims(axis)?;
                     Ok(State::Collection(expansion.into()))
+                }
+                "transpose" => {
+                    let permutation = if selector.is_none() {
+                        None
+                    } else {
+                        let permutation = selector.try_cast_into(|v| {
+                            error::bad_request("Permutation should be a tuple of axes, not", v)
+                        })?;
+                        Some(permutation)
+                    };
+
+                    let transpose = self.transpose(permutation)?;
+                    Ok(State::Collection(transpose.into()))
                 }
                 other => Err(error::not_found(other)),
             }

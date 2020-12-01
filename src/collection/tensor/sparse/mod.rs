@@ -1007,16 +1007,13 @@ impl TensorInstance for SparseTranspose {
 #[async_trait]
 impl SparseAccessor for SparseTranspose {
     async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
-        let ndim = self.ndim();
+        let rebase = self.rebase.clone();
         let filled = self
+            .source
             .clone()
-            .filled_at(txn.clone(), (0..ndim).collect())
+            .filled(txn)
             .await?
-            .and_then(move |coord| {
-                self.clone()
-                    .read_value_owned(txn.clone(), coord.to_vec())
-                    .map_ok(|value| (coord, value))
-            });
+            .map_ok(move |(coord, value)| (rebase.map_coord(coord), value));
 
         let filled: SparseStream = Box::pin(filled);
         Ok(filled)
@@ -1203,7 +1200,7 @@ impl SparseAccessor for SparseTable {
         let columns: Vec<Id> = axes.iter().map(|x| (*x).into()).collect();
         let filled_at = self
             .table
-            .group_by(columns)?
+            .group_by(columns.to_vec())?
             .stream(txn.id().clone())
             .await?
             .map(|coord| unwrap_coord(&coord));
@@ -1259,6 +1256,7 @@ impl SparseAccessor for SparseTable {
             .map(Number::from)
             .map(Value::Number)
             .collect();
+
         self.table
             .upsert(&txn_id, key, vec![Value::Number(value)])
             .await
