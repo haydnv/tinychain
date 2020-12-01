@@ -423,6 +423,11 @@ impl CollectionInstance for TensorView {
                     let cast = self.as_type(dtype)?;
                     Ok(State::Collection(cast.into()))
                 }
+                "expand_dims" => {
+                    let axis = selector.try_cast_into(|v| error::bad_request("Invalid axis", v))?;
+                    let expansion = self.expand_dims(axis)?;
+                    Ok(State::Collection(expansion.into()))
+                }
                 other => Err(error::not_found(other)),
             }
         } else {
