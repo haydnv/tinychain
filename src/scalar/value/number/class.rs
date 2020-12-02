@@ -19,15 +19,9 @@ pub trait NumberClass: Class + ValueClass + Into<NumberType> + Ord + Send {
 
     fn size(self) -> usize;
 
-    fn one(&self) -> <Self as NumberClass>::Instance {
-        let b: Boolean = true.into();
-        b.into()
-    }
+    fn one(&self) -> <Self as NumberClass>::Instance;
 
-    fn zero(&self) -> <Self as NumberClass>::Instance {
-        let b: Boolean = false.into();
-        b.into()
-    }
+    fn zero(&self) -> <Self as NumberClass>::Instance;
 }
 
 pub trait NumberInstance:
@@ -191,6 +185,20 @@ impl NumberClass for ComplexType {
             Self::C64 => 16,
         }
     }
+
+    fn one(&self) -> Complex {
+        match self {
+            Self::C32 => num::Complex::<f32>::new(1f32, 0f32).into(),
+            Self::C64 => num::Complex::<f64>::new(1f64, 0f64).into(),
+        }
+    }
+
+    fn zero(&self) -> Complex {
+        match self {
+            Self::C32 => num::Complex::<f32>::new(0f32, 0f32).into(),
+            Self::C64 => num::Complex::<f64>::new(0f64, 0f64).into(),
+        }
+    }
 }
 
 impl Ord for ComplexType {
@@ -287,6 +295,14 @@ impl NumberClass for BooleanType {
     fn size(self) -> usize {
         1
     }
+
+    fn one(&self) -> Boolean {
+        true.into()
+    }
+
+    fn zero(&self) -> Boolean {
+        false.into()
+    }
 }
 
 impl Ord for BooleanType {
@@ -378,8 +394,22 @@ impl NumberClass for FloatType {
 
     fn size(self) -> usize {
         match self {
-            FloatType::F32 => 4,
-            FloatType::F64 => 8,
+            Self::F32 => 4,
+            Self::F64 => 8,
+        }
+    }
+
+    fn one(&self) -> Float {
+        match self {
+            Self::F32 => 1f32.into(),
+            Self::F64 => 1f64.into(),
+        }
+    }
+
+    fn zero(&self) -> Float {
+        match self {
+            Self::F32 => 0f32.into(),
+            Self::F64 => 0f64.into(),
         }
     }
 }
@@ -490,9 +520,25 @@ impl NumberClass for IntType {
 
     fn size(self) -> usize {
         match self {
-            IntType::I16 => 2,
-            IntType::I32 => 4,
-            IntType::I64 => 8,
+            Self::I16 => 2,
+            Self::I32 => 4,
+            Self::I64 => 8,
+        }
+    }
+
+    fn one(&self) -> Int {
+        match self {
+            Self::I16 => 1i16.into(),
+            Self::I32 => 1i32.into(),
+            Self::I64 => 1i64.into(),
+        }
+    }
+
+    fn zero(&self) -> Int {
+        match self {
+            Self::I16 => 0i16.into(),
+            Self::I32 => 0i32.into(),
+            Self::I64 => 0i64.into(),
         }
     }
 }
@@ -614,6 +660,24 @@ impl NumberClass for UIntType {
             UIntType::U16 => 2,
             UIntType::U32 => 4,
             UIntType::U64 => 8,
+        }
+    }
+
+    fn one(&self) -> UInt {
+        match self {
+            Self::U8 => 1u8.into(),
+            Self::U16 => 1u16.into(),
+            Self::U32 => 1u32.into(),
+            Self::U64 => 1u64.into(),
+        }
+    }
+
+    fn zero(&self) -> UInt {
+        match self {
+            Self::U8 => 0u8.into(),
+            Self::U16 => 0u16.into(),
+            Self::U32 => 0u32.into(),
+            Self::U64 => 0u64.into(),
         }
     }
 }
@@ -751,6 +815,28 @@ impl NumberClass for NumberType {
 
             // a generic Number still has a distinct maximum size
             Number => NumberClass::size(ComplexType::C64),
+        }
+    }
+
+    fn one(&self) -> Number {
+        use NumberType::*;
+        match self {
+            Bool | Number => true.into(),
+            Complex(ct) => ct.one().into(),
+            Float(ft) => ft.one().into(),
+            Int(it) => it.one().into(),
+            UInt(ut) => ut.one().into(),
+        }
+    }
+
+    fn zero(&self) -> Number {
+        use NumberType::*;
+        match self {
+            Bool | Number => false.into(),
+            Complex(ct) => ct.zero().into(),
+            Float(ft) => ft.zero().into(),
+            Int(it) => it.zero().into(),
+            UInt(ut) => ut.zero().into(),
         }
     }
 }
