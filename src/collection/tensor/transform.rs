@@ -551,7 +551,7 @@ impl Transpose {
         assert_eq!(partial_source_coord.len(), axes.len());
 
         let mut source_coord: HashMap<usize, u64> = axes
-            .iter()
+            .into_iter()
             .cloned()
             .zip(partial_source_coord.into_iter())
             .collect();

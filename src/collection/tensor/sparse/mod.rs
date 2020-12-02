@@ -1007,13 +1007,16 @@ impl TensorInstance for SparseTranspose {
 #[async_trait]
 impl SparseAccessor for SparseTranspose {
     async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
-        let rebase = self.rebase.clone();
+        let ndim = self.ndim();
+        let this = self.clone();
         let filled = self
-            .source
-            .clone()
-            .filled(txn)
+            .filled_at(txn.clone(), (0..ndim).collect())
             .await?
-            .map_ok(move |(coord, value)| (rebase.map_coord(coord), value));
+            .and_then(move |coord| {
+                this.clone()
+                    .read_value_owned(txn.clone(), coord.to_vec())
+                    .map_ok(|value| (coord, value))
+            });
 
         let filled: SparseStream = Box::pin(filled);
         Ok(filled)
@@ -1026,12 +1029,13 @@ impl SparseAccessor for SparseTranspose {
     ) -> TCResult<TCTryStream<Vec<u64>>> {
         // can't use group_axes here because it would lead to a circular dependency in self.filled
         let rebase = self.rebase.clone();
+        let source_axes = rebase.invert_axes(&axes);
         let filled_at = self
             .source
             .clone()
-            .filled_at(txn, rebase.invert_axes(&axes))
+            .filled_at(txn, source_axes.to_vec())
             .await?
-            .map_ok(move |coord| rebase.map_coord_axes(coord, &axes));
+            .map_ok(move |coord| rebase.map_coord_axes(coord, &source_axes));
 
         let filled_at: TCTryStream<Vec<u64>> = Box::pin(filled_at);
         Ok(filled_at)
