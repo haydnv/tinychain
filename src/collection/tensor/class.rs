@@ -428,6 +428,12 @@ impl CollectionInstance for TensorView {
                     let expansion = self.expand_dims(axis)?;
                     Ok(State::Collection(expansion.into()))
                 }
+                "reshape" => {
+                    let shape =
+                        selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;
+                    let reshaped = self.reshape(shape)?;
+                    Ok(State::Collection(reshaped.into()))
+                }
                 "transpose" => {
                     let permutation = if selector.is_none() {
                         None
