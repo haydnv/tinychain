@@ -5,7 +5,6 @@ use std::iter::FromIterator;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, TryFutureExt};
-use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::*;
