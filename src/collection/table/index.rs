@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
-use std::iter::{self, FromIterator};
+use std::iter::FromIterator;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -837,31 +837,77 @@ impl TableInstance for TableIndex {
         loop {
             let initial = columns.to_vec();
 
-            let mut i = columns.len();
-            while i > 0 {
-                let subset = &columns[..i];
+            let mut i = 0;
+            while i < columns.len() {
+                let subset = &columns[i..];
+                let mut supported = false;
 
-                for index in iter::once(&self.primary).chain(self.auxiliary.values()) {
-                    if index.validate_order(subset).is_ok() {
-                        columns = &columns[i..];
+                if self.primary.validate_order(subset).is_ok() {
+                    supported = true;
+                    columns = &columns[..i];
+                    i = 0;
 
-                        let index_slice = index.index_slice(Bounds::default())?;
-                        let merged = Merged::new(merge_source, index_slice)?;
+                    debug!(
+                        "primary key supports order {}",
+                        Value::from_iter(subset.to_vec())
+                    );
 
-                        if columns.is_empty() {
-                            return if reverse {
-                                merged.reversed()
-                            } else {
-                                Ok(merged.into())
-                            };
+                    let index_slice = self.primary.index_slice(Bounds::default())?;
+                    let merged = Merged::new(merge_source, index_slice)?;
+
+                    if columns.is_empty() {
+                        return if reverse {
+                            merged.reversed()
+                        } else {
+                            Ok(merged.into())
+                        };
+                    }
+
+                    merge_source = MergeSource::Merge(Arc::new(merged));
+                } else {
+                    debug!(
+                        "primary key does not support order {}",
+                        Value::from_iter(subset.to_vec())
+                    );
+
+                    for (name, index) in self.auxiliary.iter() {
+                        if index.validate_order(subset).is_ok() {
+                            supported = true;
+                            columns = &columns[..i];
+                            i = 0;
+
+                            debug!(
+                                "index {} supports order {}",
+                                name,
+                                Value::from_iter(subset.to_vec())
+                            );
+
+                            let index_slice = index.index_slice(Bounds::default())?;
+                            let merged = Merged::new(merge_source, index_slice)?;
+
+                            if columns.is_empty() {
+                                return if reverse {
+                                    merged.reversed()
+                                } else {
+                                    Ok(merged.into())
+                                };
+                            }
+
+                            merge_source = MergeSource::Merge(Arc::new(merged));
+                            break;
+                        } else {
+                            debug!(
+                                "index {} does not support order {}",
+                                name,
+                                Value::from_iter(subset.to_vec())
+                            );
                         }
-
-                        merge_source = MergeSource::Merge(Arc::new(merged));
-                        break;
                     }
                 }
 
-                i = i - 1;
+                if !supported {
+                    i = i + 1;
+                }
             }
 
             if columns == &initial[..] {

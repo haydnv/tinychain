@@ -199,7 +199,12 @@ impl IndexSchema {
         Ok(row)
     }
     pub fn starts_with(&self, expected: &[Id]) -> bool {
-        let actual: Vec<Id> = self.columns().iter().map(|c| c.name()).cloned().collect();
+        let schema = self.columns();
+        if expected.len() > schema.len() {
+            return false;
+        }
+
+        let actual: Vec<Id> = schema.iter().map(|c| c.name()).cloned().collect();
         for (a, e) in actual[0..expected.len()].iter().zip(expected.iter()) {
             if a != e {
                 return false;
