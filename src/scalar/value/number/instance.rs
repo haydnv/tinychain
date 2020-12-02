@@ -14,7 +14,7 @@ use crate::scalar::{
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{NumberClass, NumberInstance};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub struct Boolean(bool);
 
 impl Instance for Boolean {
@@ -127,13 +127,6 @@ impl CastFrom<Boolean> for u64 {
     }
 }
 
-impl PartialOrd for Boolean {
-    fn partial_cmp(&self, other: &Boolean) -> Option<Ordering> {
-        let (Boolean(l), Boolean(r)) = (self, other);
-        l.partial_cmp(r)
-    }
-}
-
 impl fmt::Display for Boolean {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -146,7 +139,7 @@ impl Serialize for Boolean {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub enum Complex {
     C32(num::Complex<f32>),
     C64(num::Complex<f64>),
@@ -221,8 +214,6 @@ impl CastFrom<Complex> for Boolean {
     }
 }
 
-impl Eq for Complex {}
-
 impl Add for Complex {
     type Output = Self;
 
@@ -269,6 +260,20 @@ impl Sub for Complex {
         }
     }
 }
+
+impl PartialEq for Complex {
+    fn eq(&self, other: &Self) -> bool {
+        type Max = num::complex::Complex<f64>;
+
+        match (self, other) {
+            (Self::C32(l), Self::C32(r)) => l.eq(r),
+            (Self::C64(l), Self::C64(r)) => l.eq(r),
+            (l, r) => Max::from(*l).eq(&Max::from(*r)),
+        }
+    }
+}
+
+impl Eq for Complex {}
 
 impl PartialOrd for Complex {
     fn partial_cmp(&self, other: &Complex) -> Option<Ordering> {
@@ -383,7 +388,7 @@ impl fmt::Display for Complex {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub enum Float {
     F32(f32),
     F64(f64),
@@ -500,6 +505,16 @@ impl Sub for Float {
     }
 }
 
+impl PartialEq for Float {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::F32(l), Self::F32(r)) => l.eq(r),
+            (Self::F64(l), Self::F64(r)) => l.eq(r),
+            (l, r) => f64::from(*l).eq(&f64::from(*r)),
+        }
+    }
+}
+
 impl PartialOrd for Float {
     fn partial_cmp(&self, other: &Float) -> Option<Ordering> {
         match (self, other) {
@@ -596,7 +611,7 @@ impl fmt::Display for Float {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub enum Int {
     I16(i16),
     I32(i32),
@@ -763,6 +778,18 @@ impl Sub for Int {
     }
 }
 
+impl PartialEq for Int {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::I16(l), Self::I16(r)) => l.eq(r),
+            (Self::I32(l), Self::I32(r)) => l.eq(r),
+            (Self::I64(l), Self::I64(r)) => l.eq(r),
+            (Self::I64(l), r) => l.eq(&i64::from(*r)),
+            (l, r) => i64::from(*l).eq(&i64::from(*r)),
+        }
+    }
+}
+
 impl PartialOrd for Int {
     fn partial_cmp(&self, other: &Int) -> Option<Ordering> {
         match (self, other) {
@@ -870,7 +897,7 @@ impl fmt::Display for Int {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub enum UInt {
     U8(u8),
     U16(u16),
@@ -1076,9 +1103,27 @@ impl Ord for UInt {
     }
 }
 
+impl PartialEq for UInt {
+    fn eq(&self, other: &UInt) -> bool {
+        match (self, other) {
+            (Self::U8(l), Self::U8(r)) => l.eq(r),
+            (Self::U16(l), Self::U16(r)) => l.eq(r),
+            (Self::U32(l), Self::U32(r)) => l.eq(r),
+            (Self::U64(l), Self::U64(r)) => l.eq(r),
+            (l, r) => u64::from(*l).eq(&u64::from(*r)),
+        }
+    }
+}
+
 impl PartialOrd for UInt {
     fn partial_cmp(&self, other: &UInt) -> Option<Ordering> {
-        Some(self.cmp(other))
+        match (self, other) {
+            (Self::U8(l), Self::U8(r)) => l.partial_cmp(r),
+            (Self::U16(l), Self::U16(r)) => l.partial_cmp(r),
+            (Self::U32(l), Self::U32(r)) => l.partial_cmp(r),
+            (Self::U64(l), Self::U64(r)) => l.partial_cmp(r),
+            (l, r) => u64::from(*l).partial_cmp(&u64::from(*r)),
+        }
     }
 }
 
@@ -1198,39 +1243,13 @@ impl fmt::Display for UInt {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq)]
 pub enum Number {
     Bool(Boolean),
     Complex(Complex),
     Float(Float),
     Int(Int),
     UInt(UInt),
-}
-
-impl PartialOrd for Number {
-    fn partial_cmp(&self, other: &Number) -> Option<Ordering> {
-        match (self, other) {
-            (Self::Complex(l), Self::Complex(r)) => l.partial_cmp(r),
-            (Self::Complex(l), Self::Float(r)) => l.partial_cmp(&r.clone().into()),
-            (Self::Complex(l), Self::Int(r)) => l.partial_cmp(&r.clone().into()),
-            (Self::Complex(l), Self::UInt(r)) => l.partial_cmp(&r.clone().into()),
-            (Self::Complex(l), Self::Bool(r)) => l.partial_cmp(&r.clone().into()),
-            (Self::Float(l), Self::Float(r)) => l.partial_cmp(r),
-            (Self::Float(l), Self::Int(r)) => l.partial_cmp(&r.clone().into()),
-            (Self::Float(l), Self::UInt(r)) => l.partial_cmp(&r.clone().into()),
-            (Self::Float(l), Self::Bool(r)) => l.partial_cmp(&r.clone().into()),
-            (Self::Int(l), Self::Int(r)) => l.partial_cmp(r),
-            (Self::Int(l), Self::UInt(r)) => l.partial_cmp(&r.clone().into()),
-            (Self::UInt(l), Self::UInt(r)) => l.partial_cmp(r),
-            (Self::Bool(l), Self::Bool(r)) => l.partial_cmp(r),
-            (l, r) => match r.partial_cmp(l) {
-                Some(Ordering::Greater) => Some(Ordering::Less),
-                Some(Ordering::Less) => Some(Ordering::Greater),
-                Some(Ordering::Equal) => Some(Ordering::Equal),
-                None => None,
-            },
-        }
-    }
 }
 
 impl Instance for Number {
@@ -1317,51 +1336,47 @@ impl NumberInstance for Number {
     }
 }
 
-impl CastFrom<Number> for Boolean {
-    fn cast_from(number: Number) -> Boolean {
-        if number == number.class().zero() {
-            Boolean(false)
-        } else {
-            Boolean(true)
+impl PartialEq for Number {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Int(l), Self::Int(r)) => l.eq(r),
+            (Self::UInt(l), Self::UInt(r)) => l.eq(r),
+            (Self::Float(l), Self::Float(r)) => l.eq(r),
+            (Self::Bool(l), Self::Bool(r)) => l.eq(r),
+            (Self::Complex(l), Self::Complex(r)) => l.eq(r),
+
+            (Self::Complex(l), r) => l.eq(&Complex::cast_from(*r)),
+            (Self::Float(l), r) => l.eq(&Float::cast_from(*r)),
+            (Self::Int(l), r) => l.eq(&Int::cast_from(*r)),
+            (Self::UInt(l), r) => l.eq(&UInt::cast_from(*r)),
+
+            (l, r) => r.eq(l),
         }
     }
 }
 
-impl CastFrom<Number> for Float {
-    fn cast_from(number: Number) -> Float {
-        use Number::*;
-        match number {
-            Bool(b) => Self::cast_from(b),
-            Complex(c) => Self::cast_from(c),
-            Float(f) => f,
-            Int(i) => Self::cast_from(i),
-            UInt(u) => Self::cast_from(u),
-        }
-    }
-}
+impl PartialOrd for Number {
+    fn partial_cmp(&self, other: &Number) -> Option<Ordering> {
+        match (self, other) {
+            (Self::Int(l), Self::Int(r)) => l.partial_cmp(r),
+            (Self::UInt(l), Self::UInt(r)) => l.partial_cmp(r),
+            (Self::Float(l), Self::Float(r)) => l.partial_cmp(r),
+            (Self::Bool(l), Self::Bool(r)) => l.partial_cmp(r),
+            (Self::Complex(l), Self::Complex(r)) => l.partial_cmp(r),
 
-impl CastFrom<Number> for Int {
-    fn cast_from(number: Number) -> Int {
-        use Number::*;
-        match number {
-            Bool(b) => Self::cast_from(b),
-            Complex(c) => Self::cast_from(c),
-            Float(f) => Self::cast_from(f),
-            Int(i) => i,
-            UInt(u) => Self::cast_from(u),
-        }
-    }
-}
+            (Self::Complex(l), r) => l.partial_cmp(&Complex::cast_from(*r)),
+            (Self::Float(l), r) => l.partial_cmp(&Float::cast_from(*r)),
+            (Self::Int(l), r) => l.partial_cmp(&Int::cast_from(*r)),
+            (Self::UInt(l), r) => l.partial_cmp(&UInt::cast_from(*r)),
 
-impl CastFrom<Number> for UInt {
-    fn cast_from(number: Number) -> UInt {
-        use Number::*;
-        match number {
-            Bool(b) => Self::cast_from(b),
-            Complex(c) => Self::cast_from(c),
-            Float(f) => Self::cast_from(f),
-            Int(i) => Self::cast_from(i),
-            UInt(u) => u,
+            (l, r) => match r.partial_cmp(l) {
+                Some(ordering) => Some(match ordering {
+                    Ordering::Less => Ordering::Greater,
+                    Ordering::Equal => Ordering::Equal,
+                    Ordering::Greater => Ordering::Less,
+                }),
+                None => None,
+            },
         }
     }
 }
@@ -1513,6 +1528,55 @@ impl From<Int> for Number {
 impl From<UInt> for Number {
     fn from(u: UInt) -> Number {
         Number::UInt(u)
+    }
+}
+
+impl CastFrom<Number> for Boolean {
+    fn cast_from(number: Number) -> Boolean {
+        if number == number.class().zero() {
+            Boolean(false)
+        } else {
+            Boolean(true)
+        }
+    }
+}
+
+impl CastFrom<Number> for Float {
+    fn cast_from(number: Number) -> Float {
+        use Number::*;
+        match number {
+            Bool(b) => Self::cast_from(b),
+            Complex(c) => Self::cast_from(c),
+            Float(f) => f,
+            Int(i) => Self::cast_from(i),
+            UInt(u) => Self::cast_from(u),
+        }
+    }
+}
+
+impl CastFrom<Number> for Int {
+    fn cast_from(number: Number) -> Int {
+        use Number::*;
+        match number {
+            Bool(b) => Self::cast_from(b),
+            Complex(c) => Self::cast_from(c),
+            Float(f) => Self::cast_from(f),
+            Int(i) => i,
+            UInt(u) => Self::cast_from(u),
+        }
+    }
+}
+
+impl CastFrom<Number> for UInt {
+    fn cast_from(number: Number) -> UInt {
+        use Number::*;
+        match number {
+            Bool(b) => Self::cast_from(b),
+            Complex(c) => Self::cast_from(c),
+            Float(f) => Self::cast_from(f),
+            Int(i) => Self::cast_from(i),
+            UInt(u) => u,
+        }
     }
 }
 
