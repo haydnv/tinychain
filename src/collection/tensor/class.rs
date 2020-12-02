@@ -420,19 +420,33 @@ impl CollectionInstance for TensorView {
                 "as_type" => {
                     let dtype: NumberType =
                         selector.try_cast_into(|v| error::bad_request("Invalid NumberType", v))?;
-                    let cast = self.as_type(dtype)?;
-                    Ok(State::Collection(cast.into()))
+
+                    self.as_type(dtype)
+                        .map(Collection::from)
+                        .map(State::Collection)
+                }
+                "broadcast" => {
+                    let shape =
+                        selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;
+
+                    self.broadcast(shape)
+                        .map(Collection::from)
+                        .map(State::Collection)
                 }
                 "expand_dims" => {
                     let axis = selector.try_cast_into(|v| error::bad_request("Invalid axis", v))?;
-                    let expansion = self.expand_dims(axis)?;
-                    Ok(State::Collection(expansion.into()))
+
+                    self.expand_dims(axis)
+                        .map(Collection::from)
+                        .map(State::Collection)
                 }
                 "reshape" => {
                     let shape =
                         selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;
-                    let reshaped = self.reshape(shape)?;
-                    Ok(State::Collection(reshaped.into()))
+
+                    self.reshape(shape)
+                        .map(Collection::from)
+                        .map(State::Collection)
                 }
                 "transpose" => {
                     let permutation = if selector.is_none() {
@@ -444,8 +458,9 @@ impl CollectionInstance for TensorView {
                         Some(permutation)
                     };
 
-                    let transpose = self.transpose(permutation)?;
-                    Ok(State::Collection(transpose.into()))
+                    self.transpose(permutation)
+                        .map(Collection::from)
+                        .map(State::Collection)
                 }
                 other => Err(error::not_found(other)),
             }

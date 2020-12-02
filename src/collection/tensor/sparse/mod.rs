@@ -1683,7 +1683,13 @@ impl TensorTransform for SparseTensor {
             return Ok(self.clone());
         }
 
-        Err(error::not_implemented("SparseTensor::broadcast"))
+        let rebase = transform::Broadcast::new(self.shape().clone(), shape)?;
+        let accessor = Arc::new(SparseBroadcast {
+            source: self.accessor.clone(),
+            rebase,
+        });
+
+        Ok(SparseTensor { accessor })
     }
 
     fn expand_dims(&self, axis: usize) -> TCResult<Self> {
