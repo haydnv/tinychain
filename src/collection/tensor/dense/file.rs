@@ -30,7 +30,6 @@ pub struct BlockListFile {
     file: Arc<File<Array>>,
     dtype: NumberType,
     shape: Shape,
-    coord_bounds: Vec<u64>,
 }
 
 impl BlockListFile {
@@ -65,16 +64,7 @@ impl BlockListFile {
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
 
-        let coord_bounds = (0..shape.len())
-            .map(|axis| shape[axis + 1..].iter().product())
-            .collect();
-
-        Ok(BlockListFile {
-            dtype,
-            shape,
-            file,
-            coord_bounds,
-        })
+        Ok(BlockListFile { dtype, shape, file })
     }
 
     pub async fn from_values<S: Stream<Item = Number> + Send + Unpin>(
@@ -97,16 +87,7 @@ impl BlockListFile {
             i += 1;
         }
 
-        let coord_bounds = (0..shape.len())
-            .map(|axis| shape[axis + 1..].iter().product())
-            .collect();
-
-        Ok(BlockListFile {
-            dtype,
-            shape,
-            file,
-            coord_bounds,
-        })
+        Ok(BlockListFile { dtype, shape, file })
     }
 
     async fn merge_sort(&self, txn_id: &TxnId) -> TCResult<()> {
@@ -200,10 +181,7 @@ impl BlockList for BlockListFile {
 
         let ndim = bounds.ndim(self.shape());
 
-        let coord_bounds = af::Array::new(
-            &self.coord_bounds,
-            af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
-        );
+        let coord_bounds = coord_bounds(self.shape());
 
         let selected = stream::iter(bounds.affected())
             .chunks(PER_BLOCK)
@@ -255,8 +233,7 @@ impl BlockList for BlockListFile {
             ));
         }
 
-        let offset: u64 = self
-            .coord_bounds
+        let offset: u64 = coord_bounds(self.shape())
             .iter()
             .zip(coord.iter())
             .map(|(d, x)| d * x)
@@ -280,11 +257,7 @@ impl BlockList for BlockListFile {
         }
 
         let ndim = bounds.ndim(self.shape());
-
-        let coord_bounds = af::Array::new(
-            &self.coord_bounds,
-            af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
-        );
+        let coord_bounds = coord_bounds(self.shape());
 
         stream::iter(bounds.affected())
             .chunks(PER_BLOCK)
@@ -335,8 +308,7 @@ impl BlockList for BlockListFile {
 
             let value = value.into_type(self.dtype);
 
-            let offset: u64 = self
-                .coord_bounds
+            let offset: u64 = coord_bounds(self.shape())
                 .iter()
                 .zip(coord.iter())
                 .map(|(d, x)| d * x)
@@ -441,6 +413,12 @@ pub async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Unpin + '
     Ok(coords)
 }
 
+fn coord_bounds(shape: &Shape) -> Vec<u64> {
+    (0..shape.len())
+        .map(|axis| shape[axis + 1..].iter().product())
+        .collect()
+}
+
 fn block_offsets(
     af_indices: &af::Array<u64>,
     af_offsets: &af::Array<u64>,
@@ -468,24 +446,61 @@ fn block_offsets(
 
 fn coord_block<I: Iterator<Item = Vec<u64>>>(
     coords: I,
-    coord_bounds: &af::Array<u64>,
+    coord_bounds: &[u64],
     per_block: usize,
     ndim: usize,
 ) -> (Vec<u64>, af::Array<u64>, af::Array<u64>, u64) {
     let coords: Vec<u64> = coords.flatten().collect();
+    assert!(coords.len() > 0);
+    assert!(ndim > 0);
+    assert_eq!(coords.len() % ndim, 0);
+
     let num_coords = coords.len() / ndim;
-    let af_coords_dim = af::Dim4::new(&[num_coords as u64, ndim as u64, 1, 1]);
-    let af_coords = af::Array::new(&coords, af_coords_dim) * af::tile(coord_bounds, af_coords_dim);
-    let af_coords = af::sum(&af_coords, 1);
-    let af_per_block = af::constant(
-        per_block as u64,
-        af::Dim4::new(&[1, num_coords as u64, 1, 1]),
+
+    let af_coord_bounds = af::Array::new(coord_bounds, af::Dim4::new(&[1, ndim as u64, 1, 1]));
+    let af_coord_bounds = af::tile(
+        &af_coord_bounds,
+        af::Dim4::new(&[num_coords as u64, 1, 1, 1]),
     );
-    let af_offsets = af_coords.copy() % af_per_block.copy();
+
+    let af_coords = af::Array::new(
+        &coords,
+        af::Dim4::new(&[num_coords as u64, ndim as u64, 1, 1]),
+    );
+    let af_coords = af_coords * af_coord_bounds;
+    let af_coords = af::sum(&af_coords, 1);
+
+    let af_per_block = af::constant(per_block as u64, af::Dim4::new(&[1, 1, 1, 1]));
+    let af_offsets = af::modulo(&af_coords, &af_per_block, true);
     let af_indices = af_coords / af_per_block;
     let af_block_ids = af::set_unique(&af_indices, true);
 
-    let mut block_ids: Vec<u64> = Vec::with_capacity(af_block_ids.elements());
+    let mut block_ids = vec![0u64; af_block_ids.elements()];
     af_block_ids.host(&mut block_ids);
     (block_ids, af_indices, af_offsets, num_coords as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_coord_block() {
+        let shape = Shape::from(vec![2, 2]);
+        let bounds = coord_bounds(&shape);
+        let coords = vec![vec![0, 1], vec![1, 1]];
+
+        let (block_ids, af_indices, af_offsets, num_coords) =
+            coord_block(coords.into_iter(), &bounds, PER_BLOCK, shape.len());
+        let mut indices = vec![0u64; af_indices.elements()];
+        af_indices.host(&mut indices);
+
+        let mut offsets = vec![0u64; af_offsets.elements()];
+        af_offsets.host(&mut offsets);
+
+        assert_eq!(num_coords, 2);
+        assert_eq!(block_ids, vec![0]);
+        assert_eq!(indices, vec![0, 0]);
+        assert_eq!(offsets, vec![1, 3]);
+    }
 }
