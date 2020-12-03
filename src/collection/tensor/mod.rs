@@ -16,7 +16,7 @@ pub mod sparse;
 pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
 
-pub type Array = dense::array::Array;
+pub type Array = dense::Array;
 pub type DenseTensor = dense::DenseTensor;
 pub type SparseTensor = sparse::SparseTensor;
 pub type Tensor = class::Tensor;
