@@ -4,6 +4,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use arrayfire as af;
+use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
@@ -26,6 +27,7 @@ use array::Array;
 const ERR_CORRUPT: &str = "DenseTensor corrupted! Please file a bug report.";
 const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
+#[async_trait]
 trait BlockList: TensorInstance + Transact + 'static {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
@@ -62,13 +64,13 @@ trait BlockList: TensorInstance + Transact + 'static {
         })
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>>;
+    ) -> TCResult<TCTryStream<Number>>;
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number>;
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number>;
 
     fn read_value_at_owned<'a>(
         self: Arc<Self>,
@@ -78,19 +80,14 @@ trait BlockList: TensorInstance + Transact + 'static {
         Box::pin(async move { self.read_value_at(&txn, &coord).await })
     }
 
-    fn write_value<'a>(
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
         number: Number,
-    ) -> TCBoxTryFuture<'a, ()>;
+    ) -> TCResult<()>;
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()>;
+    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()>;
 }
 
 #[derive(Clone)]
@@ -145,6 +142,7 @@ impl TensorInstance for BlockListCombine {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListCombine {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
@@ -162,62 +160,56 @@ impl BlockList for BlockListCombine {
         })
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(async move {
-            let rebase = transform::Slice::new(self.left.shape().clone(), bounds.clone())?;
-            let left = Arc::new(BlockListSlice {
-                source: self.left.clone(),
-                rebase,
-            });
+    ) -> TCResult<TCTryStream<Number>> {
+        let rebase = transform::Slice::new(self.left.shape().clone(), bounds.clone())?;
+        let left = Arc::new(BlockListSlice {
+            source: self.left.clone(),
+            rebase,
+        });
 
-            let rebase = transform::Slice::new(self.right.shape().clone(), bounds)?;
-            let right = Arc::new(BlockListSlice {
-                source: self.right.clone(),
-                rebase,
-            });
+        let rebase = transform::Slice::new(self.right.shape().clone(), bounds)?;
+        let right = Arc::new(BlockListSlice {
+            source: self.right.clone(),
+            rebase,
+        });
 
-            let slice = Arc::new(BlockListCombine::new(
-                left,
-                right,
-                self.combinator,
-                self.value_combinator,
-                self.dtype,
-            )?);
-            slice.value_stream(txn).await
-        })
+        let slice = Arc::new(BlockListCombine::new(
+            left,
+            right,
+            self.combinator,
+            self.value_combinator,
+            self.dtype,
+        )?);
+        slice.value_stream(txn).await
     }
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move {
-            let left = self.left.read_value_at(txn, coord);
-            let right = self.right.read_value_at(txn, coord);
-            let (left, right) = try_join!(left, right)?;
-            let combinator = self.value_combinator;
-            Ok(combinator(left, right))
-        })
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        let left = self.left.read_value_at(txn, coord);
+        let right = self.right.read_value_at(txn, coord);
+        let (left, right) = try_join!(left, right)?;
+        let combinator = self.value_combinator;
+        Ok(combinator(left, right))
     }
 
-    fn write_value<'a>(
+    async fn write_value(
         self: Arc<Self>,
         _txn_id: TxnId,
         _bounds: Bounds,
         _number: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
+    ) -> TCResult<()> {
+        Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at<'a>(
-        &'a self,
+    fn write_value_at(
+        &self,
         _txn_id: TxnId,
         _coord: Vec<u64>,
         _value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
@@ -376,6 +368,7 @@ impl TensorInstance for BlockListFile {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListFile {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
@@ -398,167 +391,146 @@ impl BlockList for BlockListFile {
         })
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(async move {
-            if bounds.deref() == self.shape().all().deref() {
-                return self.value_stream(txn).await;
-            }
+    ) -> TCResult<TCTryStream<Number>> {
+        if bounds.deref() == self.shape().all().deref() {
+            return self.value_stream(txn).await;
+        }
 
-            if !self.shape.contains_bounds(&bounds) {
-                return Err(error::bad_request("Invalid bounds", bounds));
-            }
+        if !self.shape.contains_bounds(&bounds) {
+            return Err(error::bad_request("Invalid bounds", bounds));
+        }
 
-            let ndim = bounds.ndim(self.shape());
+        let ndim = bounds.ndim(self.shape());
 
-            let coord_bounds = af::Array::new(
-                &self.coord_bounds,
-                af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
-            );
+        let coord_bounds = af::Array::new(
+            &self.coord_bounds,
+            af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
+        );
 
-            let selected = stream::iter(bounds.affected())
-                .chunks(PER_BLOCK)
-                .then(move |coords| {
-                    let (block_ids, af_indices, af_offsets, num_coords) =
-                        coord_block(coords.into_iter(), &coord_bounds, PER_BLOCK, ndim);
+        let selected = stream::iter(bounds.affected())
+            .chunks(PER_BLOCK)
+            .then(move |coords| {
+                let (block_ids, af_indices, af_offsets, num_coords) =
+                    coord_block(coords.into_iter(), &coord_bounds, PER_BLOCK, ndim);
 
-                    let this = self.clone();
-                    let txn = txn.clone();
+                let this = self.clone();
+                let txn = txn.clone();
 
-                    Box::pin(async move {
-                        let mut start = 0.0f64;
-                        let mut values = vec![];
-                        for block_id in block_ids {
-                            let (block_offsets, new_start) = block_offsets(
-                                &af_indices,
-                                &af_offsets,
-                                num_coords,
-                                start,
-                                block_id,
-                            );
+                Box::pin(async move {
+                    let mut start = 0.0f64;
+                    let mut values = vec![];
+                    for block_id in block_ids {
+                        let (block_offsets, new_start) =
+                            block_offsets(&af_indices, &af_offsets, num_coords, start, block_id);
 
-                            match this
-                                .file
-                                .clone()
-                                .get_block(txn.id(), &block_id.into())
-                                .await
-                            {
-                                Ok(block) => {
-                                    let array: &Array = block.deref().try_into().unwrap();
-                                    values.extend(array.get(block_offsets));
-                                }
-                                Err(cause) => return stream::iter(vec![Err(cause)]),
+                        match this
+                            .file
+                            .clone()
+                            .get_block(txn.id(), &block_id.into())
+                            .await
+                        {
+                            Ok(block) => {
+                                let array: &Array = block.deref().try_into().unwrap();
+                                values.extend(array.get(block_offsets));
                             }
-
-                            start = new_start;
+                            Err(cause) => return stream::iter(vec![Err(cause)]),
                         }
 
-                        let values: Vec<TCResult<Number>> = values.into_iter().map(Ok).collect();
-                        stream::iter(values)
-                    })
-                });
+                        start = new_start;
+                    }
 
-            let selected: TCTryStream<Number> = Box::pin(selected.flatten());
-            Ok(selected)
-        })
+                    let values: Vec<TCResult<Number>> = values.into_iter().map(Ok).collect();
+                    stream::iter(values)
+                })
+            });
+
+        let selected: TCTryStream<Number> = Box::pin(selected.flatten());
+        Ok(selected)
     }
 
-    fn write_value<'a>(
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        if !self.shape().contains_coord(coord) {
+            let coord: Vec<String> = coord.iter().map(|c| c.to_string()).collect();
+            return Err(error::bad_request(
+                "Coordinate is out of bounds",
+                coord.join(", "),
+            ));
+        }
+
+        let offset: u64 = self
+            .coord_bounds
+            .iter()
+            .zip(coord.iter())
+            .map(|(d, x)| d * x)
+            .sum();
+        let block_id = BlockId::from(offset / PER_BLOCK as u64);
+        let block = self.file.get_block(txn.id(), &block_id).await?;
+        block
+            .deref()
+            .get_value((offset % PER_BLOCK as u64) as usize)
+            .ok_or_else(|| error::internal(ERR_CORRUPT))
+    }
+
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
         value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            if !self.shape().contains_bounds(&bounds) {
-                return Err(error::bad_request("Bounds out of bounds", bounds));
-            }
+    ) -> TCResult<()> {
+        if !self.shape().contains_bounds(&bounds) {
+            return Err(error::bad_request("Bounds out of bounds", bounds));
+        }
 
-            let ndim = bounds.ndim(self.shape());
+        let ndim = bounds.ndim(self.shape());
 
-            let coord_bounds = af::Array::new(
-                &self.coord_bounds,
-                af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
-            );
+        let coord_bounds = af::Array::new(
+            &self.coord_bounds,
+            af::Dim4::new(&[self.ndim() as u64, 1, 1, 1]),
+        );
 
-            stream::iter(bounds.affected())
-                .chunks(PER_BLOCK)
-                .map(|coords| {
-                    let (block_ids, af_indices, af_offsets, num_coords) =
-                        coord_block(coords.into_iter(), &coord_bounds, PER_BLOCK, ndim);
+        stream::iter(bounds.affected())
+            .chunks(PER_BLOCK)
+            .map(|coords| {
+                let (block_ids, af_indices, af_offsets, num_coords) =
+                    coord_block(coords.into_iter(), &coord_bounds, PER_BLOCK, ndim);
 
-                    let this = self.clone();
-                    let value = value.clone();
-                    let txn_id = txn_id;
+                let this = self.clone();
+                let value = value.clone();
+                let txn_id = txn_id;
 
-                    Ok(async move {
-                        let mut start = 0.0f64;
-                        for block_id in block_ids {
-                            let value = value.clone();
-                            let (block_offsets, new_start) = block_offsets(
-                                &af_indices,
-                                &af_offsets,
-                                num_coords,
-                                start,
-                                block_id,
-                            );
+                Ok(async move {
+                    let mut start = 0.0f64;
+                    for block_id in block_ids {
+                        let value = value.clone();
+                        let (block_offsets, new_start) =
+                            block_offsets(&af_indices, &af_offsets, num_coords, start, block_id);
 
-                            let block_id = BlockId::from(block_id);
-                            let mut block = this
-                                .file
-                                .get_block(&txn_id, &block_id)
-                                .await?
-                                .upgrade()
-                                .await?;
+                        let block_id = BlockId::from(block_id);
+                        let mut block = this
+                            .file
+                            .get_block(&txn_id, &block_id)
+                            .await?
+                            .upgrade()
+                            .await?;
 
-                            let value = Array::constant(value, (new_start - start) as usize);
-                            block.deref_mut().set(block_offsets, &value)?;
-                            start = new_start;
-                        }
+                        let value = Array::constant(value, (new_start - start) as usize);
+                        block.deref_mut().set(block_offsets, &value)?;
+                        start = new_start;
+                    }
 
-                        Ok(())
-                    })
+                    Ok(())
                 })
-                .try_buffer_unordered(2)
-                .fold(Ok(()), |_, r| future::ready(r))
-                .await
-        })
+            })
+            .try_buffer_unordered(2)
+            .fold(Ok(()), |_, r| future::ready(r))
+            .await
     }
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move {
-            if !self.shape().contains_coord(coord) {
-                let coord: Vec<String> = coord.iter().map(|c| c.to_string()).collect();
-                return Err(error::bad_request(
-                    "Coordinate is out of bounds",
-                    coord.join(", "),
-                ));
-            }
-
-            let offset: u64 = self
-                .coord_bounds
-                .iter()
-                .zip(coord.iter())
-                .map(|(d, x)| d * x)
-                .sum();
-            let block_id = BlockId::from(offset / PER_BLOCK as u64);
-            let block = self.file.get_block(txn.id(), &block_id).await?;
-            block
-                .deref()
-                .get_value((offset % PER_BLOCK as u64) as usize)
-                .ok_or_else(|| error::internal(ERR_CORRUPT))
-        })
-    }
-
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
         Box::pin(async move {
             if !self.shape().contains_coord(&coord) {
                 return Err(error::bad_request(
@@ -630,63 +602,58 @@ impl TensorInstance for BlockListBroadcast {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListBroadcast {
     fn value_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         let bounds = Bounds::all(self.shape());
         self.value_stream_slice(txn, bounds)
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(async move {
-            let rebase = self.rebase.clone();
-            let num_coords = bounds.size();
-            let source_bounds = self.rebase.invert_bounds(bounds);
-            let source_coords = source_bounds.affected();
-            let coords = source_coords
-                .map(move |coord| rebase.map_coord(coord))
-                .flatten();
+    ) -> TCResult<TCTryStream<Number>> {
+        let rebase = self.rebase.clone();
+        let num_coords = bounds.size();
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        let source_coords = source_bounds.affected();
+        let coords = source_coords
+            .map(move |coord| rebase.map_coord(coord))
+            .flatten();
 
-            let values = sort_coords(
-                txn.subcontext_tmp().await?,
-                stream::iter(coords.map(TCResult::Ok)),
-                num_coords,
-                self.shape(),
-            )
-            .await?
-            .and_then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
-            let values: TCTryStream<Number> = Box::pin(values);
-            Ok(values)
-        })
+        let values = sort_coords(
+            txn.subcontext_tmp().await?,
+            stream::iter(coords.map(TCResult::Ok)),
+            num_coords,
+            self.shape(),
+        )
+        .await?
+        .and_then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
+        let values: TCTryStream<Number> = Box::pin(values);
+        Ok(values)
     }
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move {
-            let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn, &coord).await
-        })
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        let coord = self.rebase.invert_coord(coord);
+        self.source.read_value_at(txn, &coord).await
     }
 
-    fn write_value<'a>(
+    async fn write_value(
         self: Arc<Self>,
         _txn_id: TxnId,
         _bounds: Bounds,
         _number: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
+    ) -> TCResult<()> {
+        Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at<'a>(
-        &'a self,
+    fn write_value_at(
+        &self,
         _txn_id: TxnId,
         _coord: Vec<u64>,
         _value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
@@ -731,6 +698,7 @@ impl TensorInstance for BlockListCast {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListCast {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
@@ -742,49 +710,44 @@ impl BlockList for BlockListCast {
         })
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(async move {
-            let dtype = self.dtype;
-            let value_stream = self
-                .source
-                .clone()
-                .value_stream_slice(txn, bounds)
-                .await?
-                .map_ok(move |value| value.into_type(dtype));
-
-            let value_stream: TCTryStream<Number> = Box::pin(value_stream);
-            Ok(value_stream)
-        })
-    }
-
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    ) -> TCResult<TCTryStream<Number>> {
         let dtype = self.dtype;
-        Box::pin(
-            self.source
-                .read_value_at(txn, coord)
-                .map_ok(move |value| value.into_type(dtype)),
-        )
+        let value_stream = self
+            .source
+            .clone()
+            .value_stream_slice(txn, bounds)
+            .await?
+            .map_ok(move |value| value.into_type(dtype));
+
+        let value_stream: TCTryStream<Number> = Box::pin(value_stream);
+        Ok(value_stream)
     }
 
-    fn write_value<'a>(
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        let dtype = self.dtype;
+        self.source
+            .read_value_at(txn, coord)
+            .map_ok(move |value| value.into_type(dtype))
+            .await
+    }
+
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
         number: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        self.source.clone().write_value(txn_id, bounds, number)
+    ) -> TCResult<()> {
+        self.source
+            .clone()
+            .write_value(txn_id, bounds, number)
+            .await
     }
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
         self.source.write_value_at(txn_id, coord, value)
     }
 }
@@ -827,6 +790,7 @@ impl TensorInstance for BlockListExpand {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListExpand {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         self.source.clone().block_stream(txn)
@@ -836,38 +800,34 @@ impl BlockList for BlockListExpand {
         self.source.clone().value_stream(txn)
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
+    ) -> TCResult<TCTryStream<Number>> {
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.clone().value_stream_slice(txn, bounds)
+        self.source.clone().value_stream_slice(txn, bounds).await
     }
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move {
-            let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn, &coord).await
-        })
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        let coord = self.rebase.invert_coord(coord);
+        self.source.read_value_at(txn, &coord).await
     }
 
-    fn write_value<'a>(
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
         number: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCResult<()> {
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.clone().write_value(txn_id, bounds, number)
+        self.source
+            .clone()
+            .write_value(txn_id, bounds, number)
+            .await
     }
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
     }
@@ -924,6 +884,7 @@ impl TensorInstance for BlockListReduce {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListReduce {
     fn value_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         Box::pin(async move {
@@ -940,46 +901,40 @@ impl BlockList for BlockListReduce {
         })
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(async move {
-            let (source_bounds, slice_reduce_axis) = self.rebase.invert_bounds(bounds);
-            let slice = self.source.slice(source_bounds)?;
-            BlockListReduce::new(slice, slice_reduce_axis, self.reductor)
-                .map(Arc::new)?
-                .value_stream(txn)
-                .await
-        })
+    ) -> TCResult<TCTryStream<Number>> {
+        let (source_bounds, slice_reduce_axis) = self.rebase.invert_bounds(bounds);
+        let slice = self.source.slice(source_bounds)?;
+        BlockListReduce::new(slice, slice_reduce_axis, self.reductor)
+            .map(Arc::new)?
+            .value_stream(txn)
+            .await
     }
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move {
-            let reductor = self.reductor;
-            let source_bounds = self.rebase.invert_coord(coord);
-            reductor(&self.source.slice(source_bounds)?, txn.clone()).await
-        })
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        let reductor = self.reductor;
+        let source_bounds = self.rebase.invert_coord(coord);
+        reductor(&self.source.slice(source_bounds)?, txn.clone()).await
     }
 
-    fn write_value<'a>(
+    async fn write_value(
         self: Arc<Self>,
         _txn_id: TxnId,
         _bounds: Bounds,
         _number: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
+    ) -> TCResult<()> {
+        Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at<'a>(
-        &'a self,
+    fn write_value_at(
+        &self,
         _txn_id: TxnId,
         _coord: Vec<u64>,
         _value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
@@ -1024,6 +979,7 @@ impl TensorInstance for BlockListReshape {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListReshape {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         self.source.clone().block_stream(txn)
@@ -1033,80 +989,68 @@ impl BlockList for BlockListReshape {
         self.source.clone().value_stream(txn)
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(async move {
-            if self.ndim() == 1 {
-                let (start, end) = self.rebase.offsets(&bounds);
-                let source_bounds: Bounds = vec![AxisBounds::from(start..end)].into();
-                let rebase =
-                    transform::Slice::new(self.source.shape().clone(), source_bounds.clone())?;
+    ) -> TCResult<TCTryStream<Number>> {
+        if self.ndim() == 1 {
+            let (start, end) = self.rebase.offsets(&bounds);
+            let source_bounds: Bounds = vec![AxisBounds::from(start..end)].into();
+            let rebase = transform::Slice::new(self.source.shape().clone(), source_bounds.clone())?;
 
-                let slice = Arc::new(BlockListSlice {
-                    source: self.source.clone(),
-                    rebase,
-                });
+            let slice = Arc::new(BlockListSlice {
+                source: self.source.clone(),
+                rebase,
+            });
 
-                let value_stream = stream::iter(source_bounds.affected())
-                    .zip(slice.value_stream(txn).await?)
-                    .map(|(coord, r)| r.map(|value| (coord, value)))
-                    .try_filter(move |(coord, _)| future::ready(bounds.contains_coord(coord)))
-                    .map_ok(|(_, value)| value);
-                let value_stream: TCTryStream<Number> = Box::pin(value_stream);
-                Ok(value_stream)
-            } else {
-                let rebase = transform::Reshape::new(
-                    self.source.shape().clone(),
-                    vec![self.source.size()].into(),
-                )?;
+            let value_stream = stream::iter(source_bounds.affected())
+                .zip(slice.value_stream(txn).await?)
+                .map(|(coord, r)| r.map(|value| (coord, value)))
+                .try_filter(move |(coord, _)| future::ready(bounds.contains_coord(coord)))
+                .map_ok(|(_, value)| value);
+            let value_stream: TCTryStream<Number> = Box::pin(value_stream);
+            Ok(value_stream)
+        } else {
+            let rebase = transform::Reshape::new(
+                self.source.shape().clone(),
+                vec![self.source.size()].into(),
+            )?;
 
-                let flat = Arc::new(BlockListReshape {
-                    source: self.source.clone(),
-                    rebase,
-                });
+            let flat = Arc::new(BlockListReshape {
+                source: self.source.clone(),
+                rebase,
+            });
 
-                let rebase = transform::Reshape::new(flat.shape().clone(), self.shape().clone())?;
-                let unflat = Arc::new(BlockListReshape {
-                    source: flat,
-                    rebase,
-                });
+            let rebase = transform::Reshape::new(flat.shape().clone(), self.shape().clone())?;
+            let unflat = Arc::new(BlockListReshape {
+                source: flat,
+                rebase,
+            });
 
-                unflat.value_stream_slice(txn, bounds).await
-            }
-        })
+            unflat.value_stream_slice(txn, bounds).await
+        }
     }
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move {
-            let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn, &coord).await
-        })
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        let coord = self.rebase.invert_coord(coord);
+        self.source.read_value_at(txn, &coord).await
     }
 
-    fn write_value<'a>(
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
         value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            stream::iter(bounds.affected())
-                .map(|coord| Ok(self.write_value_at(txn_id, coord, value.clone())))
-                .try_buffer_unordered(2)
-                .try_fold((), |_, _| future::ready(Ok(())))
-                .await
-        })
+    ) -> TCResult<()> {
+        stream::iter(bounds.affected())
+            .map(|coord| Ok(self.write_value_at(txn_id, coord, value.clone())))
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
     }
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
         self.source
             .write_value_at(txn_id, self.rebase.invert_coord(&coord), value)
     }
@@ -1150,6 +1094,7 @@ impl TensorInstance for BlockListSlice {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListSlice {
     fn value_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         self.source
@@ -1157,39 +1102,36 @@ impl BlockList for BlockListSlice {
             .value_stream_slice(txn, self.rebase.bounds().clone())
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
+    ) -> TCResult<TCTryStream<Number>> {
         self.source
             .clone()
             .value_stream_slice(txn, self.rebase.invert_bounds(bounds))
+            .await
     }
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move {
-            let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn, &coord).await
-        })
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        let coord = self.rebase.invert_coord(coord);
+        self.source.read_value_at(txn, &coord).await
     }
 
-    fn write_value<'a>(
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
         number: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCResult<()> {
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.clone().write_value(txn_id, bounds, number)
+        self.source
+            .clone()
+            .write_value(txn_id, bounds, number)
+            .await
     }
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
     }
@@ -1238,6 +1180,7 @@ impl TensorInstance for BlockListSparse {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListSparse {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
@@ -1286,42 +1229,33 @@ impl BlockList for BlockListSparse {
         })
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(async move {
-            let source = self.source.clone().slice(bounds)?;
-            let blocks = Arc::new(BlockListSparse::new(source));
-            blocks.value_stream(txn).await
-        })
+    ) -> TCResult<TCTryStream<Number>> {
+        let source = self.source.clone().slice(bounds)?;
+        let blocks = Arc::new(BlockListSparse::new(source));
+        blocks.value_stream(txn).await
     }
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        self.source.read_value(txn, coord)
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        self.source.read_value(txn, coord).await
     }
 
-    fn write_value<'a>(
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
         number: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            self.source
-                .clone()
-                .write_value(txn_id, bounds, number)
-                .await
-        })
+    ) -> TCResult<()> {
+        self.source
+            .clone()
+            .write_value(txn_id, bounds, number)
+            .await
     }
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
         self.source.write_value_at(txn_id, coord, value)
     }
 }
@@ -1364,6 +1298,7 @@ impl TensorInstance for BlockListTranspose {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListTranspose {
     fn value_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         Box::pin(async move {
@@ -1374,42 +1309,36 @@ impl BlockList for BlockListTranspose {
         })
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(async move {
-            let values = stream::iter(bounds.affected())
-                .then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
-            let values: TCTryStream<Number> = Box::pin(values);
-            Ok(values)
-        })
+    ) -> TCResult<TCTryStream<Number>> {
+        let values = stream::iter(bounds.affected())
+            .then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
+        let values: TCTryStream<Number> = Box::pin(values);
+        Ok(values)
     }
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
-        Box::pin(async move {
-            let coord = self.rebase.invert_coord(coord);
-            self.source.read_value_at(txn, &coord).await
-        })
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        let coord = self.rebase.invert_coord(coord);
+        self.source.read_value_at(txn, &coord).await
     }
 
-    fn write_value<'a>(
+    async fn write_value(
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
         number: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCResult<()> {
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.clone().write_value(txn_id, bounds, number)
+        self.source
+            .clone()
+            .write_value(txn_id, bounds, number)
+            .await
     }
 
-    fn write_value_at<'a>(
-        &'a self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
     }
@@ -1455,6 +1384,7 @@ impl TensorInstance for BlockListUnary {
     }
 }
 
+#[async_trait]
 impl BlockList for BlockListUnary {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
@@ -1471,44 +1401,43 @@ impl BlockList for BlockListUnary {
         })
     }
 
-    fn value_stream_slice<'a>(
+    async fn value_stream_slice(
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        Box::pin(async move {
-            let rebase = transform::Slice::new(self.source.shape().clone(), bounds)?;
-            let slice = Arc::new(BlockListSlice {
-                source: self.source.clone(),
-                rebase,
-            });
+    ) -> TCResult<TCTryStream<Number>> {
+        let rebase = transform::Slice::new(self.source.shape().clone(), bounds)?;
+        let slice = Arc::new(BlockListSlice {
+            source: self.source.clone(),
+            rebase,
+        });
 
-            slice.value_stream(txn).await
-        })
+        slice.value_stream(txn).await
     }
 
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: &'a [u64]) -> TCBoxTryFuture<'a, Number> {
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
         let transform = self.value_transform;
-        Box::pin(self.source.read_value_at(txn, coord).map_ok(transform))
+        self.source
+            .read_value_at(txn, coord)
+            .map_ok(transform)
+            .await
     }
 
-    fn write_value<'a>(
+    async fn write_value(
         self: Arc<Self>,
         _txn_id: TxnId,
         _bounds: Bounds,
         _number: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(future::ready(Err(error::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
+    ) -> TCResult<()> {
+        Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at<'a>(
-        &'a self,
+    fn write_value_at(
+        &self,
         _txn_id: TxnId,
         _coord: Vec<u64>,
         _value: Number,
-    ) -> TCBoxTryFuture<'a, ()> {
+    ) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
