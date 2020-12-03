@@ -412,7 +412,7 @@ impl BlockList for BlockListFile {
                 return Err(error::bad_request("Invalid bounds", bounds));
             }
 
-            let ndim = bounds.ndim();
+            let ndim = bounds.ndim(self.shape());
 
             let coord_bounds = af::Array::new(
                 &self.coord_bounds,
@@ -477,7 +477,7 @@ impl BlockList for BlockListFile {
                 return Err(error::bad_request("Bounds out of bounds", bounds));
             }
 
-            let ndim = bounds.ndim();
+            let ndim = bounds.ndim(self.shape());
 
             let coord_bounds = af::Array::new(
                 &self.coord_bounds,
@@ -648,12 +648,11 @@ impl BlockList for BlockListBroadcast {
             let source_coords = source_bounds.affected();
             let coords = source_coords
                 .map(move |coord| rebase.map_coord(coord))
-                .flatten()
-                .map(TCResult::Ok);
+                .flatten();
 
             let values = sort_coords(
                 txn.subcontext_tmp().await?,
-                stream::iter(coords),
+                stream::iter(coords.map(TCResult::Ok)),
                 num_coords,
                 self.shape(),
             )

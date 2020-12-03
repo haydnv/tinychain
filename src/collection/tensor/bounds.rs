@@ -263,7 +263,7 @@ impl Bounds {
         })
     }
 
-    pub fn ndim(&self) -> usize {
+    pub fn ndim(&self, shape: &Shape) -> usize {
         let mut ndim = 0;
         use AxisBounds::*;
         for axis in &self.axes {
@@ -272,7 +272,8 @@ impl Bounds {
                 _ => ndim += 1,
             }
         }
-        ndim
+
+        ndim + (shape.len() - self.len())
     }
 
     pub fn normalize(&mut self, shape: &Shape) {
