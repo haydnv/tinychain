@@ -136,21 +136,18 @@ impl CollectionClass for TensorBaseType {
                 ));
             }
 
-            let bounds = Bounds::all(&shape);
-            let tensor = self.zeros(txn, dtype, shape).await?;
-
-            let view = TensorView::from(tensor.clone());
-            let zero = dtype.zero();
-            stream::iter(
-                bounds
-                    .affected()
-                    .zip(values)
-                    .filter(|(_, value)| value != &zero),
-            )
-            .map(|(coord, value)| Ok(view.write_value_at(txn.id().clone(), coord, value)))
-            .try_buffer_unordered(2usize)
-            .try_fold((), |(), ()| future::ready(Ok(())))
-            .await?;
+            let tensor = match self {
+                Self::Dense => {
+                    let file =
+                        BlockListFile::from_values(txn, shape, dtype, stream::iter(values)).await?;
+                    TensorBase::Dense(file)
+                }
+                Self::Sparse => {
+                    let table =
+                        SparseTable::from_values(txn, shape, dtype, stream::iter(values)).await?;
+                    TensorBase::Sparse(table)
+                }
+            };
 
             Ok(tensor)
         } else {

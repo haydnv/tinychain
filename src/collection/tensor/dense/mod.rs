@@ -7,7 +7,6 @@ use arrayfire as af;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
-use itertools::Itertools;
 use num::integer::div_ceil;
 
 use crate::block::BlockId;
@@ -304,10 +303,11 @@ impl BlockListFile {
         let mut values = values.chunks(PER_BLOCK);
         while let Some(chunk) = values.next().await {
             let block_id = BlockId::from(i);
-            let block = Array::try_from_values(chunk, dtype)?;
+            let block = Array::cast_from_values(chunk, dtype)?;
             file.clone()
                 .create_block(txn.id().clone(), block_id, block)
                 .await?;
+
             i += 1;
         }
 
@@ -563,14 +563,11 @@ impl BlockList for BlockListFile {
             if !self.shape().contains_coord(&coord) {
                 return Err(error::bad_request(
                     "Invalid coordinate",
-                    format!("[{}]", coord.iter().map(|x| x.to_string()).join(", ")),
-                ));
-            } else if value.class() != self.dtype() {
-                return Err(error::bad_request(
-                    "Wrong class for tensor value",
-                    value.class(),
+                    format!("[{:?}]", coord),
                 ));
             }
+
+            let value = value.into_type(self.dtype);
 
             let offset: u64 = self
                 .coord_bounds

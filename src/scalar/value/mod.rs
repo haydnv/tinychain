@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::iter::FromIterator;
 
 use bytes::Bytes;
 use log::debug;
@@ -18,7 +19,6 @@ pub mod string;
 pub mod version;
 
 pub use class::*;
-use itertools::__std_iter::FromIterator;
 pub use link::*;
 pub use number::*;
 pub use string::*;

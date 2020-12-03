@@ -7,9 +7,7 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::scalar::{
-    CastFrom, CastInto, Link, PathSegment, ScalarInstance, TryCastFrom, Value, ValueInstance,
-};
+use crate::scalar::{CastFrom, CastInto, Link, PathSegment, ScalarInstance, Value, ValueInstance};
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{NumberClass, NumberInstance};
@@ -204,15 +202,32 @@ impl CastFrom<Number> for Complex {
 }
 
 impl CastFrom<Complex> for Boolean {
-    fn cast_from(c: Complex) -> Boolean {
-        use Complex::*;
+    fn cast_from(c: Complex) -> Self {
         match c {
-            C32(c) if c.norm_sqr() == 0f32 => Boolean(false),
-            C64(c) if c.norm_sqr() == 0f64 => Boolean(false),
+            Complex::C32(c) if c.norm_sqr() == 0f32 => Boolean(false),
+            Complex::C64(c) if c.norm_sqr() == 0f64 => Boolean(false),
             _ => Boolean(true),
         }
     }
 }
+
+impl CastFrom<Complex> for num::Complex<f32> {
+    fn cast_from(c: Complex) -> Self {
+        match c {
+            Complex::C32(c) => c,
+            Complex::C64(num::Complex { re, im }) => num::Complex::new(re as f32, im as f32),
+        }
+    }
+}
+
+// impl CastFrom<Complex> for num::Complex<f64> {
+//     fn cast_from(c: Complex) -> Self {
+//         match c {
+//             Self::C32(num::Complex { re, im }) => num::Complex::new(re as f64, im as f64),
+//             Self::C64(c) => c,
+//         }
+//     }
+// }
 
 impl Add for Complex {
     type Output = Self;
@@ -459,6 +474,15 @@ impl CastFrom<Float> for Boolean {
         };
 
         Boolean(b)
+    }
+}
+
+impl CastFrom<Float> for f32 {
+    fn cast_from(f: Float) -> f32 {
+        match f {
+            Float::F32(f) => f,
+            Float::F64(f) => f as f32,
+        }
     }
 }
 
@@ -1005,6 +1029,42 @@ impl CastFrom<UInt> for bool {
             U32(u) if u == 0u32 => false,
             U64(u) if u == 0u64 => false,
             _ => true,
+        }
+    }
+}
+
+impl CastFrom<UInt> for u8 {
+    fn cast_from(u: UInt) -> u8 {
+        use UInt::*;
+        match u {
+            U8(u) => u,
+            U16(u) => u as u8,
+            U32(u) => u as u8,
+            U64(u) => u as u8,
+        }
+    }
+}
+
+impl CastFrom<UInt> for u16 {
+    fn cast_from(u: UInt) -> u16 {
+        use UInt::*;
+        match u {
+            U8(u) => u as u16,
+            U16(u) => u,
+            U32(u) => u as u16,
+            U64(u) => u as u16,
+        }
+    }
+}
+
+impl CastFrom<UInt> for u32 {
+    fn cast_from(u: UInt) -> u32 {
+        use UInt::*;
+        match u {
+            U8(u) => u as u32,
+            U16(u) => u as u32,
+            U32(u) => u,
+            U64(u) => u as u32,
         }
     }
 }
@@ -1635,16 +1695,6 @@ impl TryFrom<Number> for Int {
     }
 }
 
-impl TryCastFrom<Number> for i64 {
-    fn can_cast_from(number: &Number) -> bool {
-        Int::can_cast_from(number)
-    }
-
-    fn opt_cast_from(number: Number) -> Option<i64> {
-        Int::opt_cast_from(number).map(i64::from)
-    }
-}
-
 impl TryFrom<Number> for UInt {
     type Error = error::TCError;
 
@@ -1662,26 +1712,6 @@ impl TryFrom<Number> for u64 {
     fn try_from(n: Number) -> TCResult<u64> {
         let u: UInt = n.try_into()?;
         Ok(u.into())
-    }
-}
-
-impl TryCastFrom<Number> for u64 {
-    fn can_cast_from(number: &Number) -> bool {
-        UInt::can_cast_from(number)
-    }
-
-    fn opt_cast_from(number: Number) -> Option<u64> {
-        UInt::opt_cast_from(number).map(u64::from)
-    }
-}
-
-impl TryCastFrom<Number> for usize {
-    fn can_cast_from(number: &Number) -> bool {
-        UInt::can_cast_from(number)
-    }
-
-    fn opt_cast_from(number: Number) -> Option<usize> {
-        UInt::opt_cast_from(number).map(usize::from)
     }
 }
 

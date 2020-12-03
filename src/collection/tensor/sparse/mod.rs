@@ -1107,10 +1107,9 @@ impl SparseTable {
         Ok(table)
     }
 
-    pub async fn create(txn: &Txn, shape: Shape, dtype: NumberType) -> TCResult<SparseTable> {
+    pub async fn create(txn: &Txn, shape: Shape, dtype: NumberType) -> TCResult<Self> {
         let table = Self::create_table(txn, shape.len(), dtype).await?;
-
-        Ok(SparseTable {
+        Ok(Self {
             table,
             dtype,
             shape,
@@ -1121,8 +1120,30 @@ impl SparseTable {
         let key: Vec<Column> = Self::key(ndim);
         let value: Vec<Column> = vec![(VALUE.into(), ValueType::Number(dtype)).into()];
         let indices = (0..ndim).map(|axis| (axis.into(), vec![axis.into()]));
-
         Table::create(txn, (IndexSchema::from((key, value)), indices).into()).await
+    }
+
+    pub async fn from_values<S: Stream<Item = Number>>(
+        txn: &Txn,
+        shape: Shape,
+        dtype: NumberType,
+        values: S,
+    ) -> TCResult<Self> {
+        let zero = dtype.zero();
+        let bounds = Bounds::all(&shape);
+
+        let table = Self::create(txn, shape, dtype).await?;
+
+        let txn_id = *txn.id();
+        stream::iter(bounds.affected())
+            .zip(values)
+            .filter(|(_, value)| future::ready(value != &zero))
+            .map(|(coord, value)| Ok(table.write_value(txn_id, coord, value)))
+            .try_buffer_unordered(2usize)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(table)
     }
 
     pub fn try_from_table(table: TableIndex, shape: Shape) -> TCResult<SparseTable> {

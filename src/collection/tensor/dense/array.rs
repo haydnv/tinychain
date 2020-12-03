@@ -6,9 +6,9 @@ use arrayfire as af;
 use bytes::Bytes;
 
 use crate::block::BlockData;
-use crate::class::TCResult;
-use crate::error;
+use crate::error::{self, TCResult};
 use crate::scalar::value::number::*;
+use crate::scalar::CastFrom;
 
 const BATCH: bool = true;
 
@@ -958,6 +958,39 @@ impl Array {
         }
     }
 
+    pub fn cast_from_values(values: Vec<Number>, dtype: NumberType) -> TCResult<Array> {
+        use Array::*;
+        let chunk = match dtype {
+            NumberType::Bool => Bool(vec_cast_into(values).into()),
+            NumberType::Complex(c) => match c {
+                ComplexType::C32 => C32(vec_cast_into(values).into()),
+                ComplexType::C64 => C32(vec_cast_into(values).into()),
+            },
+            NumberType::Float(f) => match f {
+                FloatType::F32 => F32(vec_cast_into(values).into()),
+                FloatType::F64 => F32(vec_cast_into(values).into()),
+            },
+            NumberType::Int(i) => match i {
+                IntType::I16 => I16(vec_cast_into(values).into()),
+                IntType::I32 => I32(vec_cast_into(values).into()),
+                IntType::I64 => I64(vec_cast_into(values).into()),
+            },
+            NumberType::UInt(u) => match u {
+                UIntType::U8 => U8(vec_cast_into(values).into()),
+                UIntType::U16 => U16(vec_cast_into(values).into()),
+                UIntType::U32 => U32(vec_cast_into(values).into()),
+                UIntType::U64 => U64(vec_cast_into(values).into()),
+            },
+            NumberType::Number => {
+                return Err(error::unsupported(
+                    "Array requires a uniform type of Number",
+                ));
+            }
+        };
+
+        Ok(chunk)
+    }
+
     pub fn try_from_values(values: Vec<Number>, dtype: NumberType) -> TCResult<Array> {
         use Array::*;
         let chunk = match dtype {
@@ -1733,7 +1766,11 @@ fn vec_into<D, S: Into<D>>(source: Vec<S>) -> Vec<D> {
 }
 
 fn vec_try_into<D: TryFrom<S, Error = error::TCError>, S>(source: Vec<S>) -> TCResult<Vec<D>> {
-    source.into_iter().map(|i| i.try_into()).collect()
+    source.into_iter().map(D::try_from).collect()
+}
+
+fn vec_cast_into<D: CastFrom<S>, S>(source: Vec<S>) -> Vec<D> {
+    source.into_iter().map(D::cast_from).collect()
 }
 
 fn err_corrupt<T: fmt::Display>(info: T) -> error::TCError {
