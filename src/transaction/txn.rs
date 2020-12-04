@@ -227,6 +227,7 @@ impl Txn {
                         let dep_state = dereference_state(&graph, dep.id())?;
 
                         if !is_resolved(dep_state) {
+                            debug!("{} is not resolved (state is {})", dep.id(), dep_state);
                             ready = false;
                             unvisited.push(dep.id().clone());
                         }
@@ -247,6 +248,10 @@ impl Txn {
                 }
             }
 
+            if pending.is_empty() && !is_resolved(dereference_state(&graph, &capture)?) {
+                return Err(error::bad_request("Cannot resolve all dependencies of", capture));
+            }
+
             let current_state = graph.clone();
             let pending = pending.into_iter().map(|(name, tc_ref)| async {
                 match self.subcontext(name.clone()).await {
@@ -262,6 +267,8 @@ impl Txn {
             while let Some((name, result)) = pending.next().await {
                 if let Err(cause) = &result {
                     debug!("Error resolving {}: {}", name, cause);
+                } else {
+                    debug!("resolved {}", name);
                 }
 
                 let state = result?;
