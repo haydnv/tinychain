@@ -414,6 +414,9 @@ impl CollectionInstance for TensorView {
             }
         } else if path.len() == 1 {
             match path[0].as_str() {
+                "all" => {
+                    self.all(txn.clone()).await.map(Value::from).map(State::from)
+                }
                 "as_type" => {
                     let dtype: NumberType =
                         selector.try_cast_into(|v| error::bad_request("Invalid NumberType", v))?;

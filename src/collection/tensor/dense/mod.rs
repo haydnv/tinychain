@@ -1168,6 +1168,7 @@ impl TensorInstance for DenseTensor {
 impl TensorBoolean for DenseTensor {
     async fn all(&self, txn: Txn) -> TCResult<bool> {
         let mut blocks = self.blocks.clone().block_stream(txn).await?;
+
         while let Some(array) = blocks.next().await {
             if !array?.all() {
                 return Ok(false);

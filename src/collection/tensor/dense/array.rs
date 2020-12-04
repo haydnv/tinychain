@@ -626,8 +626,7 @@ impl ArrayInstanceAnyAll for ArrayExt<u64> {}
 
 impl ArrayInstanceAnyAll for ArrayExt<num::Complex<f32>> {
     fn all(&self) -> bool {
-        let all = af::all_true_all(self.af());
-        all.0 > 0.0f64 && all.1 > 0.0f64
+        af::all_true_all(&af::abs(self.af())).0 > 0f64
     }
 
     fn any(&self) -> bool {
@@ -638,8 +637,7 @@ impl ArrayInstanceAnyAll for ArrayExt<num::Complex<f32>> {
 
 impl ArrayInstanceAnyAll for ArrayExt<num::Complex<f64>> {
     fn all(&self) -> bool {
-        let all = af::all_true_all(self.af());
-        all.0 > 0.0f64 && all.1 > 0.0f64
+        af::all_true_all(&af::abs(self.af())).0 > 0f64
     }
 
     fn any(&self) -> bool {

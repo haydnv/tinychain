@@ -210,6 +210,12 @@ impl From<Scalar> for State {
     }
 }
 
+impl From<Value> for State {
+    fn from(v: Value) -> State {
+        Self::Scalar(Scalar::from(v))
+    }
+}
+
 impl From<()> for State {
     fn from(_: ()) -> State {
         Self::Scalar(Scalar::Value(Value::None))
