@@ -417,6 +417,9 @@ impl CollectionInstance for TensorView {
                 "all" => {
                     self.all(txn.clone()).await.map(Value::from).map(State::from)
                 }
+                "any" => {
+                    self.any(txn.clone()).await.map(Value::from).map(State::from)
+                }
                 "as_type" => {
                     let dtype: NumberType =
                         selector.try_cast_into(|v| error::bad_request("Invalid NumberType", v))?;
