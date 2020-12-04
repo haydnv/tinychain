@@ -100,6 +100,7 @@ impl BlockListFile {
                 .await?
                 .upgrade()
                 .await?;
+
             block.sort();
             return Ok(());
         }
@@ -147,14 +148,11 @@ impl TensorInstance for BlockListFile {
 impl BlockList for BlockListFile {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
+            let file = self.file.clone();
             let block_stream = Box::pin(
                 stream::iter(0..(div_ceil(self.size(), PER_BLOCK as u64)))
                     .map(BlockId::from)
-                    .then(move |block_id| {
-                        self.file
-                            .clone()
-                            .get_block_owned(txn.id().clone(), block_id)
-                    }),
+                    .then(move |block_id| file.clone().get_block_owned(txn.id().clone(), block_id)),
             );
 
             let block_stream =
@@ -372,55 +370,66 @@ pub async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Unpin + '
     num_coords: u64,
     shape: &Shape,
 ) -> TCResult<impl Stream<Item = TCResult<Vec<u64>>>> {
-    let ndim = shape.len();
-    let coord_bounds: Vec<u64> = (0..shape.len())
-        .map(|axis| shape[axis + 1..].iter().product())
-        .collect();
-    let coord_bounds: af::Array<u64> =
-        af::Array::new(&coord_bounds, af::Dim4::new(&[ndim as u64, 1, 1, 1]));
-    let coord_bounds_copy = coord_bounds.copy();
-    let shape: af::Array<u64> =
-        af::Array::new(&shape.to_vec(), af::Dim4::new(&[ndim as u64, 1, 1, 1]));
+    let blocks =
+        coords_to_offsets(shape, coords).and_then(|block| future::ready(Array::try_from(block)));
 
-    let blocks = coords
+    let block_list = BlockListFile::from_blocks(
+        &txn,
+        Shape::from(vec![num_coords]),
+        UIntType::U64.into(),
+        Box::pin(blocks),
+    )
+    .await?;
+
+    block_list.merge_sort(txn.id()).await?;
+
+    let blocks = Arc::new(block_list).block_stream(txn).await?;
+    Ok(offsets_to_coords(shape, blocks))
+}
+
+fn coords_to_offsets<S: Stream<Item = TCResult<Vec<u64>>>>(
+    shape: &Shape,
+    coords: S,
+) -> impl Stream<Item = TCResult<af::Array<u64>>> {
+    let ndim = shape.len() as u64;
+    let coord_bounds = coord_bounds(shape);
+    let af_coord_bounds: af::Array<u64> =
+        af::Array::new(&coord_bounds, af::Dim4::new(&[ndim, 1, 1, 1]));
+
+    coords
         .chunks(PER_BLOCK)
         .map(|block| block.into_iter().collect::<TCResult<Vec<Vec<u64>>>>())
         .map_ok(move |block| {
             let num_coords = block.len();
             let block = block.into_iter().flatten().collect::<Vec<u64>>();
-            af::Array::new(
-                &block,
-                af::Dim4::new(&[ndim as u64, num_coords as u64, 1, 1]),
-            )
+            af::Array::new(&block, af::Dim4::new(&[ndim, num_coords as u64, 1, 1]))
         })
-        .map_ok(move |block| af::sum(&(block * coord_bounds.copy()), 1))
-        .and_then(|block| future::ready(Array::try_from(block)));
-
-    let blocks: TCTryStream<Array> = Box::pin(blocks);
-    let block_list = BlockListFile::from_blocks(
-        &txn,
-        Shape::from(vec![num_coords]),
-        NumberType::uint64(),
-        blocks,
-    )
-    .await
-    .map(Arc::new)?;
-    block_list.merge_sort(txn.id()).await?;
-
-    let coords = block_list
-        .block_stream(txn)
-        .await?
-        .map_ok(|block| block.into_af_array::<u64>())
-        .map_ok(|block| af::moddims(&block, af::Dim4::new(&[1, block.elements() as u64, 1, 1])))
         .map_ok(move |block| {
-            let dims = af::Dim4::new(&[ndim as u64, block.elements() as u64, 1, 1]);
-            let block = af::tile(&block, dims);
-            let coord_bounds = af::tile(&coord_bounds_copy, dims);
-            let shape = af::tile(&shape, dims);
-            (block / coord_bounds) % shape
+            let offsets = af::mul(&block, &af_coord_bounds, true);
+            af::sum(&offsets, 0)
+        })
+        .map_ok(|block| af::moddims(&block, af::Dim4::new(&[block.elements() as u64, 1, 1, 1])))
+}
+
+fn offsets_to_coords<S: Stream<Item = TCResult<Array>>>(
+    shape: &Shape,
+    blocks: S,
+) -> impl Stream<Item = TCResult<Vec<u64>>> {
+    let ndim = shape.len() as u64;
+    let coord_bounds = coord_bounds(shape);
+    let af_coord_bounds: af::Array<u64> =
+        af::Array::new(&coord_bounds, af::Dim4::new(&[1, ndim, 1, 1]));
+    let af_shape: af::Array<u64> = af::Array::new(&shape.to_vec(), af::Dim4::new(&[1, ndim, 1, 1]));
+    let ndim = shape.len();
+
+    blocks
+        .map_ok(|block| block.into_af_array::<u64>())
+        .map_ok(move |block| {
+            let offsets = af::div(&block, &af_coord_bounds, true);
+            af::modulo(&offsets, &af_shape, true)
         })
         .map_ok(|coord_block| {
-            let mut coords: Vec<u64> = Vec::with_capacity(coord_block.elements());
+            let mut coords = vec![0u64; coord_block.elements()];
             coord_block.host(&mut coords);
             coords
         })
@@ -429,9 +438,7 @@ pub async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Unpin + '
                 .chunks(ndim)
                 .map(Result::<Vec<u64>, error::TCError>::Ok)
         })
-        .try_flatten();
-
-    Ok(coords)
+        .try_flatten()
 }
 
 fn coord_bounds(shape: &Shape) -> Vec<u64> {

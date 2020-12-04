@@ -263,19 +263,16 @@ impl BlockList for BlockListBroadcast {
         let rebase = self.rebase.clone();
         let num_coords = bounds.size();
         let source_bounds = self.rebase.invert_bounds(bounds);
-        let source_coords = source_bounds.affected();
-        let coords = source_coords
+        let coords = source_bounds
+            .affected()
             .map(move |coord| rebase.map_coord(coord))
             .flatten();
+        let coords = stream::iter(coords.map(TCResult::Ok));
 
-        let values = sort_coords(
-            txn.subcontext_tmp().await?,
-            stream::iter(coords.map(TCResult::Ok)),
-            num_coords,
-            self.shape(),
-        )
-        .await?
-        .and_then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
+        let subcontext = txn.subcontext_tmp().await?;
+        let values = sort_coords(subcontext, coords, num_coords, self.shape()).await?;
+        let values =
+            values.and_then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
         let values: TCTryStream<Number> = Box::pin(values);
         Ok(values)
     }
@@ -1409,7 +1406,13 @@ impl TensorTransform for DenseTensor {
             return Ok(self.clone());
         }
 
-        Err(error::not_implemented("DenseTensor::broadcast"))
+        let rebase = transform::Broadcast::new(self.shape().clone(), shape)?;
+        let blocks = Arc::new(BlockListBroadcast {
+            source: self.blocks.clone(),
+            rebase,
+        });
+
+        Ok(DenseTensor { blocks })
     }
 
     fn expand_dims(&self, axis: usize) -> TCResult<Self> {
