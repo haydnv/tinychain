@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use std::sync::Arc;
 
 use arrayfire as af;
@@ -771,7 +770,7 @@ impl BlockList for BlockListSlice {
         bounds: Bounds,
         value: Number,
     ) -> TCResult<()> {
-        debug!("BlockListList::write_value {} at {}", value, bounds);
+        debug!("BlockListSlice::write_value {} at {}", value, bounds);
 
         let bounds = self.rebase.invert_bounds(bounds);
         self.source.clone().write_value(txn_id, bounds, value).await
@@ -1424,7 +1423,7 @@ impl TensorTransform for DenseTensor {
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self> {
-        if bounds.deref() == Bounds::all(self.shape()).deref() {
+        if bounds == Bounds::all(self.shape()) {
             return Ok(self.clone());
         }
 

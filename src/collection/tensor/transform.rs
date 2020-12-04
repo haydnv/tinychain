@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::iter;
 
+use log::debug;
+
 use crate::class::TCResult;
 use crate::error;
 
@@ -339,6 +341,8 @@ pub struct Slice {
 
 impl Slice {
     pub fn new(source_shape: Shape, bounds: Bounds) -> TCResult<Slice> {
+        debug!("Slice::new {}[{}]", source_shape, bounds);
+
         let mut shape: Vec<u64> = Vec::with_capacity(bounds.len());
         let mut offset = HashMap::new();
         let mut elided = HashMap::new();
@@ -396,7 +400,7 @@ impl Slice {
     }
 
     pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
-        if bounds.is_empty() {
+        if bounds.is_empty() || bounds == Bounds::all(self.shape()) {
             return self.bounds.clone();
         }
 

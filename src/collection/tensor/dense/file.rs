@@ -171,7 +171,7 @@ impl BlockList for BlockListFile {
         txn: Txn,
         bounds: Bounds,
     ) -> TCResult<TCTryStream<Number>> {
-        if bounds.deref() == Bounds::all(self.shape()).deref() {
+        if bounds == Bounds::all(self.shape()) {
             return self.value_stream(txn).await;
         }
 
@@ -270,12 +270,12 @@ impl BlockList for BlockListFile {
         }
 
         let bounds = self.shape().slice_bounds(bounds);
-        let ndim = bounds.ndim();
         let coord_bounds = coord_bounds(self.shape());
 
         stream::iter(bounds.affected())
             .chunks(PER_BLOCK)
             .map(|coords| {
+                let ndim = coords[0].len();
                 let num_coords = coords.len() as u64;
                 let (block_ids, af_indices, af_offsets) = coord_block(
                     coords.into_iter(),
@@ -304,6 +304,7 @@ impl BlockList for BlockListFile {
                             .upgrade()
                             .await?;
 
+                        debug!("write {} to", value);
                         let value = Array::constant(value, (new_start - start) as usize);
                         block.deref_mut().set(block_offsets, &value)?;
                         start = new_start;

@@ -22,7 +22,6 @@ use super::*;
 mod combine;
 
 use combine::SparseCombine;
-use std::ops::Deref;
 
 const VALUE: Label = label("value");
 
@@ -1728,7 +1727,7 @@ impl TensorTransform for SparseTensor {
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self> {
-        if bounds.deref() == Bounds::all(self.shape()).deref() {
+        if bounds == Bounds::all(self.shape()) {
             return Ok(self.clone());
         }
 

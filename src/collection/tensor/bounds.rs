@@ -263,19 +263,6 @@ impl Bounds {
         })
     }
 
-    pub fn ndim(&self) -> usize {
-        let mut ndim = 0;
-        use AxisBounds::*;
-        for axis in &self.axes {
-            match axis {
-                At(_) => {}
-                _ => ndim += 1,
-            }
-        }
-
-        ndim
-    }
-
     pub fn normalize(&mut self, shape: &Shape) {
         assert!(self.len() <= shape.len());
 
@@ -313,6 +300,12 @@ impl Deref for Bounds {
 impl DerefMut for Bounds {
     fn deref_mut(&'_ mut self) -> &'_ mut Self::Target {
         &mut self.axes
+    }
+}
+
+impl PartialEq for Bounds {
+    fn eq(&self, other: &Self) -> bool {
+        self.axes == other.axes
     }
 }
 
