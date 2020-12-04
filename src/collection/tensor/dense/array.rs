@@ -42,9 +42,21 @@ pub trait ArrayInstance {
 #[derive(Clone)]
 pub struct ArrayExt<T: af::HasAfEnum>(af::Array<T>);
 
-impl<T: af::HasAfEnum> ArrayExt<T> {
+impl<T: af::HasAfEnum + Default> ArrayExt<T> {
     fn concatenate(left: &ArrayExt<T>, right: &ArrayExt<T>) -> ArrayExt<T> {
         af::join(0, left.af(), right.af()).into()
+    }
+
+    fn get_value(&self, index: usize) -> T {
+        debug_assert!(index < self.af().elements());
+        let af_value = af::index(self.af(), &[af::Seq::new(index as f64, index as f64, 1f64)]);
+        if af_value.elements() == 1 {
+            let mut value = vec![T::default()];
+            af_value.host(&mut value);
+            value.pop().unwrap()
+        } else {
+            panic!("no value at {}", index)
+        }
     }
 
     fn split(&self, at: usize) -> (ArrayExt<T>, ArrayExt<T>) {
@@ -722,162 +734,162 @@ trait ArrayInstanceReduce: ArrayInstance {
 }
 
 impl ArrayInstanceReduce for ArrayExt<bool> {
-    type Sum = u64;
     type Product = u64;
-
-    fn sum(&self) -> u64 {
-        af::sum_all(self.af()).0 as u64
-    }
+    type Sum = u64;
 
     fn product(&self) -> u64 {
         af::product_all(self.af()).0 as u64
+    }
+
+    fn sum(&self) -> u64 {
+        af::sum_all(self.af()).0 as u64
     }
 }
 
 impl ArrayInstanceReduce for ArrayExt<num::Complex<f32>> {
-    type Sum = num::Complex<f64>;
     type Product = num::Complex<f64>;
-
-    fn sum(&self) -> Self::Sum {
-        let sum = af::sum_all(self.af());
-        num::Complex::new(sum.0, sum.1)
-    }
+    type Sum = num::Complex<f64>;
 
     fn product(&self) -> Self::Product {
         let product = af::product_all(self.af());
         num::Complex::new(product.0, product.1)
+    }
+
+    fn sum(&self) -> Self::Sum {
+        let sum = af::sum_all(self.af());
+        num::Complex::new(sum.0, sum.1)
     }
 }
 
 impl ArrayInstanceReduce for ArrayExt<num::Complex<f64>> {
-    type Sum = num::Complex<f64>;
     type Product = num::Complex<f64>;
-
-    fn sum(&self) -> Self::Sum {
-        let sum = af::sum_all(self.af());
-        num::Complex::new(sum.0, sum.1)
-    }
+    type Sum = num::Complex<f64>;
 
     fn product(&self) -> Self::Product {
         let product = af::product_all(self.af());
         num::Complex::new(product.0, product.1)
     }
+
+    fn sum(&self) -> Self::Sum {
+        let sum = af::sum_all(self.af());
+        num::Complex::new(sum.0, sum.1)
+    }
 }
 
 impl ArrayInstanceReduce for ArrayExt<f32> {
-    type Sum = f64;
     type Product = f64;
-
-    fn sum(&self) -> f64 {
-        af::sum_all(self.af()).0
-    }
+    type Sum = f64;
 
     fn product(&self) -> f64 {
         af::product_all(self.af()).0
+    }
+
+    fn sum(&self) -> f64 {
+        af::sum_all(self.af()).0
     }
 }
 
 impl ArrayInstanceReduce for ArrayExt<f64> {
-    type Sum = f64;
     type Product = f64;
-
-    fn sum(&self) -> f64 {
-        af::sum_all(self.af()).0
-    }
+    type Sum = f64;
 
     fn product(&self) -> f64 {
         af::product_all(self.af()).0
     }
+
+    fn sum(&self) -> f64 {
+        af::sum_all(self.af()).0
+    }
 }
 
 impl ArrayInstanceReduce for ArrayExt<i16> {
-    type Sum = i64;
     type Product = i64;
-
-    fn sum(&self) -> i64 {
-        af::sum_all(self.af()).0 as i64
-    }
+    type Sum = i64;
 
     fn product(&self) -> i64 {
         af::product_all(self.af()).0 as i64
+    }
+
+    fn sum(&self) -> i64 {
+        af::sum_all(self.af()).0 as i64
     }
 }
 
 impl ArrayInstanceReduce for ArrayExt<i32> {
-    type Sum = i64;
     type Product = i64;
-
-    fn sum(&self) -> i64 {
-        af::sum_all(self.af()).0 as i64
-    }
+    type Sum = i64;
 
     fn product(&self) -> i64 {
         af::product_all(self.af()).0 as i64
+    }
+
+    fn sum(&self) -> i64 {
+        af::sum_all(self.af()).0 as i64
     }
 }
 
 impl ArrayInstanceReduce for ArrayExt<i64> {
-    type Sum = i64;
     type Product = i64;
-
-    fn sum(&self) -> i64 {
-        af::sum_all(self.af()).0 as i64
-    }
+    type Sum = i64;
 
     fn product(&self) -> i64 {
         af::product_all(self.af()).0 as i64
     }
+
+    fn sum(&self) -> i64 {
+        af::sum_all(self.af()).0 as i64
+    }
 }
 
 impl ArrayInstanceReduce for ArrayExt<u8> {
-    type Sum = u64;
     type Product = u64;
-
-    fn sum(&self) -> u64 {
-        af::sum_all(self.af()).0 as u64
-    }
+    type Sum = u64;
 
     fn product(&self) -> u64 {
         af::product_all(self.af()).0 as u64
+    }
+
+    fn sum(&self) -> u64 {
+        af::sum_all(self.af()).0 as u64
     }
 }
 
 impl ArrayInstanceReduce for ArrayExt<u16> {
-    type Sum = u64;
     type Product = u64;
-
-    fn sum(&self) -> u64 {
-        af::sum_all(self.af()).0 as u64
-    }
+    type Sum = u64;
 
     fn product(&self) -> u64 {
         af::product_all(self.af()).0 as u64
+    }
+
+    fn sum(&self) -> u64 {
+        af::sum_all(self.af()).0 as u64
     }
 }
 
 impl ArrayInstanceReduce for ArrayExt<u32> {
-    type Sum = u64;
     type Product = u64;
-
-    fn sum(&self) -> u64 {
-        af::sum_all(self.af()).0 as u64
-    }
+    type Sum = u64;
 
     fn product(&self) -> u64 {
         af::product_all(self.af()).0 as u64
+    }
+
+    fn sum(&self) -> u64 {
+        af::sum_all(self.af()).0 as u64
     }
 }
 
 impl ArrayInstanceReduce for ArrayExt<u64> {
-    type Sum = u64;
     type Product = u64;
-
-    fn sum(&self) -> u64 {
-        af::sum_all(self.af()).0 as u64
-    }
+    type Sum = u64;
 
     fn product(&self) -> u64 {
         af::product_all(self.af()).0 as u64
+    }
+
+    fn sum(&self) -> u64 {
+        af::sum_all(self.af()).0 as u64
     }
 }
 
@@ -1390,34 +1402,47 @@ impl Array {
         }
     }
 
-    pub fn get_value(&self, index: usize) -> Option<Number> {
-        let seq = af::Seq::new(index as f64, index as f64, 1.0f64);
-        let mut indexer = af::Indexer::default();
-        indexer.set_index(&seq, 0, None);
-        self.get_at(indexer).pop()
+    pub fn get_value(&self, index: usize) -> Number {
+        debug_assert!(index < self.len());
+
+        use Array::*;
+        match self {
+            Bool(b) => b.get_value(index).into(),
+            C32(c) => Complex::from(c.get_value(index)).into(),
+            C64(c) => Complex::from(c.get_value(index)).into(),
+            F32(f) => Float::from(f.get_value(index)).into(),
+            F64(f) => Float::from(f.get_value(index)).into(),
+            I16(i) => Int::from(i.get_value(index)).into(),
+            I32(i) => Int::from(i.get_value(index)).into(),
+            I64(i) => Int::from(i.get_value(index)).into(),
+            U8(u) => UInt::from(u.get_value(index)).into(),
+            U16(u) => UInt::from(u.get_value(index)).into(),
+            U32(u) => UInt::from(u.get_value(index)).into(),
+            U64(u) => UInt::from(u.get_value(index)).into(),
+        }
     }
 
-    pub fn get(&self, index: af::Array<u64>) -> Vec<Number> {
+    pub fn get(&self, index: af::Array<u64>) -> Self {
         let mut indexer = af::Indexer::default();
         indexer.set_index(&index, 0, None);
         self.get_at(indexer)
     }
 
-    fn get_at(&self, index: af::Indexer) -> Vec<Number> {
+    fn get_at(&self, index: af::Indexer) -> Self {
         use Array::*;
         match self {
-            Bool(b) => b.get(index).into(),
-            C32(c) => c.get(index).into(),
-            C64(c) => c.get(index).into(),
-            F32(f) => f.get(index).into(),
-            F64(f) => f.get(index).into(),
-            I16(i) => i.get(index).into(),
-            I32(i) => i.get(index).into(),
-            I64(i) => i.get(index).into(),
-            U8(i) => i.get(index).into(),
-            U16(i) => i.get(index).into(),
-            U32(i) => i.get(index).into(),
-            U64(i) => i.get(index).into(),
+            Bool(b) => Bool(b.get(index)),
+            C32(c) => C32(c.get(index)),
+            C64(c) => C64(c.get(index)),
+            F32(f) => F32(f.get(index)),
+            F64(f) => F64(f.get(index)),
+            I16(i) => I16(i.get(index)),
+            I32(i) => I32(i.get(index)),
+            I64(i) => I64(i.get(index)),
+            U8(i) => U8(i.get(index)),
+            U16(i) => U16(i.get(index)),
+            U32(i) => U32(i.get(index)),
+            U64(i) => U64(i.get(index)),
         }
     }
 
@@ -1620,7 +1645,7 @@ impl From<Array> for Bytes {
         };
 
         let dtype = Bytes::from(bincode::serialize(&dtype).unwrap());
-        assert!(dtype.len() == 2);
+        assert_eq!(dtype.len(), 2);
         Bytes::from([dtype, serialized].concat())
     }
 }
@@ -1778,4 +1803,27 @@ fn err_corrupt<T: fmt::Display>(info: T) -> error::TCError {
         "Error! This Tensor's data has been corrupted on disk: {}",
         info
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_value() {
+        let arr = Array::from(vec![1, 2, 3]);
+        assert_eq!(arr.get_value(1), Number::from(2))
+    }
+
+    #[test]
+    fn test_get() {
+        let arr = Array::from(vec![1, 2, 3]);
+        let indices = af::Array::new(&[1, 2], af::Dim4::new(&[2, 1, 1, 1]));
+        let actual = arr.get(indices);
+        let expected = Array::from(vec![2, 3]);
+        assert_eq!(
+            actual.eq(&expected).into_values(),
+            vec![true.into(), true.into()]
+        )
+    }
 }

@@ -263,7 +263,7 @@ impl Bounds {
         })
     }
 
-    pub fn ndim(&self, shape: &Shape) -> usize {
+    pub fn ndim(&self) -> usize {
         let mut ndim = 0;
         use AxisBounds::*;
         for axis in &self.axes {
@@ -273,7 +273,7 @@ impl Bounds {
             }
         }
 
-        ndim + (shape.len() - self.len())
+        ndim
     }
 
     pub fn normalize(&mut self, shape: &Shape) {
@@ -406,14 +406,6 @@ impl fmt::Display for Bounds {
 pub struct Shape(Vec<u64>);
 
 impl Shape {
-    pub fn all(&self) -> Bounds {
-        let mut axes = Vec::with_capacity(self.len());
-        for dim in &self.0 {
-            axes.push(AxisBounds::In(0..*dim));
-        }
-        axes.into()
-    }
-
     pub fn contains_bounds(&self, bounds: &Bounds) -> bool {
         if bounds.len() > self.len() {
             return false;
@@ -461,6 +453,16 @@ impl Shape {
 
     pub fn size(&self) -> u64 {
         self.0.iter().product()
+    }
+
+    pub fn slice_bounds(&self, mut bounds: Bounds) -> Bounds {
+        assert!(bounds.len() <= self.len());
+
+        for axis in bounds.len()..self.len() {
+            bounds.push(AxisBounds::In(0..self[axis]));
+        }
+
+        bounds
     }
 }
 

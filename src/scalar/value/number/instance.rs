@@ -1727,6 +1727,12 @@ impl Serialize for Number {
     }
 }
 
+impl fmt::Debug for Number {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl fmt::Display for Number {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
