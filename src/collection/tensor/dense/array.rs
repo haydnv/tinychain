@@ -8,7 +8,7 @@ use bytes::Bytes;
 use crate::block::BlockData;
 use crate::error::{self, TCResult};
 use crate::scalar::value::number::*;
-use crate::scalar::CastFrom;
+use crate::scalar::{CastFrom, CastInto};
 
 const BATCH: bool = true;
 
@@ -1456,52 +1456,52 @@ impl Array {
         use Array::*;
         match self {
             Bool(b) => {
-                let value: Boolean = value.try_into()?;
-                b.set_at(offset, value.try_into()?);
+                let value: Boolean = value.cast_into();
+                b.set_at(offset, value.cast_into());
             }
             C32(c) => {
-                let value: Complex = value.try_into()?;
-                c.set_at(offset, value.try_into()?)
+                let value: Complex = value.cast_into();
+                c.set_at(offset, value.cast_into())
             }
             C64(c) => {
-                let value: Complex = value.try_into()?;
-                c.set_at(offset, value.try_into()?)
+                let value: Complex = value.cast_into();
+                c.set_at(offset, value.cast_into())
             }
             F32(f) => {
-                let value: Float = value.try_into()?;
-                f.set_at(offset, value.try_into()?)
+                let value: Float = value.cast_into();
+                f.set_at(offset, value.cast_into())
             }
             F64(f) => {
-                let value: Float = value.try_into()?;
-                f.set_at(offset, value.try_into()?)
+                let value: Float = value.cast_into();
+                f.set_at(offset, value.cast_into())
             }
             I16(i) => {
-                let value: Int = value.try_into()?;
-                i.set_at(offset, value.try_into()?)
+                let value: Int = value.cast_into();
+                i.set_at(offset, value.cast_into())
             }
             I32(i) => {
-                let value: Int = value.try_into()?;
-                i.set_at(offset, value.try_into()?)
+                let value: Int = value.cast_into();
+                i.set_at(offset, value.cast_into())
             }
             I64(i) => {
-                let value: Int = value.try_into()?;
-                i.set_at(offset, value.try_into()?)
+                let value: Int = value.cast_into();
+                i.set_at(offset, value.cast_into())
             }
             U8(u) => {
-                let value: UInt = value.try_into()?;
-                u.set_at(offset, value.try_into()?)
+                let value: UInt = value.cast_into();
+                u.set_at(offset, value.cast_into())
             }
             U16(u) => {
-                let value: UInt = value.try_into()?;
-                u.set_at(offset, value.try_into()?)
+                let value: UInt = value.cast_into();
+                u.set_at(offset, value.cast_into())
             }
             U32(u) => {
-                let value: UInt = value.try_into()?;
-                u.set_at(offset, value.try_into()?)
+                let value: UInt = value.cast_into();
+                u.set_at(offset, value.cast_into())
             }
             U64(u) => {
-                let value: UInt = value.try_into()?;
-                u.set_at(offset, value.try_into()?)
+                let value: UInt = value.cast_into();
+                u.set_at(offset, value.cast_into())
             }
         }
 
@@ -1510,24 +1510,19 @@ impl Array {
 
     fn set_at(&mut self, index: af::Indexer, value: &Array) -> TCResult<()> {
         use Array::*;
-        match (self, value) {
-            (Bool(l), Bool(r)) => l.set(&index, r),
-            (C32(l), C32(r)) => l.set(&index, r),
-            (C64(l), C64(r)) => l.set(&index, r),
-            (F32(l), F32(r)) => l.set(&index, r),
-            (F64(l), F64(r)) => l.set(&index, r),
-            (I16(l), I16(r)) => l.set(&index, r),
-            (I32(l), I32(r)) => l.set(&index, r),
-            (I64(l), I64(r)) => l.set(&index, r),
-            (U8(l), U8(r)) => l.set(&index, r),
-            (U16(l), U16(r)) => l.set(&index, r),
-            (U32(l), U32(r)) => l.set(&index, r),
-            (U64(l), U64(r)) => l.set(&index, r),
-            _ => {
-                return Err(error::internal(
-                    "Attempted to assign a Tensor chunk with the wrong datatype!",
-                ));
-            }
+        match self {
+            Bool(l) => l.set(&index, &value.af_cast()),
+            C32(l) => l.set(&index, &value.af_cast()),
+            C64(l) => l.set(&index, &value.af_cast()),
+            F32(l) => l.set(&index, &value.af_cast()),
+            F64(l) => l.set(&index, &value.af_cast()),
+            I16(l) => l.set(&index, &value.af_cast()),
+            I32(l) => l.set(&index, &value.af_cast()),
+            I64(l) => l.set(&index, &value.af_cast()),
+            U8(l) => l.set(&index, &value.af_cast()),
+            U16(l) => l.set(&index, &value.af_cast()),
+            U32(l) => l.set(&index, &value.af_cast()),
+            U64(l) => l.set(&index, &value.af_cast()),
         }
 
         Ok(())

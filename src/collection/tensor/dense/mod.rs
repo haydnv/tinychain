@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
+use log::debug;
 
 use crate::class::{TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::error;
@@ -768,13 +769,12 @@ impl BlockList for BlockListSlice {
         self: Arc<Self>,
         txn_id: TxnId,
         bounds: Bounds,
-        number: Number,
+        value: Number,
     ) -> TCResult<()> {
+        debug!("BlockListList::write_value {} at {}", value, bounds);
+
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source
-            .clone()
-            .write_value(txn_id, bounds, number)
-            .await
+        self.source.clone().write_value(txn_id, bounds, value).await
     }
 
     fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {

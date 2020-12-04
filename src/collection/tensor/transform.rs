@@ -396,6 +396,10 @@ impl Slice {
     }
 
     pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+        if bounds.is_empty() {
+            return self.bounds.clone();
+        }
+
         bounds.normalize(&self.shape);
 
         let mut source_bounds = Vec::with_capacity(self.source_shape.len());

@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::iter;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -261,8 +261,12 @@ impl BlockList for BlockListFile {
         bounds: Bounds,
         value: Number,
     ) -> TCResult<()> {
+        debug!("BlockListFile::write_value {} at {}", value, bounds);
+
         if !self.shape().contains_bounds(&bounds) {
             return Err(error::bad_request("Bounds out of bounds", bounds));
+        } else if bounds.len() == self.ndim() && bounds.is_coord() {
+            return self.write_value_at(txn_id, bounds.try_into()?, value).await;
         }
 
         let bounds = self.shape().slice_bounds(bounds);
