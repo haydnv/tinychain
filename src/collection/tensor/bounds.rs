@@ -436,7 +436,7 @@ impl Shape {
         }
 
         for axis in 0..coord.len() {
-            if coord[axis] > self[axis] {
+            if coord[axis] >= self[axis] {
                 return false;
             }
         }

@@ -231,6 +231,12 @@ impl BlockList for BlockListFile {
     }
 
     async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        debug!(
+            "read value at {:?} from BlockListFile with shape {}",
+            coord,
+            self.shape()
+        );
+
         if !self.shape().contains_coord(coord) {
             let coord: Vec<String> = coord.iter().map(|c| c.to_string()).collect();
             return Err(error::bad_request(
@@ -244,11 +250,18 @@ impl BlockList for BlockListFile {
             .zip(coord.iter())
             .map(|(d, x)| d * x)
             .sum();
+        debug!("coord {:?} is offset {}", coord, offset);
+
         let block_id = BlockId::from(offset / PER_BLOCK as u64);
         let block = self.file.get_block(txn.id(), &block_id).await?;
-        let value = block
-            .deref()
-            .get_value((offset % PER_BLOCK as u64) as usize);
+
+        debug!(
+            "read offset {} at block {} (length {})",
+            (offset % PER_BLOCK as u64),
+            block_id,
+            block.len()
+        );
+        let value = block.get_value((offset % PER_BLOCK as u64) as usize);
 
         Ok(value)
     }
@@ -430,13 +443,13 @@ fn offsets_to_coords<S: Stream<Item = TCResult<Array>>>(
         })
         .map_ok(|coord_block| {
             let mut coords = vec![0u64; coord_block.elements()];
-            coord_block.host(&mut coords);
+            af::transpose(&coord_block, false).host(&mut coords);
             coords
         })
         .map_ok(move |coords| {
             stream::iter(coords.into_iter())
                 .chunks(ndim)
-                .map(Result::<Vec<u64>, error::TCError>::Ok)
+                .map(TCResult::<Vec<u64>>::Ok)
         })
         .try_flatten()
 }

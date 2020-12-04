@@ -270,9 +270,9 @@ impl BlockList for BlockListBroadcast {
         let coords = stream::iter(coords.map(TCResult::Ok));
 
         let subcontext = txn.subcontext_tmp().await?;
-        let values = sort_coords(subcontext, coords, num_coords, self.shape()).await?;
+        let coords = sort_coords(subcontext, coords, num_coords, self.shape()).await?;
         let values =
-            values.and_then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
+            coords.and_then(move |coord| self.clone().read_value_at_owned(txn.clone(), coord));
         let values: TCTryStream<Number> = Box::pin(values);
         Ok(values)
     }
