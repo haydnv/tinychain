@@ -443,6 +443,9 @@ impl CollectionInstance for TensorView {
                         .map(Collection::from)
                         .map(State::Collection)
                 }
+                "not" => {
+                    self.not().map(Collection::from).map(State::Collection)
+                }
                 "reshape" => {
                     let shape =
                         selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;
