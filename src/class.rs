@@ -40,22 +40,6 @@ pub trait Instance {
     fn is_a(&self, dtype: Self::Class) -> bool {
         self.class() == dtype
     }
-
-    fn expect<M: fmt::Display>(&self, dtype: Self::Class, context_msg: M) -> TCResult<()> {
-        if self.is_a(dtype.clone()) {
-            Ok(())
-        } else {
-            Err(error::TCError::of(
-                error::Code::BadRequest,
-                format!(
-                    "Expected {} but found {} {}",
-                    dtype,
-                    self.class(),
-                    context_msg
-                ),
-            ))
-        }
-    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
