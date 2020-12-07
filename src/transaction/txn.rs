@@ -15,9 +15,7 @@ use serde::de;
 use tokio::sync::mpsc;
 
 use crate::block::{BlockData, Dir, DirEntry, File};
-use crate::chain::ChainInstance;
-use crate::class::{State, TCBoxTryFuture, TCResult};
-use crate::collection::class::CollectionInstance;
+use crate::class::{Public, State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
 use crate::lock::RwLock;
@@ -440,9 +438,7 @@ impl Txn {
         match subject {
             State::Chain(chain) => chain.get(request, self, path, key).await,
             State::Cluster(cluster) => {
-                cluster
-                    .get(request, &self.inner.gateway, self, path, key)
-                    .await
+                cluster.get(request, self, path, key).await
             }
             State::Collection(collection) => collection
                 .get(request, self, &path[..], key)

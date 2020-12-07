@@ -5,7 +5,7 @@ use std::ops::Deref;
 use futures::TryFutureExt;
 use log::debug;
 
-use crate::class::{Instance, State, TCBoxTryFuture};
+use crate::class::{Instance, Public, State, TCBoxTryFuture};
 use crate::error::{self, TCResult};
 use crate::request::Request;
 use crate::scalar::{self, Key, OpRef, PathSegment, Scalar, TCPath, Value, ValueInstance};

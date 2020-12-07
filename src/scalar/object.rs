@@ -56,11 +56,21 @@ impl Object {
         &'a self,
         _request: &'a Request,
         _txn: &'a Txn,
-        _path: TCPath,
+        _path: &'a [PathSegment],
         _key: Value,
         _value: State,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move { Err(error::not_implemented("Object::put")) })
+    }
+
+    pub fn post<'a>(
+        &'a self,
+        _request: &'a Request,
+        _txn: &'a Txn,
+        _path: &'a [PathSegment],
+        _params: Object,
+    ) -> TCBoxTryFuture<'a, State> {
+        Box::pin(async move { Err(error::not_implemented("Object::post")) })
     }
 }
 

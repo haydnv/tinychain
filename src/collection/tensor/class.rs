@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, TryFutureExt};
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, Public, State, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{
     Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
@@ -208,6 +208,17 @@ impl CollectionInstance for TensorBase {
     type Item = Number;
     type Slice = TensorView;
 
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        TensorView::from(self.clone()).is_empty(txn).await
+    }
+
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+        TensorView::from(self.clone()).to_stream(txn).await
+    }
+}
+
+#[async_trait]
+impl Public for TensorBase {
     async fn get(
         &self,
         request: &Request,
@@ -220,21 +231,6 @@ impl CollectionInstance for TensorBase {
             .await
     }
 
-    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        TensorView::from(self.clone()).is_empty(txn).await
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        TensorView::from(self.clone())
-            .post(request, txn, path, params)
-            .await
-    }
 
     async fn put(
         &self,
@@ -249,8 +245,16 @@ impl CollectionInstance for TensorBase {
             .await
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        TensorView::from(self.clone()).to_stream(txn).await
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        TensorView::from(self.clone())
+            .post(request, txn, path, params)
+            .await
     }
 }
 
@@ -389,6 +393,36 @@ impl CollectionInstance for TensorView {
     type Item = Number;
     type Slice = TensorView;
 
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        self.any(txn.clone()).map_ok(|any| !any).await
+    }
+
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+        match self {
+            // TODO: Forward errors, don't panic!
+            Self::Dense(dense) => {
+                let result_stream = dense.value_stream(txn).await?;
+                let values: TCStream<Scalar> = Box::pin(
+                    result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
+                );
+                Ok(values)
+            }
+            Self::Sparse(sparse) => {
+                let result_stream = sparse.filled(txn).await?;
+                let values: TCStream<Scalar> = Box::pin(
+                    result_stream
+                        .map(|r| r.unwrap())
+                        .map(Value::from)
+                        .map(Scalar::Value),
+                );
+                Ok(values)
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl Public for TensorView {
     async fn get(
         &self,
         _request: &Request,
@@ -475,45 +509,6 @@ impl CollectionInstance for TensorView {
         }
     }
 
-    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        self.any(txn.clone()).map_ok(|any| !any).await
-    }
-
-    async fn post(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        path: &[PathSegment],
-        mut params: Object,
-    ) -> TCResult<State> {
-        if path.is_empty() {
-            Err(error::method_not_allowed("Tensor::POST /"))
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "slice" => {
-                    let bounds = params
-                        .remove(&label("bounds").into())
-                        .ok_or(error::bad_request("Missing parameter", "bounds"))?;
-                    let bounds = Bounds::from_scalar(self.shape(), bounds)?;
-
-                    if params.is_empty() {
-                        self.slice(bounds)
-                            .map(Collection::from)
-                            .map(State::Collection)
-                    } else {
-                        Err(error::bad_request(
-                            "Unrecognized parameters",
-                            Scalar::from_iter(params),
-                        ))
-                    }
-                }
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            Err(error::path_not_found(path))
-        }
-    }
-
     async fn put(
         &self,
         _request: &Request,
@@ -549,26 +544,38 @@ impl CollectionInstance for TensorView {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        match self {
-            // TODO: Forward errors, don't panic!
-            Self::Dense(dense) => {
-                let result_stream = dense.value_stream(txn).await?;
-                let values: TCStream<Scalar> = Box::pin(
-                    result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
-                );
-                Ok(values)
+    async fn post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        path: &[PathSegment],
+        mut params: Object,
+    ) -> TCResult<State> {
+        if path.is_empty() {
+            Err(error::method_not_allowed("Tensor::POST /"))
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "slice" => {
+                    let bounds = params
+                        .remove(&label("bounds").into())
+                        .ok_or(error::bad_request("Missing parameter", "bounds"))?;
+                    let bounds = Bounds::from_scalar(self.shape(), bounds)?;
+
+                    if params.is_empty() {
+                        self.slice(bounds)
+                            .map(Collection::from)
+                            .map(State::Collection)
+                    } else {
+                        Err(error::bad_request(
+                            "Unrecognized parameters",
+                            Scalar::from_iter(params),
+                        ))
+                    }
+                }
+                other => Err(error::not_found(other)),
             }
-            Self::Sparse(sparse) => {
-                let result_stream = sparse.filled(txn).await?;
-                let values: TCStream<Scalar> = Box::pin(
-                    result_stream
-                        .map(|r| r.unwrap())
-                        .map(Value::from)
-                        .map(Scalar::Value),
-                );
-                Ok(values)
-            }
+        } else {
+            Err(error::path_not_found(path))
         }
     }
 }
@@ -719,6 +726,23 @@ impl CollectionInstance for Tensor {
     type Item = Number;
     type Slice = TensorView;
 
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        match self {
+            Self::Base(base) => base.is_empty(txn).await,
+            Self::View(view) => view.is_empty(txn).await,
+        }
+    }
+
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+        match self {
+            Self::Base(base) => base.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
+        }
+    }
+}
+
+#[async_trait]
+impl Public for Tensor {
     async fn get(
         &self,
         request: &Request,
@@ -729,26 +753,6 @@ impl CollectionInstance for Tensor {
         match self {
             Self::Base(base) => base.get(request, txn, path, selector).await,
             Self::View(view) => view.get(request, txn, path, selector).await,
-        }
-    }
-
-    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        match self {
-            Self::Base(base) => base.is_empty(txn).await,
-            Self::View(view) => view.is_empty(txn).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        match self {
-            Self::Base(base) => base.post(request, txn, path, params).await,
-            Self::View(view) => view.post(request, txn, path, params).await,
         }
     }
 
@@ -766,10 +770,16 @@ impl CollectionInstance for Tensor {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
         match self {
-            Self::Base(base) => base.to_stream(txn).await,
-            Self::View(view) => view.to_stream(txn).await,
+            Self::Base(base) => base.post(request, txn, path, params).await,
+            Self::View(view) => view.post(request, txn, path, params).await,
         }
     }
 }

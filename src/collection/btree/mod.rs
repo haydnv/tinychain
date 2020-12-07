@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::stream::{self, Stream, StreamExt};
 use futures::TryFutureExt;
 
-use crate::class::{Instance, State, TCStream};
+use crate::class::{Instance, Public, State, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionView};
 use crate::error::{self, TCResult};
@@ -130,6 +130,23 @@ impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
     type Item = Key;
     type Slice = BTreeSlice;
 
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        BTreeInstance::is_empty(self.deref(), txn).await
+    }
+
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+        let stream = self
+            .stream(txn.id().clone(), BTreeRange::default(), false)
+            .await?
+            .map(Value::Tuple)
+            .map(Scalar::Value);
+
+        Ok(Box::pin(stream))
+    }
+}
+
+#[async_trait]
+impl<T: BTreeInstance> Public for BTreeImpl<T> {
     async fn get(
         &self,
         request: &Request,
@@ -140,10 +157,6 @@ impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
         let range = BTreeRange::try_cast_from(range, |v| error::bad_request(ERR_INVALID_RANGE, v))?;
         let range = validate_range(range, self.schema())?;
         self.route(request, txn, path, range).await
-    }
-
-    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        BTreeInstance::is_empty(self.deref(), txn).await
     }
 
     async fn post(
@@ -214,16 +227,6 @@ impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
 
         Ok(())
     }
-
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        let stream = self
-            .stream(txn.id().clone(), BTreeRange::default(), false)
-            .await?
-            .map(Value::Tuple)
-            .map(Scalar::Value);
-
-        Ok(Box::pin(stream))
-    }
 }
 
 impl<T: BTreeInstance> Deref for BTreeImpl<T> {
@@ -251,6 +254,23 @@ impl CollectionInstance for BTree {
     type Item = Scalar;
     type Slice = CollectionView;
 
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        match self {
+            Self::Tree(tree) => CollectionInstance::is_empty(tree, txn).await,
+            Self::View(view) => CollectionInstance::is_empty(view, txn).await,
+        }
+    }
+
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+        match self {
+            Self::Tree(tree) => tree.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
+        }
+    }
+}
+
+#[async_trait]
+impl Public for BTree {
     async fn get(
         &self,
         request: &Request,
@@ -261,26 +281,6 @@ impl CollectionInstance for BTree {
         match self {
             Self::Tree(tree) => tree.get(request, txn, path, selector).await,
             Self::View(view) => view.get(request, txn, path, selector).await,
-        }
-    }
-
-    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        match self {
-            Self::Tree(tree) => CollectionInstance::is_empty(tree, txn).await,
-            Self::View(view) => CollectionInstance::is_empty(view, txn).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        match self {
-            Self::Tree(tree) => tree.post(request, txn, path, params).await,
-            Self::View(view) => view.post(request, txn, path, params).await,
         }
     }
 
@@ -298,10 +298,16 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
         match self {
-            Self::Tree(tree) => tree.to_stream(txn).await,
-            Self::View(view) => view.to_stream(txn).await,
+            Self::Tree(tree) => tree.post(request, txn, path, params).await,
+            Self::View(view) => view.post(request, txn, path, params).await,
         }
     }
 }

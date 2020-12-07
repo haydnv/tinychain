@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use futures::stream::{self, Stream};
+use futures::stream;
 use log::debug;
 
 use crate::class::*;
@@ -7,7 +7,7 @@ use crate::collection::class::*;
 use crate::collection::CollectionBase;
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{Id, PathSegment, Scalar, ScalarClass, Value};
+use crate::scalar::{Object, PathSegment, Scalar, ScalarClass, Value};
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -97,6 +97,13 @@ impl Instance for NullChain {
 impl ChainInstance for NullChain {
     type Class = ChainType;
 
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Value>> {
+        Ok(Box::pin(stream::empty()))
+    }
+}
+
+#[async_trait]
+impl Public for NullChain {
     async fn get(
         &self,
         _request: &Request,
@@ -118,18 +125,14 @@ impl ChainInstance for NullChain {
         Err(error::not_implemented("NullChain::put"))
     }
 
-    async fn post<S: Stream<Item = (Id, Scalar)> + Send + Unpin>(
+    async fn post(
         &self,
         _request: &Request,
         _txn: &Txn,
         _path: &[PathSegment],
-        _data: S,
+        _data: Object,
     ) -> TCResult<State> {
         Err(error::not_implemented("NullChain::post"))
-    }
-
-    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Value>> {
-        Ok(Box::pin(stream::empty()))
     }
 }
 

@@ -3,11 +3,10 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
-use crate::class::{Class, NativeClass, State, TCResult, TCStream, TCType};
+use crate::class::{Class, NativeClass, TCResult, TCStream, TCType};
 use crate::error;
-use crate::request::Request;
 use crate::scalar::{
-    label, CastInto, Link, Object, PathSegment, Scalar, TCPathBuf, TryCastFrom, TryCastInto, Value,
+    label, CastInto, Link, PathSegment, Scalar, TCPathBuf, TryCastFrom, TryCastInto, Value,
 };
 use crate::transaction::Txn;
 
@@ -29,32 +28,7 @@ pub trait CollectionInstance {
     type Item: CastInto<Scalar> + TryCastFrom<Scalar>;
     type Slice;
 
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-    ) -> TCResult<State>;
-
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool>;
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State>;
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-        value: State,
-    ) -> TCResult<()>;
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>>;
 }

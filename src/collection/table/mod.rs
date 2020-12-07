@@ -6,7 +6,7 @@ use futures::future::{self, TryFutureExt};
 use futures::{Stream, StreamExt};
 use log::debug;
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, Public, State, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionView};
 use crate::error;
@@ -178,6 +178,19 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
     type Item = Vec<Value>;
     type Slice = TableView;
 
+    async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
+        Err(error::not_implemented("TableImpl::is_empty"))
+    }
+
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+        let rows = self.inner.clone().stream(txn.id().clone()).await?;
+        let rows = Box::pin(rows.map(Value::Tuple).map(Scalar::Value));
+        Ok(rows)
+    }
+}
+
+#[async_trait]
+impl<T: TableInstance + Sync> Public for TableImpl<T> {
     async fn get(
         &self,
         _request: &Request,
@@ -209,45 +222,6 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
                 "select" => {
                     let columns = try_into_columns(selector)?;
                     self.select(columns).map(Table::from).map(State::from)
-                }
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            Err(error::path_not_found(path))
-        }
-    }
-
-    async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
-        Err(error::not_implemented("TableImpl::is_empty"))
-    }
-
-    async fn post(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        if path.is_empty() {
-            Err(error::method_not_allowed("Table: POST /"))
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "update" => {
-                    let update =
-                        params.try_cast_into(|v| error::bad_request("Invalid update", v))?;
-
-                    self.inner
-                        .clone()
-                        .update(txn.clone(), update)
-                        .map_ok(State::from)
-                        .await
-                }
-                "where" => {
-                    let bounds = Bounds::try_cast_from(params, |v| {
-                        error::bad_request("Cannot cast into Table Bounds from", v)
-                    })?;
-
-                    self.slice(bounds).map(State::from)
                 }
                 other => Err(error::not_found(other)),
             }
@@ -290,10 +264,39 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        let rows = self.inner.clone().stream(txn.id().clone()).await?;
-        let rows = Box::pin(rows.map(Value::Tuple).map(Scalar::Value));
-        Ok(rows)
+    async fn post(
+        &self,
+        _request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        if path.is_empty() {
+            Err(error::method_not_allowed("Table: POST /"))
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "update" => {
+                    let update =
+                        params.try_cast_into(|v| error::bad_request("Invalid update", v))?;
+
+                    self.inner
+                        .clone()
+                        .update(txn.clone(), update)
+                        .map_ok(State::from)
+                        .await
+                }
+                "where" => {
+                    let bounds = Bounds::try_cast_from(params, |v| {
+                        error::bad_request("Cannot cast into Table Bounds from", v)
+                    })?;
+
+                    self.slice(bounds).map(State::from)
+                }
+                other => Err(error::not_found(other)),
+            }
+        } else {
+            Err(error::path_not_found(path))
+        }
     }
 }
 
@@ -339,6 +342,23 @@ impl CollectionInstance for Table {
     type Item = Vec<Value>;
     type Slice = TableView;
 
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        match self {
+            Self::Base(base) => base.is_empty(txn).await,
+            Self::View(view) => view.is_empty(txn).await,
+        }
+    }
+
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+        match self {
+            Self::Base(base) => base.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
+        }
+    }
+}
+
+#[async_trait]
+impl Public for Table {
     async fn get(
         &self,
         request: &Request,
@@ -349,26 +369,6 @@ impl CollectionInstance for Table {
         match self {
             Self::Base(base) => base.get(request, txn, path, selector).await,
             Self::View(view) => view.get(request, txn, path, selector).await,
-        }
-    }
-
-    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        match self {
-            Self::Base(base) => base.is_empty(txn).await,
-            Self::View(view) => view.is_empty(txn).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        match self {
-            Self::Base(base) => base.post(request, txn, path, params).await,
-            Self::View(view) => view.post(request, txn, path, params).await,
         }
     }
 
@@ -386,10 +386,16 @@ impl CollectionInstance for Table {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
         match self {
-            Self::Base(base) => base.to_stream(txn).await,
-            Self::View(view) => view.to_stream(txn).await,
+            Self::Base(base) => base.post(request, txn, path, params).await,
+            Self::View(view) => view.post(request, txn, path, params).await,
         }
     }
 }

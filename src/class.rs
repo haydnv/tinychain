@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::pin::Pin;
 
+use async_trait::async_trait;
 use futures::future::Future;
 use futures::stream::Stream;
 
@@ -10,7 +11,9 @@ use crate::cluster::Cluster;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
 use crate::object::{Object, ObjectType};
-use crate::scalar::{label, Link, PathSegment, Scalar, ScalarType, TCPathBuf, Value, ValueType};
+use crate::request::Request;
+use crate::scalar::{self, label, Link, PathSegment, Scalar, ScalarType, TCPathBuf, Value, ValueType};
+use crate::transaction::Txn;
 
 pub const ERR_PROTECTED: &str =
     "You have accessed a protected class. This should not be possible. \
@@ -40,6 +43,15 @@ pub trait Instance {
     fn is_a(&self, dtype: Self::Class) -> bool {
         self.class() == dtype
     }
+}
+
+#[async_trait]
+pub trait Public {
+    async fn get(&self, request: &Request, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State>;
+
+    async fn put(&self, request: &Request, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()>;
+
+    async fn post(&self, request: &Request, txn: &Txn, path: &[PathSegment], params: scalar::Object) -> TCResult<State>;
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -160,6 +172,39 @@ impl Instance for State {
             Self::Collection(collection) => collection.class().into(),
             Self::Object(object) => object.class().into(),
             Self::Scalar(scalar) => scalar.class().into(),
+        }
+    }
+}
+
+#[async_trait]
+impl Public for State {
+    async fn get(&self, request: &Request, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
+        match self {
+            Self::Chain(chain) => chain.get(request, txn, path, key).await,
+            Self::Cluster(cluster) => cluster.get(request, txn, path, key).await,
+            Self::Collection(collection) => collection.get(request, txn, path, key).await,
+            Self::Object(object) => object.get(request, txn, path, key).await,
+            Self::Scalar(scalar) => scalar.get(request, txn, path, key).await,
+        }
+    }
+
+    async fn put(&self, request: &Request, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
+        match self {
+            Self::Chain(chain) => chain.put(request, txn, path, key, value).await,
+            Self::Cluster(cluster) => cluster.put(request, txn, path, key, value).await,
+            Self::Collection(collection) => collection.put(request, txn, path, key, value).await,
+            Self::Object(object) => object.put(request, txn, path, key, value).await,
+            Self::Scalar(scalar) => scalar.put(request, txn, path, key, value).await,
+        }
+    }
+
+    async fn post(&self, request: &Request, txn: &Txn, path: &[PathSegment], params: scalar::Object) -> TCResult<State> {
+        match self {
+            Self::Chain(chain) => chain.post(request, txn, path, params).await,
+            Self::Cluster(cluster) => cluster.post(request, txn, path, params).await,
+            Self::Collection(collection) => collection.post(request, txn, path, params).await,
+            Self::Object(object) => object.post(request, txn, path, params).await,
+            Self::Scalar(scalar) => scalar.post(request, txn, path, params).await,
         }
     }
 }

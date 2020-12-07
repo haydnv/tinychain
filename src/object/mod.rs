@@ -1,9 +1,10 @@
 use std::fmt;
 
+use async_trait::async_trait;
 use futures::TryFutureExt;
 use log::debug;
 
-use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCType};
+use crate::class::{Class, Instance, NativeClass, Public, State, TCType};
 use crate::error::{self, TCResult};
 use crate::request::Request;
 use crate::scalar::{self, label, Link, PathSegment, TCPath, TCPathBuf, Value};
@@ -81,26 +82,46 @@ pub enum Object {
     Instance(ObjectInstance),
 }
 
-impl Object {
-    pub fn get<'a>(
-        &'a self,
-        request: &'a Request,
-        txn: &'a Txn,
-        path: &'a [PathSegment],
+#[async_trait]
+impl Public for Object {
+    async fn get(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
         key: Value,
-    ) -> TCBoxTryFuture<'a, State> {
-        Box::pin(async move {
-            match self {
-                Self::Class(ic) => {
-                    ic.clone()
-                        .get(request, txn, path, key)
-                        .map_ok(Object::Instance)
-                        .map_ok(State::Object)
-                        .await
-                }
-                Self::Instance(instance) => instance.get(request, txn, path, key).await,
+    ) -> TCResult<State> {
+        match self {
+            Self::Class(ic) => {
+                ic.clone()
+                    .get(request, txn, path, key)
+                    .map_ok(Object::Instance)
+                    .map_ok(State::Object)
+                    .await
             }
-        })
+            Self::Instance(instance) => instance.get(request, txn, path, key).await,
+        }
+    }
+
+    async fn put(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _key: Value,
+        _value: State,
+    ) -> TCResult<()> {
+        Err(error::not_implemented("Object::put"))
+    }
+
+    async  fn post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _params: scalar::Object,
+    ) -> TCResult<State> {
+        Err(error::not_implemented("Object::post"))
     }
 }
 

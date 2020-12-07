@@ -9,7 +9,7 @@ use log::debug;
 
 use crate::auth::Token;
 use crate::block::Dir;
-use crate::class::{State, TCBoxTryFuture, TCResult};
+use crate::class::{Public, State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::kernel;
 use crate::request::Request;
@@ -19,7 +19,7 @@ use crate::transaction::{Txn, TxnServer};
 use super::http;
 use super::{Hosted, NetworkTime, Server};
 
-const ERR_BAD_POSTDATA: &str = "POST requires a list of (Id, Value) tuples, not";
+const ERR_BAD_POST_DATA: &str = "POST requires a list of (Id, Value) tuples, not";
 
 pub struct Gateway {
     peers: Vec<LinkHost>,
@@ -129,7 +129,7 @@ impl Gateway {
                 Err(error::not_found(subject))
             } else if let Some((suffix, cluster)) = self.hosted.get(path) {
                 debug!("Gateway::get {}{}: {}", cluster, TCPath::from(suffix), key);
-                cluster.get(request, self, txn, &suffix[..], key).await
+                cluster.get(request, txn, &suffix[..], key).await
             } else {
                 Err(error::not_found(path))
             }
@@ -165,7 +165,7 @@ impl Gateway {
                     state
                 );
 
-                cluster.put(request, self, txn, path, selector, state).await
+                cluster.put(request, txn, path, selector, state).await
             } else {
                 Err(error::not_implemented("Peer cluster discovery"))
             }
@@ -190,18 +190,17 @@ impl Gateway {
             }
 
             let data: Vec<(Id, Scalar)> =
-                data.try_cast_into(|v| error::bad_request(ERR_BAD_POSTDATA, v))?;
-            let data = stream::iter(data);
+                data.try_cast_into(|v| error::bad_request(ERR_BAD_POST_DATA, v))?;
 
             if subject.host().is_none() {
                 let path = subject.path();
                 if let Some((suffix, cluster)) = self.hosted.get(path) {
-                    cluster.post(request, txn, suffix, data).await
+                    cluster.post(request, txn, suffix, data.into_iter().collect()).await
                 } else {
                     Err(error::not_implemented("Peer discovery"))
                 }
             } else {
-                self.client.post(request, txn, subject, data).await
+                self.client.post(request, txn, subject, stream::iter(data.into_iter())).await
             }
         })
     }

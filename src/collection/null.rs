@@ -3,7 +3,7 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::stream;
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, Public, State, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
@@ -74,6 +74,17 @@ impl CollectionInstance for Null {
     type Item = Value;
     type Slice = Null;
 
+    async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
+        Ok(true)
+    }
+
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Scalar>> {
+        Ok(Box::pin(stream::empty()))
+    }
+}
+
+#[async_trait]
+impl Public for Null {
     async fn get(
         &self,
         _request: &Request,
@@ -82,20 +93,6 @@ impl CollectionInstance for Null {
         _selector: Value,
     ) -> TCResult<State> {
         Err(error::unsupported("Null Collection has no contents to GET"))
-    }
-
-    async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
-        Ok(true)
-    }
-
-    async fn post(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _params: Object,
-    ) -> TCResult<State> {
-        Err(error::not_implemented("Null::post"))
     }
 
     async fn put(
@@ -109,8 +106,14 @@ impl CollectionInstance for Null {
         Err(error::unsupported("Null Collection cannot be modified"))
     }
 
-    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Scalar>> {
-        Ok(Box::pin(stream::empty()))
+    async fn post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _params: Object,
+    ) -> TCResult<State> {
+        Err(error::not_implemented("Null::post"))
     }
 }
 

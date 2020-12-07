@@ -3,13 +3,11 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream::Stream;
 use log::debug;
 
 use crate::block::Dir;
-use crate::class::{State, TCResult};
+use crate::class::{Public, State, TCResult};
 use crate::error;
-use crate::gateway::Gateway;
 use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::lock::{Mutate, TxnLock};
@@ -68,11 +66,13 @@ impl Cluster {
             state,
         })
     }
+}
 
-    pub async fn get(
+#[async_trait]
+impl Public for Cluster {
+    async fn get(
         &self,
         _request: &Request,
-        _gateway: &Gateway,
         _txn: &Txn,
         _path: &[PathSegment],
         _key: Value,
@@ -80,10 +80,9 @@ impl Cluster {
         Err(error::not_implemented("Cluster::get"))
     }
 
-    pub async fn put(
+    async fn put(
         &self,
         _request: &Request,
-        _gateway: &Gateway,
         _txn: &Txn,
         _path: &[PathSegment],
         _key: Value,
@@ -92,12 +91,12 @@ impl Cluster {
         Err(error::not_implemented("Gateway::put"))
     }
 
-    pub async fn post<S: Stream<Item = (Id, Scalar)> + Send + Sync + Unpin>(
-        self,
+    async fn post(
+        &self,
         _request: &Request,
         _txn: &Txn,
         _path: &[PathSegment],
-        _data: S,
+        _data: Object,
     ) -> TCResult<State> {
         Err(error::not_implemented("Gateway::post"))
     }

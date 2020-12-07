@@ -121,16 +121,18 @@ impl OpDef {
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Get((key_id, def)) = self {
-                let mut data = if let Some(subject) = context {
+                let mut data = Vec::with_capacity(def.len() + 2);
+
+                if let Some(subject) = context {
                     debug!("OpDef::get {} (context: {})", subject, key);
-                    vec![(label("self").into(), State::Object(subject.clone().into()))]
+                    data.push((label("self").into(), State::Object(subject.clone().into())));
                 } else {
                     debug!("OpDef::get {}", key);
-                    vec![]
                 };
 
                 data.push((key_id.clone(), Scalar::Value(key).into()));
                 data.extend(def.to_vec().into_iter().map(|(k, v)| (k, State::Scalar(v))));
+
                 txn.execute(request, stream::iter(data.into_iter())).await
             } else {
                 Err(error::method_not_allowed(self))
@@ -138,15 +140,28 @@ impl OpDef {
         })
     }
 
+    pub fn put<'a>(
+        &'a self,
+        _request: &'a Request,
+        _txn: &'a Txn,
+        _key: Value,
+        _value: State,
+        _context: Option<&'a ObjectInstance>
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move {
+            Err(error::not_implemented("Object::put"))
+        })
+    }
+
     pub fn post<'a>(
         &'a self,
         request: &'a Request,
         txn: &'a Txn,
-        data: Object,
+        params: Object,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Post(def) = self {
-                let mut op: Vec<(Id, Scalar)> = data.into_iter().collect();
+                let mut op: Vec<(Id, Scalar)> = params.into_iter().collect();
                 op.extend(def.to_vec());
                 txn.execute(request, stream::iter(op.into_iter())).await
             } else {

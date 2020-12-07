@@ -1,13 +1,12 @@
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::stream::Stream;
 use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, NativeClass, Public, State, TCResult, TCStream, TCType};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{label, Id, Link, PathSegment, Scalar, TCPathBuf, Value};
+use crate::scalar::{label, Link, Object, PathSegment, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 mod block;
@@ -91,31 +90,6 @@ impl ChainClass for ChainType {
 pub trait ChainInstance: Instance {
     type Class: ChainClass;
 
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<State>;
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-        state: State,
-    ) -> TCResult<()>;
-
-    async fn post<S: Stream<Item = (Id, Scalar)> + Send + Unpin>(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        data: S,
-    ) -> TCResult<State>;
-
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Value>>;
 }
 
@@ -138,6 +112,15 @@ impl Instance for Chain {
 impl ChainInstance for Chain {
     type Class = ChainType;
 
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Value>> {
+        match self {
+            Self::Null(nc) => nc.to_stream(txn).await,
+        }
+    }
+}
+
+#[async_trait]
+impl Public for Chain {
     async fn get(
         &self,
         request: &Request,
@@ -163,21 +146,15 @@ impl ChainInstance for Chain {
         }
     }
 
-    async fn post<S: Stream<Item = (Id, Scalar)> + Send + Unpin>(
+    async fn post(
         &self,
         request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        data: S,
+        data: Object,
     ) -> TCResult<State> {
         match self {
             Self::Null(nc) => nc.post(request, txn, path, data).await,
-        }
-    }
-
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Value>> {
-        match self {
-            Self::Null(nc) => nc.to_stream(txn).await,
         }
     }
 }
