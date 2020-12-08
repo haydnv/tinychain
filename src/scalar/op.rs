@@ -165,12 +165,7 @@ impl OpDef {
                 data.extend(
                     params
                         .into_iter()
-                        .map(|(id, scalar)| (id, State::from(scalar))),
-                );
-
-                data.extend(
-                    def.into_iter()
-                        .cloned()
+                        .chain(def.into_iter().cloned())
                         .map(|(id, scalar)| (id, State::from(scalar))),
                 );
 
