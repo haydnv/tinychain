@@ -13,7 +13,7 @@ use crate::class::{Public, State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::kernel;
 use crate::request::Request;
-use crate::scalar::{Id, Link, LinkHost, Scalar, TCPath, TryCastInto, Value};
+use crate::scalar::{Id, Link, Scalar, TCPath, TryCastInto, Value};
 use crate::transaction::{Txn, TxnServer};
 
 use super::http;
@@ -22,7 +22,6 @@ use super::{Hosted, NetworkTime, Server};
 const ERR_BAD_POST_DATA: &str = "POST requires a list of (Id, Value) tuples, not";
 
 pub struct Gateway {
-    peers: Vec<LinkHost>,
     adapters: Vec<Link>,
     hosted: Hosted,
     client: http::Client,
@@ -37,7 +36,6 @@ impl Gateway {
     }
 
     pub fn new(
-        peers: Vec<LinkHost>,
         adapters: Vec<Link>,
         hosted: Hosted,
         workspace: Arc<Dir>,
@@ -64,7 +62,6 @@ impl Gateway {
         let txn_server = TxnServer::new(workspace.clone());
 
         Ok(Gateway {
-            peers,
             adapters,
             hosted,
             client,
@@ -167,7 +164,7 @@ impl Gateway {
 
                 cluster.put(request, txn, path, selector, state).await
             } else {
-                Err(error::not_implemented("Peer cluster discovery"))
+                Err(error::path_not_found(path))
             }
         }
     }
@@ -199,7 +196,7 @@ impl Gateway {
                         .post(request, txn, suffix, data.into_iter().collect())
                         .await
                 } else {
-                    Err(error::not_implemented("Peer discovery"))
+                    Err(error::path_not_found(path))
                 }
             } else {
                 self.client

@@ -113,7 +113,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let hosted = configure(config.hosted, data_dir.clone(), workspace.clone()).await?;
     let gateway = gateway::Gateway::new(
-        config.peers,
         config.adapters,
         hosted,
         workspace.clone(),
