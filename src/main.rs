@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arrayfire as af;
+use log::debug;
 use structopt::StructOpt;
 
 mod auth;
@@ -132,8 +133,21 @@ async fn configure(
     data_dir: Arc<block::Dir>,
     workspace: Arc<block::Dir>,
 ) -> error::TCResult<gateway::Hosted> {
+    const RESERVED: [&str; 2] = ["/sbin", "/txn"];
+
     let mut hosted = gateway::Hosted::new();
     for path in clusters {
+        for reserved in &RESERVED {
+            if path.to_string().starts_with(reserved) {
+                return Err(error::unsupported(format!(
+                    "Cannot host cluster at {} because the path {} is reserved",
+                    path, reserved
+                )));
+            } else {
+                debug!("configuring cluster at {}...", path);
+            }
+        }
+
         let cluster = cluster::Cluster::create(path.clone(), data_dir.clone(), workspace.clone())?;
         hosted.push(path, cluster);
     }
