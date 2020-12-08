@@ -242,7 +242,13 @@ impl Instance for Scalar {
 
 #[async_trait]
 impl Public for Scalar {
-    async fn get(&self, request: &Request, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
+    async fn get(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<State> {
         match self {
             Self::Object(object) => object.get(request, txn, path, key).await,
             Self::Op(op) if path.is_empty() => op.get(request, txn, key, None).await,
@@ -250,30 +256,48 @@ impl Public for Scalar {
             Self::Ref(tc_ref) => Err(error::method_not_allowed(tc_ref)),
             Self::Slice(_slice) => Err(error::not_implemented("Slice::get")),
             Self::Tuple(tuple) if path.is_empty() => {
-                let i: Number = key.try_cast_into(|v| error::bad_request("Invalid tuple index", v))?;
+                let i: Number =
+                    key.try_cast_into(|v| error::bad_request("Invalid tuple index", v))?;
                 let i: usize = i.cast_into();
-                tuple.get(i).cloned().map(State::Scalar).ok_or_else(|| error::not_found(format!("Index {}", i)))
+                tuple
+                    .get(i)
+                    .cloned()
+                    .map(State::Scalar)
+                    .ok_or_else(|| error::not_found(format!("Index {}", i)))
             }
             Self::Tuple(_) => Err(error::path_not_found(path)),
             Self::Value(value) => value.get(path, key).map(State::from),
         }
     }
 
-    async fn put(&self, request: &Request, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
+    async fn put(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+        value: State,
+    ) -> TCResult<()> {
         match self {
             Self::Object(object) => object.put(request, txn, path, key, value).await,
             Self::Op(op) if path.is_empty() => op.put(request, txn, key, value, None).await,
             Self::Op(_) => Err(error::path_not_found(path)),
-            other => Err(error::method_not_allowed(other))
+            other => Err(error::method_not_allowed(other)),
         }
     }
 
-    async fn post(&self, request: &Request, txn: &Txn, path: &[PathSegment], params: Object) -> TCResult<State> {
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
         match self {
             Self::Object(object) => object.post(request, txn, path, params).await,
-            Self::Op(op) if path.is_empty() => op.post(request, txn, params).await,
+            Self::Op(op) if path.is_empty() => op.post(request, txn, params, None).await,
             Self::Op(_) => Err(error::path_not_found(path)),
-            other => Err(error::method_not_allowed(other))
+            other => Err(error::method_not_allowed(other)),
         }
     }
 }

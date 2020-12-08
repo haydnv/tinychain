@@ -1,12 +1,11 @@
 use std::fmt;
 
 use futures::stream;
-use log::debug;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
 use crate::error;
-use crate::object::ObjectInstance;
+use crate::object::InstanceExt;
 use crate::request::Request;
 use crate::transaction::Txn;
 
@@ -117,18 +116,15 @@ impl OpDef {
         request: &'a Request,
         txn: &'a Txn,
         key: Value,
-        context: Option<&'a ObjectInstance>,
+        context: Option<InstanceExt<State>>,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Get((key_id, def)) = self {
                 let mut data = Vec::with_capacity(def.len() + 2);
 
                 if let Some(subject) = context {
-                    debug!("OpDef::get {} (context: {})", subject, key);
                     data.push((label("self").into(), State::Object(subject.clone().into())));
-                } else {
-                    debug!("OpDef::get {}", key);
-                };
+                }
 
                 data.push((key_id.clone(), Scalar::Value(key).into()));
                 data.extend(def.to_vec().into_iter().map(|(k, v)| (k, State::Scalar(v))));
@@ -146,11 +142,9 @@ impl OpDef {
         _txn: &'a Txn,
         _key: Value,
         _value: State,
-        _context: Option<&'a ObjectInstance>
+        _context: Option<InstanceExt<State>>,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move {
-            Err(error::not_implemented("Object::put"))
-        })
+        Box::pin(async move { Err(error::not_implemented("OpDef::put")) })
     }
 
     pub fn post<'a>(
@@ -158,12 +152,29 @@ impl OpDef {
         request: &'a Request,
         txn: &'a Txn,
         params: Object,
+        context: Option<InstanceExt<State>>,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
             if let Self::Post(def) = self {
-                let mut op: Vec<(Id, Scalar)> = params.into_iter().collect();
-                op.extend(def.to_vec());
-                txn.execute(request, stream::iter(op.into_iter())).await
+                let mut data = Vec::with_capacity(def.len() + params.len() + 1);
+
+                if let Some(subject) = context {
+                    data.push((label("self").into(), subject.into()));
+                }
+
+                data.extend(
+                    params
+                        .into_iter()
+                        .map(|(id, scalar)| (id, State::from(scalar))),
+                );
+
+                data.extend(
+                    def.into_iter()
+                        .cloned()
+                        .map(|(id, scalar)| (id, State::from(scalar))),
+                );
+
+                txn.execute(request, stream::iter(data.into_iter())).await
             } else {
                 Err(error::method_not_allowed(self))
             }

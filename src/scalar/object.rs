@@ -35,7 +35,7 @@ impl Object {
                 Some(scalar) => match scalar {
                     Scalar::Op(op_def) => {
                         op_def
-                            .get(request, txn, key, Some(&self.clone().into()))
+                            .get(request, txn, key, Some(self.clone().into()))
                             .await
                     }
 

@@ -231,7 +231,6 @@ impl Public for TensorBase {
             .await
     }
 
-
     async fn put(
         &self,
         request: &Request,
@@ -448,12 +447,16 @@ impl Public for TensorView {
             }
         } else if path.len() == 1 {
             match path[0].as_str() {
-                "all" => {
-                    self.all(txn.clone()).await.map(Value::from).map(State::from)
-                }
-                "any" => {
-                    self.any(txn.clone()).await.map(Value::from).map(State::from)
-                }
+                "all" => self
+                    .all(txn.clone())
+                    .await
+                    .map(Value::from)
+                    .map(State::from),
+                "any" => self
+                    .any(txn.clone())
+                    .await
+                    .map(Value::from)
+                    .map(State::from),
                 "as_type" => {
                     let dtype: NumberType =
                         selector.try_cast_into(|v| error::bad_request("Invalid NumberType", v))?;
@@ -477,9 +480,7 @@ impl Public for TensorView {
                         .map(Collection::from)
                         .map(State::Collection)
                 }
-                "not" => {
-                    self.not().map(Collection::from).map(State::Collection)
-                }
+                "not" => self.not().map(Collection::from).map(State::Collection),
                 "reshape" => {
                     let shape =
                         selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;

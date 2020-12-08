@@ -247,7 +247,10 @@ impl Txn {
             }
 
             if pending.is_empty() && !is_resolved(dereference_state(&graph, &capture)?) {
-                return Err(error::bad_request("Cannot resolve all dependencies of", capture));
+                return Err(error::bad_request(
+                    "Cannot resolve all dependencies of",
+                    capture,
+                ));
             }
 
             let current_state = graph.clone();
@@ -437,9 +440,7 @@ impl Txn {
 
         match subject {
             State::Chain(chain) => chain.get(request, self, path, key).await,
-            State::Cluster(cluster) => {
-                cluster.get(request, self, path, key).await
-            }
+            State::Cluster(cluster) => cluster.get(request, self, path, key).await,
             State::Collection(collection) => collection
                 .get(request, self, &path[..], key)
                 .await
@@ -522,7 +523,7 @@ impl Txn {
                         return Err(error::path_not_found(path));
                     }
 
-                    op_def.post(request, self, params).await
+                    op_def.post(request, self, params, None).await
                 }
                 other => Err(error::method_not_allowed(other)),
             },

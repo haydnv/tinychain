@@ -4,15 +4,15 @@ use std::fmt;
 
 use log::debug;
 
-use crate::class::{Class, Instance, NativeClass, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error::{self, TCResult};
 use crate::request::Request;
 use crate::scalar::{
-    self, label, Id, Link, PathSegment, Scalar, TCPath, TCPathBuf, TryCastInto, Value,
+    self, label, Id, Key, Link, OpRef, PathSegment, Scalar, TCPath, TCPathBuf, TryCastInto, Value,
 };
 use crate::transaction::Txn;
 
-use super::{ObjectInstance, ObjectType};
+use super::{InstanceExt, ObjectType};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct InstanceClassType;
@@ -107,16 +107,19 @@ impl InstanceClass {
         request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<ObjectInstance> {
+        schema: Value,
+    ) -> TCResult<InstanceExt<State>> {
         if path.is_empty() {
-            ObjectInstance::new(request, txn, self, key).await
+            let ctr = OpRef::Get((self.extends(), Key::Value(schema)));
+            let parent = txn.resolve(request, &HashMap::new(), ctr.into()).await?;
+
+            Ok(InstanceExt::new(parent, self))
         } else {
             Err(error::not_found(TCPath::from(path)))
         }
     }
 
-    pub fn post(path: &[PathSegment], _data: scalar::Object) -> TCResult<ObjectInstance> {
+    pub fn post(path: &[PathSegment], _data: scalar::Object) -> TCResult<InstanceExt<State>> {
         debug!("InstanceClass::post {}", TCPath::from(path));
 
         if path.is_empty() {
@@ -132,7 +135,7 @@ impl InstanceClass {
 }
 
 impl Class for InstanceClass {
-    type Instance = ObjectInstance;
+    type Instance = InstanceExt<State>;
 }
 
 impl Instance for InstanceClass {

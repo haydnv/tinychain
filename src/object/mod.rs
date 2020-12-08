@@ -14,7 +14,7 @@ mod class;
 mod instance;
 
 pub use class::{InstanceClass, InstanceClassType};
-pub use instance::ObjectInstance;
+pub use instance::InstanceExt;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum ObjectType {
@@ -79,7 +79,7 @@ impl fmt::Display for ObjectType {
 #[derive(Clone)]
 pub enum Object {
     Class(InstanceClass),
-    Instance(ObjectInstance),
+    Instance(InstanceExt<State>),
 }
 
 #[async_trait]
@@ -114,7 +114,7 @@ impl Public for Object {
         Err(error::not_implemented("Object::put"))
     }
 
-    async  fn post(
+    async fn post(
         &self,
         _request: &Request,
         _txn: &Txn,
@@ -142,9 +142,15 @@ impl From<InstanceClass> for Object {
     }
 }
 
-impl From<ObjectInstance> for Object {
-    fn from(oi: ObjectInstance) -> Object {
-        Object::Instance(oi)
+impl From<InstanceExt<State>> for Object {
+    fn from(instance: InstanceExt<State>) -> Object {
+        Object::Instance(instance)
+    }
+}
+
+impl From<InstanceExt<State>> for State {
+    fn from(instance: InstanceExt<State>) -> State {
+        State::Object(instance.into())
     }
 }
 

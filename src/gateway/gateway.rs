@@ -195,12 +195,16 @@ impl Gateway {
             if subject.host().is_none() {
                 let path = subject.path();
                 if let Some((suffix, cluster)) = self.hosted.get(path) {
-                    cluster.post(request, txn, suffix, data.into_iter().collect()).await
+                    cluster
+                        .post(request, txn, suffix, data.into_iter().collect())
+                        .await
                 } else {
                     Err(error::not_implemented("Peer discovery"))
                 }
             } else {
-                self.client.post(request, txn, subject, stream::iter(data.into_iter())).await
+                self.client
+                    .post(request, txn, subject, stream::iter(data.into_iter()))
+                    .await
             }
         })
     }
