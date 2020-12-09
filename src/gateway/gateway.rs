@@ -162,7 +162,7 @@ impl Gateway {
                     state
                 );
 
-                cluster.put(request, txn, path, selector, state).await
+                cluster.put(request, txn, suffix, selector, state).await
             } else {
                 Err(error::path_not_found(path))
             }

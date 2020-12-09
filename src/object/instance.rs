@@ -13,12 +13,12 @@ use crate::transaction::Txn;
 use super::InstanceClass;
 
 #[derive(Clone)]
-pub struct InstanceExt<T: Clone + Public + Into<State> + Send + Sync> {
+pub struct InstanceExt<T: Clone + Public + Send + Sync> {
     parent: Box<T>,
     class: InstanceClass,
 }
 
-impl<T: Clone + Public + Into<State> + Send + Sync> InstanceExt<T> {
+impl<T: Clone + Public + Send + Sync> InstanceExt<T> {
     pub fn new(parent: T, class: InstanceClass) -> InstanceExt<T> {
         InstanceExt {
             parent: Box::new(parent),
@@ -26,7 +26,10 @@ impl<T: Clone + Public + Into<State> + Send + Sync> InstanceExt<T> {
         }
     }
 
-    pub fn into_state(self) -> InstanceExt<State> {
+    pub fn into_state(self) -> InstanceExt<State>
+    where
+        T: Into<State>,
+    {
         let parent = Box::new((*self.parent).into());
         let class = self.class;
         InstanceExt { parent, class }
@@ -87,7 +90,7 @@ impl<T: Clone + Public + Into<State> + Send + Sync> Public for InstanceExt<T> {
     }
 }
 
-impl<T: Clone + Public + Into<State> + Send + Sync> Instance for InstanceExt<T> {
+impl<T: Clone + Public + Send + Sync> Instance for InstanceExt<T> {
     type Class = InstanceClass;
 
     fn class(&self) -> Self::Class {
@@ -104,7 +107,7 @@ impl From<scalar::Object> for InstanceExt<State> {
     }
 }
 
-impl<T: Clone + Public + Into<State> + Send + Sync> fmt::Display for InstanceExt<T> {
+impl<T: Clone + Public + Send + Sync> fmt::Display for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Object of type {}", self.class())
     }

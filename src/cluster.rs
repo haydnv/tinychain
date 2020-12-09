@@ -1,16 +1,19 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::{try_join, StreamExt};
 use log::debug;
 
 use crate::block::Dir;
+use crate::chain::Chain;
 use crate::class::{Public, State, TCResult};
 use crate::error;
 use crate::request::Request;
 use crate::scalar::*;
-use crate::transaction::lock::{Mutate, TxnLock};
+use crate::transaction::lock::{Mutable, Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
 #[derive(Clone)]
@@ -49,6 +52,8 @@ pub struct Cluster {
     data_dir: Arc<Dir>,
     workspace: Arc<Dir>,
     state: TxnLock<ClusterState>,
+    chains: TxnLock<Mutable<HashMap<Id, Chain>>>,
+    methods: TxnLock<Mutable<Object>>,
 }
 
 impl Cluster {
@@ -59,11 +64,23 @@ impl Cluster {
             ClusterState { replica },
         );
 
+        let chains = TxnLock::new(
+            format!("Chains of Cluster at {}", path),
+            HashMap::new().into(),
+        );
+
+        let methods = TxnLock::new(
+            format!("Object of Cluster at {}", path),
+            Object::default().into(),
+        );
+
         Ok(Cluster {
             path,
             data_dir,
             workspace,
             state,
+            chains,
+            methods,
         })
     }
 }
@@ -82,13 +99,55 @@ impl Public for Cluster {
 
     async fn put(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _key: Value,
-        _state: State,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+        state: State,
     ) -> TCResult<()> {
-        Err(error::not_implemented("Gateway::put"))
+        if path.is_empty() {
+            if key.is_none() {
+                let object: Object = state.try_cast_into(|s| {
+                    error::bad_request("Expected generic Object but found", s)
+                })?;
+                let provided = HashMap::new();
+                let mut object = txn.resolve_object(request, &provided, object);
+
+                let mut chains = HashMap::new();
+                let mut methods = HashMap::new();
+                while let Some(result) = object.next().await {
+                    let (id, state) = result?;
+
+                    match state {
+                        State::Scalar(Scalar::Op(op)) => {
+                            methods.insert(id, Scalar::Op(op));
+                        }
+                        State::Chain(chain) => {
+                            chains.insert(id, chain);
+                        }
+                        other => {
+                            return Err(error::bad_request("Cluster member must be wrapped in a Chain (consider /sbin/chain/null)", other));
+                        }
+                    }
+                }
+
+                let txn_id = *txn.id();
+                let (mut chains_lock, mut methods_lock) =
+                    try_join!(self.chains.write(txn_id), self.methods.write(txn_id))?;
+                *chains_lock.deref_mut() = chains;
+                *methods_lock.deref_mut() = methods.into();
+
+                Ok(())
+            } else {
+                Err(error::not_implemented(format!("Cluster::put / {}", key)))
+            }
+        } else {
+            Err(error::not_implemented(format!(
+                "Cluster::put {} {}",
+                TCPath::from(path),
+                key
+            )))
+        }
     }
 
     async fn post(
@@ -98,7 +157,7 @@ impl Public for Cluster {
         _path: &[PathSegment],
         _data: Object,
     ) -> TCResult<State> {
-        Err(error::not_implemented("Gateway::post"))
+        Err(error::not_implemented("Cluster::post"))
     }
 }
 

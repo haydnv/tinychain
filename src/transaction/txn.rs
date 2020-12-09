@@ -391,6 +391,24 @@ impl Txn {
         }
     }
 
+    pub fn resolve_object<'a>(
+        &'a self,
+        request: &'a Request,
+        provided: &'a HashMap<Id, State>,
+        object: Object,
+    ) -> impl Stream<Item = TCResult<(Id, State)>> + 'a {
+        FuturesUnordered::from_iter(object.into_iter().map(|(id, scalar)| {
+            let provider: TCBoxTryFuture<State> = match scalar {
+                Scalar::Ref(tc_ref) => {
+                    Box::pin(async move { self.resolve(request, provided, *tc_ref).await })
+                }
+                other => Box::pin(async move { Ok(State::Scalar(other)) }),
+            };
+
+            provider.map_ok(|state| (id, state))
+        }))
+    }
+
     fn resolve_flow<'a>(
         &'a self,
         request: &'a Request,

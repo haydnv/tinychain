@@ -20,12 +20,11 @@ pub mod reference;
 pub mod slice;
 pub mod value;
 
+pub use object::Object;
 pub use op::*;
 pub use reference::*;
 pub use slice::*;
 pub use value::*;
-
-pub type Object = object::Object;
 
 pub trait CastFrom<T> {
     fn cast_from(value: T) -> Self;
@@ -413,22 +412,6 @@ impl<T: TryFrom<Scalar, Error = error::TCError>> TryFrom<Scalar> for Vec<T> {
             items.push(item.try_into()?);
         }
         Ok(items)
-    }
-}
-
-impl TryCastFrom<Scalar> for Object {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Object(_) => true,
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Object> {
-        match scalar {
-            Scalar::Object(object) => Some(object),
-            _ => None,
-        }
     }
 }
 

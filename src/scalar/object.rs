@@ -3,15 +3,18 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
+use async_trait::async_trait;
 use log::debug;
 use serde::ser::{Serialize, Serializer};
 
-use crate::class::{State, TCBoxTryFuture};
+use crate::class::{Public, State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::request::Request;
 use crate::transaction::Txn;
 
-use super::{Id, PathSegment, Scalar, TCPath, Value, ValueInstance};
+use super::{
+    Id, PathSegment, Scalar, ScalarInstance, TCPath, TryCastFrom, TryCastInto, Value, ValueInstance,
+};
 
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct Object(HashMap<Id, Scalar>);
@@ -74,6 +77,40 @@ impl Object {
     }
 }
 
+#[async_trait]
+impl Public for Object {
+    async fn get(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<State> {
+        Object::get(self, request, txn, path, key).await
+    }
+
+    async fn put(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+        value: State,
+    ) -> TCResult<()> {
+        Object::put(self, request, txn, path, key, value).await
+    }
+
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        Object::post(self, request, txn, path, params).await
+    }
+}
+
 impl Deref for Object {
     type Target = HashMap<Id, Scalar>;
 
@@ -101,6 +138,56 @@ impl<T: Into<Scalar>> FromIterator<(Id, T)> for Object {
     }
 }
 
+impl From<HashMap<Id, Scalar>> for Object {
+    fn from(map: HashMap<Id, Scalar>) -> Object {
+        Object(map)
+    }
+}
+
+impl TryCastFrom<Scalar> for Object {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Object(_) => true,
+            other => other.matches::<Vec<(Id, Scalar)>>(),
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Object> {
+        match scalar {
+            Scalar::Object(object) => Some(object),
+            other if other.matches::<Vec<(Id, Scalar)>>() => {
+                let data: Vec<(Id, Scalar)> = other.opt_cast_into().unwrap();
+                Some(Object::from_iter(data))
+            }
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for Object {
+    fn can_cast_from(state: &State) -> bool {
+        if let State::Scalar(scalar) = state {
+            Object::can_cast_from(scalar)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Object> {
+        if let State::Scalar(scalar) = state {
+            Object::opt_cast_from(scalar)
+        } else {
+            None
+        }
+    }
+}
+
+impl From<Object> for HashMap<Id, Scalar> {
+    fn from(object: Object) -> HashMap<Id, Scalar> {
+        object.0
+    }
+}
+
 impl IntoIterator for Object {
     type Item = (Id, Scalar);
     type IntoIter = std::collections::hash_map::IntoIter<Id, Scalar>;
@@ -113,18 +200,6 @@ impl IntoIterator for Object {
 impl Serialize for Object {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         self.0.serialize(s)
-    }
-}
-
-impl From<HashMap<Id, Scalar>> for Object {
-    fn from(map: HashMap<Id, Scalar>) -> Object {
-        Object(map)
-    }
-}
-
-impl From<Object> for HashMap<Id, Scalar> {
-    fn from(object: Object) -> HashMap<Id, Scalar> {
-        object.0
     }
 }
 
