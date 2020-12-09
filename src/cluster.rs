@@ -212,12 +212,26 @@ impl Public for Cluster {
 
     async fn post(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _data: Object,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
     ) -> TCResult<State> {
-        Err(error::not_implemented("Cluster::post"))
+        if path.is_empty() {
+            return Err(error::method_not_allowed(self));
+        }
+
+        let methods = self.methods.read(txn.id()).await?;
+        if methods.contains_key(&path[0]) {
+            return methods.post(request, txn, path, params).await;
+        }
+
+        let chains = self.chains.read(txn.id()).await?;
+        if let Some(chain) = chains.get(&path[0]) {
+            return chain.post(request, txn, &path[1..], params).await;
+        }
+
+        Err(error::path_not_found(path))
     }
 }
 
