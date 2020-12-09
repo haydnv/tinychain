@@ -4,6 +4,7 @@ use futures::stream;
 use futures::TryFutureExt;
 use log::debug;
 
+use crate::chain::{ChainClass, ChainType};
 use crate::class::{NativeClass, State, TCResult, TCType};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error;
@@ -21,7 +22,16 @@ pub async fn get(txn: &Txn, path: &[PathSegment], id: Value) -> TCResult<State> 
     debug!("kernel::get /sbin{}", TCPath::from(suffix));
 
     match suffix[0].as_str() {
-        "chain" => Err(error::not_implemented("Instantiate Chain")),
+        "chain" => {
+            let ctype = ChainType::from_path(path)?;
+            let (dtype, schema): (TCPathBuf, Value) =
+                id.try_cast_into(|v| error::bad_request("Expected (Class, Schema) but found", v))?;
+
+            ctype
+                .get(txn, TCType::from_path(&dtype)?, schema)
+                .map_ok(State::Chain)
+                .await
+        }
         "collection" => {
             let ctype = CollectionType::from_path(path)?;
             ctype.get(txn, id).map_ok(State::Collection).await
