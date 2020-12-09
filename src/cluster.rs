@@ -103,11 +103,11 @@ impl Public for Cluster {
         txn: &Txn,
         path: &[PathSegment],
         key: Value,
-        state: State,
+        value: State,
     ) -> TCResult<()> {
         if path.is_empty() {
             if key.is_none() {
-                let object: Object = state.try_cast_into(|s| {
+                let object: Object = value.try_cast_into(|s| {
                     error::bad_request("Expected generic Object but found", s)
                 })?;
                 let provided = HashMap::new();
@@ -139,14 +139,42 @@ impl Public for Cluster {
 
                 Ok(())
             } else {
-                Err(error::not_implemented(format!("Cluster::put / {}", key)))
+                let key: Id =
+                    key.try_cast_into(|v| error::bad_request("Invalid Id for Cluster member", v))?;
+
+                match value {
+                    State::Chain(chain) => {
+                        let mut chains = self.chains.write(*txn.id()).await?;
+                        chains.insert(key, chain);
+                        Ok(())
+                    }
+                    State::Scalar(Scalar::Op(op_def)) => {
+                        let mut methods = self.methods.write(*txn.id()).await?;
+                        methods.insert(key, Scalar::Op(op_def));
+                        Ok(())
+                    }
+                    other => Err(error::bad_request(
+                        "Cluster member must be a Chain or OpDef, not",
+                        other,
+                    )),
+                }
             }
         } else {
-            Err(error::not_implemented(format!(
-                "Cluster::put {} {}",
-                TCPath::from(path),
-                key
-            )))
+            let methods = self.methods.read(txn.id()).await?;
+            if methods.contains_key(&path[0]) {
+                return methods.put(request, txn, path, key, value).await;
+            } else {
+                debug!("Cluster at {} has no method called {}", self.path, path[0]);
+            }
+
+            let chains = self.chains.read(txn.id()).await?;
+            if let Some(chain) = chains.get(&path[0]) {
+                return chain.put(request, txn, &path[1..], key, value).await;
+            } else {
+                debug!("Cluster at {} has no chain called {}", self.path, path[0]);
+            }
+
+            Err(error::path_not_found(path))
         }
     }
 
