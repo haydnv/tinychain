@@ -32,7 +32,7 @@ impl Hosted {
         let mut found_path = &path[0..0];
         for i in 0..path.len() {
             if let Some(child) = node.children.get(&path[i]) {
-                found_path = &path[..i];
+                found_path = &path[..i + 1];
                 node = child;
             } else if let Some(cluster) = self.hosted.get(found_path) {
                 return Some((&path[found_path.len()..], cluster.clone()));
