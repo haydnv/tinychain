@@ -646,15 +646,15 @@ impl ScalarVisitor {
     ) -> Result<Scalar, E> {
         debug!("Method {} on {}, params {}", path, subject, params);
 
-        let method = if params.matches::<Object>() {
+        let method = if params.is_none() {
+            Method::Get((subject, path), Key::Value(Value::None))
+        } else if params.matches::<Object>() {
             Method::Post((subject, path), params.opt_cast_into().unwrap())
         } else if params.matches::<(Key, Scalar)>() {
             Method::Put((subject, path), params.opt_cast_into().unwrap())
         } else if params.matches::<(Key,)>() {
             let (key,) = params.opt_cast_into().unwrap();
             Method::Get((subject, path), key)
-        } else if params.is_none() {
-            Method::Get((subject, path), Key::Value(Value::None))
         } else {
             return Err(de::Error::custom(format!(
                 "expected a Method but found {}",
@@ -691,14 +691,6 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
         f.write_str("a Tinychain Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"id\", \"$state\"]\"}")
     }
 
-    fn visit_f32<E: de::Error>(self, value: f32) -> Result<Self::Value, E> {
-        self.value_visitor.visit_f32(value).map(Scalar::Value)
-    }
-
-    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
-        self.value_visitor.visit_f64(value).map(Scalar::Value)
-    }
-
     fn visit_i16<E: de::Error>(self, value: i16) -> Result<Self::Value, E> {
         self.value_visitor.visit_i16(value).map(Scalar::Value)
     }
@@ -725,6 +717,32 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
 
     fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
         self.value_visitor.visit_u64(value).map(Scalar::Value)
+    }
+
+    fn visit_f32<E: de::Error>(self, value: f32) -> Result<Self::Value, E> {
+        self.value_visitor.visit_f32(value).map(Scalar::Value)
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        self.value_visitor.visit_f64(value).map(Scalar::Value)
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        self.value_visitor.visit_str(value).map(Scalar::Value)
+    }
+
+    fn visit_seq<L: de::SeqAccess<'de>>(self, mut access: L) -> Result<Self::Value, L::Error> {
+        let mut items: Vec<Scalar> = if let Some(size) = access.size_hint() {
+            Vec::with_capacity(size)
+        } else {
+            vec![]
+        };
+
+        while let Some(value) = access.next_element()? {
+            items.push(value)
+        }
+
+        Ok(Scalar::Tuple(items))
     }
 
     fn visit_map<M: de::MapAccess<'de>>(self, mut access: M) -> Result<Self::Value, M::Error> {
@@ -765,7 +783,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                     )
                 };
 
-                debug!("{} data is {}", key, data);
+                debug!("{}{} data is {}", subject, path, data);
                 return if data.is_none() {
                     if path == TCPathBuf::default() {
                         Ok(Scalar::Ref(Box::new(subject.into())))
@@ -843,24 +861,6 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
         }
 
         Ok(Scalar::Object(map.into()))
-    }
-
-    fn visit_seq<L: de::SeqAccess<'de>>(self, mut access: L) -> Result<Self::Value, L::Error> {
-        let mut items: Vec<Scalar> = if let Some(size) = access.size_hint() {
-            Vec::with_capacity(size)
-        } else {
-            vec![]
-        };
-
-        while let Some(value) = access.next_element()? {
-            items.push(value)
-        }
-
-        Ok(Scalar::Tuple(items))
-    }
-
-    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-        self.value_visitor.visit_str(value).map(Scalar::Value)
     }
 }
 
