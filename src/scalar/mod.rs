@@ -648,13 +648,13 @@ impl ScalarVisitor {
 
         let method = if params.is_none() {
             Method::Get((subject, path), Key::Value(Value::None))
-        } else if params.matches::<Object>() {
-            Method::Post((subject, path), params.opt_cast_into().unwrap())
-        } else if params.matches::<(Key, Scalar)>() {
-            Method::Put((subject, path), params.opt_cast_into().unwrap())
         } else if params.matches::<(Key,)>() {
             let (key,) = params.opt_cast_into().unwrap();
             Method::Get((subject, path), key)
+        } else if params.matches::<(Key, Scalar)>() {
+            Method::Put((subject, path), params.opt_cast_into().unwrap())
+        } else if params.matches::<Object>() {
+            Method::Post((subject, path), params.opt_cast_into().unwrap())
         } else {
             return Err(de::Error::custom(format!(
                 "expected a Method but found {}",
