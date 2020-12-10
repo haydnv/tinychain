@@ -184,9 +184,19 @@ impl Server {
         gateway: Arc<Gateway>,
         request: hyper::Request<Body>,
     ) -> Result<hyper::Response<Body>, hyper::Error> {
+        let success_code = if request.method() == Method::PUT {
+            StatusCode::NO_CONTENT // 204, no response content
+        } else {
+            StatusCode::OK // 200, content to follow
+        };
+
         let mut response = match self.authenticate_and_route(gateway, request).await {
             Err(cause) => transform_error(cause),
-            Ok(response) => hyper::Response::new(Body::wrap_stream(response)),
+            Ok(response) => {
+                let mut response = hyper::Response::new(Body::wrap_stream(response));
+                *response.status_mut() = success_code;
+                response
+            }
         };
 
         response
