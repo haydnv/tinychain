@@ -7,7 +7,7 @@ use log::debug;
 use crate::chain::{ChainClass, ChainType};
 use crate::class::{NativeClass, State, TCResult, TCType};
 use crate::collection::class::{CollectionClass, CollectionType};
-use crate::error;
+use crate::error::{self, ErrorType};
 use crate::object::ObjectType;
 use crate::request::Request;
 use crate::scalar::*;
@@ -36,6 +36,10 @@ pub async fn get(txn: &Txn, path: &[PathSegment], id: Value) -> TCResult<State> 
             let ctype = CollectionType::from_path(path)?;
             ctype.get(txn, id).map_ok(State::Collection).await
         }
+        "error" => {
+            let etype = ErrorType::from_path(path)?;
+            Err(etype.get(id))
+        }
         "value" => {
             let dtype = ValueType::from_path(path)?;
             dtype.try_cast(id).map(Scalar::Value).map(State::Scalar)
@@ -53,7 +57,9 @@ pub async fn post(
 ) -> TCResult<State> {
     debug!("kernel::post {}", TCPath::from(path));
 
-    if &path[0] == "sbin" && &path[1] == "transact" {
+    if path.is_empty() {
+        Err(error::method_not_allowed("/"))
+    } else if &path[0] == "sbin" && &path[1] == "transact" {
         if data.matches::<Vec<(Id, Scalar)>>() {
             let values: Vec<(Id, Scalar)> = data.opt_cast_into().unwrap();
             txn.execute(request, stream::iter(values)).await
@@ -66,6 +72,14 @@ pub async fn post(
         let data = data.try_into()?;
         ObjectType::post(path, data).map(State::Object)
     } else {
-        Err(error::path_not_found(path))
+        match path[0].as_str() {
+            "sbin" if path.len() > 1 => match path[1].as_str() {
+                "chain" | "collection" | "error" | "value" => {
+                    Err(error::method_not_allowed(&path[1]))
+                }
+                other => Err(error::not_found(other)),
+            },
+            other => Err(error::not_found(other)),
+        }
     }
 }

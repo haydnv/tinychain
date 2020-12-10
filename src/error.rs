@@ -1,15 +1,13 @@
 use std::convert::Infallible;
 use std::fmt;
 
-use crate::scalar::value::{PathSegment, TCPath};
+use crate::class::{Class, Instance, NativeClass, TCType};
+use crate::scalar::value::{label, Link, PathSegment, TCPath, TCPathBuf};
 
 pub type TCResult<T> = Result<T, TCError>;
 
-#[derive(Clone, Eq, PartialEq)]
-pub enum Code {
-    // "No problem"
-    Ok,
-
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum ErrorType {
     // "I know that what you're asking for doesn't make sense"
     BadRequest,
 
@@ -44,12 +42,55 @@ pub enum Code {
     Unknown,
 }
 
-impl From<u16> for Code {
-    fn from(code: u16) -> Code {
-        use Code::*;
+impl ErrorType {
+    pub fn get<I: fmt::Display>(self, message: I) -> TCError {
+        TCError {
+            reason: self,
+            message: message.to_string(),
+        }
+    }
+}
+
+impl Class for ErrorType {
+    type Instance = TCError;
+}
+
+impl NativeClass for ErrorType {
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
+
+        if suffix.len() == 1 {
+            let err = match suffix[0].as_str() {
+                "bad_request" => Self::BadRequest,
+                "unauthorized" => Self::Unauthorized,
+                "forbidden" => Self::Forbidden,
+                "not_found" => Self::NotFound,
+                "method_not_allowed" => Self::MethodNotAllowed,
+                "conflict" => Self::Conflict,
+                "too_large" => Self::TooLarge,
+                "transport" => Self::Transport,
+                "internal" => Self::Internal,
+                "not_implemented" => Self::NotImplemented,
+                "unknown" => Self::Unknown,
+                other => return Err(not_found(other)),
+            };
+
+            Ok(err)
+        } else {
+            Err(path_not_found(path))
+        }
+    }
+
+    fn prefix() -> TCPathBuf {
+        TCType::prefix().append(label("error"))
+    }
+}
+
+impl From<u16> for ErrorType {
+    fn from(code: u16) -> ErrorType {
+        use ErrorType::*;
 
         match code {
-            200 => Ok,
             400 => BadRequest,
             401 => Unauthorized,
             403 => Forbidden,
@@ -65,33 +106,54 @@ impl From<u16> for Code {
     }
 }
 
-impl fmt::Display for Code {
+impl From<ErrorType> for Link {
+    fn from(et: ErrorType) -> Link {
+        use ErrorType::*;
+
+        let label = match et {
+            BadRequest => label("bad_request"),
+            Unauthorized => label("unauthorized"),
+            Forbidden => label("forbidden"),
+            NotFound => label("not_found"),
+            MethodNotAllowed => label("method_not_allowed"),
+            Conflict => label("conflict"),
+            TooLarge => label("too_large"),
+            Transport => label("transport"),
+            Internal => label("internal"),
+            NotImplemented => label("not_implemented"),
+            Unknown => label("unknown"),
+        };
+
+        ErrorType::prefix().append(label).into()
+    }
+}
+
+impl fmt::Display for ErrorType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Code::Ok => write!(f, "Ok"),
-            Code::BadRequest => write!(f, "Bad request"),
-            Code::Conflict => write!(f, "Conflict"),
-            Code::Forbidden => write!(f, "Forbidden"),
-            Code::Internal => write!(f, "Internal server error"),
-            Code::MethodNotAllowed => write!(f, "Method not allowed"),
-            Code::NotFound => write!(f, "Not found"),
-            Code::NotImplemented => write!(f, "Not implemented"),
-            Code::TooLarge => write!(f, "Request too large"),
-            Code::Transport => write!(f, "Transport protocol error"),
-            Code::Unauthorized => write!(f, "Unauthorized"),
-            Code::Unknown => write!(f, "Unrecognized error code"),
+            ErrorType::BadRequest => write!(f, "Bad request"),
+            ErrorType::Conflict => write!(f, "Conflict"),
+            ErrorType::Forbidden => write!(f, "Forbidden"),
+            ErrorType::Internal => write!(f, "Internal server error"),
+            ErrorType::MethodNotAllowed => write!(f, "Method not allowed"),
+            ErrorType::NotFound => write!(f, "Not found"),
+            ErrorType::NotImplemented => write!(f, "Not implemented"),
+            ErrorType::TooLarge => write!(f, "Request too large"),
+            ErrorType::Transport => write!(f, "Transport protocol error"),
+            ErrorType::Unauthorized => write!(f, "Unauthorized"),
+            ErrorType::Unknown => write!(f, "Unrecognized error code"),
         }
     }
 }
 
 #[derive(Clone)]
 pub struct TCError {
-    reason: Code,
+    reason: ErrorType,
     message: String,
 }
 
 impl TCError {
-    pub fn of(reason: Code, message: String) -> TCError {
+    pub fn of(reason: ErrorType, message: String) -> TCError {
         TCError { reason, message }
     }
 
@@ -99,8 +161,16 @@ impl TCError {
         &self.message
     }
 
-    pub fn reason(&self) -> &Code {
+    pub fn reason(&self) -> &ErrorType {
         &self.reason
+    }
+}
+
+impl Instance for TCError {
+    type Class = ErrorType;
+
+    fn class(&self) -> Self::Class {
+        self.reason
     }
 }
 
@@ -143,34 +213,34 @@ impl fmt::Display for TCError {
 }
 
 pub fn bad_request<I: fmt::Display, T: fmt::Display>(message: I, info: T) -> TCError {
-    TCError::of(Code::BadRequest, format!("{}: {}", message, info))
+    TCError::of(ErrorType::BadRequest, format!("{}: {}", message, info))
 }
 
 pub fn conflict() -> TCError {
     TCError::of(
-        Code::Conflict,
+        ErrorType::Conflict,
         "Transaction failed due to a concurrent access conflict".to_string(),
     )
 }
 
 pub fn forbidden<T: fmt::Display>(message: &str, info: T) -> TCError {
-    TCError::of(Code::Forbidden, format!("{}: {}", message, info))
+    TCError::of(ErrorType::Forbidden, format!("{}: {}", message, info))
 }
 
 pub fn internal<T: fmt::Display>(cause: T) -> TCError {
-    TCError::of(Code::Internal, format!("{}", cause))
+    TCError::of(ErrorType::Internal, format!("{}", cause))
 }
 
 pub fn method_not_allowed<T: fmt::Display>(id: T) -> TCError {
     TCError::of(
-        Code::MethodNotAllowed,
+        ErrorType::MethodNotAllowed,
         format!("This resource does not support this request method: {}", id),
     )
 }
 
 pub fn not_found<T: fmt::Display>(id: T) -> TCError {
     TCError::of(
-        Code::NotFound,
+        ErrorType::NotFound,
         format!("The requested resource could not be found: {}", id),
     )
 }
@@ -182,18 +252,18 @@ pub fn path_not_found(path: &[PathSegment]) -> TCError {
 #[allow(dead_code)]
 pub fn not_implemented<I: fmt::Display>(feature: I) -> TCError {
     TCError::of(
-        Code::NotImplemented,
+        ErrorType::NotImplemented,
         format!("This feature is not yet implemented: {}", feature),
     )
 }
 
 pub fn unsupported<I: fmt::Display>(hint: I) -> TCError {
-    TCError::of(Code::BadRequest, hint.to_string())
+    TCError::of(ErrorType::BadRequest, hint.to_string())
 }
 
 pub fn too_large(max_size: usize) -> TCError {
     TCError::of(
-        Code::TooLarge,
+        ErrorType::TooLarge,
         format!(
             "Payload exceeded the maximum allowed size of {} bytes",
             max_size,
@@ -202,9 +272,9 @@ pub fn too_large(max_size: usize) -> TCError {
 }
 
 pub fn transport<I: fmt::Display>(info: I) -> TCError {
-    TCError::of(Code::Transport, info.to_string())
+    TCError::of(ErrorType::Transport, info.to_string())
 }
 
 pub fn unauthorized(message: &str) -> TCError {
-    TCError::of(Code::Unauthorized, message.into())
+    TCError::of(ErrorType::Unauthorized, message.into())
 }

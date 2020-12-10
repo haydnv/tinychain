@@ -393,9 +393,8 @@ fn get_param<T: DeserializeOwned>(
 fn transform_error(err: error::TCError) -> hyper::Response<Body> {
     let mut response = hyper::Response::new(Body::from(format!("{}\r\n", err.message())));
 
-    use error::Code::*;
+    use error::ErrorType::*;
     *response.status_mut() = match err.reason() {
-        Ok => StatusCode::OK,
         BadRequest => StatusCode::BAD_REQUEST,
         Conflict => StatusCode::CONFLICT,
         Forbidden => StatusCode::FORBIDDEN,
