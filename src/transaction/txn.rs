@@ -534,7 +534,10 @@ impl Txn {
         let subject = dereference_state(&provided, subject.id())?;
 
         match subject {
+            State::Chain(chain) => chain.post(request, self, path, params).await,
+            State::Cluster(cluster) => cluster.post(request, self, path, params).await,
             State::Collection(collection) => collection.post(request, self, path, params).await,
+            State::Object(object) => object.post(request, self, path, params).await,
             State::Scalar(scalar) => match scalar {
                 Scalar::Op(op_def) => {
                     if !path.is_empty() {
@@ -545,7 +548,6 @@ impl Txn {
                 }
                 other => Err(error::method_not_allowed(other)),
             },
-            _ => Err(error::not_implemented("Txn::resolve Method::Post")),
         }
     }
 
