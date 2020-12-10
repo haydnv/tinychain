@@ -160,8 +160,11 @@ impl NativeClass for ComplexType {
 impl ScalarClass for ComplexType {
     type Instance = Complex;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Complex> {
-        let v = Value::try_from(scalar.into())?;
+    fn try_cast<S>(&self, scalar: S) -> TCResult<Complex>
+    where
+        Scalar: From<S>,
+    {
+        let v = Value::try_from(Scalar::from(scalar))?;
         let n = Number::try_from(v)?;
         let n = n.into_type(NumberType::Complex(*self));
         n.try_into()
@@ -272,8 +275,11 @@ impl NativeClass for BooleanType {
 impl ScalarClass for BooleanType {
     type Instance = Boolean;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Boolean> {
-        let s: Scalar = scalar.into();
+    fn try_cast<S>(&self, scalar: S) -> TCResult<Boolean>
+    where
+        Scalar: From<S>,
+    {
+        let s = Scalar::from(scalar);
         let v = Value::try_from(s)?;
         let n = Number::try_from(v)?;
         let n = n.into_type(NumberType::Bool);
@@ -372,8 +378,11 @@ impl NativeClass for FloatType {
 impl ScalarClass for FloatType {
     type Instance = Float;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Float> {
-        let s: Scalar = scalar.into();
+    fn try_cast<S>(&self, scalar: S) -> TCResult<Float>
+    where
+        Scalar: From<S>,
+    {
+        let s = Scalar::from(scalar);
         let v = Value::try_from(s)?;
         let n = Number::try_from(v)?;
         let n = n.into_type(NumberType::Float(*self));
@@ -499,8 +508,11 @@ impl NativeClass for IntType {
 impl ScalarClass for IntType {
     type Instance = Int;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Int> {
-        let v = Value::try_from(scalar.into())?;
+    fn try_cast<S>(&self, scalar: S) -> TCResult<Int>
+    where
+        Scalar: From<S>,
+    {
+        let v = Value::try_from(Scalar::from(scalar))?;
         let n = Number::try_from(v)?;
         let n = n.into_type(NumberType::Int(*self));
         n.try_into()
@@ -635,8 +647,11 @@ impl NativeClass for UIntType {
 impl ScalarClass for UIntType {
     type Instance = UInt;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<UInt> {
-        let v = Value::try_from(scalar.into())?;
+    fn try_cast<S>(&self, scalar: S) -> TCResult<UInt>
+    where
+        Scalar: From<S>,
+    {
+        let v = Value::try_from(Scalar::from(scalar))?;
         let n = Number::try_from(v)?;
         let n = n.into_type(NumberType::UInt(*self));
         n.try_into()
@@ -787,8 +802,11 @@ impl NativeClass for NumberType {
 impl ScalarClass for NumberType {
     type Instance = Number;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Number> {
-        let value = Value::try_from(scalar.into())?;
+    fn try_cast<S>(&self, scalar: S) -> TCResult<Number>
+    where
+        Scalar: From<S>,
+    {
+        let value = Value::try_from(Scalar::from(scalar))?;
         Number::try_from(value).map(|n| n.into_type(*self))
     }
 }

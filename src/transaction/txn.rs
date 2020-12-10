@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::hash::Hash;
 use std::iter::FromIterator;
@@ -347,16 +347,23 @@ impl Txn {
             TCRef::Id(id_ref) => dereference_state_owned(&provided, id_ref.id()),
 
             TCRef::Method(method) => match method {
-                Method::Get((id_ref, path), key) => {
+                Method::Get((id_ref, path, key)) => {
                     self.resolve_get(request, provided, id_ref, &path[..], key)
                         .await
                 }
-                Method::Put((id_ref, path), (key, value)) => {
+                Method::Put((id_ref, path, key, value)) => {
                     self.resolve_put(request, provided, id_ref, &path[..], key, value)
+                        .map_ok(State::from)
                         .await
                 }
-                Method::Post((id_ref, path), params) => {
+                Method::Post((id_ref, path, params)) => {
                     self.resolve_post(request, provided, id_ref, &path[..], params)
+                        .await
+                }
+
+                Method::Delete((id_ref, path, key)) => {
+                    self.resolve_delete(request, provided, id_ref, &path[..], key)
+                        .map_ok(State::from)
                         .await
                 }
             },
@@ -384,6 +391,15 @@ impl Txn {
                     self.inner
                         .gateway
                         .post(request, self, link, data.into())
+                        .map_ok(State::from)
+                        .await
+                }
+
+                OpRef::Delete((link, key)) => {
+                    let key = dereference_value(&provided, key)?;
+                    self.inner
+                        .gateway
+                        .delete(request, self, &link, key)
                         .map_ok(State::from)
                         .await
                 }
@@ -463,14 +479,14 @@ impl Txn {
         match subject {
             State::Chain(chain) => chain.get(request, self, path, key).await,
             State::Cluster(cluster) => cluster.get(request, self, path, key).await,
-            State::Collection(collection) => collection
-                .get(request, self, &path[..], key)
-                .await
-                .map(State::from),
+            State::Collection(collection) => {
+                collection
+                    .get(request, self, &path[..], key)
+                    .map_ok(State::from)
+                    .await
+            }
             State::Object(object) => object.get(request, self, path, key).await,
             State::Scalar(scalar) => match scalar {
-                Scalar::Object(object) => object.get(request, self, path, key).await,
-
                 Scalar::Op(op_def) => {
                     if !&path[..].is_empty() {
                         return Err(error::path_not_found(path));
@@ -480,13 +496,7 @@ impl Txn {
                         .get(request, self, key, Some(subject.clone().into()))
                         .await
                 }
-
-                Scalar::Value(value) => value
-                    .get(path, key.clone())
-                    .map(Scalar::Value)
-                    .map(State::Scalar),
-
-                other => Err(error::method_not_allowed(format!("GET: {}", other))),
+                other => other.get(request, self, &path[..], key).await,
             },
         }
     }
@@ -499,33 +509,27 @@ impl Txn {
         path: &[PathSegment],
         key: Key,
         value: Scalar,
-    ) -> TCResult<State> {
+    ) -> TCResult<()> {
         let subject = dereference_state(&provided, subject.id())?;
         let key = dereference_value(&provided, key)?;
         let value = dereference(&provided, &value)?;
 
         match subject {
-            State::Scalar(scalar) => Err(error::method_not_allowed(scalar)),
-            State::Chain(chain) => {
-                self.mutate(chain.clone().into()).await;
-
-                chain
-                    .put(&request, self, &path[..], key, value)
-                    .map_ok(State::from)
-                    .await
-            }
+            State::Chain(chain) => chain.put(request, self, &path[..], key, value).await,
+            State::Cluster(cluster) => cluster.put(request, self, &path[..], key, value).await,
             State::Collection(collection) => {
-                let value = value.try_into()?;
-
-                collection
-                    .put(&request, self, &path[..], key, value)
-                    .map_ok(State::from)
-                    .await
+                collection.put(request, self, &path[..], key, value).await
             }
-            other => Err(error::not_implemented(format!(
-                "Txn::resolve_put for {}",
-                other
-            ))),
+            State::Object(object) => object.put(request, self, path, key, value).await,
+            State::Scalar(scalar) => match scalar {
+                Scalar::Op(op_def) if path.len() == 0 => {
+                    op_def
+                        .put(request, self, key, value, Some(subject.clone().into()))
+                        .await
+                }
+                Scalar::Op(_) => Err(error::path_not_found(path)),
+                other => other.put(request, self, path, key, value).await,
+            },
         }
     }
 
@@ -545,16 +549,45 @@ impl Txn {
             State::Collection(collection) => collection.post(request, self, path, params).await,
             State::Object(object) => object.post(request, self, path, params).await,
             State::Scalar(scalar) => match scalar {
-                Scalar::Op(op_def) => {
-                    if !path.is_empty() {
-                        return Err(error::path_not_found(path));
-                    }
-
+                Scalar::Op(op_def) if path.is_empty() => {
                     op_def
                         .post(request, self, params, Some(subject.clone().into()))
                         .await
                 }
-                other => Err(error::method_not_allowed(other)),
+                Scalar::Op(_) => Err(error::path_not_found(path)),
+                other => other.post(request, self, path, params).await,
+            },
+        }
+    }
+
+    async fn resolve_delete(
+        &self,
+        request: &Request,
+        provided: &HashMap<Id, State>,
+        subject: IdRef,
+        path: &[PathSegment],
+        key: Key,
+    ) -> TCResult<()> {
+        debug!("Txn::resolve {}::GET {}", subject, key);
+
+        let subject = dereference_state(&provided, subject.id())?;
+        let key = dereference_value(&provided, key)?;
+
+        debug!("Txn::resolve {}::GET {}", subject, key);
+
+        match subject {
+            State::Chain(chain) => chain.delete(request, self, path, key).await,
+            State::Cluster(cluster) => cluster.delete(request, self, path, key).await,
+            State::Collection(collection) => collection.delete(request, self, &path[..], key).await,
+            State::Object(object) => object.delete(request, self, path, key).await,
+            State::Scalar(scalar) => match scalar {
+                Scalar::Op(op_def) if path.is_empty() => {
+                    op_def
+                        .delete(request, self, key, Some(subject.clone().into()))
+                        .await
+                }
+                Scalar::Op(_) => Err(error::path_not_found(path)),
+                other => other.delete(request, self, path, key).await,
             },
         }
     }
@@ -729,14 +762,14 @@ fn method_requires<'a>(
     let mut deps = HashSet::new();
 
     match method {
-        Method::Get((subject, _path), key) => {
+        Method::Get((subject, _path, key)) => {
             deps.insert(subject);
 
-            if let Key::Ref(key) = key {
-                deps.insert(key);
+            if let Key::Ref(tc_ref) = key {
+                deps.insert(tc_ref);
             }
         }
-        Method::Put((subject, _path), (key, value)) => {
+        Method::Put((subject, _path, key, value)) => {
             deps.insert(subject);
 
             if let Key::Ref(key) = key {
@@ -745,8 +778,15 @@ fn method_requires<'a>(
 
             deps.extend(requires(value, txn_state)?);
         }
-        Method::Post((subject, _path), _params) => {
+        Method::Post((subject, _path, _params)) => {
             deps.insert(subject);
+        }
+        Method::Delete((subject, _path, key)) => {
+            deps.insert(subject);
+
+            if let Key::Ref(tc_ref) = key {
+                deps.insert(tc_ref);
+            }
         }
     }
 
@@ -775,6 +815,11 @@ fn op_requires<'a>(
         OpRef::Post((_path, params)) => {
             for provider in params.values() {
                 deps.extend(requires(provider, txn_state)?);
+            }
+        }
+        OpRef::Delete((_path, key)) => {
+            if let Key::Ref(tc_ref) = key {
+                deps.insert(tc_ref);
             }
         }
     }

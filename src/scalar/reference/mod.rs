@@ -55,16 +55,15 @@ impl NativeClass for RefType {
 impl ScalarClass for RefType {
     type Instance = TCRef;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<TCRef> {
+    fn try_cast<S>(&self, scalar: S) -> TCResult<TCRef>
+    where
+        Scalar: From<S>,
+    {
         match self {
             Self::Flow(ft) => ft.try_cast(scalar).map(Box::new).map(TCRef::Flow),
-            Self::Id => {
-                let scalar: Scalar = scalar.into();
-
-                scalar
-                    .try_cast_into(|v| error::bad_request("Cannot cast into Ref from", v))
-                    .map(TCRef::Id)
-            }
+            Self::Id => Scalar::from(scalar)
+                .try_cast_into(|v| error::bad_request("Cannot cast into Ref from", v))
+                .map(TCRef::Id),
             Self::Method(mt) => mt.try_cast(scalar).map(TCRef::Method),
             Self::Op(ort) => ort.try_cast(scalar).map(TCRef::Op),
         }

@@ -5,7 +5,9 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::error::{self, TCResult};
-use crate::scalar::{Id, TCString, TryCastFrom, Value};
+use crate::scalar::{Id, Scalar, TCString, TryCastFrom, Value};
+
+use super::TCRef;
 
 const EMPTY_SLICE: &[usize] = &[];
 
@@ -69,6 +71,30 @@ impl TryCastFrom<Value> for IdRef {
                 TCString::UString(ustring) => IdRef::from_str(&ustring).ok(),
                 _ => None,
             },
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Scalar> for IdRef {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Ref(tc_ref) => match **tc_ref {
+                TCRef::Id(_) => true,
+                _ => false,
+            },
+            Scalar::Value(value) => IdRef::can_cast_from(value),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<IdRef> {
+        match scalar {
+            Scalar::Ref(tc_ref) => match *tc_ref {
+                TCRef::Id(id_ref) => Some(id_ref),
+                _ => None,
+            },
+            Scalar::Value(value) => IdRef::opt_cast_from(value),
             _ => None,
         }
     }

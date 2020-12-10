@@ -82,17 +82,17 @@ impl NativeClass for ValueType {
 impl ScalarClass for ValueType {
     type Instance = Value;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Value> {
+    fn try_cast<S>(&self, scalar: S) -> TCResult<Value>
+    where
+        Scalar: From<S>,
+    {
         match self {
             Self::None => Ok(Value::None),
             Self::Number(nt) => nt.try_cast(scalar).map(Value::Number),
             Self::TCString(st) => st.try_cast(scalar).map(Value::TCString),
-            other => {
-                let scalar: Scalar = scalar.into();
-                scalar.try_cast_into(|v| {
-                    error::not_implemented(format!("Cast into {} from {}", other, v))
-                })
-            }
+            other => Scalar::from(scalar).try_cast_into(|v| {
+                error::not_implemented(format!("Cast into {} from {}", other, v))
+            }),
         }
     }
 }

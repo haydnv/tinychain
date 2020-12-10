@@ -44,8 +44,11 @@ impl NativeClass for FlowControlType {
 impl ScalarClass for FlowControlType {
     type Instance = FlowControl;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<FlowControl> {
-        FlowControl::try_cast_from(scalar.into(), |s| {
+    fn try_cast<S>(&self, scalar: S) -> TCResult<FlowControl>
+    where
+        Scalar: From<S>,
+    {
+        FlowControl::try_cast_from(Scalar::from(scalar), |s| {
             error::bad_request("Cannot cast into FlowControl from", s)
         })
     }

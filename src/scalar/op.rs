@@ -51,8 +51,11 @@ impl NativeClass for OpDefType {
 impl ScalarClass for OpDefType {
     type Instance = OpDef;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<OpDef> {
-        let scalar: Scalar = scalar.into();
+    fn try_cast<S>(&self, scalar: S) -> TCResult<OpDef>
+    where
+        Scalar: From<S>,
+    {
+        let scalar = Scalar::from(scalar);
 
         match self {
             Self::Get => {

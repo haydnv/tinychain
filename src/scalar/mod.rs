@@ -105,7 +105,9 @@ pub trait ScalarInstance: Instance + Sized {
 pub trait ScalarClass: Class {
     type Instance: ScalarInstance;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<<Self as ScalarClass>::Instance>;
+    fn try_cast<S>(&self, scalar: S) -> TCResult<<Self as ScalarClass>::Instance>
+    where
+        Scalar: From<S>;
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -154,18 +156,19 @@ impl NativeClass for ScalarType {
 impl ScalarClass for ScalarType {
     type Instance = Scalar;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Scalar> {
-        let scalar: Scalar = scalar.into();
-
+    fn try_cast<S>(&self, scalar: S) -> TCResult<Scalar>
+    where
+        Scalar: From<S>,
+    {
         match self {
-            Self::Object => match scalar {
+            Self::Object => match Scalar::from(scalar) {
                 Scalar::Object(map) => Ok(Scalar::Object(map)),
                 other => Err(error::bad_request("Cannot cast into Map from", other)),
             },
             Self::Op(odt) => odt.try_cast(scalar).map(Box::new).map(Scalar::Op),
             Self::Ref(rt) => rt.try_cast(scalar).map(Box::new).map(Scalar::Ref),
             Self::Slice(st) => st.try_cast(scalar).map(Scalar::Slice),
-            Self::Tuple => scalar
+            Self::Tuple => Scalar::from(scalar)
                 .try_cast_into(|v| error::not_implemented(format!("Cast into Tuple from {}", v))),
             Self::Value(vt) => vt.try_cast(scalar).map(Scalar::Value),
         }
@@ -486,30 +489,6 @@ impl TryCastFrom<Scalar> for Number {
     }
 }
 
-impl TryCastFrom<Scalar> for IdRef {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Ref(tc_ref) => match &**tc_ref {
-                TCRef::Id(_) => true,
-                _ => false,
-            },
-            Scalar::Value(value) => IdRef::can_cast_from(value),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<IdRef> {
-        match scalar {
-            Scalar::Ref(tc_ref) => match *tc_ref {
-                TCRef::Id(id) => Some(id),
-                _ => None,
-            },
-            Scalar::Value(value) => IdRef::opt_cast_from(value),
-            _ => None,
-        }
-    }
-}
-
 impl TryCastFrom<Scalar> for Id {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
@@ -648,6 +627,48 @@ impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>, T3: TryCastFrom<Scalar>> 
     }
 }
 
+impl<
+        T1: TryCastFrom<Scalar>,
+        T2: TryCastFrom<Scalar>,
+        T3: TryCastFrom<Scalar>,
+        T4: TryCastFrom<Scalar>,
+    > TryCastFrom<Scalar> for (T1, T2, T3, T4)
+{
+    fn can_cast_from(source: &Scalar) -> bool {
+        if let Scalar::Tuple(source) = source {
+            if source.len() == 4
+                && T1::can_cast_from(&source[0])
+                && T2::can_cast_from(&source[1])
+                && T3::can_cast_from(&source[2])
+                && T4::can_cast_from(&source[3])
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn opt_cast_from(source: Scalar) -> Option<(T1, T2, T3, T4)> {
+        if let Scalar::Tuple(mut source) = source {
+            if source.len() == 4 {
+                let fourth: Option<T4> = source.pop().unwrap().opt_cast_into();
+                let third: Option<T3> = source.pop().unwrap().opt_cast_into();
+                let second: Option<T2> = source.pop().unwrap().opt_cast_into();
+                let first: Option<T1> = source.pop().unwrap().opt_cast_into();
+                return match (first, second, third, fourth) {
+                    (Some(first), Some(second), Some(third), Some(fourth)) => {
+                        Some((first, second, third, fourth))
+                    }
+                    _ => None,
+                };
+            }
+        }
+
+        None
+    }
+}
+
 struct ScalarVisitor {
     value_visitor: value::ValueVisitor,
 }
@@ -662,14 +683,15 @@ impl ScalarVisitor {
         debug!("Method {} on {}, params {}", path, subject, params);
 
         let method = if params.is_none() {
-            Method::Get((subject, path), Key::Value(Value::None))
+            Method::Get((subject, path, Key::Value(Value::None)))
         } else if params.matches::<(Key,)>() {
             let (key,) = params.opt_cast_into().unwrap();
-            Method::Get((subject, path), key)
+            Method::Get((subject, path, key))
         } else if params.matches::<(Key, Scalar)>() {
-            Method::Put((subject, path), params.opt_cast_into().unwrap())
+            let (key, value) = params.opt_cast_into().unwrap();
+            Method::Put((subject, path, key, value))
         } else if params.matches::<Object>() {
-            Method::Post((subject, path), params.opt_cast_into().unwrap())
+            Method::Post((subject, path, params.opt_cast_into().unwrap()))
         } else {
             return Err(de::Error::custom(format!(
                 "expected a Method but found {}",

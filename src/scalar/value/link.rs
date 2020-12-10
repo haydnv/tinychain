@@ -12,7 +12,7 @@ use serde::de;
 use serde::ser::{SerializeMap, Serializer};
 
 use crate::error::{self, TCResult};
-use crate::scalar::{Id, Label, TCString, TryCastFrom, Value};
+use crate::scalar::{Id, Label, Scalar, TCString, TryCastFrom, Value};
 
 const EMPTY_SLICE: &[usize] = &[];
 
@@ -567,6 +567,42 @@ impl TryCastFrom<TCString> for TCPathBuf {
             TCString::Link(link) if link.host().is_none() => Some(link.into_path()),
             TCString::UString(ustring) => TCPathBuf::from_str(&ustring).ok(),
             _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Value> for TCPathBuf {
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::TCString(s) = value {
+            Self::can_cast_from(s)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        if let Value::TCString(s) = value {
+            Self::opt_cast_from(s)
+        } else {
+            None
+        }
+    }
+}
+
+impl TryCastFrom<Scalar> for TCPathBuf {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        if let Scalar::Value(value) = scalar {
+            Self::can_cast_from(value)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        if let Scalar::Value(value) = scalar {
+            Self::opt_cast_from(value)
+        } else {
+            None
         }
     }
 }

@@ -58,9 +58,11 @@ impl NativeClass for StringType {
 impl ScalarClass for StringType {
     type Instance = TCString;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<TCString> {
-        let scalar: Scalar = scalar.into();
-        let value = Value::try_cast_from(scalar, |s| {
+    fn try_cast<S>(&self, scalar: S) -> TCResult<TCString>
+    where
+        Scalar: From<S>,
+    {
+        let value = Value::try_cast_from(Scalar::from(scalar), |s| {
             error::bad_request("Can't cast into Value from", s)
         })?;
 

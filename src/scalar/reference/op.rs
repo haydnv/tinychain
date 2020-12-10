@@ -16,6 +16,7 @@ pub enum MethodType {
     Get,
     Put,
     Post,
+    Delete,
 }
 
 impl Class for MethodType {
@@ -31,6 +32,7 @@ impl NativeClass for MethodType {
                 "get" => Ok(Self::Get),
                 "put" => Ok(Self::Put),
                 "post" => Ok(Self::Post),
+                "delete" => Ok(Self::Delete),
                 other => Err(error::not_found(other)),
             }
         } else {
@@ -46,17 +48,47 @@ impl NativeClass for MethodType {
 impl ScalarClass for MethodType {
     type Instance = Method;
 
-    fn try_cast<S: Into<Scalar>>(&self, _scalar: S) -> TCResult<Method> {
-        Err(error::not_implemented("Cast Scalar into Method"))
+    fn try_cast<S>(&self, scalar: S) -> TCResult<Method>
+    where
+        Scalar: From<S>,
+    {
+        let scalar = Scalar::from(scalar);
+
+        let method = match self {
+            Self::Get => {
+                let method =
+                    scalar.try_cast_into(|s| error::bad_request("Invalid GET method", s))?;
+                Method::Get(method)
+            }
+            Self::Put => {
+                let method =
+                    scalar.try_cast_into(|s| error::bad_request("Invalid PUT method", s))?;
+                Method::Put(method)
+            }
+            Self::Post => {
+                let method =
+                    scalar.try_cast_into(|s| error::bad_request("Invalid POST method", s))?;
+                Method::Post(method)
+            }
+            Self::Delete => {
+                let method =
+                    scalar.try_cast_into(|s| error::bad_request("Invalid DELETE method", s))?;
+                Method::Delete(method)
+            }
+        };
+
+        Ok(method)
     }
 }
 
 impl From<MethodType> for Link {
     fn from(mt: MethodType) -> Link {
+        use MethodType::*;
         let suffix = match mt {
-            MethodType::Get => label("get"),
-            MethodType::Put => label("put"),
-            MethodType::Post => label("post"),
+            Get => label("get"),
+            Put => label("put"),
+            Post => label("post"),
+            Delete => label("delete"),
         };
 
         MethodType::prefix().append(suffix).into()
@@ -69,6 +101,7 @@ impl fmt::Display for MethodType {
             Self::Get => write!(f, "type: GET method"),
             Self::Put => write!(f, "type: PUT method"),
             Self::Post => write!(f, "type: POST method"),
+            Self::Delete => write!(f, "type: DELETE method"),
         }
     }
 }
@@ -78,6 +111,7 @@ pub enum OpRefType {
     Get,
     Put,
     Post,
+    Delete,
 }
 
 impl Class for OpRefType {
@@ -93,6 +127,7 @@ impl NativeClass for OpRefType {
                 "get" => Ok(OpRefType::Get),
                 "put" => Ok(OpRefType::Put),
                 "post" => Ok(OpRefType::Post),
+                "delete" => Ok(OpRefType::Delete),
                 other => Err(error::not_found(other)),
             }
         } else {
@@ -108,9 +143,14 @@ impl NativeClass for OpRefType {
 impl ScalarClass for OpRefType {
     type Instance = OpRef;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<OpRef> {
-        let scalar: Scalar = scalar.into();
-        scalar.try_cast_into(|v| error::bad_request(format!("Cannot cast into {} from", self), v))
+    fn try_cast<S>(&self, scalar: S) -> TCResult<OpRef>
+    where
+        Scalar: From<S>,
+    {
+        Err(error::bad_request(
+            format!("Cannot cast into {} from", self),
+            Scalar::from(scalar),
+        ))
     }
 }
 
@@ -121,6 +161,7 @@ impl From<OpRefType> for Link {
             ORT::Get => label("get"),
             ORT::Put => label("put"),
             ORT::Post => label("post"),
+            ORT::Delete => label("delete"),
         };
 
         ORT::prefix().append(suffix).into()
@@ -133,6 +174,7 @@ impl fmt::Display for OpRefType {
             Self::Get => write!(f, "type: GET Op ref"),
             Self::Put => write!(f, "type: PUT Op ref"),
             Self::Post => write!(f, "type: POST Op ref"),
+            Self::Delete => write!(f, "type: DELETE Op ref"),
         }
     }
 }
@@ -196,11 +238,17 @@ impl fmt::Display for Key {
     }
 }
 
+type GetMethod = (IdRef, TCPathBuf, Key);
+type PutMethod = (IdRef, TCPathBuf, Key, Scalar);
+type PostMethod = (IdRef, TCPathBuf, Object);
+type DeleteMethod = (IdRef, TCPathBuf, Key);
+
 #[derive(Clone, Eq, PartialEq)]
 pub enum Method {
-    Get((IdRef, TCPathBuf), Key),
-    Put((IdRef, TCPathBuf), (Key, Scalar)),
-    Post((IdRef, TCPathBuf), Object),
+    Get(GetMethod),
+    Put(PutMethod),
+    Post(PostMethod),
+    Delete(DeleteMethod),
 }
 
 impl Instance for Method {
@@ -208,9 +256,10 @@ impl Instance for Method {
 
     fn class(&self) -> MethodType {
         match self {
-            Self::Get(_, _) => MethodType::Get,
-            Self::Put(_, _) => MethodType::Put,
-            Self::Post(_, _) => MethodType::Post,
+            Self::Get(_) => MethodType::Get,
+            Self::Put(_) => MethodType::Put,
+            Self::Post(_) => MethodType::Post,
+            Self::Delete(_) => MethodType::Delete,
         }
     }
 }
@@ -224,16 +273,20 @@ impl Serialize for Method {
         let mut map = s.serialize_map(Some(1))?;
 
         match self {
-            Method::Get((subject, path), arg) => {
-                map.serialize_entry(&format!("{}{}", subject, path), &(arg,))
+            Method::Get((subject, path, key)) => {
+                map.serialize_entry(&format!("{}{}", subject, path), &(key,))?
             }
-            Method::Put((subject, path), args) => {
-                map.serialize_entry(&format!("{}{}", subject, path), args)
+            Method::Put((subject, path, key, value)) => {
+                map.serialize_entry(&format!("{}{}", subject, path), &(key, value))?
             }
-            Method::Post((subject, path), args) => {
-                map.serialize_entry(&format!("{}{}", subject, path), args)
+            Method::Post((subject, path, args)) => {
+                map.serialize_entry(&format!("{}{}", subject, path), args)?
             }
-        }?;
+            Method::Delete((subject, path, key)) => {
+                map.serialize_key(&Link::from(MethodType::Delete).path().to_string())?;
+                map.serialize_value(&(subject, path, key))?
+            }
+        };
 
         map.end()
     }
@@ -242,12 +295,15 @@ impl Serialize for Method {
 impl fmt::Display for Method {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Get((subject, path), key) => write!(f, "GET {}{}?key={}", subject, path, key),
-            Self::Put((subject, path), (key, value)) => {
+            Self::Get((subject, path, key)) => write!(f, "GET {}{}?key={}", subject, path, key),
+            Self::Put((subject, path, key, value)) => {
                 write!(f, "PUT {}{}?key={} <- {}", subject, path, key, value)
             }
-            Self::Post((subject, path), params) => {
+            Self::Post((subject, path, params)) => {
                 write!(f, "POST {}{} args: {}", subject, path, params)
+            }
+            Self::Delete((subject, path, key)) => {
+                write!(f, "DELETE {}{}?key={}", subject, path, key)
             }
         }
     }
@@ -256,12 +312,14 @@ impl fmt::Display for Method {
 type GetRef = (Link, Key);
 type PutRef = (Link, Key, Scalar);
 type PostRef = (Link, Object);
+type DeleteRef = (Link, Key);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {
     Get(GetRef),
     Put(PutRef),
     Post(PostRef),
+    Delete(DeleteRef),
 }
 
 impl Instance for OpRef {
@@ -272,6 +330,7 @@ impl Instance for OpRef {
             Self::Get(_) => OpRefType::Get,
             Self::Put(_) => OpRefType::Put,
             Self::Post(_) => OpRefType::Post,
+            Self::Delete(_) => OpRefType::Delete,
         }
     }
 }
@@ -280,35 +339,23 @@ impl ScalarInstance for OpRef {
     type Class = OpRefType;
 }
 
-impl TryCastFrom<Scalar> for OpRef {
-    fn can_cast_from(s: &Scalar) -> bool {
-        s.matches::<PostRef>() || s.matches::<PutRef>() || s.matches::<GetRef>()
-    }
-
-    fn opt_cast_from(_s: Scalar) -> Option<OpRef> {
-        unimplemented!()
-    }
-}
-
 impl Serialize for OpRef {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut map = s.serialize_map(Some(1))?;
+
         match self {
-            OpRef::Get((path, key)) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(&path.to_string(), key)?;
-                map.end()
-            }
+            OpRef::Get((path, key)) => map.serialize_entry(&path.to_string(), key)?,
             OpRef::Put((path, key, value)) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(&path.to_string(), &(key, value))?;
-                map.end()
+                map.serialize_entry(&path.to_string(), &(key, value))?
             }
-            OpRef::Post((path, data)) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry(&path.to_string(), data)?;
-                map.end()
+            OpRef::Post((path, data)) => map.serialize_entry(&path.to_string(), data)?,
+            OpRef::Delete((path, key)) => {
+                map.serialize_key(&Link::from(OpRefType::Delete).path().to_string())?;
+                map.serialize_value(&(path, key))?
             }
         }
+
+        map.end()
     }
 }
 
@@ -318,6 +365,7 @@ impl fmt::Display for OpRef {
             OpRef::Get((link, id)) => write!(f, "OpRef::Get {}?key={}", link, id),
             OpRef::Put((path, id, val)) => write!(f, "OpRef::Put {}?key={} <- {}", path, id, val),
             OpRef::Post((path, _)) => write!(f, "OpRef::Post {}", path),
+            OpRef::Delete((link, id)) => write!(f, "OpRef::Delete {}?key={}", link, id),
         }
     }
 }

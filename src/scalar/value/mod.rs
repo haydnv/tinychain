@@ -473,24 +473,6 @@ impl TryCastFrom<Value> for number::NumberType {
     }
 }
 
-impl TryCastFrom<Value> for TCPathBuf {
-    fn can_cast_from(value: &Value) -> bool {
-        if let Value::TCString(tc_string) = value {
-            TCPathBuf::can_cast_from(tc_string)
-        } else {
-            false
-        }
-    }
-
-    fn opt_cast_from(value: Value) -> Option<TCPathBuf> {
-        if let Value::TCString(tc_string) = value {
-            TCPathBuf::opt_cast_from(tc_string)
-        } else {
-            None
-        }
-    }
-}
-
 impl TryCastFrom<Value> for TCString {
     fn can_cast_from(value: &Value) -> bool {
         if let Value::TCString(_) = value {
@@ -662,14 +644,6 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         f.write_str("a Tinychain Value, e.g. \"foo\" or 123 or {\"$object_ref: [\"slice_id\", \"$state\"]\"}")
     }
 
-    fn visit_f32<E: de::Error>(self, value: f32) -> Result<Self::Value, E> {
-        self.visit_float(value)
-    }
-
-    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
-        self.visit_float(value)
-    }
-
     fn visit_i16<E: de::Error>(self, value: i16) -> Result<Self::Value, E> {
         self.visit_int(value)
     }
@@ -696,6 +670,36 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
 
     fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
         self.visit_uint(value)
+    }
+
+    fn visit_f32<E: de::Error>(self, value: f32) -> Result<Self::Value, E> {
+        self.visit_float(value)
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        self.visit_float(value)
+    }
+
+    fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+        Ok(Value::TCString(TCString::UString(s.to_string())))
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Value::None)
+    }
+
+    fn visit_seq<L: de::SeqAccess<'de>>(self, mut access: L) -> Result<Self::Value, L::Error> {
+        let mut items: Vec<Value> = if let Some(size) = access.size_hint() {
+            Vec::with_capacity(size)
+        } else {
+            vec![]
+        };
+
+        while let Some(value) = access.next_element()? {
+            items.push(value)
+        }
+
+        Ok(Value::Tuple(items))
     }
 
     fn visit_map<M: de::MapAccess<'de>>(self, mut access: M) -> Result<Self::Value, M::Error> {
@@ -744,28 +748,6 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
                 "Empty map is not a valid Tinychain datatype",
             ))
         }
-    }
-
-    fn visit_seq<L: de::SeqAccess<'de>>(self, mut access: L) -> Result<Self::Value, L::Error> {
-        let mut items: Vec<Value> = if let Some(size) = access.size_hint() {
-            Vec::with_capacity(size)
-        } else {
-            vec![]
-        };
-
-        while let Some(value) = access.next_element()? {
-            items.push(value)
-        }
-
-        Ok(Value::Tuple(items))
-    }
-
-    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
-        Ok(Value::None)
-    }
-
-    fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
-        Ok(Value::TCString(TCString::UString(s.to_string())))
     }
 }
 

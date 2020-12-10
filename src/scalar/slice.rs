@@ -64,8 +64,11 @@ impl NativeClass for SliceType {
 impl ScalarClass for SliceType {
     type Instance = Slice;
 
-    fn try_cast<S: Into<Scalar>>(&self, scalar: S) -> TCResult<Slice> {
-        let scalar: Scalar = scalar.into();
+    fn try_cast<S>(&self, scalar: S) -> TCResult<Slice>
+    where
+        Scalar: From<S>,
+    {
+        let scalar = Scalar::from(scalar);
 
         match self {
             Self::Bound(bt) => {

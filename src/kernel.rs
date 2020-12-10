@@ -63,8 +63,6 @@ pub async fn post(
         if data.matches::<Vec<(Id, Scalar)>>() {
             let values: Vec<(Id, Scalar)> = data.opt_cast_into().unwrap();
             txn.execute(request, stream::iter(values)).await
-        } else if data.matches::<OpRef>() {
-            Err(error::not_implemented("Resolve OpRef"))
         } else {
             Ok(State::Scalar(data))
         }
