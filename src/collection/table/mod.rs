@@ -203,6 +203,9 @@ impl<T: TableInstance + Sync> Public for TableImpl<T> {
             Ok(State::from(table))
         } else if path.len() == 1 {
             match path[0].as_str() {
+                "insert" | "delete" | "update" | "where" => {
+                    Err(error::method_not_allowed(&path[0]))
+                }
                 "group_by" => {
                     let columns: Vec<Id> = try_into_columns(selector)?;
                     self.group_by(columns).map(Table::from).map(State::from)
@@ -243,6 +246,9 @@ impl<T: TableInstance + Sync> Public for TableImpl<T> {
             self.upsert(txn.id(), key, values).await
         } else if path.len() == 1 {
             match path[0].as_str() {
+                "group_by" | "order_by" | "limit" | "reverse" | "select" | "update" | "where" => {
+                    Err(error::method_not_allowed(&path[0]))
+                }
                 "insert" => {
                     let (key, values) = try_into_row(selector, value)?;
                     self.insert(txn.id().clone(), key, values).await
@@ -275,6 +281,9 @@ impl<T: TableInstance + Sync> Public for TableImpl<T> {
             Err(error::method_not_allowed("Table: POST /"))
         } else if path.len() == 1 {
             match path[0].as_str() {
+                "delete" | "group_by" | "insert" | "order_by" | "limit" | "reverse" | "select" => {
+                    Err(error::method_not_allowed(&path[0]))
+                }
                 "update" => {
                     let update =
                         params.try_cast_into(|v| error::bad_request("Invalid update", v))?;
