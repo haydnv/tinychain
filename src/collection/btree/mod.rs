@@ -2,7 +2,6 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use futures::stream::{self, Stream, StreamExt};
-use futures::TryFutureExt;
 
 use crate::class::{Instance, Public, State, TCStream};
 use crate::collection::class::CollectionInstance;
@@ -173,13 +172,7 @@ impl<T: BTreeInstance> Public for BTreeImpl<T> {
         let range = BTreeRange::try_cast_from(range, |s| error::bad_request(ERR_INVALID_RANGE, s))?;
         let range = validate_range(range, self.schema())?;
 
-        if path.len() == 1 && &path[0] == "delete" {
-            BTreeInstance::delete(self.deref(), txn.id(), range)
-                .map_ok(State::from)
-                .await
-        } else {
-            self.route(request, txn, path, range).await
-        }
+        self.route(request, txn, path, range).await
     }
 
     async fn put(
@@ -233,11 +226,19 @@ impl<T: BTreeInstance> Public for BTreeImpl<T> {
     async fn delete(
         &self,
         _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _range: Value,
+        txn: &Txn,
+        path: &[PathSegment],
+        range: Value,
     ) -> TCResult<()> {
-        Err(error::not_implemented("BTreeImpl::delete"))
+        if path.is_empty() {
+            let range =
+                BTreeRange::try_cast_from(range, |v| error::bad_request(ERR_INVALID_RANGE, v))?;
+            let range = validate_range(range, self.schema())?;
+
+            BTreeInstance::delete(self.deref(), txn.id(), range).await
+        } else {
+            Err(error::path_not_found(path))
+        }
     }
 }
 
