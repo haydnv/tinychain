@@ -73,6 +73,14 @@ pub trait Public {
         path: &[PathSegment],
         params: scalar::Object,
     ) -> TCResult<State>;
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<()>;
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -245,6 +253,22 @@ impl Public for State {
             Self::Collection(collection) => collection.post(request, txn, path, params).await,
             Self::Object(object) => object.post(request, txn, path, params).await,
             Self::Scalar(scalar) => scalar.post(request, txn, path, params).await,
+        }
+    }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<()> {
+        match self {
+            Self::Chain(chain) => chain.delete(request, txn, path, key).await,
+            Self::Cluster(cluster) => cluster.delete(request, txn, path, key).await,
+            Self::Collection(collection) => collection.delete(request, txn, path, key).await,
+            Self::Object(object) => object.delete(request, txn, path, key).await,
+            Self::Scalar(scalar) => scalar.delete(request, txn, path, key).await,
         }
     }
 }

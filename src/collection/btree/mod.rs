@@ -174,7 +174,9 @@ impl<T: BTreeInstance> Public for BTreeImpl<T> {
         let range = validate_range(range, self.schema())?;
 
         if path.len() == 1 && &path[0] == "delete" {
-            self.delete(txn.id(), range).map_ok(State::from).await
+            BTreeInstance::delete(self.deref(), txn.id(), range)
+                .map_ok(State::from)
+                .await
         } else {
             self.route(request, txn, path, range).await
         }
@@ -193,7 +195,7 @@ impl<T: BTreeInstance> Public for BTreeImpl<T> {
         let range = validate_range(range, self.schema())?;
 
         if path.len() == 1 && &path[0] == "delete" {
-            return self.delete(txn.id(), range).await;
+            return BTreeInstance::delete(self.deref(), txn.id(), range).await;
         } else if !path.is_empty() {
             return Err(error::path_not_found(path));
         }
@@ -226,6 +228,16 @@ impl<T: BTreeInstance> Public for BTreeImpl<T> {
         }
 
         Ok(())
+    }
+
+    async fn delete(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _range: Value,
+    ) -> TCResult<()> {
+        Err(error::not_implemented("BTreeImpl::delete"))
     }
 }
 
@@ -310,6 +322,19 @@ impl Public for BTree {
             Self::View(view) => view.post(request, txn, path, params).await,
         }
     }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        selector: Value,
+    ) -> TCResult<()> {
+        match self {
+            Self::Tree(tree) => tree.delete(request, txn, path, selector).await,
+            Self::View(view) => view.delete(request, txn, path, selector).await,
+        }
+    }
 }
 
 impl Instance for BTree {
@@ -327,8 +352,8 @@ impl Instance for BTree {
 impl BTreeInstance for BTree {
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
         match self {
-            Self::Tree(tree) => tree.delete(txn_id, range).await,
-            Self::View(view) => view.delete(txn_id, range).await,
+            Self::Tree(tree) => BTreeInstance::delete(tree.deref(), txn_id, range).await,
+            Self::View(view) => BTreeInstance::delete(view.deref(), txn_id, range).await,
         }
     }
 

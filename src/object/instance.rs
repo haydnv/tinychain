@@ -144,6 +144,16 @@ impl<T: Clone + Public + Into<State> + Send + Sync> Public for InstanceExt<T> {
             None => self.parent.post(request, txn, path, params).await,
         }
     }
+
+    async fn delete(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _key: Value,
+    ) -> TCResult<()> {
+        Err(error::not_implemented("InstanceExt::delete"))
+    }
 }
 
 impl<T: Clone + Public + Send + Sync> Instance for InstanceExt<T> {

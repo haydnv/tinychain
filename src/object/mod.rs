@@ -129,6 +129,19 @@ impl Public for Object {
             Self::Instance(instance) => instance.post(request, txn, path, params).await,
         }
     }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<()> {
+        match self {
+            Self::Class(ic) => Err(error::method_not_allowed(ic)),
+            Self::Instance(instance) => instance.delete(request, txn, path, key).await,
+        }
+    }
 }
 
 impl Instance for Object {

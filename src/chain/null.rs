@@ -134,6 +134,16 @@ impl Public for NullChain {
     ) -> TCResult<State> {
         Err(error::not_implemented("NullChain::post"))
     }
+
+    async fn delete(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _key: Value,
+    ) -> TCResult<()> {
+        Err(error::not_implemented("NullChain::delete"))
+    }
 }
 
 #[async_trait]

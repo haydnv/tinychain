@@ -157,6 +157,18 @@ impl Public for Chain {
             Self::Null(nc) => nc.post(request, txn, path, data).await,
         }
     }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<()> {
+        match self {
+            Self::Null(nc) => nc.delete(request, txn, path, key).await,
+        }
+    }
 }
 
 #[async_trait]

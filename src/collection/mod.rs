@@ -112,6 +112,21 @@ impl Public for CollectionBase {
             Self::Tensor(tensor) => tensor.put(request, txn, path, selector, value).await,
         }
     }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        selector: Value,
+    ) -> TCResult<()> {
+        match self {
+            Self::BTree(btree) => btree.delete(request, txn, path, selector).await,
+            Self::Null(null) => null.delete(request, txn, path, selector).await,
+            Self::Table(table) => table.delete(request, txn, path, selector).await,
+            Self::Tensor(tensor) => tensor.delete(request, txn, path, selector).await,
+        }
+    }
 }
 
 #[async_trait]
@@ -247,6 +262,21 @@ impl Public for CollectionView {
             Self::Tensor(tensor) => tensor.post(request, txn, path, params).await,
         }
     }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        selector: Value,
+    ) -> TCResult<()> {
+        match self {
+            Self::BTree(btree) => Public::delete(btree, request, txn, path, selector).await,
+            Self::Null(null) => null.delete(request, txn, path, selector).await,
+            Self::Table(table) => table.delete(request, txn, path, selector).await,
+            Self::Tensor(tensor) => tensor.delete(request, txn, path, selector).await,
+        }
+    }
 }
 
 #[async_trait]
@@ -377,6 +407,19 @@ impl Public for Collection {
         match self {
             Self::Base(base) => base.post(request, txn, path, params).await,
             Self::View(view) => view.post(request, txn, path, params).await,
+        }
+    }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        selector: Value,
+    ) -> TCResult<()> {
+        match self {
+            Self::Base(base) => base.delete(request, txn, path, selector).await,
+            Self::View(view) => view.delete(request, txn, path, selector).await,
         }
     }
 }

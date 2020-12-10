@@ -184,7 +184,8 @@ impl Server {
         gateway: Arc<Gateway>,
         request: hyper::Request<Body>,
     ) -> Result<hyper::Response<Body>, hyper::Error> {
-        let success_code = if request.method() == Method::PUT {
+        let success_code = if request.method() == Method::PUT || request.method() == Method::DELETE
+        {
             StatusCode::NO_CONTENT // 204, no response content
         } else {
             StatusCode::OK // 200, content to follow
@@ -293,6 +294,12 @@ impl Server {
                     .await?;
 
                 to_stream(state, txn).await
+            }
+
+            &Method::DELETE => {
+                let id = get_param(&mut params, "key")?.unwrap_or_else(|| Value::None);
+                gateway.delete(&request, &txn, &path.into(), id).await?;
+                Ok(Box::pin(stream::empty()))
             }
 
             other => Err(error::method_not_allowed(format!(

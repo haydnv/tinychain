@@ -115,6 +115,18 @@ impl Public for Null {
     ) -> TCResult<State> {
         Err(error::not_implemented("Null::post"))
     }
+
+    async fn delete(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _selector: Value,
+    ) -> TCResult<()> {
+        Err(error::unsupported(
+            "Null Collection has no contents to delete",
+        ))
+    }
 }
 
 #[async_trait]

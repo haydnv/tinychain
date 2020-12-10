@@ -307,6 +307,16 @@ impl<T: TableInstance + Sync> Public for TableImpl<T> {
             Err(error::path_not_found(path))
         }
     }
+
+    async fn delete(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _path: &[PathSegment],
+        _selector: Value,
+    ) -> TCResult<()> {
+        Err(error::not_implemented("TableImpl::delete"))
+    }
 }
 
 impl<T: TableInstance> Deref for TableImpl<T> {
@@ -405,6 +415,19 @@ impl Public for Table {
         match self {
             Self::Base(base) => base.post(request, txn, path, params).await,
             Self::View(view) => view.post(request, txn, path, params).await,
+        }
+    }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        selector: Value,
+    ) -> TCResult<()> {
+        match self {
+            Self::Base(base) => base.delete(request, txn, path, selector).await,
+            Self::View(view) => view.delete(request, txn, path, selector).await,
         }
     }
 }

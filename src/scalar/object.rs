@@ -140,6 +140,16 @@ impl Object {
             }
         })
     }
+
+    pub fn delete<'a>(
+        &'a self,
+        _request: &'a Request,
+        _txn: &'a Txn,
+        _path: &'a [PathSegment],
+        _key: Value,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move { Err(error::not_implemented("Object::delete")) })
+    }
 }
 
 impl Instance for Object {
@@ -181,6 +191,16 @@ impl Public for Object {
         params: Object,
     ) -> TCResult<State> {
         Object::post(self, request, txn, path, params).await
+    }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<()> {
+        Object::delete(self, request, txn, path, key).await
     }
 }
 

@@ -205,4 +205,46 @@ impl Gateway {
             }
         })
     }
+
+    pub async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        subject: &Link,
+        key: Value,
+    ) -> TCResult<()> {
+        debug!("Gateway::delete {}", subject);
+        let path = subject.path();
+
+        if subject.host().is_some() {
+            Err(error::not_implemented("Gateway::delete over the network"))
+        } else if path.len() > 1 {
+            if let Some((suffix, cluster)) = self.hosted.get(path) {
+                debug!(
+                    "Gateway::delete {}{}: {}",
+                    cluster,
+                    TCPath::from(suffix),
+                    key
+                );
+                cluster.delete(request, txn, &suffix[..], key).await
+            } else {
+                match path[0].as_str() {
+                    "sbin" => match path[1].as_str() {
+                        "chain" | "cluster" | "collection" | "object" | "op" | "slice"
+                        | "value" => Err(error::method_not_allowed(&path[1])),
+                        other => Err(error::not_found(other)),
+                    },
+                    other => Err(error::not_found(other)),
+                }
+            }
+        } else if path.len() == 1 {
+            if path[0].as_str() == "/sbin" {
+                Err(error::method_not_allowed(path))
+            } else {
+                Err(error::not_found(path))
+            }
+        } else {
+            Err(error::method_not_allowed(path))
+        }
+    }
 }

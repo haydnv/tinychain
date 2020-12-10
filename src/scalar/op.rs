@@ -175,6 +175,16 @@ impl OpDef {
             }
         })
     }
+
+    pub fn delete<'a>(
+        &'a self,
+        _request: &'a Request,
+        _txn: &'a Txn,
+        _key: Value,
+        _context: Option<InstanceExt<State>>,
+    ) -> TCBoxTryFuture<'a, ()> {
+        Box::pin(async move { Err(error::not_implemented("OpDef::delete")) })
+    }
 }
 
 impl Instance for OpDef {

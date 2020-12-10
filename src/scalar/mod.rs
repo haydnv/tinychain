@@ -299,6 +299,21 @@ impl Public for Scalar {
             other => Err(error::method_not_allowed(other)),
         }
     }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<()> {
+        match self {
+            Self::Object(object) => object.delete(request, txn, path, key).await,
+            Self::Op(op) if path.is_empty() => op.delete(request, txn, key, None).await,
+            Self::Op(_) => Err(error::path_not_found(path)),
+            other => Err(error::method_not_allowed(other)),
+        }
+    }
 }
 
 impl ScalarInstance for Scalar {

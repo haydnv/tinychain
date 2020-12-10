@@ -243,6 +243,52 @@ impl Public for Cluster {
 
         Err(error::path_not_found(path))
     }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<()> {
+        let txn_id = *txn.id();
+
+        if path.is_empty() {
+            if key.is_none() {
+                let (mut methods, mut chains) =
+                    try_join!(self.methods.write(txn_id), self.chains.write(txn_id))?;
+                *methods = Object::default();
+                *chains = HashMap::new();
+                Ok(())
+            } else {
+                let key: Id = key.try_cast_into(|v| error::bad_request(ERR_ID, v))?;
+
+                let mut methods = self.methods.write(txn_id).await?;
+                if methods.remove(&key).is_some() {
+                    return Ok(());
+                }
+
+                let mut chains = self.chains.write(txn_id).await?;
+                if chains.remove(&key).is_some() {
+                    return Ok(());
+                }
+
+                Err(error::not_found(key))
+            }
+        } else {
+            let methods = self.methods.read(txn.id()).await?;
+            if methods.contains_key(&path[0]) {
+                return methods.delete(request, txn, path, key).await;
+            }
+
+            let chains = self.chains.read(txn.id()).await?;
+            if let Some(chain) = chains.get(&path[0]) {
+                return chain.delete(request, txn, &path[1..], key).await;
+            }
+
+            Err(error::path_not_found(path))
+        }
+    }
 }
 
 #[async_trait]
