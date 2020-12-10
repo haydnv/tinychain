@@ -16,6 +16,8 @@ use crate::scalar::*;
 use crate::transaction::lock::{Mutable, Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
+const ERR_ID: &str = "Invalid Id for Cluster member";
+
 #[derive(Clone)]
 enum ClusterReplica {
     Director(HashSet<LinkHost>), // set of all hosts replicating this cluster
@@ -89,12 +91,42 @@ impl Cluster {
 impl Public for Cluster {
     async fn get(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _key: Value,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
     ) -> TCResult<State> {
-        Err(error::not_implemented("Cluster::get"))
+        if path.is_empty() {
+            if key.is_none() {
+                Ok(State::Cluster(self.clone()))
+            } else {
+                let key: Id = key.try_cast_into(|v| error::bad_request(ERR_ID, v))?;
+
+                let methods = self.methods.read(txn.id()).await?;
+                if let Some(method) = (**methods).get(&key) {
+                    return Ok(State::Scalar(method.clone()));
+                }
+
+                let chains = self.chains.read(txn.id()).await?;
+                if let Some(chain) = chains.get(&key) {
+                    return Ok(State::Chain(chain.clone()));
+                }
+
+                Err(error::not_found(key))
+            }
+        } else {
+            let methods = self.methods.read(txn.id()).await?;
+            if methods.contains_key(&path[0]) {
+                return methods.get(request, txn, path, key).await;
+            }
+
+            let chains = self.chains.read(txn.id()).await?;
+            if let Some(chain) = chains.get(&path[0]) {
+                return chain.get(request, txn, &path[1..], key).await;
+            }
+
+            Err(error::path_not_found(path))
+        }
     }
 
     async fn put(
@@ -140,7 +172,7 @@ impl Public for Cluster {
                 Ok(())
             } else {
                 let key: Id =
-                    key.try_cast_into(|v| error::bad_request("Invalid Id for Cluster member", v))?;
+                    key.try_cast_into(|v| error::bad_request(ERR_ID, v))?;
 
                 match value {
                     State::Chain(chain) => {
@@ -180,12 +212,26 @@ impl Public for Cluster {
 
     async fn post(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _data: Object,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
     ) -> TCResult<State> {
-        Err(error::not_implemented("Cluster::post"))
+        if path.is_empty() {
+            return Err(error::method_not_allowed(self));
+        }
+
+        let methods = self.methods.read(txn.id()).await?;
+        if methods.contains_key(&path[0]) {
+            return methods.post(request, txn, path, params).await;
+        }
+
+        let chains = self.chains.read(txn.id()).await?;
+        if let Some(chain) = chains.get(&path[0]) {
+            return chain.post(request, txn, &path[1..], params).await;
+        }
+
+        Err(error::path_not_found(path))
     }
 }
 
