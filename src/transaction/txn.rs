@@ -453,8 +453,12 @@ impl Txn {
         path: &[PathSegment],
         key: Key,
     ) -> TCResult<State> {
+        debug!("Txn::resolve {}::GET {}", subject, key);
+
         let subject = dereference_state(&provided, subject.id())?;
         let key = dereference_value(&provided, key)?;
+
+        debug!("Txn::resolve {}::GET {}", subject, key);
 
         match subject {
             State::Chain(chain) => chain.get(request, self, path, key).await,
@@ -472,7 +476,9 @@ impl Txn {
                         return Err(error::path_not_found(path));
                     }
 
-                    op_def.get(request, self, key, None).await
+                    op_def
+                        .get(request, self, key, Some(subject.clone().into()))
+                        .await
                 }
 
                 Scalar::Value(value) => value
@@ -544,7 +550,9 @@ impl Txn {
                         return Err(error::path_not_found(path));
                     }
 
-                    op_def.post(request, self, params, None).await
+                    op_def
+                        .post(request, self, params, Some(subject.clone().into()))
+                        .await
                 }
                 other => Err(error::method_not_allowed(other)),
             },

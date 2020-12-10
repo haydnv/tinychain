@@ -4,17 +4,50 @@ use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-use log::debug;
 use serde::ser::{Serialize, Serializer};
 
-use crate::class::{Public, State, TCBoxTryFuture, TCResult};
+use crate::class::{Class, Instance, NativeClass, Public, State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::request::Request;
 use crate::transaction::Txn;
 
 use super::{
-    Id, PathSegment, Scalar, ScalarInstance, TCPath, TryCastFrom, TryCastInto, Value, ValueInstance,
+    label, Id, Link, PathSegment, Scalar, ScalarInstance, ScalarType, TCPathBuf, TryCastFrom,
+    TryCastInto, Value,
 };
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct ObjectType;
+
+impl Class for ObjectType {
+    type Instance = Object;
+}
+
+impl NativeClass for ObjectType {
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        if path == Self::prefix().as_slice() {
+            Ok(Self)
+        } else {
+            Err(error::path_not_found(path))
+        }
+    }
+
+    fn prefix() -> TCPathBuf {
+        ScalarType::prefix().append(label("object"))
+    }
+}
+
+impl From<ObjectType> for Link {
+    fn from(_ot: ObjectType) -> Link {
+        ObjectType::prefix().into()
+    }
+}
+
+impl fmt::Display for ObjectType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "generic Object type")
+    }
+}
 
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct Object(HashMap<Id, Scalar>);
@@ -28,52 +61,92 @@ impl Object {
         key: Value,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
-            debug!("Object::get {}: {}", TCPath::from(path), key);
-
             if path.is_empty() {
                 return Ok(State::Scalar(Scalar::Object(self.clone())));
             }
 
-            match self.0.get(&path[0]) {
-                Some(scalar) => match scalar {
-                    Scalar::Op(op_def) => {
-                        op_def
-                            .get(request, txn, key, Some(self.clone().into()))
-                            .await
-                    }
+            let scalar = self
+                .0
+                .get(&path[0])
+                .ok_or_else(|| error::not_found(&path[0]))?;
 
-                    Scalar::Value(value) => value
-                        .get(&path[1..], key)
-                        .map(Scalar::Value)
-                        .map(State::Scalar),
-
-                    other if path.len() == 1 => Ok(State::Scalar(other.clone())),
-                    _ => Err(error::path_not_found(path)),
-                },
-                _ => Err(error::path_not_found(path)),
+            match scalar {
+                Scalar::Op(op_def) if path.len() == 1 => {
+                    op_def
+                        .get(request, txn, key, Some(self.clone().into()))
+                        .await
+                }
+                Scalar::Op(_) => Err(error::path_not_found(path)),
+                other => other.get(request, txn, &path[1..], key).await,
             }
         })
     }
 
     pub fn put<'a>(
         &'a self,
-        _request: &'a Request,
-        _txn: &'a Txn,
-        _path: &'a [PathSegment],
-        _key: Value,
-        _value: State,
+        request: &'a Request,
+        txn: &'a Txn,
+        path: &'a [PathSegment],
+        key: Value,
+        value: State,
     ) -> TCBoxTryFuture<'a, ()> {
-        Box::pin(async move { Err(error::not_implemented("Object::put")) })
+        Box::pin(async move {
+            if path.is_empty() {
+                return Err(error::method_not_allowed(self));
+            }
+
+            let scalar = self
+                .0
+                .get(&path[0])
+                .ok_or_else(|| error::not_found(&path[0]))?;
+
+            match scalar {
+                Scalar::Op(op_def) if path.len() == 1 => {
+                    op_def
+                        .put(request, txn, key, value, Some(self.clone().into()))
+                        .await
+                }
+                Scalar::Op(_) => Err(error::path_not_found(path)),
+                other => other.put(request, txn, &path[1..], key, value).await,
+            }
+        })
     }
 
     pub fn post<'a>(
         &'a self,
-        _request: &'a Request,
-        _txn: &'a Txn,
-        _path: &'a [PathSegment],
-        _params: Object,
+        request: &'a Request,
+        txn: &'a Txn,
+        path: &'a [PathSegment],
+        params: Object,
     ) -> TCBoxTryFuture<'a, State> {
-        Box::pin(async move { Err(error::not_implemented("Object::post")) })
+        Box::pin(async move {
+            if path.is_empty() {
+                return Err(error::method_not_allowed(self));
+            }
+
+            let scalar = self
+                .0
+                .get(&path[0])
+                .ok_or_else(|| error::not_found(&path[0]))?;
+
+            match scalar {
+                Scalar::Op(op_def) if path.len() == 1 => {
+                    op_def
+                        .post(request, txn, params, Some(self.clone().into()))
+                        .await
+                }
+                Scalar::Op(_) => Err(error::path_not_found(path)),
+                other => other.post(request, txn, &path[1..], params).await,
+            }
+        })
+    }
+}
+
+impl Instance for Object {
+    type Class = ObjectType;
+
+    fn class(&self) -> Self::Class {
+        ObjectType
     }
 }
 
