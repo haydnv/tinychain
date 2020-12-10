@@ -246,22 +246,11 @@ impl<T: TableInstance + Sync> Public for TableImpl<T> {
             self.upsert(txn.id(), key, values).await
         } else if path.len() == 1 {
             match path[0].as_str() {
-                "group_by" | "order_by" | "limit" | "reverse" | "select" | "update" | "where" => {
-                    Err(error::method_not_allowed(&path[0]))
-                }
+                "delete" | "group_by" | "order_by" | "limit" | "reverse" | "select" | "update"
+                | "where" => Err(error::method_not_allowed(&path[0])),
                 "insert" => {
                     let (key, values) = try_into_row(selector, value)?;
                     self.insert(txn.id().clone(), key, values).await
-                }
-                "delete" => {
-                    if selector.is_none() && value.is_none() {
-                        self.inner.clone().delete(txn.id().clone()).await
-                    } else {
-                        Err(error::bad_request(
-                            "Table::PUT /delete expected no arguments but found",
-                            format!("{}: {}", selector, value),
-                        ))
-                    }
                 }
                 other => Err(error::not_found(other)),
             }
@@ -311,11 +300,26 @@ impl<T: TableInstance + Sync> Public for TableImpl<T> {
     async fn delete(
         &self,
         _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _selector: Value,
+        txn: &Txn,
+        path: &[PathSegment],
+        selector: Value,
     ) -> TCResult<()> {
-        Err(error::not_implemented("TableImpl::delete"))
+        if !path.is_empty() {
+            return match path[0].as_str() {
+                "group_by" | "insert" | "order_by" | "limit" | "reverse" | "select" | "update"
+                | "where" => Err(error::method_not_allowed(&path[0])),
+                other => Err(error::not_found(other)),
+            };
+        }
+
+        if selector.is_none() {
+            self.inner.clone().delete(txn.id().clone()).await
+        } else {
+            Err(error::bad_request(
+                "Table::DELETE / expected no arguments but found",
+                selector,
+            ))
+        }
     }
 }
 
