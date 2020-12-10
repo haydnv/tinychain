@@ -90,6 +90,12 @@ pub struct InstanceClass {
 }
 
 impl InstanceClass {
+    pub fn from_class<C: Class>(class: C) -> InstanceClass {
+        let extends = Some(class.into());
+        let proto = scalar::Object::default();
+        Self { extends, proto }
+    }
+
     pub fn extends(&self) -> Link {
         if let Some(link) = &self.extends {
             link.clone()

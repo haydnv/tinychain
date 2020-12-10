@@ -11,6 +11,7 @@ use crate::block::Dir;
 use crate::chain::Chain;
 use crate::class::{Public, State, TCResult};
 use crate::error;
+use crate::object::InstanceExt;
 use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::lock::{Mutable, Mutate, TxnLock};
@@ -54,7 +55,7 @@ pub struct Cluster {
     data_dir: Arc<Dir>,
     workspace: Arc<Dir>,
     state: TxnLock<ClusterState>,
-    chains: TxnLock<Mutable<HashMap<Id, Chain>>>,
+    chains: TxnLock<Mutable<HashMap<Id, InstanceExt<Chain>>>>,
     methods: TxnLock<Mutable<Object>>,
 }
 
@@ -109,7 +110,7 @@ impl Public for Cluster {
 
                 let chains = self.chains.read(txn.id()).await?;
                 if let Some(chain) = chains.get(&key) {
-                    return Ok(State::Chain(chain.clone()));
+                    return Ok(State::Object(chain.clone().into_state().into()));
                 }
 
                 Err(error::not_found(key))
@@ -155,6 +156,10 @@ impl Public for Cluster {
                             methods.insert(id, Scalar::Op(op));
                         }
                         State::Chain(chain) => {
+                            chains.insert(id, chain.into());
+                        }
+                        State::Object(crate::object::Object::Instance(chain)) => {
+                            let chain = chain.try_as()?;
                             chains.insert(id, chain);
                         }
                         other => {
@@ -171,12 +176,17 @@ impl Public for Cluster {
 
                 Ok(())
             } else {
-                let key: Id =
-                    key.try_cast_into(|v| error::bad_request(ERR_ID, v))?;
+                let key: Id = key.try_cast_into(|v| error::bad_request(ERR_ID, v))?;
 
                 match value {
                     State::Chain(chain) => {
                         let mut chains = self.chains.write(*txn.id()).await?;
+                        chains.insert(key, chain.into());
+                        Ok(())
+                    }
+                    State::Object(crate::object::Object::Instance(chain)) => {
+                        let mut chains = self.chains.write(*txn.id()).await?;
+                        let chain = chain.try_as()?;
                         chains.insert(key, chain);
                         Ok(())
                     }

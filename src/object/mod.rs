@@ -105,23 +105,29 @@ impl Public for Object {
 
     async fn put(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _key: Value,
-        _value: State,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+        value: State,
     ) -> TCResult<()> {
-        Err(error::not_implemented("Object::put"))
+        match self {
+            Self::Class(ic) => Err(error::method_not_allowed(ic)),
+            Self::Instance(instance) => instance.put(request, txn, path, key, value).await,
+        }
     }
 
     async fn post(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _params: scalar::Object,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: scalar::Object,
     ) -> TCResult<State> {
-        Err(error::not_implemented("Object::post"))
+        match self {
+            Self::Class(ic) => Err(error::method_not_allowed(ic)),
+            Self::Instance(instance) => instance.post(request, txn, path, params).await,
+        }
     }
 }
 
