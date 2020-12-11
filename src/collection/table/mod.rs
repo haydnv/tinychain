@@ -30,12 +30,8 @@ const ERR_SLICE: &str = "Slicing is not supported by instance of";
 const ERR_UPDATE: &str = "Update is not supported by instance of";
 
 pub use bounds::*;
-
-pub type TableBase = index::TableBase;
-pub type TableBaseType = index::TableBaseType;
-pub type TableIndex = index::TableIndex;
-pub type TableView = view::TableView;
-pub type TableViewType = view::TableViewType;
+pub use index::{TableBase, TableBaseType, TableIndex};
+pub use view::{TableView, TableViewType};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum TableType {
@@ -179,14 +175,18 @@ impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
     type Item = Vec<Value>;
     type Slice = TableView;
 
-    async fn is_empty(&self, _txn: &Txn) -> TCResult<bool> {
-        Err(error::not_implemented("TableImpl::is_empty"))
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        let mut rows = self.inner.clone().stream(*txn.id()).await?;
+        if let Some(_row) = rows.next().await {
+            Ok(false)
+        } else {
+            Ok(true)
+        }
     }
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        let rows = self.inner.clone().stream(txn.id().clone()).await?;
-        let rows = Box::pin(rows.map(Value::Tuple).map(Scalar::Value));
-        Ok(rows)
+        let stream = self.inner.clone().stream(*txn.id()).await?;
+        Ok(Box::pin(stream.map(Scalar::from)))
     }
 }
 
