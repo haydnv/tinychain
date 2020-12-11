@@ -12,7 +12,7 @@ use log::debug;
 use crate::class::*;
 use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
-use crate::collection::{Collection, CollectionView};
+use crate::collection::{Collection, CollectionType, CollectionView, CollectionViewType};
 use crate::error;
 use crate::scalar::{label, Id, Link, PathSegment, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -54,9 +54,21 @@ impl NativeClass for TableViewType {
     }
 }
 
+impl From<TableViewType> for CollectionType {
+    fn from(tvt: TableViewType) -> CollectionType {
+        CollectionType::View(CollectionViewType::Table(tvt.into()))
+    }
+}
+
 impl From<TableViewType> for Link {
     fn from(_tvt: TableViewType) -> Link {
         TableViewType::prefix().append(label("index")).into()
+    }
+}
+
+impl From<TableViewType> for TCType {
+    fn from(tvt: TableViewType) -> TCType {
+        TCType::Collection(tvt.into())
     }
 }
 

@@ -72,7 +72,7 @@ impl Public for CollectionBase {
     ) -> TCResult<State> {
         match self {
             Self::BTree(btree) => btree.get(request, txn, path, selector).await,
-            Self::Table(table) => table.get(request, txn, path, selector).await,
+            Self::Table(table) => Public::get(table, request, txn, path, selector).await,
             Self::Tensor(tensor) => tensor.get(request, txn, path, selector).await,
         }
     }

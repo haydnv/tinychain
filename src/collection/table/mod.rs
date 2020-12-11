@@ -1,8 +1,7 @@
 use std::fmt;
-use std::ops::Deref;
 
 use async_trait::async_trait;
-use futures::future::{self, TryFutureExt};
+use futures::future;
 use futures::{Stream, StreamExt};
 use log::debug;
 
@@ -10,17 +9,14 @@ use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionView};
 use crate::error;
-use crate::handler::Public;
-use crate::request::Request;
-use crate::scalar::{
-    Id, Link, Object, PathSegment, Scalar, ScalarInstance, TCPathBuf, TryCastFrom, TryCastInto,
-    Value,
-};
+use crate::handler::*;
+use crate::scalar::{Id, Link, MethodType, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::schema::{Column, Row, TableSchema};
 
 mod bounds;
+mod handlers;
 mod index;
 mod view;
 
@@ -30,6 +26,7 @@ const ERR_SLICE: &str = "Slicing is not supported by instance of";
 const ERR_UPDATE: &str = "Update is not supported by instance of";
 
 pub use bounds::*;
+pub use handlers::TableImpl;
 pub use index::{TableBase, TableBaseType, TableIndex};
 pub use view::{TableView, TableViewType};
 
@@ -85,7 +82,7 @@ impl fmt::Display for TableType {
 }
 
 #[async_trait]
-pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static {
+pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + Sync + 'static {
     type Stream: Stream<Item = Vec<Value>> + Send + Unpin;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
@@ -160,185 +157,6 @@ pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + 'static
 }
 
 #[derive(Clone)]
-pub struct TableImpl<T: TableInstance> {
-    inner: T,
-}
-
-impl<T: TableInstance> TableImpl<T> {
-    fn into_inner(self) -> T {
-        self.inner
-    }
-}
-
-#[async_trait]
-impl<T: TableInstance + Sync> CollectionInstance for TableImpl<T> {
-    type Item = Vec<Value>;
-    type Slice = TableView;
-
-    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        let mut rows = self.inner.clone().stream(*txn.id()).await?;
-        if let Some(_row) = rows.next().await {
-            Ok(false)
-        } else {
-            Ok(true)
-        }
-    }
-
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        let stream = self.inner.clone().stream(*txn.id()).await?;
-        Ok(Box::pin(stream.map(Scalar::from)))
-    }
-}
-
-#[async_trait]
-impl<T: TableInstance + Sync> Public for TableImpl<T> {
-    async fn get(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-    ) -> TCResult<State> {
-        if path.is_empty() {
-            let table: Table = self.inner.clone().into();
-            Ok(State::from(table))
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "insert" | "delete" | "update" | "where" => {
-                    Err(error::method_not_allowed(&path[0]))
-                }
-                "group_by" => {
-                    let columns: Vec<Id> = try_into_columns(selector)?;
-                    self.group_by(columns).map(Table::from).map(State::from)
-                }
-                "limit" => {
-                    let limit =
-                        selector.try_cast_into(|v| error::bad_request("Invalid limit", v))?;
-                    Ok(State::from(Table::from(self.limit(limit))))
-                }
-                "order_by" => {
-                    let columns = try_into_columns(selector)?;
-                    self.order_by(columns, false)
-                        .map(Table::from)
-                        .map(State::from)
-                }
-                "reverse" => self.reversed().map(State::from),
-                "select" => {
-                    let columns = try_into_columns(selector)?;
-                    self.select(columns).map(Table::from).map(State::from)
-                }
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            Err(error::path_not_found(path))
-        }
-    }
-
-    async fn put(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-        value: State,
-    ) -> TCResult<()> {
-        if path.is_empty() {
-            let (key, values) = try_into_row(selector, value)?;
-            self.upsert(txn.id(), key, values).await
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "delete" | "group_by" | "order_by" | "limit" | "reverse" | "select" | "update"
-                | "where" => Err(error::method_not_allowed(&path[0])),
-                "insert" => {
-                    let (key, values) = try_into_row(selector, value)?;
-                    self.insert(txn.id().clone(), key, values).await
-                }
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            return Err(error::path_not_found(path));
-        }
-    }
-
-    async fn post(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        if path.is_empty() {
-            Err(error::method_not_allowed("Table: POST /"))
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "delete" | "group_by" | "insert" | "order_by" | "limit" | "reverse" | "select" => {
-                    Err(error::method_not_allowed(&path[0]))
-                }
-                "update" => {
-                    let update =
-                        params.try_cast_into(|v| error::bad_request("Invalid update", v))?;
-
-                    self.inner
-                        .clone()
-                        .update(txn.clone(), update)
-                        .map_ok(State::from)
-                        .await
-                }
-                "where" => {
-                    let bounds = Bounds::try_cast_from(params, |v| {
-                        error::bad_request("Cannot cast into Table Bounds from", v)
-                    })?;
-
-                    self.slice(bounds).map(State::from)
-                }
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            Err(error::path_not_found(path))
-        }
-    }
-
-    async fn delete(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-    ) -> TCResult<()> {
-        if !path.is_empty() {
-            return match path[0].as_str() {
-                "group_by" | "insert" | "order_by" | "limit" | "reverse" | "select" | "update"
-                | "where" => Err(error::method_not_allowed(&path[0])),
-                other => Err(error::not_found(other)),
-            };
-        }
-
-        if selector.is_none() {
-            self.inner.clone().delete(txn.id().clone()).await
-        } else {
-            Err(error::bad_request(
-                "Table::DELETE / expected no arguments but found",
-                selector,
-            ))
-        }
-    }
-}
-
-impl<T: TableInstance> Deref for TableImpl<T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        &self.inner
-    }
-}
-
-impl<T: TableInstance> From<T> for TableImpl<T> {
-    fn from(inner: T) -> TableImpl<T> {
-        Self { inner }
-    }
-}
-
-#[derive(Clone)]
 pub enum Table {
     Base(TableImpl<TableBase>),
     View(TableImpl<TableView>),
@@ -381,58 +199,15 @@ impl CollectionInstance for Table {
     }
 }
 
-#[async_trait]
-impl Public for Table {
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-    ) -> TCResult<State> {
+impl Route for Table {
+    fn route(
+        &'_ self,
+        method: MethodType,
+        path: &'_ [PathSegment],
+    ) -> Option<Box<dyn Handler + '_>> {
         match self {
-            Self::Base(base) => base.get(request, txn, path, selector).await,
-            Self::View(view) => view.get(request, txn, path, selector).await,
-        }
-    }
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-        value: State,
-    ) -> TCResult<()> {
-        match self {
-            Self::Base(base) => base.put(request, txn, path, selector, value).await,
-            Self::View(view) => view.put(request, txn, path, selector, value).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        match self {
-            Self::Base(base) => base.post(request, txn, path, params).await,
-            Self::View(view) => view.post(request, txn, path, params).await,
-        }
-    }
-
-    async fn delete(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-    ) -> TCResult<()> {
-        match self {
-            Self::Base(base) => base.delete(request, txn, path, selector).await,
-            Self::View(view) => view.delete(request, txn, path, selector).await,
+            Self::Base(base) => base.route(method, path),
+            Self::View(view) => view.route(method, path),
         }
     }
 }
@@ -625,30 +400,5 @@ impl From<Table> for Collection {
 impl From<Table> for State {
     fn from(table: Table) -> State {
         State::Collection(table.into())
-    }
-}
-
-fn try_into_row(selector: Value, values: State) -> TCResult<(Vec<Value>, Vec<Value>)> {
-    let key = match selector {
-        Value::Tuple(key) => key,
-        other => vec![other],
-    };
-
-    let values = Value::try_cast_from(values, |v| error::bad_request("Invalid row value", v))?;
-    let values = match values {
-        Value::Tuple(values) => values,
-        other => vec![other],
-    };
-
-    Ok((key, values))
-}
-
-fn try_into_columns(selector: Value) -> TCResult<Vec<Id>> {
-    if selector.matches::<Vec<Id>>() {
-        Ok(selector.opt_cast_into().unwrap())
-    } else {
-        let name = selector.try_cast_into(|v| error::bad_request("Invalid column name", v))?;
-
-        Ok(vec![name])
     }
 }

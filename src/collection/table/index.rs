@@ -9,7 +9,7 @@ use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
 
-use crate::class::{Class, Instance, NativeClass, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, TCResult, TCStream, TCType};
 use crate::collection::btree::{self, BTreeFile, BTreeInstance};
 use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
@@ -83,6 +83,12 @@ impl From<TableBaseType> for Link {
             ReadOnly => prefix.append(label("ro_index")).into(),
             Table => prefix.into(),
         }
+    }
+}
+
+impl From<TableBaseType> for TCType {
+    fn from(tbt: TableBaseType) -> TCType {
+        TCType::Collection(tbt.into())
     }
 }
 
