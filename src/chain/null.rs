@@ -2,10 +2,11 @@ use async_trait::async_trait;
 use futures::stream;
 use log::debug;
 
-use crate::class::*;
+use crate::class::{Instance, State, TCResult, TCStream, TCType};
 use crate::collection::class::*;
 use crate::collection::CollectionBase;
 use crate::error;
+use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::{Object, PathSegment, Scalar, ScalarClass, Value};
 use crate::transaction::lock::{Mutable, TxnLock};

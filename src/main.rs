@@ -16,6 +16,7 @@ mod cluster;
 mod collection;
 mod error;
 mod gateway;
+mod handler;
 mod kernel;
 mod lock;
 mod logger;

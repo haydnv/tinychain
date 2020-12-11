@@ -3,10 +3,11 @@ use std::ops::Deref;
 use async_trait::async_trait;
 use futures::stream::{self, Stream, StreamExt};
 
-use crate::class::{Instance, Public, State, TCStream};
+use crate::class::{Instance, State, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionView};
 use crate::error::{self, TCResult};
+use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};

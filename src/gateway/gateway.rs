@@ -9,8 +9,9 @@ use log::debug;
 
 use crate::auth::Token;
 use crate::block::Dir;
-use crate::class::{Public, State, TCBoxTryFuture, TCResult};
+use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::error;
+use crate::handler::Public;
 use crate::kernel;
 use crate::request::Request;
 use crate::scalar::{Id, Link, Scalar, TCPath, TryCastInto, Value};

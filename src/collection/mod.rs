@@ -3,8 +3,9 @@ use std::fmt;
 
 use async_trait::async_trait;
 
-use crate::class::{Instance, Public, State, TCResult, TCStream};
+use crate::class::{Instance, State, TCResult, TCStream};
 use crate::error;
+use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::{Object, PathSegment, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};

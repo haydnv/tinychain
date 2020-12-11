@@ -6,12 +6,13 @@ use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, TryFutureExt};
 
-use crate::class::{Class, Instance, NativeClass, Public, State, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::*;
 use crate::collection::{
     Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
 };
 use crate::error;
+use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};

@@ -6,8 +6,9 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 use serde::ser::{Serialize, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, Public, State, TCBoxTryFuture, TCResult};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
 use crate::error;
+use crate::handler::Public;
 use crate::request::Request;
 use crate::transaction::Txn;
 

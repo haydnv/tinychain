@@ -10,6 +10,7 @@ use crate::chain::{Chain, ChainType};
 use crate::cluster::Cluster;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
+use crate::handler::Public;
 use crate::object::{Object, ObjectType};
 use crate::request::Request;
 use crate::scalar::{
@@ -45,42 +46,6 @@ pub trait Instance {
     fn is_a(&self, dtype: Self::Class) -> bool {
         self.class() == dtype
     }
-}
-
-#[async_trait]
-pub trait Public {
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<State>;
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-        value: State,
-    ) -> TCResult<()>;
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: scalar::Object,
-    ) -> TCResult<State>;
-
-    async fn delete(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<()>;
 }
 
 #[derive(Clone, Eq, PartialEq)]

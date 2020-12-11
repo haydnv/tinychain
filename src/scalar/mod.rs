@@ -11,6 +11,7 @@ use serde::ser::{Serialize, SerializeSeq, Serializer};
 
 use crate::class::*;
 use crate::error;
+use crate::handler::Public;
 use crate::request::Request;
 use crate::transaction::Txn;
 

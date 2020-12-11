@@ -15,9 +15,10 @@ use serde::de;
 use tokio::sync::mpsc;
 
 use crate::block::{BlockData, Dir, DirEntry, File};
-use crate::class::{Public, State, TCBoxTryFuture, TCResult};
+use crate::class::{State, TCBoxTryFuture, TCResult};
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
+use crate::handler::Public;
 use crate::lock::RwLock;
 use crate::request::Request;
 use crate::scalar::*;

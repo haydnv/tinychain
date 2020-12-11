@@ -9,8 +9,9 @@ use log::debug;
 
 use crate::block::Dir;
 use crate::chain::Chain;
-use crate::class::{Public, State, TCResult};
+use crate::class::{State, TCResult};
 use crate::error;
+use crate::handler::Public;
 use crate::object::InstanceExt;
 use crate::request::Request;
 use crate::scalar::*;

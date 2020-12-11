@@ -4,8 +4,9 @@ use async_trait::async_trait;
 use futures::TryFutureExt;
 use log::debug;
 
-use crate::class::{Class, Instance, NativeClass, Public, State, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error::{self, TCResult};
+use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::{self, label, Link, PathSegment, TCPath, TCPathBuf, Value};
 use crate::transaction::Txn;

@@ -6,10 +6,11 @@ use futures::future::{self, TryFutureExt};
 use futures::{Stream, StreamExt};
 use log::debug;
 
-use crate::class::{Class, Instance, NativeClass, Public, State, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionBase, CollectionView};
 use crate::error;
+use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::{
     Id, Link, Object, PathSegment, Scalar, ScalarInstance, TCPathBuf, TryCastFrom, TryCastInto,

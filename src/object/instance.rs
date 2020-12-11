@@ -5,8 +5,9 @@ use std::ops::Deref;
 use async_trait::async_trait;
 use log::debug;
 
-use crate::class::{Instance, Public, State};
+use crate::class::{Instance, State};
 use crate::error::{self, TCResult};
+use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::{self, PathSegment, Scalar, TCPath, TryCastInto, Value, ValueInstance};
 use crate::transaction::Txn;
