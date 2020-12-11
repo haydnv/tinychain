@@ -4,7 +4,7 @@ use crate::auth;
 use crate::class::{State, TCResult, TCType};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{Object, PathSegment, Value};
+use crate::scalar::{MethodType, Object, PathSegment, Value};
 use crate::transaction::Txn;
 
 #[async_trait]
@@ -84,4 +84,72 @@ pub trait Public {
         path: &[PathSegment],
         key: Value,
     ) -> TCResult<()>;
+}
+
+pub trait Route {
+    fn route(
+        &'_ self,
+        method: MethodType,
+        path: &'_ [PathSegment],
+    ) -> Option<Box<dyn Handler + '_>>;
+}
+
+#[async_trait]
+impl<T: Route + Send + Sync> Public for T {
+    async fn get(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<State> {
+        if let Some(handler) = self.route(MethodType::Get, path) {
+            handler.get(request, txn, key).await
+        } else {
+            Err(error::path_not_found(path))
+        }
+    }
+
+    async fn put(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+        value: State,
+    ) -> TCResult<()> {
+        if let Some(handler) = self.route(MethodType::Put, path) {
+            handler.put(request, txn, key, value).await
+        } else {
+            Err(error::path_not_found(path))
+        }
+    }
+
+    async fn post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        params: Object,
+    ) -> TCResult<State> {
+        if let Some(handler) = self.route(MethodType::Post, path) {
+            handler.post(request, txn, params).await
+        } else {
+            Err(error::path_not_found(path))
+        }
+    }
+
+    async fn delete(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<()> {
+        if let Some(handler) = self.route(MethodType::Delete, path) {
+            handler.delete(request, txn, key).await
+        } else {
+            Err(error::path_not_found(path))
+        }
+    }
 }
