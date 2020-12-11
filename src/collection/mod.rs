@@ -22,7 +22,7 @@ pub use table::*;
 
 #[derive(Clone)]
 pub enum CollectionBase {
-    BTree(BTreeImpl<BTreeFile>),
+    BTree(BTreeFile),
     Table(TableImpl<TableBase>),
     Tensor(tensor::class::TensorBase),
 }
@@ -114,7 +114,7 @@ impl Public for CollectionBase {
         selector: Value,
     ) -> TCResult<()> {
         match self {
-            Self::BTree(btree) => btree.delete(request, txn, path, selector).await,
+            Self::BTree(btree) => Public::delete(btree, request, txn, path, selector).await,
             Self::Table(table) => table.delete(request, txn, path, selector).await,
             Self::Tensor(tensor) => tensor.delete(request, txn, path, selector).await,
         }
@@ -170,7 +170,7 @@ impl Instance for CollectionView {
 
     fn class(&self) -> Self::Class {
         match self {
-            Self::BTree(btree) => btree.class().into(),
+            Self::BTree(btree) => Instance::class(btree).into(),
             Self::Table(table) => table.class().into(),
             Self::Tensor(tensor) => tensor.class().into(),
         }

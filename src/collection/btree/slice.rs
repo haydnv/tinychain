@@ -3,10 +3,10 @@ use futures::stream::{Stream, StreamExt};
 
 use log::debug;
 
-use crate::class::{Instance, TCResult, TCStream};
+use crate::class::TCStream;
 use crate::collection::schema::Column;
 use crate::collection::{Collection, CollectionView};
-use crate::error;
+use crate::error::{self, TCResult};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::{BTree, BTreeFile, BTreeInstance, BTreeRange, BTreeType, Key};
@@ -31,15 +31,13 @@ impl BTreeSlice {
                     "BTreeSlice from source tree with range {} (reverse: {})",
                     range, reverse
                 );
-                let source = tree.into_inner();
                 Ok(Self {
-                    source,
+                    source: tree,
                     range,
                     reverse,
                 })
             }
             BTree::View(view) => {
-                let view = view.into_inner();
                 let source = view.source.clone();
                 let reverse = view.reverse ^ reverse;
                 debug!(
@@ -70,22 +68,10 @@ impl BTreeSlice {
     }
 }
 
-impl Instance for BTreeSlice {
-    type Class = BTreeType;
-
-    fn class(&self) -> BTreeType {
-        BTreeType::View
-    }
-}
-
 #[async_trait]
 impl BTreeInstance for BTreeSlice {
-    fn into_btree(self) -> BTree {
-        BTree::from(self)
-    }
-
-    fn into_collection(self) -> Collection {
-        self.into()
+    fn class(&self) -> BTreeType {
+        BTreeType::View
     }
 
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
