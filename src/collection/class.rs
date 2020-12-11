@@ -11,7 +11,6 @@ use crate::scalar::{
 use crate::transaction::Txn;
 
 use super::btree::{BTreeFile, BTreeImpl, BTreeType};
-use super::null::{Null, NullType};
 use super::table::{TableBaseType, TableImpl, TableType};
 use super::tensor::{TensorBaseType, TensorType};
 use super::{Collection, CollectionBase, CollectionView};
@@ -101,7 +100,6 @@ impl fmt::Display for CollectionType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionBaseType {
     BTree,
-    Null,
     Table(TableBaseType),
     Tensor(TensorBaseType),
 }
@@ -120,7 +118,6 @@ impl NativeClass for CollectionBaseType {
             use CollectionBaseType::*;
             match suffix[0].as_str() {
                 "btree" if suffix.len() == 1 => Ok(BTree),
-                "null" if suffix.len() == 1 => Ok(Null),
                 "table" => TableBaseType::from_path(path).map(Table),
                 "tensor" => TensorBaseType::from_path(path).map(Tensor),
                 _ => Err(error::path_not_found(suffix)),
@@ -148,7 +145,6 @@ impl CollectionClass for CollectionBaseType {
                     .map_ok(CollectionBase::BTree)
                     .await
             }
-            Self::Null => Ok(CollectionBase::Null(Null::create())),
             Self::Table(tt) => {
                 tt.get(txn, schema)
                     .map_ok(TableImpl::from)
@@ -165,7 +161,6 @@ impl From<CollectionBaseType> for Link {
         use CollectionBaseType::*;
         match ct {
             BTree => BTreeType::Tree.into(),
-            Null => CollectionBaseType::prefix().append(label("null")).into(),
             Table(tbt) => tbt.into(),
             Tensor(tbt) => tbt.into(),
         }
@@ -177,7 +172,6 @@ impl fmt::Display for CollectionBaseType {
         use CollectionBaseType::*;
         match self {
             BTree => write!(f, "{}", BTreeType::Tree),
-            Null => write!(f, "{}", NullType),
             Table(tbt) => write!(f, "{}", tbt),
             Tensor(tbt) => write!(f, "{}", tbt),
         }
@@ -187,7 +181,6 @@ impl fmt::Display for CollectionBaseType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionViewType {
     BTree(BTreeType),
-    Null(NullType),
     Table(TableType),
     Tensor(TensorType),
 }
@@ -212,12 +205,6 @@ impl From<BTreeType> for CollectionViewType {
     }
 }
 
-impl From<NullType> for CollectionViewType {
-    fn from(nt: NullType) -> CollectionViewType {
-        Self::Null(nt)
-    }
-}
-
 impl From<TableType> for CollectionViewType {
     fn from(tt: TableType) -> CollectionViewType {
         Self::Table(tt)
@@ -235,7 +222,6 @@ impl From<CollectionViewType> for Link {
         use CollectionViewType::*;
         match cvt {
             BTree(btt) => btt.into(),
-            Null(nt) => nt.into(),
             Table(tt) => tt.into(),
             Tensor(tt) => tt.into(),
         }
@@ -247,7 +233,6 @@ impl fmt::Display for CollectionViewType {
         use CollectionViewType::*;
         match self {
             BTree(btree_type) => write!(f, "{}", btree_type),
-            Null(null_type) => write!(f, "{}", null_type),
             Table(table_type) => write!(f, "{}", table_type),
             Tensor(tensor_type) => write!(f, "{}", tensor_type),
         }
