@@ -14,8 +14,6 @@ use super::{BTree, BTreeRange, Key};
 
 #[async_trait]
 pub trait BTreeInstance: Clone + Instance<Class = BTreeType> + Transact {
-    fn class(&self) -> BTreeType;
-
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()>;
 
     async fn insert(&self, txn_id: &TxnId, key: Key) -> TCResult<()>;

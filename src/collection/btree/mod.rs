@@ -265,13 +265,47 @@ impl<'a, T: BTreeInstance> Handler for WriteHandler<'a, T> {
     }
 }
 
-impl<T: BTreeInstance> Route for T
+#[derive(Clone)]
+pub struct BTreeImpl<T: BTreeInstance> {
+    inner: T,
+}
+
+impl<T: BTreeInstance> BTreeImpl<T> {
+    fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+impl<T: BTreeInstance> Instance for BTreeImpl<T> {
+    type Class = BTreeType;
+
+    fn class(&self) -> BTreeType {
+        self.inner.class()
+    }
+}
+
+#[async_trait]
+impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
+    type Item = Key;
+    type Slice = BTreeSlice;
+
+    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
+        self.inner.is_empty(txn).await
+    }
+
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+        let stream = self.stream(*txn.id(), BTreeRange::default(), false).await?;
+        Ok(Box::pin(stream.map(Scalar::from)))
+    }
+}
+
+impl<T: BTreeInstance> Route for BTreeImpl<T>
 where
     Collection: From<T>,
     BTree: From<T>,
 {
     fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
-        let btree = self;
+        let btree = &self.inner;
 
         if path.is_empty() {
             match method {
@@ -291,44 +325,59 @@ where
     }
 }
 
+impl<T: BTreeInstance> Deref for BTreeImpl<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T: BTreeInstance> From<T> for BTreeImpl<T> {
+    fn from(inner: T) -> Self {
+        Self { inner }
+    }
+}
+
 #[derive(Clone)]
 pub enum BTree {
-    Tree(BTreeFile),
-    View(BTreeSlice),
+    Tree(BTreeImpl<BTreeFile>),
+    View(BTreeImpl<BTreeSlice>),
+}
+
+impl Instance for BTree {
+    type Class = BTreeType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::Tree(tree) => tree.class(),
+            Self::View(view) => view.class(),
+        }
+    }
 }
 
 #[async_trait]
-impl<T: BTreeInstance> CollectionInstance for T {
-    type Item = Scalar;
-    type Slice = CollectionView;
+impl CollectionInstance for BTree {
+    type Item = Key;
+    type Slice = BTreeSlice;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        BTreeInstance::is_empty(self, txn).await
+        match self {
+            Self::Tree(tree) => tree.is_empty(txn).await,
+            Self::View(view) => view.is_empty(txn).await,
+        }
     }
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        let stream = BTreeInstance::stream(self, *txn.id(), BTreeRange::default(), false).await?;
-        Ok(Box::pin(stream.map(Scalar::from)))
-    }
-}
-
-impl<T: BTreeInstance> Instance for T {
-    type Class = BTreeType;
-
-    fn class(&self) -> BTreeType {
-        BTreeInstance::class(self)
+        match self {
+            Self::Tree(tree) => tree.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
+        }
     }
 }
 
 #[async_trait]
 impl BTreeInstance for BTree {
-    fn class(&self) -> BTreeType {
-        match self {
-            Self::Tree(tree) => BTreeInstance::class(tree),
-            Self::View(view) => BTreeInstance::class(view),
-        }
-    }
-
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
         match self {
             Self::Tree(tree) => BTreeInstance::delete(tree.deref(), txn_id, range).await,
@@ -395,6 +444,19 @@ impl BTreeInstance for BTree {
         match self {
             Self::Tree(tree) => tree.stream(txn_id, range, reverse).await,
             Self::View(view) => view.stream(txn_id, range, reverse).await,
+        }
+    }
+}
+
+impl Route for BTree {
+    fn route(
+        &'_ self,
+        method: MethodType,
+        path: &'_ [PathSegment],
+    ) -> Option<Box<dyn Handler + '_>> {
+        match self {
+            Self::Tree(tree) => tree.route(method, path),
+            Self::View(view) => view.route(method, path),
         }
     }
 }

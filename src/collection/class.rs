@@ -10,7 +10,7 @@ use crate::scalar::{
 };
 use crate::transaction::Txn;
 
-use super::btree::{BTreeFile, BTreeType};
+use super::btree::{BTreeFile, BTreeImpl, BTreeType};
 use super::table::{TableBaseType, TableImpl, TableType};
 use super::tensor::{TensorBaseType, TensorType};
 use super::{Collection, CollectionBase, CollectionView};
@@ -141,6 +141,7 @@ impl CollectionClass for CollectionBaseType {
                     .try_cast_into(|s| error::bad_request("Expected BTree schema but found", s))?;
 
                 BTreeFile::create(txn, schema)
+                    .map_ok(BTreeImpl::from)
                     .map_ok(CollectionBase::BTree)
                     .await
             }

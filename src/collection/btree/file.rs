@@ -15,9 +15,9 @@ use uuid::Uuid;
 
 use crate::block::File;
 use crate::block::{BlockData, BlockId, BlockOwned, BlockOwnedMut};
-use crate::class::{TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::schema::{Column, RowSchema};
-use crate::collection::{Collection, CollectionBase};
+use crate::collection::{BTreeImpl, Collection, CollectionBase};
 use crate::error;
 use crate::scalar::*;
 use crate::transaction::lock::{Mutable, TxnLock};
@@ -597,12 +597,16 @@ impl BTreeFile {
     }
 }
 
-#[async_trait]
-impl BTreeInstance for BTreeFile {
-    fn class(&self) -> BTreeType {
+impl Instance for BTreeFile {
+    type Class = BTreeType;
+
+    fn class(&self) -> Self::Class {
         BTreeType::Tree
     }
+}
 
+#[async_trait]
+impl BTreeInstance for BTreeFile {
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
         let range = validate_range(range, self.schema())?;
         let root_id = self.root.read(txn_id).await?;
@@ -729,7 +733,7 @@ impl Transact for BTreeFile {
 
 impl From<BTreeFile> for Collection {
     fn from(btree: BTreeFile) -> Collection {
-        Collection::Base(CollectionBase::BTree(btree.into()))
+        Collection::Base(CollectionBase::BTree(BTreeImpl::from(btree)))
     }
 }
 

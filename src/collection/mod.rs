@@ -22,7 +22,7 @@ pub use table::*;
 
 #[derive(Clone)]
 pub enum CollectionBase {
-    BTree(BTreeFile),
+    BTree(BTreeImpl<BTreeFile>),
     Table(TableImpl<TableBase>),
     Tensor(tensor::class::TensorBase),
 }
