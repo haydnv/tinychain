@@ -223,7 +223,7 @@ pub fn conflict() -> TCError {
     )
 }
 
-pub fn forbidden<T: fmt::Display>(message: &str, info: T) -> TCError {
+pub fn forbidden<I: fmt::Display, T: fmt::Display>(message: I, info: T) -> TCError {
     TCError::of(ErrorType::Forbidden, format!("{}: {}", message, info))
 }
 
