@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::block::File;
 use crate::block::{BlockData, BlockId, BlockOwned, BlockOwnedMut};
-use crate::class::{TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::schema::{Column, RowSchema};
 use crate::collection::{Collection, CollectionBase};
 use crate::error;
@@ -24,7 +24,7 @@ use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::collator::Collator;
-use super::{validate_key, validate_range, BTreeInstance, BTreeRange, Key};
+use super::{validate_key, validate_range, BTree, BTreeInstance, BTreeRange, BTreeType, Key};
 
 type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Unpin>>>;
 
@@ -597,8 +597,24 @@ impl BTreeFile {
     }
 }
 
+impl Instance for BTreeFile {
+    type Class = BTreeType;
+
+    fn class(&self) -> BTreeType {
+        BTreeType::Tree
+    }
+}
+
 #[async_trait]
 impl BTreeInstance for BTreeFile {
+    fn into_btree(self) -> BTree {
+        BTree::from(self)
+    }
+
+    fn into_collection(self) -> Collection {
+        self.into()
+    }
+
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
         let range = validate_range(range, self.schema())?;
         let root_id = self.root.read(txn_id).await?;

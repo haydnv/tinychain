@@ -3,13 +3,13 @@ use futures::stream::{Stream, StreamExt};
 
 use log::debug;
 
-use crate::class::{TCResult, TCStream};
+use crate::class::{Instance, TCResult, TCStream};
 use crate::collection::schema::Column;
 use crate::collection::{Collection, CollectionView};
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::{BTree, BTreeFile, BTreeInstance, BTreeRange, Key};
+use super::{BTree, BTreeFile, BTreeInstance, BTreeRange, BTreeType, Key};
 
 pub const ERR_BOUNDS: &str = "Requested range is outside the bounds of the containing view \
 (hint: try slicing the base BTree instead)";
@@ -70,8 +70,24 @@ impl BTreeSlice {
     }
 }
 
+impl Instance for BTreeSlice {
+    type Class = BTreeType;
+
+    fn class(&self) -> BTreeType {
+        BTreeType::View
+    }
+}
+
 #[async_trait]
 impl BTreeInstance for BTreeSlice {
+    fn into_btree(self) -> BTree {
+        BTree::from(self)
+    }
+
+    fn into_collection(self) -> Collection {
+        self.into()
+    }
+
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
         if range == BTreeRange::default() {
             self.source.delete(txn_id, self.range.clone()).await

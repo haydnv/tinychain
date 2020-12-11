@@ -113,7 +113,7 @@ impl Handler for NullChainHandler {
         self.chain.class().into()
     }
 
-    fn scope() -> Scope {
+    fn scope(&self) -> Scope {
         "/admin".parse().unwrap()
     }
 }

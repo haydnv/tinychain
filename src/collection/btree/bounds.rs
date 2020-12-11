@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt;
 
 use crate::collection::schema::Column;
-use crate::error::TCResult;
+use crate::error::{self, TCResult};
 use crate::scalar::*;
 
 use super::collator::Collator;
@@ -62,8 +62,13 @@ impl BTreeRange {
     }
 }
 
-pub fn validate_range(range: BTreeRange, schema: &[Column]) -> TCResult<BTreeRange> {
+pub fn validate_range<T: fmt::Display>(range: T, schema: &[Column]) -> TCResult<BTreeRange>
+where
+    BTreeRange: TryCastFrom<T>,
+{
     use Bound::*;
+
+    let range = BTreeRange::try_cast_from(range, |v| error::bad_request("Invalid BTreeRange", v))?;
 
     let cast = |(bound, column): (Bound, &Column)| {
         let value = match bound {

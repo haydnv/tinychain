@@ -3,11 +3,12 @@ use std::ops::Deref;
 use async_trait::async_trait;
 use futures::stream::{self, Stream, StreamExt};
 
-use crate::class::{Instance, State, TCStream};
+use crate::auth::Scope;
+use crate::class::{Instance, State, TCStream, TCType};
 use crate::collection::class::CollectionInstance;
 use crate::collection::{Collection, CollectionView};
 use crate::error::{self, TCResult};
-use crate::handler::Public;
+use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
@@ -67,7 +68,7 @@ fn validate_prefix(prefix: Key, schema: &[Column]) -> TCResult<Key> {
             if let Some(size) = column.max_len() {
                 if key_size as usize > *size {
                     return Err(error::bad_request(
-                        "Column value exceeds the maximum lendth",
+                        "Column value exceeds the maximum length",
                         column.name(),
                     ));
                 }
@@ -78,49 +79,203 @@ fn validate_prefix(prefix: Key, schema: &[Column]) -> TCResult<Key> {
         .collect()
 }
 
+struct CountHandler<T: BTreeInstance> {
+    btree: T,
+}
+
+#[async_trait]
+impl<T: BTreeInstance> Handler for CountHandler<T> {
+    fn subject(&self) -> TCType {
+        self.btree.class().into()
+    }
+
+    fn scope(&self) -> Scope {
+        "/admin/write/read".parse().unwrap()
+    }
+
+    async fn handle_get(&self, txn: &Txn, range: Value) -> TCResult<State> {
+        let range = validate_range(range, self.btree.schema())?;
+        let count = self.btree.len(*txn.id(), range).await?;
+        Ok(State::Scalar(Scalar::Value(Value::Number(count.into()))))
+    }
+}
+
+struct DeleteHandler<T: BTreeInstance> {
+    btree: T,
+}
+
+#[async_trait]
+impl<T: BTreeInstance> Handler for DeleteHandler<T> {
+    fn subject(&self) -> TCType {
+        self.btree.class().into()
+    }
+
+    fn scope(&self) -> Scope {
+        "/admin/write".parse().unwrap()
+    }
+
+    async fn handle_delete(&self, txn: &Txn, range: Value) -> TCResult<()> {
+        let range = validate_range(range, self.btree.schema())?;
+        BTreeInstance::delete(&self.btree, txn.id(), range).await
+    }
+}
+
+struct SliceHandler<T: BTreeInstance> {
+    btree: T,
+}
+
+impl<T: BTreeInstance> SliceHandler<T> {
+    async fn slice(&self, txn: &Txn, range: BTreeRange) -> TCResult<State> {
+        if range == BTreeRange::default() {
+            Ok(State::Collection(self.btree.clone().into_collection()))
+        } else if range.is_key(self.btree.schema()) {
+            let mut rows = self.btree.stream(txn.id().clone(), range, false).await?;
+            let row = rows.next().await;
+            row.ok_or_else(|| error::not_found("(btree key)"))
+                .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key))))
+        } else {
+            let slice = BTreeSlice::new(self.btree.clone().into_btree(), range, false)?;
+            Ok(State::Collection(slice.into()))
+        }
+    }
+}
+
+#[async_trait]
+impl<T: BTreeInstance> Handler for SliceHandler<T> {
+    fn subject(&self) -> TCType {
+        self.btree.class().into()
+    }
+
+    fn scope(&self) -> Scope {
+        "/admin/write/read".parse().unwrap()
+    }
+
+    async fn handle_get(&self, txn: &Txn, range: Value) -> TCResult<State> {
+        let range = validate_range(range, self.btree.schema())?;
+        self.slice(txn, range).await
+    }
+
+    async fn handle_post(&self, txn: &Txn, mut params: Object) -> TCResult<State> {
+        let range = params
+            .remove(&label("where").into())
+            .unwrap_or_else(|| Scalar::from(()));
+
+        let range = validate_range(range, self.btree.schema())?;
+        self.slice(txn, range).await
+    }
+}
+
+struct ReverseHandler<T: BTreeInstance> {
+    btree: T,
+}
+
+impl<T: BTreeInstance> ReverseHandler<T> {
+    fn reverse(&self, range: BTreeRange) -> TCResult<State> {
+        let slice = BTreeSlice::new(self.btree.clone().into_btree(), range, true)?;
+        Ok(State::Collection(Collection::View(CollectionView::BTree(
+            slice.into(),
+        ))))
+    }
+}
+
+#[async_trait]
+impl<T: BTreeInstance> Handler for ReverseHandler<T> {
+    fn subject(&self) -> TCType {
+        self.btree.class().into()
+    }
+
+    fn scope(&self) -> Scope {
+        "/admin/write/read".parse().unwrap()
+    }
+
+    async fn handle_get(&self, _txn: &Txn, range: Value) -> TCResult<State> {
+        let range = validate_range(range, self.btree.schema())?;
+        self.reverse(range)
+    }
+
+    async fn handle_post(&self, _txn: &Txn, mut params: Object) -> TCResult<State> {
+        let range = params
+            .remove(&label("where").into())
+            .unwrap_or_else(|| Scalar::from(()));
+
+        let range = validate_range(range, self.btree.schema())?;
+        self.reverse(range)
+    }
+}
+
+struct WriteHandler<T: BTreeInstance> {
+    btree: T,
+}
+
+#[async_trait]
+impl<T: BTreeInstance> Handler for WriteHandler<T> {
+    fn subject(&self) -> TCType {
+        self.btree.class().into()
+    }
+
+    fn scope(&self) -> Scope {
+        "/admin/write".parse().unwrap()
+    }
+
+    async fn handle_put(&self, txn: &Txn, range: Value, data: State) -> TCResult<()> {
+        let range = validate_range(range, self.btree.schema())?;
+
+        if range == BTreeRange::default() {
+            match data {
+                State::Collection(collection) => {
+                    let keys = collection.to_stream(txn.clone()).await?;
+                    let keys = keys
+                        .map(|s| s.try_cast_into(|k| error::bad_request("Invalid BTree key", k)));
+
+                    self.btree.try_insert_from(txn.id(), keys).await?;
+                }
+                State::Scalar(scalar) if scalar.matches::<Vec<Key>>() => {
+                    let keys: Vec<Key> = scalar.opt_cast_into().unwrap();
+                    self.btree
+                        .insert_from(txn.id(), stream::iter(keys.into_iter()))
+                        .await?;
+                }
+                State::Scalar(scalar) if scalar.matches::<Key>() => {
+                    let key: Key = scalar.opt_cast_into().unwrap();
+                    let key = validate_key(key, self.btree.schema())?;
+                    self.btree.insert(txn.id(), key).await?;
+                }
+                other => {
+                    return Err(error::bad_request("Invalid key for BTree", other));
+                }
+            }
+        } else {
+            return Err(error::not_implemented("BTree::update"));
+        }
+
+        Ok(())
+    }
+}
+
+// TODO: delete
 #[derive(Clone)]
-pub struct BTreeImpl<T: BTreeInstance> {
+pub struct BTreeImpl<T: BTreeInstance + 'static> {
     inner: T,
 }
 
-impl<T: BTreeInstance> BTreeImpl<T> {
+impl<T: BTreeInstance + 'static> BTreeImpl<T> {
     pub fn into_inner(self) -> T {
         self.inner
     }
 
-    async fn route(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        range: BTreeRange,
-    ) -> TCResult<State> {
+    fn route(&self, path: &[PathSegment]) -> Option<Box<dyn Handler>> {
+        let btree = self.inner.clone();
+
         if path.is_empty() {
-            if range == BTreeRange::default() {
-                Ok(State::Collection(self.inner.clone().into()))
-            } else if range.is_key(self.schema()) {
-                let mut rows = self.stream(txn.id().clone(), range, false).await?;
-                let row = rows.next().await;
-                row.ok_or_else(|| error::not_found("(btree key)"))
-                    .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key))))
-            } else {
-                let slice = BTreeSlice::new(self.inner.clone().into(), range, false)?;
-                Ok(State::Collection(slice.into()))
-            }
+            Some(Box::new(SliceHandler { btree }))
         } else if path.len() == 1 {
             match path[0].as_str() {
-                "count" => {
-                    let len = self.len(txn.id().clone(), range).await?;
-                    Ok(State::Scalar(Number::from(len).into()))
-                }
-                "reverse" => {
-                    let slice = BTreeSlice::new(self.inner.clone().into(), range, true)?;
-                    Ok(State::Collection(slice.into()))
-                }
-                other => Err(error::not_found(other)),
+                "count" => Some(Box::new(CountHandler { btree })),
+                "reverse" => Some(Box::new(ReverseHandler { btree })),
+                _ => None,
             }
         } else {
-            Err(error::path_not_found(path))
+            None
         }
     }
 }
@@ -154,9 +309,28 @@ impl<T: BTreeInstance> Public for BTreeImpl<T> {
         path: &[PathSegment],
         range: Value,
     ) -> TCResult<State> {
-        let range = BTreeRange::try_cast_from(range, |v| error::bad_request(ERR_INVALID_RANGE, v))?;
-        let range = validate_range(range, self.schema())?;
-        self.route(request, txn, path, range).await
+        if let Some(handler) = self.route(path) {
+            handler.get(request, txn, range).await
+        } else {
+            Err(error::path_not_found(path))
+        }
+    }
+
+    async fn put(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        range: Value,
+        key: State,
+    ) -> TCResult<()> {
+        if !path.is_empty() {
+            return Err(error::path_not_found(path));
+        }
+
+        let btree = self.inner.clone();
+        let handler = WriteHandler { btree };
+        handler.put(request, txn, range, key).await
     }
 
     async fn post(
@@ -164,79 +338,26 @@ impl<T: BTreeInstance> Public for BTreeImpl<T> {
         request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        mut params: Object,
+        params: Object,
     ) -> TCResult<State> {
-        let range = params
-            .remove(&label("where").into())
-            .unwrap_or_else(|| Scalar::from(()));
-
-        let range = BTreeRange::try_cast_from(range, |s| error::bad_request(ERR_INVALID_RANGE, s))?;
-        let range = validate_range(range, self.schema())?;
-
-        self.route(request, txn, path, range).await
-    }
-
-    async fn put(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        range: Value,
-        key: State,
-    ) -> TCResult<()> {
-        let range: BTreeRange =
-            range.try_cast_into(|v| error::bad_request("Invalid BTree selector", v))?;
-        let range = validate_range(range, self.schema())?;
-
-        if path.len() == 1 && &path[0] == "delete" {
-            return BTreeInstance::delete(self.deref(), txn.id(), range).await;
-        } else if !path.is_empty() {
-            return Err(error::path_not_found(path));
-        }
-
-        if range == BTreeRange::default() {
-            match key {
-                State::Collection(collection) => {
-                    let keys = collection.to_stream(txn.clone()).await?;
-                    let keys = keys
-                        .map(|s| s.try_cast_into(|k| error::bad_request("Invalid BTree key", k)));
-
-                    self.try_insert_from(txn.id(), keys).await?;
-                }
-                State::Scalar(scalar) if scalar.matches::<Vec<Key>>() => {
-                    let keys: Vec<Key> = scalar.opt_cast_into().unwrap();
-                    self.insert_from(txn.id(), stream::iter(keys.into_iter()))
-                        .await?;
-                }
-                State::Scalar(scalar) if scalar.matches::<Key>() => {
-                    let key: Key = scalar.opt_cast_into().unwrap();
-                    let key = validate_key(key, self.schema())?;
-                    self.insert(txn.id(), key).await?;
-                }
-                other => {
-                    return Err(error::bad_request("Invalid key for BTree", other));
-                }
-            }
+        if let Some(handler) = self.route(path) {
+            handler.post(request, txn, params).await
         } else {
-            return Err(error::not_implemented("BTree::update"));
+            Err(error::path_not_found(path))
         }
-
-        Ok(())
     }
 
     async fn delete(
         &self,
-        _request: &Request,
+        request: &Request,
         txn: &Txn,
         path: &[PathSegment],
         range: Value,
     ) -> TCResult<()> {
         if path.is_empty() {
-            let range =
-                BTreeRange::try_cast_from(range, |v| error::bad_request(ERR_INVALID_RANGE, v))?;
-            let range = validate_range(range, self.schema())?;
-
-            BTreeInstance::delete(self.deref(), txn.id(), range).await
+            let btree = self.inner.clone();
+            let handler = DeleteHandler { btree };
+            handler.delete(request, txn, range).await
         } else {
             Err(error::path_not_found(path))
         }
@@ -344,14 +465,22 @@ impl Instance for BTree {
 
     fn class(&self) -> BTreeType {
         match self {
-            Self::Tree(_) => BTreeType::Tree,
-            Self::View(_) => BTreeType::View,
+            Self::Tree(tree) => tree.class(),
+            Self::View(view) => view.class(),
         }
     }
 }
 
 #[async_trait]
 impl BTreeInstance for BTree {
+    fn into_btree(self) -> BTree {
+        self
+    }
+
+    fn into_collection(self) -> Collection {
+        self.into()
+    }
+
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()> {
         match self {
             Self::Tree(tree) => BTreeInstance::delete(tree.deref(), txn_id, range).await,

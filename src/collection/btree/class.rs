@@ -3,7 +3,7 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::Stream;
 
-use crate::class::{Class, NativeClass, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, TCResult, TCStream, TCType};
 use crate::collection::class::*;
 use crate::collection::schema::Column;
 use crate::collection::Collection;
@@ -14,7 +14,11 @@ use crate::transaction::{Transact, Txn, TxnId};
 use super::{BTree, BTreeRange, Key};
 
 #[async_trait]
-pub trait BTreeInstance: Clone + Into<BTree> + Into<Collection> + Transact {
+pub trait BTreeInstance: Clone + Instance<Class = BTreeType> + Transact {
+    fn into_btree(self) -> BTree;
+
+    fn into_collection(self) -> Collection;
+
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()>;
 
     async fn insert(&self, txn_id: &TxnId, key: Key) -> TCResult<()>;
@@ -83,6 +87,12 @@ impl CollectionClass for BTreeType {
 impl From<BTreeType> for CollectionType {
     fn from(btree_type: BTreeType) -> CollectionType {
         CollectionType::View(CollectionViewType::BTree(btree_type))
+    }
+}
+
+impl From<BTreeType> for TCType {
+    fn from(btt: BTreeType) -> TCType {
+        TCType::Collection(btt.into())
     }
 }
 

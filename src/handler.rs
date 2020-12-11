@@ -8,10 +8,10 @@ use crate::scalar::{Object, PathSegment, Value};
 use crate::transaction::Txn;
 
 #[async_trait]
-pub trait Handler {
+pub trait Handler: Send + Sync {
     fn subject(&self) -> TCType;
 
-    fn scope() -> auth::Scope;
+    fn scope(&self) -> auth::Scope;
 
     async fn handle_get(&self, _txn: &Txn, _key: Value) -> TCResult<State> {
         Err(error::method_not_allowed(self.subject()))
