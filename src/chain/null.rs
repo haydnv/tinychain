@@ -2,11 +2,12 @@ use async_trait::async_trait;
 use futures::stream;
 use log::debug;
 
+use crate::auth::Scope;
 use crate::class::{Instance, State, TCResult, TCStream, TCType};
 use crate::collection::class::*;
 use crate::collection::CollectionBase;
 use crate::error;
-use crate::handler::Public;
+use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{Object, PathSegment, Scalar, ScalarClass, Value};
 use crate::transaction::lock::{Mutable, TxnLock};
@@ -103,47 +104,91 @@ impl ChainInstance for NullChain {
     }
 }
 
+struct NullChainHandler {
+    chain: NullChain,
+}
+
+impl Handler for NullChainHandler {
+    fn subject(&self) -> TCType {
+        self.chain.class().into()
+    }
+
+    fn scope() -> Scope {
+        "/admin".parse().unwrap()
+    }
+}
+
+impl From<NullChain> for NullChainHandler {
+    fn from(chain: NullChain) -> Self {
+        Self { chain }
+    }
+}
+
 #[async_trait]
 impl Public for NullChain {
     async fn get(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _key: Value,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
     ) -> TCResult<State> {
-        Err(error::not_implemented("NullChain::get"))
+        if path.is_empty() {
+            NullChainHandler::from(self.clone())
+                .get(request, txn, key)
+                .await
+        } else {
+            Err(error::path_not_found(path))
+        }
     }
 
     async fn put(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _key: Value,
-        _new_value: State,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
+        value: State,
     ) -> TCResult<()> {
-        Err(error::not_implemented("NullChain::put"))
+        if path.is_empty() {
+            NullChainHandler::from(self.clone())
+                .put(request, txn, key, value)
+                .await
+        } else {
+            Err(error::path_not_found(path))
+        }
     }
 
     async fn post(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _data: Object,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        data: Object,
     ) -> TCResult<State> {
-        Err(error::not_implemented("NullChain::post"))
+        if path.is_empty() {
+            NullChainHandler::from(self.clone())
+                .post(request, txn, data)
+                .await
+        } else {
+            Err(error::path_not_found(path))
+        }
     }
 
     async fn delete(
         &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _key: Value,
+        request: &Request,
+        txn: &Txn,
+        path: &[PathSegment],
+        key: Value,
     ) -> TCResult<()> {
-        Err(error::not_implemented("NullChain::delete"))
+        if path.is_empty() {
+            NullChainHandler::from(self.clone())
+                .delete(request, txn, key)
+                .await
+        } else {
+            Err(error::path_not_found(path))
+        }
     }
 }
 
