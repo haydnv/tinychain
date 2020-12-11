@@ -11,18 +11,33 @@ use crate::class::TCResult;
 use crate::error;
 use crate::scalar::{Link, TCPathBuf, Value};
 
+pub type Scope = TCPathBuf;
+
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Token {
     iss: Link,
     iat: u64,
     exp: u64,
     actor_id: Value,
-    scopes: Vec<TCPathBuf>,
+    scopes: Vec<Scope>,
 }
 
 impl Token {
     pub fn actor_id(&self) -> (Link, Value) {
         (self.iss.clone(), self.actor_id.clone())
+    }
+
+    pub fn validate<I: fmt::Display>(&self, scope: Scope, id: I) -> TCResult<()> {
+        for authorized in &self.scopes {
+            if scope.starts_with(&authorized) {
+                return Ok(());
+            }
+        }
+
+        Err(error::forbidden(
+            format!("The requested action requires the {} scope", scope),
+            id,
+        ))
     }
 }
 
