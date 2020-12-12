@@ -13,19 +13,15 @@ pub mod class;
 pub mod dense;
 pub mod sparse;
 
+pub use class::{Tensor, TensorBaseType, TensorInstance, TensorType, TensorView};
+pub use dense::{Array, DenseTensor};
+pub use sparse::SparseTensor;
+
 pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
 
-pub type Array = dense::Array;
-pub type DenseTensor = dense::DenseTensor;
-pub type SparseTensor = sparse::SparseTensor;
-pub type Tensor = class::Tensor;
-pub type TensorBaseType = class::TensorBaseType;
-pub type TensorView = class::TensorView;
-pub type TensorType = class::TensorType;
-
 #[async_trait]
-pub trait TensorBoolean: class::TensorInstance + Sized {
+pub trait TensorBoolean: TensorInstance + Sized {
     async fn all(&self, txn: Txn) -> TCResult<bool>;
 
     async fn any(&self, txn: Txn) -> TCResult<bool>;
@@ -40,7 +36,7 @@ pub trait TensorBoolean: class::TensorInstance + Sized {
 }
 
 #[async_trait]
-pub trait TensorCompare: class::TensorInstance + Sized {
+pub trait TensorCompare: TensorInstance + Sized {
     async fn eq(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor>;
 
     fn gt(&self, other: &Self) -> TCResult<Self>;
@@ -55,7 +51,7 @@ pub trait TensorCompare: class::TensorInstance + Sized {
 }
 
 #[async_trait]
-pub trait TensorIO: class::TensorInstance + Sized {
+pub trait TensorIO: TensorInstance + Sized {
     async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()>;
 
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number>;
@@ -72,7 +68,7 @@ pub trait TensorIO: class::TensorInstance + Sized {
     async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
 }
 
-pub trait TensorMath: class::TensorInstance + Sized {
+pub trait TensorMath: TensorInstance + Sized {
     fn abs(&self) -> TCResult<Self>;
 
     fn add(&self, other: &Self) -> TCResult<Self>;
@@ -80,7 +76,7 @@ pub trait TensorMath: class::TensorInstance + Sized {
     fn multiply(&self, other: &Self) -> TCResult<Self>;
 }
 
-pub trait TensorReduce: class::TensorInstance + Sized {
+pub trait TensorReduce: TensorInstance + Sized {
     fn product(&self, axis: usize) -> TCResult<Self>;
 
     fn product_all(&self, txn: Txn) -> TCBoxTryFuture<Number>;
@@ -90,7 +86,7 @@ pub trait TensorReduce: class::TensorInstance + Sized {
     fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number>;
 }
 
-pub trait TensorTransform: class::TensorInstance + Sized {
+pub trait TensorTransform: TensorInstance + Sized {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self>;
 
     fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self>;
@@ -121,7 +117,7 @@ impl TensorBoolean for TensorView {
     }
 
     fn and(&self, other: &Self) -> TCResult<Self> {
-        use class::TensorView::*;
+        use TensorView::*;
         match (self, other) {
             (Dense(left), Dense(right)) => left.and(right).map(Self::from),
             (Sparse(left), Sparse(right)) => left.and(right).map(Self::from),
@@ -141,7 +137,7 @@ impl TensorBoolean for TensorView {
     }
 
     fn or(&self, other: &Self) -> TCResult<Self> {
-        use class::TensorView::*;
+        use TensorView::*;
         match (self, other) {
             (Dense(left), Dense(right)) => left.or(right).map(Self::from),
             (Sparse(left), Sparse(right)) => left.or(right).map(Self::from),
@@ -154,7 +150,7 @@ impl TensorBoolean for TensorView {
     }
 
     fn xor(&self, other: &Self) -> TCResult<Self> {
-        use class::TensorView::*;
+        use TensorView::*;
         match (self, other) {
             (Dense(left), Dense(right)) => left.xor(right).map(Self::from),
             (Sparse(left), _) => Dense(DenseTensor::from_sparse(left.clone())).xor(other),
@@ -416,7 +412,7 @@ impl TensorTransform for TensorView {
     }
 }
 
-pub fn einsum<T: Clone + class::TensorInstance + TensorMath + TensorReduce + TensorTransform>(
+pub fn einsum<T: Clone + TensorInstance + TensorMath + TensorReduce + TensorTransform>(
     format: &str,
     tensors: Vec<T>,
 ) -> TCResult<T> {
