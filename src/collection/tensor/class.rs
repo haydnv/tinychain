@@ -22,7 +22,7 @@ use super::dense::BlockListFile;
 use super::sparse::SparseTable;
 use super::{DenseTensor, SparseTensor, TensorBoolean, TensorIO, TensorTransform};
 
-pub trait TensorInstance: Send {
+pub trait TensorAccessor: Send {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;
@@ -270,7 +270,7 @@ impl Public for TensorBase {
     }
 }
 
-impl TensorInstance for TensorBase {
+impl TensorAccessor for TensorBase {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Dense(dense) => dense.dtype(),
@@ -604,7 +604,7 @@ impl Public for TensorView {
     }
 }
 
-impl TensorInstance for TensorView {
+impl TensorAccessor for TensorView {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Dense(dense) => dense.dtype(),
@@ -821,7 +821,7 @@ impl Public for Tensor {
     }
 }
 
-impl TensorInstance for Tensor {
+impl TensorAccessor for Tensor {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Base(base) => base.dtype(),

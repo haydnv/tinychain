@@ -15,7 +15,7 @@ use crate::block::BlockId;
 use crate::block::File;
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::tensor::bounds::*;
-use crate::collection::tensor::class::TensorInstance;
+use crate::collection::tensor::class::TensorAccessor;
 use crate::error;
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
@@ -126,7 +126,7 @@ impl BlockListFile {
     }
 }
 
-impl TensorInstance for BlockListFile {
+impl TensorAccessor for BlockListFile {
     fn dtype(&self) -> NumberType {
         self.dtype
     }

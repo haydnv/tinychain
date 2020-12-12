@@ -16,7 +16,7 @@ use crate::scalar::{label, Bound, Id, Label, Value, ValueType};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
-use super::class::TensorInstance;
+use super::class::TensorAccessor;
 use super::*;
 
 mod combine;
@@ -34,7 +34,7 @@ convert to a DenseTensor first.";
 const ERR_CORRUPT: &str = "SparseTensor corrupted! Please file a bug report.";
 
 #[async_trait]
-trait SparseAccessor: TensorInstance + Transact + 'static {
+trait SparseAccessor: TensorAccessor + Transact + 'static {
     fn copy<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, SparseTable> {
         Box::pin(async move {
             let accessor = SparseTable::create(&txn, self.shape().clone(), self.dtype()).await?;
@@ -80,7 +80,7 @@ struct DenseAccessor {
     source: DenseTensor,
 }
 
-impl TensorInstance for DenseAccessor {
+impl TensorAccessor for DenseAccessor {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -203,7 +203,7 @@ impl SparseBroadcast {
     }
 }
 
-impl TensorInstance for SparseBroadcast {
+impl TensorAccessor for SparseBroadcast {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -310,7 +310,7 @@ struct SparseCast {
     dtype: NumberType,
 }
 
-impl TensorInstance for SparseCast {
+impl TensorAccessor for SparseCast {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -443,7 +443,7 @@ impl SparseCombinator {
     }
 }
 
-impl TensorInstance for SparseCombinator {
+impl TensorAccessor for SparseCombinator {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -528,7 +528,7 @@ struct SparseExpand {
     rebase: transform::Expand,
 }
 
-impl TensorInstance for SparseExpand {
+impl TensorAccessor for SparseExpand {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -629,7 +629,7 @@ impl SparseReduce {
     }
 }
 
-impl TensorInstance for SparseReduce {
+impl TensorAccessor for SparseReduce {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -766,7 +766,7 @@ struct SparseReshape {
     rebase: transform::Reshape,
 }
 
-impl TensorInstance for SparseReshape {
+impl TensorAccessor for SparseReshape {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -884,7 +884,7 @@ struct SparseSlice {
     rebase: transform::Slice,
 }
 
-impl TensorInstance for SparseSlice {
+impl TensorAccessor for SparseSlice {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -985,7 +985,7 @@ struct SparseTranspose {
     rebase: transform::Transpose,
 }
 
-impl TensorInstance for SparseTranspose {
+impl TensorAccessor for SparseTranspose {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -1189,7 +1189,7 @@ impl SparseTable {
     }
 }
 
-impl TensorInstance for SparseTable {
+impl TensorAccessor for SparseTable {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -1308,7 +1308,7 @@ struct SparseUnary {
     dtype: NumberType,
 }
 
-impl TensorInstance for SparseUnary {
+impl TensorAccessor for SparseUnary {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -1480,7 +1480,7 @@ impl SparseTensor {
     }
 }
 
-impl TensorInstance for SparseTensor {
+impl TensorAccessor for SparseTensor {
     fn dtype(&self) -> NumberType {
         self.accessor.dtype()
     }

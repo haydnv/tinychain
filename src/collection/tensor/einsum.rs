@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::class::TCResult;
 use crate::error;
 
-use super::class::TensorInstance;
+use super::class::TensorAccessor;
 use super::{TensorMath, TensorReduce, TensorTransform};
 
 const VALID_LABELS: [char; 52] = [
@@ -52,7 +52,7 @@ fn parse_format(format: &str) -> TCResult<(Vec<Vec<char>>, Vec<char>)> {
     Ok((f_inputs, f_output))
 }
 
-fn validate_args<T: TensorInstance>(
+fn validate_args<T: TensorAccessor>(
     f_inputs: &[Vec<char>],
     tensors: &[T],
 ) -> TCResult<BTreeMap<char, u64>> {

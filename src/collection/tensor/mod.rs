@@ -13,7 +13,7 @@ pub mod class;
 pub mod dense;
 pub mod sparse;
 
-pub use class::{Tensor, TensorBaseType, TensorInstance, TensorType, TensorView};
+pub use class::{Tensor, TensorBaseType, TensorAccessor, TensorType, TensorView};
 pub use dense::{Array, DenseTensor};
 pub use sparse::SparseTensor;
 
@@ -21,7 +21,7 @@ pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
 
 #[async_trait]
-pub trait TensorBoolean: TensorInstance + Sized {
+pub trait TensorBoolean: TensorAccessor + Sized {
     async fn all(&self, txn: Txn) -> TCResult<bool>;
 
     async fn any(&self, txn: Txn) -> TCResult<bool>;
@@ -36,7 +36,7 @@ pub trait TensorBoolean: TensorInstance + Sized {
 }
 
 #[async_trait]
-pub trait TensorCompare: TensorInstance + Sized {
+pub trait TensorCompare: TensorAccessor + Sized {
     async fn eq(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor>;
 
     fn gt(&self, other: &Self) -> TCResult<Self>;
@@ -51,7 +51,7 @@ pub trait TensorCompare: TensorInstance + Sized {
 }
 
 #[async_trait]
-pub trait TensorIO: TensorInstance + Sized {
+pub trait TensorIO: TensorAccessor + Sized {
     async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()>;
 
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number>;
@@ -68,7 +68,7 @@ pub trait TensorIO: TensorInstance + Sized {
     async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
 }
 
-pub trait TensorMath: TensorInstance + Sized {
+pub trait TensorMath: TensorAccessor + Sized {
     fn abs(&self) -> TCResult<Self>;
 
     fn add(&self, other: &Self) -> TCResult<Self>;
@@ -76,7 +76,7 @@ pub trait TensorMath: TensorInstance + Sized {
     fn multiply(&self, other: &Self) -> TCResult<Self>;
 }
 
-pub trait TensorReduce: TensorInstance + Sized {
+pub trait TensorReduce: TensorAccessor + Sized {
     fn product(&self, axis: usize) -> TCResult<Self>;
 
     fn product_all(&self, txn: Txn) -> TCBoxTryFuture<Number>;
@@ -86,7 +86,7 @@ pub trait TensorReduce: TensorInstance + Sized {
     fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number>;
 }
 
-pub trait TensorTransform: TensorInstance + Sized {
+pub trait TensorTransform: TensorAccessor + Sized {
     fn as_type(&self, dtype: NumberType) -> TCResult<Self>;
 
     fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self>;
@@ -412,7 +412,7 @@ impl TensorTransform for TensorView {
     }
 }
 
-pub fn einsum<T: Clone + TensorInstance + TensorMath + TensorReduce + TensorTransform>(
+pub fn einsum<T: Clone + TensorAccessor + TensorMath + TensorReduce + TensorTransform>(
     format: &str,
     tensors: Vec<T>,
 ) -> TCResult<T> {
