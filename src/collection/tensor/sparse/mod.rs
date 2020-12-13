@@ -17,6 +17,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::class::TensorAccessor;
+use super::dense::{dense_constant, from_sparse, BlockList, BlockListFile};
 use super::*;
 
 mod combine;
@@ -76,11 +77,11 @@ trait SparseAccessor: TensorAccessor + Transact + 'static {
     async fn write_value(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
 }
 
-struct DenseAccessor {
-    source: DenseTensor,
+struct DenseAccessor<T: Clone + BlockList> {
+    source: DenseTensor<T>,
 }
 
-impl TensorAccessor for DenseAccessor {
+impl<T: Clone + BlockList> TensorAccessor for DenseAccessor<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -99,7 +100,7 @@ impl TensorAccessor for DenseAccessor {
 }
 
 #[async_trait]
-impl SparseAccessor for DenseAccessor {
+impl<T: Clone + BlockList> SparseAccessor for DenseAccessor<T> {
     async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
         let source = self.source.clone();
         let values = source.value_stream(txn).await?;
@@ -160,7 +161,7 @@ impl SparseAccessor for DenseAccessor {
 }
 
 #[async_trait]
-impl Transact for DenseAccessor {
+impl<T: Clone + BlockList> Transact for DenseAccessor<T> {
     async fn commit(&self, txn_id: &TxnId) {
         self.source.commit(txn_id).await
     }
@@ -1416,7 +1417,7 @@ impl SparseTensor {
         self.accessor.clone().filled(txn)
     }
 
-    pub fn from_dense(source: DenseTensor) -> SparseTensor {
+    pub fn from_dense<T: Clone + BlockList>(source: DenseTensor<T>) -> SparseTensor {
         let accessor = Arc::new(DenseAccessor { source });
         SparseTensor { accessor }
     }
@@ -1457,7 +1458,7 @@ impl SparseTensor {
         txn: Txn,
         default: Number,
         condensor: fn(Number, Number) -> Number,
-    ) -> TCBoxTryFuture<'a, DenseTensor> {
+    ) -> TCBoxTryFuture<'a, DenseTensor<BlockListFile>> {
         Box::pin(async move {
             if self.shape() != other.shape() {
                 let (this, that) = broadcast(self, other)?;
@@ -1469,9 +1470,10 @@ impl SparseTensor {
                 other.accessor.clone(),
                 condensor,
                 default.class(),
-            ).map(Arc::new)?;
+            )
+            .map(Arc::new)?;
 
-            let condensed = DenseTensor::constant(&txn, self.shape().clone(), default).await?;
+            let condensed = dense_constant(&txn, self.shape().clone(), default).await?;
 
             let txn_id = *txn.id();
             accessor
@@ -1513,8 +1515,35 @@ impl TensorAccessor for SparseTensor {
 
 #[async_trait]
 impl TensorBoolean<SparseTensor> for SparseTensor {
-    type Unary = SparseTensor;
     type Combine = SparseTensor;
+
+    fn and(&self, other: &SparseTensor) -> TCResult<Self::Combine> {
+        // TODO: use a custom method for this, to only iterate over self.filled (not other.filled)
+        self.combine(other, Number::and, NumberType::Bool)
+    }
+
+    fn or(&self, other: &SparseTensor) -> TCResult<Self::Combine> {
+        self.combine(other, Number::or, NumberType::Bool)
+    }
+
+    fn xor(&self, _other: &SparseTensor) -> TCResult<Self::Combine> {
+        Err(error::unsupported(ERR_NOT_SPARSE))
+    }
+}
+
+#[async_trait]
+impl TensorUnary for SparseTensor {
+    type Unary = SparseTensor;
+
+    fn abs(&self) -> TCResult<Self::Unary> {
+        let accessor = Arc::new(SparseUnary {
+            source: self.accessor.clone(),
+            transform: <Number as NumberInstance>::abs,
+            dtype: NumberType::Bool,
+        });
+
+        Ok(SparseTensor { accessor })
+    }
 
     async fn all(&self, txn: Txn) -> TCResult<bool> {
         let mut coords = self
@@ -1541,20 +1570,7 @@ impl TensorBoolean<SparseTensor> for SparseTensor {
         Ok(filled.next().await.is_some())
     }
 
-    fn and(&self, other: &SparseTensor) -> TCResult<Self::Combine> {
-        // TODO: use a custom method for this, to only iterate over self.filled (not other.filled)
-        self.combine(other, Number::and, NumberType::Bool)
-    }
-
     fn not(&self) -> TCResult<Self::Unary> {
-        Err(error::unsupported(ERR_NOT_SPARSE))
-    }
-
-    fn or(&self, other: &SparseTensor) -> TCResult<Self::Combine> {
-        self.combine(other, Number::or, NumberType::Bool)
-    }
-
-    fn xor(&self, _other: &SparseTensor) -> TCResult<Self::Combine> {
         Err(error::unsupported(ERR_NOT_SPARSE))
     }
 }
@@ -1562,68 +1578,40 @@ impl TensorBoolean<SparseTensor> for SparseTensor {
 #[async_trait]
 impl TensorCompare<SparseTensor> for SparseTensor {
     type Compare = SparseTensor;
-    type Dense = DenseTensor;
+    type Dense = DenseTensor<BlockListFile>;
 
-    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<Self::Dense> {
+    async fn eq(&self, other: &SparseTensor, txn: Txn) -> TCResult<Self::Dense> {
         self.condense(other, txn, true.into(), <Number as NumberInstance>::eq)
             .await
     }
 
-    fn gt(&self, other: &Self) -> TCResult<Self::Compare> {
+    fn gt(&self, other: &SparseTensor) -> TCResult<Self::Compare> {
         self.combine(other, <Number as NumberInstance>::gt, NumberType::Bool)
     }
 
-    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<Self::Dense> {
+    async fn gte(&self, other: &SparseTensor, txn: Txn) -> TCResult<Self::Dense> {
         self.condense(other, txn, true.into(), <Number as NumberInstance>::gte)
             .await
     }
 
-    fn lt(&self, other: &Self) -> TCResult<Self::Compare> {
+    fn lt(&self, other: &SparseTensor) -> TCResult<Self::Compare> {
         self.combine(other, <Number as NumberInstance>::lt, NumberType::Bool)
     }
 
-    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<Self::Dense> {
+    async fn lte(&self, other: &SparseTensor, txn: Txn) -> TCResult<Self::Dense> {
         self.condense(other, txn, true.into(), <Number as NumberInstance>::lte)
             .await
     }
 
-    fn ne(&self, other: &Self) -> TCResult<Self::Compare> {
+    fn ne(&self, other: &SparseTensor) -> TCResult<Self::Compare> {
         self.combine(other, <Number as NumberInstance>::ne, NumberType::Bool)
     }
 }
 
 #[async_trait]
-impl TensorIO<SparseTensor> for SparseTensor {
-    async fn mask(&self, txn: &Txn, other: SparseTensor) -> TCResult<()> {
-        let zero = self.dtype().zero();
-        let txn_id = txn.id().clone();
-        other
-            .filled(txn.clone())
-            .await?
-            .map_ok(|(coord, _)| self.write_value_at(txn_id, coord, zero.clone()))
-            .try_buffer_unordered(2)
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await
-    }
-
+impl TensorIO for SparseTensor {
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
         self.accessor.read_value(txn, coord).await
-    }
-
-    async fn write(&self, txn: Txn, bounds: Bounds, other: SparseTensor) -> TCResult<()> {
-        let slice = self.slice(bounds)?;
-        let other = other
-            .broadcast(slice.shape().clone())?
-            .as_type(self.dtype())?;
-
-        let txn_id = txn.id().clone();
-        other
-            .filled(txn)
-            .await?
-            .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
-            .try_buffer_unordered(2)
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
@@ -1643,29 +1631,39 @@ impl TensorIO<SparseTensor> for SparseTensor {
     }
 }
 
-impl TensorMath<SparseTensor> for SparseTensor {
-    type Unary = SparseTensor;
-    type Combine = SparseTensor;
-
-    fn abs(&self) -> TCResult<Self::Unary> {
-        let is_abs = match self.dtype() {
-            NumberType::Bool => true,
-            NumberType::UInt(_) => true,
-            _ => false,
-        };
-
-        if is_abs {
-            return Ok(self.clone());
-        }
-
-        let accessor = Arc::new(SparseUnary {
-            source: self.accessor.clone(),
-            transform: <Number as NumberInstance>::abs,
-            dtype: NumberType::Bool,
-        });
-
-        Ok(SparseTensor { accessor })
+#[async_trait]
+impl TensorDualIO<SparseTensor> for SparseTensor {
+    async fn mask(&self, txn: &Txn, other: SparseTensor) -> TCResult<()> {
+        let zero = self.dtype().zero();
+        let txn_id = txn.id().clone();
+        other
+            .filled(txn.clone())
+            .await?
+            .map_ok(|(coord, _)| self.write_value_at(txn_id, coord, zero.clone()))
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
     }
+
+    async fn write(&self, txn: Txn, bounds: Bounds, other: SparseTensor) -> TCResult<()> {
+        let slice = self.slice(bounds)?;
+        let other = other
+            .broadcast(slice.shape().clone())?
+            .as_type(self.dtype())?;
+
+        let txn_id = txn.id().clone();
+        other
+            .filled(txn)
+            .await?
+            .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
+            .try_buffer_unordered(2)
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await
+    }
+}
+
+impl TensorMath<SparseTensor> for SparseTensor {
+    type Combine = SparseTensor;
 
     fn add(&self, other: &Self) -> TCResult<Self::Combine> {
         let dtype = Ord::max(self.dtype(), other.dtype());
@@ -1689,9 +1687,7 @@ impl TensorReduce for SparseTensor {
     fn product_all(&self, txn: Txn) -> TCBoxTryFuture<Number> {
         Box::pin(async move {
             if self.all(txn.clone()).await? {
-                DenseTensor::from_sparse(self.clone())
-                    .product_all(txn)
-                    .await
+                from_sparse(self.clone()).product_all(txn).await
             } else {
                 Ok(self.dtype().zero())
             }
@@ -1706,7 +1702,7 @@ impl TensorReduce for SparseTensor {
     fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number> {
         Box::pin(async move {
             if self.any(txn.clone()).await? {
-                DenseTensor::from_sparse(self.clone()).sum_all(txn).await
+                from_sparse(self.clone()).sum_all(txn).await
             } else {
                 Ok(self.dtype().zero())
             }

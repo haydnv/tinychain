@@ -22,7 +22,7 @@ pub use array::Array;
 pub use file::*;
 
 #[async_trait]
-trait BlockList: TensorAccessor + Transact + 'static {
+pub trait BlockList: TensorAccessor + Transact + 'static {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
             let dtype = self.dtype();
@@ -85,7 +85,105 @@ trait BlockList: TensorAccessor + Transact + 'static {
 }
 
 #[derive(Clone)]
-struct BlockListCombine {
+pub struct BlockListDyn {
+    source: Arc<dyn BlockList>,
+}
+
+impl BlockListDyn {
+    pub fn new<T: BlockList>(source: T) -> BlockListDyn {
+        Self {
+            source: Arc::new(source),
+        }
+    }
+}
+
+impl TensorAccessor for BlockListDyn {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.source.ndim()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.source.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.source.size()
+    }
+}
+
+#[async_trait]
+impl BlockList for BlockListDyn {
+    fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
+        self.source.clone().block_stream(txn)
+    }
+
+    fn value_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
+        self.source.clone().value_stream(txn)
+    }
+
+    async fn value_stream_slice(
+        self: Arc<Self>,
+        txn: Txn,
+        bounds: Bounds,
+    ) -> TCResult<TCTryStream<Number>> {
+        self.source.clone().value_stream_slice(txn, bounds).await
+    }
+
+    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        self.source.read_value_at(txn, coord).await
+    }
+
+    fn read_value_at_owned<'a>(
+        self: Arc<Self>,
+        txn: Txn,
+        coord: Vec<u64>,
+    ) -> TCBoxTryFuture<'a, Number> {
+        self.source.clone().read_value_at_owned(txn, coord)
+    }
+
+    async fn write_value(
+        self: Arc<Self>,
+        txn_id: TxnId,
+        bounds: Bounds,
+        number: Number,
+    ) -> TCResult<()> {
+        self.source
+            .clone()
+            .write_value(txn_id, bounds, number)
+            .await
+    }
+
+    fn write_value_at(
+        &self,
+        txn_id: TxnId,
+        coord: Vec<u64>,
+        value: Number,
+    ) -> TCBoxTryFuture<'_, ()> {
+        self.source.write_value_at(txn_id, coord, value)
+    }
+}
+
+#[async_trait]
+impl Transact for BlockListDyn {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
+    }
+}
+
+#[derive(Clone)]
+pub struct BlockListCombine {
     left: Arc<dyn BlockList>,
     right: Arc<dyn BlockList>,
     combinator: fn(&Array, &Array) -> Array,
@@ -225,7 +323,8 @@ impl Transact for BlockListCombine {
     }
 }
 
-struct BlockListBroadcast {
+#[derive(Clone)]
+pub struct BlockListBroadcast {
     source: Arc<dyn BlockList>,
     rebase: transform::Broadcast,
 }
@@ -318,7 +417,8 @@ impl Transact for BlockListBroadcast {
     }
 }
 
-struct BlockListCast {
+#[derive(Clone)]
+pub struct BlockListCast {
     source: Arc<dyn BlockList>,
     dtype: NumberType,
 }
@@ -410,7 +510,8 @@ impl Transact for BlockListCast {
     }
 }
 
-struct BlockListExpand {
+#[derive(Clone)]
+pub struct BlockListExpand {
     source: Arc<dyn BlockList>,
     rebase: transform::Expand,
 }
@@ -491,16 +592,21 @@ impl Transact for BlockListExpand {
     }
 }
 
-type Reductor = fn(&DenseTensor, Txn) -> TCBoxTryFuture<Number>;
+type Reductor<T> = fn(&DenseTensor<T>, Txn) -> TCBoxTryFuture<Number>;
 
-struct BlockListReduce {
-    source: DenseTensor,
+#[derive(Clone)]
+pub struct BlockListReduce<T: Clone + BlockList> {
+    source: DenseTensor<T>,
     rebase: transform::Reduce,
-    reductor: Reductor,
+    reductor: Reductor<BlockListSlice>,
 }
 
-impl BlockListReduce {
-    fn new(source: DenseTensor, axis: usize, reductor: Reductor) -> TCResult<BlockListReduce> {
+impl<T: Clone + BlockList> BlockListReduce<T> {
+    fn new(
+        source: DenseTensor<T>,
+        axis: usize,
+        reductor: Reductor<BlockListSlice>,
+    ) -> TCResult<BlockListReduce<T>> {
         transform::Reduce::new(source.shape().clone(), axis).map(|rebase| BlockListReduce {
             source,
             rebase,
@@ -509,7 +615,7 @@ impl BlockListReduce {
     }
 }
 
-impl TensorAccessor for BlockListReduce {
+impl<T: Clone + BlockList> TensorAccessor for BlockListReduce<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -528,7 +634,7 @@ impl TensorAccessor for BlockListReduce {
 }
 
 #[async_trait]
-impl BlockList for BlockListReduce {
+impl<T: Clone + BlockList> BlockList for BlockListReduce<T> {
     fn value_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
         Box::pin(async move {
             let values = stream::iter(Bounds::all(self.shape()).affected()).then(move |coord| {
@@ -585,7 +691,7 @@ impl BlockList for BlockListReduce {
 }
 
 #[async_trait]
-impl Transact for BlockListReduce {
+impl<T: Clone + BlockList> Transact for BlockListReduce<T> {
     async fn commit(&self, _txn_id: &TxnId) {
         // no-op
     }
@@ -599,7 +705,8 @@ impl Transact for BlockListReduce {
     }
 }
 
-struct BlockListReshape {
+#[derive(Clone)]
+pub struct BlockListReshape {
     source: Arc<dyn BlockList>,
     rebase: transform::Reshape,
 }
@@ -714,7 +821,8 @@ impl Transact for BlockListReshape {
     }
 }
 
-struct BlockListSlice {
+#[derive(Clone)]
+pub struct BlockListSlice {
     source: Arc<dyn BlockList>,
     rebase: transform::Slice,
 }
@@ -794,7 +902,8 @@ impl Transact for BlockListSlice {
     }
 }
 
-struct BlockListSparse {
+#[derive(Clone)]
+pub struct BlockListSparse {
     source: SparseTensor,
 }
 
@@ -917,7 +1026,8 @@ impl Transact for BlockListSparse {
     }
 }
 
-struct BlockListTranspose {
+#[derive(Clone)]
+pub struct BlockListTranspose {
     source: Arc<dyn BlockList>,
     rebase: transform::Transpose,
 }
@@ -1001,6 +1111,7 @@ impl Transact for BlockListTranspose {
     }
 }
 
+#[derive(Clone)]
 pub struct BlockListUnary {
     source: Arc<dyn BlockList>,
     transform: fn(&Array) -> Array,
@@ -1102,19 +1213,13 @@ impl Transact for BlockListUnary {
 }
 
 #[derive(Clone)]
-pub struct DenseTensor {
-    blocks: Arc<dyn BlockList>,
+pub struct DenseTensor<T: Clone + BlockList> {
+    blocks: Arc<T>,
 }
 
-impl DenseTensor {
-    pub async fn constant(txn: &Txn, shape: Shape, value: Number) -> TCResult<DenseTensor> {
-        let blocks = Arc::new(BlockListFile::constant(txn, shape, value).await?);
-        Ok(DenseTensor { blocks })
-    }
-
-    pub fn from_sparse(sparse: SparseTensor) -> DenseTensor {
-        let blocks = Arc::new(BlockListSparse::new(sparse));
-        DenseTensor { blocks }
+impl<T: Clone + BlockList> DenseTensor<T> {
+    pub fn into_inner(self) -> T {
+        (*self.blocks).clone()
     }
 
     pub async fn value_stream(&self, txn: Txn) -> TCResult<TCStream<TCResult<Number>>> {
@@ -1125,13 +1230,13 @@ impl DenseTensor {
         Box::pin(async move { self.read_value(&txn, &coord).await })
     }
 
-    fn combine(
+    fn combine<OT: Clone + BlockList>(
         &self,
-        other: &DenseTensor,
+        other: &DenseTensor<OT>,
         combinator: fn(&Array, &Array) -> Array,
         value_combinator: fn(Number, Number) -> Number,
         dtype: NumberType,
-    ) -> TCResult<DenseTensor> {
+    ) -> TCResult<DenseTensor<BlockListCombine>> {
         if self.shape() != other.shape() {
             let (this, that) = broadcast(self, other)?;
             return this.combine(&that, combinator, value_combinator, dtype);
@@ -1149,13 +1254,14 @@ impl DenseTensor {
     }
 }
 
-impl IntoView for DenseTensor {
+impl<T: Clone + BlockList> IntoView for DenseTensor<T> {
     fn into_view(self) -> TensorView {
-        TensorView::Dense(self)
+        let blocks = Arc::new(BlockListDyn::new(self.into_inner()));
+        TensorView::Dense(DenseTensor { blocks })
     }
 }
 
-impl TensorAccessor for DenseTensor {
+impl<T: Clone + BlockList> TensorAccessor for DenseTensor<T> {
     fn dtype(&self) -> NumberType {
         self.blocks.dtype()
     }
@@ -1174,9 +1280,38 @@ impl TensorAccessor for DenseTensor {
 }
 
 #[async_trait]
-impl TensorBoolean<DenseTensor> for DenseTensor {
-    type Unary = DenseTensor;
-    type Combine = DenseTensor;
+impl<T: Clone + BlockList, OT: Clone + BlockList> TensorBoolean<DenseTensor<OT>>
+    for DenseTensor<T>
+{
+    type Combine = DenseTensor<BlockListCombine>;
+
+    fn and(&self, other: &DenseTensor<OT>) -> TCResult<Self::Combine> {
+        self.combine(other, Array::and, Number::and, NumberType::Bool)
+    }
+
+    fn or(&self, other: &DenseTensor<OT>) -> TCResult<Self::Combine> {
+        self.combine(other, Array::or, Number::or, NumberType::Bool)
+    }
+
+    fn xor(&self, other: &DenseTensor<OT>) -> TCResult<Self::Combine> {
+        self.combine(other, Array::xor, Number::xor, NumberType::Bool)
+    }
+}
+
+#[async_trait]
+impl<T: Clone + BlockList> TensorUnary for DenseTensor<T> {
+    type Unary = DenseTensor<BlockListUnary>;
+
+    fn abs(&self) -> TCResult<Self::Unary> {
+        let blocks = Arc::new(BlockListUnary {
+            source: self.blocks.clone(),
+            transform: Array::abs,
+            value_transform: <Number as NumberInstance>::abs,
+            dtype: NumberType::Bool,
+        });
+
+        Ok(DenseTensor { blocks })
+    }
 
     async fn all(&self, txn: Txn) -> TCResult<bool> {
         let mut blocks = self.blocks.clone().block_stream(txn).await?;
@@ -1201,10 +1336,6 @@ impl TensorBoolean<DenseTensor> for DenseTensor {
         Ok(false)
     }
 
-    fn and(&self, other: &DenseTensor) -> TCResult<Self::Combine> {
-        self.combine(other, Array::and, Number::and, NumberType::Bool)
-    }
-
     fn not(&self) -> TCResult<Self::Unary> {
         let blocks = Arc::new(BlockListUnary {
             source: self.blocks.clone(),
@@ -1215,22 +1346,16 @@ impl TensorBoolean<DenseTensor> for DenseTensor {
 
         Ok(DenseTensor { blocks })
     }
-
-    fn or(&self, other: &DenseTensor) -> TCResult<Self::Combine> {
-        self.combine(other, Array::or, Number::or, NumberType::Bool)
-    }
-
-    fn xor(&self, other: &DenseTensor) -> TCResult<Self::Combine> {
-        self.combine(other, Array::xor, Number::xor, NumberType::Bool)
-    }
 }
 
 #[async_trait]
-impl TensorCompare<DenseTensor> for DenseTensor {
-    type Compare = DenseTensor;
-    type Dense = DenseTensor;
+impl<T: Clone + BlockList, OT: Clone + BlockList> TensorCompare<DenseTensor<OT>>
+    for DenseTensor<T>
+{
+    type Compare = DenseTensor<BlockListCombine>;
+    type Dense = DenseTensor<BlockListCombine>;
 
-    async fn eq(&self, other: &Self, _txn: Txn) -> TCResult<Self::Dense> {
+    async fn eq(&self, other: &DenseTensor<OT>, _txn: Txn) -> TCResult<Self::Dense> {
         self.combine(
             other,
             Array::eq,
@@ -1239,7 +1364,7 @@ impl TensorCompare<DenseTensor> for DenseTensor {
         )
     }
 
-    fn gt(&self, other: &Self) -> TCResult<Self::Compare> {
+    fn gt(&self, other: &DenseTensor<OT>) -> TCResult<Self::Compare> {
         self.combine(
             other,
             Array::gt,
@@ -1248,7 +1373,7 @@ impl TensorCompare<DenseTensor> for DenseTensor {
         )
     }
 
-    async fn gte(&self, other: &Self, _txn: Txn) -> TCResult<Self::Dense> {
+    async fn gte(&self, other: &DenseTensor<OT>, _txn: Txn) -> TCResult<Self::Dense> {
         self.combine(
             other,
             Array::gte,
@@ -1257,7 +1382,7 @@ impl TensorCompare<DenseTensor> for DenseTensor {
         )
     }
 
-    fn lt(&self, other: &Self) -> TCResult<Self::Compare> {
+    fn lt(&self, other: &DenseTensor<OT>) -> TCResult<Self::Compare> {
         self.combine(
             other,
             Array::lt,
@@ -1266,7 +1391,7 @@ impl TensorCompare<DenseTensor> for DenseTensor {
         )
     }
 
-    async fn lte(&self, other: &Self, _txn: Txn) -> TCResult<Self::Dense> {
+    async fn lte(&self, other: &DenseTensor<OT>, _txn: Txn) -> TCResult<Self::Dense> {
         self.combine(
             other,
             Array::lte,
@@ -1275,7 +1400,7 @@ impl TensorCompare<DenseTensor> for DenseTensor {
         )
     }
 
-    fn ne(&self, other: &Self) -> TCResult<Self::Compare> {
+    fn ne(&self, other: &DenseTensor<OT>) -> TCResult<Self::Compare> {
         self.combine(
             other,
             Array::eq, // TODO: implement Array:ne!
@@ -1285,37 +1410,15 @@ impl TensorCompare<DenseTensor> for DenseTensor {
     }
 }
 
-impl TensorMath<DenseTensor> for DenseTensor {
-    type Unary = DenseTensor;
-    type Combine = DenseTensor;
+impl<T: Clone + BlockList, OT: Clone + BlockList> TensorMath<DenseTensor<OT>> for DenseTensor<T> {
+    type Combine = DenseTensor<BlockListCombine>;
 
-    fn abs(&self) -> TCResult<Self::Unary> {
-        let is_abs = match self.dtype() {
-            NumberType::Bool => true,
-            NumberType::UInt(_) => true,
-            _ => false,
-        };
-
-        if is_abs {
-            return Ok(self.clone());
-        }
-
-        let blocks = Arc::new(BlockListUnary {
-            source: self.blocks.clone(),
-            transform: Array::abs,
-            value_transform: <Number as NumberInstance>::abs,
-            dtype: NumberType::Bool,
-        });
-
-        Ok(DenseTensor { blocks })
-    }
-
-    fn add(&self, other: &Self) -> TCResult<Self::Combine> {
+    fn add(&self, other: &DenseTensor<OT>) -> TCResult<Self::Combine> {
         let dtype = Ord::max(self.dtype(), other.dtype());
         self.combine(other, Array::add, <Number as NumberInstance>::add, dtype)
     }
 
-    fn multiply(&self, other: &Self) -> TCResult<Self::Combine> {
+    fn multiply(&self, other: &DenseTensor<OT>) -> TCResult<Self::Combine> {
         let dtype = Ord::max(self.dtype(), other.dtype());
         self.combine(
             other,
@@ -1327,36 +1430,9 @@ impl TensorMath<DenseTensor> for DenseTensor {
 }
 
 #[async_trait]
-impl TensorIO<DenseTensor> for DenseTensor {
-    async fn mask(&self, _txn: &Txn, _other: DenseTensor) -> TCResult<()> {
-        Err(error::not_implemented("DenseTensor::mask"))
-    }
-
+impl<T: Clone + BlockList> TensorIO for DenseTensor<T> {
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
         self.blocks.read_value_at(txn, coord).await
-    }
-
-    async fn write(&self, txn: Txn, bounds: Bounds, other: DenseTensor) -> TCResult<()> {
-        let slice = self.slice(bounds)?;
-        let other = other
-            .broadcast(slice.shape().clone())?
-            .as_type(self.dtype())?;
-
-        let txn_id = txn.id().clone();
-        let txn_id_clone = txn_id;
-        stream::iter(Bounds::all(slice.shape()).affected())
-            .map(move |coord| {
-                Ok(other
-                    .clone()
-                    .read_value_owned(txn.clone(), coord.to_vec())
-                    .map_ok(|value| (coord, value)))
-            })
-            .try_buffer_unordered(2)
-            .and_then(|(coord, value)| slice.write_value_at(txn_id_clone.clone(), coord, value))
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await?;
-
-        Ok(())
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
@@ -1368,8 +1444,37 @@ impl TensorIO<DenseTensor> for DenseTensor {
     }
 }
 
-impl TensorReduce for DenseTensor {
-    type Reduce = DenseTensor;
+#[async_trait]
+impl<T: Clone + BlockList, OT: Clone + BlockList> TensorDualIO<DenseTensor<OT>> for DenseTensor<T> {
+    async fn mask(&self, _txn: &Txn, _other: DenseTensor<OT>) -> TCResult<()> {
+        Err(error::not_implemented("DenseTensor::mask"))
+    }
+
+    async fn write(&self, txn: Txn, bounds: Bounds, other: DenseTensor<OT>) -> TCResult<()> {
+        let slice = self.slice(bounds)?;
+        let other = other
+            .broadcast(slice.shape().clone())?
+            .as_type(self.dtype())?;
+
+        let txn_id = *txn.id();
+        stream::iter(Bounds::all(slice.shape()).affected())
+            .map(move |coord| {
+                Ok(other
+                    .clone()
+                    .read_value_owned(txn.clone(), coord.to_vec())
+                    .map_ok(|value| (coord, value)))
+            })
+            .try_buffer_unordered(2)
+            .and_then(|(coord, value)| slice.write_value_at(txn_id, coord, value))
+            .try_fold((), |_, _| future::ready(Ok(())))
+            .await?;
+
+        Ok(())
+    }
+}
+
+impl<T: Clone + BlockList> TensorReduce for DenseTensor<T> {
+    type Reduce = DenseTensor<BlockListReduce<T>>;
 
     fn product(&self, _axis: usize) -> TCResult<Self::Reduce> {
         Err(error::not_implemented("DenseTensor::product"))
@@ -1408,19 +1513,15 @@ impl TensorReduce for DenseTensor {
     }
 }
 
-impl TensorTransform for DenseTensor {
-    type Cast = DenseTensor;
-    type Broadcast = DenseTensor;
-    type Expand = DenseTensor;
-    type Slice = DenseTensor;
-    type Reshape = DenseTensor;
-    type Transpose = DenseTensor;
+impl<T: Clone + BlockList> TensorTransform for DenseTensor<T> {
+    type Cast = DenseTensor<BlockListCast>;
+    type Broadcast = DenseTensor<BlockListBroadcast>;
+    type Expand = DenseTensor<BlockListExpand>;
+    type Slice = DenseTensor<BlockListSlice>;
+    type Reshape = DenseTensor<BlockListReshape>;
+    type Transpose = DenseTensor<BlockListTranspose>;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
-        if dtype == self.dtype() {
-            return Ok(self.clone());
-        }
-
         let blocks = Arc::new(BlockListCast {
             source: self.blocks.clone(),
             dtype,
@@ -1430,10 +1531,6 @@ impl TensorTransform for DenseTensor {
     }
 
     fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast> {
-        if &shape == self.shape() {
-            return Ok(self.clone());
-        }
-
         let rebase = transform::Broadcast::new(self.shape().clone(), shape)?;
         let blocks = Arc::new(BlockListBroadcast {
             source: self.blocks.clone(),
@@ -1454,10 +1551,6 @@ impl TensorTransform for DenseTensor {
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
-        if bounds == Bounds::all(self.shape()) {
-            return Ok(self.clone());
-        }
-
         let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
         let blocks = Arc::new(BlockListSlice {
             source: self.blocks.clone(),
@@ -1468,10 +1561,6 @@ impl TensorTransform for DenseTensor {
     }
 
     fn reshape(&self, shape: Shape) -> TCResult<Self::Reshape> {
-        if &shape == self.shape() {
-            return Ok(self.clone());
-        }
-
         let rebase = transform::Reshape::new(self.shape().clone(), shape)?;
         let blocks = Arc::new(BlockListReshape {
             source: self.blocks.clone(),
@@ -1482,10 +1571,6 @@ impl TensorTransform for DenseTensor {
     }
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        if permutation == Some((0..self.ndim()).collect()) {
-            return Ok(self.clone());
-        }
-
         let rebase = transform::Transpose::new(self.shape().clone(), permutation)?;
         let blocks = Arc::new(BlockListTranspose {
             source: self.blocks.clone(),
@@ -1497,7 +1582,7 @@ impl TensorTransform for DenseTensor {
 }
 
 #[async_trait]
-impl Transact for DenseTensor {
+impl<T: Clone + BlockList> Transact for DenseTensor<T> {
     async fn commit(&self, txn_id: &TxnId) {
         self.blocks.commit(txn_id).await
     }
@@ -1511,9 +1596,30 @@ impl Transact for DenseTensor {
     }
 }
 
-impl From<BlockListFile> for DenseTensor {
-    fn from(blocks: BlockListFile) -> DenseTensor {
-        let blocks = Arc::new(blocks);
+impl From<BlockListFile> for DenseTensor<BlockListFile> {
+    fn from(blocks: BlockListFile) -> DenseTensor<BlockListFile> {
+        DenseTensor {
+            blocks: Arc::new(blocks),
+        }
+    }
+}
+
+impl<T: Clone + BlockList> From<Arc<T>> for DenseTensor<T> {
+    fn from(blocks: Arc<T>) -> DenseTensor<T> {
         DenseTensor { blocks }
     }
+}
+
+pub async fn dense_constant(
+    txn: &Txn,
+    shape: Shape,
+    value: Number,
+) -> TCResult<DenseTensor<BlockListFile>> {
+    let blocks = Arc::new(BlockListFile::constant(txn, shape, value).await?);
+    Ok(DenseTensor { blocks })
+}
+
+pub fn from_sparse(sparse: SparseTensor) -> DenseTensor<BlockListSparse> {
+    let blocks = Arc::new(BlockListSparse::new(sparse));
+    DenseTensor { blocks }
 }

@@ -1,6 +1,7 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -18,9 +19,12 @@ use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{Bounds, Shape};
-use super::dense::BlockListFile;
+use super::dense::{BlockList, BlockListDyn, BlockListFile};
 use super::sparse::SparseTable;
-use super::{DenseTensor, IntoView, SparseTensor, TensorBoolean, TensorIO, TensorTransform};
+use super::{
+    DenseTensor, IntoView, SparseTensor, TensorDualIO, TensorIO, TensorTransform,
+    TensorUnary,
+};
 
 pub trait TensorAccessor: Send {
     fn dtype(&self) -> NumberType;
@@ -43,6 +47,7 @@ impl TensorBaseType {
         match self {
             Self::Dense => {
                 BlockListFile::constant(txn, shape, number)
+                    .map_ok(DenseTensor::from)
                     .map_ok(TensorBase::Dense)
                     .await
             }
@@ -58,6 +63,7 @@ impl TensorBaseType {
         match self {
             Self::Dense => {
                 BlockListFile::constant(txn, shape, dtype.zero())
+                    .map_ok(DenseTensor::from)
                     .map_ok(TensorBase::Dense)
                     .await
             }
@@ -141,7 +147,8 @@ impl CollectionClass for TensorBaseType {
                 Self::Dense => {
                     let file =
                         BlockListFile::from_values(txn, shape, dtype, stream::iter(values)).await?;
-                    TensorBase::Dense(file)
+
+                    TensorBase::Dense(file.into())
                 }
                 Self::Sparse => {
                     let table =
@@ -189,7 +196,7 @@ impl fmt::Display for TensorBaseType {
 
 #[derive(Clone)]
 pub enum TensorBase {
-    Dense(BlockListFile),
+    Dense(DenseTensor<BlockListFile>),
     Sparse(SparseTable),
 }
 
@@ -333,7 +340,7 @@ impl From<TensorBase> for Collection {
 impl From<TensorBase> for TensorView {
     fn from(base: TensorBase) -> TensorView {
         match base {
-            TensorBase::Dense(blocks) => Self::Dense(blocks.into()),
+            TensorBase::Dense(dense) => dense.into_view(),
             TensorBase::Sparse(table) => Self::Sparse(table.into()),
         }
     }
@@ -385,7 +392,7 @@ impl fmt::Display for TensorViewType {
 
 #[derive(Clone)]
 pub enum TensorView {
-    Dense(DenseTensor),
+    Dense(DenseTensor<BlockListDyn>),
     Sparse(SparseTensor),
 }
 
@@ -664,9 +671,10 @@ impl Transact for TensorView {
     }
 }
 
-impl From<DenseTensor> for TensorView {
-    fn from(dense: DenseTensor) -> TensorView {
-        Self::Dense(dense)
+impl<T: Clone + BlockList> From<DenseTensor<T>> for TensorView {
+    fn from(dense: DenseTensor<T>) -> TensorView {
+        let blocks = Arc::new(BlockListDyn::new(dense.into_inner()));
+        Self::Dense(DenseTensor::from(blocks))
     }
 }
 

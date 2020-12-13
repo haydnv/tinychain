@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures::TryFutureExt;
 
 use crate::class::TCBoxTryFuture;
 use crate::error::{self, TCResult};
@@ -14,7 +15,7 @@ pub mod dense;
 pub mod sparse;
 
 pub use class::{Tensor, TensorAccessor, TensorBaseType, TensorType, TensorView};
-pub use dense::{Array, DenseTensor};
+pub use dense::{from_sparse, Array, DenseTensor};
 pub use einsum::einsum;
 pub use sparse::SparseTensor;
 
@@ -27,20 +28,26 @@ pub trait IntoView {
 
 #[async_trait]
 pub trait TensorBoolean<O>: TensorAccessor + Sized {
-    type Unary: IntoView;
     type Combine: IntoView;
+
+    fn and(&self, other: &O) -> TCResult<Self::Combine>;
+
+    fn or(&self, other: &O) -> TCResult<Self::Combine>;
+
+    fn xor(&self, other: &O) -> TCResult<Self::Combine>;
+}
+
+#[async_trait]
+pub trait TensorUnary: TensorAccessor + Sized {
+    type Unary: IntoView;
+
+    fn abs(&self) -> TCResult<Self::Unary>;
 
     async fn all(&self, txn: Txn) -> TCResult<bool>;
 
     async fn any(&self, txn: Txn) -> TCResult<bool>;
 
-    fn and(&self, other: &O) -> TCResult<Self::Combine>;
-
     fn not(&self) -> TCResult<Self::Unary>;
-
-    fn or(&self, other: &O) -> TCResult<Self::Combine>;
-
-    fn xor(&self, other: &O) -> TCResult<Self::Combine>;
 }
 
 #[async_trait]
@@ -62,12 +69,8 @@ pub trait TensorCompare<O>: TensorAccessor + Sized {
 }
 
 #[async_trait]
-pub trait TensorIO<O>: TensorAccessor + Sized {
-    async fn mask(&self, txn: &Txn, other: O) -> TCResult<()>;
-
+pub trait TensorIO: TensorAccessor + Sized {
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number>;
-
-    async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: O) -> TCResult<()>;
 
     async fn write_value(
         &self,
@@ -79,11 +82,15 @@ pub trait TensorIO<O>: TensorAccessor + Sized {
     async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
 }
 
-pub trait TensorMath<O>: TensorAccessor + Sized {
-    type Unary: IntoView;
-    type Combine: IntoView;
+#[async_trait]
+pub trait TensorDualIO<O>: TensorAccessor + Sized {
+    async fn mask(&self, txn: &Txn, other: O) -> TCResult<()>;
 
-    fn abs(&self) -> TCResult<Self::Unary>;
+    async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: O) -> TCResult<()>;
+}
+
+pub trait TensorMath<O>: TensorAccessor + Sized {
+    type Combine: IntoView;
 
     fn add(&self, other: &O) -> TCResult<Self::Combine>;
 
@@ -125,8 +132,52 @@ pub trait TensorTransform: TensorAccessor + Sized {
 
 #[async_trait]
 impl TensorBoolean<TensorView> for TensorView {
-    type Unary = TensorView;
     type Combine = TensorView;
+
+    fn and(&self, other: &Self) -> TCResult<Self> {
+        use TensorView::*;
+        match (self, other) {
+            (Dense(left), Dense(right)) => left.and(right).map(Self::from),
+            (Sparse(left), Sparse(right)) => left.and(right).map(Self::from),
+            (Sparse(left), Dense(right)) => left
+                .and(&SparseTensor::from_dense(right.clone()))
+                .map(Self::from),
+
+            _ => other.and(self),
+        }
+    }
+
+    fn or(&self, other: &Self) -> TCResult<Self> {
+        use TensorView::*;
+        match (self, other) {
+            (Dense(left), Dense(right)) => left.or(right).map(Self::from),
+            (Sparse(left), Sparse(right)) => left.or(right).map(Self::from),
+            (Dense(left), Sparse(right)) => left.or(&from_sparse(right.clone())).map(Self::from),
+
+            _ => other.or(self),
+        }
+    }
+
+    fn xor(&self, other: &Self) -> TCResult<Self> {
+        use TensorView::*;
+        match (self, other) {
+            (Dense(left), Dense(right)) => left.xor(right).map(Self::from),
+            (Sparse(left), _) => from_sparse(left.clone()).into_view().xor(other),
+            (left, right) => right.xor(left),
+        }
+    }
+}
+
+#[async_trait]
+impl TensorUnary for TensorView {
+    type Unary = TensorView;
+
+    fn abs(&self) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.abs().map(Self::from),
+            Self::Sparse(sparse) => sparse.abs().map(Self::from),
+        }
+    }
 
     async fn all(&self, txn: Txn) -> TCResult<bool> {
         match self {
@@ -142,45 +193,10 @@ impl TensorBoolean<TensorView> for TensorView {
         }
     }
 
-    fn and(&self, other: &Self) -> TCResult<Self> {
-        use TensorView::*;
-        match (self, other) {
-            (Dense(left), Dense(right)) => left.and(right).map(Self::from),
-            (Sparse(left), Sparse(right)) => left.and(right).map(Self::from),
-            (Sparse(left), Dense(right)) => left
-                .and(&SparseTensor::from_dense(right.clone()))
-                .map(Self::from),
-
-            _ => other.and(self),
-        }
-    }
-
     fn not(&self) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.not().map(Self::from),
             Self::Sparse(sparse) => sparse.not().map(Self::from),
-        }
-    }
-
-    fn or(&self, other: &Self) -> TCResult<Self> {
-        use TensorView::*;
-        match (self, other) {
-            (Dense(left), Dense(right)) => left.or(right).map(Self::from),
-            (Sparse(left), Sparse(right)) => left.or(right).map(Self::from),
-            (Dense(left), Sparse(right)) => left
-                .or(&DenseTensor::from_sparse(right.clone()))
-                .map(Self::from),
-
-            _ => other.or(self),
-        }
-    }
-
-    fn xor(&self, other: &Self) -> TCResult<Self> {
-        use TensorView::*;
-        match (self, other) {
-            (Dense(left), Dense(right)) => left.xor(right).map(Self::from),
-            (Sparse(left), _) => Dense(DenseTensor::from_sparse(left.clone())).xor(other),
-            (left, right) => right.xor(left),
         }
     }
 }
@@ -191,130 +207,115 @@ impl TensorCompare<TensorView> for TensorView {
     type Dense = Self;
 
     async fn eq(&self, other: &Self, txn: Txn) -> TCResult<Self> {
-        let eq = match (self, other) {
-            (Self::Dense(left), Self::Dense(right)) => left.eq(right, txn).await,
-            (Self::Sparse(left), Self::Sparse(right)) => left.eq(right, txn).await,
-            (Self::Dense(left), Self::Sparse(right)) => {
-                left.eq(&DenseTensor::from_sparse(right.clone()), txn).await
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => {
+                left.eq(right, txn).map_ok(IntoView::into_view).await
             }
-            (Self::Sparse(left), Self::Dense(right)) => {
-                DenseTensor::from_sparse(left.clone()).eq(right, txn).await
+            (Self::Sparse(left), Self::Sparse(right)) => {
+                left.eq(right, txn).map_ok(IntoView::into_view).await
             }
-        };
-
-        eq.map(Self::from)
+            (Self::Sparse(left), right) => {
+                from_sparse(left.clone())
+                    .into_view()
+                    .eq(right, txn)
+                    .map_ok(IntoView::into_view)
+                    .await
+            }
+            (left, Self::Sparse(right)) => {
+                left.eq(&from_sparse(right.clone()).into_view(), txn)
+                    .map_ok(IntoView::into_view)
+                    .await
+            }
+        }
     }
 
     fn gt(&self, other: &Self) -> TCResult<Self> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.gt(right).map(Self::from),
             (Self::Sparse(left), Self::Sparse(right)) => left.gt(right).map(Self::from),
-            (Self::Dense(left), Self::Sparse(right)) => left
-                .gt(&DenseTensor::from_sparse(right.clone()))
-                .map(Self::from),
-            (Self::Sparse(left), Self::Dense(right)) => left
-                .gt(&SparseTensor::from_dense(right.clone()))
+            (Self::Sparse(left), right) => from_sparse(left.clone()).into_view().gt(right),
+            (left, Self::Sparse(right)) => left
+                .gt(&from_sparse(right.clone()).into_view())
                 .map(Self::from),
         }
     }
 
     async fn gte(&self, other: &Self, txn: Txn) -> TCResult<Self> {
-        let gte = match (self, other) {
-            (Self::Dense(left), Self::Dense(right)) => left.gte(right, txn).await,
-            (Self::Sparse(left), Self::Sparse(right)) => left.gte(right, txn).await,
-            (Self::Dense(left), Self::Sparse(right)) => {
-                left.gte(&DenseTensor::from_sparse(right.clone()), txn)
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => {
+                left.gte(right, txn).map_ok(IntoView::into_view).await
+            }
+            (Self::Sparse(left), Self::Sparse(right)) => {
+                left.gte(right, txn).map_ok(IntoView::into_view).await
+            }
+            (Self::Sparse(left), right) => {
+                from_sparse(left.clone())
+                    .into_view()
+                    .gte(right, txn)
+                    .map_ok(IntoView::into_view)
                     .await
             }
-            (Self::Sparse(left), Self::Dense(right)) => {
-                DenseTensor::from_sparse(left.clone()).gte(right, txn).await
+            (left, Self::Sparse(right)) => {
+                left.gte(&from_sparse(right.clone()).into_view(), txn)
+                    .map_ok(IntoView::into_view)
+                    .await
             }
-        };
-
-        gte.map(Self::from)
+        }
     }
 
     fn lt(&self, other: &Self) -> TCResult<Self> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.lt(right).map(Self::from),
             (Self::Sparse(left), Self::Sparse(right)) => left.lt(right).map(Self::from),
-            (Self::Dense(left), Self::Sparse(right)) => left
-                .lt(&DenseTensor::from_sparse(right.clone()))
-                .map(Self::from),
-            (Self::Sparse(left), Self::Dense(right)) => left
-                .lt(&SparseTensor::from_dense(right.clone()))
-                .map(Self::from),
+            (Self::Sparse(left), right) => from_sparse(left.clone()).into_view().lt(right),
+            (left, Self::Sparse(right)) => left.lt(&from_sparse(right.clone()).into_view()),
         }
     }
 
     async fn lte(&self, other: &Self, txn: Txn) -> TCResult<Self> {
-        let lte = match (self, other) {
-            (Self::Dense(left), Self::Dense(right)) => left.lte(right, txn).await,
-            (Self::Sparse(left), Self::Sparse(right)) => left.lte(right, txn).await,
-            (Self::Dense(left), Self::Sparse(right)) => {
-                left.lte(&DenseTensor::from_sparse(right.clone()), txn)
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => {
+                left.lte(right, txn).map_ok(IntoView::into_view).await
+            }
+            (Self::Sparse(left), Self::Sparse(right)) => {
+                left.lte(right, txn).map_ok(IntoView::into_view).await
+            }
+            (Self::Sparse(left), right) => {
+                from_sparse(left.clone())
+                    .into_view()
+                    .lte(right, txn)
+                    .map_ok(IntoView::into_view)
                     .await
             }
-            (Self::Sparse(left), Self::Dense(right)) => {
-                DenseTensor::from_sparse(left.clone()).lte(right, txn).await
+            (left, Self::Sparse(right)) => {
+                left.lte(&from_sparse(right.clone()).into_view(), txn)
+                    .map_ok(IntoView::into_view)
+                    .await
             }
-        };
-
-        lte.map(Self::from)
+        }
     }
 
     fn ne(&self, other: &Self) -> TCResult<Self> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.ne(right).map(Self::from),
             (Self::Sparse(left), Self::Sparse(right)) => left.ne(right).map(Self::from),
-            (Self::Dense(left), Self::Sparse(right)) => left
-                .ne(&DenseTensor::from_sparse(right.clone()))
-                .map(Self::from),
-            (Self::Sparse(left), Self::Dense(right)) => DenseTensor::from_sparse(left.clone())
+            (Self::Sparse(left), right) => from_sparse(left.clone())
+                .into_view()
                 .ne(right)
+                .map(Self::from),
+            (left, Self::Sparse(right)) => left
+                .ne(&from_sparse(right.clone()).into_view())
                 .map(Self::from),
         }
     }
 }
 
 #[async_trait]
-impl TensorIO<TensorView> for TensorView {
-    async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()> {
-        match (self, &other) {
-            (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()).await,
-            (Self::Sparse(l), Self::Sparse(r)) => l.mask(txn, r.clone()).await,
-            (Self::Sparse(l), Self::Dense(r)) => {
-                l.mask(txn, SparseTensor::from_dense(r.clone())).await
-            }
-            (Self::Dense(l), Self::Sparse(r)) => {
-                l.mask(txn, DenseTensor::from_sparse(r.clone())).await
-            }
-        }
-    }
-
+impl TensorIO for TensorView {
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
         match self {
             Self::Dense(dense) => dense.read_value(txn, coord).await,
             Self::Sparse(sparse) => sparse.read_value(txn, coord).await,
-        }
-    }
-
-    async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: Self) -> TCResult<()> {
-        match self {
-            Self::Dense(this) => match value {
-                Self::Dense(that) => this.write(txn, bounds, that).await,
-                Self::Sparse(that) => {
-                    this.write(txn, bounds, DenseTensor::from_sparse(that))
-                        .await
-                }
-            },
-            Self::Sparse(this) => match value {
-                Self::Dense(that) => {
-                    this.write(txn, bounds, SparseTensor::from_dense(that))
-                        .await
-                }
-                Self::Sparse(that) => this.write(txn, bounds, that).await,
-            },
         }
     }
 
@@ -338,27 +339,49 @@ impl TensorIO<TensorView> for TensorView {
     }
 }
 
-impl TensorMath<TensorView> for TensorView {
-    type Unary = Self;
-    type Combine = Self;
-
-    fn abs(&self) -> TCResult<Self> {
-        match self {
-            Self::Dense(dense) => dense.abs().map(Self::from),
-            Self::Sparse(sparse) => sparse.abs().map(Self::from),
+#[async_trait]
+impl TensorDualIO<TensorView> for TensorView {
+    async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()> {
+        match (self, &other) {
+            (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()).await,
+            (Self::Sparse(l), Self::Sparse(r)) => l.mask(txn, r.clone()).await,
+            (Self::Sparse(l), Self::Dense(r)) => {
+                l.mask(txn, SparseTensor::from_dense(r.clone())).await
+            }
+            (l, Self::Sparse(r)) => l.mask(txn, from_sparse(r.clone()).into_view()).await,
         }
     }
+
+    async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: Self) -> TCResult<()> {
+        match self {
+            Self::Dense(this) => match value {
+                Self::Dense(that) => this.write(txn, bounds, that).await,
+                Self::Sparse(that) => this.write(txn, bounds, from_sparse(that)).await,
+            },
+            Self::Sparse(this) => match value {
+                Self::Dense(that) => {
+                    this.write(txn, bounds, SparseTensor::from_dense(that))
+                        .await
+                }
+                Self::Sparse(that) => this.write(txn, bounds, that).await,
+            },
+        }
+    }
+}
+
+impl TensorMath<TensorView> for TensorView {
+    type Combine = Self;
 
     fn add(&self, other: &Self) -> TCResult<Self> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.add(right).map(Self::from),
             (Self::Sparse(left), Self::Sparse(right)) => left.add(right).map(Self::from),
-            (Self::Dense(left), Self::Sparse(right)) => left
-                .add(&DenseTensor::from_sparse(right.clone()))
-                .map(Self::from),
-            (Self::Sparse(left), Self::Dense(right)) => DenseTensor::from_sparse(left.clone())
-                .add(right)
-                .map(Self::from),
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.add(&from_sparse(right.clone())).map(Self::from)
+            }
+            (Self::Sparse(left), Self::Dense(right)) => {
+                from_sparse(left.clone()).add(right).map(Self::from)
+            }
         }
     }
 
@@ -366,12 +389,12 @@ impl TensorMath<TensorView> for TensorView {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.multiply(right).map(Self::from),
             (Self::Sparse(left), Self::Sparse(right)) => left.multiply(right).map(Self::from),
-            (Self::Dense(left), Self::Sparse(right)) => left
-                .multiply(&DenseTensor::from_sparse(right.clone()))
-                .map(Self::from),
-            (Self::Sparse(left), Self::Dense(right)) => DenseTensor::from_sparse(left.clone())
-                .multiply(right)
-                .map(Self::from),
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.multiply(&from_sparse(right.clone())).map(Self::from)
+            }
+            (Self::Sparse(left), Self::Dense(right)) => {
+                from_sparse(left.clone()).multiply(right).map(Self::from)
+            }
         }
     }
 }
