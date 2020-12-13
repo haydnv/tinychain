@@ -9,11 +9,18 @@ use log::debug;
 
 use crate::class::{TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::error;
+use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::class::TensorAccessor;
-use super::*;
+use super::sparse::{SparseAccessor, SparseTensor};
+use super::transform;
+use super::{
+    IntoView, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath, TensorReduce,
+    TensorTransform, TensorUnary, TensorView, ERR_NONBIJECTIVE_WRITE,
+};
+//use super::*;
 
 mod array;
 mod file;
@@ -878,17 +885,17 @@ impl<T: BlockList> Transact for BlockListSlice<T> {
 }
 
 #[derive(Clone)]
-pub struct BlockListSparse {
-    source: SparseTensor,
+pub struct BlockListSparse<T: Clone + SparseAccessor> {
+    source: SparseTensor<T>,
 }
 
-impl BlockListSparse {
-    fn new(source: SparseTensor) -> BlockListSparse {
+impl<T: Clone + SparseAccessor> BlockListSparse<T> {
+    fn new(source: SparseTensor<T>) -> Self {
         BlockListSparse { source }
     }
 }
 
-impl TensorAccessor for BlockListSparse {
+impl<T: Clone + SparseAccessor> TensorAccessor for BlockListSparse<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -907,7 +914,7 @@ impl TensorAccessor for BlockListSparse {
 }
 
 #[async_trait]
-impl BlockList for BlockListSparse {
+impl<T: Clone + SparseAccessor> BlockList for BlockListSparse<T> {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
             let dtype = self.dtype();
@@ -987,7 +994,7 @@ impl BlockList for BlockListSparse {
 }
 
 #[async_trait]
-impl Transact for BlockListSparse {
+impl<T: Clone + SparseAccessor> Transact for BlockListSparse<T> {
     async fn commit(&self, txn_id: &TxnId) {
         self.source.commit(txn_id).await
     }
@@ -1194,13 +1201,13 @@ pub struct DenseTensor<T: Clone + BlockList> {
 
 impl<T: Clone + BlockList> DenseTensor<T> {
     fn into_dyn(self) -> DenseTensor<BlockListDyn> {
-        let blocks = BlockListDyn::new(self.into_inner());
+        let blocks = BlockListDyn::new(self.clone_into());
         DenseTensor {
             blocks: Arc::new(blocks),
         }
     }
 
-    pub fn into_inner(self) -> T {
+    pub fn clone_into(&self) -> T {
         (*self.blocks).clone()
     }
 
@@ -1233,7 +1240,7 @@ impl<T: Clone + BlockList> DenseTensor<T> {
 
 impl<T: Clone + BlockList> IntoView for DenseTensor<T> {
     fn into_view(self) -> TensorView {
-        let blocks = Arc::new(BlockListDyn::new(self.into_inner()));
+        let blocks = Arc::new(BlockListDyn::new(self.clone_into()));
         TensorView::Dense(DenseTensor { blocks })
     }
 }
@@ -1596,7 +1603,9 @@ pub async fn dense_constant(
     Ok(DenseTensor { blocks })
 }
 
-pub fn from_sparse(sparse: SparseTensor) -> DenseTensor<BlockListSparse> {
+pub fn from_sparse<T: Clone + SparseAccessor>(
+    sparse: SparseTensor<T>,
+) -> DenseTensor<BlockListSparse<T>> {
     let blocks = Arc::new(BlockListSparse::new(sparse));
     DenseTensor { blocks }
 }

@@ -20,7 +20,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{Bounds, Shape};
 use super::dense::{BlockList, BlockListDyn, BlockListFile};
-use super::sparse::SparseTable;
+use super::sparse::{SparseAccessor, SparseAccessorDyn, SparseTable};
 use super::{
     DenseTensor, IntoView, SparseTensor, TensorDualIO, TensorIO, TensorTransform, TensorUnary,
 };
@@ -52,6 +52,7 @@ impl TensorBaseType {
             }
             Self::Sparse => {
                 SparseTable::constant(txn, shape, number)
+                    .map_ok(SparseTensor::from)
                     .map_ok(TensorBase::Sparse)
                     .await
             }
@@ -68,6 +69,7 @@ impl TensorBaseType {
             }
             Self::Sparse => {
                 SparseTable::create(txn, shape, dtype)
+                    .map_ok(SparseTensor::from)
                     .map_ok(TensorBase::Sparse)
                     .await
             }
@@ -152,7 +154,8 @@ impl CollectionClass for TensorBaseType {
                 Self::Sparse => {
                     let table =
                         SparseTable::from_values(txn, shape, dtype, stream::iter(values)).await?;
-                    TensorBase::Sparse(table)
+
+                    TensorBase::Sparse(table.into())
                 }
             };
 
@@ -196,7 +199,7 @@ impl fmt::Display for TensorBaseType {
 #[derive(Clone)]
 pub enum TensorBase {
     Dense(DenseTensor<BlockListFile>),
-    Sparse(SparseTable),
+    Sparse(SparseTensor<SparseTable>),
 }
 
 impl Instance for TensorBase {
@@ -340,7 +343,7 @@ impl From<TensorBase> for TensorView {
     fn from(base: TensorBase) -> TensorView {
         match base {
             TensorBase::Dense(dense) => dense.into_view(),
-            TensorBase::Sparse(table) => Self::Sparse(table.into()),
+            TensorBase::Sparse(sparse) => sparse.into_view(),
         }
     }
 }
@@ -392,7 +395,7 @@ impl fmt::Display for TensorViewType {
 #[derive(Clone)]
 pub enum TensorView {
     Dense(DenseTensor<BlockListDyn>),
-    Sparse(SparseTensor),
+    Sparse(SparseTensor<SparseAccessorDyn>),
 }
 
 impl IntoView for TensorView {
@@ -672,14 +675,15 @@ impl Transact for TensorView {
 
 impl<T: Clone + BlockList> From<DenseTensor<T>> for TensorView {
     fn from(dense: DenseTensor<T>) -> TensorView {
-        let blocks = Arc::new(BlockListDyn::new(dense.into_inner()));
+        let blocks = Arc::new(BlockListDyn::new(dense.clone_into()));
         Self::Dense(DenseTensor::from(blocks))
     }
 }
 
-impl From<SparseTensor> for TensorView {
-    fn from(sparse: SparseTensor) -> TensorView {
-        Self::Sparse(sparse)
+impl<T: Clone + SparseAccessor> From<SparseTensor<T>> for TensorView {
+    fn from(sparse: SparseTensor<T>) -> TensorView {
+        let accessor = Arc::new(SparseAccessorDyn::new(sparse.clone_into()));
+        Self::Sparse(SparseTensor::from(accessor))
     }
 }
 

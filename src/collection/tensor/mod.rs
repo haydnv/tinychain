@@ -17,7 +17,7 @@ pub mod sparse;
 pub use class::{Tensor, TensorAccessor, TensorBaseType, TensorType, TensorView};
 pub use dense::{from_sparse, Array, DenseTensor};
 pub use einsum::einsum;
-pub use sparse::SparseTensor;
+pub use sparse::{from_dense, SparseTensor};
 
 pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
@@ -139,9 +139,7 @@ impl TensorBoolean<TensorView> for TensorView {
         match (self, other) {
             (Dense(left), Dense(right)) => left.and(right).map(Self::from),
             (Sparse(left), Sparse(right)) => left.and(right).map(Self::from),
-            (Sparse(left), Dense(right)) => left
-                .and(&SparseTensor::from_dense(right.clone()))
-                .map(Self::from),
+            (Sparse(left), Dense(right)) => left.and(&from_dense(right.clone())).map(Self::from),
 
             _ => other.and(self),
         }
@@ -345,9 +343,7 @@ impl TensorDualIO<TensorView> for TensorView {
         match (self, &other) {
             (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()).await,
             (Self::Sparse(l), Self::Sparse(r)) => l.mask(txn, r.clone()).await,
-            (Self::Sparse(l), Self::Dense(r)) => {
-                l.mask(txn, SparseTensor::from_dense(r.clone())).await
-            }
+            (Self::Sparse(l), Self::Dense(r)) => l.mask(txn, from_dense(r.clone())).await,
             (l, Self::Sparse(r)) => l.mask(txn, from_sparse(r.clone()).into_view()).await,
         }
     }
@@ -359,10 +355,7 @@ impl TensorDualIO<TensorView> for TensorView {
                 Self::Sparse(that) => this.write(txn, bounds, from_sparse(that)).await,
             },
             Self::Sparse(this) => match value {
-                Self::Dense(that) => {
-                    this.write(txn, bounds, SparseTensor::from_dense(that))
-                        .await
-                }
+                Self::Dense(that) => this.write(txn, bounds, from_dense(that)).await,
                 Self::Sparse(that) => this.write(txn, bounds, that).await,
             },
         }
