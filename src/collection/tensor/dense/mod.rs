@@ -1226,6 +1226,14 @@ impl<T: Clone + BlockList> DenseTensor<T> {
         value_combinator: fn(Number, Number) -> Number,
         dtype: NumberType,
     ) -> TCResult<DenseTensor<BlockListCombine<T, OT>>> {
+        if self.shape() != other.shape() {
+            return Err(error::unsupported(format!(
+                "Cannot combine tensors with different shapes: {}, {}",
+                self.shape(),
+                other.shape()
+            )));
+        }
+
         let blocks = Arc::new(BlockListCombine::new(
             self.blocks.clone(),
             other.blocks.clone(),

@@ -348,6 +348,11 @@ pub struct SparseTensor<T: Clone + SparseAccess> {
 }
 
 impl<T: Clone + SparseAccess> SparseTensor<T> {
+    fn into_dyn(self) -> SparseTensor<SparseAccessorDyn> {
+        let accessor = Arc::new(SparseAccessorDyn::new(self.clone_into()));
+        SparseTensor { accessor }
+    }
+
     pub fn clone_into(&self) -> T {
         (*self.accessor).clone()
     }
@@ -378,10 +383,13 @@ impl<T: Clone + SparseAccess> SparseTensor<T> {
         other: &SparseTensor<OT>,
         combinator: fn(Number, Number) -> Number,
         dtype: NumberType,
-    ) -> TCResult<SparseTensor<SparseCombinator>> {
+    ) -> TCResult<SparseTensor<SparseCombinator<T, OT>>> {
         if self.shape() != other.shape() {
-            let (this, that) = broadcast(self, other)?;
-            return this.combine(&that, combinator, dtype);
+            return Err(error::unsupported(format!(
+                "Cannot combine Tensors of different shapes: {}, {}",
+                self.shape(),
+                other.shape()
+            )));
         }
 
         let accessor = SparseCombinator::new(
@@ -461,7 +469,7 @@ impl<T: Clone + SparseAccess> TensorAccessor for SparseTensor<T> {
 impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorBoolean<SparseTensor<OT>>
     for SparseTensor<T>
 {
-    type Combine = SparseTensor<SparseCombinator>;
+    type Combine = SparseTensor<SparseCombinator<T, OT>>;
 
     fn and(&self, other: &SparseTensor<OT>) -> TCResult<Self::Combine> {
         // TODO: use a custom method for this, to only iterate over self.filled (not other.filled)
@@ -525,7 +533,7 @@ impl<T: Clone + SparseAccess> TensorUnary for SparseTensor<T> {
 impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorCompare<SparseTensor<OT>>
     for SparseTensor<T>
 {
-    type Compare = SparseTensor<SparseCombinator>;
+    type Compare = SparseTensor<SparseCombinator<T, OT>>;
     type Dense = DenseTensor<BlockListFile>;
 
     async fn eq(&self, other: &SparseTensor<OT>, txn: Txn) -> TCResult<Self::Dense> {
@@ -619,7 +627,7 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorDualIO<SparseTenso
 impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorMath<SparseTensor<OT>>
     for SparseTensor<T>
 {
-    type Combine = SparseTensor<SparseCombinator>;
+    type Combine = SparseTensor<SparseCombinator<T, OT>>;
 
     fn add(&self, other: &SparseTensor<OT>) -> TCResult<Self::Combine> {
         let dtype = Ord::max(self.dtype(), other.dtype());
@@ -669,12 +677,12 @@ impl<T: Clone + SparseAccess> TensorReduce for SparseTensor<T> {
 }
 
 impl<T: Clone + SparseAccess> TensorTransform for SparseTensor<T> {
-    type Cast = SparseTensor<SparseCast>;
-    type Broadcast = SparseTensor<SparseBroadcast>;
-    type Expand = SparseTensor<SparseExpand>;
+    type Cast = SparseTensor<SparseCast<T>>;
+    type Broadcast = SparseTensor<SparseBroadcast<T>>;
+    type Expand = SparseTensor<SparseExpand<T>>;
     type Slice = SparseTensor<SparseSlice>;
     type Reshape = SparseTensor<SparseReshape>;
-    type Transpose = SparseTensor<SparseTranspose>;
+    type Transpose = SparseTensor<SparseTranspose<T>>;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
         let source = self.accessor.clone();

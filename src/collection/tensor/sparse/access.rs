@@ -258,13 +258,13 @@ impl<T: Clone + BlockList> Transact for DenseAccessor<T> {
 }
 
 #[derive(Clone)]
-pub struct SparseBroadcast {
-    source: Arc<dyn SparseAccess>,
+pub struct SparseBroadcast<T: SparseAccess> {
+    source: Arc<T>,
     rebase: transform::Broadcast,
 }
 
-impl SparseBroadcast {
-    pub fn new(source: Arc<dyn SparseAccess>, rebase: transform::Broadcast) -> Self {
+impl<T: SparseAccess> SparseBroadcast<T> {
+    pub fn new(source: Arc<T>, rebase: transform::Broadcast) -> Self {
         Self { source, rebase }
     }
 
@@ -291,7 +291,7 @@ impl SparseBroadcast {
     }
 }
 
-impl TensorAccessor for SparseBroadcast {
+impl<T: SparseAccess> TensorAccessor for SparseBroadcast<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -310,7 +310,7 @@ impl TensorAccessor for SparseBroadcast {
 }
 
 #[async_trait]
-impl SparseAccess for SparseBroadcast {
+impl<T: SparseAccess> SparseAccess for SparseBroadcast<T> {
     async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
         let rebase = self.rebase.clone();
         let filled = self
@@ -379,7 +379,7 @@ impl SparseAccess for SparseBroadcast {
 }
 
 #[async_trait]
-impl Transact for SparseBroadcast {
+impl<T: SparseAccess> Transact for SparseBroadcast<T> {
     async fn commit(&self, _txn_id: &TxnId) {
         // no-op
     }
@@ -394,18 +394,18 @@ impl Transact for SparseBroadcast {
 }
 
 #[derive(Clone)]
-pub struct SparseCast {
-    source: Arc<dyn SparseAccess>,
+pub struct SparseCast<T: SparseAccess> {
+    source: Arc<T>,
     dtype: NumberType,
 }
 
-impl SparseCast {
-    pub fn new(source: Arc<dyn SparseAccess>, dtype: NumberType) -> Self {
+impl<T: SparseAccess> SparseCast<T> {
+    pub fn new(source: Arc<T>, dtype: NumberType) -> Self {
         Self { source, dtype }
     }
 }
 
-impl TensorAccessor for SparseCast {
+impl<T: SparseAccess> TensorAccessor for SparseCast<T> {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -424,7 +424,7 @@ impl TensorAccessor for SparseCast {
 }
 
 #[async_trait]
-impl SparseAccess for SparseCast {
+impl<T: SparseAccess> SparseAccess for SparseCast<T> {
     async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
         let dtype = self.dtype;
         let filled = self.source.clone().filled(txn).await?;
@@ -467,7 +467,7 @@ impl SparseAccess for SparseCast {
 }
 
 #[async_trait]
-impl Transact for SparseCast {
+impl<T: SparseAccess> Transact for SparseCast<T> {
     async fn commit(&self, txn_id: &TxnId) {
         self.source.commit(txn_id).await
     }
@@ -482,22 +482,22 @@ impl Transact for SparseCast {
 }
 
 #[derive(Clone)]
-pub struct SparseCombinator {
-    left: Arc<dyn SparseAccess>,
+pub struct SparseCombinator<L: SparseAccess, R: SparseAccess> {
+    left: Arc<L>,
     left_zero: Number,
-    right: Arc<dyn SparseAccess>,
+    right: Arc<R>,
     right_zero: Number,
     combinator: fn(Number, Number) -> Number,
     dtype: NumberType,
 }
 
-impl SparseCombinator {
+impl<L: SparseAccess, R: SparseAccess> SparseCombinator<L, R> {
     pub fn new(
-        left: Arc<dyn SparseAccess>,
-        right: Arc<dyn SparseAccess>,
+        left: Arc<L>,
+        right: Arc<R>,
         combinator: fn(Number, Number) -> Number,
         dtype: NumberType,
-    ) -> TCResult<SparseCombinator> {
+    ) -> TCResult<Self> {
         if left.shape() != right.shape() {
             return Err(error::internal(
                 "Tried to combine SparseTensors with different shapes",
@@ -539,7 +539,7 @@ impl SparseCombinator {
     }
 }
 
-impl TensorAccessor for SparseCombinator {
+impl<L: SparseAccess, R: SparseAccess> TensorAccessor for SparseCombinator<L, R> {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -558,7 +558,7 @@ impl TensorAccessor for SparseCombinator {
 }
 
 #[async_trait]
-impl SparseAccess for SparseCombinator {
+impl<L: SparseAccess, R: SparseAccess> SparseAccess for SparseCombinator<L, R> {
     async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
         let left = self.left.clone().filled(txn.clone());
         let right = self.right.clone().filled(txn);
@@ -605,7 +605,7 @@ impl SparseAccess for SparseCombinator {
 }
 
 #[async_trait]
-impl Transact for SparseCombinator {
+impl<L: SparseAccess, R: SparseAccess> Transact for SparseCombinator<L, R> {
     async fn commit(&self, _txn_id: &TxnId) {
         // no-op
     }
@@ -620,18 +620,18 @@ impl Transact for SparseCombinator {
 }
 
 #[derive(Clone)]
-pub struct SparseExpand {
-    source: Arc<dyn SparseAccess>,
+pub struct SparseExpand<T: SparseAccess> {
+    source: Arc<T>,
     rebase: transform::Expand,
 }
 
-impl SparseExpand {
-    pub fn new(source: Arc<dyn SparseAccess>, rebase: transform::Expand) -> Self {
+impl<T: SparseAccess> SparseExpand<T> {
+    pub fn new(source: Arc<T>, rebase: transform::Expand) -> Self {
         Self { source, rebase }
     }
 }
 
-impl TensorAccessor for SparseExpand {
+impl<T: SparseAccess> TensorAccessor for SparseExpand<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -650,7 +650,7 @@ impl TensorAccessor for SparseExpand {
 }
 
 #[async_trait]
-impl SparseAccess for SparseExpand {
+impl<T: SparseAccess> SparseAccess for SparseExpand<T> {
     async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
         let filled = self
             .source
@@ -700,7 +700,7 @@ impl SparseAccess for SparseExpand {
 }
 
 #[async_trait]
-impl Transact for SparseExpand {
+impl<T: SparseAccess> Transact for SparseExpand<T> {
     async fn commit(&self, txn_id: &TxnId) {
         self.source.commit(txn_id).await
     }
@@ -714,7 +714,7 @@ impl Transact for SparseExpand {
     }
 }
 
-type Reductor = fn(&SparseTensor<SparseSlice>, Txn) -> TCBoxTryFuture<Number>;
+type Reductor = fn(&SparseTensor<SparseAccessorDyn>, Txn) -> TCBoxTryFuture<Number>;
 
 #[derive(Clone)]
 pub struct SparseReduce<T: Clone + SparseAccess> {
@@ -769,9 +769,10 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseReduce<T> {
                 let txn = txn.clone();
                 let source = source.clone();
                 let source_bounds = self.rebase.invert_coord(&coord);
-                Box::pin(
-                    async move { Ok((coord, reductor(&source.slice(source_bounds)?, txn).await?)) },
-                )
+                Box::pin(async move {
+                    let slice = source.slice(source_bounds)?;
+                    Ok((coord, reductor(&slice.into_dyn(), txn).await?))
+                })
             });
 
         let filled: SparseStream = Box::pin(filled);
@@ -846,7 +847,8 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseReduce<T> {
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
         let source_bounds = self.rebase.invert_coord(coord);
         let reductor = self.reductor;
-        reductor(&self.source.slice(source_bounds)?, txn.clone()).await
+        let slice = self.source.slice(source_bounds)?;
+        reductor(&slice.into_dyn(), txn.clone()).await
     }
 
     async fn write_value(&self, _txn_id: TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
@@ -1103,18 +1105,18 @@ impl Transact for SparseSlice {
 }
 
 #[derive(Clone)]
-pub struct SparseTranspose {
-    source: Arc<dyn SparseAccess>,
+pub struct SparseTranspose<T: SparseAccess> {
+    source: Arc<T>,
     rebase: transform::Transpose,
 }
 
-impl SparseTranspose {
-    pub fn new(source: Arc<dyn SparseAccess>, rebase: transform::Transpose) -> Self {
+impl<T: SparseAccess> SparseTranspose<T> {
+    pub fn new(source: Arc<T>, rebase: transform::Transpose) -> Self {
         Self { source, rebase }
     }
 }
 
-impl TensorAccessor for SparseTranspose {
+impl<T: SparseAccess> TensorAccessor for SparseTranspose<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -1133,7 +1135,7 @@ impl TensorAccessor for SparseTranspose {
 }
 
 #[async_trait]
-impl SparseAccess for SparseTranspose {
+impl<T: SparseAccess> SparseAccess for SparseTranspose<T> {
     async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
         let ndim = self.ndim();
         let this = self.clone();
@@ -1198,7 +1200,7 @@ impl SparseAccess for SparseTranspose {
 }
 
 #[async_trait]
-impl Transact for SparseTranspose {
+impl<T: SparseAccess> Transact for SparseTranspose<T> {
     async fn commit(&self, txn_id: &TxnId) {
         self.source.commit(txn_id).await
     }
@@ -1212,8 +1214,8 @@ impl Transact for SparseTranspose {
     }
 }
 
-fn group_axes<'a>(
-    accessor: Arc<dyn SparseAccess>,
+fn group_axes<'a, T: SparseAccess>(
+    accessor: Arc<T>,
     txn: Txn,
     axes: Vec<usize>,
 ) -> TCBoxTryFuture<'a, TCTryStream<Vec<u64>>> {
