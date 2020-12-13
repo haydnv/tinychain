@@ -22,8 +22,7 @@ use super::bounds::{Bounds, Shape};
 use super::dense::{BlockList, BlockListDyn, BlockListFile};
 use super::sparse::SparseTable;
 use super::{
-    DenseTensor, IntoView, SparseTensor, TensorDualIO, TensorIO, TensorTransform,
-    TensorUnary,
+    DenseTensor, IntoView, SparseTensor, TensorDualIO, TensorIO, TensorTransform, TensorUnary,
 };
 
 pub trait TensorAccessor: Send {
