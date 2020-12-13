@@ -19,20 +19,13 @@ use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{Bounds, Shape};
-use super::dense::{BlockList, BlockListDyn, BlockListFile};
-use super::sparse::{SparseAccess, SparseAccessorDyn, SparseTable};
-use super::{
-    DenseTensor, IntoView, SparseTensor, TensorDualIO, TensorIO, TensorTransform, TensorUnary,
-};
+use super::dense::{BlockList, BlockListDyn, BlockListFile, DenseTensor};
+use super::sparse::{SparseAccess, SparseAccessorDyn, SparseTable, SparseTensor};
+use super::{IntoView, TensorAccessor, TensorDualIO, TensorIO, TensorTransform, TensorUnary};
 
-pub trait TensorAccessor: Send {
-    fn dtype(&self) -> NumberType;
-
-    fn ndim(&self) -> usize;
-
-    fn shape(&'_ self) -> &'_ Shape;
-
-    fn size(&self) -> u64;
+pub trait TensorInstance:
+    Clone + Instance + IntoView + TensorIO + TensorTransform + TensorUnary + Send + Sync
+{
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -119,7 +112,7 @@ impl CollectionClass for TensorBaseType {
                 schema.opt_cast_into().unwrap();
             let tensor = self.zeros(txn, dtype, shape).await?;
 
-            let view = TensorView::from(tensor.clone());
+            let view = tensor.clone().into_view();
             let zero = dtype.zero();
             stream::iter(values.into_iter().filter(|(_, value)| value != &zero))
                 .map(|(coord, value)| Ok(view.write_value_at(txn.id().clone(), coord, value)))
@@ -219,11 +212,20 @@ impl CollectionInstance for TensorBase {
     type Slice = TensorView;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        TensorView::from(self.clone()).is_empty(txn).await
+        let txn = txn.clone();
+        let any = match self {
+            Self::Dense(dense) => dense.any(txn).await?,
+            Self::Sparse(sparse) => sparse.any(txn).await?,
+        };
+
+        Ok(!any)
     }
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        TensorView::from(self.clone()).to_stream(txn).await
+        match self {
+            Self::Dense(dense) => dense.clone().into_view().to_stream(txn).await,
+            Self::Sparse(sparse) => sparse.clone().into_view().to_stream(txn).await,
+        }
     }
 }
 
@@ -234,11 +236,9 @@ impl Public for TensorBase {
         request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        selector: Value,
+        key: Value,
     ) -> TCResult<State> {
-        TensorView::from(self.clone())
-            .get(request, txn, path, selector)
-            .await
+        self.clone().into_view().get(request, txn, path, key).await
     }
 
     async fn put(
@@ -246,11 +246,12 @@ impl Public for TensorBase {
         request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        selector: Value,
+        key: Value,
         value: State,
     ) -> TCResult<()> {
-        TensorView::from(self.clone())
-            .put(request, txn, path, selector, value)
+        self.clone()
+            .into_view()
+            .put(request, txn, path, key, value)
             .await
     }
 
@@ -261,7 +262,8 @@ impl Public for TensorBase {
         path: &[PathSegment],
         params: Object,
     ) -> TCResult<State> {
-        TensorView::from(self.clone())
+        self.clone()
+            .into_view()
             .post(request, txn, path, params)
             .await
     }
@@ -271,10 +273,11 @@ impl Public for TensorBase {
         request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        selector: Value,
+        key: Value,
     ) -> TCResult<()> {
-        TensorView::from(self.clone())
-            .delete(request, txn, path, selector)
+        self.clone()
+            .into_view()
+            .delete(request, txn, path, key)
             .await
     }
 }
@@ -333,18 +336,18 @@ impl Transact for TensorBase {
     }
 }
 
-impl From<TensorBase> for Collection {
-    fn from(base: TensorBase) -> Collection {
-        Collection::Base(CollectionBase::Tensor(base))
-    }
-}
-
-impl From<TensorBase> for TensorView {
-    fn from(base: TensorBase) -> TensorView {
-        match base {
+impl IntoView for TensorBase {
+    fn into_view(self) -> TensorView {
+        match self {
             TensorBase::Dense(dense) => dense.into_view(),
             TensorBase::Sparse(sparse) => sparse.into_view(),
         }
+    }
+}
+
+impl From<TensorBase> for Collection {
+    fn from(base: TensorBase) -> Collection {
+        Collection::Base(CollectionBase::Tensor(base))
     }
 }
 
@@ -414,6 +417,8 @@ impl Instance for TensorView {
         }
     }
 }
+
+impl TensorInstance for TensorView {}
 
 #[async_trait]
 impl CollectionInstance for TensorView {
@@ -561,10 +566,10 @@ impl Public for TensorView {
                 self.write_value(txn.id().clone(), bounds, value).await
             }
             State::Collection(Collection::Base(CollectionBase::Tensor(tensor))) => {
-                self.write(txn.clone(), bounds, tensor.into()).await
+                self.write(txn.clone(), bounds, tensor.into_view()).await
             }
             State::Collection(Collection::View(CollectionView::Tensor(tensor))) => {
-                self.write(txn.clone(), bounds, tensor.into()).await
+                self.write(txn.clone(), bounds, tensor.into_view()).await
             }
             other => Err(error::bad_request(
                 "Not a valid Tensor value or slice",
@@ -693,7 +698,7 @@ impl TryFrom<CollectionView> for TensorView {
     fn try_from(view: CollectionView) -> TCResult<TensorView> {
         match view {
             CollectionView::Tensor(tensor) => match tensor {
-                Tensor::Base(tb) => Ok(tb.into()),
+                Tensor::Base(tb) => Ok(tb.into_view()),
                 Tensor::View(tv) => Ok(tv),
             },
             other => Err(error::bad_request("Expected TensorView but found", other)),
@@ -892,6 +897,15 @@ impl Transact for Tensor {
     }
 }
 
+impl IntoView for Tensor {
+    fn into_view(self) -> TensorView {
+        match self {
+            Tensor::Base(base) => base.into_view(),
+            Tensor::View(view) => view,
+        }
+    }
+}
+
 impl From<TensorBase> for Tensor {
     fn from(tb: TensorBase) -> Tensor {
         Tensor::Base(tb)
@@ -909,15 +923,6 @@ impl From<Tensor> for Collection {
         match tensor {
             Tensor::Base(base) => Collection::Base(CollectionBase::Tensor(base)),
             Tensor::View(view) => Collection::View(CollectionView::Tensor(view.into())),
-        }
-    }
-}
-
-impl From<Tensor> for TensorView {
-    fn from(tensor: Tensor) -> TensorView {
-        match tensor {
-            Tensor::Base(base) => base.into(),
-            Tensor::View(view) => view,
         }
     }
 }

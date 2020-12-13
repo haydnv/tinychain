@@ -14,11 +14,12 @@ use num::integer::div_ceil;
 use crate::block::BlockId;
 use crate::block::File;
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
-use crate::collection::tensor::bounds::*;
-use crate::collection::tensor::class::TensorAccessor;
 use crate::error;
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
+
+use super::super::bounds::*;
+use super::super::TensorAccessor;
 
 use super::array::Array;
 use super::BlockList;

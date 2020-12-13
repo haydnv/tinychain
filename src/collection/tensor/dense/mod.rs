@@ -7,18 +7,18 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 use log::debug;
 
-use crate::class::{TCBoxTryFuture, TCResult, TCStream, TCTryStream};
+use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::error;
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
-use super::class::TensorAccessor;
+use super::class::{TensorInstance, TensorType, TensorViewType};
 use super::sparse::{SparseAccess, SparseTensor};
 use super::transform;
 use super::{
-    IntoView, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath, TensorReduce,
-    TensorTransform, TensorUnary, TensorView, ERR_NONBIJECTIVE_WRITE,
+    IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
+    TensorReduce, TensorTransform, TensorUnary, TensorView, ERR_NONBIJECTIVE_WRITE,
 };
 //use super::*;
 
@@ -1245,6 +1245,16 @@ impl<T: Clone + BlockList> DenseTensor<T> {
         Ok(DenseTensor { blocks })
     }
 }
+
+impl<T: Clone + BlockList> Instance for DenseTensor<T> {
+    type Class = TensorType;
+
+    fn class(&self) -> TensorType {
+        TensorType::View(TensorViewType::Dense)
+    }
+}
+
+impl<T: Clone + BlockList> TensorInstance for DenseTensor<T> {}
 
 impl<T: Clone + BlockList> IntoView for DenseTensor<T> {
     fn into_view(self) -> TensorView {

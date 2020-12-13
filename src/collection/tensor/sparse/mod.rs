@@ -16,12 +16,12 @@ use crate::scalar::{label, Bound, Id, Label, Value, ValueType};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
-use super::class::TensorAccessor;
+use super::class::{TensorInstance, TensorType, TensorViewType};
 use super::dense::{dense_constant, from_sparse, BlockList, BlockListFile, DenseTensor};
 use super::transform;
 use super::{
-    broadcast, IntoView, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
-    TensorReduce, TensorTransform, TensorUnary, TensorView, ERR_NONBIJECTIVE_WRITE,
+    broadcast, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
+    TensorMath, TensorReduce, TensorTransform, TensorUnary, TensorView, ERR_NONBIJECTIVE_WRITE,
 };
 
 mod access;
@@ -439,6 +439,16 @@ impl<T: Clone + SparseAccess> SparseTensor<T> {
         })
     }
 }
+
+impl<T: Clone + SparseAccess> Instance for SparseTensor<T> {
+    type Class = TensorType;
+
+    fn class(&self) -> TensorType {
+        TensorType::View(TensorViewType::Sparse)
+    }
+}
+
+impl<T: Clone + SparseAccess> TensorInstance for SparseTensor<T> {}
 
 impl<T: Clone + SparseAccess> IntoView for SparseTensor<T> {
     fn into_view(self) -> TensorView {

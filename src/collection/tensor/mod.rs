@@ -14,10 +14,12 @@ pub mod class;
 pub mod dense;
 pub mod sparse;
 
-pub use class::{Tensor, TensorAccessor, TensorBaseType, TensorType, TensorView};
+pub use bounds::*;
+pub use class::{Tensor, TensorBaseType, TensorType, TensorView};
 pub use dense::{from_sparse, Array, DenseTensor};
 pub use einsum::einsum;
 pub use sparse::{from_dense, SparseTensor};
+use crate::collection::tensor::class::TensorInstance;
 
 pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
@@ -26,9 +28,19 @@ pub trait IntoView {
     fn into_view(self) -> TensorView;
 }
 
+pub trait TensorAccessor: Send {
+    fn dtype(&self) -> NumberType;
+
+    fn ndim(&self) -> usize;
+
+    fn shape(&'_ self) -> &'_ Shape;
+
+    fn size(&self) -> u64;
+}
+
 #[async_trait]
 pub trait TensorBoolean<O>: TensorAccessor + Sized {
-    type Combine: IntoView;
+    type Combine: TensorInstance;
 
     fn and(&self, other: &O) -> TCResult<Self::Combine>;
 
@@ -39,7 +51,7 @@ pub trait TensorBoolean<O>: TensorAccessor + Sized {
 
 #[async_trait]
 pub trait TensorUnary: TensorAccessor + Sized {
-    type Unary: IntoView;
+    type Unary: TensorInstance;
 
     fn abs(&self) -> TCResult<Self::Unary>;
 
@@ -52,8 +64,8 @@ pub trait TensorUnary: TensorAccessor + Sized {
 
 #[async_trait]
 pub trait TensorCompare<O>: TensorAccessor + Sized {
-    type Compare: IntoView;
-    type Dense: IntoView;
+    type Compare: TensorInstance;
+    type Dense: TensorInstance;
 
     async fn eq(&self, other: &O, txn: Txn) -> TCResult<Self::Dense>;
 
@@ -90,7 +102,7 @@ pub trait TensorDualIO<O>: TensorAccessor + Sized {
 }
 
 pub trait TensorMath<O>: TensorAccessor + Sized {
-    type Combine: IntoView;
+    type Combine: TensorInstance;
 
     fn add(&self, other: &O) -> TCResult<Self::Combine>;
 
@@ -98,7 +110,7 @@ pub trait TensorMath<O>: TensorAccessor + Sized {
 }
 
 pub trait TensorReduce: TensorAccessor + Sized {
-    type Reduce: IntoView;
+    type Reduce: TensorInstance;
 
     fn product(&self, axis: usize) -> TCResult<Self::Reduce>;
 
@@ -110,12 +122,12 @@ pub trait TensorReduce: TensorAccessor + Sized {
 }
 
 pub trait TensorTransform: TensorAccessor + Sized {
-    type Cast: IntoView;
-    type Broadcast: IntoView;
-    type Expand: IntoView;
-    type Slice: IntoView;
-    type Reshape: IntoView;
-    type Transpose: IntoView;
+    type Cast: TensorInstance;
+    type Broadcast: TensorInstance;
+    type Expand: TensorInstance;
+    type Slice: TensorInstance;
+    type Reshape: TensorInstance;
+    type Transpose: TensorInstance;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast>;
 

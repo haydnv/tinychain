@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::class::TCResult;
 use crate::error;
 
-use super::class::TensorAccessor;
-use super::{IntoView, TensorMath, TensorReduce, TensorTransform};
+use super::class::TensorInstance;
+use super::{TensorAccessor, TensorMath, TensorReduce, TensorTransform};
 
 const VALID_LABELS: [char; 52] = [
     'a', 'A', 'b', 'B', 'c', 'C', 'd', 'D', 'e', 'E', 'f', 'F', 'g', 'G', 'h', 'H', 'i', 'I', 'j',
@@ -92,7 +92,7 @@ fn validate_args<T: TensorAccessor>(
     Ok(dimensions)
 }
 
-fn normalize<T: Clone + IntoView + TensorTransform<Expand = T, Transpose = T>>(
+fn normalize<T: TensorInstance + TensorTransform<Expand = T, Transpose = T>>(
     tensor: &T,
     f_input: &[char],
     f_output: &[char],
@@ -130,7 +130,7 @@ fn normalize<T: Clone + IntoView + TensorTransform<Expand = T, Transpose = T>>(
 }
 
 fn outer_product<
-    T: Clone + IntoView + TensorMath<T, Combine = T> + TensorTransform<Expand = T, Transpose = T>,
+    T: TensorInstance + TensorMath<T, Combine = T> + TensorTransform<Expand = T, Transpose = T>,
 >(
     f_inputs: &[Vec<char>],
     dimensions: &BTreeMap<char, u64>,
@@ -155,7 +155,7 @@ fn outer_product<
     Ok(op)
 }
 
-fn contract<T: IntoView + TensorReduce<Reduce = T> + TensorTransform<Transpose = T>>(
+fn contract<T: TensorInstance + TensorReduce<Reduce = T> + TensorTransform<Transpose = T>>(
     mut op: T,
     dimensions: BTreeMap<char, u64>,
     f_output: Vec<char>,
@@ -183,8 +183,7 @@ fn contract<T: IntoView + TensorReduce<Reduce = T> + TensorTransform<Transpose =
 }
 
 pub fn einsum<
-    T: Clone
-        + IntoView
+    T: TensorInstance
         + TensorMath<T, Combine = T>
         + TensorTransform<Expand = T, Transpose = T>
         + TensorReduce<Reduce = T>,
