@@ -4,7 +4,7 @@ use crate::class::TCResult;
 use crate::error;
 
 use super::class::TensorAccessor;
-use super::{TensorMath, TensorReduce, TensorTransform};
+use super::{IntoView, TensorMath, TensorReduce, TensorTransform};
 
 const VALID_LABELS: [char; 52] = [
     'a', 'A', 'b', 'B', 'c', 'C', 'd', 'D', 'e', 'E', 'f', 'F', 'g', 'G', 'h', 'H', 'i', 'I', 'j',
@@ -92,7 +92,7 @@ fn validate_args<T: TensorAccessor>(
     Ok(dimensions)
 }
 
-fn normalize<T: Clone + TensorTransform>(
+fn normalize<T: Clone + IntoView + TensorTransform<Expand = T, Transpose = T>>(
     tensor: &T,
     f_input: &[char],
     f_output: &[char],
@@ -129,12 +129,14 @@ fn normalize<T: Clone + TensorTransform>(
     Ok(tensor)
 }
 
-fn outer_product<T: Clone + TensorMath + TensorTransform>(
+fn outer_product<
+    T: Clone + IntoView + TensorMath<T, Combine = T> + TensorTransform<Expand = T, Transpose = T>,
+>(
     f_inputs: &[Vec<char>],
     dimensions: &BTreeMap<char, u64>,
     tensors: Vec<T>,
 ) -> TCResult<T> {
-    assert!(f_inputs.len() == tensors.len());
+    assert_eq!(f_inputs.len(), tensors.len());
     assert!(!tensors.is_empty());
 
     let f_output: Vec<char> = dimensions.keys().cloned().collect();
@@ -153,7 +155,7 @@ fn outer_product<T: Clone + TensorMath + TensorTransform>(
     Ok(op)
 }
 
-fn contract<T: TensorReduce + TensorTransform>(
+fn contract<T: IntoView + TensorReduce<Reduce = T> + TensorTransform<Transpose = T>>(
     mut op: T,
     dimensions: BTreeMap<char, u64>,
     f_output: Vec<char>,
@@ -161,7 +163,7 @@ fn contract<T: TensorReduce + TensorTransform>(
     let mut f_input: Vec<char> = dimensions.keys().cloned().collect();
     let mut axis = 0;
     while op.ndim() > f_output.len() {
-        assert!(f_input.len() == op.ndim());
+        assert_eq!(f_input.len(), op.ndim());
 
         if !f_output.contains(&f_input[axis]) {
             op = op.sum(axis)?;
@@ -180,7 +182,13 @@ fn contract<T: TensorReduce + TensorTransform>(
     }
 }
 
-pub fn einsum<T: Clone + TensorMath + TensorTransform + TensorReduce>(
+pub fn einsum<
+    T: Clone
+        + IntoView
+        + TensorMath<T, Combine = T>
+        + TensorTransform<Expand = T, Transpose = T>
+        + TensorReduce<Reduce = T>,
+>(
     format: &str,
     tensors: Vec<T>,
 ) -> TCResult<T> {
@@ -188,7 +196,10 @@ pub fn einsum<T: Clone + TensorMath + TensorTransform + TensorReduce>(
     let dimensions = validate_args(&f_inputs, &tensors)?;
 
     let op = outer_product(&f_inputs, &dimensions, tensors)?;
-    assert!(op.shape().to_vec() == dimensions.values().cloned().collect::<Vec<u64>>());
+    assert_eq!(
+        op.shape().to_vec(),
+        dimensions.values().cloned().collect::<Vec<u64>>()
+    );
 
     contract(op, dimensions, f_output)
 }

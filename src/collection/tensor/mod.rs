@@ -13,50 +13,61 @@ pub mod class;
 pub mod dense;
 pub mod sparse;
 
-pub use class::{Tensor, TensorBaseType, TensorAccessor, TensorType, TensorView};
+pub use class::{Tensor, TensorAccessor, TensorBaseType, TensorType, TensorView};
 pub use dense::{Array, DenseTensor};
+pub use einsum::einsum;
 pub use sparse::SparseTensor;
 
 pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
 
+pub trait IntoView {
+    fn into_view(self) -> TensorView;
+}
+
 #[async_trait]
-pub trait TensorBoolean: TensorAccessor + Sized {
+pub trait TensorBoolean<O>: TensorAccessor + Sized {
+    type Unary: IntoView;
+    type Combine: IntoView;
+
     async fn all(&self, txn: Txn) -> TCResult<bool>;
 
     async fn any(&self, txn: Txn) -> TCResult<bool>;
 
-    fn and(&self, other: &Self) -> TCResult<Self>;
+    fn and(&self, other: &O) -> TCResult<Self::Combine>;
 
-    fn not(&self) -> TCResult<Self>;
+    fn not(&self) -> TCResult<Self::Unary>;
 
-    fn or(&self, other: &Self) -> TCResult<Self>;
+    fn or(&self, other: &O) -> TCResult<Self::Combine>;
 
-    fn xor(&self, other: &Self) -> TCResult<Self>;
+    fn xor(&self, other: &O) -> TCResult<Self::Combine>;
 }
 
 #[async_trait]
-pub trait TensorCompare: TensorAccessor + Sized {
-    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor>;
+pub trait TensorCompare<O>: TensorAccessor + Sized {
+    type Compare: IntoView;
+    type Dense: IntoView;
 
-    fn gt(&self, other: &Self) -> TCResult<Self>;
+    async fn eq(&self, other: &O, txn: Txn) -> TCResult<Self::Dense>;
 
-    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor>;
+    fn gt(&self, other: &O) -> TCResult<Self::Compare>;
 
-    fn lt(&self, other: &Self) -> TCResult<Self>;
+    async fn gte(&self, other: &O, txn: Txn) -> TCResult<Self::Dense>;
 
-    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor>;
+    fn lt(&self, other: &O) -> TCResult<Self::Compare>;
 
-    fn ne(&self, other: &Self) -> TCResult<Self>;
+    async fn lte(&self, other: &O, txn: Txn) -> TCResult<Self::Dense>;
+
+    fn ne(&self, other: &O) -> TCResult<Self::Compare>;
 }
 
 #[async_trait]
-pub trait TensorIO: TensorAccessor + Sized {
-    async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()>;
+pub trait TensorIO<O>: TensorAccessor + Sized {
+    async fn mask(&self, txn: &Txn, other: O) -> TCResult<()>;
 
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number>;
 
-    async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: Self) -> TCResult<()>;
+    async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: O) -> TCResult<()>;
 
     async fn write_value(
         &self,
@@ -68,40 +79,55 @@ pub trait TensorIO: TensorAccessor + Sized {
     async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
 }
 
-pub trait TensorMath: TensorAccessor + Sized {
-    fn abs(&self) -> TCResult<Self>;
+pub trait TensorMath<O>: TensorAccessor + Sized {
+    type Unary: IntoView;
+    type Combine: IntoView;
 
-    fn add(&self, other: &Self) -> TCResult<Self>;
+    fn abs(&self) -> TCResult<Self::Unary>;
 
-    fn multiply(&self, other: &Self) -> TCResult<Self>;
+    fn add(&self, other: &O) -> TCResult<Self::Combine>;
+
+    fn multiply(&self, other: &O) -> TCResult<Self::Combine>;
 }
 
 pub trait TensorReduce: TensorAccessor + Sized {
-    fn product(&self, axis: usize) -> TCResult<Self>;
+    type Reduce: IntoView;
+
+    fn product(&self, axis: usize) -> TCResult<Self::Reduce>;
 
     fn product_all(&self, txn: Txn) -> TCBoxTryFuture<Number>;
 
-    fn sum(&self, axis: usize) -> TCResult<Self>;
+    fn sum(&self, axis: usize) -> TCResult<Self::Reduce>;
 
     fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number>;
 }
 
 pub trait TensorTransform: TensorAccessor + Sized {
-    fn as_type(&self, dtype: NumberType) -> TCResult<Self>;
+    type Cast: IntoView;
+    type Broadcast: IntoView;
+    type Expand: IntoView;
+    type Slice: IntoView;
+    type Reshape: IntoView;
+    type Transpose: IntoView;
 
-    fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self>;
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast>;
 
-    fn expand_dims(&self, axis: usize) -> TCResult<Self>;
+    fn broadcast(&self, shape: bounds::Shape) -> TCResult<Self::Broadcast>;
 
-    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self>;
+    fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand>;
 
-    fn reshape(&self, shape: bounds::Shape) -> TCResult<Self>;
+    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self::Slice>;
 
-    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self>;
+    fn reshape(&self, shape: bounds::Shape) -> TCResult<Self::Reshape>;
+
+    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 }
 
 #[async_trait]
-impl TensorBoolean for TensorView {
+impl TensorBoolean<TensorView> for TensorView {
+    type Unary = TensorView;
+    type Combine = TensorView;
+
     async fn all(&self, txn: Txn) -> TCResult<bool> {
         match self {
             Self::Dense(dense) => dense.all(txn).await,
@@ -160,9 +186,12 @@ impl TensorBoolean for TensorView {
 }
 
 #[async_trait]
-impl TensorCompare for TensorView {
-    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
-        match (self, other) {
+impl TensorCompare<TensorView> for TensorView {
+    type Compare = Self;
+    type Dense = Self;
+
+    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<Self> {
+        let eq = match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.eq(right, txn).await,
             (Self::Sparse(left), Self::Sparse(right)) => left.eq(right, txn).await,
             (Self::Dense(left), Self::Sparse(right)) => {
@@ -171,7 +200,9 @@ impl TensorCompare for TensorView {
             (Self::Sparse(left), Self::Dense(right)) => {
                 DenseTensor::from_sparse(left.clone()).eq(right, txn).await
             }
-        }
+        };
+
+        eq.map(Self::from)
     }
 
     fn gt(&self, other: &Self) -> TCResult<Self> {
@@ -187,8 +218,8 @@ impl TensorCompare for TensorView {
         }
     }
 
-    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
-        match (self, other) {
+    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<Self> {
+        let gte = match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.gte(right, txn).await,
             (Self::Sparse(left), Self::Sparse(right)) => left.gte(right, txn).await,
             (Self::Dense(left), Self::Sparse(right)) => {
@@ -198,7 +229,9 @@ impl TensorCompare for TensorView {
             (Self::Sparse(left), Self::Dense(right)) => {
                 DenseTensor::from_sparse(left.clone()).gte(right, txn).await
             }
-        }
+        };
+
+        gte.map(Self::from)
     }
 
     fn lt(&self, other: &Self) -> TCResult<Self> {
@@ -214,8 +247,8 @@ impl TensorCompare for TensorView {
         }
     }
 
-    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
-        match (self, other) {
+    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<Self> {
+        let lte = match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.lte(right, txn).await,
             (Self::Sparse(left), Self::Sparse(right)) => left.lte(right, txn).await,
             (Self::Dense(left), Self::Sparse(right)) => {
@@ -225,7 +258,9 @@ impl TensorCompare for TensorView {
             (Self::Sparse(left), Self::Dense(right)) => {
                 DenseTensor::from_sparse(left.clone()).lte(right, txn).await
             }
-        }
+        };
+
+        lte.map(Self::from)
     }
 
     fn ne(&self, other: &Self) -> TCResult<Self> {
@@ -243,7 +278,7 @@ impl TensorCompare for TensorView {
 }
 
 #[async_trait]
-impl TensorIO for TensorView {
+impl TensorIO<TensorView> for TensorView {
     async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()> {
         match (self, &other) {
             (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()).await,
@@ -303,7 +338,10 @@ impl TensorIO for TensorView {
     }
 }
 
-impl TensorMath for TensorView {
+impl TensorMath<TensorView> for TensorView {
+    type Unary = Self;
+    type Combine = Self;
+
     fn abs(&self) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.abs().map(Self::from),
@@ -339,7 +377,9 @@ impl TensorMath for TensorView {
 }
 
 impl TensorReduce for TensorView {
-    fn product(&self, axis: usize) -> TCResult<Self> {
+    type Reduce = Self;
+
+    fn product(&self, axis: usize) -> TCResult<Self::Reduce> {
         match self {
             Self::Dense(dense) => dense.product(axis).map(Self::from),
             Self::Sparse(sparse) => sparse.product(axis).map(Self::from),
@@ -353,7 +393,7 @@ impl TensorReduce for TensorView {
         }
     }
 
-    fn sum(&self, axis: usize) -> TCResult<Self> {
+    fn sum(&self, axis: usize) -> TCResult<Self::Reduce> {
         match self {
             Self::Dense(dense) => dense.product(axis).map(Self::from),
             Self::Sparse(sparse) => sparse.product(axis).map(Self::from),
@@ -369,6 +409,13 @@ impl TensorReduce for TensorView {
 }
 
 impl TensorTransform for TensorView {
+    type Cast = Self;
+    type Broadcast = Self;
+    type Expand = Self;
+    type Slice = Self;
+    type Reshape = Self;
+    type Transpose = Self;
+
     fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.as_type(dtype).map(Self::from),
@@ -412,21 +459,13 @@ impl TensorTransform for TensorView {
     }
 }
 
-pub fn einsum<T: Clone + TensorAccessor + TensorMath + TensorReduce + TensorTransform>(
-    format: &str,
-    tensors: Vec<T>,
-) -> TCResult<T> {
-    einsum::einsum(format, tensors)
-}
-
 fn broadcast<L: Clone + TensorTransform, R: Clone + TensorTransform>(
     left: &L,
     right: &R,
-) -> TCResult<(L, R)> {
-    if left.shape() == right.shape() {
-        return Ok((left.clone(), right.clone()));
-    }
-
+) -> TCResult<(
+    <L as TensorTransform>::Broadcast,
+    <R as TensorTransform>::Broadcast,
+)> {
     let mut left_shape = left.shape().to_vec();
     let mut right_shape = right.shape().to_vec();
 

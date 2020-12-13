@@ -1127,22 +1127,31 @@ impl DenseTensor {
 
     fn combine(
         &self,
-        other: &Self,
+        other: &DenseTensor,
         combinator: fn(&Array, &Array) -> Array,
         value_combinator: fn(Number, Number) -> Number,
         dtype: NumberType,
-    ) -> TCResult<Self> {
-        let (this, that) = broadcast(self, other)?;
+    ) -> TCResult<DenseTensor> {
+        if self.shape() != other.shape() {
+            let (this, that) = broadcast(self, other)?;
+            return this.combine(&that, combinator, value_combinator, dtype);
+        }
 
         let blocks = Arc::new(BlockListCombine::new(
-            this.blocks.clone(),
-            that.blocks.clone(),
+            self.blocks.clone(),
+            other.blocks.clone(),
             combinator,
             value_combinator,
             dtype,
         )?);
 
         Ok(DenseTensor { blocks })
+    }
+}
+
+impl IntoView for DenseTensor {
+    fn into_view(self) -> TensorView {
+        TensorView::Dense(self)
     }
 }
 
@@ -1165,7 +1174,10 @@ impl TensorAccessor for DenseTensor {
 }
 
 #[async_trait]
-impl TensorBoolean for DenseTensor {
+impl TensorBoolean<DenseTensor> for DenseTensor {
+    type Unary = DenseTensor;
+    type Combine = DenseTensor;
+
     async fn all(&self, txn: Txn) -> TCResult<bool> {
         let mut blocks = self.blocks.clone().block_stream(txn).await?;
 
@@ -1189,11 +1201,11 @@ impl TensorBoolean for DenseTensor {
         Ok(false)
     }
 
-    fn and(&self, other: &Self) -> TCResult<Self> {
+    fn and(&self, other: &DenseTensor) -> TCResult<Self::Combine> {
         self.combine(other, Array::and, Number::and, NumberType::Bool)
     }
 
-    fn not(&self) -> TCResult<Self> {
+    fn not(&self) -> TCResult<Self::Unary> {
         let blocks = Arc::new(BlockListUnary {
             source: self.blocks.clone(),
             transform: Array::not,
@@ -1204,18 +1216,21 @@ impl TensorBoolean for DenseTensor {
         Ok(DenseTensor { blocks })
     }
 
-    fn or(&self, other: &Self) -> TCResult<Self> {
+    fn or(&self, other: &DenseTensor) -> TCResult<Self::Combine> {
         self.combine(other, Array::or, Number::or, NumberType::Bool)
     }
 
-    fn xor(&self, other: &Self) -> TCResult<Self> {
+    fn xor(&self, other: &DenseTensor) -> TCResult<Self::Combine> {
         self.combine(other, Array::xor, Number::xor, NumberType::Bool)
     }
 }
 
 #[async_trait]
-impl TensorCompare for DenseTensor {
-    async fn eq(&self, other: &Self, _txn: Txn) -> TCResult<DenseTensor> {
+impl TensorCompare<DenseTensor> for DenseTensor {
+    type Compare = DenseTensor;
+    type Dense = DenseTensor;
+
+    async fn eq(&self, other: &Self, _txn: Txn) -> TCResult<Self::Dense> {
         self.combine(
             other,
             Array::eq,
@@ -1224,7 +1239,7 @@ impl TensorCompare for DenseTensor {
         )
     }
 
-    fn gt(&self, other: &Self) -> TCResult<Self> {
+    fn gt(&self, other: &Self) -> TCResult<Self::Compare> {
         self.combine(
             other,
             Array::gt,
@@ -1233,45 +1248,48 @@ impl TensorCompare for DenseTensor {
         )
     }
 
-    async fn gte(&self, other: &Self, _txn: Txn) -> TCResult<DenseTensor> {
+    async fn gte(&self, other: &Self, _txn: Txn) -> TCResult<Self::Dense> {
         self.combine(
             other,
-            Array::eq,
+            Array::gte,
             <Number as NumberInstance>::gte,
             NumberType::Bool,
         )
     }
 
-    fn lt(&self, other: &Self) -> TCResult<Self> {
+    fn lt(&self, other: &Self) -> TCResult<Self::Compare> {
         self.combine(
             other,
-            Array::eq,
+            Array::lt,
             <Number as NumberInstance>::lt,
             NumberType::Bool,
         )
     }
 
-    async fn lte(&self, other: &Self, _txn: Txn) -> TCResult<DenseTensor> {
+    async fn lte(&self, other: &Self, _txn: Txn) -> TCResult<Self::Dense> {
         self.combine(
             other,
-            Array::eq,
+            Array::lte,
             <Number as NumberInstance>::lte,
             NumberType::Bool,
         )
     }
 
-    fn ne(&self, other: &Self) -> TCResult<Self> {
+    fn ne(&self, other: &Self) -> TCResult<Self::Compare> {
         self.combine(
             other,
-            Array::eq,
+            Array::eq, // TODO: implement Array:ne!
             <Number as NumberInstance>::ne,
             NumberType::Bool,
         )
     }
 }
 
-impl TensorMath for DenseTensor {
-    fn abs(&self) -> TCResult<Self> {
+impl TensorMath<DenseTensor> for DenseTensor {
+    type Unary = DenseTensor;
+    type Combine = DenseTensor;
+
+    fn abs(&self) -> TCResult<Self::Unary> {
         let is_abs = match self.dtype() {
             NumberType::Bool => true,
             NumberType::UInt(_) => true,
@@ -1292,12 +1310,12 @@ impl TensorMath for DenseTensor {
         Ok(DenseTensor { blocks })
     }
 
-    fn add(&self, other: &Self) -> TCResult<Self> {
+    fn add(&self, other: &Self) -> TCResult<Self::Combine> {
         let dtype = Ord::max(self.dtype(), other.dtype());
         self.combine(other, Array::add, <Number as NumberInstance>::add, dtype)
     }
 
-    fn multiply(&self, other: &Self) -> TCResult<Self> {
+    fn multiply(&self, other: &Self) -> TCResult<Self::Combine> {
         let dtype = Ord::max(self.dtype(), other.dtype());
         self.combine(
             other,
@@ -1309,8 +1327,8 @@ impl TensorMath for DenseTensor {
 }
 
 #[async_trait]
-impl TensorIO for DenseTensor {
-    async fn mask(&self, _txn: &Txn, _other: Self) -> TCResult<()> {
+impl TensorIO<DenseTensor> for DenseTensor {
+    async fn mask(&self, _txn: &Txn, _other: DenseTensor) -> TCResult<()> {
         Err(error::not_implemented("DenseTensor::mask"))
     }
 
@@ -1318,7 +1336,7 @@ impl TensorIO for DenseTensor {
         self.blocks.read_value_at(txn, coord).await
     }
 
-    async fn write(&self, txn: Txn, bounds: Bounds, other: Self) -> TCResult<()> {
+    async fn write(&self, txn: Txn, bounds: Bounds, other: DenseTensor) -> TCResult<()> {
         let slice = self.slice(bounds)?;
         let other = other
             .broadcast(slice.shape().clone())?
@@ -1351,7 +1369,9 @@ impl TensorIO for DenseTensor {
 }
 
 impl TensorReduce for DenseTensor {
-    fn product(&self, _axis: usize) -> TCResult<Self> {
+    type Reduce = DenseTensor;
+
+    fn product(&self, _axis: usize) -> TCResult<Self::Reduce> {
         Err(error::not_implemented("DenseTensor::product"))
     }
 
@@ -1369,7 +1389,7 @@ impl TensorReduce for DenseTensor {
         })
     }
 
-    fn sum(&self, _axis: usize) -> TCResult<Self> {
+    fn sum(&self, _axis: usize) -> TCResult<Self::Reduce> {
         Err(error::not_implemented("DenseTensor::sum"))
     }
 
@@ -1389,7 +1409,14 @@ impl TensorReduce for DenseTensor {
 }
 
 impl TensorTransform for DenseTensor {
-    fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
+    type Cast = DenseTensor;
+    type Broadcast = DenseTensor;
+    type Expand = DenseTensor;
+    type Slice = DenseTensor;
+    type Reshape = DenseTensor;
+    type Transpose = DenseTensor;
+
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
         if dtype == self.dtype() {
             return Ok(self.clone());
         }
@@ -1402,7 +1429,7 @@ impl TensorTransform for DenseTensor {
         Ok(DenseTensor { blocks })
     }
 
-    fn broadcast(&self, shape: Shape) -> TCResult<Self> {
+    fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast> {
         if &shape == self.shape() {
             return Ok(self.clone());
         }
@@ -1416,7 +1443,7 @@ impl TensorTransform for DenseTensor {
         Ok(DenseTensor { blocks })
     }
 
-    fn expand_dims(&self, axis: usize) -> TCResult<Self> {
+    fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand> {
         let rebase = transform::Expand::new(self.shape().clone(), axis)?;
         let blocks = Arc::new(BlockListExpand {
             source: self.blocks.clone(),
@@ -1426,7 +1453,7 @@ impl TensorTransform for DenseTensor {
         Ok(DenseTensor { blocks })
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Self> {
+    fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
         if bounds == Bounds::all(self.shape()) {
             return Ok(self.clone());
         }
@@ -1440,7 +1467,7 @@ impl TensorTransform for DenseTensor {
         Ok(DenseTensor { blocks })
     }
 
-    fn reshape(&self, shape: Shape) -> TCResult<Self> {
+    fn reshape(&self, shape: Shape) -> TCResult<Self::Reshape> {
         if &shape == self.shape() {
             return Ok(self.clone());
         }
@@ -1454,7 +1481,7 @@ impl TensorTransform for DenseTensor {
         Ok(DenseTensor { blocks })
     }
 
-    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         if permutation == Some((0..self.ndim()).collect()) {
             return Ok(self.clone());
         }

@@ -20,7 +20,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 use super::bounds::{Bounds, Shape};
 use super::dense::BlockListFile;
 use super::sparse::SparseTable;
-use super::{DenseTensor, SparseTensor, TensorBoolean, TensorIO, TensorTransform};
+use super::{DenseTensor, IntoView, SparseTensor, TensorBoolean, TensorIO, TensorTransform};
 
 pub trait TensorAccessor: Send {
     fn dtype(&self) -> NumberType;
@@ -387,6 +387,12 @@ impl fmt::Display for TensorViewType {
 pub enum TensorView {
     Dense(DenseTensor),
     Sparse(SparseTensor),
+}
+
+impl IntoView for TensorView {
+    fn into_view(self) -> Self {
+        self
+    }
 }
 
 impl Instance for TensorView {

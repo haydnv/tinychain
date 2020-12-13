@@ -1431,15 +1431,18 @@ impl SparseTensor {
 
     fn combine(
         &self,
-        other: &Self,
+        other: &SparseTensor,
         combinator: fn(Number, Number) -> Number,
         dtype: NumberType,
-    ) -> TCResult<Self> {
-        let (this, that) = broadcast(self, other)?;
+    ) -> TCResult<SparseTensor> {
+        if self.shape() != other.shape() {
+            let (this, that) = broadcast(self, other)?;
+            return this.combine(&that, combinator, dtype);
+        }
 
         let accessor = SparseCombinator::new(
-            this.accessor.clone(),
-            that.accessor.clone(),
+            self.accessor.clone(),
+            other.accessor.clone(),
             combinator,
             dtype,
         )
@@ -1448,35 +1451,45 @@ impl SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    async fn condense(
-        &self,
-        other: &Self,
+    fn condense<'a>(
+        &'a self,
+        other: &'a SparseTensor,
         txn: Txn,
         default: Number,
         condensor: fn(Number, Number) -> Number,
-    ) -> TCResult<DenseTensor> {
-        let (this, that) = broadcast(self, other)?;
+    ) -> TCBoxTryFuture<'a, DenseTensor> {
+        Box::pin(async move {
+            if self.shape() != other.shape() {
+                let (this, that) = broadcast(self, other)?;
+                return this.condense(&that, txn, default, condensor).await;
+            }
 
-        let accessor = SparseCombinator::new(
-            this.accessor.clone(),
-            that.accessor.clone(),
-            condensor,
-            default.class(),
-        )
-        .map(Arc::new)?;
+            let accessor = SparseCombinator::new(
+                self.accessor.clone(),
+                other.accessor.clone(),
+                condensor,
+                default.class(),
+            ).map(Arc::new)?;
 
-        let condensed = DenseTensor::constant(&txn, this.shape().clone(), default).await?;
+            let condensed = DenseTensor::constant(&txn, self.shape().clone(), default).await?;
 
-        let txn_id = txn.id().clone();
-        accessor
-            .filled(txn)
-            .await?
-            .map_ok(|(coord, value)| condensed.write_value_at(txn_id, coord, value))
-            .try_buffer_unordered(2)
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await?;
+            let txn_id = *txn.id();
+            accessor
+                .filled(txn)
+                .await?
+                .map_ok(|(coord, value)| condensed.write_value_at(txn_id, coord, value))
+                .try_buffer_unordered(2)
+                .try_fold((), |_, _| future::ready(Ok(())))
+                .await?;
 
-        Ok(condensed)
+            Ok(condensed)
+        })
+    }
+}
+
+impl IntoView for SparseTensor {
+    fn into_view(self) -> TensorView {
+        TensorView::Sparse(self)
     }
 }
 
@@ -1499,7 +1512,10 @@ impl TensorAccessor for SparseTensor {
 }
 
 #[async_trait]
-impl TensorBoolean for SparseTensor {
+impl TensorBoolean<SparseTensor> for SparseTensor {
+    type Unary = SparseTensor;
+    type Combine = SparseTensor;
+
     async fn all(&self, txn: Txn) -> TCResult<bool> {
         let mut coords = self
             .accessor
@@ -1525,57 +1541,60 @@ impl TensorBoolean for SparseTensor {
         Ok(filled.next().await.is_some())
     }
 
-    fn and(&self, other: &Self) -> TCResult<Self> {
+    fn and(&self, other: &SparseTensor) -> TCResult<Self::Combine> {
         // TODO: use a custom method for this, to only iterate over self.filled (not other.filled)
         self.combine(other, Number::and, NumberType::Bool)
     }
 
-    fn not(&self) -> TCResult<Self> {
+    fn not(&self) -> TCResult<Self::Unary> {
         Err(error::unsupported(ERR_NOT_SPARSE))
     }
 
-    fn or(&self, other: &Self) -> TCResult<Self> {
+    fn or(&self, other: &SparseTensor) -> TCResult<Self::Combine> {
         self.combine(other, Number::or, NumberType::Bool)
     }
 
-    fn xor(&self, _other: &Self) -> TCResult<Self> {
+    fn xor(&self, _other: &SparseTensor) -> TCResult<Self::Combine> {
         Err(error::unsupported(ERR_NOT_SPARSE))
     }
 }
 
 #[async_trait]
-impl TensorCompare for SparseTensor {
-    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
+impl TensorCompare<SparseTensor> for SparseTensor {
+    type Compare = SparseTensor;
+    type Dense = DenseTensor;
+
+    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<Self::Dense> {
         self.condense(other, txn, true.into(), <Number as NumberInstance>::eq)
             .await
     }
 
-    fn gt(&self, other: &Self) -> TCResult<Self> {
+    fn gt(&self, other: &Self) -> TCResult<Self::Compare> {
         self.combine(other, <Number as NumberInstance>::gt, NumberType::Bool)
     }
 
-    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
+    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<Self::Dense> {
         self.condense(other, txn, true.into(), <Number as NumberInstance>::gte)
             .await
     }
 
-    fn lt(&self, other: &Self) -> TCResult<Self> {
+    fn lt(&self, other: &Self) -> TCResult<Self::Compare> {
         self.combine(other, <Number as NumberInstance>::lt, NumberType::Bool)
     }
 
-    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<DenseTensor> {
+    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<Self::Dense> {
         self.condense(other, txn, true.into(), <Number as NumberInstance>::lte)
             .await
     }
 
-    fn ne(&self, other: &Self) -> TCResult<Self> {
+    fn ne(&self, other: &Self) -> TCResult<Self::Compare> {
         self.combine(other, <Number as NumberInstance>::ne, NumberType::Bool)
     }
 }
 
 #[async_trait]
-impl TensorIO for SparseTensor {
-    async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()> {
+impl TensorIO<SparseTensor> for SparseTensor {
+    async fn mask(&self, txn: &Txn, other: SparseTensor) -> TCResult<()> {
         let zero = self.dtype().zero();
         let txn_id = txn.id().clone();
         other
@@ -1591,7 +1610,7 @@ impl TensorIO for SparseTensor {
         self.accessor.read_value(txn, coord).await
     }
 
-    async fn write(&self, txn: Txn, bounds: Bounds, other: Self) -> TCResult<()> {
+    async fn write(&self, txn: Txn, bounds: Bounds, other: SparseTensor) -> TCResult<()> {
         let slice = self.slice(bounds)?;
         let other = other
             .broadcast(slice.shape().clone())?
@@ -1624,8 +1643,11 @@ impl TensorIO for SparseTensor {
     }
 }
 
-impl TensorMath for SparseTensor {
-    fn abs(&self) -> TCResult<Self> {
+impl TensorMath<SparseTensor> for SparseTensor {
+    type Unary = SparseTensor;
+    type Combine = SparseTensor;
+
+    fn abs(&self) -> TCResult<Self::Unary> {
         let is_abs = match self.dtype() {
             NumberType::Bool => true,
             NumberType::UInt(_) => true,
@@ -1645,19 +1667,21 @@ impl TensorMath for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    fn add(&self, other: &Self) -> TCResult<Self> {
+    fn add(&self, other: &Self) -> TCResult<Self::Combine> {
         let dtype = Ord::max(self.dtype(), other.dtype());
         self.combine(other, <Number as NumberInstance>::add, dtype)
     }
 
-    fn multiply(&self, other: &Self) -> TCResult<Self> {
+    fn multiply(&self, other: &Self) -> TCResult<Self::Combine> {
         let dtype = Ord::max(self.dtype(), other.dtype());
         self.combine(other, <Number as NumberInstance>::multiply, dtype)
     }
 }
 
 impl TensorReduce for SparseTensor {
-    fn product(&self, axis: usize) -> TCResult<Self> {
+    type Reduce = SparseTensor;
+
+    fn product(&self, axis: usize) -> TCResult<Self::Reduce> {
         let accessor = SparseReduce::new(self.clone(), axis, Self::product_all).map(Arc::new)?;
         Ok(SparseTensor { accessor })
     }
@@ -1674,7 +1698,7 @@ impl TensorReduce for SparseTensor {
         })
     }
 
-    fn sum(&self, axis: usize) -> TCResult<Self> {
+    fn sum(&self, axis: usize) -> TCResult<Self::Reduce> {
         let accessor = SparseReduce::new(self.clone(), axis, Self::sum_all).map(Arc::new)?;
         Ok(SparseTensor { accessor })
     }
@@ -1691,7 +1715,14 @@ impl TensorReduce for SparseTensor {
 }
 
 impl TensorTransform for SparseTensor {
-    fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
+    type Cast = SparseTensor;
+    type Broadcast = SparseTensor;
+    type Expand = SparseTensor;
+    type Slice = SparseTensor;
+    type Reshape = SparseTensor;
+    type Transpose = SparseTensor;
+
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
         if dtype == self.dtype() {
             return Ok(self.clone());
         }
@@ -1702,7 +1733,7 @@ impl TensorTransform for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    fn broadcast(&self, shape: Shape) -> TCResult<Self> {
+    fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast> {
         if &shape == self.shape() {
             return Ok(self.clone());
         }
@@ -1716,7 +1747,7 @@ impl TensorTransform for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    fn expand_dims(&self, axis: usize) -> TCResult<Self> {
+    fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand> {
         let rebase = transform::Expand::new(self.shape().clone(), axis)?;
         let accessor = Arc::new(SparseExpand {
             source: self.accessor.clone(),
@@ -1726,7 +1757,7 @@ impl TensorTransform for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Self> {
+    fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
         if bounds == Bounds::all(self.shape()) {
             return Ok(self.clone());
         }
@@ -1740,7 +1771,7 @@ impl TensorTransform for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    fn reshape(&self, shape: Shape) -> TCResult<Self> {
+    fn reshape(&self, shape: Shape) -> TCResult<Self::Reshape> {
         if &shape == self.shape() {
             return Ok(self.clone());
         }
@@ -1754,7 +1785,7 @@ impl TensorTransform for SparseTensor {
         Ok(SparseTensor { accessor })
     }
 
-    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         if permutation == Some((0..self.ndim()).collect()) {
             return Ok(self.clone());
         }
