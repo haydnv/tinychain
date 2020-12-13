@@ -20,7 +20,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{Bounds, Shape};
 use super::dense::{BlockList, BlockListDyn, BlockListFile};
-use super::sparse::{SparseAccessor, SparseAccessorDyn, SparseTable};
+use super::sparse::{SparseAccess, SparseAccessorDyn, SparseTable};
 use super::{
     DenseTensor, IntoView, SparseTensor, TensorDualIO, TensorIO, TensorTransform, TensorUnary,
 };
@@ -680,7 +680,7 @@ impl<T: Clone + BlockList> From<DenseTensor<T>> for TensorView {
     }
 }
 
-impl<T: Clone + SparseAccessor> From<SparseTensor<T>> for TensorView {
+impl<T: Clone + SparseAccess> From<SparseTensor<T>> for TensorView {
     fn from(sparse: SparseTensor<T>) -> TensorView {
         let accessor = Arc::new(SparseAccessorDyn::new(sparse.clone_into()));
         Self::Sparse(SparseTensor::from(accessor))

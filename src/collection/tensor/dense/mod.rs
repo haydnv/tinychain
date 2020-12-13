@@ -14,7 +14,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::class::TensorAccessor;
-use super::sparse::{SparseAccessor, SparseTensor};
+use super::sparse::{SparseAccess, SparseTensor};
 use super::transform;
 use super::{
     IntoView, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath, TensorReduce,
@@ -885,17 +885,17 @@ impl<T: BlockList> Transact for BlockListSlice<T> {
 }
 
 #[derive(Clone)]
-pub struct BlockListSparse<T: Clone + SparseAccessor> {
+pub struct BlockListSparse<T: Clone + SparseAccess> {
     source: SparseTensor<T>,
 }
 
-impl<T: Clone + SparseAccessor> BlockListSparse<T> {
+impl<T: Clone + SparseAccess> BlockListSparse<T> {
     fn new(source: SparseTensor<T>) -> Self {
         BlockListSparse { source }
     }
 }
 
-impl<T: Clone + SparseAccessor> TensorAccessor for BlockListSparse<T> {
+impl<T: Clone + SparseAccess> TensorAccessor for BlockListSparse<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -914,7 +914,7 @@ impl<T: Clone + SparseAccessor> TensorAccessor for BlockListSparse<T> {
 }
 
 #[async_trait]
-impl<T: Clone + SparseAccessor> BlockList for BlockListSparse<T> {
+impl<T: Clone + SparseAccess> BlockList for BlockListSparse<T> {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
         Box::pin(async move {
             let dtype = self.dtype();
@@ -994,7 +994,7 @@ impl<T: Clone + SparseAccessor> BlockList for BlockListSparse<T> {
 }
 
 #[async_trait]
-impl<T: Clone + SparseAccessor> Transact for BlockListSparse<T> {
+impl<T: Clone + SparseAccess> Transact for BlockListSparse<T> {
     async fn commit(&self, txn_id: &TxnId) {
         self.source.commit(txn_id).await
     }
@@ -1603,7 +1603,7 @@ pub async fn dense_constant(
     Ok(DenseTensor { blocks })
 }
 
-pub fn from_sparse<T: Clone + SparseAccessor>(
+pub fn from_sparse<T: Clone + SparseAccess>(
     sparse: SparseTensor<T>,
 ) -> DenseTensor<BlockListSparse<T>> {
     let blocks = Arc::new(BlockListSparse::new(sparse));

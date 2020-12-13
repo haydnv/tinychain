@@ -9,7 +9,7 @@ use pin_project::pin_project;
 use crate::class::TCResult;
 use crate::scalar::Number;
 
-use super::bounds::Shape;
+use super::super::bounds::Shape;
 use super::{SparseRow, SparseStream};
 
 // Based on: https://github.com/rust-lang/futures-rs/blob/master/futures-util/src/stream/select.rs
