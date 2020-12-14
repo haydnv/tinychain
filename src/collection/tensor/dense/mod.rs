@@ -1417,7 +1417,7 @@ impl<T: Clone + BlockList, OT: Clone + BlockList> TensorCompare<DenseTensor<OT>>
     fn ne(&self, other: &DenseTensor<OT>) -> TCResult<Self::Compare> {
         self.combine(
             other,
-            Array::eq, // TODO: implement Array:ne!
+            Array::ne,
             <Number as NumberInstance>::ne,
             NumberType::Bool,
         )

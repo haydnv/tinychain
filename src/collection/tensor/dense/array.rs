@@ -698,6 +698,8 @@ trait ArrayInstanceCompare {
     fn lt(&self, other: &Self) -> ArrayExt<bool>;
 
     fn lte(&self, other: &Self) -> ArrayExt<bool>;
+
+    fn ne(&self, other: &Self) -> ArrayExt<bool>;
 }
 
 impl<T: af::HasAfEnum + af::ImplicitPromote<T>> ArrayInstanceCompare for ArrayExt<T> {
@@ -719,6 +721,10 @@ impl<T: af::HasAfEnum + af::ImplicitPromote<T>> ArrayInstanceCompare for ArrayEx
 
     fn lte(&self, other: &Self) -> ArrayExt<bool> {
         af::le(self.af(), other.af(), BATCH).into()
+    }
+
+    fn ne(&self, other: &Self) -> ArrayExt<bool> {
+        self.eq(other).not()
     }
 }
 
@@ -1298,6 +1304,25 @@ impl Array {
             U16(l) => Bool(l.lte(&other.af_cast())),
             U32(l) => Bool(l.lte(&other.af_cast())),
             U64(l) => Bool(l.lte(&other.af_cast())),
+        }
+    }
+
+    pub fn ne(&self, other: &Array) -> Array {
+        use Array::*;
+
+        match self {
+            Bool(l) => Bool(l.ne(&other.af_cast())),
+            C32(l) => Bool(l.ne(&other.af_cast())),
+            C64(l) => Bool(l.ne(&other.af_cast())),
+            F32(l) => Bool(l.ne(&other.af_cast())),
+            F64(l) => Bool(l.ne(&other.af_cast())),
+            I16(l) => Bool(l.ne(&other.af_cast())),
+            I32(l) => Bool(l.ne(&other.af_cast())),
+            I64(l) => Bool(l.ne(&other.af_cast())),
+            U8(l) => Bool(l.ne(&other.af_cast())),
+            U16(l) => Bool(l.ne(&other.af_cast())),
+            U32(l) => Bool(l.ne(&other.af_cast())),
+            U64(l) => Bool(l.ne(&other.af_cast())),
         }
     }
 
