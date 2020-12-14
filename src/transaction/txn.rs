@@ -544,7 +544,6 @@ impl Txn {
 
         match subject {
             State::Chain(chain) => chain.get(request, self, path, key).await,
-            State::Cluster(cluster) => cluster.get(request, self, path, key).await,
             State::Collection(collection) => {
                 collection
                     .get(request, self, &path[..], key)
@@ -582,7 +581,6 @@ impl Txn {
 
         match subject {
             State::Chain(chain) => chain.put(request, self, &path[..], key, value).await,
-            State::Cluster(cluster) => cluster.put(request, self, &path[..], key, value).await,
             State::Collection(collection) => {
                 collection.put(request, self, &path[..], key, value).await
             }
@@ -611,7 +609,6 @@ impl Txn {
 
         match subject {
             State::Chain(chain) => chain.post(request, self, path, params).await,
-            State::Cluster(cluster) => cluster.post(request, self, path, params).await,
             State::Collection(collection) => collection.post(request, self, path, params).await,
             State::Object(object) => object.post(request, self, path, params).await,
             State::Scalar(scalar) => match scalar {
@@ -643,7 +640,6 @@ impl Txn {
 
         match subject {
             State::Chain(chain) => chain.delete(request, self, path, key).await,
-            State::Cluster(cluster) => cluster.delete(request, self, path, key).await,
             State::Collection(collection) => collection.delete(request, self, &path[..], key).await,
             State::Object(object) => object.delete(request, self, path, key).await,
             State::Scalar(scalar) => match scalar {
@@ -661,7 +657,6 @@ impl Txn {
     pub async fn mutate(&self, state: State) {
         let state: Box<dyn Transact> = match state {
             State::Chain(chain) => Box::new(chain),
-            State::Cluster(cluster) => Box::new(cluster),
             State::Collection(collection) => Box::new(collection),
             State::Object(_) => panic!("Objects do not support transactional mutations!"),
             State::Scalar(_) => panic!("Scalar values do not support transactional mutations!"),

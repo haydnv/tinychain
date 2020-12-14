@@ -7,7 +7,6 @@ use futures::future::Future;
 use futures::stream::Stream;
 
 use crate::chain::{Chain, ChainType};
-use crate::cluster::Cluster;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
 use crate::handler::Public;
@@ -47,7 +46,6 @@ pub trait Instance {
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCType {
     Chain(ChainType),
-    Cluster,
     Collection(CollectionType),
     Object(ObjectType),
     Scalar(ScalarType),
@@ -114,7 +112,6 @@ impl From<TCType> for Link {
     fn from(t: TCType) -> Link {
         match t {
             TCType::Chain(ct) => ct.into(),
-            TCType::Cluster => TCType::prefix().append(label("cluster")).into(),
             TCType::Collection(ct) => ct.into(),
             TCType::Object(ot) => ot.into(),
             TCType::Scalar(st) => st.into(),
@@ -126,7 +123,6 @@ impl fmt::Display for TCType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Chain(ct) => write!(f, "{}", ct),
-            Self::Cluster => write!(f, "type Cluster"),
             Self::Collection(ct) => write!(f, "{}", ct),
             Self::Object(ot) => write!(f, "{}", ot),
             Self::Scalar(st) => write!(f, "{}", st),
@@ -137,7 +133,6 @@ impl fmt::Display for TCType {
 #[derive(Clone)]
 pub enum State {
     Chain(Chain),
-    Cluster(Cluster),
     Collection(Collection),
     Object(Object),
     Scalar(Scalar),
@@ -158,7 +153,6 @@ impl Instance for State {
     fn class(&self) -> Self::Class {
         match self {
             Self::Chain(chain) => chain.class().into(),
-            Self::Cluster(_) => TCType::Cluster,
             Self::Collection(collection) => collection.class().into(),
             Self::Object(object) => object.class().into(),
             Self::Scalar(scalar) => scalar.class().into(),
@@ -177,7 +171,6 @@ impl Public for State {
     ) -> TCResult<State> {
         match self {
             Self::Chain(chain) => chain.get(request, txn, path, key).await,
-            Self::Cluster(cluster) => cluster.get(request, txn, path, key).await,
             Self::Collection(collection) => collection.get(request, txn, path, key).await,
             Self::Object(object) => object.get(request, txn, path, key).await,
             Self::Scalar(scalar) => scalar.get(request, txn, path, key).await,
@@ -194,7 +187,6 @@ impl Public for State {
     ) -> TCResult<()> {
         match self {
             Self::Chain(chain) => chain.put(request, txn, path, key, value).await,
-            Self::Cluster(cluster) => cluster.put(request, txn, path, key, value).await,
             Self::Collection(collection) => collection.put(request, txn, path, key, value).await,
             Self::Object(object) => object.put(request, txn, path, key, value).await,
             Self::Scalar(scalar) => scalar.put(request, txn, path, key, value).await,
@@ -210,7 +202,6 @@ impl Public for State {
     ) -> TCResult<State> {
         match self {
             Self::Chain(chain) => chain.post(request, txn, path, params).await,
-            Self::Cluster(cluster) => cluster.post(request, txn, path, params).await,
             Self::Collection(collection) => collection.post(request, txn, path, params).await,
             Self::Object(object) => object.post(request, txn, path, params).await,
             Self::Scalar(scalar) => scalar.post(request, txn, path, params).await,
@@ -226,7 +217,6 @@ impl Public for State {
     ) -> TCResult<()> {
         match self {
             Self::Chain(chain) => chain.delete(request, txn, path, key).await,
-            Self::Cluster(cluster) => cluster.delete(request, txn, path, key).await,
             Self::Collection(collection) => collection.delete(request, txn, path, key).await,
             Self::Object(object) => object.delete(request, txn, path, key).await,
             Self::Scalar(scalar) => scalar.delete(request, txn, path, key).await,
@@ -237,12 +227,6 @@ impl Public for State {
 impl From<Chain> for State {
     fn from(c: Chain) -> State {
         Self::Chain(c)
-    }
-}
-
-impl From<Cluster> for State {
-    fn from(c: Cluster) -> State {
-        Self::Cluster(c)
     }
 }
 
@@ -322,7 +306,6 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Chain(c) => write!(f, "{}", c),
-            Self::Cluster(c) => write!(f, "{}", c),
             Self::Collection(c) => write!(f, "{}", c),
             Self::Object(o) => write!(f, "{}", o),
             Self::Scalar(s) => write!(f, "{}", s),

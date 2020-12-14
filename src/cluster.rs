@@ -98,23 +98,19 @@ impl Public for Cluster {
         key: Value,
     ) -> TCResult<State> {
         if path.is_empty() {
-            if key.is_none() {
-                Ok(State::Cluster(self.clone()))
-            } else {
-                let key: Id = key.try_cast_into(|v| error::bad_request(ERR_ID, v))?;
+            let key: Id = key.try_cast_into(|v| error::bad_request(ERR_ID, v))?;
 
-                let methods = self.methods.read(txn.id()).await?;
-                if let Some(method) = (**methods).get(&key) {
-                    return Ok(State::Scalar(method.clone()));
-                }
-
-                let chains = self.chains.read(txn.id()).await?;
-                if let Some(chain) = chains.get(&key) {
-                    return Ok(State::Object(chain.clone().into_state().into()));
-                }
-
-                Err(error::not_found(key))
+            let methods = self.methods.read(txn.id()).await?;
+            if let Some(method) = (**methods).get(&key) {
+                return Ok(State::Scalar(method.clone()));
             }
+
+            let chains = self.chains.read(txn.id()).await?;
+            if let Some(chain) = chains.get(&key) {
+                return Ok(State::Object(chain.clone().into_state().into()));
+            }
+
+            Err(error::not_found(key))
         } else {
             let methods = self.methods.read(txn.id()).await?;
             if methods.contains_key(&path[0]) {
