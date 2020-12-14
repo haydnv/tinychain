@@ -8,7 +8,7 @@ use futures::try_join;
 use log::debug;
 
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
-use crate::collection::Collection;
+use crate::collection::{from_dense, Collection};
 use crate::error;
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
@@ -25,6 +25,7 @@ use super::{
 mod array;
 mod file;
 
+use crate::collection::tensor::sparse::DenseAccessor;
 pub use array::Array;
 pub use file::*;
 
@@ -1254,7 +1255,18 @@ impl<T: Clone + BlockList> Instance for DenseTensor<T> {
     }
 }
 
-impl<T: Clone + BlockList> TensorInstance for DenseTensor<T> {}
+impl<T: Clone + BlockList> TensorInstance for DenseTensor<T> {
+    type Dense = Self;
+    type Sparse = SparseTensor<DenseAccessor<T>>;
+
+    fn into_dense(self) -> Self::Dense {
+        self
+    }
+
+    fn into_sparse(self) -> Self::Sparse {
+        from_dense(self)
+    }
+}
 
 impl<T: Clone + BlockList> IntoView for DenseTensor<T> {
     fn into_view(self) -> Tensor {

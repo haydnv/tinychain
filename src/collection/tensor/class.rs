@@ -17,10 +17,8 @@ use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::*;
-use super::dense::{
-    dense_constant, from_sparse, BlockList, BlockListDyn, BlockListFile, DenseTensor,
-};
-use super::sparse::{self, from_dense, SparseAccess, SparseAccessorDyn, SparseTable, SparseTensor};
+use super::dense::{dense_constant, BlockList, BlockListDyn, BlockListFile, DenseTensor};
+use super::sparse::{self, SparseAccess, SparseAccessorDyn, SparseTable, SparseTensor};
 use super::{
     IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
     TensorReduce, TensorTransform, TensorUnary,
@@ -29,6 +27,12 @@ use super::{
 pub trait TensorInstance:
     Clone + Instance + IntoView + TensorIO + TensorTransform + TensorUnary + Send + Sync
 {
+    type Dense: TensorInstance;
+    type Sparse: TensorInstance;
+
+    fn into_dense(self) -> Self::Dense;
+
+    fn into_sparse(self) -> Self::Sparse;
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -296,7 +300,24 @@ impl IntoView for Tensor {
     }
 }
 
-impl TensorInstance for Tensor {}
+impl TensorInstance for Tensor {
+    type Dense = Self;
+    type Sparse = Self;
+
+    fn into_dense(self) -> Self {
+        match self {
+            Self::Dense(dense) => Self::Dense(dense),
+            Self::Sparse(sparse) => Self::Dense(sparse.into_dense().into_dyn()),
+        }
+    }
+
+    fn into_sparse(self) -> Self {
+        match self {
+            Self::Dense(dense) => Self::Sparse(dense.into_sparse().into_dyn()),
+            Self::Sparse(sparse) => Self::Sparse(sparse),
+        }
+    }
+}
 
 #[async_trait]
 impl TensorBoolean<Tensor> for Tensor {
@@ -307,7 +328,7 @@ impl TensorBoolean<Tensor> for Tensor {
         match (self, other) {
             (Dense(left), Dense(right)) => left.and(right).map(Self::from),
             (Sparse(left), Sparse(right)) => left.and(right).map(Self::from),
-            (Sparse(left), Dense(right)) => left.and(&from_dense(right.clone())).map(Self::from),
+            (Sparse(left), Dense(right)) => left.and(&right.clone().into_sparse()).map(Self::from),
 
             _ => other.and(self),
         }
@@ -318,7 +339,7 @@ impl TensorBoolean<Tensor> for Tensor {
         match (self, other) {
             (Dense(left), Dense(right)) => left.or(right).map(Self::from),
             (Sparse(left), Sparse(right)) => left.or(right).map(Self::from),
-            (Dense(left), Sparse(right)) => left.or(&from_sparse(right.clone())).map(Self::from),
+            (Dense(left), Sparse(right)) => left.or(&right.clone().into_dense()).map(Self::from),
 
             _ => other.or(self),
         }
@@ -328,7 +349,8 @@ impl TensorBoolean<Tensor> for Tensor {
         use Tensor::*;
         match (self, other) {
             (Dense(left), Dense(right)) => left.xor(right).map(Self::from),
-            (Sparse(left), _) => from_sparse(left.clone()).into_view().xor(other),
+            (Sparse(left), _) => left.clone().into_dense().into_view().xor(other),
+
             (left, right) => right.xor(left),
         }
     }
@@ -380,15 +402,15 @@ impl TensorCompare<Tensor> for Tensor {
             (Self::Sparse(left), Self::Sparse(right)) => {
                 left.eq(right, txn).map_ok(IntoView::into_view).await
             }
-            (Self::Sparse(left), right) => {
-                from_sparse(left.clone())
-                    .into_view()
+            (Self::Sparse(left), Self::Dense(right)) => {
+                left.clone()
+                    .into_dense()
                     .eq(right, txn)
                     .map_ok(IntoView::into_view)
                     .await
             }
-            (left, Self::Sparse(right)) => {
-                left.eq(&from_sparse(right.clone()).into_view(), txn)
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.eq(&right.clone().into_dense(), txn)
                     .map_ok(IntoView::into_view)
                     .await
             }
@@ -399,10 +421,12 @@ impl TensorCompare<Tensor> for Tensor {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.gt(right).map(Self::from),
             (Self::Sparse(left), Self::Sparse(right)) => left.gt(right).map(Self::from),
-            (Self::Sparse(left), right) => from_sparse(left.clone()).into_view().gt(right),
-            (left, Self::Sparse(right)) => left
-                .gt(&from_sparse(right.clone()).into_view())
-                .map(Self::from),
+            (Self::Sparse(left), Self::Dense(right)) => {
+                left.gt(&right.clone().into_sparse()).map(Self::from)
+            }
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.clone().into_sparse().gt(right).map(Self::from)
+            }
         }
     }
 
@@ -414,15 +438,15 @@ impl TensorCompare<Tensor> for Tensor {
             (Self::Sparse(left), Self::Sparse(right)) => {
                 left.gte(right, txn).map_ok(IntoView::into_view).await
             }
-            (Self::Sparse(left), right) => {
-                from_sparse(left.clone())
-                    .into_view()
+            (Self::Sparse(left), Self::Dense(right)) => {
+                left.clone()
+                    .into_dense()
                     .gte(right, txn)
                     .map_ok(IntoView::into_view)
                     .await
             }
-            (left, Self::Sparse(right)) => {
-                left.gte(&from_sparse(right.clone()).into_view(), txn)
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.gte(&right.clone().into_dense(), txn)
                     .map_ok(IntoView::into_view)
                     .await
             }
@@ -433,8 +457,12 @@ impl TensorCompare<Tensor> for Tensor {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.lt(right).map(Self::from),
             (Self::Sparse(left), Self::Sparse(right)) => left.lt(right).map(Self::from),
-            (Self::Sparse(left), right) => from_sparse(left.clone()).into_view().lt(right),
-            (left, Self::Sparse(right)) => left.lt(&from_sparse(right.clone()).into_view()),
+            (Self::Sparse(left), Self::Dense(right)) => {
+                left.lt(&right.clone().into_sparse()).map(Self::from)
+            }
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.clone().into_sparse().lt(right).map(Self::from)
+            }
         }
     }
 
@@ -446,15 +474,15 @@ impl TensorCompare<Tensor> for Tensor {
             (Self::Sparse(left), Self::Sparse(right)) => {
                 left.lte(right, txn).map_ok(IntoView::into_view).await
             }
-            (Self::Sparse(left), right) => {
-                from_sparse(left.clone())
-                    .into_view()
+            (Self::Sparse(left), Self::Dense(right)) => {
+                left.clone()
+                    .into_dense()
                     .lte(right, txn)
                     .map_ok(IntoView::into_view)
                     .await
             }
-            (left, Self::Sparse(right)) => {
-                left.lte(&from_sparse(right.clone()).into_view(), txn)
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.lte(&right.clone().into_dense(), txn)
                     .map_ok(IntoView::into_view)
                     .await
             }
@@ -465,13 +493,12 @@ impl TensorCompare<Tensor> for Tensor {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => left.ne(right).map(Self::from),
             (Self::Sparse(left), Self::Sparse(right)) => left.ne(right).map(Self::from),
-            (Self::Sparse(left), right) => from_sparse(left.clone())
-                .into_view()
-                .ne(right)
-                .map(Self::from),
-            (left, Self::Sparse(right)) => left
-                .ne(&from_sparse(right.clone()).into_view())
-                .map(Self::from),
+            (Self::Sparse(left), Self::Dense(right)) => {
+                left.clone().into_dense().ne(right).map(Self::from)
+            }
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.ne(&right.clone().into_dense()).map(Self::from)
+            }
         }
     }
 }
@@ -506,8 +533,8 @@ impl TensorDualIO<Tensor> for Tensor {
         match (self, &other) {
             (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()).await,
             (Self::Sparse(l), Self::Sparse(r)) => l.mask(txn, r.clone()).await,
-            (Self::Sparse(l), Self::Dense(r)) => l.mask(txn, from_dense(r.clone())).await,
-            (l, Self::Sparse(r)) => l.mask(txn, from_sparse(r.clone()).into_view()).await,
+            (Self::Sparse(l), Self::Dense(r)) => l.mask(txn, r.clone().into_sparse()).await,
+            (l, Self::Sparse(r)) => l.mask(txn, r.clone().into_dense().into_view()).await,
         }
     }
 
@@ -515,10 +542,10 @@ impl TensorDualIO<Tensor> for Tensor {
         match self {
             Self::Dense(this) => match value {
                 Self::Dense(that) => this.write(txn, bounds, that).await,
-                Self::Sparse(that) => this.write(txn, bounds, from_sparse(that)).await,
+                Self::Sparse(that) => this.write(txn, bounds, that.into_dense()).await,
             },
             Self::Sparse(this) => match value {
-                Self::Dense(that) => this.write(txn, bounds, from_dense(that)).await,
+                Self::Dense(that) => this.write(txn, bounds, that.into_sparse()).await,
                 Self::Sparse(that) => this.write(txn, bounds, that).await,
             },
         }
@@ -533,10 +560,10 @@ impl TensorMath<Tensor> for Tensor {
             (Self::Dense(left), Self::Dense(right)) => left.add(right).map(Self::from),
             (Self::Sparse(left), Self::Sparse(right)) => left.add(right).map(Self::from),
             (Self::Dense(left), Self::Sparse(right)) => {
-                left.add(&from_sparse(right.clone())).map(Self::from)
+                left.add(&right.clone().into_dense()).map(Self::from)
             }
             (Self::Sparse(left), Self::Dense(right)) => {
-                from_sparse(left.clone()).add(right).map(Self::from)
+                left.clone().into_dense().add(right).map(Self::from)
             }
         }
     }
@@ -546,10 +573,10 @@ impl TensorMath<Tensor> for Tensor {
             (Self::Dense(left), Self::Dense(right)) => left.multiply(right).map(Self::from),
             (Self::Sparse(left), Self::Sparse(right)) => left.multiply(right).map(Self::from),
             (Self::Dense(left), Self::Sparse(right)) => {
-                left.multiply(&from_sparse(right.clone())).map(Self::from)
+                left.clone().into_sparse().multiply(&right).map(Self::from)
             }
             (Self::Sparse(left), Self::Dense(right)) => {
-                from_sparse(left.clone()).multiply(right).map(Self::from)
+                left.multiply(&right.clone().into_sparse()).map(Self::from)
             }
         }
     }

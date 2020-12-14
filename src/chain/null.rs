@@ -70,11 +70,7 @@ pub struct NullChain {
 }
 
 impl NullChain {
-    pub async fn create(
-        _txn: &Txn,
-        _dtype: TCType,
-        _schema: Value,
-    ) -> TCResult<NullChain> {
+    pub async fn create(_txn: &Txn, _dtype: TCType, _schema: Value) -> TCResult<NullChain> {
         Err(error::not_implemented("NullChain::create"))
     }
 }

@@ -28,6 +28,7 @@ use super::{
 mod access;
 mod combine;
 
+use crate::collection::tensor::dense::BlockListSparse;
 pub use access::*;
 use combine::SparseCombine;
 
@@ -449,7 +450,18 @@ impl<T: Clone + SparseAccess> Instance for SparseTensor<T> {
     }
 }
 
-impl<T: Clone + SparseAccess> TensorInstance for SparseTensor<T> {}
+impl<T: Clone + SparseAccess> TensorInstance for SparseTensor<T> {
+    type Dense = DenseTensor<BlockListSparse<T>>;
+    type Sparse = Self;
+
+    fn into_dense(self) -> Self::Dense {
+        from_sparse(self)
+    }
+
+    fn into_sparse(self) -> Self::Sparse {
+        self
+    }
+}
 
 impl<T: Clone + SparseAccess> IntoView for SparseTensor<T> {
     fn into_view(self) -> Tensor {
