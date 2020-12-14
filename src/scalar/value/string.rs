@@ -8,7 +8,7 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use uuid::Uuid;
 
-use crate::class::{Class, Instance, NativeClass, TCResult};
+use crate::class::{Class, Instance, NativeClass, TCResult, TCType};
 use crate::error;
 use crate::scalar::{Scalar, ScalarClass, ScalarInstance, TryCastFrom};
 
@@ -90,6 +90,12 @@ impl From<StringType> for Link {
         };
 
         StringType::prefix().append(suffix).into()
+    }
+}
+
+impl From<StringType> for TCType {
+    fn from(st: StringType) -> TCType {
+        ValueType::TCString(st).into()
     }
 }
 

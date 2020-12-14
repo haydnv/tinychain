@@ -240,6 +240,12 @@ impl From<ComplexType> for Link {
     }
 }
 
+impl From<ComplexType> for TCType {
+    fn from(ct: ComplexType) -> TCType {
+        NumberType::Complex(ct).into()
+    }
+}
+
 impl fmt::Display for ComplexType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -332,6 +338,12 @@ impl From<BooleanType> for NumberType {
 impl From<BooleanType> for Link {
     fn from(_: BooleanType) -> Link {
         BooleanType::prefix().into()
+    }
+}
+
+impl From<BooleanType> for TCType {
+    fn from(_: BooleanType) -> TCType {
+        NumberType::Bool.into()
     }
 }
 
@@ -456,6 +468,12 @@ impl From<FloatType> for Link {
         };
 
         FloatType::prefix().append(suffix).into()
+    }
+}
+
+impl From<FloatType> for TCType {
+    fn from(ft: FloatType) -> TCType {
+        NumberType::Float(ft).into()
     }
 }
 
@@ -592,6 +610,12 @@ impl From<IntType> for Link {
         };
 
         IntType::prefix().append(suffix).into()
+    }
+}
+
+impl From<IntType> for TCType {
+    fn from(it: IntType) -> TCType {
+        NumberType::Int(it).into()
     }
 }
 
@@ -738,6 +762,12 @@ impl From<UIntType> for Link {
         };
 
         UIntType::prefix().append(suffix).into()
+    }
+}
+
+impl From<UIntType> for TCType {
+    fn from(ut: UIntType) -> TCType {
+        NumberType::UInt(ut).into()
     }
 }
 
@@ -905,6 +935,12 @@ impl From<NumberType> for Link {
             UInt(ut) => ut.into(),
             Number => NumberType::prefix().into(),
         }
+    }
+}
+
+impl From<NumberType> for TCType {
+    fn from(nt: NumberType) -> TCType {
+        TCType::Scalar(ScalarType::Value(ValueType::Number(nt)))
     }
 }
 

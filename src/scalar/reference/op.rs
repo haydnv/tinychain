@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, TCResult};
+use crate::class::{Class, Instance, NativeClass, TCResult, TCType};
 use crate::error;
 use crate::scalar::{
     label, Link, Object, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
@@ -95,6 +95,12 @@ impl From<MethodType> for Link {
     }
 }
 
+impl From<MethodType> for TCType {
+    fn from(mt: MethodType) -> TCType {
+        RefType::Method(mt).into()
+    }
+}
+
 impl fmt::Display for MethodType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -165,6 +171,12 @@ impl From<OpRefType> for Link {
         };
 
         ORT::prefix().append(suffix).into()
+    }
+}
+
+impl From<OpRefType> for TCType {
+    fn from(ort: OpRefType) -> TCType {
+        RefType::Op(ort).into()
     }
 }
 

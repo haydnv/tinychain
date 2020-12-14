@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 use serde::ser::{Serialize, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCType};
 use crate::error;
 use crate::handler::Public;
 use crate::request::Request;
@@ -41,6 +41,12 @@ impl NativeClass for ObjectType {
 impl From<ObjectType> for Link {
     fn from(_ot: ObjectType) -> Link {
         ObjectType::prefix().into()
+    }
+}
+
+impl From<ObjectType> for TCType {
+    fn from(_: ObjectType) -> TCType {
+        ScalarType::Object.into()
     }
 }
 

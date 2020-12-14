@@ -3,7 +3,7 @@ use std::fmt;
 use futures::stream;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCType};
 use crate::error;
 use crate::object::InstanceExt;
 use crate::request::Request;
@@ -89,6 +89,12 @@ impl From<OpDefType> for Link {
         };
 
         OpDefType::prefix().append(suffix).into()
+    }
+}
+
+impl From<OpDefType> for TCType {
+    fn from(odt: OpDefType) -> TCType {
+        ScalarType::Op(odt).into()
     }
 }
 

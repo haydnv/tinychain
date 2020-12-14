@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, TCResult};
+use crate::class::{Class, Instance, NativeClass, TCResult, TCType};
 use crate::error;
 use crate::scalar::{
     label, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
@@ -63,6 +63,12 @@ impl From<FlowControlType> for Link {
         };
 
         FCT::prefix().append(suffix).into()
+    }
+}
+
+impl From<FlowControlType> for TCType {
+    fn from(fct: FlowControlType) -> TCType {
+        RefType::Flow(fct).into()
     }
 }
 

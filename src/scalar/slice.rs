@@ -7,8 +7,8 @@ use crate::collection::Collator;
 use crate::error::{self, TCResult};
 
 use super::{
-    label, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPath, TCPathBuf, TryCastFrom,
-    TryCastInto, Value,
+    label, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TCPath, TCPathBuf,
+    TryCastFrom, TryCastInto, Value,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
@@ -110,6 +110,12 @@ impl From<SliceType> for Link {
         };
 
         path.into()
+    }
+}
+
+impl From<SliceType> for TCType {
+    fn from(st: SliceType) -> TCType {
+        ScalarType::Slice(st).into()
     }
 }
 
