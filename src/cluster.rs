@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::ops::DerefMut;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::{try_join, StreamExt};
+use futures::try_join;
 use log::debug;
 
 use crate::block::Dir;
@@ -141,41 +140,7 @@ impl Public for Cluster {
     ) -> TCResult<()> {
         if path.is_empty() {
             if key.is_none() {
-                let object: Object = value.try_cast_into(|s| {
-                    error::bad_request("Expected generic Object but found", s)
-                })?;
-                let provided = HashMap::new();
-                let mut object = txn.resolve_object(request, &provided, object);
-
-                let mut chains = HashMap::new();
-                let mut methods = HashMap::new();
-                while let Some(result) = object.next().await {
-                    let (id, state) = result?;
-
-                    match state {
-                        State::Scalar(Scalar::Op(op)) => {
-                            methods.insert(id, Scalar::Op(op));
-                        }
-                        State::Chain(chain) => {
-                            chains.insert(id, chain.into());
-                        }
-                        State::Object(crate::object::Object::Instance(chain)) => {
-                            let chain = chain.try_as()?;
-                            chains.insert(id, chain);
-                        }
-                        other => {
-                            return Err(error::bad_request("Cluster member must be wrapped in a Chain (consider /sbin/chain/null)", other));
-                        }
-                    }
-                }
-
-                let txn_id = *txn.id();
-                let (mut chains_lock, mut methods_lock) =
-                    try_join!(self.chains.write(txn_id), self.methods.write(txn_id))?;
-                *chains_lock.deref_mut() = chains;
-                *methods_lock.deref_mut() = methods.into();
-
-                Ok(())
+                Err(error::not_implemented("Cluster::PUT /"))
             } else {
                 let key: Id = key.try_cast_into(|v| error::bad_request(ERR_ID, v))?;
 

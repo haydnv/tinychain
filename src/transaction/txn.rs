@@ -104,6 +104,83 @@ impl fmt::Display for TxnId {
     }
 }
 
+#[derive(Clone)]
+struct TxnState {
+    context: Option<State>,
+    provided: HashMap<Id, State>,
+}
+
+impl TxnState {
+    fn new(context: Option<State>) -> Self {
+        let provided = HashMap::new();
+        Self { context, provided }
+    }
+
+    fn dereference(&self, scalar: Scalar) -> TCResult<State> {
+        match scalar {
+            Scalar::Ref(ref tc_ref) => match &**tc_ref {
+                TCRef::Id(id_ref) => self.dereference_state_owned(id_ref.id()),
+                _ => self.dereference_scalar(scalar).map(State::Scalar),
+            },
+            _ => self.dereference_scalar(scalar).map(State::Scalar),
+        }
+    }
+
+    fn dereference_state(&'_ self, id: &'_ Id) -> TCResult<&'_ State> {
+        if let Some(state) = self.provided.get(id) {
+            Ok(state)
+        } else if id == "self" {
+            if let Some(context) = &self.context {
+                Ok(context)
+            } else {
+                Err(error::not_found(id))
+            }
+        } else {
+            self.provided.get(id).ok_or_else(|| error::not_found(id))
+        }
+    }
+
+    fn dereference_state_owned(&self, id: &Id) -> TCResult<State> {
+        self.dereference_state(id).map(Clone::clone)
+    }
+
+    fn dereference_object(&self, _object: &Object) -> TCResult<Object> {
+        Err(error::not_implemented("TxnState::dereference_object"))
+    }
+
+    fn dereference_scalar(&'_ self, scalar: Scalar) -> TCResult<Scalar> {
+        match scalar {
+            Scalar::Object(object) => self.dereference_object(&object).map(Scalar::Object),
+            Scalar::Ref(tc_ref) => match *tc_ref {
+                TCRef::Id(id_ref) => self
+                    .dereference_state_owned(id_ref.id())
+                    .and_then(Scalar::try_from),
+                _ => Ok(Scalar::Ref(tc_ref)),
+            },
+            Scalar::Tuple(tuple) => self.dereference_tuple(tuple).map(Scalar::Tuple),
+            other => Ok(other),
+        }
+    }
+
+    fn dereference_tuple(&'_ self, tuple: Vec<Scalar>) -> TCResult<Vec<Scalar>> {
+        let mut dereferenced = Vec::with_capacity(tuple.len());
+        for item in tuple {
+            dereferenced.push(self.dereference_scalar(item)?);
+        }
+        Ok(dereferenced)
+    }
+
+    fn dereference_value(&'_ self, key: Key) -> TCResult<Value> {
+        match key {
+            Key::Value(value) => Ok(value),
+            Key::Ref(id_ref) => match self.dereference_state(id_ref.id())? {
+                State::Scalar(Scalar::Value(value)) => Ok(value.clone()),
+                other => Err(error::bad_request("Expected Value but found", other)),
+            },
+        }
+    }
+}
+
 struct Inner {
     id: TxnId,
     dir: Arc<Dir>,
@@ -190,22 +267,22 @@ impl Txn {
 
         debug!("Txn::execute");
 
-        let mut graph: HashMap<Id, State> = HashMap::new();
+        let mut graph = TxnState::new(None);
         let mut capture = None;
         while let Some((name, state)) = parameters.next().await {
             let state: State = state.into();
             debug!("pending: {}: {}", name, state);
             capture = Some(name.clone());
-            graph.insert(name, state);
+            graph.provided.insert(name, state);
         }
 
         let capture =
             capture.ok_or_else(|| error::unsupported("Cannot execute empty operation"))?;
 
-        while !is_resolved(dereference_state(&graph, &capture)?) {
+        while !is_resolved(graph.dereference_state(&capture)?) {
             let mut pending = vec![];
             let mut visited = HashSet::new();
-            let mut unvisited = Vec::with_capacity(graph.len());
+            let mut unvisited = Vec::with_capacity(graph.provided.len());
             unvisited.push(capture.clone());
             while let Some(name) = unvisited.pop() {
                 if visited.contains(&name) {
@@ -217,13 +294,13 @@ impl Txn {
 
                 debug!("Txn::execute {} (#{})", &name, visited.len());
 
-                let state = dereference_state(&graph, &name)?;
+                let state = graph.dereference_state(&name)?;
                 if let State::Scalar(scalar) = state {
                     let mut ready = true;
 
                     for dep in requires(&scalar, &graph)? {
                         debug!("requires {}", dep);
-                        let dep_state = dereference_state(&graph, dep.id())?;
+                        let dep_state = graph.dereference_state(dep.id())?;
 
                         if !is_resolved(dep_state) {
                             debug!("{} is not resolved (state is {})", dep.id(), dep_state);
@@ -237,17 +314,17 @@ impl Txn {
                             let tc_ref = (&**tc_ref).clone();
                             pending.push((name, tc_ref));
                         } else if let Scalar::Object(object) = scalar {
-                            let object = dereference_object(&graph, object)?;
-                            graph.insert(name, Scalar::Object(object).into());
+                            let object = graph.dereference_object(object)?;
+                            graph.provided.insert(name, Scalar::Object(object).into());
                         } else if let Scalar::Tuple(tuple) = scalar {
-                            let tuple = dereference_tuple(&graph, tuple)?;
-                            graph.insert(name, Scalar::Tuple(tuple).into());
+                            let tuple = Scalar::Tuple(graph.dereference_tuple(tuple.to_vec())?);
+                            graph.provided.insert(name, State::Scalar(tuple));
                         }
                     }
                 }
             }
 
-            if pending.is_empty() && !is_resolved(dereference_state(&graph, &capture)?) {
+            if pending.is_empty() && !is_resolved(graph.dereference_state(&capture)?) {
                 return Err(error::bad_request(
                     "Cannot resolve all dependencies of",
                     capture,
@@ -258,7 +335,7 @@ impl Txn {
             let pending = pending.into_iter().map(|(name, tc_ref)| async {
                 match self.subcontext(name.clone()).await {
                     Ok(cxt) => {
-                        cxt.resolve(request, &current_state, tc_ref)
+                        cxt.resolve_inner(request, &current_state, tc_ref)
                             .map(|r| (name, r))
                             .await
                     }
@@ -274,12 +351,13 @@ impl Txn {
                 }
 
                 let state = result?;
-                graph.insert(name, state);
+                graph.provided.insert(name, state);
             }
         }
 
         debug!("Txn::execute complete, returning {}...", capture);
         graph
+            .provided
             .remove(&capture)
             .ok_or_else(|| error::not_found(capture))
     }
@@ -332,10 +410,15 @@ impl Txn {
         .await;
     }
 
-    pub async fn resolve(
+    pub async fn resolve(&self, request: &Request, provider: TCRef) -> TCResult<State> {
+        let graph = TxnState::new(None);
+        self.resolve_inner(request, &graph, provider).await
+    }
+
+    async fn resolve_inner(
         &self,
         request: &Request,
-        provided: &HashMap<Id, State>,
+        graph: &TxnState,
         provider: TCRef,
     ) -> TCResult<State> {
         validate_id(request, &self.inner.id)?;
@@ -343,27 +426,27 @@ impl Txn {
         debug!("Txn::resolve {}", provider);
 
         match provider {
-            TCRef::Flow(control) => self.resolve_flow(request, provided, *control).await,
+            TCRef::Flow(control) => self.resolve_flow(request, graph, *control).await,
 
-            TCRef::Id(id_ref) => dereference_state_owned(&provided, id_ref.id()),
+            TCRef::Id(id_ref) => graph.dereference_state_owned(id_ref.id()),
 
             TCRef::Method(method) => match method {
                 Method::Get((id_ref, path, key)) => {
-                    self.resolve_get(request, provided, id_ref, &path[..], key)
+                    self.resolve_get(request, graph, id_ref, &path[..], key)
                         .await
                 }
                 Method::Put((id_ref, path, key, value)) => {
-                    self.resolve_put(request, provided, id_ref, &path[..], key, value)
+                    self.resolve_put(request, graph, id_ref, &path[..], key, value)
                         .map_ok(State::from)
                         .await
                 }
                 Method::Post((id_ref, path, params)) => {
-                    self.resolve_post(request, provided, id_ref, &path[..], params)
+                    self.resolve_post(request, graph, id_ref, &path[..], params)
                         .await
                 }
 
                 Method::Delete((id_ref, path, key)) => {
-                    self.resolve_delete(request, provided, id_ref, &path[..], key)
+                    self.resolve_delete(request, graph, id_ref, &path[..], key)
                         .map_ok(State::from)
                         .await
                 }
@@ -371,13 +454,13 @@ impl Txn {
 
             TCRef::Op(op_ref) => match op_ref {
                 OpRef::Get((link, key)) => {
-                    let key = dereference_value(&provided, key)?;
+                    let key = graph.dereference_value(key)?;
                     self.inner.gateway.get(request, self, &link, key).await
                 }
 
                 OpRef::Put((link, key, value)) => {
-                    let key = dereference_value(&provided, key)?;
-                    let value = dereference(&provided, &value)?;
+                    let key = graph.dereference_value(key)?;
+                    let value = graph.dereference(value)?;
                     self.inner
                         .gateway
                         .put(&request, self, &link, key, value)
@@ -397,7 +480,7 @@ impl Txn {
                 }
 
                 OpRef::Delete((link, key)) => {
-                    let key = dereference_value(&provided, key)?;
+                    let key = graph.dereference_value(key)?;
                     self.inner
                         .gateway
                         .delete(request, self, &link, key)
@@ -408,28 +491,10 @@ impl Txn {
         }
     }
 
-    pub fn resolve_object<'a>(
-        &'a self,
-        request: &'a Request,
-        provided: &'a HashMap<Id, State>,
-        object: Object,
-    ) -> impl Stream<Item = TCResult<(Id, State)>> + 'a {
-        FuturesUnordered::from_iter(object.into_iter().map(|(id, scalar)| {
-            let provider: TCBoxTryFuture<State> = match scalar {
-                Scalar::Ref(tc_ref) => {
-                    Box::pin(async move { self.resolve(request, provided, *tc_ref).await })
-                }
-                other => Box::pin(async move { Ok(State::Scalar(other)) }),
-            };
-
-            provider.map_ok(|state| (id, state))
-        }))
-    }
-
     fn resolve_flow<'a>(
         &'a self,
         request: &'a Request,
-        provided: &'a HashMap<Id, State>,
+        graph: &'a TxnState,
         control: FlowControl,
     ) -> TCBoxTryFuture<'a, State> {
         Box::pin(async move {
@@ -437,19 +502,19 @@ impl Txn {
                 FlowControl::After((when, then)) => {
                     let when = when
                         .into_iter()
-                        .map(|tc_ref| self.resolve(request, provided, tc_ref));
+                        .map(|tc_ref| self.resolve_inner(request, graph, tc_ref));
 
                     try_join_all(when).await?;
-                    Ok(State::Scalar(Scalar::Ref(Box::new(then))))
+                    Ok(State::Scalar(Scalar::Ref(Box::new(then.clone()))))
                 }
                 FlowControl::If((cond, then, or_else)) => {
-                    let cond = self.resolve(request, provided, cond).await?;
+                    let cond = self.resolve_inner(request, graph, cond).await?;
 
                     if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(cond)))) = cond {
                         if cond.into() {
-                            Ok(State::Scalar(then))
+                            Ok(State::Scalar(then.clone()))
                         } else {
-                            Ok(State::Scalar(or_else))
+                            Ok(State::Scalar(or_else.clone()))
                         }
                     } else {
                         Err(error::bad_request(
@@ -465,15 +530,15 @@ impl Txn {
     async fn resolve_get(
         &self,
         request: &Request,
-        provided: &HashMap<Id, State>,
+        graph: &TxnState,
         subject: IdRef,
         path: &[PathSegment],
         key: Key,
     ) -> TCResult<State> {
         debug!("Txn::resolve {}::GET {}", subject, key);
 
-        let subject = dereference_state(&provided, subject.id())?;
-        let key = dereference_value(&provided, key)?;
+        let subject = graph.dereference_state(subject.id())?;
+        let key = graph.dereference_value(key)?;
 
         debug!("Txn::resolve {}::GET {}", subject, key);
 
@@ -505,15 +570,15 @@ impl Txn {
     async fn resolve_put(
         &self,
         request: &Request,
-        provided: &HashMap<Id, State>,
+        graph: &TxnState,
         subject: IdRef,
         path: &[PathSegment],
         key: Key,
         value: Scalar,
     ) -> TCResult<()> {
-        let subject = dereference_state(&provided, subject.id())?;
-        let key = dereference_value(&provided, key)?;
-        let value = dereference(&provided, &value)?;
+        let subject = graph.dereference_state(subject.id())?;
+        let key = graph.dereference_value(key)?;
+        let value = graph.dereference(value)?;
 
         match subject {
             State::Chain(chain) => chain.put(request, self, &path[..], key, value).await,
@@ -537,12 +602,12 @@ impl Txn {
     async fn resolve_post(
         &self,
         request: &Request,
-        provided: &HashMap<Id, State>,
+        graph: &TxnState,
         subject: IdRef,
         path: &[PathSegment],
         params: Object,
     ) -> TCResult<State> {
-        let subject = dereference_state(&provided, subject.id())?;
+        let subject = graph.dereference_state(subject.id())?;
 
         match subject {
             State::Chain(chain) => chain.post(request, self, path, params).await,
@@ -564,15 +629,15 @@ impl Txn {
     async fn resolve_delete(
         &self,
         request: &Request,
-        provided: &HashMap<Id, State>,
+        graph: &TxnState,
         subject: IdRef,
         path: &[PathSegment],
         key: Key,
     ) -> TCResult<()> {
         debug!("Txn::resolve {}::GET {}", subject, key);
 
-        let subject = dereference_state(&provided, subject.id())?;
-        let key = dereference_value(&provided, key)?;
+        let subject = graph.dereference_state(subject.id())?;
+        let key = graph.dereference_value(key)?;
 
         debug!("Txn::resolve {}::GET {}", subject, key);
 
@@ -615,66 +680,6 @@ impl Drop for Txn {
     }
 }
 
-fn dereference(provided: &HashMap<Id, State>, scalar: &Scalar) -> TCResult<State> {
-    match scalar {
-        Scalar::Ref(tc_ref) => match &**tc_ref {
-            TCRef::Id(id_ref) => dereference_state_owned(provided, id_ref.id()),
-            _ => dereference_scalar(provided, scalar).map(State::Scalar),
-        },
-        _ => dereference_scalar(provided, scalar).map(State::Scalar),
-    }
-}
-
-fn dereference_scalar(provided: &HashMap<Id, State>, scalar: &Scalar) -> TCResult<Scalar> {
-    match scalar {
-        Scalar::Object(object) => dereference_object(provided, object).map(Scalar::Object),
-        Scalar::Op(op_ref) => Err(error::not_implemented(format!(
-            "dereference_scalar {}",
-            op_ref
-        ))),
-        Scalar::Ref(tc_ref) => match &**tc_ref {
-            TCRef::Id(id_ref) => {
-                dereference_state_owned(provided, id_ref.id()).and_then(Scalar::try_from)
-            }
-            other => Ok(Scalar::Ref(Box::new(other.clone()))),
-        },
-        Scalar::Tuple(tuple) => dereference_tuple(provided, tuple).map(Scalar::Tuple),
-        other => Ok(other.clone()),
-    }
-}
-
-fn dereference_state<'a>(provided: &'a HashMap<Id, State>, id: &'a Id) -> TCResult<&'a State> {
-    provided.get(id).ok_or_else(|| error::not_found(id))
-}
-
-fn dereference_state_owned(provided: &HashMap<Id, State>, id: &Id) -> TCResult<State> {
-    provided
-        .get(id)
-        .cloned()
-        .ok_or_else(|| error::not_found(id))
-}
-
-fn dereference_object(_provided: &HashMap<Id, State>, _object: &Object) -> TCResult<Object> {
-    Err(error::not_implemented("dereference_object"))
-}
-
-fn dereference_tuple(provided: &HashMap<Id, State>, tuple: &[Scalar]) -> TCResult<Vec<Scalar>> {
-    let mut dereferenced = Vec::with_capacity(tuple.len());
-    for item in tuple {
-        dereferenced.push(dereference_scalar(provided, item)?);
-    }
-    Ok(dereferenced)
-}
-
-fn dereference_value(provided: &HashMap<Id, State>, key: Key) -> TCResult<Value> {
-    match key {
-        Key::Value(value) => Ok(value),
-        Key::Ref(id_ref) => {
-            dereference_state_owned(provided, id_ref.id()).and_then(Value::try_from)
-        }
-    }
-}
-
 fn is_resolved(state: &State) -> bool {
     match state {
         State::Scalar(scalar) => is_resolved_scalar(scalar),
@@ -691,10 +696,7 @@ fn is_resolved_scalar(scalar: &Scalar) -> bool {
     }
 }
 
-fn requires<'a>(
-    scalar: &'a Scalar,
-    txn_state: &'a HashMap<Id, State>,
-) -> TCResult<HashSet<&'a IdRef>> {
+fn requires<'a>(scalar: &'a Scalar, txn_state: &'a TxnState) -> TCResult<HashSet<&'a IdRef>> {
     let mut deps = HashSet::new();
 
     match scalar {
@@ -712,10 +714,7 @@ fn requires<'a>(
     Ok(deps)
 }
 
-fn ref_requires<'a>(
-    tc_ref: &'a TCRef,
-    txn_state: &'a HashMap<Id, State>,
-) -> TCResult<HashSet<&'a IdRef>> {
+fn ref_requires<'a>(tc_ref: &'a TCRef, txn_state: &'a TxnState) -> TCResult<HashSet<&'a IdRef>> {
     let mut deps = HashSet::new();
 
     match tc_ref {
@@ -738,7 +737,7 @@ fn ref_requires<'a>(
 
 fn flow_requires<'a>(
     control: &'a FlowControl,
-    txn_state: &'a HashMap<Id, State>,
+    txn_state: &'a TxnState,
 ) -> TCResult<HashSet<&'a IdRef>> {
     let mut deps = HashSet::new();
 
@@ -758,7 +757,7 @@ fn flow_requires<'a>(
 
 fn method_requires<'a>(
     method: &'a Method,
-    txn_state: &'a HashMap<Id, State>,
+    txn_state: &'a TxnState,
 ) -> TCResult<HashSet<&'a IdRef>> {
     let mut deps = HashSet::new();
 
@@ -794,10 +793,7 @@ fn method_requires<'a>(
     Ok(deps)
 }
 
-fn op_requires<'a>(
-    op_ref: &'a OpRef,
-    txn_state: &'a HashMap<Id, State>,
-) -> TCResult<HashSet<&'a IdRef>> {
+fn op_requires<'a>(op_ref: &'a OpRef, txn_state: &'a TxnState) -> TCResult<HashSet<&'a IdRef>> {
     let mut deps = HashSet::new();
 
     match op_ref {

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures::stream;
 
-use crate::auth::{SCOPE_WRITE, Scope};
+use crate::auth::{Scope, SCOPE_WRITE};
 use crate::class::{Instance, TCResult, TCStream, TCType};
 use crate::collection::btree::BTreeFile;
 use crate::collection::table::TableIndex;

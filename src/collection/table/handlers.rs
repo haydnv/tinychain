@@ -5,12 +5,14 @@ use async_trait::async_trait;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 
-use crate::auth::{SCOPE_READ, SCOPE_WRITE, Scope};
+use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
 use crate::class::{Instance, State, TCResult, TCStream, TCType};
 use crate::collection::CollectionInstance;
 use crate::error;
 use crate::handler::*;
-use crate::scalar::{Id, MethodType, Object, PathSegment, Scalar, ScalarInstance, TryCastFrom, TryCastInto, Value};
+use crate::scalar::{
+    Id, MethodType, Object, PathSegment, Scalar, ScalarInstance, TryCastFrom, TryCastInto, Value,
+};
 use crate::transaction::Txn;
 
 use super::{Bounds, Table, TableInstance};

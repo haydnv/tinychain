@@ -117,7 +117,7 @@ impl InstanceClass {
     ) -> TCResult<InstanceExt<State>> {
         if path.is_empty() {
             let ctr = OpRef::Get((self.extends(), Key::Value(schema)));
-            let parent = txn.resolve(request, &HashMap::new(), ctr.into()).await?;
+            let parent = txn.resolve(request, ctr.into()).await?;
 
             Ok(InstanceExt::new(parent, self))
         } else {
