@@ -9,7 +9,7 @@ use crate::class::{Instance, State};
 use crate::error::{self, TCResult};
 use crate::handler::Public;
 use crate::request::Request;
-use crate::scalar::{self, PathSegment, Scalar, TCPath, TryCastInto, Value, ValueInstance};
+use crate::scalar::{self, PathSegment, Scalar, TCPath, Value};
 use crate::transaction::Txn;
 
 use super::InstanceClass;
@@ -63,27 +63,13 @@ impl<T: Clone + Public + Into<State> + Send + Sync> Public for InstanceExt<T> {
         let proto = self.class.proto().deref();
         match proto.get(&path[0]) {
             Some(scalar) => match scalar {
-                Scalar::Object(object) => object.get(request, txn, &path[1..], key).await,
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
                         .get(request, txn, key, Some(self.clone().into_state().into()))
                         .await
                 }
                 Scalar::Op(_) => Err(error::path_not_found(&path[1..])),
-                Scalar::Tuple(tuple) => {
-                    let i: usize =
-                        key.try_cast_into(|v| error::bad_request("Invalid index for tuple", v))?;
-                    tuple
-                        .get(i)
-                        .cloned()
-                        .map(State::Scalar)
-                        .ok_or_else(|| error::not_found(i))
-                }
-                Scalar::Value(value) => value
-                    .get(&path[1..], key)
-                    .map(Scalar::Value)
-                    .map(State::Scalar),
-                other => Err(error::method_not_allowed(other)),
+                scalar => scalar.get(request, txn, path, key).await,
             },
             None => self.parent.get(request, txn, path, key).await,
         }
@@ -102,7 +88,6 @@ impl<T: Clone + Public + Into<State> + Send + Sync> Public for InstanceExt<T> {
         let proto = self.class.proto().deref();
         match proto.get(&path[0]) {
             Some(scalar) => match scalar {
-                Scalar::Object(object) => object.put(request, txn, &path[1..], key, value).await,
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
                         .put(
@@ -115,7 +100,7 @@ impl<T: Clone + Public + Into<State> + Send + Sync> Public for InstanceExt<T> {
                         .await
                 }
                 Scalar::Op(_) => Err(error::path_not_found(&path[1..])),
-                other => Err(error::method_not_allowed(other)),
+                scalar => scalar.put(request, txn, path, key, value).await,
             },
             None => self.parent.put(request, txn, path, key, value).await,
         }
@@ -133,14 +118,13 @@ impl<T: Clone + Public + Into<State> + Send + Sync> Public for InstanceExt<T> {
         let proto = self.class.proto().deref();
         match proto.get(&path[0]) {
             Some(scalar) => match scalar {
-                Scalar::Object(object) => object.post(request, txn, &path[1..], params).await,
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
                         .post(request, txn, params, Some(self.clone().into_state().into()))
                         .await
                 }
                 Scalar::Op(_) => Err(error::path_not_found(&path[1..])),
-                other => Err(error::method_not_allowed(other)),
+                scalar => scalar.post(request, txn, path, params).await,
             },
             None => self.parent.post(request, txn, path, params).await,
         }
