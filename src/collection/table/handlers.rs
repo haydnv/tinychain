@@ -5,14 +5,12 @@ use async_trait::async_trait;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 
-use crate::auth::Scope;
+use crate::auth::{SCOPE_READ, SCOPE_WRITE, Scope};
 use crate::class::{Instance, State, TCResult, TCStream, TCType};
 use crate::collection::CollectionInstance;
 use crate::error;
 use crate::handler::*;
-use crate::scalar::{
-    Id, MethodType, Object, PathSegment, Scalar, ScalarInstance, TryCastFrom, TryCastInto, Value,
-};
+use crate::scalar::{Id, MethodType, Object, PathSegment, Scalar, ScalarInstance, TryCastFrom, TryCastInto, Value};
 use crate::transaction::Txn;
 
 use super::{Bounds, Table, TableInstance};
@@ -31,7 +29,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write".parse().unwrap())
+        Some(SCOPE_WRITE.into())
     }
 
     async fn handle_delete(&self, txn: &Txn, key: Value) -> TCResult<()> {
@@ -60,7 +58,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
@@ -86,7 +84,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write".parse().unwrap())
+        Some(SCOPE_WRITE.into())
     }
 
     async fn handle_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
@@ -109,7 +107,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
@@ -132,7 +130,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
@@ -158,7 +156,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
@@ -187,7 +185,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
@@ -210,7 +208,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write".parse().unwrap())
+        Some(SCOPE_WRITE.into())
     }
 
     async fn handle_post(&self, txn: &Txn, params: Object) -> TCResult<State> {
@@ -238,7 +236,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write".parse().unwrap())
+        Some(SCOPE_WRITE.into())
     }
 
     async fn handle_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
@@ -261,7 +259,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {

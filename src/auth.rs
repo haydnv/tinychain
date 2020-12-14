@@ -9,9 +9,13 @@ use signature::{Signature, Signer, Verifier};
 
 use crate::class::TCResult;
 use crate::error;
-use crate::scalar::{Link, TCPathBuf, Value};
+use crate::scalar::{path_label, Link, PathLabel, TCPathBuf, Value};
 
 pub type Scope = TCPathBuf;
+
+pub const SCOPE_WRITE: PathLabel = path_label(&["write"]);
+pub const SCOPE_READ: PathLabel = path_label(&["write", "read"]);
+pub const SCOPE_EXECUTE: PathLabel = path_label(&["write", "read", "execute"]);
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Token {

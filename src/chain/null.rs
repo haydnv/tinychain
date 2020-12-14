@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures::stream;
 
-use crate::auth::Scope;
+use crate::auth::{SCOPE_WRITE, Scope};
 use crate::class::{Instance, TCResult, TCStream, TCType};
 use crate::collection::btree::BTreeFile;
 use crate::collection::table::TableIndex;
@@ -90,7 +90,7 @@ impl<'a> Handler for NullChainHandler<'a> {
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin".parse().unwrap())
+        Some(SCOPE_WRITE.into())
     }
 }
 

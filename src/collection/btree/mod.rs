@@ -4,7 +4,7 @@ use std::ops::Deref;
 use async_trait::async_trait;
 use futures::stream::{self, Stream, StreamExt};
 
-use crate::auth::Scope;
+use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
 use crate::class::{Instance, State, TCStream, TCType};
 use crate::collection::class::CollectionInstance;
 use crate::collection::Collection;
@@ -88,7 +88,7 @@ impl<'a, T: BTreeInstance> Handler for CountHandler<'a, T> {
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, txn: &Txn, range: Value) -> TCResult<State> {
@@ -109,7 +109,7 @@ impl<'a, T: BTreeInstance> Handler for DeleteHandler<'a, T> {
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write".parse().unwrap())
+        Some(SCOPE_WRITE.into())
     }
 
     async fn handle_delete(&self, txn: &Txn, range: Value) -> TCResult<()> {
@@ -153,7 +153,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, txn: &Txn, range: Value) -> TCResult<State> {
@@ -195,7 +195,7 @@ where
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, _txn: &Txn, range: Value) -> TCResult<State> {
@@ -224,7 +224,7 @@ impl<'a, T: BTreeInstance> Handler for WriteHandler<'a, T> {
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/admin/write".parse().unwrap())
+        Some(SCOPE_WRITE.into())
     }
 
     async fn handle_put(&self, txn: &Txn, range: Value, data: State) -> TCResult<()> {

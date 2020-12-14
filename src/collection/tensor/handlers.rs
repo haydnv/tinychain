@@ -3,7 +3,7 @@ use std::iter::FromIterator;
 
 use async_trait::async_trait;
 
-use crate::auth::Scope;
+use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
 use crate::class::{State, TCResult, TCType};
 use crate::collection::Collection;
 use crate::error;
@@ -28,7 +28,7 @@ impl<'a, T: TensorInstance> Handler for AllHandler<'a, T> {
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
@@ -56,7 +56,7 @@ impl<'a, T: TensorInstance> Handler for AnyHandler<'a, T> {
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
@@ -87,7 +87,7 @@ impl<'a, T: TensorInstance, R: Fn(&T, &Txn, Value) -> TCResult<State> + Send + S
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
@@ -106,7 +106,7 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/write/read".parse().unwrap())
+        Some(SCOPE_READ.into())
     }
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
@@ -158,7 +158,7 @@ impl<'a, T: TensorInstance + TensorDualIO<Tensor>> Handler for WriteHandler<'a, 
     }
 
     fn scope(&self) -> Option<Scope> {
-        Some("/write".parse().unwrap())
+        Some(SCOPE_WRITE.into())
     }
 
     async fn handle_put(&self, txn: &Txn, selector: Value, value: State) -> TCResult<()> {
