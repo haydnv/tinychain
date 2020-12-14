@@ -10,7 +10,9 @@ use log::debug;
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::collection::{from_dense, Collection};
 use crate::error;
+use crate::handler::*;
 use crate::scalar::number::*;
+use crate::scalar::{MethodType, PathSegment};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
@@ -1487,6 +1489,23 @@ impl<T: Clone + BlockList, OT: Clone + BlockList> TensorDualIO<DenseTensor<OT>> 
     }
 }
 
+#[async_trait]
+impl<T: Clone + BlockList> TensorDualIO<Tensor> for DenseTensor<T> {
+    async fn mask(&self, txn: &Txn, other: Tensor) -> TCResult<()> {
+        match other {
+            Tensor::Sparse(sparse) => self.mask(txn, sparse.into_dense()).await,
+            Tensor::Dense(dense) => self.mask(txn, dense).await,
+        }
+    }
+
+    async fn write(&self, txn: Txn, bounds: Bounds, other: Tensor) -> TCResult<()> {
+        match other {
+            Tensor::Sparse(sparse) => self.write(txn, bounds, sparse.into_dense()).await,
+            Tensor::Dense(dense) => self.write(txn, bounds, dense).await,
+        }
+    }
+}
+
 impl<T: Clone + BlockList> TensorReduce for DenseTensor<T> {
     type Reduce = DenseTensor<BlockListReduce<T>>;
 
@@ -1592,6 +1611,16 @@ impl<T: Clone + BlockList> TensorTransform for DenseTensor<T> {
         });
 
         Ok(DenseTensor { blocks })
+    }
+}
+
+impl<T: Clone + BlockList> Route for DenseTensor<T> {
+    fn route(
+        &'_ self,
+        method: MethodType,
+        path: &'_ [PathSegment],
+    ) -> Option<Box<dyn Handler + '_>> {
+        super::handlers::route(self, method, path)
     }
 }
 

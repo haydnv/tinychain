@@ -5,18 +5,20 @@ use async_trait::async_trait;
 
 use crate::auth::Scope;
 use crate::class::{State, TCResult, TCType};
-use crate::collection::{Collection};
+use crate::collection::Collection;
 use crate::error;
 use crate::handler::*;
-use crate::scalar::{label, MethodType, NumberType, Object, Scalar, PathSegment, TryCastInto, Value};
+use crate::scalar::{
+    label, MethodType, NumberType, Object, PathSegment, Scalar, TryCastInto, Value,
+};
 use crate::transaction::Txn;
 
-use super::class::{Tensor, TensorInstance};
 use super::bounds::*;
+use super::class::{Tensor, TensorInstance};
 use super::{IntoView, TensorDualIO, TensorUnary};
 
 struct AllHandler<'a, T: TensorInstance> {
-    tensor: &'a T
+    tensor: &'a T,
 }
 
 #[async_trait]
@@ -33,7 +35,8 @@ impl<'a, T: TensorInstance> Handler for AllHandler<'a, T> {
         let all = if selector.is_none() {
             self.tensor.all(txn.clone()).await
         } else {
-            let bounds = selector.try_cast_into(|v| error::bad_request("Invalid Tensor bounds", v))?;
+            let bounds =
+                selector.try_cast_into(|v| error::bad_request("Invalid Tensor bounds", v))?;
             let slice = self.tensor.slice(bounds)?;
             slice.into_view().all(txn.clone()).await
         };
@@ -43,7 +46,7 @@ impl<'a, T: TensorInstance> Handler for AllHandler<'a, T> {
 }
 
 struct AnyHandler<'a, T: TensorInstance> {
-    tensor: &'a T
+    tensor: &'a T,
 }
 
 #[async_trait]
@@ -60,7 +63,8 @@ impl<'a, T: TensorInstance> Handler for AnyHandler<'a, T> {
         let any = if selector.is_none() {
             self.tensor.any(txn.clone()).await
         } else {
-            let bounds = selector.try_cast_into(|v| error::bad_request("Invalid Tensor bounds", v))?;
+            let bounds =
+                selector.try_cast_into(|v| error::bad_request("Invalid Tensor bounds", v))?;
             let slice = self.tensor.slice(bounds)?;
             slice.into_view().any(txn.clone()).await
         };
@@ -71,11 +75,13 @@ impl<'a, T: TensorInstance> Handler for AnyHandler<'a, T> {
 
 struct GetHandler<'a, T: TensorInstance, R: Fn(&T, &Txn, Value) -> TCResult<State> + Send + Sync> {
     tensor: &'a T,
-    read_fn: R
+    read_fn: R,
 }
 
 #[async_trait]
-impl<'a, T: TensorInstance, R: Fn(&T, &Txn, Value) -> TCResult<State> + Send + Sync> Handler for GetHandler<'a, T, R> {
+impl<'a, T: TensorInstance, R: Fn(&T, &Txn, Value) -> TCResult<State> + Send + Sync> Handler
+    for GetHandler<'a, T, R>
+{
     fn subject(&self) -> TCType {
         self.tensor.class().into()
     }
@@ -107,8 +113,7 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
         let bounds = if selector.is_none() {
             Bounds::all(self.tensor.shape())
         } else {
-            selector
-                .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?
+            selector.try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?
         };
 
         if bounds.is_coord() {
@@ -128,7 +133,8 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
         let bounds = Bounds::from_scalar(self.tensor.shape(), bounds)?;
 
         if params.is_empty() {
-            self.tensor.slice(bounds)
+            self.tensor
+                .slice(bounds)
                 .map(IntoView::into_view)
                 .map(Collection::from)
                 .map(State::Collection)
@@ -142,7 +148,7 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
 }
 
 struct WriteHandler<'a, T: TensorInstance> {
-    tensor: &'a T
+    tensor: &'a T,
 }
 
 #[async_trait]
@@ -164,7 +170,9 @@ impl<'a, T: TensorInstance + TensorDualIO<Tensor>> Handler for WriteHandler<'a, 
 
         match value {
             State::Scalar(Scalar::Value(Value::Number(value))) => {
-                self.tensor.write_value(txn.id().clone(), bounds, value).await
+                self.tensor
+                    .write_value(txn.id().clone(), bounds, value)
+                    .await
             }
             State::Collection(Collection::Tensor(tensor)) => {
                 self.tensor.write(txn.clone(), bounds, tensor).await
@@ -177,10 +185,15 @@ impl<'a, T: TensorInstance + TensorDualIO<Tensor>> Handler for WriteHandler<'a, 
     }
 }
 
-pub fn route<'a, T: TensorInstance>(tensor: &'a T, method: MethodType, path: &'_ [PathSegment]) -> Option<Box<dyn Handler + 'a>> {
+pub fn route<'a, T: TensorInstance + TensorDualIO<Tensor>>(
+    tensor: &'a T,
+    method: MethodType,
+    path: &'_ [PathSegment],
+) -> Option<Box<dyn Handler + 'a>> {
     if path.is_empty() {
         let handler: Box<dyn Handler> = match method {
             MethodType::Get => Box::new(SliceHandler { tensor }),
+            MethodType::Put => Box::new(WriteHandler { tensor }),
             _ => return None,
         };
 
@@ -195,11 +208,12 @@ pub fn route<'a, T: TensorInstance>(tensor: &'a T, method: MethodType, path: &'_
                     let dtype: NumberType =
                         selector.try_cast_into(|v| error::bad_request("Invalid NumberType", v))?;
 
-                    tensor.as_type(dtype)
+                    tensor
+                        .as_type(dtype)
                         .map(IntoView::into_view)
                         .map(Collection::from)
                         .map(State::Collection)
-                }
+                },
             }),
             "broadcast" => Box::new(GetHandler {
                 tensor,
@@ -207,32 +221,41 @@ pub fn route<'a, T: TensorInstance>(tensor: &'a T, method: MethodType, path: &'_
                     let shape =
                         selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;
 
-                    tensor.broadcast(shape)
+                    tensor
+                        .broadcast(shape)
                         .map(IntoView::into_view)
                         .map(Collection::from)
                         .map(State::Collection)
-                }
+                },
             }),
             "expand_dims" => Box::new(GetHandler {
                 tensor,
                 read_fn: |tensor, _txn, selector| {
                     let axis = selector.try_cast_into(|v| error::bad_request("Invalid axis", v))?;
 
-                    tensor.expand_dims(axis)
+                    tensor
+                        .expand_dims(axis)
                         .map(IntoView::into_view)
                         .map(Collection::from)
                         .map(State::Collection)
-                }
+                },
             }),
             "not" => Box::new(GetHandler {
                 tensor,
                 read_fn: |tensor, _txn, selector| {
                     if selector.is_none() {
-                        tensor.not().map(IntoView::into_view).map(Collection::from).map(State::Collection)
+                        tensor
+                            .not()
+                            .map(IntoView::into_view)
+                            .map(Collection::from)
+                            .map(State::Collection)
                     } else {
-                        Err(error::bad_request("Tensor::not takes no parameters, found", selector))
+                        Err(error::bad_request(
+                            "Tensor::not takes no parameters, found",
+                            selector,
+                        ))
                     }
-                }
+                },
             }),
             "reshape" => Box::new(GetHandler {
                 tensor,
@@ -240,11 +263,12 @@ pub fn route<'a, T: TensorInstance>(tensor: &'a T, method: MethodType, path: &'_
                     let shape =
                         selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;
 
-                    tensor.reshape(shape)
+                    tensor
+                        .reshape(shape)
                         .map(IntoView::into_view)
                         .map(Collection::from)
                         .map(State::Collection)
-                }
+                },
             }),
             "slice" => Box::new(SliceHandler { tensor }),
             "transpose" => Box::new(GetHandler {
@@ -259,11 +283,12 @@ pub fn route<'a, T: TensorInstance>(tensor: &'a T, method: MethodType, path: &'_
                         Some(permutation)
                     };
 
-                    tensor.transpose(permutation)
+                    tensor
+                        .transpose(permutation)
                         .map(IntoView::into_view)
                         .map(Collection::from)
                         .map(State::Collection)
-                }
+                },
             }),
             _ => return None,
         };

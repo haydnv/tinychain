@@ -96,7 +96,7 @@ pub trait TensorIO: TensorAccessor + Sized {
 
 #[async_trait]
 pub trait TensorDualIO<O>: TensorAccessor + Sized {
-    async fn mask(&self, txn: &Txn, other: O) -> TCResult<()>;
+    async fn mask(&self, txn: &Txn, value: O) -> TCResult<()>;
 
     async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: O) -> TCResult<()>;
 }

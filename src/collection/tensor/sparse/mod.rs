@@ -12,8 +12,9 @@ use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::collection::Collection;
 use crate::error;
+use crate::handler::*;
 use crate::scalar::value::number::*;
-use crate::scalar::{label, Bound, Id, Label, Value, ValueType};
+use crate::scalar::{label, Bound, Id, Label, MethodType, PathSegment, Value, ValueType};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
@@ -647,6 +648,24 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorDualIO<SparseTenso
     }
 }
 
+#[async_trait]
+impl<T: Clone + SparseAccess> TensorDualIO<Tensor> for SparseTensor<T>
+{
+    async fn mask(&self, txn: &Txn, other: Tensor) -> TCResult<()> {
+        match other {
+            Tensor::Dense(dense) => self.mask(txn, dense.into_sparse()).await,
+            Tensor::Sparse(sparse) => self.mask(txn, sparse).await,
+        }
+    }
+
+    async fn write(&self, txn: Txn, bounds: Bounds, value: Tensor) -> TCResult<()> {
+        match value {
+            Tensor::Sparse(sparse) => self.write(txn, bounds, sparse).await,
+            Tensor::Dense(dense) => self.write(txn, bounds, dense.into_sparse()).await,
+        }
+    }
+}
+
 impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorMath<SparseTensor<OT>>
     for SparseTensor<T>
 {
@@ -747,6 +766,16 @@ impl<T: Clone + SparseAccess> TensorTransform for SparseTensor<T> {
         let accessor = Arc::new(SparseTranspose::new(self.accessor.clone(), rebase));
 
         Ok(accessor.into())
+    }
+}
+
+impl<T: Clone + SparseAccess> Route for SparseTensor<T> {
+    fn route(
+        &'_ self,
+        method: MethodType,
+        path: &'_ [PathSegment],
+    ) -> Option<Box<dyn Handler + '_>> {
+        super::handlers::route(self, method, path)
     }
 }
 

@@ -1,18 +1,16 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
-use std::iter::FromIterator;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, TryFutureExt};
 
-use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, NativeClass, TCBoxTryFuture, TCResult, TCStream, TCType};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::handler::Public;
-use crate::request::Request;
+use crate::handler::*;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -25,7 +23,14 @@ use super::{
 };
 
 pub trait TensorInstance:
-    Clone + Instance<Class = TensorType> + IntoView + TensorIO + TensorTransform + TensorUnary + Send + Sync
+    Clone
+    + Instance<Class = TensorType>
+    + IntoView
+    + TensorIO
+    + TensorTransform
+    + TensorUnary
+    + Send
+    + Sync
 {
     type Dense: TensorInstance;
     type Sparse: TensorInstance;
@@ -536,24 +541,16 @@ impl TensorIO for Tensor {
 #[async_trait]
 impl TensorDualIO<Tensor> for Tensor {
     async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()> {
-        match (self, &other) {
-            (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()).await,
-            (Self::Sparse(l), Self::Sparse(r)) => l.mask(txn, r.clone()).await,
-            (Self::Sparse(l), Self::Dense(r)) => l.mask(txn, r.clone().into_sparse()).await,
-            (l, Self::Sparse(r)) => l.mask(txn, r.clone().into_dense().into_view()).await,
+        match self {
+            Self::Dense(dense) => dense.mask(txn, other).await,
+            Self::Sparse(sparse) => sparse.mask(txn, other).await,
         }
     }
 
     async fn write(&self, txn: Txn, bounds: Bounds, value: Self) -> TCResult<()> {
         match self {
-            Self::Dense(this) => match value {
-                Self::Dense(that) => this.write(txn, bounds, that).await,
-                Self::Sparse(that) => this.write(txn, bounds, that.into_dense()).await,
-            },
-            Self::Sparse(this) => match value {
-                Self::Dense(that) => this.write(txn, bounds, that.into_sparse()).await,
-                Self::Sparse(that) => this.write(txn, bounds, that).await,
-            },
+            Self::Dense(dense) => dense.write(txn, bounds, value).await,
+            Self::Sparse(sparse) => sparse.write(txn, bounds, value).await,
         }
     }
 }
@@ -671,171 +668,13 @@ impl TensorTransform for Tensor {
     }
 }
 
-#[async_trait]
-impl Public for Tensor {
-    async fn get(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-    ) -> TCResult<State> {
-        if path.is_empty() {
-            let bounds = if selector.is_none() {
-                Bounds::all(self.shape())
-            } else {
-                selector
-                    .try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?
-            };
-
-            if bounds.is_coord() {
-                let coord: Vec<u64> = bounds.try_into()?;
-                let value = self.read_value(&txn, &coord).await?;
-                Ok(State::Scalar(Scalar::Value(Value::Number(value))))
-            } else {
-                let slice = self.slice(bounds)?;
-                Ok(State::Collection(slice.into()))
-            }
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "all" => self
-                    .all(txn.clone())
-                    .await
-                    .map(Value::from)
-                    .map(State::from),
-                "any" => self
-                    .any(txn.clone())
-                    .await
-                    .map(Value::from)
-                    .map(State::from),
-                "as_type" => {
-                    let dtype: NumberType =
-                        selector.try_cast_into(|v| error::bad_request("Invalid NumberType", v))?;
-
-                    self.as_type(dtype)
-                        .map(Collection::from)
-                        .map(State::Collection)
-                }
-                "broadcast" => {
-                    let shape =
-                        selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;
-
-                    self.broadcast(shape)
-                        .map(Collection::from)
-                        .map(State::Collection)
-                }
-                "expand_dims" => {
-                    let axis = selector.try_cast_into(|v| error::bad_request("Invalid axis", v))?;
-
-                    self.expand_dims(axis)
-                        .map(Collection::from)
-                        .map(State::Collection)
-                }
-                "not" => self.not().map(Collection::from).map(State::Collection),
-                "reshape" => {
-                    let shape =
-                        selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;
-
-                    self.reshape(shape)
-                        .map(Collection::from)
-                        .map(State::Collection)
-                }
-                "transpose" => {
-                    let permutation = if selector.is_none() {
-                        None
-                    } else {
-                        let permutation = selector.try_cast_into(|v| {
-                            error::bad_request("Permutation should be a tuple of axes, not", v)
-                        })?;
-                        Some(permutation)
-                    };
-
-                    self.transpose(permutation)
-                        .map(Collection::from)
-                        .map(State::Collection)
-                }
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            Err(error::path_not_found(path))
-        }
-    }
-
-    async fn put(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-        value: State,
-    ) -> TCResult<()> {
-        if !path.is_empty() {
-            return Err(error::path_not_found(path));
-        }
-
-        let bounds = if selector.is_none() {
-            Bounds::all(self.shape())
-        } else {
-            selector.try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?
-        };
-
-        match value {
-            State::Scalar(Scalar::Value(Value::Number(value))) => {
-                self.write_value(txn.id().clone(), bounds, value).await
-            }
-            State::Collection(Collection::Tensor(tensor)) => {
-                self.write(txn.clone(), bounds, tensor).await
-            }
-            other => Err(error::bad_request(
-                "Not a valid Tensor value or slice",
-                other,
-            )),
-        }
-    }
-
-    async fn post(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        path: &[PathSegment],
-        mut params: Object,
-    ) -> TCResult<State> {
-        if path.is_empty() {
-            Err(error::method_not_allowed("Tensor::POST /"))
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "slice" => {
-                    let bounds = params
-                        .remove(&label("bounds").into())
-                        .ok_or(error::bad_request("Missing parameter", "bounds"))?;
-                    let bounds = Bounds::from_scalar(self.shape(), bounds)?;
-
-                    if params.is_empty() {
-                        self.slice(bounds)
-                            .map(Collection::from)
-                            .map(State::Collection)
-                    } else {
-                        Err(error::bad_request(
-                            "Unrecognized parameters",
-                            Scalar::from_iter(params),
-                        ))
-                    }
-                }
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            Err(error::path_not_found(path))
-        }
-    }
-
-    async fn delete(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _selector: Value,
-    ) -> TCResult<()> {
-        Err(error::not_implemented("Tensor::delete"))
+impl Route for Tensor {
+    fn route(
+        &'_ self,
+        method: MethodType,
+        path: &'_ [PathSegment],
+    ) -> Option<Box<dyn Handler + '_>> {
+        super::handlers::route(self, method, path)
     }
 }
 
