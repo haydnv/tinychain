@@ -2,10 +2,9 @@ use std::fmt;
 
 use async_trait::async_trait;
 
-use crate::class::{Instance, State, TCResult, TCStream};
-use crate::handler::Public;
-use crate::request::Request;
-use crate::scalar::{Object, PathSegment, Scalar, Value};
+use crate::class::{Instance, TCResult, TCStream};
+use crate::handler::*;
+use crate::scalar::{MethodType, PathSegment, Scalar};
 use crate::transaction::{Transact, Txn, TxnId};
 
 pub mod btree;
@@ -59,62 +58,16 @@ impl CollectionInstance for Collection {
     }
 }
 
-#[async_trait]
-impl Public for Collection {
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-    ) -> TCResult<State> {
+impl Route for Collection {
+    fn route(
+        &'_ self,
+        method: MethodType,
+        path: &'_ [PathSegment],
+    ) -> Option<Box<dyn Handler + '_>> {
         match self {
-            Self::BTree(btree) => btree.get(request, txn, path, selector).await,
-            Self::Table(table) => Public::get(table, request, txn, path, selector).await,
-            Self::Tensor(tensor) => tensor.get(request, txn, path, selector).await,
-        }
-    }
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-        value: State,
-    ) -> TCResult<()> {
-        match self {
-            Self::BTree(btree) => btree.put(request, txn, path, selector, value).await,
-            Self::Table(table) => table.put(request, txn, path, selector, value).await,
-            Self::Tensor(tensor) => tensor.put(request, txn, path, selector, value).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        match self {
-            Self::BTree(btree) => btree.post(request, txn, path, params).await,
-            Self::Table(table) => table.post(request, txn, path, params).await,
-            Self::Tensor(tensor) => tensor.post(request, txn, path, params).await,
-        }
-    }
-
-    async fn delete(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-    ) -> TCResult<()> {
-        match self {
-            Self::BTree(btree) => Public::delete(btree, request, txn, path, selector).await,
-            Self::Table(table) => table.delete(request, txn, path, selector).await,
-            Self::Tensor(tensor) => tensor.delete(request, txn, path, selector).await,
+            Self::BTree(btree) => btree.route(method, path),
+            Self::Table(table) => table.route(method, path),
+            Self::Tensor(tensor) => tensor.route(method, path),
         }
     }
 }

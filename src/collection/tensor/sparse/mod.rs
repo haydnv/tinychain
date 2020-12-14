@@ -649,8 +649,7 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorDualIO<SparseTenso
 }
 
 #[async_trait]
-impl<T: Clone + SparseAccess> TensorDualIO<Tensor> for SparseTensor<T>
-{
+impl<T: Clone + SparseAccess> TensorDualIO<Tensor> for SparseTensor<T> {
     async fn mask(&self, txn: &Txn, other: Tensor) -> TCResult<()> {
         match other {
             Tensor::Dense(dense) => self.mask(txn, dense.into_sparse()).await,
