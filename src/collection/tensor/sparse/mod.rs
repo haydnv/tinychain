@@ -10,18 +10,19 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
 use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
+use crate::collection::Collection;
 use crate::error;
 use crate::scalar::value::number::*;
 use crate::scalar::{label, Bound, Id, Label, Value, ValueType};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
-use super::class::{TensorInstance, TensorType, TensorViewType};
+use super::class::{Tensor, TensorInstance, TensorType};
 use super::dense::{dense_constant, from_sparse, BlockList, BlockListFile, DenseTensor};
 use super::transform;
 use super::{
     broadcast, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
-    TensorMath, TensorReduce, TensorTransform, TensorUnary, TensorView, ERR_NONBIJECTIVE_WRITE,
+    TensorMath, TensorReduce, TensorTransform, TensorUnary, ERR_NONBIJECTIVE_WRITE,
 };
 
 mod access;
@@ -348,7 +349,7 @@ pub struct SparseTensor<T: Clone + SparseAccess> {
 }
 
 impl<T: Clone + SparseAccess> SparseTensor<T> {
-    fn into_dyn(self) -> SparseTensor<SparseAccessorDyn> {
+    pub fn into_dyn(self) -> SparseTensor<SparseAccessorDyn> {
         let accessor = Arc::new(SparseAccessorDyn::new(self.clone_into()));
         SparseTensor { accessor }
     }
@@ -444,16 +445,16 @@ impl<T: Clone + SparseAccess> Instance for SparseTensor<T> {
     type Class = TensorType;
 
     fn class(&self) -> TensorType {
-        TensorType::View(TensorViewType::Sparse)
+        TensorType::Sparse
     }
 }
 
 impl<T: Clone + SparseAccess> TensorInstance for SparseTensor<T> {}
 
 impl<T: Clone + SparseAccess> IntoView for SparseTensor<T> {
-    fn into_view(self) -> TensorView {
+    fn into_view(self) -> Tensor {
         let accessor = Arc::new(SparseAccessorDyn::new(self.clone_into()));
-        TensorView::Sparse(SparseTensor { accessor })
+        Tensor::Sparse(SparseTensor { accessor })
     }
 }
 
@@ -763,6 +764,23 @@ impl<T: Clone + SparseAccess> From<Arc<T>> for SparseTensor<T> {
     fn from(accessor: Arc<T>) -> Self {
         Self { accessor }
     }
+}
+
+impl<T: Clone + SparseAccess> From<SparseTensor<T>> for Collection {
+    fn from(sparse: SparseTensor<T>) -> Collection {
+        Collection::Tensor(Tensor::Sparse(sparse.into_dyn()))
+    }
+}
+
+pub async fn create(
+    txn: &Txn,
+    shape: Shape,
+    dtype: NumberType,
+) -> TCResult<SparseTensor<SparseTable>> {
+    SparseTable::create(txn, shape, dtype)
+        .map_ok(Arc::new)
+        .map_ok(|accessor| SparseTensor { accessor })
+        .await
 }
 
 pub fn from_dense<T: Clone + BlockList>(source: DenseTensor<T>) -> SparseTensor<DenseAccessor<T>> {

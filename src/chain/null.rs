@@ -1,26 +1,27 @@
 use async_trait::async_trait;
 use futures::stream;
-use log::debug;
 
 use crate::auth::Scope;
 use crate::class::{Instance, State, TCResult, TCStream, TCType};
-use crate::collection::class::*;
-use crate::collection::CollectionBase;
+use crate::collection::btree::BTreeFile;
+use crate::collection::table::TableIndex;
+use crate::collection::tensor::dense::{BlockListFile, DenseTensor};
+use crate::collection::tensor::sparse::{SparseTable, SparseTensor};
 use crate::error;
 use crate::handler::*;
 use crate::request::Request;
-use crate::scalar::{Object, PathSegment, Scalar, ScalarClass, Value};
+use crate::scalar::{Object, PathSegment, Scalar, Value};
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::{ChainInstance, ChainType};
 
-const ERR_COLLECTION_VIEW: &str = "Chain does not support CollectionView; \
-consider making a copy of the Collection first";
-
 #[derive(Clone)]
 enum ChainState {
-    Collection(CollectionBase),
+    Tree(BTreeFile),
+    Table(TableIndex),
+    DenseTensor(DenseTensor<BlockListFile>),
+    SparseTensor(SparseTensor<SparseTable>),
     Scalar(TxnLock<Mutable<Scalar>>),
 }
 
@@ -28,29 +29,32 @@ enum ChainState {
 impl Transact for ChainState {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
-            Self::Collection(c) => c.commit(txn_id).await,
+            Self::Tree(tree) => tree.commit(txn_id).await,
+            Self::Table(table) => table.commit(txn_id).await,
+            Self::DenseTensor(tensor) => tensor.commit(txn_id).await,
+            Self::SparseTensor(tensor) => tensor.commit(txn_id).await,
             Self::Scalar(s) => s.commit(txn_id).await,
         }
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
-            Self::Collection(c) => c.rollback(txn_id).await,
+            Self::Tree(tree) => tree.rollback(txn_id).await,
+            Self::Table(table) => table.rollback(txn_id).await,
+            Self::DenseTensor(tensor) => tensor.rollback(txn_id).await,
+            Self::SparseTensor(tensor) => tensor.rollback(txn_id).await,
             Self::Scalar(s) => s.rollback(txn_id).await,
         }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         match self {
-            Self::Collection(c) => c.finalize(txn_id).await,
+            Self::Tree(tree) => tree.finalize(txn_id).await,
+            Self::Table(table) => table.finalize(txn_id).await,
+            Self::DenseTensor(tensor) => tensor.finalize(txn_id).await,
+            Self::SparseTensor(tensor) => tensor.finalize(txn_id).await,
             Self::Scalar(s) => s.finalize(txn_id).await,
         }
-    }
-}
-
-impl From<CollectionBase> for ChainState {
-    fn from(cb: CollectionBase) -> ChainState {
-        ChainState::Collection(cb)
     }
 }
 
@@ -66,24 +70,12 @@ pub struct NullChain {
 }
 
 impl NullChain {
-    pub async fn create(txn: &Txn, dtype: TCType, schema: Value) -> TCResult<NullChain> {
-        let state = match dtype {
-            TCType::Collection(ct) => match ct {
-                CollectionType::Base(ct) => {
-                    let collection = ct.get(txn, schema).await?;
-                    collection.into()
-                }
-                _ => return Err(error::unsupported(ERR_COLLECTION_VIEW)),
-            },
-            TCType::Scalar(st) => {
-                let scalar = st.try_cast(schema)?;
-                debug!("NullChain::create({}) wraps scalar {}", st, scalar);
-                scalar.into()
-            }
-            other => return Err(error::not_implemented(format!("Chain({})", other))),
-        };
-
-        Ok(NullChain { state })
+    pub async fn create(
+        _txn: &Txn,
+        _dtype: TCType,
+        _schema: Value,
+    ) -> TCResult<NullChain> {
+        Err(error::not_implemented("NullChain::create"))
     }
 }
 

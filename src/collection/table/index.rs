@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt;
 use std::iter::FromIterator;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -9,293 +7,19 @@ use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
 
-use crate::class::{Class, Instance, NativeClass, TCResult, TCStream, TCType};
+use crate::class::{Instance, TCResult, TCStream};
 use crate::collection::btree::{self, BTreeFile, BTreeInstance};
-use crate::collection::class::*;
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
-use crate::collection::{Collection, CollectionBase};
+use crate::collection::Collection;
 use crate::error;
-use crate::scalar::{label, Id, Link, PathSegment, Scalar, TCPathBuf, TryCastInto, Value};
+use crate::scalar::{Id, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::bounds::{self, Bounds, ColumnBound};
+use super::bounds::{Bounds, ColumnBound};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};
-use super::{Table, TableImpl, TableInstance, TableType};
+use super::{Table, TableInstance, TableType};
 
 const PRIMARY_INDEX: &str = "primary";
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum TableBaseType {
-    Index,
-    ReadOnly,
-    Table,
-}
-
-impl Class for TableBaseType {
-    type Instance = TableBase;
-}
-
-impl NativeClass for TableBaseType {
-    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
-        let suffix = Self::prefix().try_suffix(path)?;
-
-        if suffix.is_empty() {
-            Ok(TableBaseType::Table)
-        } else if suffix.len() == 1 && suffix[0].as_str() == "index" {
-            Ok(TableBaseType::Index)
-        } else {
-            Err(error::path_not_found(path))
-        }
-    }
-
-    fn prefix() -> TCPathBuf {
-        CollectionType::prefix().append(label("table"))
-    }
-}
-
-#[async_trait]
-impl CollectionClass for TableBaseType {
-    type Instance = TableBase;
-
-    async fn get(&self, txn: &Txn, schema: Value) -> TCResult<TableBase> {
-        let schema =
-            schema.try_cast_into(|v| error::bad_request("Expected TableSchema but found", v))?;
-
-        TableIndex::create(txn, schema)
-            .map_ok(TableBase::from)
-            .await
-    }
-}
-
-impl From<TableBaseType> for CollectionType {
-    fn from(tbt: TableBaseType) -> CollectionType {
-        CollectionType::Base(CollectionBaseType::Table(tbt))
-    }
-}
-
-impl From<TableBaseType> for Link {
-    fn from(tbt: TableBaseType) -> Link {
-        let prefix = TableType::prefix();
-
-        use TableBaseType::*;
-        match tbt {
-            Index => prefix.append(label("index")).into(),
-            ReadOnly => prefix.append(label("ro_index")).into(),
-            Table => prefix.into(),
-        }
-    }
-}
-
-impl From<TableBaseType> for TCType {
-    fn from(tbt: TableBaseType) -> TCType {
-        TCType::Collection(tbt.into())
-    }
-}
-
-impl fmt::Display for TableBaseType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Index => write!(f, "Index"),
-            Self::ReadOnly => write!(f, "Index (read-only)"),
-            Self::Table => write!(f, "Table"),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum TableBase {
-    Index(TableImpl<Index>),
-    ROIndex(TableImpl<ReadOnly>),
-    Table(TableImpl<TableIndex>),
-}
-
-impl Instance for TableBase {
-    type Class = TableBaseType;
-
-    fn class(&self) -> Self::Class {
-        match self {
-            Self::Index(_) => TableBaseType::Index,
-            Self::ROIndex(_) => TableBaseType::ReadOnly,
-            Self::Table(_) => TableBaseType::Table,
-        }
-    }
-}
-
-#[async_trait]
-impl TableInstance for TableBase {
-    type Stream = TCStream<Vec<Value>>;
-
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        match self {
-            Self::Index(index) => index.count(txn_id).await,
-            Self::ROIndex(index) => index.count(txn_id).await,
-            Self::Table(table) => table.count(txn_id).await,
-        }
-    }
-
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.into_inner().clone().delete(txn_id).await,
-            Self::ROIndex(index) => index.into_inner().clone().delete(txn_id).await,
-            Self::Table(table) => table.into_inner().clone().delete(txn_id).await,
-        }
-    }
-
-    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.delete_row(txn_id, row).await,
-            Self::ROIndex(index) => index.delete_row(txn_id, row).await,
-            Self::Table(table) => table.delete_row(txn_id, row).await,
-        }
-    }
-
-    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
-        match self {
-            Self::Index(index) => TableInstance::insert(index.deref(), txn_id, key, values).await,
-            Self::ROIndex(index) => TableInstance::insert(index.deref(), txn_id, key, values).await,
-            Self::Table(table) => TableInstance::insert(table.deref(), txn_id, key, values).await,
-        }
-    }
-
-    fn key(&'_ self) -> &'_ [Column] {
-        match self {
-            Self::Index(index) => index.key(),
-            Self::ROIndex(index) => index.key(),
-            Self::Table(table) => table.key(),
-        }
-    }
-
-    fn values(&'_ self) -> &'_ [Column] {
-        match self {
-            Self::Index(index) => index.values(),
-            Self::ROIndex(index) => index.values(),
-            Self::Table(table) => table.values(),
-        }
-    }
-
-    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
-        match self {
-            Self::Index(index) => index.order_by(columns, reverse),
-            Self::ROIndex(index) => index.order_by(columns, reverse),
-            Self::Table(table) => table.order_by(columns, reverse),
-        }
-    }
-
-    fn reversed(&self) -> TCResult<Table> {
-        match self {
-            Self::Index(index) => index.reversed(),
-            Self::ROIndex(index) => index.reversed(),
-            Self::Table(table) => table.reversed(),
-        }
-    }
-
-    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Table> {
-        match self {
-            Self::Index(index) => index.slice(bounds),
-            Self::ROIndex(index) => index.slice(bounds),
-            Self::Table(table) => table.slice(bounds),
-        }
-    }
-
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        match self {
-            Self::Index(index) => index.into_inner().stream(txn_id).await,
-            Self::ROIndex(index) => index.into_inner().stream(txn_id).await,
-            Self::Table(table) => table.into_inner().stream(txn_id).await,
-        }
-    }
-
-    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.validate_bounds(bounds),
-            Self::ROIndex(index) => index.validate_bounds(bounds),
-            Self::Table(table) => table.validate_bounds(bounds),
-        }
-    }
-
-    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.validate_order(order),
-            Self::ROIndex(index) => index.validate_order(order),
-            Self::Table(table) => table.validate_order(order),
-        }
-    }
-
-    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.into_inner().update(txn, value).await,
-            Self::ROIndex(index) => index.into_inner().update(txn, value).await,
-            Self::Table(table) => table.into_inner().update(txn, value).await,
-        }
-    }
-
-    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
-        match self {
-            Self::Index(index) => index.update_row(txn_id, row, value).await,
-            Self::ROIndex(index) => index.update_row(txn_id, row, value).await,
-            Self::Table(table) => table.update_row(txn_id, row, value).await,
-        }
-    }
-
-    async fn upsert(&self, txn_id: &TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
-        match self {
-            Self::Index(index) => TableInstance::upsert(index.deref(), txn_id, key, values).await,
-            Self::ROIndex(index) => TableInstance::upsert(index.deref(), txn_id, key, values).await,
-            Self::Table(table) => TableInstance::upsert(table.deref(), txn_id, key, values).await,
-        }
-    }
-}
-
-#[async_trait]
-impl Transact for TableBase {
-    async fn commit(&self, txn_id: &TxnId) {
-        match self {
-            Self::Index(index) => index.commit(txn_id).await,
-            Self::ROIndex(_) => (), // no-op
-            Self::Table(table) => table.commit(txn_id).await,
-        }
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        match self {
-            Self::Index(index) => index.rollback(txn_id).await,
-            Self::ROIndex(_) => (), // no-op
-            Self::Table(table) => table.rollback(txn_id).await,
-        }
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        match self {
-            Self::Index(index) => index.finalize(txn_id).await,
-            Self::ROIndex(_) => (), // no-op
-            Self::Table(table) => table.finalize(txn_id).await,
-        }
-    }
-}
-
-impl From<Index> for TableBase {
-    fn from(index: Index) -> Self {
-        Self::Index(index.into())
-    }
-}
-
-impl From<ReadOnly> for TableBase {
-    fn from(index: ReadOnly) -> Self {
-        Self::ROIndex(index.into())
-    }
-}
-
-impl From<TableIndex> for TableBase {
-    fn from(index: TableIndex) -> Self {
-        Self::Table(index.into())
-    }
-}
-
-impl From<TableBase> for Collection {
-    fn from(table: TableBase) -> Collection {
-        Collection::Base(CollectionBase::Table(table.into()))
-    }
-}
 
 #[derive(Clone)]
 pub struct Index {
@@ -359,7 +83,7 @@ impl Index {
 }
 
 impl Instance for Index {
-    type Class = TableBaseType;
+    type Class = TableType;
 
     fn class(&self) -> Self::Class {
         Self::Class::Index
@@ -481,12 +205,6 @@ impl TableInstance for Index {
     }
 }
 
-impl From<Index> for Table {
-    fn from(index: Index) -> Table {
-        Table::Base(TableBase::from(index).into())
-    }
-}
-
 #[async_trait]
 impl Transact for Index {
     async fn commit(&self, txn_id: &TxnId) {
@@ -499,6 +217,12 @@ impl Transact for Index {
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.btree.finalize(txn_id).await
+    }
+}
+
+impl From<Index> for Collection {
+    fn from(index: Index) -> Collection {
+        Collection::Table(index.into())
     }
 }
 
@@ -553,7 +277,7 @@ impl ReadOnly {
 }
 
 impl Instance for ReadOnly {
-    type Class = TableBaseType;
+    type Class = TableType;
 
     fn class(&self) -> Self::Class {
         Self::Class::ReadOnly
@@ -610,9 +334,9 @@ impl TableInstance for ReadOnly {
     }
 }
 
-impl From<ReadOnly> for Table {
-    fn from(index: ReadOnly) -> Table {
-        Table::Base(TableBase::from(index).into())
+impl From<ReadOnly> for Collection {
+    fn from(index: ReadOnly) -> Collection {
+        Collection::Table(index.into())
     }
 }
 
@@ -773,7 +497,7 @@ impl TableIndex {
 }
 
 impl Instance for TableIndex {
-    type Class = TableBaseType;
+    type Class = TableType;
 
     fn class(&self) -> Self::Class {
         Self::Class::Table
@@ -1146,12 +870,6 @@ impl TableInstance for TableIndex {
     }
 }
 
-impl From<TableIndex> for Table {
-    fn from(index: TableIndex) -> Table {
-        Table::Base(TableBase::from(index).into())
-    }
-}
-
 #[async_trait]
 impl Transact for TableIndex {
     async fn commit(&self, txn_id: &TxnId) {
@@ -1182,5 +900,11 @@ impl Transact for TableIndex {
         }
 
         join_all(cleanups).await;
+    }
+}
+
+impl From<TableIndex> for Collection {
+    fn from(index: TableIndex) -> Collection {
+        Collection::Table(index.into())
     }
 }

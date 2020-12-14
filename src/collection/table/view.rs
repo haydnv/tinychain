@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::sync::Arc;
@@ -12,12 +11,12 @@ use log::debug;
 use crate::class::*;
 use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
-use crate::collection::{Collection, CollectionType, CollectionView, CollectionViewType};
+use crate::collection::Collection;
 use crate::error;
-use crate::scalar::{label, Id, Link, PathSegment, TCPathBuf, Value};
+use crate::scalar::{Id, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::bounds::{self, Bounds};
+use super::bounds::Bounds;
 use super::index::TableIndex;
 use super::{Table, TableInstance, TableType};
 
@@ -29,323 +28,6 @@ const ERR_LIMITED_ORDER: &str = "Cannot order a limited selection. \
 Consider ordering the source or indexing the selection.";
 const ERR_LIMITED_REVERSE: &str = "Cannot reverse a limited selection. \
 Consider reversing a slice before limiting";
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum TableViewType {
-    Aggregate,
-    IndexSlice,
-    Limit,
-    Merge,
-    Selection,
-    TableSlice,
-}
-
-impl Class for TableViewType {
-    type Instance = TableView;
-}
-
-impl NativeClass for TableViewType {
-    fn from_path(_path: &[PathSegment]) -> TCResult<Self> {
-        Err(error::internal(crate::class::ERR_PROTECTED))
-    }
-
-    fn prefix() -> TCPathBuf {
-        TableType::prefix()
-    }
-}
-
-impl From<TableViewType> for CollectionType {
-    fn from(tvt: TableViewType) -> CollectionType {
-        CollectionType::View(CollectionViewType::Table(tvt.into()))
-    }
-}
-
-impl From<TableViewType> for Link {
-    fn from(_tvt: TableViewType) -> Link {
-        TableViewType::prefix().append(label("index")).into()
-    }
-}
-
-impl From<TableViewType> for TCType {
-    fn from(tvt: TableViewType) -> TCType {
-        TCType::Collection(tvt.into())
-    }
-}
-
-impl fmt::Display for TableViewType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Aggregate => write!(f, "Table or Index Aggregate"),
-            Self::IndexSlice => write!(f, "Index Slice"),
-            Self::Limit => write!(f, "Table or Index Limit Selection"),
-            Self::Merge => write!(f, "Table Merge Selection"),
-            Self::Selection => write!(f, "Table or Index Column Selection"),
-            Self::TableSlice => write!(f, "Table Slice"),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum TableView {
-    Aggregate(Aggregate),
-    IndexSlice(IndexSlice),
-    Limit(Limited),
-    Merge(Merged),
-    Selection(Selection),
-    TableSlice(TableSlice),
-}
-
-impl Instance for TableView {
-    type Class = TableViewType;
-
-    fn class(&self) -> Self::Class {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.class(),
-            Self::IndexSlice(index_slice) => index_slice.class(),
-            Self::Limit(limit) => limit.class(),
-            Self::Merge(merge) => merge.class(),
-            Self::Selection(selection) => selection.class(),
-            Self::TableSlice(table_slice) => table_slice.class(),
-        }
-    }
-}
-
-#[async_trait]
-impl TableInstance for TableView {
-    type Stream = TCStream<Vec<Value>>;
-
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.count(txn_id).await,
-            Self::IndexSlice(index_slice) => index_slice.count(txn_id).await,
-            Self::Limit(limited) => limited.count(txn_id).await,
-            Self::Merge(merged) => merged.count(txn_id).await,
-            Self::Selection(columns) => columns.count(txn_id).await,
-            Self::TableSlice(table_slice) => table_slice.count(txn_id).await,
-        }
-    }
-
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.delete(txn_id).await,
-            Self::IndexSlice(index_slice) => index_slice.delete(txn_id).await,
-            Self::Limit(limited) => limited.delete(txn_id).await,
-            Self::Merge(merged) => merged.delete(txn_id).await,
-            Self::Selection(columns) => columns.delete(txn_id).await,
-            Self::TableSlice(table_slice) => table_slice.delete(txn_id).await,
-        }
-    }
-
-    async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.delete_row(txn_id, row).await,
-            Self::IndexSlice(index_slice) => index_slice.delete_row(txn_id, row).await,
-            Self::Limit(limited) => limited.delete_row(txn_id, row).await,
-            Self::Merge(merged) => merged.delete_row(txn_id, row).await,
-            Self::Selection(columns) => columns.delete_row(txn_id, row).await,
-            Self::TableSlice(table_slice) => table_slice.delete_row(txn_id, row).await,
-        }
-    }
-
-    fn key(&'_ self) -> &'_ [Column] {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.key(),
-            Self::IndexSlice(index_slice) => index_slice.key(),
-            Self::Limit(limited) => limited.key(),
-            Self::Merge(merged) => merged.key(),
-            Self::Selection(columns) => columns.key(),
-            Self::TableSlice(table_slice) => table_slice.key(),
-        }
-    }
-
-    fn values(&'_ self) -> &'_ [Column] {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.values(),
-            Self::IndexSlice(index_slice) => index_slice.values(),
-            Self::Limit(limited) => limited.values(),
-            Self::Merge(merged) => merged.values(),
-            Self::Selection(columns) => columns.values(),
-            Self::TableSlice(table_slice) => table_slice.values(),
-        }
-    }
-
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.order_by(order, reverse),
-            Self::IndexSlice(index_slice) => index_slice.order_by(order, reverse),
-            Self::Limit(limited) => limited.order_by(order, reverse),
-            Self::Merge(merged) => merged.order_by(order, reverse),
-            Self::Selection(columns) => columns.order_by(order, reverse),
-            Self::TableSlice(table_slice) => table_slice.order_by(order, reverse),
-        }
-    }
-
-    fn reversed(&self) -> TCResult<Table> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.reversed(),
-            Self::IndexSlice(index_slice) => index_slice.reversed(),
-            Self::Limit(limited) => limited.reversed(),
-            Self::Merge(merged) => merged.reversed(),
-            Self::Selection(columns) => columns.reversed(),
-            Self::TableSlice(table_slice) => table_slice.reversed(),
-        }
-    }
-
-    fn slice(&self, bounds: bounds::Bounds) -> TCResult<Table> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.slice(bounds),
-            Self::Limit(limited) => limited.slice(bounds),
-            Self::IndexSlice(index_slice) => index_slice.slice(bounds),
-            Self::Merge(merged) => merged.slice(bounds),
-            Self::Selection(columns) => columns.slice(bounds),
-            Self::TableSlice(table_slice) => table_slice.slice(bounds),
-        }
-    }
-
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.stream(txn_id).await,
-            Self::IndexSlice(index_slice) => index_slice.stream(txn_id).await,
-            Self::Limit(limited) => limited.stream(txn_id).await,
-            Self::Merge(merged) => merged.stream(txn_id).await,
-            Self::Selection(columns) => columns.stream(txn_id).await,
-            Self::TableSlice(table_slice) => table_slice.stream(txn_id).await,
-        }
-    }
-
-    fn validate_bounds(&self, bounds: &bounds::Bounds) -> TCResult<()> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.validate_bounds(bounds),
-            Self::IndexSlice(index_slice) => index_slice.validate_bounds(bounds),
-            Self::Limit(limited) => limited.validate_bounds(bounds),
-            Self::Merge(merged) => merged.validate_bounds(bounds),
-            Self::Selection(columns) => columns.validate_bounds(bounds),
-            Self::TableSlice(table_slice) => table_slice.validate_bounds(bounds),
-        }
-    }
-
-    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.validate_order(order),
-            Self::IndexSlice(index_slice) => index_slice.validate_order(order),
-            Self::Limit(limited) => limited.validate_order(order),
-            Self::Merge(merged) => merged.validate_order(order),
-            Self::Selection(columns) => columns.validate_order(order),
-            Self::TableSlice(table_slice) => table_slice.validate_order(order),
-        }
-    }
-
-    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.update(txn, value).await,
-            Self::IndexSlice(index_slice) => index_slice.update(txn, value).await,
-            Self::Limit(limited) => limited.update(txn, value).await,
-            Self::Merge(merged) => merged.update(txn, value).await,
-            Self::Selection(columns) => columns.update(txn, value).await,
-            Self::TableSlice(table_slice) => table_slice.update(txn, value).await,
-        }
-    }
-
-    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
-        match self {
-            Self::Aggregate(aggregate) => aggregate.update_row(txn_id, row, value).await,
-            Self::IndexSlice(index_slice) => index_slice.update_row(txn_id, row, value).await,
-            Self::Limit(limited) => limited.update_row(txn_id, row, value).await,
-            Self::Merge(merged) => merged.update_row(txn_id, row, value).await,
-            Self::Selection(columns) => columns.update_row(txn_id, row, value).await,
-            Self::TableSlice(table_slice) => table_slice.update_row(txn_id, row, value).await,
-        }
-    }
-}
-
-#[async_trait]
-impl Transact for TableView {
-    async fn commit(&self, txn_id: &TxnId) {
-        match self {
-            Self::Aggregate(_) => (), // no-op
-            Self::IndexSlice(index_slice) => index_slice.commit(txn_id).await,
-            Self::Limit(limited) => limited.commit(txn_id).await,
-            Self::Merge(merged) => merged.commit(txn_id).await,
-            Self::Selection(_) => (), // no-op
-            Self::TableSlice(table_slice) => table_slice.commit(txn_id).await,
-        }
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        match self {
-            Self::Aggregate(_) => (), // no-op
-            Self::IndexSlice(index_slice) => index_slice.rollback(txn_id).await,
-            Self::Limit(limited) => limited.rollback(txn_id).await,
-            Self::Merge(merged) => merged.rollback(txn_id).await,
-            Self::Selection(_) => (), // no-op
-            Self::TableSlice(table_slice) => table_slice.rollback(txn_id).await,
-        }
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        match self {
-            Self::Aggregate(_) => (), // no-op
-            Self::IndexSlice(index_slice) => index_slice.finalize(txn_id).await,
-            Self::Limit(limited) => limited.finalize(txn_id).await,
-            Self::Merge(merged) => merged.finalize(txn_id).await,
-            Self::Selection(_) => (), // no-op
-            Self::TableSlice(table_slice) => table_slice.finalize(txn_id).await,
-        }
-    }
-}
-
-impl From<Aggregate> for TableView {
-    fn from(aggregate: Aggregate) -> Self {
-        Self::Aggregate(aggregate)
-    }
-}
-
-impl From<Selection> for TableView {
-    fn from(selection: Selection) -> Self {
-        Self::Selection(selection)
-    }
-}
-
-impl From<Limited> for TableView {
-    fn from(limited: Limited) -> Self {
-        Self::Limit(limited)
-    }
-}
-
-impl From<IndexSlice> for TableView {
-    fn from(index_slice: IndexSlice) -> Self {
-        Self::IndexSlice(index_slice)
-    }
-}
-
-impl From<Merged> for TableView {
-    fn from(merged: Merged) -> Self {
-        Self::Merge(merged)
-    }
-}
-
-impl From<TableSlice> for TableView {
-    fn from(table_slice: TableSlice) -> Self {
-        Self::TableSlice(table_slice)
-    }
-}
-
-impl TryFrom<CollectionView> for TableView {
-    type Error = error::TCError;
-
-    fn try_from(view: CollectionView) -> TCResult<TableView> {
-        match view {
-            CollectionView::Table(Table::View(view)) => Ok(view.into_inner()),
-            other => Err(error::bad_request("Expected TableView but found", other)),
-        }
-    }
-}
-
-impl From<TableView> for Collection {
-    fn from(view: TableView) -> Collection {
-        Collection::View(CollectionView::Table(Table::View(view.into())))
-    }
-}
 
 #[derive(Clone)]
 pub struct Aggregate {
@@ -366,7 +48,7 @@ impl Aggregate {
 }
 
 impl Instance for Aggregate {
-    type Class = TableViewType;
+    type Class = TableType;
 
     fn class(&self) -> Self::Class {
         Self::Class::Aggregate
@@ -443,9 +125,9 @@ impl TableInstance for Aggregate {
     }
 }
 
-impl From<Aggregate> for Table {
-    fn from(aggregate: Aggregate) -> Self {
-        Self::View(TableView::from(aggregate).into())
+impl From<Aggregate> for Collection {
+    fn from(index: Aggregate) -> Collection {
+        Collection::Table(index.into())
     }
 }
 
@@ -524,7 +206,7 @@ impl IndexSlice {
 }
 
 impl Instance for IndexSlice {
-    type Class = TableViewType;
+    type Class = TableType;
 
     fn class(&self) -> Self::Class {
         Self::Class::IndexSlice
@@ -605,12 +287,6 @@ impl TableInstance for IndexSlice {
     }
 }
 
-impl From<IndexSlice> for Table {
-    fn from(index_slice: IndexSlice) -> Self {
-        Self::View(TableView::from(index_slice).into())
-    }
-}
-
 #[async_trait]
 impl Transact for IndexSlice {
     async fn commit(&self, txn_id: &TxnId) {
@@ -623,6 +299,12 @@ impl Transact for IndexSlice {
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.source.finalize(txn_id).await
+    }
+}
+
+impl From<IndexSlice> for Collection {
+    fn from(index: IndexSlice) -> Collection {
+        Collection::Table(index.into())
     }
 }
 
@@ -646,7 +328,7 @@ impl Limited {
 }
 
 impl Instance for Limited {
-    type Class = TableViewType;
+    type Class = TableType;
 
     fn class(&self) -> Self::Class {
         Self::Class::Limit
@@ -720,12 +402,6 @@ impl TableInstance for Limited {
     }
 }
 
-impl From<Limited> for Table {
-    fn from(limited: Limited) -> Table {
-        Table::View(TableView::from(limited).into())
-    }
-}
-
 #[async_trait]
 impl Transact for Limited {
     async fn commit(&self, txn_id: &TxnId) {
@@ -738,6 +414,12 @@ impl Transact for Limited {
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.source.finalize(txn_id).await
+    }
+}
+
+impl From<Limited> for Collection {
+    fn from(limit: Limited) -> Collection {
+        Collection::Table(limit.into())
     }
 }
 
@@ -851,7 +533,7 @@ impl Merged {
 }
 
 impl Instance for Merged {
-    type Class = TableViewType;
+    type Class = TableType;
 
     fn class(&self) -> Self::Class {
         Self::Class::Merge
@@ -978,12 +660,6 @@ impl TableInstance for Merged {
     }
 }
 
-impl From<Merged> for Table {
-    fn from(merged: Merged) -> Table {
-        Table::View(TableView::from(merged).into())
-    }
-}
-
 #[async_trait]
 impl Transact for Merged {
     async fn commit(&self, txn_id: &TxnId) {
@@ -996,6 +672,12 @@ impl Transact for Merged {
 
     async fn finalize(&self, txn_id: &TxnId) {
         join!(self.left.finalize(txn_id), self.right.finalize(txn_id));
+    }
+}
+
+impl From<Merged> for Collection {
+    fn from(merge: Merged) -> Collection {
+        Collection::Table(merge.into())
     }
 }
 
@@ -1054,7 +736,7 @@ impl Selection {
 }
 
 impl Instance for Selection {
-    type Class = TableViewType;
+    type Class = TableType;
 
     fn class(&self) -> Self::Class {
         Self::Class::Selection
@@ -1153,9 +835,9 @@ impl TableInstance for Selection {
     }
 }
 
-impl From<Selection> for Table {
-    fn from(selection: Selection) -> Self {
-        Self::View(TableView::from(selection).into())
+impl From<Selection> for Collection {
+    fn from(selection: Selection) -> Collection {
+        Collection::Table(selection.into())
     }
 }
 
@@ -1201,7 +883,7 @@ impl TableSlice {
 }
 
 impl Instance for TableSlice {
-    type Class = TableViewType;
+    type Class = TableType;
 
     fn class(&self) -> Self::Class {
         Self::Class::TableSlice
@@ -1302,12 +984,6 @@ impl TableInstance for TableSlice {
     }
 }
 
-impl From<TableSlice> for Table {
-    fn from(table_slice: TableSlice) -> Table {
-        Table::View(TableView::from(table_slice).into())
-    }
-}
-
 #[async_trait]
 impl Transact for TableSlice {
     async fn commit(&self, txn_id: &TxnId) {
@@ -1320,6 +996,12 @@ impl Transact for TableSlice {
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.table.finalize(txn_id).await
+    }
+}
+
+impl From<TableSlice> for Collection {
+    fn from(slice: TableSlice) -> Collection {
+        Collection::Table(slice.into())
     }
 }
 

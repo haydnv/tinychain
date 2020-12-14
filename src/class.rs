@@ -18,10 +18,6 @@ use crate::scalar::{
 };
 use crate::transaction::Txn;
 
-pub const ERR_PROTECTED: &str =
-    "You have accessed a protected class. This should not be possible. \
-Please file a bug report.";
-
 pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send>>;
 pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
 pub type TCResult<T> = error::TCResult<T>;

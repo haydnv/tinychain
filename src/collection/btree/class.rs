@@ -1,16 +1,17 @@
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::Stream;
+use futures::{Stream, TryFutureExt};
 
 use crate::class::{Class, Instance, NativeClass, TCResult, TCStream, TCType};
 use crate::collection::class::*;
 use crate::collection::schema::Column;
 use crate::error;
-use crate::scalar::{label, Link, PathSegment, TCPathBuf, Value};
+use crate::scalar::{label, Link, PathSegment, TCPathBuf, TryCastInto, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::{BTree, BTreeRange, Key};
+use crate::collection::{BTreeFile, BTreeImpl};
 
 #[async_trait]
 pub trait BTreeInstance: Clone + Instance<Class = BTreeType> + Transact {
@@ -74,14 +75,20 @@ impl NativeClass for BTreeType {
 impl CollectionClass for BTreeType {
     type Instance = BTree;
 
-    async fn get(&self, _txn: &Txn, _schema: Value) -> TCResult<BTree> {
-        Err(error::not_implemented("BTreeType::get"))
-    }
-}
-
-impl From<BTreeType> for CollectionType {
-    fn from(btree_type: BTreeType) -> CollectionType {
-        CollectionType::View(CollectionViewType::BTree(btree_type))
+    async fn get(&self, txn: &Txn, schema: Value) -> TCResult<BTree> {
+        match self {
+            Self::Tree => {
+                let schema =
+                    schema.try_cast_into(|v| error::bad_request("Invalid B-Tree schema", v))?;
+                BTreeFile::create(txn, schema)
+                    .map_ok(BTreeImpl::from)
+                    .map_ok(BTree::Tree)
+                    .await
+            }
+            Self::View => Err(error::unsupported(
+                "Cannot instantiate a B-Tree view directly",
+            )),
+        }
     }
 }
 

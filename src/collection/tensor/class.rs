@@ -7,21 +7,24 @@ use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, TryFutureExt};
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::class::*;
-use crate::collection::{
-    Collection, CollectionBase, CollectionBaseType, CollectionType, CollectionView,
-};
+use crate::collection::{Collection, CollectionType};
 use crate::error;
 use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::bounds::{Bounds, Shape};
-use super::dense::{BlockList, BlockListDyn, BlockListFile, DenseTensor};
-use super::sparse::{SparseAccess, SparseAccessorDyn, SparseTable, SparseTensor};
-use super::{IntoView, TensorAccessor, TensorDualIO, TensorIO, TensorTransform, TensorUnary};
+use super::bounds::*;
+use super::dense::{
+    dense_constant, from_sparse, BlockList, BlockListDyn, BlockListFile, DenseTensor,
+};
+use super::sparse::{self, from_dense, SparseAccess, SparseAccessorDyn, SparseTable, SparseTensor};
+use super::{
+    IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
+    TensorReduce, TensorTransform, TensorUnary,
+};
 
 pub trait TensorInstance:
     Clone + Instance + IntoView + TensorIO + TensorTransform + TensorUnary + Send + Sync
@@ -29,59 +32,60 @@ pub trait TensorInstance:
 }
 
 #[derive(Clone, Eq, PartialEq)]
-pub enum TensorBaseType {
-    Dense,
+pub enum TensorType {
     Sparse,
+    Dense,
 }
 
-impl TensorBaseType {
-    async fn constant(&self, txn: &Txn, shape: Shape, number: Number) -> TCResult<TensorBase> {
+impl TensorType {
+    async fn constant(&self, txn: &Txn, shape: Shape, number: Number) -> TCResult<Tensor> {
         match self {
             Self::Dense => {
-                BlockListFile::constant(txn, shape, number)
-                    .map_ok(DenseTensor::from)
-                    .map_ok(TensorBase::Dense)
+                dense_constant(txn, shape, number)
+                    .map_ok(DenseTensor::into_dyn)
+                    .map_ok(Tensor::Dense)
                     .await
             }
             Self::Sparse => {
-                SparseTable::constant(txn, shape, number)
-                    .map_ok(SparseTensor::from)
-                    .map_ok(TensorBase::Sparse)
-                    .await
+                let tensor = self.zeros(txn, number.class(), shape).await?;
+                tensor
+                    .write_value(*txn.id(), Bounds::all(tensor.shape()), number)
+                    .await?;
+                Ok(tensor)
             }
         }
     }
 
-    async fn zeros(&self, txn: &Txn, dtype: NumberType, shape: Shape) -> TCResult<TensorBase> {
+    async fn zeros(&self, txn: &Txn, dtype: NumberType, shape: Shape) -> TCResult<Tensor> {
         match self {
             Self::Dense => {
-                BlockListFile::constant(txn, shape, dtype.zero())
-                    .map_ok(DenseTensor::from)
-                    .map_ok(TensorBase::Dense)
+                dense_constant(txn, shape, dtype.zero())
+                    .map_ok(DenseTensor::into_dyn)
+                    .map_ok(Tensor::Dense)
                     .await
             }
             Self::Sparse => {
-                SparseTable::create(txn, shape, dtype)
-                    .map_ok(SparseTensor::from)
-                    .map_ok(TensorBase::Sparse)
+                sparse::create(txn, shape, dtype)
+                    .map_ok(SparseTensor::into_dyn)
+                    .map_ok(Tensor::Sparse)
                     .await
             }
         }
     }
 }
 
-impl Class for TensorBaseType {
-    type Instance = TensorBase;
+impl Class for TensorType {
+    type Instance = Tensor;
 }
 
-impl NativeClass for TensorBaseType {
+impl NativeClass for TensorType {
     fn from_path(path: &[PathSegment]) -> TCResult<Self> {
         let suffix = Self::prefix().try_suffix(path)?;
 
         if suffix.len() == 1 {
             match suffix[0].as_str() {
-                "dense" => Ok(TensorBaseType::Dense),
-                "sparse" => Ok(TensorBaseType::Sparse),
+                "dense" => Ok(TensorType::Dense),
+                "sparse" => Ok(TensorType::Sparse),
                 other => Err(error::not_found(other)),
             }
         } else {
@@ -90,15 +94,15 @@ impl NativeClass for TensorBaseType {
     }
 
     fn prefix() -> TCPathBuf {
-        CollectionBaseType::prefix().append(label("tensor"))
+        CollectionType::prefix().append(label("tensor"))
     }
 }
 
 #[async_trait]
-impl CollectionClass for TensorBaseType {
-    type Instance = TensorBase;
+impl CollectionClass for TensorType {
+    type Instance = Tensor;
 
-    async fn get(&self, txn: &Txn, schema: Value) -> TCResult<TensorBase> {
+    async fn get(&self, txn: &Txn, schema: Value) -> TCResult<Tensor> {
         if schema.matches::<(NumberType, Shape)>() {
             let (dtype, shape) = schema.opt_cast_into().unwrap();
             self.zeros(txn, dtype, shape).await
@@ -142,13 +146,13 @@ impl CollectionClass for TensorBaseType {
                     let file =
                         BlockListFile::from_values(txn, shape, dtype, stream::iter(values)).await?;
 
-                    TensorBase::Dense(file.into())
+                    Tensor::Dense(DenseTensor::from(file).into_dyn())
                 }
                 Self::Sparse => {
                     let table =
                         SparseTable::from_values(txn, shape, dtype, stream::iter(values)).await?;
 
-                    TensorBase::Sparse(table.into())
+                    Tensor::Sparse(SparseTensor::from(table).into_dyn())
                 }
             };
 
@@ -162,25 +166,19 @@ impl CollectionClass for TensorBaseType {
     }
 }
 
-impl From<TensorBaseType> for CollectionType {
-    fn from(tbt: TensorBaseType) -> CollectionType {
-        CollectionType::Base(CollectionBaseType::Tensor(tbt))
-    }
-}
+impl From<TensorType> for Link {
+    fn from(tt: TensorType) -> Link {
+        let prefix = TensorType::prefix();
 
-impl From<TensorBaseType> for Link {
-    fn from(tbt: TensorBaseType) -> Link {
-        let prefix = TensorBaseType::prefix();
-
-        use TensorBaseType::*;
-        match tbt {
+        use TensorType::*;
+        match tt {
             Dense => prefix.append(label("dense")).into(),
             Sparse => prefix.append(label("sparse")).into(),
         }
     }
 }
 
-impl fmt::Display for TensorBaseType {
+impl fmt::Display for TensorType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Dense => write!(f, "type: DenseTensor"),
@@ -190,13 +188,13 @@ impl fmt::Display for TensorBaseType {
 }
 
 #[derive(Clone)]
-pub enum TensorBase {
-    Dense(DenseTensor<BlockListFile>),
-    Sparse(SparseTensor<SparseTable>),
+pub enum Tensor {
+    Dense(DenseTensor<BlockListDyn>),
+    Sparse(SparseTensor<SparseAccessorDyn>),
 }
 
-impl Instance for TensorBase {
-    type Class = TensorBaseType;
+impl Instance for Tensor {
+    type Class = TensorType;
 
     fn class(&self) -> Self::Class {
         match self {
@@ -207,82 +205,38 @@ impl Instance for TensorBase {
 }
 
 #[async_trait]
-impl CollectionInstance for TensorBase {
+impl CollectionInstance for Tensor {
     type Item = Number;
-    type Slice = TensorView;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        let txn = txn.clone();
-        let any = match self {
-            Self::Dense(dense) => dense.any(txn).await?,
-            Self::Sparse(sparse) => sparse.any(txn).await?,
-        };
-
-        Ok(!any)
+        self.any(txn.clone()).map_ok(|any| !any).await
     }
 
     async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
-            Self::Dense(dense) => dense.clone().into_view().to_stream(txn).await,
-            Self::Sparse(sparse) => sparse.clone().into_view().to_stream(txn).await,
+            // TODO: Forward errors, don't panic!
+            Self::Dense(dense) => {
+                let result_stream = dense.value_stream(txn).await?;
+                let values: TCStream<Scalar> = Box::pin(
+                    result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
+                );
+                Ok(values)
+            }
+            Self::Sparse(sparse) => {
+                let result_stream = sparse.filled(txn).await?;
+                let values: TCStream<Scalar> = Box::pin(
+                    result_stream
+                        .map(|r| r.unwrap())
+                        .map(Value::from)
+                        .map(Scalar::Value),
+                );
+                Ok(values)
+            }
         }
     }
 }
 
-#[async_trait]
-impl Public for TensorBase {
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<State> {
-        self.clone().into_view().get(request, txn, path, key).await
-    }
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
-        self.clone()
-            .into_view()
-            .put(request, txn, path, key, value)
-            .await
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        self.clone()
-            .into_view()
-            .post(request, txn, path, params)
-            .await
-    }
-
-    async fn delete(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<()> {
-        self.clone()
-            .into_view()
-            .delete(request, txn, path, key)
-            .await
-    }
-}
-
-impl TensorAccessor for TensorBase {
+impl TensorAccessor for Tensor {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Dense(dense) => dense.dtype(),
@@ -313,7 +267,7 @@ impl TensorAccessor for TensorBase {
 }
 
 #[async_trait]
-impl Transact for TensorBase {
+impl Transact for Tensor {
     async fn commit(&self, txn_id: &TxnId) {
         match self {
             Self::Dense(dense) => dense.commit(txn_id).await,
@@ -336,125 +290,356 @@ impl Transact for TensorBase {
     }
 }
 
-impl IntoView for TensorBase {
-    fn into_view(self) -> TensorView {
-        match self {
-            TensorBase::Dense(dense) => dense.into_view(),
-            TensorBase::Sparse(sparse) => sparse.into_view(),
-        }
-    }
-}
-
-impl From<TensorBase> for Collection {
-    fn from(base: TensorBase) -> Collection {
-        Collection::Base(CollectionBase::Tensor(base))
-    }
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum TensorViewType {
-    Dense,
-    Sparse,
-}
-
-impl Class for TensorViewType {
-    type Instance = TensorView;
-}
-
-impl NativeClass for TensorViewType {
-    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
-        Err(error::bad_request(
-            crate::class::ERR_PROTECTED,
-            TCPath::from(path),
-        ))
-    }
-
-    fn prefix() -> TCPathBuf {
-        TensorBaseType::prefix()
-    }
-}
-
-impl From<TensorViewType> for Link {
-    fn from(tvt: TensorViewType) -> Link {
-        let prefix = TensorViewType::prefix();
-
-        use TensorViewType::*;
-        match tvt {
-            Dense => prefix.append(label("dense")).into(),
-            Sparse => prefix.append(label("sparse")).into(),
-        }
-    }
-}
-
-impl fmt::Display for TensorViewType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Dense => write!(f, "type: DenseTensorView"),
-            Self::Sparse => write!(f, "type: SparseTensorView"),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum TensorView {
-    Dense(DenseTensor<BlockListDyn>),
-    Sparse(SparseTensor<SparseAccessorDyn>),
-}
-
-impl IntoView for TensorView {
-    fn into_view(self) -> Self {
+impl IntoView for Tensor {
+    fn into_view(self) -> Tensor {
         self
     }
 }
 
-impl Instance for TensorView {
-    type Class = TensorViewType;
-
-    fn class(&self) -> Self::Class {
-        match self {
-            Self::Dense(_) => Self::Class::Dense,
-            Self::Sparse(_) => Self::Class::Sparse,
-        }
-    }
-}
-
-impl TensorInstance for TensorView {}
+impl TensorInstance for Tensor {}
 
 #[async_trait]
-impl CollectionInstance for TensorView {
-    type Item = Number;
-    type Slice = TensorView;
+impl TensorBoolean<Tensor> for Tensor {
+    type Combine = Tensor;
 
-    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        self.any(txn.clone()).map_ok(|any| !any).await
+    fn and(&self, other: &Self) -> TCResult<Self> {
+        use Tensor::*;
+        match (self, other) {
+            (Dense(left), Dense(right)) => left.and(right).map(Self::from),
+            (Sparse(left), Sparse(right)) => left.and(right).map(Self::from),
+            (Sparse(left), Dense(right)) => left.and(&from_dense(right.clone())).map(Self::from),
+
+            _ => other.and(self),
+        }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        match self {
-            // TODO: Forward errors, don't panic!
-            Self::Dense(dense) => {
-                let result_stream = dense.value_stream(txn).await?;
-                let values: TCStream<Scalar> = Box::pin(
-                    result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
-                );
-                Ok(values)
-            }
-            Self::Sparse(sparse) => {
-                let result_stream = sparse.filled(txn).await?;
-                let values: TCStream<Scalar> = Box::pin(
-                    result_stream
-                        .map(|r| r.unwrap())
-                        .map(Value::from)
-                        .map(Scalar::Value),
-                );
-                Ok(values)
-            }
+    fn or(&self, other: &Self) -> TCResult<Self> {
+        use Tensor::*;
+        match (self, other) {
+            (Dense(left), Dense(right)) => left.or(right).map(Self::from),
+            (Sparse(left), Sparse(right)) => left.or(right).map(Self::from),
+            (Dense(left), Sparse(right)) => left.or(&from_sparse(right.clone())).map(Self::from),
+
+            _ => other.or(self),
+        }
+    }
+
+    fn xor(&self, other: &Self) -> TCResult<Self> {
+        use Tensor::*;
+        match (self, other) {
+            (Dense(left), Dense(right)) => left.xor(right).map(Self::from),
+            (Sparse(left), _) => from_sparse(left.clone()).into_view().xor(other),
+            (left, right) => right.xor(left),
         }
     }
 }
 
 #[async_trait]
-impl Public for TensorView {
+impl TensorUnary for Tensor {
+    type Unary = Tensor;
+
+    fn abs(&self) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.abs().map(Self::from),
+            Self::Sparse(sparse) => sparse.abs().map(Self::from),
+        }
+    }
+
+    async fn all(&self, txn: Txn) -> TCResult<bool> {
+        match self {
+            Self::Dense(dense) => dense.all(txn).await,
+            Self::Sparse(sparse) => sparse.all(txn).await,
+        }
+    }
+
+    async fn any(&self, txn: Txn) -> TCResult<bool> {
+        match self {
+            Self::Dense(dense) => dense.any(txn).await,
+            Self::Sparse(sparse) => sparse.any(txn).await,
+        }
+    }
+
+    fn not(&self) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.not().map(Self::from),
+            Self::Sparse(sparse) => sparse.not().map(Self::from),
+        }
+    }
+}
+
+#[async_trait]
+impl TensorCompare<Tensor> for Tensor {
+    type Compare = Self;
+    type Dense = Self;
+
+    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => {
+                left.eq(right, txn).map_ok(IntoView::into_view).await
+            }
+            (Self::Sparse(left), Self::Sparse(right)) => {
+                left.eq(right, txn).map_ok(IntoView::into_view).await
+            }
+            (Self::Sparse(left), right) => {
+                from_sparse(left.clone())
+                    .into_view()
+                    .eq(right, txn)
+                    .map_ok(IntoView::into_view)
+                    .await
+            }
+            (left, Self::Sparse(right)) => {
+                left.eq(&from_sparse(right.clone()).into_view(), txn)
+                    .map_ok(IntoView::into_view)
+                    .await
+            }
+        }
+    }
+
+    fn gt(&self, other: &Self) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.gt(right).map(Self::from),
+            (Self::Sparse(left), Self::Sparse(right)) => left.gt(right).map(Self::from),
+            (Self::Sparse(left), right) => from_sparse(left.clone()).into_view().gt(right),
+            (left, Self::Sparse(right)) => left
+                .gt(&from_sparse(right.clone()).into_view())
+                .map(Self::from),
+        }
+    }
+
+    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => {
+                left.gte(right, txn).map_ok(IntoView::into_view).await
+            }
+            (Self::Sparse(left), Self::Sparse(right)) => {
+                left.gte(right, txn).map_ok(IntoView::into_view).await
+            }
+            (Self::Sparse(left), right) => {
+                from_sparse(left.clone())
+                    .into_view()
+                    .gte(right, txn)
+                    .map_ok(IntoView::into_view)
+                    .await
+            }
+            (left, Self::Sparse(right)) => {
+                left.gte(&from_sparse(right.clone()).into_view(), txn)
+                    .map_ok(IntoView::into_view)
+                    .await
+            }
+        }
+    }
+
+    fn lt(&self, other: &Self) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.lt(right).map(Self::from),
+            (Self::Sparse(left), Self::Sparse(right)) => left.lt(right).map(Self::from),
+            (Self::Sparse(left), right) => from_sparse(left.clone()).into_view().lt(right),
+            (left, Self::Sparse(right)) => left.lt(&from_sparse(right.clone()).into_view()),
+        }
+    }
+
+    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => {
+                left.lte(right, txn).map_ok(IntoView::into_view).await
+            }
+            (Self::Sparse(left), Self::Sparse(right)) => {
+                left.lte(right, txn).map_ok(IntoView::into_view).await
+            }
+            (Self::Sparse(left), right) => {
+                from_sparse(left.clone())
+                    .into_view()
+                    .lte(right, txn)
+                    .map_ok(IntoView::into_view)
+                    .await
+            }
+            (left, Self::Sparse(right)) => {
+                left.lte(&from_sparse(right.clone()).into_view(), txn)
+                    .map_ok(IntoView::into_view)
+                    .await
+            }
+        }
+    }
+
+    fn ne(&self, other: &Self) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.ne(right).map(Self::from),
+            (Self::Sparse(left), Self::Sparse(right)) => left.ne(right).map(Self::from),
+            (Self::Sparse(left), right) => from_sparse(left.clone())
+                .into_view()
+                .ne(right)
+                .map(Self::from),
+            (left, Self::Sparse(right)) => left
+                .ne(&from_sparse(right.clone()).into_view())
+                .map(Self::from),
+        }
+    }
+}
+
+#[async_trait]
+impl TensorIO for Tensor {
+    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+        match self {
+            Self::Dense(dense) => dense.read_value(txn, coord).await,
+            Self::Sparse(sparse) => sparse.read_value(txn, coord).await,
+        }
+    }
+
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
+        match self {
+            Self::Dense(dense) => dense.write_value(txn_id, bounds, value).await,
+            Self::Sparse(sparse) => sparse.write_value(txn_id, bounds, value).await,
+        }
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+        match self {
+            Self::Dense(dense) => dense.write_value_at(txn_id, coord, value).await,
+            Self::Sparse(sparse) => sparse.write_value_at(txn_id, coord, value).await,
+        }
+    }
+}
+
+#[async_trait]
+impl TensorDualIO<Tensor> for Tensor {
+    async fn mask(&self, txn: &Txn, other: Self) -> TCResult<()> {
+        match (self, &other) {
+            (Self::Dense(l), Self::Dense(r)) => l.mask(txn, r.clone()).await,
+            (Self::Sparse(l), Self::Sparse(r)) => l.mask(txn, r.clone()).await,
+            (Self::Sparse(l), Self::Dense(r)) => l.mask(txn, from_dense(r.clone())).await,
+            (l, Self::Sparse(r)) => l.mask(txn, from_sparse(r.clone()).into_view()).await,
+        }
+    }
+
+    async fn write(&self, txn: Txn, bounds: Bounds, value: Self) -> TCResult<()> {
+        match self {
+            Self::Dense(this) => match value {
+                Self::Dense(that) => this.write(txn, bounds, that).await,
+                Self::Sparse(that) => this.write(txn, bounds, from_sparse(that)).await,
+            },
+            Self::Sparse(this) => match value {
+                Self::Dense(that) => this.write(txn, bounds, from_dense(that)).await,
+                Self::Sparse(that) => this.write(txn, bounds, that).await,
+            },
+        }
+    }
+}
+
+impl TensorMath<Tensor> for Tensor {
+    type Combine = Self;
+
+    fn add(&self, other: &Self) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.add(right).map(Self::from),
+            (Self::Sparse(left), Self::Sparse(right)) => left.add(right).map(Self::from),
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.add(&from_sparse(right.clone())).map(Self::from)
+            }
+            (Self::Sparse(left), Self::Dense(right)) => {
+                from_sparse(left.clone()).add(right).map(Self::from)
+            }
+        }
+    }
+
+    fn multiply(&self, other: &Self) -> TCResult<Self> {
+        match (self, other) {
+            (Self::Dense(left), Self::Dense(right)) => left.multiply(right).map(Self::from),
+            (Self::Sparse(left), Self::Sparse(right)) => left.multiply(right).map(Self::from),
+            (Self::Dense(left), Self::Sparse(right)) => {
+                left.multiply(&from_sparse(right.clone())).map(Self::from)
+            }
+            (Self::Sparse(left), Self::Dense(right)) => {
+                from_sparse(left.clone()).multiply(right).map(Self::from)
+            }
+        }
+    }
+}
+
+impl TensorReduce for Tensor {
+    type Reduce = Self;
+
+    fn product(&self, axis: usize) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Dense(dense) => dense.product(axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.product(axis).map(Self::from),
+        }
+    }
+
+    fn product_all(&self, txn: Txn) -> TCBoxTryFuture<Number> {
+        match self {
+            Self::Dense(dense) => dense.product_all(txn),
+            Self::Sparse(sparse) => sparse.product_all(txn),
+        }
+    }
+
+    fn sum(&self, axis: usize) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Dense(dense) => dense.product(axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.product(axis).map(Self::from),
+        }
+    }
+
+    fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number> {
+        match self {
+            Self::Dense(dense) => dense.product_all(txn),
+            Self::Sparse(sparse) => sparse.product_all(txn),
+        }
+    }
+}
+
+impl TensorTransform for Tensor {
+    type Cast = Self;
+    type Broadcast = Self;
+    type Expand = Self;
+    type Slice = Self;
+    type Reshape = Self;
+    type Transpose = Self;
+
+    fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.as_type(dtype).map(Self::from),
+            Self::Sparse(sparse) => sparse.as_type(dtype).map(Self::from),
+        }
+    }
+
+    fn broadcast(&self, shape: Shape) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.broadcast(shape).map(Self::from),
+            Self::Sparse(sparse) => sparse.broadcast(shape).map(Self::from),
+        }
+    }
+
+    fn expand_dims(&self, axis: usize) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.expand_dims(axis).map(Self::from),
+            Self::Sparse(sparse) => sparse.expand_dims(axis).map(Self::from),
+        }
+    }
+
+    fn slice(&self, bounds: Bounds) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.slice(bounds).map(Self::from),
+            Self::Sparse(sparse) => sparse.slice(bounds).map(Self::from),
+        }
+    }
+
+    fn reshape(&self, shape: Shape) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.reshape(shape).map(Self::from),
+            Self::Sparse(sparse) => sparse.reshape(shape).map(Self::from),
+        }
+    }
+
+    fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        match self {
+            Self::Dense(dense) => dense.transpose(permutation).map(Self::from),
+            Self::Sparse(sparse) => sparse.transpose(permutation).map(Self::from),
+        }
+    }
+}
+
+#[async_trait]
+impl Public for Tensor {
     async fn get(
         &self,
         _request: &Request,
@@ -565,11 +750,8 @@ impl Public for TensorView {
             State::Scalar(Scalar::Value(Value::Number(value))) => {
                 self.write_value(txn.id().clone(), bounds, value).await
             }
-            State::Collection(Collection::Base(CollectionBase::Tensor(tensor))) => {
-                self.write(txn.clone(), bounds, tensor.into_view()).await
-            }
-            State::Collection(Collection::View(CollectionView::Tensor(tensor))) => {
-                self.write(txn.clone(), bounds, tensor.into_view()).await
+            State::Collection(Collection::Tensor(tensor)) => {
+                self.write(txn.clone(), bounds, tensor).await
             }
             other => Err(error::bad_request(
                 "Not a valid Tensor value or slice",
@@ -620,309 +802,40 @@ impl Public for TensorView {
         _path: &[PathSegment],
         _selector: Value,
     ) -> TCResult<()> {
-        Err(error::not_implemented("TensorView::delete"))
+        Err(error::not_implemented("Tensor::delete"))
     }
 }
 
-impl TensorAccessor for TensorView {
-    fn dtype(&self) -> NumberType {
-        match self {
-            Self::Dense(dense) => dense.dtype(),
-            Self::Sparse(sparse) => sparse.dtype(),
-        }
-    }
-
-    fn ndim(&self) -> usize {
-        match self {
-            Self::Dense(dense) => dense.ndim(),
-            Self::Sparse(sparse) => sparse.ndim(),
-        }
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        match self {
-            Self::Dense(dense) => dense.shape(),
-            Self::Sparse(sparse) => sparse.shape(),
-        }
-    }
-
-    fn size(&self) -> u64 {
-        match self {
-            Self::Dense(dense) => dense.size(),
-            Self::Sparse(sparse) => sparse.size(),
-        }
-    }
-}
-
-#[async_trait]
-impl Transact for TensorView {
-    async fn commit(&self, txn_id: &TxnId) {
-        match self {
-            Self::Dense(dense) => dense.commit(txn_id).await,
-            Self::Sparse(sparse) => sparse.commit(txn_id).await,
-        }
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        match self {
-            Self::Dense(dense) => dense.rollback(txn_id).await,
-            Self::Sparse(sparse) => sparse.rollback(txn_id).await,
-        }
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        match self {
-            Self::Dense(dense) => dense.finalize(txn_id).await,
-            Self::Sparse(sparse) => sparse.finalize(txn_id).await,
-        }
-    }
-}
-
-impl<T: Clone + BlockList> From<DenseTensor<T>> for TensorView {
-    fn from(dense: DenseTensor<T>) -> TensorView {
+impl<T: Clone + BlockList> From<DenseTensor<T>> for Tensor {
+    fn from(dense: DenseTensor<T>) -> Tensor {
         let blocks = Arc::new(BlockListDyn::new(dense.clone_into()));
         Self::Dense(DenseTensor::from(blocks))
     }
 }
 
-impl<T: Clone + SparseAccess> From<SparseTensor<T>> for TensorView {
-    fn from(sparse: SparseTensor<T>) -> TensorView {
+impl<T: Clone + SparseAccess> From<SparseTensor<T>> for Tensor {
+    fn from(sparse: SparseTensor<T>) -> Tensor {
         let accessor = Arc::new(SparseAccessorDyn::new(sparse.clone_into()));
         Self::Sparse(SparseTensor::from(accessor))
     }
 }
 
-impl TryFrom<CollectionView> for TensorView {
+impl TryFrom<Collection> for Tensor {
     type Error = error::TCError;
 
-    fn try_from(view: CollectionView) -> TCResult<TensorView> {
-        match view {
-            CollectionView::Tensor(tensor) => match tensor {
-                Tensor::Base(tb) => Ok(tb.into_view()),
-                Tensor::View(tv) => Ok(tv),
-            },
-            other => Err(error::bad_request("Expected TensorView but found", other)),
+    fn try_from(collection: Collection) -> TCResult<Tensor> {
+        match collection {
+            Collection::Tensor(tensor) => Ok(tensor),
+            other => Err(error::bad_request("Expected Tensor but found", other)),
         }
     }
 }
 
-impl From<TensorView> for Collection {
-    fn from(view: TensorView) -> Collection {
-        Collection::View(CollectionView::Tensor(view.into()))
-    }
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum TensorType {
-    Base(TensorBaseType),
-    View(TensorViewType),
-}
-
-impl Class for TensorType {
-    type Instance = Tensor;
-}
-
-impl NativeClass for TensorType {
-    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
-        TensorBaseType::from_path(path).map(TensorType::Base)
-    }
-
-    fn prefix() -> TCPathBuf {
-        TensorBaseType::prefix()
-    }
-}
-
-impl From<TensorType> for Link {
-    fn from(tt: TensorType) -> Link {
-        match tt {
-            TensorType::Base(base) => base.into(),
-            TensorType::View(view) => view.into(),
-        }
-    }
-}
-
-impl fmt::Display for TensorType {
+impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Base(base) => write!(f, "{}", base),
-            Self::View(view) => write!(f, "{}", view),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum Tensor {
-    Base(TensorBase),
-    View(TensorView),
-}
-
-impl Instance for Tensor {
-    type Class = TensorType;
-
-    fn class(&self) -> Self::Class {
-        match self {
-            Self::Base(base) => TensorType::Base(base.class()),
-            Self::View(view) => TensorType::View(view.class()),
-        }
-    }
-}
-
-#[async_trait]
-impl CollectionInstance for Tensor {
-    type Item = Number;
-    type Slice = TensorView;
-
-    async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        match self {
-            Self::Base(base) => base.is_empty(txn).await,
-            Self::View(view) => view.is_empty(txn).await,
-        }
-    }
-
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        match self {
-            Self::Base(base) => base.to_stream(txn).await,
-            Self::View(view) => view.to_stream(txn).await,
-        }
-    }
-}
-
-#[async_trait]
-impl Public for Tensor {
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-    ) -> TCResult<State> {
-        match self {
-            Self::Base(base) => base.get(request, txn, path, selector).await,
-            Self::View(view) => view.get(request, txn, path, selector).await,
-        }
-    }
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-        value: State,
-    ) -> TCResult<()> {
-        match self {
-            Self::Base(base) => base.put(request, txn, path, selector, value).await,
-            Self::View(view) => view.put(request, txn, path, selector, value).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        match self {
-            Self::Base(base) => base.post(request, txn, path, params).await,
-            Self::View(view) => view.post(request, txn, path, params).await,
-        }
-    }
-
-    async fn delete(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        selector: Value,
-    ) -> TCResult<()> {
-        match self {
-            Self::Base(base) => base.delete(request, txn, path, selector).await,
-            Self::View(view) => view.delete(request, txn, path, selector).await,
-        }
-    }
-}
-
-impl TensorAccessor for Tensor {
-    fn dtype(&self) -> NumberType {
-        match self {
-            Self::Base(base) => base.dtype(),
-            Self::View(view) => view.dtype(),
-        }
-    }
-
-    fn ndim(&self) -> usize {
-        match self {
-            Self::Base(base) => base.ndim(),
-            Self::View(view) => view.ndim(),
-        }
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        match self {
-            Self::Base(base) => base.shape(),
-            Self::View(view) => view.shape(),
-        }
-    }
-
-    fn size(&self) -> u64 {
-        match self {
-            Self::Base(base) => base.size(),
-            Self::View(view) => view.size(),
-        }
-    }
-}
-
-#[async_trait]
-impl Transact for Tensor {
-    async fn commit(&self, txn_id: &TxnId) {
-        match self {
-            Self::Base(base) => base.commit(txn_id).await,
-            Self::View(view) => view.commit(txn_id).await,
-        }
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        match self {
-            Self::Base(base) => base.rollback(txn_id).await,
-            Self::View(view) => view.rollback(txn_id).await,
-        }
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        match self {
-            Self::Base(base) => base.finalize(txn_id).await,
-            Self::View(view) => view.finalize(txn_id).await,
-        }
-    }
-}
-
-impl IntoView for Tensor {
-    fn into_view(self) -> TensorView {
-        match self {
-            Tensor::Base(base) => base.into_view(),
-            Tensor::View(view) => view,
-        }
-    }
-}
-
-impl From<TensorBase> for Tensor {
-    fn from(tb: TensorBase) -> Tensor {
-        Tensor::Base(tb)
-    }
-}
-
-impl From<TensorView> for Tensor {
-    fn from(tv: TensorView) -> Tensor {
-        Tensor::View(tv)
-    }
-}
-
-impl From<Tensor> for Collection {
-    fn from(tensor: Tensor) -> Collection {
-        match tensor {
-            Tensor::Base(base) => Collection::Base(CollectionBase::Tensor(base)),
-            Tensor::View(view) => Collection::View(CollectionView::Tensor(view.into())),
+            Self::Dense(_) => write!(f, "(DenseTensor)"),
+            Self::Sparse(_) => write!(f, "(SparseTensor)"),
         }
     }
 }

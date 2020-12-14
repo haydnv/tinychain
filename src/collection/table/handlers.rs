@@ -15,7 +15,7 @@ use crate::scalar::{
 };
 use crate::transaction::Txn;
 
-use super::{Bounds, Table, TableInstance, TableView};
+use super::{Bounds, Table, TableInstance};
 
 pub struct DeleteHandler<'a, T: TableInstance> {
     table: &'a T,
@@ -316,7 +316,6 @@ impl<T: TableInstance> TableImpl<T> {
 #[async_trait]
 impl<T: TableInstance> CollectionInstance for TableImpl<T> {
     type Item = Vec<Value>;
-    type Slice = TableView;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         let mut rows = self.inner.clone().stream(*txn.id()).await?;

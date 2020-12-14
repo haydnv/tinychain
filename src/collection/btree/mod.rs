@@ -1,3 +1,4 @@
+use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
@@ -6,7 +7,7 @@ use futures::stream::{self, Stream, StreamExt};
 use crate::auth::Scope;
 use crate::class::{Instance, State, TCStream, TCType};
 use crate::collection::class::CollectionInstance;
-use crate::collection::{Collection, CollectionView};
+use crate::collection::Collection;
 use crate::error::{self, TCResult};
 use crate::handler::*;
 use crate::scalar::*;
@@ -27,8 +28,6 @@ pub use file::*;
 pub use slice::*;
 
 pub type Key = Vec<Value>;
-
-const ERR_INVALID_RANGE: &str = "Invalid BTree range";
 
 fn format_schema(schema: &[Column]) -> String {
     let schema: Vec<String> = schema.iter().map(|c| c.to_string()).collect();
@@ -182,9 +181,7 @@ where
 {
     fn reverse(&self, range: BTreeRange) -> TCResult<State> {
         let slice = BTreeSlice::new(self.btree.clone().into(), range, true)?;
-        Ok(State::Collection(Collection::View(CollectionView::BTree(
-            slice.into(),
-        ))))
+        Ok(State::Collection(Collection::BTree(slice.into())))
     }
 }
 
@@ -287,7 +284,6 @@ impl<T: BTreeInstance> Instance for BTreeImpl<T> {
 #[async_trait]
 impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
     type Item = Key;
-    type Slice = BTreeSlice;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         self.inner.is_empty(txn).await
@@ -359,7 +355,6 @@ impl Instance for BTree {
 #[async_trait]
 impl CollectionInstance for BTree {
     type Item = Key;
-    type Slice = BTreeSlice;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         match self {
@@ -497,8 +492,11 @@ impl From<BTreeSlice> for BTree {
     }
 }
 
-impl From<BTree> for Collection {
-    fn from(btree: BTree) -> Collection {
-        Collection::View(CollectionView::BTree(btree))
+impl fmt::Display for BTree {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Tree(_) => write!(f, "(b-tree)"),
+            Self::View(_) => write!(f, "(b-tree slice)"),
+        }
     }
 }

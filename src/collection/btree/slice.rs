@@ -5,7 +5,7 @@ use log::debug;
 
 use crate::class::{Instance, TCResult, TCStream};
 use crate::collection::schema::Column;
-use crate::collection::{Collection, CollectionView};
+use crate::collection::Collection;
 use crate::error;
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -186,13 +186,7 @@ impl Transact for BTreeSlice {
 }
 
 impl From<BTreeSlice> for Collection {
-    fn from(btree_slice: BTreeSlice) -> Collection {
-        Collection::View(btree_slice.into())
-    }
-}
-
-impl From<BTreeSlice> for CollectionView {
-    fn from(btree_slice: BTreeSlice) -> CollectionView {
-        CollectionView::BTree(BTree::View(btree_slice.into()))
+    fn from(slice: BTreeSlice) -> Collection {
+        Collection::BTree(slice.into())
     }
 }

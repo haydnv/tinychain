@@ -17,7 +17,7 @@ use crate::block::File;
 use crate::block::{BlockData, BlockId, BlockOwned, BlockOwnedMut};
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
 use crate::collection::schema::{Column, RowSchema};
-use crate::collection::{BTreeImpl, Collection, CollectionBase};
+use crate::collection::Collection;
 use crate::error;
 use crate::scalar::*;
 use crate::transaction::lock::{Mutable, TxnLock};
@@ -733,7 +733,7 @@ impl Transact for BTreeFile {
 
 impl From<BTreeFile> for Collection {
     fn from(btree: BTreeFile) -> Collection {
-        Collection::Base(CollectionBase::BTree(BTreeImpl::from(btree)))
+        Collection::BTree(btree.into())
     }
 }
 

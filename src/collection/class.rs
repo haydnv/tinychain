@@ -5,15 +5,13 @@ use futures::TryFutureExt;
 
 use crate::class::{Class, NativeClass, TCResult, TCStream, TCType};
 use crate::error;
-use crate::scalar::{
-    label, CastInto, Link, PathSegment, Scalar, TCPathBuf, TryCastFrom, TryCastInto, Value,
-};
+use crate::scalar::{label, CastInto, Link, PathSegment, Scalar, TCPathBuf, TryCastFrom, Value};
 use crate::transaction::Txn;
 
-use super::btree::{BTreeFile, BTreeImpl, BTreeType};
-use super::table::{TableBaseType, TableImpl, TableType};
-use super::tensor::{TensorBaseType, TensorType};
-use super::{Collection, CollectionBase, CollectionView};
+use super::btree::BTreeType;
+use super::table::TableType;
+use super::tensor::TensorType;
+use super::Collection;
 
 #[async_trait]
 pub trait CollectionClass: Class + Into<CollectionType> + Send {
@@ -25,7 +23,6 @@ pub trait CollectionClass: Class + Into<CollectionType> + Send {
 #[async_trait]
 pub trait CollectionInstance {
     type Item: CastInto<Scalar> + TryCastFrom<Scalar>;
-    type Slice;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool>;
 
@@ -34,8 +31,9 @@ pub trait CollectionInstance {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionType {
-    Base(CollectionBaseType),
-    View(CollectionViewType),
+    BTree(BTreeType),
+    Table(TableType),
+    Tensor(TensorType),
 }
 
 impl Class for CollectionType {
@@ -44,7 +42,19 @@ impl Class for CollectionType {
 
 impl NativeClass for CollectionType {
     fn from_path(path: &[PathSegment]) -> TCResult<Self> {
-        CollectionBaseType::from_path(path).map(CollectionType::Base)
+        let suffix = Self::prefix().try_suffix(path)?;
+
+        if suffix.is_empty() {
+            Err(error::unsupported("You must specify a type of Collection"))
+        } else {
+            use CollectionType::*;
+            match suffix[0].as_str() {
+                "btree" if suffix.len() == 1 => Ok(Self::BTree(BTreeType::Tree)),
+                "table" => TableType::from_path(path).map(Table),
+                "tensor" => TensorType::from_path(path).map(Tensor),
+                _ => Err(error::path_not_found(suffix)),
+            }
+        }
     }
 
     fn prefix() -> TCPathBuf {
@@ -58,32 +68,45 @@ impl CollectionClass for CollectionType {
 
     async fn get(&self, txn: &Txn, schema: Value) -> TCResult<<Self as CollectionClass>::Instance> {
         match self {
-            Self::Base(cbt) => cbt.get(txn, schema).map_ok(Collection::Base).await,
-            Self::View(_) => Err(error::unsupported(
-                "Cannot instantiate a CollectionView directly",
+            Self::BTree(btt) if btt == &BTreeType::Tree => {
+                btt.get(txn, schema).map_ok(Collection::BTree).await
+            }
+            Self::Table(tt) if tt == &TableType::Table => {
+                tt.get(txn, schema).map_ok(Collection::Table).await
+            }
+            Self::Tensor(tt) => tt.get(txn, schema).map_ok(Collection::Tensor).await,
+            other => Err(error::bad_request(
+                "Cannot instantiate a Collection view directly",
+                other,
             )),
         }
     }
 }
 
-impl From<CollectionBaseType> for CollectionType {
-    fn from(cbt: CollectionBaseType) -> CollectionType {
-        CollectionType::Base(cbt)
+impl From<BTreeType> for CollectionType {
+    fn from(btt: BTreeType) -> Self {
+        Self::BTree(btt)
     }
 }
 
-impl From<CollectionViewType> for CollectionType {
-    fn from(cvt: CollectionViewType) -> CollectionType {
-        CollectionType::View(cvt)
+impl From<TableType> for CollectionType {
+    fn from(tt: TableType) -> Self {
+        Self::Table(tt)
+    }
+}
+
+impl From<TensorType> for CollectionType {
+    fn from(tt: TensorType) -> Self {
+        Self::Tensor(tt)
     }
 }
 
 impl From<CollectionType> for Link {
     fn from(ct: CollectionType) -> Link {
-        use CollectionType::*;
         match ct {
-            Base(base) => base.into(),
-            View(view) => view.into(),
+            CollectionType::BTree(btt) => btt.into(),
+            CollectionType::Table(tt) => tt.into(),
+            CollectionType::Tensor(tt) => tt.into(),
         }
     }
 }
@@ -91,150 +114,9 @@ impl From<CollectionType> for Link {
 impl fmt::Display for CollectionType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            CollectionType::Base(base) => write!(f, "{}", base),
-            CollectionType::View(view) => write!(f, "{}", view),
-        }
-    }
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum CollectionBaseType {
-    BTree,
-    Table(TableBaseType),
-    Tensor(TensorBaseType),
-}
-
-impl Class for CollectionBaseType {
-    type Instance = CollectionBase;
-}
-
-impl NativeClass for CollectionBaseType {
-    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
-        let suffix = Self::prefix().try_suffix(path)?;
-
-        if suffix.is_empty() {
-            Err(error::unsupported("You must specify a type of Collection"))
-        } else {
-            use CollectionBaseType::*;
-            match suffix[0].as_str() {
-                "btree" if suffix.len() == 1 => Ok(BTree),
-                "table" => TableBaseType::from_path(path).map(Table),
-                "tensor" => TensorBaseType::from_path(path).map(Tensor),
-                _ => Err(error::path_not_found(suffix)),
-            }
-        }
-    }
-
-    fn prefix() -> TCPathBuf {
-        CollectionType::prefix()
-    }
-}
-
-#[async_trait]
-impl CollectionClass for CollectionBaseType {
-    type Instance = CollectionBase;
-
-    async fn get(&self, txn: &Txn, schema: Value) -> TCResult<CollectionBase> {
-        match self {
-            Self::BTree => {
-                let schema = schema
-                    .try_cast_into(|s| error::bad_request("Expected BTree schema but found", s))?;
-
-                BTreeFile::create(txn, schema)
-                    .map_ok(BTreeImpl::from)
-                    .map_ok(CollectionBase::BTree)
-                    .await
-            }
-            Self::Table(tt) => {
-                tt.get(txn, schema)
-                    .map_ok(TableImpl::from)
-                    .map_ok(CollectionBase::Table)
-                    .await
-            }
-            Self::Tensor(tt) => tt.get(txn, schema).map_ok(CollectionBase::Tensor).await,
-        }
-    }
-}
-
-impl From<CollectionBaseType> for Link {
-    fn from(ct: CollectionBaseType) -> Link {
-        use CollectionBaseType::*;
-        match ct {
-            BTree => BTreeType::Tree.into(),
-            Table(tbt) => tbt.into(),
-            Tensor(tbt) => tbt.into(),
-        }
-    }
-}
-
-impl fmt::Display for CollectionBaseType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use CollectionBaseType::*;
-        match self {
-            BTree => write!(f, "{}", BTreeType::Tree),
-            Table(tbt) => write!(f, "{}", tbt),
-            Tensor(tbt) => write!(f, "{}", tbt),
-        }
-    }
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum CollectionViewType {
-    BTree(BTreeType),
-    Table(TableType),
-    Tensor(TensorType),
-}
-
-impl Class for CollectionViewType {
-    type Instance = CollectionView;
-}
-
-impl NativeClass for CollectionViewType {
-    fn from_path(_path: &[PathSegment]) -> TCResult<Self> {
-        Err(error::internal(crate::class::ERR_PROTECTED))
-    }
-
-    fn prefix() -> TCPathBuf {
-        CollectionType::prefix()
-    }
-}
-
-impl From<BTreeType> for CollectionViewType {
-    fn from(btt: BTreeType) -> CollectionViewType {
-        Self::BTree(btt)
-    }
-}
-
-impl From<TableType> for CollectionViewType {
-    fn from(tt: TableType) -> CollectionViewType {
-        Self::Table(tt)
-    }
-}
-
-impl From<TensorType> for CollectionViewType {
-    fn from(tt: TensorType) -> CollectionViewType {
-        Self::Tensor(tt)
-    }
-}
-
-impl From<CollectionViewType> for Link {
-    fn from(cvt: CollectionViewType) -> Link {
-        use CollectionViewType::*;
-        match cvt {
-            BTree(btt) => btt.into(),
-            Table(tt) => tt.into(),
-            Tensor(tt) => tt.into(),
-        }
-    }
-}
-
-impl fmt::Display for CollectionViewType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use CollectionViewType::*;
-        match self {
-            BTree(btree_type) => write!(f, "{}", btree_type),
-            Table(table_type) => write!(f, "{}", table_type),
-            Tensor(tensor_type) => write!(f, "{}", tensor_type),
+            Self::BTree(btt) => fmt::Display::fmt(btt, f),
+            Self::Table(tt) => fmt::Display::fmt(tt, f),
+            Self::Tensor(tt) => fmt::Display::fmt(tt, f),
         }
     }
 }

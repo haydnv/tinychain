@@ -8,19 +8,19 @@ use futures::try_join;
 use log::debug;
 
 use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
+use crate::collection::Collection;
 use crate::error;
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
-use super::class::{TensorInstance, TensorType, TensorViewType};
+use super::class::{Tensor, TensorInstance, TensorType};
 use super::sparse::{SparseAccess, SparseTensor};
 use super::transform;
 use super::{
     IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
-    TensorReduce, TensorTransform, TensorUnary, TensorView, ERR_NONBIJECTIVE_WRITE,
+    TensorReduce, TensorTransform, TensorUnary, ERR_NONBIJECTIVE_WRITE,
 };
-//use super::*;
 
 mod array;
 mod file;
@@ -1200,7 +1200,7 @@ pub struct DenseTensor<T: Clone + BlockList> {
 }
 
 impl<T: Clone + BlockList> DenseTensor<T> {
-    fn into_dyn(self) -> DenseTensor<BlockListDyn> {
+    pub fn into_dyn(self) -> DenseTensor<BlockListDyn> {
         let blocks = BlockListDyn::new(self.clone_into());
         DenseTensor {
             blocks: Arc::new(blocks),
@@ -1250,16 +1250,16 @@ impl<T: Clone + BlockList> Instance for DenseTensor<T> {
     type Class = TensorType;
 
     fn class(&self) -> TensorType {
-        TensorType::View(TensorViewType::Dense)
+        TensorType::Dense
     }
 }
 
 impl<T: Clone + BlockList> TensorInstance for DenseTensor<T> {}
 
 impl<T: Clone + BlockList> IntoView for DenseTensor<T> {
-    fn into_view(self) -> TensorView {
+    fn into_view(self) -> Tensor {
         let blocks = Arc::new(BlockListDyn::new(self.clone_into()));
-        TensorView::Dense(DenseTensor { blocks })
+        Tensor::Dense(DenseTensor { blocks })
     }
 }
 
@@ -1609,6 +1609,12 @@ impl From<BlockListFile> for DenseTensor<BlockListFile> {
 impl<T: Clone + BlockList> From<Arc<T>> for DenseTensor<T> {
     fn from(blocks: Arc<T>) -> DenseTensor<T> {
         DenseTensor { blocks }
+    }
+}
+
+impl<T: Clone + BlockList> From<DenseTensor<T>> for Collection {
+    fn from(dense: DenseTensor<T>) -> Collection {
+        Collection::Tensor(Tensor::Dense(dense.into_dyn()))
     }
 }
 
