@@ -3,11 +3,10 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, NativeClass, TCResult, TCStream, TCType};
 use crate::error;
-use crate::handler::Public;
-use crate::request::Request;
-use crate::scalar::{label, Link, Object, PathSegment, TCPathBuf, Value};
+use crate::handler::*;
+use crate::scalar::{label, Link, MethodType, PathSegment, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 mod block;
@@ -120,54 +119,14 @@ impl ChainInstance for Chain {
     }
 }
 
-#[async_trait]
-impl Public for Chain {
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<State> {
+impl Route for Chain {
+    fn route(
+        &'_ self,
+        method: MethodType,
+        path: &'_ [PathSegment],
+    ) -> Option<Box<dyn Handler + '_>> {
         match self {
-            Self::Null(nc) => nc.get(request, txn, path, key).await,
-        }
-    }
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
-        match self {
-            Self::Null(nc) => nc.put(request, txn, path, key, value).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        data: Object,
-    ) -> TCResult<State> {
-        match self {
-            Self::Null(nc) => nc.post(request, txn, path, data).await,
-        }
-    }
-
-    async fn delete(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<()> {
-        match self {
-            Self::Null(nc) => nc.delete(request, txn, path, key).await,
+            Self::Null(nc) => nc.route(method, path),
         }
     }
 }
