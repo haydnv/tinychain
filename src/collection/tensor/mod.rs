@@ -6,6 +6,7 @@ use crate::scalar::value::number::*;
 use crate::transaction::{Txn, TxnId};
 
 mod einsum;
+mod handlers;
 mod transform;
 
 pub mod bounds;

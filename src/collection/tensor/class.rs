@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, TryFutureExt};
 
-use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCStream, TCType};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
@@ -25,7 +25,7 @@ use super::{
 };
 
 pub trait TensorInstance:
-    Clone + Instance + IntoView + TensorIO + TensorTransform + TensorUnary + Send + Sync
+    Clone + Instance<Class = TensorType> + IntoView + TensorIO + TensorTransform + TensorUnary + Send + Sync
 {
     type Dense: TensorInstance;
     type Sparse: TensorInstance;
@@ -179,6 +179,12 @@ impl From<TensorType> for Link {
             Dense => prefix.append(label("dense")).into(),
             Sparse => prefix.append(label("sparse")).into(),
         }
+    }
+}
+
+impl From<TensorType> for TCType {
+    fn from(tt: TensorType) -> TCType {
+        TCType::Collection(CollectionType::Tensor(tt))
     }
 }
 
