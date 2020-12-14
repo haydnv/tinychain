@@ -23,10 +23,6 @@ pub use number::*;
 pub use string::*;
 pub use version::*;
 
-pub const fn label(id: &'static str) -> string::Label {
-    string::label(id)
-}
-
 #[derive(Clone, Eq, PartialEq)]
 pub enum Value {
     None,

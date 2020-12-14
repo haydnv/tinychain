@@ -12,11 +12,32 @@ use serde::de;
 use serde::ser::{SerializeMap, Serializer};
 
 use crate::error::{self, TCResult};
-use crate::scalar::{Id, Label, Scalar, TCString, TryCastFrom, Value};
+use crate::scalar::{label, Id, Label, Scalar, TCString, TryCastFrom, Value};
 
 const EMPTY_SLICE: &[usize] = &[];
 
 pub type PathSegment = Id;
+
+pub struct PathLabel {
+    segments: &'static [&'static str],
+}
+
+pub const fn path_label(segments: &'static [&'static str]) -> PathLabel {
+    PathLabel { segments }
+}
+
+impl From<PathLabel> for TCPathBuf {
+    fn from(path: PathLabel) -> Self {
+        let segments = path
+            .segments
+            .into_iter()
+            .map(|segment| label(*segment))
+            .map(PathSegment::from)
+            .collect();
+
+        Self { segments }
+    }
+}
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
