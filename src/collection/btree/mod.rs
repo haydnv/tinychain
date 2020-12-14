@@ -87,8 +87,8 @@ impl<'a, T: BTreeInstance> Handler for CountHandler<'a, T> {
         Instance::class(self.btree).into()
     }
 
-    fn scope(&self) -> Scope {
-        "/admin/write/read".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/admin/write/read".parse().unwrap())
     }
 
     async fn handle_get(&self, txn: &Txn, range: Value) -> TCResult<State> {
@@ -108,8 +108,8 @@ impl<'a, T: BTreeInstance> Handler for DeleteHandler<'a, T> {
         Instance::class(self.btree).into()
     }
 
-    fn scope(&self) -> Scope {
-        "/admin/write".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/admin/write".parse().unwrap())
     }
 
     async fn handle_delete(&self, txn: &Txn, range: Value) -> TCResult<()> {
@@ -152,8 +152,8 @@ where
         Instance::class(self.btree).into()
     }
 
-    fn scope(&self) -> Scope {
-        "/admin/write/read".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/admin/write/read".parse().unwrap())
     }
 
     async fn handle_get(&self, txn: &Txn, range: Value) -> TCResult<State> {
@@ -194,8 +194,8 @@ where
         Instance::class(self.btree).into()
     }
 
-    fn scope(&self) -> Scope {
-        "/admin/write/read".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/admin/write/read".parse().unwrap())
     }
 
     async fn handle_get(&self, _txn: &Txn, range: Value) -> TCResult<State> {
@@ -223,8 +223,8 @@ impl<'a, T: BTreeInstance> Handler for WriteHandler<'a, T> {
         Instance::class(self.btree).into()
     }
 
-    fn scope(&self) -> Scope {
-        "/admin/write".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/admin/write".parse().unwrap())
     }
 
     async fn handle_put(&self, txn: &Txn, range: Value, data: State) -> TCResult<()> {

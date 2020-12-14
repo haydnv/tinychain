@@ -27,8 +27,8 @@ impl<'a, T: TensorInstance> Handler for AllHandler<'a, T> {
         self.tensor.class().into()
     }
 
-    fn scope(&self) -> Scope {
-        "/write/read".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/write/read".parse().unwrap())
     }
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
@@ -55,8 +55,8 @@ impl<'a, T: TensorInstance> Handler for AnyHandler<'a, T> {
         self.tensor.class().into()
     }
 
-    fn scope(&self) -> Scope {
-        "/write/read".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/write/read".parse().unwrap())
     }
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
@@ -86,8 +86,8 @@ impl<'a, T: TensorInstance, R: Fn(&T, &Txn, Value) -> TCResult<State> + Send + S
         self.tensor.class().into()
     }
 
-    fn scope(&self) -> Scope {
-        "/write/read".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/write/read".parse().unwrap())
     }
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
@@ -105,8 +105,8 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
         self.tensor.class().into()
     }
 
-    fn scope(&self) -> Scope {
-        "/write/read".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/write/read".parse().unwrap())
     }
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
@@ -157,8 +157,8 @@ impl<'a, T: TensorInstance + TensorDualIO<Tensor>> Handler for WriteHandler<'a, 
         self.tensor.class().into()
     }
 
-    fn scope(&self) -> Scope {
-        "/write".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/write".parse().unwrap())
     }
 
     async fn handle_put(&self, txn: &Txn, selector: Value, value: State) -> TCResult<()> {

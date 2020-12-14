@@ -11,7 +11,9 @@ use crate::transaction::Txn;
 pub trait Handler: Send + Sync {
     fn subject(&self) -> TCType;
 
-    fn scope(&self) -> auth::Scope;
+    fn scope(&self) -> Option<auth::Scope> {
+        None
+    }
 
     async fn handle_get(&self, _txn: &Txn, _key: Value) -> TCResult<State> {
         Err(error::method_not_allowed(self.subject()))

@@ -89,8 +89,8 @@ impl<'a> Handler for NullChainHandler<'a> {
         self.chain.class().into()
     }
 
-    fn scope(&self) -> Scope {
-        "/admin".parse().unwrap()
+    fn scope(&self) -> Option<Scope> {
+        Some("/admin".parse().unwrap())
     }
 }
 
