@@ -552,15 +552,13 @@ impl Txn {
             }
             State::Object(object) => object.get(request, self, path, key).await,
             State::Scalar(scalar) => match scalar {
-                Scalar::Op(op_def) => {
-                    if !&path[..].is_empty() {
-                        return Err(error::path_not_found(path));
-                    }
-
+                Scalar::Op(op_def) if path.is_empty() => {
                     op_def
-                        .get(request, self, key, Some(subject.clone().into()))
+                        .route(request, Some(subject.clone()))
+                        .get(request, self, key)
                         .await
                 }
+                Scalar::Op(_) => Err(error::path_not_found(path)),
                 other => other.get(request, self, &path[..], key).await,
             },
         }
@@ -588,7 +586,8 @@ impl Txn {
             State::Scalar(scalar) => match scalar {
                 Scalar::Op(op_def) if path.len() == 0 => {
                     op_def
-                        .put(request, self, key, value, Some(subject.clone().into()))
+                        .route(request, Some(subject.clone()))
+                        .put(request, self, key, value)
                         .await
                 }
                 Scalar::Op(_) => Err(error::path_not_found(path)),
@@ -614,7 +613,8 @@ impl Txn {
             State::Scalar(scalar) => match scalar {
                 Scalar::Op(op_def) if path.is_empty() => {
                     op_def
-                        .post(request, self, params, Some(subject.clone().into()))
+                        .route(request, Some(subject.clone()))
+                        .post(request, self, params)
                         .await
                 }
                 Scalar::Op(_) => Err(error::path_not_found(path)),
@@ -645,7 +645,8 @@ impl Txn {
             State::Scalar(scalar) => match scalar {
                 Scalar::Op(op_def) if path.is_empty() => {
                     op_def
-                        .delete(request, self, key, Some(subject.clone().into()))
+                        .route(request, Some(subject.clone()))
+                        .delete(request, self, key)
                         .await
                 }
                 Scalar::Op(_) => Err(error::path_not_found(path)),

@@ -8,7 +8,7 @@ use serde::ser::{Serialize, Serializer};
 
 use crate::class::{Class, Instance, NativeClass, State, TCBoxTryFuture, TCResult, TCType};
 use crate::error;
-use crate::handler::Public;
+use crate::handler::*;
 use crate::request::Request;
 use crate::transaction::Txn;
 
@@ -80,7 +80,8 @@ impl Object {
             match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
-                        .get(request, txn, key, Some(self.clone().into()))
+                        .route(request, Some(self.clone().into()))
+                        .get(request, txn, key)
                         .await
                 }
                 Scalar::Op(_) => Err(error::path_not_found(path)),
@@ -110,7 +111,8 @@ impl Object {
             match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
-                        .put(request, txn, key, value, Some(self.clone().into()))
+                        .route(request, Some(self.clone().into()))
+                        .put(request, txn, key, value)
                         .await
                 }
                 Scalar::Op(_) => Err(error::path_not_found(path)),
@@ -139,7 +141,8 @@ impl Object {
             match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
-                        .post(request, txn, params, Some(self.clone().into()))
+                        .route(request, Some(self.clone().into()))
+                        .post(request, txn, params)
                         .await
                 }
                 Scalar::Op(_) => Err(error::path_not_found(path)),
@@ -285,6 +288,12 @@ impl TryCastFrom<State> for Object {
 impl From<Object> for HashMap<Id, Scalar> {
     fn from(object: Object) -> HashMap<Id, Scalar> {
         object.0
+    }
+}
+
+impl From<Object> for State {
+    fn from(object: Object) -> State {
+        State::Scalar(Scalar::Object(object))
     }
 }
 
