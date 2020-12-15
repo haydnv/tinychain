@@ -10,7 +10,7 @@ use crate::error::{self, TCResult};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{
-    self, label, Id, Key, Link, MethodType, Object, OpRef, PathSegment, Scalar, TCPath, TCPathBuf,
+    self, label, Id, Key, Link, MethodType, OpRef, PathSegment, Scalar, TCPath, TCPathBuf,
     TryCastInto, Value,
 };
 use crate::transaction::Txn;
@@ -176,7 +176,7 @@ impl<'a> Handler for Initializer<'a> {
 
     async fn get(&self, request: &Request, txn: &Txn, schema: Value) -> TCResult<State> {
         let ctr = OpRef::Get((self.class.extends(), Key::Value(schema)));
-        let parent = txn.resolve(request, ctr.into()).await?;
+        let parent = txn.resolve(request, ctr.into(), None).await?;
         Ok(InstanceExt::new(parent, self.class.clone()).into())
     }
 }

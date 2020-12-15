@@ -262,12 +262,13 @@ impl Txn {
         &self,
         request: &Request,
         mut parameters: S,
+        context: Option<State>,
     ) -> TCResult<State> {
         validate_id(request, &self.inner.id)?;
 
         debug!("Txn::execute");
 
-        let mut graph = TxnState::new(None);
+        let mut graph = TxnState::new(context);
         let mut capture = None;
         while let Some((name, state)) = parameters.next().await {
             let state: State = state.into();
@@ -410,8 +411,13 @@ impl Txn {
         .await;
     }
 
-    pub async fn resolve(&self, request: &Request, provider: TCRef) -> TCResult<State> {
-        let graph = TxnState::new(None);
+    pub async fn resolve(
+        &self,
+        request: &Request,
+        provider: TCRef,
+        context: Option<State>,
+    ) -> TCResult<State> {
+        let graph = TxnState::new(context);
         self.resolve_inner(request, &graph, provider).await
     }
 

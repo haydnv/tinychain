@@ -227,16 +227,16 @@ impl<'a> Handler for GetHandler<'a> {
 
         let (key_id, def) = self.op;
 
-        let mut data = Vec::with_capacity(def.len() + 2);
-
-        if let Some(subject) = &self.context {
-            data.push((label("self").into(), subject.clone()));
-        }
-
+        let mut data = Vec::with_capacity(def.len() + 1);
         data.push((key_id.clone(), Scalar::Value(key).into()));
         data.extend(def.to_vec().into_iter().map(|(k, v)| (k, State::Scalar(v))));
 
-        txn.execute(request, stream::iter(data.into_iter())).await
+        txn.execute(
+            request,
+            stream::iter(data.into_iter()),
+            self.context.clone(),
+        )
+        .await
     }
 }
 
@@ -290,20 +290,12 @@ impl<'a> Handler for PostHandler<'a> {
     }
 
     async fn handle_post(&self, request: &Request, txn: &Txn, params: Object) -> TCResult<State> {
-        let mut data = Vec::with_capacity(self.op.len() + params.len() + 1);
-
-        if let Some(subject) = &self.context {
-            data.push((label("self").into(), subject.clone()));
-        }
-
-        data.extend(
-            params
-                .into_iter()
-                .chain(self.op.to_vec())
-                .map(|(id, scalar)| (id, State::from(scalar))),
-        );
-
-        txn.execute(request, stream::iter(data.into_iter())).await
+        let op = params
+            .into_iter()
+            .chain(self.op.to_vec())
+            .map(|(id, scalar)| (id, State::from(scalar)));
+        txn.execute(request, stream::iter(op), self.context.clone())
+            .await
     }
 }
 

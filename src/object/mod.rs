@@ -6,7 +6,6 @@ use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error::{self, TCResult};
 use crate::handler::*;
 use crate::scalar::{self, label, Link, MethodType, PathSegment, TCPath, TCPathBuf};
-use crate::transaction::Txn;
 
 mod class;
 mod instance;

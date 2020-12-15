@@ -2,15 +2,9 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Deref;
 
-use async_trait::async_trait;
-use log::debug;
-
 use crate::class::{Instance, State};
-use crate::error::{self, TCResult};
 use crate::handler::*;
-use crate::request::Request;
-use crate::scalar::{self, MethodType, PathSegment, Scalar, TCPath, Value};
-use crate::transaction::Txn;
+use crate::scalar::{self, MethodType, PathSegment, Scalar};
 
 use super::InstanceClass;
 
