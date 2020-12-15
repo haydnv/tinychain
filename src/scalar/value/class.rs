@@ -11,10 +11,6 @@ use super::Value;
 
 pub trait ValueInstance: ScalarInstance {
     type Class: ValueClass;
-
-    fn get(&self, _path: &[PathSegment], _key: Value) -> TCResult<Value> {
-        Err(error::method_not_allowed(format!("GET {}", self.class())))
-    }
 }
 
 pub trait ValueClass: ScalarClass {

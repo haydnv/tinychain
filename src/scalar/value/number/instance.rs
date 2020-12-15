@@ -7,7 +7,8 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::{Instance, TCResult};
 use crate::error;
-use crate::scalar::{CastFrom, CastInto, Link, PathSegment, ScalarInstance, Value, ValueInstance};
+use crate::handler::{Handler, Route};
+use crate::scalar::{CastFrom, CastInto, Link, MethodType, PathSegment, ScalarInstance, ValueInstance};
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{NumberClass, NumberInstance};
@@ -57,6 +58,12 @@ impl NumberInstance for Boolean {
 
     fn xor(self, other: Self) -> Self {
         Boolean(self.0 ^ other.0)
+    }
+}
+
+impl Route for Boolean {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        super::handlers::route(self, method, path)
     }
 }
 
@@ -185,6 +192,12 @@ impl NumberInstance for Complex {
             Self::C32(c) => Float::F32(c.norm_sqr()),
             Self::C64(c) => Float::F64(c.norm_sqr()),
         }
+    }
+}
+
+impl Route for Complex {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        super::handlers::route(self, method, path)
     }
 }
 
@@ -454,6 +467,12 @@ impl NumberInstance for Float {
     }
 }
 
+impl Route for Float {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        super::handlers::route(self, method, path)
+    }
+}
+
 impl CastFrom<Complex> for Float {
     fn cast_from(c: Complex) -> Float {
         use Complex::*;
@@ -693,6 +712,12 @@ impl NumberInstance for Int {
             Self::I32(i) => Int::I32(i.abs()),
             Self::I64(i) => Int::I64(i.abs()),
         }
+    }
+}
+
+impl Route for Int {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        super::handlers::route(self, method, path)
     }
 }
 
@@ -986,6 +1011,12 @@ impl NumberInstance for UInt {
 
     fn abs(self) -> UInt {
         self
+    }
+}
+
+impl Route for UInt {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        super::handlers::route(self, method, path)
     }
 }
 
@@ -1333,26 +1364,6 @@ impl ScalarInstance for Number {
 
 impl ValueInstance for Number {
     type Class = NumberType;
-
-    fn get(&self, path: &[PathSegment], key: Value) -> TCResult<Value> {
-        let that = Number::try_from(key)?;
-
-        if path.len() == 1 {
-            match path[0].as_str() {
-                "add" => Ok(Add::add(*self, that).into()),
-                "eq" => Ok(Number::Bool(Boolean(self == &that)).into()),
-                "gt" => Ok(Number::Bool(Boolean(self > &that)).into()),
-                "gte" => Ok(Number::Bool(Boolean(self >= &that)).into()),
-                "lt" => Ok(Number::Bool(Boolean(self < &that)).into()),
-                "lte" => Ok(Number::Bool(Boolean(self <= &that)).into()),
-                "mul" => Ok(Mul::mul(*self, that).into()),
-                "sub" => Ok(Sub::sub(*self, that).into()),
-                other => Err(error::not_found(other)),
-            }
-        } else {
-            Err(error::path_not_found(path))
-        }
-    }
 }
 
 impl NumberInstance for Number {
@@ -1395,6 +1406,12 @@ impl NumberInstance for Number {
             }
             NT::Number => self,
         }
+    }
+}
+
+impl Route for Number {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        super::handlers::route(self, method, path)
     }
 }
 

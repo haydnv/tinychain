@@ -286,22 +286,6 @@ impl ScalarInstance for TCString {
 
 impl ValueInstance for TCString {
     type Class = StringType;
-
-    fn get(&self, path: &[PathSegment], key: Value) -> TCResult<Value> {
-        if path.is_empty() {
-            Ok(self.clone().into())
-        } else if path.len() > 1 {
-            Err(error::path_not_found(path))
-        } else {
-            match path[0].as_str() {
-                "eq" => match key {
-                    Value::TCString(other) => Ok((self == &other).into()),
-                    other => Err(error::bad_request("Can't compare String with", other)),
-                },
-                other => Err(error::not_found(other)),
-            }
-        }
-    }
 }
 
 impl Default for TCString {

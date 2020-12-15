@@ -269,7 +269,7 @@ impl Public for Scalar {
                     .ok_or_else(|| error::not_found(format!("Index {}", i)))
             }
             Self::Tuple(_) => Err(error::path_not_found(path)),
-            Self::Value(value) => value.get(path, key).map(State::from),
+            Self::Value(value) => value.get(request, txn, path, key).await,
         }
     }
 

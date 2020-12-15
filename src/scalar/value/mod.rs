@@ -8,8 +8,11 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::class::{Instance, NativeClass, State, TCResult, TCType};
 use crate::error;
+use crate::handler::{Handler, Route};
 
 use super::{Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto};
+
+mod handlers;
 
 pub mod class;
 pub mod link;
@@ -17,6 +20,7 @@ pub mod number;
 pub mod string;
 pub mod version;
 
+use crate::scalar::MethodType;
 pub use class::*;
 pub use link::*;
 pub use number::*;
@@ -59,18 +63,28 @@ impl Instance for Value {
 }
 
 impl ScalarInstance for Value {
-    type Class = class::ValueType;
+    type Class = ValueType;
 }
 
-impl class::ValueInstance for Value {
-    type Class = class::ValueType;
+impl ValueInstance for Value {
+    type Class = ValueType;
+}
 
-    fn get(&self, path: &[PathSegment], key: Value) -> TCResult<Value> {
-        match self {
-            Value::None => Err(error::path_not_found(path)),
-            Value::Number(number) => number.get(path, key),
-            Value::TCString(string) => string.get(path, key),
-            other => Err(error::method_not_allowed(format!("GET {}", other.class()))),
+impl Route for Value {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        if method != MethodType::Get {
+            return None;
+        }
+
+        if path.is_empty() {
+            return Some(Box::new(handlers::SelfHandler::from(self)));
+        } else if &path[0] == "eq" {
+            return Some(Box::new(handlers::EqHandler::from(self)));
+        } else {
+            match self {
+                Self::Number(n) => n.route(method, path),
+                _ => None,
+            }
         }
     }
 }

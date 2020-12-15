@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::class::{Class, NativeClass, TCResult, TCType};
 use crate::error;
+use crate::handler::Route;
 use crate::scalar::{
     label, CastInto, Link, PathSegment, Scalar, ScalarClass, ScalarType, TCPathBuf, TryCastFrom,
     Value, ValueClass, ValueInstance, ValueType,
@@ -29,6 +30,7 @@ pub trait NumberInstance:
     + Add<Output = Self>
     + Mul<Output = Self>
     + Sub<Output = Self>
+    + Route
     + Sized
     + PartialOrd
     + From<Boolean>
