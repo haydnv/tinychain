@@ -12,7 +12,6 @@ use serde::ser::{Serialize, SerializeSeq, Serializer};
 use crate::class::*;
 use crate::error;
 use crate::handler::*;
-use crate::request::Request;
 use crate::transaction::Txn;
 
 pub mod object;
@@ -243,79 +242,17 @@ impl Instance for Scalar {
     }
 }
 
-#[async_trait]
-impl Public for Scalar {
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<State> {
-        match self {
-            Self::Object(object) => object.get(request, txn, path, key).await,
-            Self::Op(op) if path.is_empty() => op.handler(None).get(request, txn, key).await,
-            Self::Op(_) => Err(error::path_not_found(path)),
-            Self::Ref(tc_ref) => Err(error::method_not_allowed(tc_ref)),
-            Self::Slice(_slice) => Err(error::not_implemented("Slice::get")),
-            Self::Tuple(tuple) if path.is_empty() => {
-                let i: Number =
-                    key.try_cast_into(|v| error::bad_request("Invalid tuple index", v))?;
-                let i: usize = i.cast_into();
-                tuple
-                    .get(i)
-                    .cloned()
-                    .map(State::Scalar)
-                    .ok_or_else(|| error::not_found(format!("Index {}", i)))
-            }
-            Self::Tuple(_) => Err(error::path_not_found(path)),
-            Self::Value(value) => value.get(request, txn, path, key).await,
+impl Route for Scalar {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        if path.is_empty() {
+            return Some(Box::new(SelfHandler { scalar: self }));
         }
-    }
 
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
         match self {
-            Self::Object(object) => object.put(request, txn, path, key, value).await,
-            Self::Op(op) if path.is_empty() => op.handler(None).put(request, txn, key, value).await,
-            Self::Op(_) => Err(error::path_not_found(path)),
-            other => Err(error::method_not_allowed(other)),
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: Object,
-    ) -> TCResult<State> {
-        match self {
-            Self::Object(object) => object.post(request, txn, path, params).await,
-            Self::Op(op) if path.is_empty() => op.handler(None).post(request, txn, params).await,
-            Self::Op(_) => Err(error::path_not_found(path)),
-            other => Err(error::method_not_allowed(other)),
-        }
-    }
-
-    async fn delete(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<()> {
-        match self {
-            Self::Object(object) => object.delete(request, txn, path, key).await,
-            Self::Op(op) if path.is_empty() => op.handler(None).delete(request, txn, key).await,
-            Self::Op(_) => Err(error::path_not_found(path)),
-            other => Err(error::method_not_allowed(other)),
+            Self::Object(object) => object.route(method, path),
+            Self::Op(op) if path.is_empty() => Some(op.handler(None)),
+            Self::Value(value) => value.route(method, path),
+            _ => None,
         }
     }
 }
@@ -953,6 +890,43 @@ impl fmt::Display for Scalar {
                     .join(", ")
             ),
             Scalar::Value(value) => write!(f, "{}", value),
+        }
+    }
+}
+
+struct SelfHandler<'a> {
+    scalar: &'a Scalar,
+}
+
+#[async_trait]
+impl<'a> Handler for SelfHandler<'a> {
+    fn subject(&self) -> TCType {
+        self.scalar.class().into()
+    }
+
+    async fn handle_get(&self, _txn: &Txn, key: Value) -> TCResult<State> {
+        if key.is_none() {
+            return Ok(State::from(self.scalar.clone()));
+        } else if let Scalar::Tuple(tuple) = self.scalar {
+            let i: usize =
+                key.try_cast_into(|v| error::bad_request("Invalid index for tuple", v))?;
+
+            tuple.get(i).cloned().map(State::from).ok_or_else(|| {
+                error::not_found(format!("Index {} in tuple of size {}", i, tuple.len()))
+            })
+        } else if let Scalar::Value(Value::Tuple(tuple)) = self.scalar {
+            let i: usize =
+                key.try_cast_into(|v| error::bad_request("Invalid index for tuple", v))?;
+
+            tuple.get(i).cloned().map(State::from).ok_or_else(|| {
+                error::not_found(format!("Index {} in tuple of size {}", i, tuple.len()))
+            })
+        } else {
+            Err(error::not_found(format!(
+                "{} has no field {}",
+                self.scalar.class(),
+                key
+            )))
         }
     }
 }

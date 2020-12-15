@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
@@ -9,10 +10,9 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 use crate::class::{Instance, NativeClass, State, TCResult, TCType};
 use crate::error;
 use crate::handler::{Handler, Route};
+use crate::transaction::Txn;
 
 use super::{Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto};
-
-mod handlers;
 
 pub mod class;
 pub mod link;
@@ -76,10 +76,8 @@ impl Route for Value {
             return None;
         }
 
-        if path.is_empty() {
-            return Some(Box::new(handlers::SelfHandler::from(self)));
-        } else if &path[0] == "eq" {
-            return Some(Box::new(handlers::EqHandler::from(self)));
+        if &path[0] == "eq" {
+            return Some(Box::new(EqHandler { value: self }));
         } else {
             match self {
                 Self::Number(n) => n.route(method, path),
@@ -819,5 +817,22 @@ impl fmt::Display for Value {
                     .join(", ")
             ),
         }
+    }
+}
+
+pub struct EqHandler<'a> {
+    value: &'a Value,
+}
+
+#[async_trait]
+impl<'a> Handler for EqHandler<'a> {
+    fn subject(&self) -> TCType {
+        self.value.class().into()
+    }
+
+    async fn handle_get(&self, _txn: &Txn, other: Value) -> TCResult<State> {
+        Ok(State::from(Value::Number(Number::Bool(Boolean::from(
+            self.value == &other,
+        )))))
     }
 }
