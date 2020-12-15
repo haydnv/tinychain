@@ -2,13 +2,16 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 
+use async_trait::async_trait;
 use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error::{self, TCResult};
+use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{
-    self, label, Id, Key, Link, OpRef, PathSegment, Scalar, TCPath, TCPathBuf, TryCastInto, Value,
+    self, label, Id, Key, Link, MethodType, Object, OpRef, PathSegment, Scalar, TCPath, TCPathBuf,
+    TryCastInto, Value,
 };
 use crate::transaction::Txn;
 
@@ -77,6 +80,12 @@ impl From<InstanceClassType> for Link {
     }
 }
 
+impl From<InstanceClassType> for TCType {
+    fn from(ict: InstanceClassType) -> TCType {
+        TCType::Object(ObjectType::Class(ict))
+    }
+}
+
 impl fmt::Display for InstanceClassType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "user-defined Class")
@@ -108,33 +117,6 @@ impl InstanceClass {
         &self.proto
     }
 
-    pub async fn get(
-        self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        schema: Value,
-    ) -> TCResult<InstanceExt<State>> {
-        if path.is_empty() {
-            let ctr = OpRef::Get((self.extends(), Key::Value(schema)));
-            let parent = txn.resolve(request, ctr.into()).await?;
-
-            Ok(InstanceExt::new(parent, self))
-        } else {
-            Err(error::not_found(TCPath::from(path)))
-        }
-    }
-
-    pub fn post(path: &[PathSegment], _data: scalar::Object) -> TCResult<InstanceExt<State>> {
-        debug!("InstanceClass::post {}", TCPath::from(path));
-
-        if path.is_empty() {
-            Err(error::not_implemented("InstanceClass::post"))
-        } else {
-            Err(error::not_found(TCPath::from(path)))
-        }
-    }
-
     pub fn prefix() -> TCPathBuf {
         TCType::prefix().append(label("object"))
     }
@@ -149,6 +131,16 @@ impl Instance for InstanceClass {
 
     fn class(&self) -> InstanceClassType {
         InstanceClassType
+    }
+}
+
+impl Route for InstanceClass {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        if path.is_empty() && method == MethodType::Get {
+            Some(Box::new(Initializer { class: self }))
+        } else {
+            None
+        }
     }
 }
 
@@ -169,5 +161,22 @@ impl fmt::Display for InstanceClass {
         } else {
             write!(f, "generic Object type")
         }
+    }
+}
+
+pub struct Initializer<'a> {
+    class: &'a InstanceClass,
+}
+
+#[async_trait]
+impl<'a> Handler for Initializer<'a> {
+    fn subject(&self) -> TCType {
+        self.class.class().into()
+    }
+
+    async fn get(&self, request: &Request, txn: &Txn, schema: Value) -> TCResult<State> {
+        let ctr = OpRef::Get((self.class.extends(), Key::Value(schema)));
+        let parent = txn.resolve(request, ctr.into()).await?;
+        Ok(InstanceExt::new(parent, self.class.clone()).into())
     }
 }

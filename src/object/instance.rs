@@ -7,9 +7,9 @@ use log::debug;
 
 use crate::class::{Instance, State};
 use crate::error::{self, TCResult};
-use crate::handler::Public;
+use crate::handler::*;
 use crate::request::Request;
-use crate::scalar::{self, PathSegment, Scalar, TCPath, Value};
+use crate::scalar::{self, MethodType, PathSegment, Scalar, TCPath, Value};
 use crate::transaction::Txn;
 
 use super::InstanceClass;
@@ -48,95 +48,21 @@ impl<T: Instance> InstanceExt<T> {
     }
 }
 
-#[async_trait]
-impl<T: Instance + Public> Public for InstanceExt<T>
+impl<T: Instance + Route> Route for InstanceExt<T>
 where
     State: From<T>,
 {
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<State> {
-        debug!("ObjectInstance::get {}: {}", TCPath::from(path), key);
-
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
         let proto = self.class.proto().deref();
         match proto.get(&path[0]) {
             Some(scalar) => match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
-                    op_def
-                        .handler(Some(self.clone().into_state().into()))
-                        .get(request, txn, key)
-                        .await
+                    Some(op_def.handler(Some(self.clone().into_state().into())))
                 }
-                Scalar::Op(_) => Err(error::path_not_found(&path[1..])),
-                scalar => scalar.get(request, txn, path, key).await,
+                scalar => scalar.route(method, path),
             },
-            None => self.parent.get(request, txn, path, key).await,
+            None => self.parent.route(method, path),
         }
-    }
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
-        debug!("ObjectInstance::put {}: {}", TCPath::from(path), key);
-
-        let proto = self.class.proto().deref();
-        match proto.get(&path[0]) {
-            Some(scalar) => match scalar {
-                Scalar::Op(op_def) if path.len() == 1 => {
-                    op_def
-                        .handler(Some(self.clone().into_state().into()))
-                        .put(request, txn, key, value)
-                        .await
-                }
-                Scalar::Op(_) => Err(error::path_not_found(&path[1..])),
-                scalar => scalar.put(request, txn, path, key, value).await,
-            },
-            None => self.parent.put(request, txn, path, key, value).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: scalar::Object,
-    ) -> TCResult<State> {
-        debug!("ObjectInstance::post {}", TCPath::from(path));
-
-        let proto = self.class.proto().deref();
-        match proto.get(&path[0]) {
-            Some(scalar) => match scalar {
-                Scalar::Op(op_def) if path.len() == 1 => {
-                    op_def
-                        .handler(Some(self.clone().into_state().into()))
-                        .post(request, txn, params)
-                        .await
-                }
-                Scalar::Op(_) => Err(error::path_not_found(&path[1..])),
-                scalar => scalar.post(request, txn, path, params).await,
-            },
-            None => self.parent.post(request, txn, path, params).await,
-        }
-    }
-
-    async fn delete(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        _path: &[PathSegment],
-        _key: Value,
-    ) -> TCResult<()> {
-        Err(error::not_implemented("InstanceExt::delete"))
     }
 }
 

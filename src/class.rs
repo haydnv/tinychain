@@ -2,20 +2,17 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::pin::Pin;
 
-use async_trait::async_trait;
 use futures::future::Future;
 use futures::stream::Stream;
 
 use crate::chain::{Chain, ChainType};
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::handler::Public;
+use crate::handler::*;
 use crate::object::{Object, ObjectType};
-use crate::request::Request;
 use crate::scalar::{
-    self, label, Link, PathSegment, Scalar, ScalarType, TCPathBuf, Value, ValueType,
+    label, Link, MethodType, PathSegment, Scalar, ScalarType, TCPathBuf, Value, ValueType,
 };
-use crate::transaction::Txn;
 
 pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send>>;
 pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
@@ -160,66 +157,13 @@ impl Instance for State {
     }
 }
 
-#[async_trait]
-impl Public for State {
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<State> {
+impl Route for State {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
         match self {
-            Self::Chain(chain) => chain.get(request, txn, path, key).await,
-            Self::Collection(collection) => collection.get(request, txn, path, key).await,
-            Self::Object(object) => object.get(request, txn, path, key).await,
-            Self::Scalar(scalar) => scalar.get(request, txn, path, key).await,
-        }
-    }
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
-        match self {
-            Self::Chain(chain) => chain.put(request, txn, path, key, value).await,
-            Self::Collection(collection) => collection.put(request, txn, path, key, value).await,
-            Self::Object(object) => object.put(request, txn, path, key, value).await,
-            Self::Scalar(scalar) => scalar.put(request, txn, path, key, value).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: scalar::Object,
-    ) -> TCResult<State> {
-        match self {
-            Self::Chain(chain) => chain.post(request, txn, path, params).await,
-            Self::Collection(collection) => collection.post(request, txn, path, params).await,
-            Self::Object(object) => object.post(request, txn, path, params).await,
-            Self::Scalar(scalar) => scalar.post(request, txn, path, params).await,
-        }
-    }
-
-    async fn delete(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<()> {
-        match self {
-            Self::Chain(chain) => chain.delete(request, txn, path, key).await,
-            Self::Collection(collection) => collection.delete(request, txn, path, key).await,
-            Self::Object(object) => object.delete(request, txn, path, key).await,
-            Self::Scalar(scalar) => scalar.delete(request, txn, path, key).await,
+            Self::Chain(chain) => chain.route(method, path),
+            Self::Collection(collection) => collection.route(method, path),
+            Self::Object(object) => object.route(method, path),
+            Self::Scalar(scalar) => scalar.route(method, path),
         }
     }
 }

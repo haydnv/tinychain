@@ -1,14 +1,11 @@
 use std::fmt;
 
-use async_trait::async_trait;
-use futures::TryFutureExt;
 use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error::{self, TCResult};
-use crate::handler::Public;
-use crate::request::Request;
-use crate::scalar::{self, label, Link, PathSegment, TCPath, TCPathBuf, Value};
+use crate::handler::*;
+use crate::scalar::{self, label, Link, MethodType, PathSegment, TCPath, TCPathBuf};
 use crate::transaction::Txn;
 
 mod class;
@@ -27,9 +24,7 @@ impl ObjectType {
     pub fn post(path: &[PathSegment], data: scalar::Object) -> TCResult<Object> {
         debug!("ObjectType::post {} <- {}", TCPath::from(path), data);
 
-        if path == &Self::prefix()[..] {
-            InstanceClass::post(path, data).map(Object::Instance)
-        } else if path.starts_with(&InstanceClassType::prefix()) {
+        if path.starts_with(&InstanceClassType::prefix()) {
             InstanceClassType::post(path, data).map(Object::Class)
         } else {
             Err(error::path_not_found(path))
@@ -83,64 +78,11 @@ pub enum Object {
     Instance(InstanceExt<State>),
 }
 
-#[async_trait]
-impl Public for Object {
-    async fn get(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<State> {
+impl Route for Object {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
         match self {
-            Self::Class(ic) => {
-                ic.clone()
-                    .get(request, txn, path, key)
-                    .map_ok(Object::Instance)
-                    .map_ok(State::Object)
-                    .await
-            }
-            Self::Instance(instance) => instance.get(request, txn, path, key).await,
-        }
-    }
-
-    async fn put(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-        value: State,
-    ) -> TCResult<()> {
-        match self {
-            Self::Class(ic) => Err(error::method_not_allowed(ic)),
-            Self::Instance(instance) => instance.put(request, txn, path, key, value).await,
-        }
-    }
-
-    async fn post(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        params: scalar::Object,
-    ) -> TCResult<State> {
-        match self {
-            Self::Class(ic) => Err(error::method_not_allowed(ic)),
-            Self::Instance(instance) => instance.post(request, txn, path, params).await,
-        }
-    }
-
-    async fn delete(
-        &self,
-        request: &Request,
-        txn: &Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<()> {
-        match self {
-            Self::Class(ic) => Err(error::method_not_allowed(ic)),
-            Self::Instance(instance) => instance.delete(request, txn, path, key).await,
+            Self::Class(ic) => ic.route(method, path),
+            Self::Instance(instance) => instance.route(method, path),
         }
     }
 }
