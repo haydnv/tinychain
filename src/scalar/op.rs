@@ -131,23 +131,11 @@ pub enum OpDef {
 }
 
 impl OpDef {
-    pub fn route<'a>(
-        &'a self,
-        request: &'a Request,
-        context: Option<State>,
-    ) -> Box<dyn Handler + 'a> {
+    pub fn handler<'a>(&'a self, context: Option<State>) -> Box<dyn Handler + 'a> {
         match self {
-            Self::Get(op) => Box::new(GetHandler {
-                op,
-                request,
-                context,
-            }),
+            Self::Get(op) => Box::new(GetHandler { op, context }),
             Self::Put(op) => Box::new(PutHandler { op, context }),
-            Self::Post(op) => Box::new(PostHandler {
-                op,
-                request,
-                context,
-            }),
+            Self::Post(op) => Box::new(PostHandler { op, context }),
             Self::Delete(op) => Box::new(DeleteHandler { op, context }),
         }
     }
@@ -217,7 +205,6 @@ impl fmt::Display for OpDef {
 
 struct GetHandler<'a> {
     op: &'a GetOp,
-    request: &'a Request,
     context: Option<State>,
 }
 
@@ -235,7 +222,9 @@ impl<'a> Handler for GetHandler<'a> {
         Some(SCOPE_EXECUTE.into())
     }
 
-    async fn handle_get(&self, txn: &Txn, key: Value) -> TCResult<State> {
+    async fn get(&self, request: &Request, txn: &Txn, key: Value) -> TCResult<State> {
+        self.authorize(request)?;
+
         let (key_id, def) = self.op;
 
         let mut data = Vec::with_capacity(def.len() + 2);
@@ -247,8 +236,7 @@ impl<'a> Handler for GetHandler<'a> {
         data.push((key_id.clone(), Scalar::Value(key).into()));
         data.extend(def.to_vec().into_iter().map(|(k, v)| (k, State::Scalar(v))));
 
-        txn.execute(self.request, stream::iter(data.into_iter()))
-            .await
+        txn.execute(request, stream::iter(data.into_iter())).await
     }
 }
 
@@ -271,14 +259,19 @@ impl<'a> Handler for PutHandler<'a> {
         Some(SCOPE_EXECUTE.into())
     }
 
-    async fn handle_put(&self, _txn: &Txn, _key: Value, _value: State) -> TCResult<()> {
+    async fn handle_put(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _key: Value,
+        _value: State,
+    ) -> TCResult<()> {
         Err(error::not_implemented("OpDef::put"))
     }
 }
 
 struct PostHandler<'a> {
     op: &'a PostOp,
-    request: &'a Request,
     context: Option<State>,
 }
 
@@ -296,7 +289,7 @@ impl<'a> Handler for PostHandler<'a> {
         Some(SCOPE_EXECUTE.into())
     }
 
-    async fn handle_post(&self, txn: &Txn, params: Object) -> TCResult<State> {
+    async fn handle_post(&self, request: &Request, txn: &Txn, params: Object) -> TCResult<State> {
         let mut data = Vec::with_capacity(self.op.len() + params.len() + 1);
 
         if let Some(subject) = &self.context {
@@ -310,8 +303,7 @@ impl<'a> Handler for PostHandler<'a> {
                 .map(|(id, scalar)| (id, State::from(scalar))),
         );
 
-        txn.execute(self.request, stream::iter(data.into_iter()))
-            .await
+        txn.execute(request, stream::iter(data.into_iter())).await
     }
 }
 

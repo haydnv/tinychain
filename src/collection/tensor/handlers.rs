@@ -8,6 +8,7 @@ use crate::class::{State, TCResult, TCType};
 use crate::collection::Collection;
 use crate::error;
 use crate::handler::*;
+use crate::request::Request;
 use crate::scalar::{
     label, MethodType, NumberType, Object, PathSegment, Scalar, TryCastInto, Value,
 };
@@ -126,7 +127,12 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
         }
     }
 
-    async fn handle_post(&self, _txn: &Txn, mut params: Object) -> TCResult<State> {
+    async fn handle_post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        mut params: Object,
+    ) -> TCResult<State> {
         let bounds = params
             .remove(&label("bounds").into())
             .ok_or(error::bad_request("Missing parameter", "bounds"))?;
@@ -161,7 +167,13 @@ impl<'a, T: TensorInstance + TensorDualIO<Tensor>> Handler for WriteHandler<'a, 
         Some(SCOPE_WRITE.into())
     }
 
-    async fn handle_put(&self, txn: &Txn, selector: Value, value: State) -> TCResult<()> {
+    async fn handle_put(
+        &self,
+        _request: &Request,
+        txn: &Txn,
+        selector: Value,
+        value: State,
+    ) -> TCResult<()> {
         let bounds = if selector.is_none() {
             Bounds::all(self.tensor.shape())
         } else {

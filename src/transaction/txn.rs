@@ -554,7 +554,7 @@ impl Txn {
             State::Scalar(scalar) => match scalar {
                 Scalar::Op(op_def) if path.is_empty() => {
                     op_def
-                        .route(request, Some(subject.clone()))
+                        .handler(Some(subject.clone()))
                         .get(request, self, key)
                         .await
                 }
@@ -586,7 +586,7 @@ impl Txn {
             State::Scalar(scalar) => match scalar {
                 Scalar::Op(op_def) if path.len() == 0 => {
                     op_def
-                        .route(request, Some(subject.clone()))
+                        .handler(Some(subject.clone()))
                         .put(request, self, key, value)
                         .await
                 }
@@ -613,7 +613,7 @@ impl Txn {
             State::Scalar(scalar) => match scalar {
                 Scalar::Op(op_def) if path.is_empty() => {
                     op_def
-                        .route(request, Some(subject.clone()))
+                        .handler(Some(subject.clone()))
                         .post(request, self, params)
                         .await
                 }
@@ -645,7 +645,7 @@ impl Txn {
             State::Scalar(scalar) => match scalar {
                 Scalar::Op(op_def) if path.is_empty() => {
                     op_def
-                        .route(request, Some(subject.clone()))
+                        .handler(Some(subject.clone()))
                         .delete(request, self, key)
                         .await
                 }

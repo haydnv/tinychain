@@ -10,6 +10,7 @@ use crate::class::{Instance, State, TCResult, TCStream, TCType};
 use crate::collection::CollectionInstance;
 use crate::error;
 use crate::handler::*;
+use crate::request::Request;
 use crate::scalar::{
     Id, MethodType, Object, PathSegment, Scalar, ScalarInstance, TryCastFrom, TryCastInto, Value,
 };
@@ -89,7 +90,13 @@ where
         Some(SCOPE_WRITE.into())
     }
 
-    async fn handle_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
+    async fn handle_put(
+        &self,
+        _request: &Request,
+        txn: &Txn,
+        key: Value,
+        value: State,
+    ) -> TCResult<()> {
         let (key, values) = try_into_row(key, value)?;
         self.table.insert(txn.id().clone(), key, values).await
     }
@@ -213,7 +220,7 @@ where
         Some(SCOPE_WRITE.into())
     }
 
-    async fn handle_post(&self, txn: &Txn, params: Object) -> TCResult<State> {
+    async fn handle_post(&self, _request: &Request, txn: &Txn, params: Object) -> TCResult<State> {
         let update = params.try_cast_into(|v| error::bad_request("Invalid update", v))?;
 
         self.table
@@ -241,7 +248,13 @@ where
         Some(SCOPE_WRITE.into())
     }
 
-    async fn handle_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
+    async fn handle_put(
+        &self,
+        _request: &Request,
+        txn: &Txn,
+        key: Value,
+        value: State,
+    ) -> TCResult<()> {
         let (key, values) = try_into_row(key, value)?;
         self.table.upsert(txn.id(), key, values).await
     }
@@ -294,7 +307,7 @@ where
         }
     }
 
-    async fn handle_post(&self, _txn: &Txn, params: Object) -> TCResult<State> {
+    async fn handle_post(&self, _request: &Request, _txn: &Txn, params: Object) -> TCResult<State> {
         let bounds = Bounds::try_cast_from(params, |v| {
             error::bad_request("Cannot cast into Table Bounds from", v)
         })?;

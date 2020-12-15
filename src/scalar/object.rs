@@ -80,7 +80,7 @@ impl Object {
             match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
-                        .route(request, Some(self.clone().into()))
+                        .handler(Some(self.clone().into()))
                         .get(request, txn, key)
                         .await
                 }
@@ -111,7 +111,7 @@ impl Object {
             match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
-                        .route(request, Some(self.clone().into()))
+                        .handler(Some(self.clone().into()))
                         .put(request, txn, key, value)
                         .await
                 }
@@ -141,7 +141,7 @@ impl Object {
             match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
-                        .route(request, Some(self.clone().into()))
+                        .handler(Some(self.clone().into()))
                         .post(request, txn, params)
                         .await
                 }

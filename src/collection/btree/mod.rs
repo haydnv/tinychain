@@ -10,6 +10,7 @@ use crate::collection::class::CollectionInstance;
 use crate::collection::Collection;
 use crate::error::{self, TCResult};
 use crate::handler::*;
+use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -161,7 +162,12 @@ where
         self.slice(txn, range).await
     }
 
-    async fn handle_post(&self, txn: &Txn, mut params: Object) -> TCResult<State> {
+    async fn handle_post(
+        &self,
+        _request: &Request,
+        txn: &Txn,
+        mut params: Object,
+    ) -> TCResult<State> {
         let range = params
             .remove(&label("where").into())
             .unwrap_or_else(|| Scalar::from(()));
@@ -203,7 +209,12 @@ where
         self.reverse(range)
     }
 
-    async fn handle_post(&self, _txn: &Txn, mut params: Object) -> TCResult<State> {
+    async fn handle_post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        mut params: Object,
+    ) -> TCResult<State> {
         let range = params
             .remove(&label("where").into())
             .unwrap_or_else(|| Scalar::from(()));
@@ -227,7 +238,13 @@ impl<'a, T: BTreeInstance> Handler for WriteHandler<'a, T> {
         Some(SCOPE_WRITE.into())
     }
 
-    async fn handle_put(&self, txn: &Txn, range: Value, data: State) -> TCResult<()> {
+    async fn handle_put(
+        &self,
+        _request: &Request,
+        txn: &Txn,
+        range: Value,
+        data: State,
+    ) -> TCResult<()> {
         let range = validate_range(range, self.btree.schema())?;
 
         if range == BTreeRange::default() {

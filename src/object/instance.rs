@@ -67,7 +67,7 @@ where
             Some(scalar) => match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
-                        .route(request, Some(self.clone().into_state().into()))
+                        .handler(Some(self.clone().into_state().into()))
                         .get(request, txn, key)
                         .await
                 }
@@ -93,7 +93,7 @@ where
             Some(scalar) => match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
-                        .route(request, Some(self.clone().into_state().into()))
+                        .handler(Some(self.clone().into_state().into()))
                         .put(request, txn, key, value)
                         .await
                 }
@@ -118,7 +118,7 @@ where
             Some(scalar) => match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
                     op_def
-                        .route(request, Some(self.clone().into_state().into()))
+                        .handler(Some(self.clone().into_state().into()))
                         .post(request, txn, params)
                         .await
                 }

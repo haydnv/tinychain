@@ -15,31 +15,50 @@ pub trait Handler: Send + Sync {
         None
     }
 
+    fn authorize(&self, _request: &Request) -> TCResult<()> {
+        if let Some(_scope) = self.scope() {
+            // TODO: validate scope
+        }
+
+        Ok(())
+    }
+
     async fn handle_get(&self, _txn: &Txn, _key: Value) -> TCResult<State> {
         Err(error::method_not_allowed(self.subject()))
     }
 
-    async fn get(&self, _request: &Request, txn: &Txn, key: Value) -> TCResult<State> {
-        // TODO: validate scope
+    async fn get(&self, request: &Request, txn: &Txn, key: Value) -> TCResult<State> {
+        self.authorize(request)?;
         self.handle_get(txn, key).await
     }
 
-    async fn handle_put(&self, _txn: &Txn, _key: Value, _value: State) -> TCResult<()> {
+    async fn handle_put(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _key: Value,
+        _value: State,
+    ) -> TCResult<()> {
         Err(error::method_not_allowed(self.subject()))
     }
 
-    async fn put(&self, _request: &Request, txn: &Txn, key: Value, value: State) -> TCResult<()> {
-        // TODO: validate scope
-        self.handle_put(txn, key, value).await
+    async fn put(&self, request: &Request, txn: &Txn, key: Value, value: State) -> TCResult<()> {
+        self.authorize(request)?;
+        self.handle_put(request, txn, key, value).await
     }
 
-    async fn handle_post(&self, _txn: &Txn, _params: Object) -> TCResult<State> {
+    async fn handle_post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        _params: Object,
+    ) -> TCResult<State> {
         Err(error::method_not_allowed(self.subject()))
     }
 
-    async fn post(&self, _request: &Request, txn: &Txn, params: Object) -> TCResult<State> {
-        // TODO: validate scope
-        self.handle_post(txn, params).await
+    async fn post(&self, request: &Request, txn: &Txn, params: Object) -> TCResult<State> {
+        self.authorize(request)?;
+        self.handle_post(request, txn, params).await
     }
 
     async fn handle_delete(&self, _txn: &Txn, _key: Value) -> TCResult<()> {

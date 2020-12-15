@@ -254,7 +254,7 @@ impl Public for Scalar {
     ) -> TCResult<State> {
         match self {
             Self::Object(object) => object.get(request, txn, path, key).await,
-            Self::Op(op) if path.is_empty() => op.route(request, None).get(request, txn, key).await,
+            Self::Op(op) if path.is_empty() => op.handler(None).get(request, txn, key).await,
             Self::Op(_) => Err(error::path_not_found(path)),
             Self::Ref(tc_ref) => Err(error::method_not_allowed(tc_ref)),
             Self::Slice(_slice) => Err(error::not_implemented("Slice::get")),
@@ -283,9 +283,7 @@ impl Public for Scalar {
     ) -> TCResult<()> {
         match self {
             Self::Object(object) => object.put(request, txn, path, key, value).await,
-            Self::Op(op) if path.is_empty() => {
-                op.route(request, None).put(request, txn, key, value).await
-            }
+            Self::Op(op) if path.is_empty() => op.handler(None).put(request, txn, key, value).await,
             Self::Op(_) => Err(error::path_not_found(path)),
             other => Err(error::method_not_allowed(other)),
         }
@@ -300,9 +298,7 @@ impl Public for Scalar {
     ) -> TCResult<State> {
         match self {
             Self::Object(object) => object.post(request, txn, path, params).await,
-            Self::Op(op) if path.is_empty() => {
-                op.route(request, None).post(request, txn, params).await
-            }
+            Self::Op(op) if path.is_empty() => op.handler(None).post(request, txn, params).await,
             Self::Op(_) => Err(error::path_not_found(path)),
             other => Err(error::method_not_allowed(other)),
         }
@@ -317,9 +313,7 @@ impl Public for Scalar {
     ) -> TCResult<()> {
         match self {
             Self::Object(object) => object.delete(request, txn, path, key).await,
-            Self::Op(op) if path.is_empty() => {
-                op.route(request, None).delete(request, txn, key).await
-            }
+            Self::Op(op) if path.is_empty() => op.handler(None).delete(request, txn, key).await,
             Self::Op(_) => Err(error::path_not_found(path)),
             other => Err(error::method_not_allowed(other)),
         }
