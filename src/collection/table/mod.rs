@@ -118,7 +118,7 @@ impl fmt::Display for TableType {
 }
 
 #[async_trait]
-pub trait TableInstance: Instance + Clone + Into<Table> + Sized + Send + Sync + 'static {
+pub trait TableInstance: Instance<Class = TableType> + Into<Table> + Sized + 'static {
     type Stream: Stream<Item = Vec<Value>> + Send + Unpin;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {

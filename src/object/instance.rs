@@ -15,12 +15,12 @@ use crate::transaction::Txn;
 use super::InstanceClass;
 
 #[derive(Clone)]
-pub struct InstanceExt<T: Clone + Public + Send + Sync> {
+pub struct InstanceExt<T: Instance> {
     parent: Box<T>,
     class: InstanceClass,
 }
 
-impl<T: Clone + Public + Send + Sync> InstanceExt<T> {
+impl<T: Instance> InstanceExt<T> {
     pub fn new(parent: T, class: InstanceClass) -> InstanceExt<T> {
         InstanceExt {
             parent: Box::new(parent),
@@ -30,18 +30,17 @@ impl<T: Clone + Public + Send + Sync> InstanceExt<T> {
 
     pub fn into_state(self) -> InstanceExt<State>
     where
-        T: Into<State>,
+        State: From<T>,
     {
         let parent = Box::new((*self.parent).into());
         let class = self.class;
         InstanceExt { parent, class }
     }
 
-    pub fn try_as<E, O: Clone + Public + TryFrom<T, Error = E> + Send + Sync>(
-        self,
-    ) -> Result<InstanceExt<O>, E> {
+    pub fn try_as<E, O: Instance + TryFrom<T, Error = E>>(self) -> Result<InstanceExt<O>, E> {
         let class = self.class;
         let parent = (*self.parent).try_into()?;
+
         Ok(InstanceExt {
             parent: Box::new(parent),
             class,
@@ -50,7 +49,10 @@ impl<T: Clone + Public + Send + Sync> InstanceExt<T> {
 }
 
 #[async_trait]
-impl<T: Clone + Public + Into<State> + Send + Sync> Public for InstanceExt<T> {
+impl<T: Instance + Public> Public for InstanceExt<T>
+where
+    State: From<T>,
+{
     async fn get(
         &self,
         request: &Request,
@@ -141,7 +143,7 @@ impl<T: Clone + Public + Into<State> + Send + Sync> Public for InstanceExt<T> {
     }
 }
 
-impl<T: Clone + Public + Send + Sync> Instance for InstanceExt<T> {
+impl<T: Instance> Instance for InstanceExt<T> {
     type Class = InstanceClass;
 
     fn class(&self) -> Self::Class {
@@ -149,7 +151,7 @@ impl<T: Clone + Public + Send + Sync> Instance for InstanceExt<T> {
     }
 }
 
-impl<T: Clone + Instance + Public + Send + Sync> From<T> for InstanceExt<T> {
+impl<T: Instance> From<T> for InstanceExt<T> {
     fn from(instance: T) -> InstanceExt<T> {
         let class = InstanceClass::from_class(instance.class());
 
@@ -171,7 +173,7 @@ impl From<scalar::Object> for InstanceExt<State> {
     }
 }
 
-impl<T: Clone + Public + Send + Sync> fmt::Display for InstanceExt<T> {
+impl<T: Instance> fmt::Display for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Object of type {}", self.class())
     }

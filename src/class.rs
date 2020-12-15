@@ -33,7 +33,7 @@ pub trait NativeClass: Class {
     fn prefix() -> TCPathBuf;
 }
 
-pub trait Instance {
+pub trait Instance: Clone + Send + Sync {
     type Class: Class;
 
     fn class(&self) -> Self::Class;

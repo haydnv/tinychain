@@ -14,7 +14,7 @@ use super::{BTree, BTreeRange, Key};
 use crate::collection::{BTreeFile, BTreeImpl};
 
 #[async_trait]
-pub trait BTreeInstance: Clone + Instance<Class = BTreeType> + Transact {
+pub trait BTreeInstance: Instance<Class = BTreeType> + Transact {
     async fn delete(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<()>;
 
     async fn insert(&self, txn_id: &TxnId, key: Key) -> TCResult<()>;
