@@ -34,6 +34,7 @@ pub trait NumberInstance:
     + From<Boolean>
     + Into<Number>
     + Default
+    + Copy
 {
     type Abs: NumberInstance;
     type Class: NumberClass;

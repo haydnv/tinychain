@@ -3,6 +3,7 @@ use num;
 use crate::scalar::{CastFrom, CastInto};
 
 pub mod class;
+mod handlers;
 pub mod instance;
 
 pub use class::*;

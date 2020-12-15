@@ -1335,16 +1335,18 @@ impl ValueInstance for Number {
     type Class = NumberType;
 
     fn get(&self, path: &[PathSegment], key: Value) -> TCResult<Value> {
+        let that = Number::try_from(key)?;
+
         if path.len() == 1 {
             match path[0].as_str() {
-                "add" => Ok(Add::add(self.clone(), key.try_into()?).into()),
-                "eq" => Ok(Number::Bool(Boolean(self == &Number::try_from(key)?)).into()),
-                "gt" => Ok(Number::Bool(Boolean(self > &Number::try_from(key)?)).into()),
-                "gte" => Ok(Number::Bool(Boolean(self >= &Number::try_from(key)?)).into()),
-                "lt" => Ok(Number::Bool(Boolean(self < &Number::try_from(key)?)).into()),
-                "lte" => Ok(Number::Bool(Boolean(self <= &Number::try_from(key)?)).into()),
-                "mul" => Ok(Mul::mul(self.clone(), key.try_into()?).into()),
-                "sub" => Ok(Sub::sub(self.clone(), key.try_into()?).into()),
+                "add" => Ok(Add::add(*self, that).into()),
+                "eq" => Ok(Number::Bool(Boolean(self == &that)).into()),
+                "gt" => Ok(Number::Bool(Boolean(self > &that)).into()),
+                "gte" => Ok(Number::Bool(Boolean(self >= &that)).into()),
+                "lt" => Ok(Number::Bool(Boolean(self < &that)).into()),
+                "lte" => Ok(Number::Bool(Boolean(self <= &that)).into()),
+                "mul" => Ok(Mul::mul(*self, that).into()),
+                "sub" => Ok(Sub::sub(*self, that).into()),
                 other => Err(error::not_found(other)),
             }
         } else {
