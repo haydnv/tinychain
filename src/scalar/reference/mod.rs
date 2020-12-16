@@ -1,13 +1,17 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
+use async_trait::async_trait;
 use serde::ser::{Serialize, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, TCResult, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCType};
 use crate::error;
+use crate::request::Request;
 use crate::scalar::{
-    label, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TCPath, TCPathBuf,
-    TryCastFrom, TryCastInto,
+    label, Id, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TCPath,
+    TCPathBuf, TryCastFrom, TryCastInto,
 };
+use crate::transaction::Txn;
 
 pub mod flow;
 pub mod id;
@@ -16,6 +20,18 @@ pub mod op;
 pub use flow::*;
 pub use id::*;
 pub use op::*;
+
+#[async_trait]
+pub trait Refer {
+    fn requires(&self, deps: &mut HashSet<Id>);
+
+    async fn resolve(
+        self,
+        request: &Request,
+        txn: &Txn,
+        context: &HashMap<Id, State>,
+    ) -> TCResult<State>;
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RefType {
@@ -123,6 +139,40 @@ impl Instance for TCRef {
 
 impl ScalarInstance for TCRef {
     type Class = RefType;
+}
+
+#[async_trait]
+impl Refer for TCRef {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        match self {
+            TCRef::Flow(control) => {
+                control.requires(deps);
+            }
+            TCRef::Id(id_ref) => {
+                deps.insert(id_ref.id().clone());
+            }
+            TCRef::Method(method) => {
+                method.requires(deps);
+            }
+            TCRef::Op(op_ref) => {
+                op_ref.requires(deps);
+            }
+        }
+    }
+
+    async fn resolve(
+        self,
+        request: &Request,
+        txn: &Txn,
+        context: &HashMap<Id, State>,
+    ) -> TCResult<State> {
+        match self {
+            TCRef::Flow(control) => control.resolve(request, txn, context).await,
+            TCRef::Id(id_ref) => id_ref.resolve(request, txn, context).await,
+            TCRef::Method(method) => method.resolve(request, txn, context).await,
+            TCRef::Op(op_ref) => op_ref.resolve(request, txn, context).await,
+        }
+    }
 }
 
 impl From<IdRef> for TCRef {

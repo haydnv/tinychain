@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
 use std::str::FromStr;
 
 use async_trait::async_trait;
+use futures::future::try_join_all;
 use log::debug;
 use serde::de;
 use serde::ser::{Serialize, SerializeSeq, Serializer};
@@ -12,6 +13,7 @@ use serde::ser::{Serialize, SerializeSeq, Serializer};
 use crate::class::*;
 use crate::error;
 use crate::handler::*;
+use crate::request::Request;
 use crate::transaction::Txn;
 
 pub mod map;
@@ -242,6 +244,50 @@ impl Instance for Scalar {
     }
 }
 
+#[async_trait]
+impl Refer for Scalar {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        match self {
+            Scalar::Ref(tc_ref) => {
+                tc_ref.requires(deps);
+            }
+            Scalar::Tuple(tuple) => {
+                for item in &tuple[..] {
+                    item.requires(deps);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn resolve(
+        self,
+        request: &Request,
+        txn: &Txn,
+        context: &HashMap<Id, State>,
+    ) -> TCResult<State> {
+        match self {
+            Scalar::Map(map) => map.resolve(request, txn, context).await,
+            Scalar::Ref(tc_ref) => tc_ref.resolve(request, txn, context).await,
+            Scalar::Tuple(tuple) => {
+                // TODO: use a common impl struct for State::Tuple, Scalar::Tuple, Value::Tuple
+                let tuple = try_join_all(
+                    tuple
+                        .into_iter()
+                        .map(|item| item.resolve(request, txn, context)),
+                )
+                .await?;
+                if Scalar::can_cast_from(&tuple) {
+                    Ok(State::Scalar(Scalar::opt_cast_from(tuple).unwrap()))
+                } else {
+                    Ok(State::Tuple(Box::new(tuple)))
+                }
+            }
+            other => Ok(State::Scalar(other)),
+        }
+    }
+}
+
 impl Route for Scalar {
     fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
         if path.is_empty() {
@@ -310,6 +356,25 @@ impl<T: Into<Scalar>> FromIterator<T> for Scalar {
             tuple.push(item.into());
         }
         Self::Tuple(tuple)
+    }
+}
+
+impl TryCastFrom<Vec<State>> for Scalar {
+    fn can_cast_from(tuple: &Vec<State>) -> bool {
+        tuple.iter().all(State::is_scalar)
+    }
+
+    fn opt_cast_from(tuple: Vec<State>) -> Option<Scalar> {
+        let mut cast = Vec::with_capacity(tuple.len());
+        for item in tuple.into_iter() {
+            if let State::Scalar(scalar) = item {
+                cast.push(scalar);
+            } else {
+                return None;
+            }
+        }
+
+        Some(Scalar::Tuple(cast))
     }
 }
 

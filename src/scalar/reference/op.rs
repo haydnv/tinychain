@@ -1,15 +1,21 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
+use async_trait::async_trait;
+use futures::{try_join, TryFutureExt};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, TCResult, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCType};
 use crate::error;
+use crate::handler::Public;
+use crate::request::Request;
 use crate::scalar::{
-    label, Link, Map, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
+    label, Id, Link, Map, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
     TryCastInto, Value,
 };
+use crate::transaction::Txn;
 
-use super::{IdRef, RefType, TCRef};
+use super::{IdRef, RefType, Refer, TCRef};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum MethodType {
@@ -197,6 +203,27 @@ pub enum Key {
     Value(Value),
 }
 
+#[async_trait]
+impl Refer for Key {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        if let Self::Ref(id_ref) = self {
+            deps.insert(id_ref.id().clone());
+        }
+    }
+
+    async fn resolve(
+        self,
+        request: &Request,
+        txn: &Txn,
+        context: &HashMap<Id, State>,
+    ) -> TCResult<State> {
+        match self {
+            Self::Ref(id_ref) => id_ref.resolve(request, txn, context).await,
+            Self::Value(value) => Ok(State::from(value)),
+        }
+    }
+}
+
 impl TryCastFrom<Scalar> for Key {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
@@ -280,6 +307,98 @@ impl ScalarInstance for Method {
     type Class = MethodType;
 }
 
+#[async_trait]
+impl Refer for Method {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        match self {
+            Method::Get((subject, _path, key)) => {
+                deps.insert(subject.id().clone());
+
+                if let Key::Ref(id_ref) = key {
+                    deps.insert(id_ref.id().clone());
+                }
+            }
+            Method::Put((subject, _path, key, value)) => {
+                deps.insert(subject.id().clone());
+
+                if let Key::Ref(key) = key {
+                    deps.insert(key.id().clone());
+                }
+
+                value.requires(deps);
+            }
+            Method::Post((subject, _path, _params)) => {
+                deps.insert(subject.id().clone());
+            }
+            Method::Delete((subject, _path, key)) => {
+                deps.insert(subject.id().clone());
+
+                if let Key::Ref(tc_ref) = key {
+                    deps.insert(tc_ref.id().clone());
+                }
+            }
+        }
+    }
+
+    async fn resolve(
+        self,
+        request: &Request,
+        txn: &Txn,
+        context: &HashMap<Id, State>,
+    ) -> TCResult<State> {
+        const ERR_KEY_NOT_VALUE: &str = "Method key must be a Value, not";
+
+        match self {
+            Self::Get((subject, path, key)) => {
+                let (subject, key) = try_join!(
+                    subject.resolve(request, txn, context),
+                    key.resolve(request, txn, context)
+                )?;
+                let key = key.try_cast_into(|s| error::bad_request(ERR_KEY_NOT_VALUE, s))?;
+                subject.get(request, txn, &path, key).await
+            }
+            Self::Put((subject, path, key, value)) => {
+                let (subject, key, value) = try_join!(
+                    subject.resolve(request, txn, context),
+                    key.resolve(request, txn, context),
+                    value.resolve(request, txn, context)
+                )?;
+                let key = key.try_cast_into(|s| error::bad_request(ERR_KEY_NOT_VALUE, s))?;
+                subject
+                    .put(request, txn, &path, key, value)
+                    .map_ok(State::from)
+                    .await
+            }
+            Self::Post((subject, path, params)) => {
+                let (subject, params) = try_join!(
+                    subject.resolve(request, txn, context),
+                    params.resolve(request, txn, context)
+                )?;
+                // TODO: update Public::post to accept a State::Map
+                if let State::Scalar(Scalar::Map(params)) = params {
+                    subject.post(request, txn, &path, params).await
+                } else {
+                    Err(error::not_implemented(format!(
+                        "POST with params {}",
+                        params
+                    )))
+                }
+            }
+            Self::Delete((subject, path, key)) => {
+                let (subject, key) = try_join!(
+                    subject.resolve(request, txn, context),
+                    key.resolve(request, txn, context)
+                )?;
+                let key = key.try_cast_into(|s| error::bad_request(ERR_KEY_NOT_VALUE, s))?;
+                subject
+                    .delete(request, txn, &path, key)
+                    .map_ok(State::from)
+                    .await
+            }
+        }
+    }
+}
+
 impl Serialize for Method {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut map = s.serialize_map(Some(1))?;
@@ -349,6 +468,45 @@ impl Instance for OpRef {
 
 impl ScalarInstance for OpRef {
     type Class = OpRefType;
+}
+
+#[async_trait]
+impl Refer for OpRef {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        match self {
+            OpRef::Get((_path, key)) => {
+                if let Key::Ref(id_ref) = key {
+                    deps.insert(id_ref.id().clone());
+                }
+            }
+            OpRef::Put((_path, key, value)) => {
+                if let Key::Ref(id_ref) = key {
+                    deps.insert(id_ref.id().clone());
+                }
+
+                value.requires(deps);
+            }
+            OpRef::Post((_path, params)) => {
+                for provider in params.values() {
+                    provider.requires(deps);
+                }
+            }
+            OpRef::Delete((_path, key)) => {
+                if let Key::Ref(id_ref) = key {
+                    deps.insert(id_ref.id().clone());
+                }
+            }
+        }
+    }
+
+    async fn resolve(
+        self,
+        _request: &Request,
+        _txn: &Txn,
+        _context: &HashMap<Id, State>,
+    ) -> TCResult<State> {
+        todo!()
+    }
 }
 
 impl Serialize for OpRef {

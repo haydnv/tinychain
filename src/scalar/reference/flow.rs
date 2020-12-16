@@ -1,15 +1,21 @@
 use std::fmt;
 
+use async_trait::async_trait;
+use futures::future::try_join_all;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, TCResult, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCResult, TCType};
 use crate::error;
 use crate::scalar::{
-    label, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
-    TryCastInto,
+    label, Id, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
+    TryCastInto, Value,
 };
 
-use super::{RefType, TCRef};
+use super::{RefType, Refer, TCRef};
+use crate::request::Request;
+use crate::transaction::Txn;
+use std::collections::hash_map::RandomState;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum FlowControlType {
@@ -107,6 +113,56 @@ impl Instance for FlowControl {
 
 impl ScalarInstance for FlowControl {
     type Class = FlowControlType;
+}
+
+#[async_trait]
+impl Refer for FlowControl {
+    fn requires(&self, deps: &mut HashSet<Id, RandomState>) {
+        match self {
+            FlowControl::After((when, _)) => {
+                for tc_ref in when {
+                    tc_ref.requires(deps);
+                }
+            }
+            FlowControl::If((cond, _, _)) => {
+                cond.requires(deps);
+            }
+        }
+    }
+
+    async fn resolve(
+        self,
+        request: &Request,
+        txn: &Txn,
+        context: &HashMap<Id, State, RandomState>,
+    ) -> TCResult<State> {
+        match self {
+            FlowControl::After((when, then)) => {
+                try_join_all(
+                    when.into_iter()
+                        .map(|tc_ref| tc_ref.resolve(request, txn, context)),
+                )
+                .await?;
+                then.resolve(request, txn, context).await
+            }
+            FlowControl::If((cond, then, or_else)) => {
+                const ERR_NOT_BOOLEAN: &str = "Expected a boolean condition but found";
+
+                let cond = cond.resolve(request, txn, context).await?;
+                let cond: bool = if let State::Scalar(Scalar::Value(Value::Number(cond))) = cond {
+                    cond.try_cast_into(|v| error::bad_request(ERR_NOT_BOOLEAN, v))
+                } else {
+                    Err(error::bad_request(ERR_NOT_BOOLEAN, cond))
+                }?;
+
+                if cond {
+                    then.resolve(request, txn, context).await
+                } else {
+                    or_else.resolve(request, txn, context).await
+                }
+            }
+        }
+    }
 }
 
 impl TryCastFrom<Scalar> for FlowControl {

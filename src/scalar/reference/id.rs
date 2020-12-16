@@ -1,13 +1,18 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::str::FromStr;
 
+use async_trait::async_trait;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
+use crate::class::State;
 use crate::error::{self, TCResult};
+use crate::request::Request;
 use crate::scalar::{Id, Scalar, TCString, TryCastFrom, Value};
+use crate::transaction::Txn;
 
-use super::TCRef;
+use super::{Refer, TCRef};
 
 const EMPTY_SLICE: &[usize] = &[];
 
@@ -23,6 +28,25 @@ impl IdRef {
 
     pub fn id(&'_ self) -> &'_ Id {
         &self.to
+    }
+}
+
+#[async_trait]
+impl Refer for IdRef {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        deps.insert(self.to.clone());
+    }
+
+    async fn resolve(
+        self,
+        _request: &Request,
+        _txn: &Txn,
+        context: &HashMap<Id, State>,
+    ) -> TCResult<State> {
+        context
+            .get(&self.to)
+            .cloned()
+            .ok_or_else(|| error::not_found(self))
     }
 }
 

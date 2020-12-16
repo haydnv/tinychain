@@ -1,19 +1,22 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
+use async_trait::async_trait;
+use futures::stream::{FuturesUnordered, StreamExt};
+use futures::TryFutureExt;
 use serde::ser::{Serialize, Serializer};
 
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCType};
 use crate::error;
 use crate::handler::*;
+use crate::request::Request;
+use crate::transaction::Txn;
 
-use super::{
-    label, Id, Link, PathSegment, Scalar, ScalarInstance, ScalarType, TCPathBuf, TryCastFrom,
-    TryCastInto,
-};
-use crate::scalar::MethodType;
+use super::reference::Refer;
+use super::value::{label, Id, Link, PathSegment, TCPathBuf};
+use super::{MethodType, Scalar, ScalarInstance, ScalarType, TryCastFrom, TryCastInto};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct MapType;
@@ -62,6 +65,39 @@ impl Instance for Map {
 
     fn class(&self) -> Self::Class {
         MapType
+    }
+}
+
+#[async_trait]
+impl Refer for Map {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        for tc_ref in self.values() {
+            tc_ref.requires(deps);
+        }
+    }
+
+    async fn resolve(
+        self,
+        request: &Request,
+        txn: &Txn,
+        context: &HashMap<Id, State>,
+    ) -> TCResult<State> {
+        let mut map = HashMap::<Id, State>::new();
+        let mut pending = FuturesUnordered::from_iter(self.into_iter().map(|(id, scalar)| {
+            scalar
+                .resolve(request, txn, context)
+                .map_ok(|state| (id, state))
+        }));
+        while let Some(result) = pending.next().await {
+            let (id, state) = result?;
+            map.insert(id, state);
+        }
+
+        if Map::can_cast_from(&map) {
+            Ok(State::Scalar(Scalar::Map(map.opt_cast_into().unwrap())))
+        } else {
+            Ok(State::Map(Box::new(map)))
+        }
     }
 }
 
@@ -137,10 +173,31 @@ impl TryCastFrom<Scalar> for Map {
     }
 }
 
+impl TryCastFrom<HashMap<Id, State>> for Map {
+    fn can_cast_from(map: &HashMap<Id, State>) -> bool {
+        map.values().all(State::is_scalar)
+    }
+
+    fn opt_cast_from(map: HashMap<Id, State>) -> Option<Map> {
+        let mut cast = HashMap::<Id, Scalar>::new();
+        for (id, state) in map.into_iter() {
+            if let State::Scalar(scalar) = state {
+                cast.insert(id, scalar);
+            } else {
+                return None;
+            }
+        }
+
+        Some(Map(cast))
+    }
+}
+
 impl TryCastFrom<State> for Map {
     fn can_cast_from(state: &State) -> bool {
         if let State::Scalar(scalar) = state {
             Map::can_cast_from(scalar)
+        } else if let State::Map(map) = state {
+            Map::can_cast_from(&**map)
         } else {
             false
         }
@@ -149,6 +206,8 @@ impl TryCastFrom<State> for Map {
     fn opt_cast_from(state: State) -> Option<Map> {
         if let State::Scalar(scalar) = state {
             Map::opt_cast_from(scalar)
+        } else if let State::Map(map) = state {
+            Map::opt_cast_from(*map)
         } else {
             None
         }

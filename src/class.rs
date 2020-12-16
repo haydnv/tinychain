@@ -152,6 +152,13 @@ impl State {
             _ => false,
         }
     }
+
+    pub fn is_scalar(&self) -> bool {
+        match self {
+            Self::Scalar(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl Instance for State {
