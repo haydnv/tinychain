@@ -137,7 +137,7 @@ the contents of `myapp.json` with this:
 
 When you run this, you'll only see:
 
-```json
+```bash
 $ curl "http://127.0.0.1:8702/sbin/transact" -d @myapp.json 
 2
 ```
@@ -195,7 +195,7 @@ For example, consider a third-party service that returns data like
 {"lat": 40.689, "lng": -74.044}
 ```
 
-You can easily modify an `Object` to define other instance variables and methods--consider this
+You can easily use a `Map` to define other instance variables and methods--consider this
 example with a new method called `radians`:
 
 ```json
@@ -213,7 +213,7 @@ example with a new method called `radians`:
 }
 ```
 
-Of course, you can call an method on a generic `Object` just like any other:
+Of course, you can call an method on a `Map` just like any other:
 
 ```json
 [
