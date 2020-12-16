@@ -567,6 +567,10 @@ impl Txn {
                 Scalar::Op(_) => Err(error::path_not_found(path)),
                 other => other.get(request, self, &path[..], key).await,
             },
+            other => Err(error::not_implemented(format!(
+                "Txn::resolve for {}",
+                other
+            ))),
         }
     }
 
@@ -599,6 +603,10 @@ impl Txn {
                 Scalar::Op(_) => Err(error::path_not_found(path)),
                 other => other.put(request, self, path, key, value).await,
             },
+            other => Err(error::not_implemented(format!(
+                "Txn::resolve for {}",
+                other
+            ))),
         }
     }
 
@@ -626,6 +634,10 @@ impl Txn {
                 Scalar::Op(_) => Err(error::path_not_found(path)),
                 other => other.post(request, self, path, params).await,
             },
+            other => Err(error::not_implemented(format!(
+                "Txn::resolve for {}",
+                other
+            ))),
         }
     }
 
@@ -658,6 +670,10 @@ impl Txn {
                 Scalar::Op(_) => Err(error::path_not_found(path)),
                 other => other.delete(request, self, path, key).await,
             },
+            other => Err(error::not_implemented(format!(
+                "Txn::resolve for {}",
+                other
+            ))),
         }
     }
 
@@ -665,8 +681,7 @@ impl Txn {
         let state: Box<dyn Transact> = match state {
             State::Chain(chain) => Box::new(chain),
             State::Collection(collection) => Box::new(collection),
-            State::Object(_) => panic!("Objects do not support transactional mutations!"),
-            State::Scalar(_) => panic!("Scalar values do not support transactional mutations!"),
+            other => panic!("{} does not support transactional mutations!", other),
         };
 
         self.inner.mutated.write().await.push(state)

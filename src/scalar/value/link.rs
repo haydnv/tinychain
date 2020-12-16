@@ -39,6 +39,12 @@ impl From<PathLabel> for TCPathBuf {
     }
 }
 
+impl From<PathLabel> for Link {
+    fn from(path: PathLabel) -> Self {
+        TCPathBuf::from(path).into()
+    }
+}
+
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
     DomainName(DomainName),

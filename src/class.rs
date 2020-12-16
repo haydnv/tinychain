@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::pin::Pin;
@@ -11,7 +12,8 @@ use crate::error;
 use crate::handler::*;
 use crate::object::{Object, ObjectType};
 use crate::scalar::{
-    label, Link, MethodType, PathSegment, Scalar, ScalarType, TCPathBuf, Value, ValueType,
+    label, path_label, Id, Link, MethodType, PathSegment, Scalar, ScalarType, TCPathBuf, Value,
+    ValueType,
 };
 
 pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send>>;
@@ -44,8 +46,10 @@ pub trait Instance: Clone + Send + Sync {
 pub enum TCType {
     Chain(ChainType),
     Collection(CollectionType),
+    Map,
     Object(ObjectType),
     Scalar(ScalarType),
+    Tuple,
 }
 
 impl Class for TCType {
@@ -110,8 +114,10 @@ impl From<TCType> for Link {
         match t {
             TCType::Chain(ct) => ct.into(),
             TCType::Collection(ct) => ct.into(),
+            TCType::Map => path_label(&["sbin", "map"]).into(),
             TCType::Object(ot) => ot.into(),
             TCType::Scalar(st) => st.into(),
+            TCType::Tuple => path_label(&["sbin", "tuple"]).into(),
         }
     }
 }
@@ -121,8 +127,10 @@ impl fmt::Display for TCType {
         match self {
             Self::Chain(ct) => write!(f, "{}", ct),
             Self::Collection(ct) => write!(f, "{}", ct),
+            Self::Map => write!(f, "type Map"),
             Self::Object(ot) => write!(f, "{}", ot),
             Self::Scalar(st) => write!(f, "{}", st),
+            Self::Tuple => write!(f, "type Tuple"),
         }
     }
 }
@@ -131,8 +139,10 @@ impl fmt::Display for TCType {
 pub enum State {
     Chain(Chain),
     Collection(Collection),
+    Map(Box<HashMap<Id, State>>),
     Object(Object),
     Scalar(Scalar),
+    Tuple(Box<Vec<State>>),
 }
 
 impl State {
@@ -151,8 +161,10 @@ impl Instance for State {
         match self {
             Self::Chain(chain) => chain.class().into(),
             Self::Collection(collection) => collection.class().into(),
+            Self::Map(_) => TCType::Map,
             Self::Object(object) => object.class().into(),
             Self::Scalar(scalar) => scalar.class().into(),
+            Self::Tuple(_) => TCType::Tuple,
         }
     }
 }
@@ -164,6 +176,7 @@ impl Route for State {
             Self::Collection(collection) => collection.route(method, path),
             Self::Object(object) => object.route(method, path),
             Self::Scalar(scalar) => scalar.route(method, path),
+            _ => None, // TODO: impl Route for Map and Tuple
         }
     }
 }
@@ -251,8 +264,25 @@ impl fmt::Display for State {
         match self {
             Self::Chain(c) => write!(f, "{}", c),
             Self::Collection(c) => write!(f, "{}", c),
+            Self::Map(map) => write!(
+                f,
+                "{{{}}}",
+                map.iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
             Self::Object(o) => write!(f, "{}", o),
             Self::Scalar(s) => write!(f, "{}", s),
+            Self::Tuple(tuple) => write!(
+                f,
+                "({})",
+                tuple
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
         }
     }
 }
