@@ -109,12 +109,6 @@ impl From<InstanceExt<State>> for Object {
     }
 }
 
-impl From<InstanceExt<State>> for State {
-    fn from(instance: InstanceExt<State>) -> State {
-        State::Object(instance.into())
-    }
-}
-
 impl fmt::Display for Object {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

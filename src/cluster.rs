@@ -107,7 +107,7 @@ impl Public for Cluster {
 
             let chains = self.chains.read(txn.id()).await?;
             if let Some(chain) = chains.get(&key) {
-                return Ok(State::Object(chain.clone().into_state().into()));
+                return Ok(State::from(chain.clone()));
             }
 
             Err(error::not_found(key))

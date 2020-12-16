@@ -22,15 +22,6 @@ impl<T: Instance> InstanceExt<T> {
         }
     }
 
-    pub fn into_state(self) -> InstanceExt<State>
-    where
-        State: From<T>,
-    {
-        let parent = Box::new((*self.parent).into());
-        let class = self.class;
-        InstanceExt { parent, class }
-    }
-
     pub fn try_as<E, O: Instance + TryFrom<T, Error = E>>(self) -> Result<InstanceExt<O>, E> {
         let class = self.class;
         let parent = (*self.parent).try_into()?;
@@ -51,7 +42,7 @@ where
         match proto.get(&path[0]) {
             Some(scalar) => match scalar {
                 Scalar::Op(op_def) if path.len() == 1 => {
-                    Some(op_def.handler(Some(self.clone().into_state().into())))
+                    Some(op_def.handler(Some(self.clone().into())))
                 }
                 scalar => scalar.route(method, path),
             },
@@ -87,6 +78,18 @@ impl From<scalar::Object> for InstanceExt<State> {
             parent: Box::new(State::Scalar(scalar.into())),
             class,
         }
+    }
+}
+
+impl<T: Instance> From<InstanceExt<T>> for State
+where
+    State: From<T>,
+{
+    fn from(instance: InstanceExt<T>) -> State {
+        let parent = Box::new((*instance.parent).into());
+        let class = instance.class;
+        let instance = InstanceExt { parent, class };
+        State::Object(instance.into())
     }
 }
 
