@@ -8,12 +8,12 @@ use crate::scalar::*;
 
 pub type Row = HashMap<Id, Value>;
 
-impl TryCastFrom<Object> for Row {
-    fn can_cast_from(object: &Object) -> bool {
+impl TryCastFrom<Map> for Row {
+    fn can_cast_from(object: &Map) -> bool {
         object.values().all(Value::can_cast_from)
     }
 
-    fn opt_cast_from(object: Object) -> Option<Row> {
+    fn opt_cast_from(object: Map) -> Option<Row> {
         let mut row = Row::new();
 
         for (id, value) in object.into_iter() {

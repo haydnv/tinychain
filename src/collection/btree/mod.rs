@@ -162,12 +162,7 @@ where
         self.slice(txn, range).await
     }
 
-    async fn handle_post(
-        &self,
-        _request: &Request,
-        txn: &Txn,
-        mut params: Object,
-    ) -> TCResult<State> {
+    async fn handle_post(&self, _request: &Request, txn: &Txn, mut params: Map) -> TCResult<State> {
         let range = params
             .remove(&label("where").into())
             .unwrap_or_else(|| Scalar::from(()));
@@ -213,7 +208,7 @@ where
         &self,
         _request: &Request,
         _txn: &Txn,
-        mut params: Object,
+        mut params: Map,
     ) -> TCResult<State> {
         let range = params
             .remove(&label("where").into())

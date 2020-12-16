@@ -9,9 +9,7 @@ use crate::collection::Collection;
 use crate::error;
 use crate::handler::*;
 use crate::request::Request;
-use crate::scalar::{
-    label, MethodType, NumberType, Object, PathSegment, Scalar, TryCastInto, Value,
-};
+use crate::scalar::{label, Map, MethodType, NumberType, PathSegment, Scalar, TryCastInto, Value};
 use crate::transaction::Txn;
 
 use super::bounds::*;
@@ -131,7 +129,7 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
         &self,
         _request: &Request,
         _txn: &Txn,
-        mut params: Object,
+        mut params: Map,
     ) -> TCResult<State> {
         let bounds = params
             .remove(&label("bounds").into())

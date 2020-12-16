@@ -4,7 +4,7 @@ use crate::auth;
 use crate::class::{State, TCResult, TCType};
 use crate::error;
 use crate::request::Request;
-use crate::scalar::{MethodType, Object, PathSegment, Value};
+use crate::scalar::{Map, MethodType, PathSegment, Value};
 use crate::transaction::Txn;
 
 #[async_trait]
@@ -47,16 +47,11 @@ pub trait Handler: Send + Sync {
         self.handle_put(request, txn, key, value).await
     }
 
-    async fn handle_post(
-        &self,
-        _request: &Request,
-        _txn: &Txn,
-        _params: Object,
-    ) -> TCResult<State> {
+    async fn handle_post(&self, _request: &Request, _txn: &Txn, _params: Map) -> TCResult<State> {
         Err(error::method_not_allowed(self.subject()))
     }
 
-    async fn post(&self, request: &Request, txn: &Txn, params: Object) -> TCResult<State> {
+    async fn post(&self, request: &Request, txn: &Txn, params: Map) -> TCResult<State> {
         self.authorize(request)?;
         self.handle_post(request, txn, params).await
     }
@@ -95,7 +90,7 @@ pub trait Public {
         request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        params: Object,
+        params: Map,
     ) -> TCResult<State>;
 
     async fn delete(
@@ -151,7 +146,7 @@ impl<T: Route + Send + Sync> Public for T {
         request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        params: Object,
+        params: Map,
     ) -> TCResult<State> {
         if let Some(handler) = self.route(MethodType::Post, path) {
             handler.post(request, txn, params).await

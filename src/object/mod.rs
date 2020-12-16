@@ -20,7 +20,7 @@ pub enum ObjectType {
 }
 
 impl ObjectType {
-    pub fn post(path: &[PathSegment], data: scalar::Object) -> TCResult<Object> {
+    pub fn post(path: &[PathSegment], data: scalar::Map) -> TCResult<Object> {
         debug!("ObjectType::post {} <- {}", TCPath::from(path), data);
 
         if path.starts_with(&InstanceClassType::prefix()) {

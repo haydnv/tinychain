@@ -56,7 +56,7 @@ pub struct Cluster {
     workspace: Arc<Dir>,
     state: TxnLock<ClusterState>,
     chains: TxnLock<Mutable<HashMap<Id, InstanceExt<Chain>>>>,
-    methods: TxnLock<Mutable<Object>>,
+    methods: TxnLock<Mutable<Map>>,
 }
 
 impl Cluster {
@@ -74,7 +74,7 @@ impl Cluster {
 
         let methods = TxnLock::new(
             format!("Object of Cluster at {}", path),
-            Object::default().into(),
+            Map::default().into(),
         );
 
         Ok(Cluster {
@@ -187,7 +187,7 @@ impl Public for Cluster {
         request: &Request,
         txn: &Txn,
         path: &[PathSegment],
-        params: Object,
+        params: Map,
     ) -> TCResult<State> {
         if path.is_empty() {
             return Err(error::method_not_allowed(self));
@@ -219,7 +219,7 @@ impl Public for Cluster {
             if key.is_none() {
                 let (mut methods, mut chains) =
                     try_join!(self.methods.write(txn_id), self.chains.write(txn_id))?;
-                *methods = Object::default();
+                *methods = Map::default();
                 *chains = HashMap::new();
                 Ok(())
             } else {

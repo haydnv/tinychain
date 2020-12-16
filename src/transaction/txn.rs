@@ -144,13 +144,13 @@ impl TxnState {
         self.dereference_state(id).map(Clone::clone)
     }
 
-    fn dereference_object(&self, _object: &Object) -> TCResult<Object> {
+    fn dereference_object(&self, _object: &Map) -> TCResult<Map> {
         Err(error::not_implemented("TxnState::dereference_object"))
     }
 
     fn dereference_scalar(&'_ self, scalar: Scalar) -> TCResult<Scalar> {
         match scalar {
-            Scalar::Object(object) => self.dereference_object(&object).map(Scalar::Object),
+            Scalar::Map(object) => self.dereference_object(&object).map(Scalar::Map),
             Scalar::Ref(tc_ref) => match *tc_ref {
                 TCRef::Id(id_ref) => self
                     .dereference_state_owned(id_ref.id())
@@ -314,9 +314,9 @@ impl Txn {
                         if let Scalar::Ref(tc_ref) = scalar {
                             let tc_ref = (&**tc_ref).clone();
                             pending.push((name, tc_ref));
-                        } else if let Scalar::Object(object) = scalar {
+                        } else if let Scalar::Map(object) = scalar {
                             let object = graph.dereference_object(object)?;
-                            graph.provided.insert(name, Scalar::Object(object).into());
+                            graph.provided.insert(name, Scalar::Map(object).into());
                         } else if let Scalar::Tuple(tuple) = scalar {
                             let tuple = Scalar::Tuple(graph.dereference_tuple(tuple.to_vec())?);
                             graph.provided.insert(name, State::Scalar(tuple));
@@ -608,7 +608,7 @@ impl Txn {
         graph: &TxnState,
         subject: IdRef,
         path: &[PathSegment],
-        params: Object,
+        params: Map,
     ) -> TCResult<State> {
         let subject = graph.dereference_state(subject.id())?;
 
@@ -691,7 +691,7 @@ fn is_resolved(state: &State) -> bool {
 
 fn is_resolved_scalar(scalar: &Scalar) -> bool {
     match scalar {
-        Scalar::Object(object) => object.values().all(is_resolved_scalar),
+        Scalar::Map(object) => object.values().all(is_resolved_scalar),
         Scalar::Ref(_) => false,
         Scalar::Tuple(tuple) => tuple.iter().all(is_resolved_scalar),
         _ => true,

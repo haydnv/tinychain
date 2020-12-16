@@ -5,7 +5,7 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::class::{Class, Instance, NativeClass, TCResult, TCType};
 use crate::error;
 use crate::scalar::{
-    label, Link, Object, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
+    label, Link, Map, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
     TryCastInto, Value,
 };
 
@@ -252,7 +252,7 @@ impl fmt::Display for Key {
 
 type GetMethod = (IdRef, TCPathBuf, Key);
 type PutMethod = (IdRef, TCPathBuf, Key, Scalar);
-type PostMethod = (IdRef, TCPathBuf, Object);
+type PostMethod = (IdRef, TCPathBuf, Map);
 type DeleteMethod = (IdRef, TCPathBuf, Key);
 
 #[derive(Clone, Eq, PartialEq)]
@@ -323,7 +323,7 @@ impl fmt::Display for Method {
 
 type GetRef = (Link, Key);
 type PutRef = (Link, Key, Scalar);
-type PostRef = (Link, Object);
+type PostRef = (Link, Map);
 type DeleteRef = (Link, Key);
 
 #[derive(Clone, Eq, PartialEq)]

@@ -12,7 +12,7 @@ use crate::error;
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{
-    Id, MethodType, Object, PathSegment, Scalar, ScalarInstance, TryCastFrom, TryCastInto, Value,
+    Id, Map, MethodType, PathSegment, Scalar, ScalarInstance, TryCastFrom, TryCastInto, Value,
 };
 use crate::transaction::Txn;
 
@@ -220,7 +220,7 @@ where
         Some(SCOPE_WRITE.into())
     }
 
-    async fn handle_post(&self, _request: &Request, txn: &Txn, params: Object) -> TCResult<State> {
+    async fn handle_post(&self, _request: &Request, txn: &Txn, params: Map) -> TCResult<State> {
         let update = params.try_cast_into(|v| error::bad_request("Invalid update", v))?;
 
         self.table
@@ -307,7 +307,7 @@ where
         }
     }
 
-    async fn handle_post(&self, _request: &Request, _txn: &Txn, params: Object) -> TCResult<State> {
+    async fn handle_post(&self, _request: &Request, _txn: &Txn, params: Map) -> TCResult<State> {
         let bounds = Bounds::try_cast_from(params, |v| {
             error::bad_request("Cannot cast into Table Bounds from", v)
         })?;

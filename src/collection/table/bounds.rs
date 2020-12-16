@@ -10,7 +10,7 @@ use crate::collection::btree::{BTreeRange, Collator};
 use crate::collection::schema::Column;
 use crate::error::{self, TCResult};
 use crate::scalar::{
-    Bound, Id, Object, Range, Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto, Value,
+    Bound, Id, Map, Range, Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto, Value,
     ValueType,
 };
 use std::cmp::Ordering;
@@ -231,12 +231,12 @@ impl From<HashMap<Id, ColumnBound>> for Bounds {
     }
 }
 
-impl TryCastFrom<Object> for Bounds {
-    fn can_cast_from(object: &Object) -> bool {
+impl TryCastFrom<Map> for Bounds {
+    fn can_cast_from(object: &Map) -> bool {
         object.values().all(|v| v.matches::<ColumnBound>())
     }
 
-    fn opt_cast_from(object: Object) -> Option<Bounds> {
+    fn opt_cast_from(object: Map) -> Option<Bounds> {
         let mut bounds = HashMap::new();
 
         for (id, bound) in object.into_iter() {
@@ -253,6 +253,6 @@ impl TryCastFrom<Object> for Bounds {
 
 impl fmt::Display for Bounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&Object::from_iter(self.inner.clone()), f)
+        fmt::Display::fmt(&Map::from_iter(self.inner.clone()), f)
     }
 }

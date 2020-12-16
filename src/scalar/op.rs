@@ -12,7 +12,7 @@ use crate::request::Request;
 use crate::transaction::Txn;
 
 use super::link::{Link, TCPathBuf};
-use super::object::Object;
+use super::map::Map;
 use super::{
     label, Id, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TryCastFrom,
     TryCastInto, Value,
@@ -289,7 +289,7 @@ impl<'a> Handler for PostHandler<'a> {
         Some(SCOPE_EXECUTE.into())
     }
 
-    async fn handle_post(&self, request: &Request, txn: &Txn, params: Object) -> TCResult<State> {
+    async fn handle_post(&self, request: &Request, txn: &Txn, params: Map) -> TCResult<State> {
         let op = params
             .into_iter()
             .chain(self.op.to_vec())

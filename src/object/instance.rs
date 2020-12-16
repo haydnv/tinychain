@@ -70,8 +70,8 @@ impl<T: Instance> From<T> for InstanceExt<T> {
     }
 }
 
-impl From<scalar::Object> for InstanceExt<State> {
-    fn from(scalar: scalar::Object) -> InstanceExt<State> {
+impl From<scalar::Map> for InstanceExt<State> {
+    fn from(scalar: scalar::Map) -> InstanceExt<State> {
         let class = InstanceClass::from_class(scalar.class());
 
         InstanceExt {

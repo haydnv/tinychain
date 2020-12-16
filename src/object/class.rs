@@ -21,7 +21,7 @@ use super::{InstanceExt, ObjectType};
 pub struct InstanceClassType;
 
 impl InstanceClassType {
-    pub fn post(path: &[PathSegment], data: scalar::Object) -> TCResult<InstanceClass> {
+    pub fn post(path: &[PathSegment], data: scalar::Map) -> TCResult<InstanceClass> {
         debug!("InstanceClassType::post {}", TCPath::from(path));
 
         if path == &Self::prefix()[..] {
@@ -37,9 +37,9 @@ impl InstanceClassType {
                 None
             };
 
-            let proto: scalar::Object = data
+            let proto: scalar::Map = data
                 .remove(&label("proto").into())
-                .unwrap_or_else(|| scalar::Object::default().into())
+                .unwrap_or_else(|| scalar::Map::default().into())
                 .try_into()?;
 
             if data.is_empty() {
@@ -95,13 +95,13 @@ impl fmt::Display for InstanceClassType {
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct InstanceClass {
     extends: Option<Link>,
-    proto: scalar::Object,
+    proto: scalar::Map,
 }
 
 impl InstanceClass {
     pub fn from_class<C: Class>(class: C) -> InstanceClass {
         let extends = Some(class.into());
-        let proto = scalar::Object::default();
+        let proto = scalar::Map::default();
         Self { extends, proto }
     }
 
@@ -113,7 +113,7 @@ impl InstanceClass {
         }
     }
 
-    pub fn proto(&'_ self) -> &'_ scalar::Object {
+    pub fn proto(&'_ self) -> &'_ scalar::Map {
         &self.proto
     }
 

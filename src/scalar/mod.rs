@@ -14,13 +14,13 @@ use crate::error;
 use crate::handler::*;
 use crate::transaction::Txn;
 
-pub mod object;
+pub mod map;
 pub mod op;
 pub mod reference;
 pub mod slice;
 pub mod value;
 
-pub use object::Object;
+pub use map::Map;
 pub use op::*;
 pub use reference::*;
 pub use slice::*;
@@ -112,7 +112,7 @@ pub trait ScalarClass: Class {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum ScalarType {
-    Object,
+    Map,
     Op(OpDefType),
     Ref(RefType),
     Slice(SliceType),
@@ -132,7 +132,7 @@ impl NativeClass for ScalarType {
             Err(error::method_not_allowed(TCPath::from(path)))
         } else if suffix.len() == 1 {
             match suffix[0].as_str() {
-                "object" => Ok(ScalarType::Object),
+                "map" => Ok(ScalarType::Map),
                 "tuple" => Ok(ScalarType::Tuple),
                 "op" | "ref" | "slice" | "value" => Err(error::method_not_allowed(&suffix[0])),
                 other => Err(error::not_found(other)),
@@ -161,8 +161,8 @@ impl ScalarClass for ScalarType {
         Scalar: From<S>,
     {
         match self {
-            Self::Object => match Scalar::from(scalar) {
-                Scalar::Object(map) => Ok(Scalar::Object(map)),
+            Self::Map => match Scalar::from(scalar) {
+                Scalar::Map(map) => Ok(Scalar::Map(map)),
                 other => Err(error::bad_request("Cannot cast into Map from", other)),
             },
             Self::Op(odt) => odt.try_cast(scalar).map(Box::new).map(Scalar::Op),
@@ -178,7 +178,7 @@ impl ScalarClass for ScalarType {
 impl From<ScalarType> for Link {
     fn from(st: ScalarType) -> Link {
         match st {
-            ScalarType::Object => ScalarType::prefix().append(label("object")).into(),
+            ScalarType::Map => ScalarType::prefix().append(label("map")).into(),
             ScalarType::Op(odt) => odt.into(),
             ScalarType::Ref(rt) => rt.into(),
             ScalarType::Slice(st) => st.into(),
@@ -197,7 +197,7 @@ impl From<ScalarType> for TCType {
 impl fmt::Display for ScalarType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Object => write!(f, "type Object (generic)"),
+            Self::Map => write!(f, "type Scalar Map"),
             Self::Op(odt) => write!(f, "{}", odt),
             Self::Ref(rt) => write!(f, "{}", rt),
             Self::Slice(st) => write!(f, "{}", st),
@@ -209,7 +209,7 @@ impl fmt::Display for ScalarType {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Scalar {
-    Object(Object),
+    Map(Map),
     Op(Box<OpDef>),
     Ref(Box<TCRef>),
     Slice(Slice),
@@ -232,7 +232,7 @@ impl Instance for Scalar {
 
     fn class(&self) -> Self::Class {
         match self {
-            Self::Object(_) => ScalarType::Object,
+            Self::Map(_) => ScalarType::Map,
             Self::Op(op) => ScalarType::Op(op.class()),
             Self::Ref(tc_ref) => ScalarType::Ref(tc_ref.class()),
             Self::Slice(slice) => ScalarType::Slice(slice.class()),
@@ -249,7 +249,7 @@ impl Route for Scalar {
         }
 
         match self {
-            Self::Object(object) => object.route(method, path),
+            Self::Map(map) => map.route(method, path),
             Self::Op(op) if path.is_empty() => Some(op.handler(None)),
             Self::Value(value) => value.route(method, path),
             _ => None,
@@ -267,9 +267,9 @@ impl From<Number> for Scalar {
     }
 }
 
-impl From<Object> for Scalar {
-    fn from(object: Object) -> Self {
-        Scalar::Object(object)
+impl From<Map> for Scalar {
+    fn from(map: Map) -> Self {
+        Scalar::Map(map)
     }
 }
 
@@ -322,16 +322,13 @@ impl PartialEq<Value> for Scalar {
     }
 }
 
-impl TryFrom<Scalar> for object::Object {
+impl TryFrom<Scalar> for map::Map {
     type Error = error::TCError;
 
-    fn try_from(s: Scalar) -> TCResult<object::Object> {
+    fn try_from(s: Scalar) -> TCResult<map::Map> {
         match s {
-            Scalar::Object(object) => Ok(object),
-            other => Err(error::bad_request(
-                "Expected generic Object but found",
-                other,
-            )),
+            Scalar::Map(map) => Ok(map),
+            other => Err(error::bad_request("Expected Scalar Map but found", other)),
         }
     }
 }
@@ -628,7 +625,7 @@ impl ScalarVisitor {
         } else if params.matches::<(Key, Scalar)>() {
             let (key, value) = params.opt_cast_into().unwrap();
             Method::Put((subject, path, key, value))
-        } else if params.matches::<Object>() {
+        } else if params.matches::<Map>() {
             Method::Post((subject, path, params.opt_cast_into().unwrap()))
         } else {
             return Err(de::Error::custom(format!(
@@ -649,7 +646,7 @@ impl ScalarVisitor {
         } else if params.matches::<(Key,)>() {
             let (key,): (Key,) = params.opt_cast_into().unwrap();
             OpRef::Get((link, key))
-        } else if params.matches::<Object>() {
+        } else if params.matches::<Map>() {
             OpRef::Post((link, params.opt_cast_into().unwrap()))
         } else {
             return Err(de::Error::custom(format!("invalid Op format: {}", params)));
@@ -738,7 +735,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
         }
 
         if data.is_empty() {
-            return Ok(Scalar::Object(Object::default()));
+            return Ok(Scalar::Map(Map::default()));
         } else if data.len() == 1 {
             debug!("deserialize map of length 1");
             let (key, data) = data.clone().drain().next().unwrap();
@@ -778,7 +775,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                 let path = link.path();
                 return if path.len() > 1 && &path[0] == "sbin" {
                     match path[1].as_str() {
-                        "value" | "object" | "op" | "ref" | "slice" | "tuple" => match data {
+                        "value" | "map" | "op" | "ref" | "slice" | "tuple" => match data {
                             Scalar::Value(data) if &path[1] != "slice" => match data {
                                 Value::Tuple(tuple) if &path[1] == "tuple" => {
                                     Ok(Scalar::Value(Value::Tuple(tuple)))
@@ -806,12 +803,12 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
                             Scalar::Op(_) => {
                                 Err(de::Error::custom("{<link>: <op>} does not make sense"))
                             }
-                            Scalar::Object(object) if path.len() == 2 && &path[1] == "object" => {
-                                Ok(Scalar::Object(object))
+                            Scalar::Map(map) if path.len() == 2 && &path[1] == "map" => {
+                                Ok(Scalar::Map(map))
                             }
-                            Scalar::Object(object) => Ok(Scalar::Ref(Box::new(TCRef::Op(
-                                OpRef::Post((link, object)),
-                            )))),
+                            Scalar::Map(map) => {
+                                Ok(Scalar::Ref(Box::new(TCRef::Op(OpRef::Post((link, map))))))
+                            }
                             other => {
                                 let dtype = ScalarType::from_path(&link.path()[..])
                                     .map_err(de::Error::custom)?;
@@ -826,8 +823,6 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
             }
         }
 
-        debug!("map is an Object");
-
         let mut map = HashMap::with_capacity(data.len());
         for (key, value) in data.drain() {
             debug!("key {} value {}", key, value);
@@ -835,7 +830,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
             map.insert(key, value);
         }
 
-        Ok(Scalar::Object(map.into()))
+        Ok(Scalar::Map(map.into()))
     }
 }
 
@@ -849,7 +844,7 @@ impl<'de> de::Deserialize<'de> for Scalar {
 impl Serialize for Scalar {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
-            Scalar::Object(object) => object.serialize(s),
+            Scalar::Map(map) => map.serialize(s),
             Scalar::Op(op_def) => op_def.serialize(s),
             Scalar::Ref(tc_ref) => tc_ref.serialize(s),
             Scalar::Slice(slice) => slice.serialize(s),
@@ -868,11 +863,10 @@ impl Serialize for Scalar {
 impl fmt::Display for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Scalar::Object(object) => write!(
+            Scalar::Map(map) => write!(
                 f,
                 "{{{}}}",
-                object
-                    .iter()
+                map.iter()
                     .map(|(k, v)| format!("{}: {}", k, v))
                     .collect::<Vec<String>>()
                     .join(", ")
