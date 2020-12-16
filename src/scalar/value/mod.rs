@@ -76,7 +76,7 @@ impl Route for Value {
             return None;
         }
 
-        if &path[0] == "eq" {
+        if !path.is_empty() && &path[0] == "eq" {
             return Some(Box::new(EqHandler { value: self }));
         } else {
             match self {

@@ -16,7 +16,7 @@ impl TryCastFrom<Map> for Row {
     fn opt_cast_from(object: Map) -> Option<Row> {
         let mut row = Row::new();
 
-        for (id, value) in object.into_iter() {
+        for (id, value) in object.into_inner().into_iter() {
             if let Some(value) = value.opt_cast_into() {
                 row.insert(id, value);
             } else {

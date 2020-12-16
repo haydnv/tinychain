@@ -1,7 +1,7 @@
+use std::collections::HashMap;
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::stream;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::auth::{Scope, SCOPE_EXECUTE};
@@ -225,18 +225,14 @@ impl<'a> Handler for GetHandler<'a> {
     async fn get(&self, request: &Request, txn: &Txn, key: Value) -> TCResult<State> {
         self.authorize(request)?;
 
-        let (key_id, def) = self.op;
+        let (key_id, op) = self.op.clone();
+        let mut graph = HashMap::new();
+        graph.insert(key_id, State::from(key));
+        if let Some(context) = &self.context {
+            graph.insert(label("self").into(), context.clone());
+        }
 
-        let mut data = Vec::with_capacity(def.len() + 1);
-        data.push((key_id.clone(), Scalar::Value(key).into()));
-        data.extend(def.to_vec().into_iter().map(|(k, v)| (k, State::Scalar(v))));
-
-        txn.execute(
-            request,
-            stream::iter(data.into_iter()),
-            self.context.clone(),
-        )
-        .await
+        txn.execute(request, graph, op.to_vec()).await
     }
 }
 
@@ -290,12 +286,13 @@ impl<'a> Handler for PostHandler<'a> {
     }
 
     async fn handle_post(&self, request: &Request, txn: &Txn, params: Map) -> TCResult<State> {
-        let op = params
+        let graph = params
+            .into_inner()
             .into_iter()
-            .chain(self.op.to_vec())
-            .map(|(id, scalar)| (id, State::from(scalar)));
-        txn.execute(request, stream::iter(op), self.context.clone())
-            .await
+            .map(|(id, scalar)| (id, State::from(scalar)))
+            .collect();
+
+        txn.execute(request, graph, self.op.to_vec()).await
     }
 }
 

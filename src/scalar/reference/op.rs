@@ -3,6 +3,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use futures::{try_join, TryFutureExt};
+use log::debug;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::{Class, Instance, NativeClass, State, TCResult, TCType};
@@ -203,6 +204,23 @@ pub enum Key {
     Value(Value),
 }
 
+impl Key {
+    pub async fn resolve_value(
+        self,
+        request: &Request,
+        txn: &Txn,
+        context: &HashMap<Id, State>,
+    ) -> TCResult<Value> {
+        const ERR: &str = "Key must be a Value, not";
+
+        let key = self.resolve(request, txn, context).await?;
+        match key {
+            State::Scalar(scalar) => scalar.try_cast_into(|s| error::bad_request(ERR, s)),
+            other => Err(error::bad_request(ERR, other)),
+        }
+    }
+}
+
 #[async_trait]
 impl Refer for Key {
     fn requires(&self, deps: &mut HashSet<Id>) {
@@ -346,24 +364,22 @@ impl Refer for Method {
         txn: &Txn,
         context: &HashMap<Id, State>,
     ) -> TCResult<State> {
-        const ERR_KEY_NOT_VALUE: &str = "Method key must be a Value, not";
-
         match self {
             Self::Get((subject, path, key)) => {
                 let (subject, key) = try_join!(
                     subject.resolve(request, txn, context),
-                    key.resolve(request, txn, context)
+                    key.resolve_value(request, txn, context)
                 )?;
-                let key = key.try_cast_into(|s| error::bad_request(ERR_KEY_NOT_VALUE, s))?;
+
                 subject.get(request, txn, &path, key).await
             }
             Self::Put((subject, path, key, value)) => {
                 let (subject, key, value) = try_join!(
                     subject.resolve(request, txn, context),
-                    key.resolve(request, txn, context),
+                    key.resolve_value(request, txn, context),
                     value.resolve(request, txn, context)
                 )?;
-                let key = key.try_cast_into(|s| error::bad_request(ERR_KEY_NOT_VALUE, s))?;
+
                 subject
                     .put(request, txn, &path, key, value)
                     .map_ok(State::from)
@@ -374,6 +390,9 @@ impl Refer for Method {
                     subject.resolve(request, txn, context),
                     params.resolve(request, txn, context)
                 )?;
+
+                debug!("Method::resolve {}{}: {})", subject, path, params);
+
                 // TODO: update Public::post to accept a State::Map
                 if let State::Scalar(Scalar::Map(params)) = params {
                     subject.post(request, txn, &path, params).await
@@ -387,9 +406,9 @@ impl Refer for Method {
             Self::Delete((subject, path, key)) => {
                 let (subject, key) = try_join!(
                     subject.resolve(request, txn, context),
-                    key.resolve(request, txn, context)
+                    key.resolve_value(request, txn, context)
                 )?;
-                let key = key.try_cast_into(|s| error::bad_request(ERR_KEY_NOT_VALUE, s))?;
+
                 subject
                     .delete(request, txn, &path, key)
                     .map_ok(State::from)
@@ -501,11 +520,11 @@ impl Refer for OpRef {
 
     async fn resolve(
         self,
-        _request: &Request,
-        _txn: &Txn,
-        _context: &HashMap<Id, State>,
+        request: &Request,
+        txn: &Txn,
+        context: &HashMap<Id, State>,
     ) -> TCResult<State> {
-        todo!()
+        txn.resolve_op(request, context, self).await
     }
 }
 

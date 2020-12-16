@@ -227,6 +227,15 @@ impl Scalar {
             _ => false,
         }
     }
+
+    pub fn is_ref(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(Scalar::is_ref),
+            Self::Ref(_) => true,
+            Self::Tuple(tuple) => tuple.iter().any(Scalar::is_ref),
+            _ => false
+        }
+    }
 }
 
 impl Instance for Scalar {
@@ -290,15 +299,17 @@ impl Refer for Scalar {
 
 impl Route for Scalar {
     fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
-        if path.is_empty() {
-            return Some(Box::new(SelfHandler { scalar: self }));
-        }
-
-        match self {
+        let handler = match self {
             Self::Map(map) => map.route(method, path),
             Self::Op(op) if path.is_empty() => Some(op.handler(None)),
             Self::Value(value) => value.route(method, path),
             _ => None,
+        };
+
+        if handler.is_none() && path.is_empty() {
+            return Some(Box::new(SelfHandler { scalar: self }));
+        } else {
+            handler
         }
     }
 }

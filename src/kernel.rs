@@ -1,6 +1,6 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 
-use futures::stream;
 use futures::TryFutureExt;
 use log::debug;
 
@@ -62,7 +62,7 @@ pub async fn post(
     } else if &path[0] == "sbin" && &path[1] == "transact" {
         if data.matches::<Vec<(Id, Scalar)>>() {
             let values: Vec<(Id, Scalar)> = data.opt_cast_into().unwrap();
-            txn.execute(request, stream::iter(values), None).await
+            txn.execute(request, HashMap::new(), values).await
         } else {
             Ok(State::Scalar(data))
         }

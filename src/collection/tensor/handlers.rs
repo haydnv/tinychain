@@ -145,7 +145,7 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
         } else {
             Err(error::bad_request(
                 "Unrecognized parameters",
-                Scalar::from_iter(params),
+                Scalar::from_iter(params.into_inner()),
             ))
         }
     }

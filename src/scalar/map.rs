@@ -60,6 +60,12 @@ impl fmt::Display for MapType {
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct Map(HashMap<Id, Scalar>);
 
+impl Map {
+    pub fn into_inner(self) -> HashMap<Id, Scalar> {
+        self.0
+    }
+}
+
 impl Instance for Map {
     type Class = MapType;
 
@@ -83,11 +89,12 @@ impl Refer for Map {
         context: &HashMap<Id, State>,
     ) -> TCResult<State> {
         let mut map = HashMap::<Id, State>::new();
-        let mut pending = FuturesUnordered::from_iter(self.into_iter().map(|(id, scalar)| {
+        let mut pending = FuturesUnordered::from_iter(self.0.into_iter().map(|(id, scalar)| {
             scalar
                 .resolve(request, txn, context)
                 .map_ok(|state| (id, state))
         }));
+
         while let Some(result) = pending.next().await {
             let (id, state) = result?;
             map.insert(id, state);
@@ -223,15 +230,6 @@ impl From<Map> for HashMap<Id, Scalar> {
 impl From<Map> for State {
     fn from(map: Map) -> State {
         State::Scalar(Scalar::Map(map))
-    }
-}
-
-impl IntoIterator for Map {
-    type Item = (Id, Scalar);
-    type IntoIter = std::collections::hash_map::IntoIter<Id, Scalar>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
     }
 }
 

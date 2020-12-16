@@ -143,7 +143,8 @@ impl Refer for FlowControl {
                         .map(|tc_ref| tc_ref.resolve(request, txn, context)),
                 )
                 .await?;
-                then.resolve(request, txn, context).await
+
+                Ok(State::Scalar(Scalar::Ref(Box::new(then))))
             }
             FlowControl::If((cond, then, or_else)) => {
                 const ERR_NOT_BOOLEAN: &str = "Expected a boolean condition but found";
@@ -156,9 +157,9 @@ impl Refer for FlowControl {
                 }?;
 
                 if cond {
-                    then.resolve(request, txn, context).await
+                    Ok(State::Scalar(then))
                 } else {
-                    or_else.resolve(request, txn, context).await
+                    Ok(State::Scalar(or_else))
                 }
             }
         }

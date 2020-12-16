@@ -239,7 +239,7 @@ impl TryCastFrom<Map> for Bounds {
     fn opt_cast_from(object: Map) -> Option<Bounds> {
         let mut bounds = HashMap::new();
 
-        for (id, bound) in object.into_iter() {
+        for (id, bound) in object.into_inner().into_iter() {
             if let Some(bound) = bound.opt_cast_into() {
                 bounds.insert(id, bound);
             } else {
