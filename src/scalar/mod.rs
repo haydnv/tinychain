@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
+use std::ops::Deref;
 use std::str::FromStr;
 
 use async_trait::async_trait;
@@ -12,6 +13,7 @@ use serde::ser::{Serialize, SerializeSeq, Serializer};
 
 use crate::class::*;
 use crate::error;
+use crate::general::{Map, TCResult, Tuple};
 use crate::handler::*;
 use crate::request::Request;
 use crate::transaction::Txn;
@@ -22,7 +24,6 @@ pub mod reference;
 pub mod slice;
 pub mod value;
 
-pub use map::Map;
 pub use op::*;
 pub use reference::*;
 pub use slice::*;
@@ -211,11 +212,11 @@ impl fmt::Display for ScalarType {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Scalar {
-    Map(Map),
+    Map(Map<Scalar>),
     Op(Box<OpDef>),
     Ref(Box<TCRef>),
     Slice(Slice),
-    Tuple(Vec<Scalar>),
+    Tuple(Tuple<Scalar>),
     Value(value::Value),
 }
 
@@ -233,7 +234,7 @@ impl Scalar {
             Self::Map(map) => map.values().any(Scalar::is_ref),
             Self::Ref(_) => true,
             Self::Tuple(tuple) => tuple.iter().any(Scalar::is_ref),
-            _ => false
+            _ => false,
         }
     }
 }
@@ -282,14 +283,17 @@ impl Refer for Scalar {
                 // TODO: use a common impl struct for State::Tuple, Scalar::Tuple, Value::Tuple
                 let tuple = try_join_all(
                     tuple
+                        .into_inner()
                         .into_iter()
                         .map(|item| item.resolve(request, txn, context)),
                 )
                 .await?;
+
+                let tuple = Tuple::from(tuple);
                 if Scalar::can_cast_from(&tuple) {
                     Ok(State::Scalar(Scalar::opt_cast_from(tuple).unwrap()))
                 } else {
-                    Ok(State::Tuple(Box::new(tuple)))
+                    Ok(State::Tuple(tuple.into()))
                 }
             }
             other => Ok(State::Scalar(other)),
@@ -324,8 +328,8 @@ impl From<Number> for Scalar {
     }
 }
 
-impl From<Map> for Scalar {
-    fn from(map: Map) -> Self {
+impl From<Map<Scalar>> for Scalar {
+    fn from(map: Map<Scalar>) -> Self {
         Scalar::Map(map)
     }
 }
@@ -350,7 +354,7 @@ impl From<()> for Scalar {
 
 impl<T1: Into<Scalar>, T2: Into<Scalar>> From<(T1, T2)> for Scalar {
     fn from(tuple: (T1, T2)) -> Self {
-        Scalar::Tuple(vec![tuple.0.into(), tuple.1.into()])
+        Scalar::Tuple(vec![tuple.0.into(), tuple.1.into()].into())
     }
 }
 
@@ -360,24 +364,30 @@ impl<T: Into<Scalar>> From<Vec<T>> for Scalar {
     }
 }
 
+impl<T: Clone + Into<Scalar>> From<Tuple<T>> for Scalar {
+    fn from(v: Tuple<T>) -> Self {
+        Scalar::Tuple(v.into_inner().into_iter().map(|i| i.into()).collect())
+    }
+}
+
 impl<T: Into<Scalar>> FromIterator<T> for Scalar {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut tuple = vec![];
         for item in iter {
             tuple.push(item.into());
         }
-        Self::Tuple(tuple)
+        Self::Tuple(tuple.into())
     }
 }
 
-impl TryCastFrom<Vec<State>> for Scalar {
-    fn can_cast_from(tuple: &Vec<State>) -> bool {
+impl TryCastFrom<Tuple<State>> for Scalar {
+    fn can_cast_from(tuple: &Tuple<State>) -> bool {
         tuple.iter().all(State::is_scalar)
     }
 
-    fn opt_cast_from(tuple: Vec<State>) -> Option<Scalar> {
+    fn opt_cast_from(tuple: Tuple<State>) -> Option<Scalar> {
         let mut cast = Vec::with_capacity(tuple.len());
-        for item in tuple.into_iter() {
+        for item in tuple.into_inner().into_iter() {
             if let State::Scalar(scalar) = item {
                 cast.push(scalar);
             } else {
@@ -385,7 +395,7 @@ impl TryCastFrom<Vec<State>> for Scalar {
             }
         }
 
-        Some(Scalar::Tuple(cast))
+        Some(Scalar::Tuple(cast.into()))
     }
 }
 
@@ -398,10 +408,10 @@ impl PartialEq<Value> for Scalar {
     }
 }
 
-impl TryFrom<Scalar> for map::Map {
+impl TryFrom<Scalar> for Map<Scalar> {
     type Error = error::TCError;
 
-    fn try_from(s: Scalar) -> TCResult<map::Map> {
+    fn try_from(s: Scalar) -> TCResult<Self> {
         match s {
             Scalar::Map(map) => Ok(map),
             other => Err(error::bad_request("Expected Scalar Map but found", other)),
@@ -420,10 +430,10 @@ impl TryFrom<Scalar> for Value {
     }
 }
 
-impl TryFrom<Scalar> for Vec<Scalar> {
+impl TryFrom<Scalar> for Tuple<Scalar> {
     type Error = error::TCError;
 
-    fn try_from(s: Scalar) -> TCResult<Vec<Scalar>> {
+    fn try_from(s: Scalar) -> TCResult<Tuple<Scalar>> {
         match s {
             Scalar::Tuple(t) => Ok(t),
             other => Err(error::bad_request("Expected Tuple, found", other)),
@@ -435,11 +445,12 @@ impl<T: TryFrom<Scalar, Error = error::TCError>> TryFrom<Scalar> for Vec<T> {
     type Error = error::TCError;
 
     fn try_from(source: Scalar) -> TCResult<Vec<T>> {
-        let source: Vec<Scalar> = source.try_into()?;
+        let source: Tuple<Scalar> = source.try_into()?;
         let mut items = Vec::with_capacity(source.len());
-        for item in source.into_iter() {
+        for item in source.into_inner().into_iter() {
             items.push(item.try_into()?);
         }
+
         Ok(items)
     }
 }
@@ -536,7 +547,7 @@ impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
     fn opt_cast_from(scalar: Scalar) -> Option<Vec<T>> {
         if let Scalar::Tuple(values) = scalar {
             let mut cast: Vec<T> = Vec::with_capacity(values.len());
-            for val in values.into_iter() {
+            for val in values.into_inner().into_iter() {
                 if let Some(val) = val.opt_cast_into() {
                     cast.push(val)
                 } else {
@@ -701,7 +712,7 @@ impl ScalarVisitor {
         } else if params.matches::<(Key, Scalar)>() {
             let (key, value) = params.opt_cast_into().unwrap();
             Method::Put((subject, path, key, value))
-        } else if params.matches::<Map>() {
+        } else if params.matches::<Map<Scalar>>() {
             Method::Post((subject, path, params.opt_cast_into().unwrap()))
         } else {
             return Err(de::Error::custom(format!(
@@ -722,7 +733,7 @@ impl ScalarVisitor {
         } else if params.matches::<(Key,)>() {
             let (key,): (Key,) = params.opt_cast_into().unwrap();
             OpRef::Get((link, key))
-        } else if params.matches::<Map>() {
+        } else if params.matches::<Map<Scalar>>() {
             OpRef::Post((link, params.opt_cast_into().unwrap()))
         } else {
             return Err(de::Error::custom(format!("invalid Op format: {}", params)));
@@ -790,7 +801,7 @@ impl<'de> de::Visitor<'de> for ScalarVisitor {
             items.push(value)
         }
 
-        Ok(Scalar::Tuple(items))
+        Ok(Scalar::Tuple(items.into()))
     }
 
     fn visit_map<M: de::MapAccess<'de>>(self, mut access: M) -> Result<Self::Value, M::Error> {
@@ -926,7 +937,7 @@ impl Serialize for Scalar {
             Scalar::Slice(slice) => slice.serialize(s),
             Scalar::Tuple(tuple) => {
                 let mut seq = s.serialize_seq(Some(tuple.len()))?;
-                for item in tuple {
+                for item in tuple.iter() {
                     seq.serialize_element(item)?;
                 }
                 seq.end()
@@ -981,16 +992,26 @@ impl<'a> Handler for SelfHandler<'a> {
             let i: usize =
                 key.try_cast_into(|v| error::bad_request("Invalid index for tuple", v))?;
 
-            tuple.get(i).cloned().map(State::from).ok_or_else(|| {
-                error::not_found(format!("Index {} in tuple of size {}", i, tuple.len()))
-            })
+            tuple
+                .deref()
+                .get(i)
+                .cloned()
+                .map(State::from)
+                .ok_or_else(|| {
+                    error::not_found(format!("Index {} in tuple of size {}", i, tuple.len()))
+                })
         } else if let Scalar::Value(Value::Tuple(tuple)) = self.scalar {
             let i: usize =
                 key.try_cast_into(|v| error::bad_request("Invalid index for tuple", v))?;
 
-            tuple.get(i).cloned().map(State::from).ok_or_else(|| {
-                error::not_found(format!("Index {} in tuple of size {}", i, tuple.len()))
-            })
+            tuple
+                .deref()
+                .get(i)
+                .cloned()
+                .map(State::from)
+                .ok_or_else(|| {
+                    error::not_found(format!("Index {} in tuple of size {}", i, tuple.len()))
+                })
         } else {
             Err(error::not_found(format!(
                 "{} has no field {}",

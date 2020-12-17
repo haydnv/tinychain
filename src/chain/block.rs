@@ -4,8 +4,8 @@ use std::fmt;
 use bytes::Bytes;
 
 use crate::block::BlockData;
-use crate::class::TCResult;
 use crate::error;
+use crate::general::TCResult;
 
 #[derive(Clone)]
 pub struct ChainBlock {}

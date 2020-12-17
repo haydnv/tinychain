@@ -2,9 +2,8 @@ use std::convert::Infallible;
 use std::fmt;
 
 use crate::class::{Class, Instance, NativeClass, TCType};
+use crate::general::TCResult;
 use crate::scalar::value::{label, Link, PathSegment, TCPath, TCPathBuf};
-
-pub type TCResult<T> = Result<T, TCError>;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ErrorType {

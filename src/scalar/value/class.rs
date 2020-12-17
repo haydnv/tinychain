@@ -1,7 +1,8 @@
 use std::fmt;
 
-use crate::class::{Class, NativeClass, TCResult, TCType};
+use crate::class::{Class, NativeClass, TCType};
 use crate::error;
+use crate::general::TCResult;
 use crate::scalar::{Scalar, ScalarClass, ScalarInstance, ScalarType, TryCastFrom, TryCastInto};
 
 use super::link::{Link, PathSegment, TCPathBuf};
@@ -86,6 +87,9 @@ impl ScalarClass for ValueType {
             Self::None => Ok(Value::None),
             Self::Number(nt) => nt.try_cast(scalar).map(Value::Number),
             Self::TCString(st) => st.try_cast(scalar).map(Value::TCString),
+            Self::Tuple => Scalar::from(scalar)
+                .try_cast_into(|v| error::bad_request("Not a Value Tuple", v))
+                .map(Value::Tuple),
             other => Scalar::from(scalar).try_cast_into(|v| {
                 error::not_implemented(format!("Cast into {} from {}", other, v))
             }),

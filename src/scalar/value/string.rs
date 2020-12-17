@@ -8,8 +8,9 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use uuid::Uuid;
 
-use crate::class::{Class, Instance, NativeClass, TCResult, TCType};
+use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::error;
+use crate::general::TCResult;
 use crate::scalar::{Scalar, ScalarClass, ScalarInstance, TryCastFrom};
 
 use super::class::{ValueClass, ValueInstance, ValueType};
@@ -252,6 +253,16 @@ impl TryCastFrom<TCPathBuf> for Id {
         } else {
             None
         }
+    }
+}
+
+impl TryCastFrom<Id> for usize {
+    fn can_cast_from(id: &Id) -> bool {
+        id.as_str().parse::<usize>().is_ok()
+    }
+
+    fn opt_cast_from(id: Id) -> Option<usize> {
+        id.as_str().parse::<usize>().ok()
     }
 }
 

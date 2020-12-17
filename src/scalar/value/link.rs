@@ -11,7 +11,8 @@ use addr::DomainName;
 use serde::de;
 use serde::ser::{SerializeMap, Serializer};
 
-use crate::error::{self, TCResult};
+use crate::error;
+use crate::general::TCResult;
 use crate::scalar::{label, Id, Label, Scalar, TCString, TryCastFrom, Value};
 
 const EMPTY_SLICE: &[usize] = &[];

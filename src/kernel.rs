@@ -5,9 +5,10 @@ use futures::TryFutureExt;
 use log::debug;
 
 use crate::chain::{ChainClass, ChainType};
-use crate::class::{NativeClass, State, TCResult, TCType};
+use crate::class::{NativeClass, State, TCType};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error::{self, ErrorType};
+use crate::general::TCResult;
 use crate::object::ObjectType;
 use crate::request::Request;
 use crate::scalar::*;

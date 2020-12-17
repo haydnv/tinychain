@@ -5,8 +5,8 @@ use std::thread;
 use tokio::sync::mpsc;
 
 use crate::block::Dir;
-use crate::error::TCResult;
 use crate::gateway::Gateway;
+use crate::general::TCResult;
 use crate::lock::RwLock;
 
 use super::{Transact, Txn, TxnId};

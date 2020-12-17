@@ -4,12 +4,13 @@ use std::iter::FromIterator;
 use async_trait::async_trait;
 
 use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
-use crate::class::{State, TCResult, TCType};
+use crate::class::{State, TCType};
 use crate::collection::Collection;
 use crate::error;
+use crate::general::{Map, TCResult};
 use crate::handler::*;
 use crate::request::Request;
-use crate::scalar::{label, Map, MethodType, NumberType, PathSegment, Scalar, TryCastInto, Value};
+use crate::scalar::{label, MethodType, NumberType, PathSegment, Scalar, TryCastInto, Value};
 use crate::transaction::Txn;
 
 use super::bounds::*;
@@ -129,7 +130,7 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
         &self,
         _request: &Request,
         _txn: &Txn,
-        mut params: Map,
+        mut params: Map<Scalar>,
     ) -> TCResult<State> {
         let bounds = params
             .remove(&label("bounds").into())

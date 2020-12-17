@@ -7,8 +7,9 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use log::debug;
 
-use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
+use crate::class::Instance;
 use crate::error;
+use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
 use crate::scalar::value::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 

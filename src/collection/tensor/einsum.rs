@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::class::TCResult;
 use crate::error;
+use crate::general::TCResult;
 
 use super::class::TensorInstance;
 use super::{TensorAccessor, TensorMath, TensorReduce, TensorTransform};

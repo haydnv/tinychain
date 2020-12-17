@@ -6,12 +6,13 @@ use futures::{try_join, TryFutureExt};
 use log::debug;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
+use crate::general::{Map, TCResult};
 use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::{
-    label, Id, Link, Map, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
+    label, Id, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
     TryCastInto, Value,
 };
 use crate::transaction::Txn;
@@ -297,7 +298,7 @@ impl fmt::Display for Key {
 
 type GetMethod = (IdRef, TCPathBuf, Key);
 type PutMethod = (IdRef, TCPathBuf, Key, Scalar);
-type PostMethod = (IdRef, TCPathBuf, Map);
+type PostMethod = (IdRef, TCPathBuf, Map<Scalar>);
 type DeleteMethod = (IdRef, TCPathBuf, Key);
 
 #[derive(Clone, Eq, PartialEq)]
@@ -393,7 +394,7 @@ impl Refer for Method {
 
                 debug!("Method::resolve {}{}: {})", subject, path, params);
 
-                // TODO: update Public::post to accept a State::Map
+                // TODO: update Public::post to accept a Map<State>
                 if let State::Scalar(Scalar::Map(params)) = params {
                     subject.post(request, txn, &path, params).await
                 } else {
@@ -461,7 +462,7 @@ impl fmt::Display for Method {
 
 type GetRef = (Link, Key);
 type PutRef = (Link, Key, Scalar);
-type PostRef = (Link, Map);
+type PostRef = (Link, Map<Scalar>);
 type DeleteRef = (Link, Key);
 
 #[derive(Clone, Eq, PartialEq)]

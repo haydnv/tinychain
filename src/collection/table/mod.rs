@@ -5,8 +5,9 @@ use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::{Stream, StreamExt};
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCStream, TCType};
+use crate::class::*;
 use crate::error;
+use crate::general::{TCResult, TCStream};
 use crate::handler::*;
 use crate::scalar::{
     label, Id, Link, MethodType, PathSegment, Scalar, TCPathBuf, TryCastInto, Value,

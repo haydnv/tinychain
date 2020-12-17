@@ -2,7 +2,8 @@ use std::fmt;
 
 use async_trait::async_trait;
 
-use crate::class::{Instance, TCResult, TCStream};
+use crate::class::Instance;
+use crate::general::{TCResult, TCStream};
 use crate::handler::*;
 use crate::scalar::{MethodType, PathSegment, Scalar};
 use crate::transaction::{Transact, Txn, TxnId};

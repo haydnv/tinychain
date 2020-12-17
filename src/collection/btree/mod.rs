@@ -5,10 +5,11 @@ use async_trait::async_trait;
 use futures::stream::{self, Stream, StreamExt};
 
 use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
-use crate::class::{Instance, State, TCStream, TCType};
+use crate::class::{Instance, State, TCType};
 use crate::collection::class::CollectionInstance;
 use crate::collection::Collection;
-use crate::error::{self, TCResult};
+use crate::error;
+use crate::general::{Map, TCResult, TCStream};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::*;
@@ -38,7 +39,10 @@ fn format_schema(schema: &[Column]) -> String {
 fn validate_key(key: Key, schema: &[Column]) -> TCResult<Key> {
     if key.len() != schema.len() {
         return Err(error::bad_request(
-            &format!("Invalid key {} for schema", Value::Tuple(key.to_vec())),
+            &format!(
+                "Invalid key {} for schema",
+                Value::Tuple(key.to_vec().into())
+            ),
             format_schema(schema),
         ));
     }
@@ -51,7 +55,7 @@ fn validate_prefix(prefix: Key, schema: &[Column]) -> TCResult<Key> {
         return Err(error::bad_request(
             &format!(
                 "Invalid selector {} for schema",
-                Value::Tuple(prefix.to_vec())
+                Value::Tuple(prefix.to_vec().into())
             ),
             format_schema(schema),
         ));
@@ -135,7 +139,7 @@ where
             let mut rows = self.btree.stream(txn.id().clone(), range, false).await?;
             let row = rows.next().await;
             row.ok_or_else(|| error::not_found("(btree key)"))
-                .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key))))
+                .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key.into()))))
         } else {
             let slice = BTreeSlice::new(self.btree.clone().into(), range, false)?;
             Ok(State::Collection(slice.into()))
@@ -162,7 +166,12 @@ where
         self.slice(txn, range).await
     }
 
-    async fn handle_post(&self, _request: &Request, txn: &Txn, mut params: Map) -> TCResult<State> {
+    async fn handle_post(
+        &self,
+        _request: &Request,
+        txn: &Txn,
+        mut params: Map<Scalar>,
+    ) -> TCResult<State> {
         let range = params
             .remove(&label("where").into())
             .unwrap_or_else(|| Scalar::from(()));
@@ -208,7 +217,7 @@ where
         &self,
         _request: &Request,
         _txn: &Txn,
-        mut params: Map,
+        mut params: Map<Scalar>,
     ) -> TCResult<State> {
         let range = params
             .remove(&label("where").into())

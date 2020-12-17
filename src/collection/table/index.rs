@@ -7,11 +7,12 @@ use futures::future::{self, join_all, try_join_all, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
 
-use crate::class::{Instance, TCResult, TCStream};
+use crate::class::Instance;
 use crate::collection::btree::{self, BTreeFile, BTreeInstance};
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::Collection;
 use crate::error;
+use crate::general::{TCResult, TCStream};
 use crate::scalar::{Id, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 

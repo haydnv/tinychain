@@ -4,8 +4,9 @@ use async_trait::async_trait;
 use futures::future::try_join_all;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
+use crate::general::TCResult;
 use crate::scalar::{
     label, Id, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
     TryCastInto, Value,

@@ -16,6 +16,7 @@ mod cluster;
 mod collection;
 mod error;
 mod gateway;
+mod general;
 mod handler;
 mod kernel;
 mod lock;
@@ -29,7 +30,7 @@ mod transaction;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 static LOGGER: logger::Logger = logger::Logger;
 
-fn data_size(flag: &str) -> error::TCResult<usize> {
+fn data_size(flag: &str) -> general::TCResult<usize> {
     if flag.is_empty() {
         return Err(error::bad_request("Invalid size specified", flag));
     }
@@ -47,7 +48,7 @@ fn data_size(flag: &str) -> error::TCResult<usize> {
     }
 }
 
-fn duration(flag: &str) -> error::TCResult<Duration> {
+fn duration(flag: &str) -> general::TCResult<Duration> {
     u64::from_str(flag)
         .map(Duration::from_secs)
         .map_err(|_| error::bad_request("Invalid duration", flag))
@@ -132,7 +133,7 @@ async fn configure(
     clusters: Vec<scalar::value::link::TCPathBuf>,
     data_dir: Arc<block::Dir>,
     workspace: Arc<block::Dir>,
-) -> error::TCResult<gateway::Hosted> {
+) -> general::TCResult<gateway::Hosted> {
     const RESERVED: [&str; 2] = ["/sbin", "/txn"];
 
     let mut hosted = gateway::Hosted::new();

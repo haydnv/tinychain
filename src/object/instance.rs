@@ -3,8 +3,9 @@ use std::fmt;
 use std::ops::Deref;
 
 use crate::class::{Instance, State};
+use crate::general::Map;
 use crate::handler::*;
-use crate::scalar::{self, MethodType, PathSegment, Scalar};
+use crate::scalar::{MethodType, PathSegment, Scalar};
 
 use super::InstanceClass;
 
@@ -70,8 +71,8 @@ impl<T: Instance> From<T> for InstanceExt<T> {
     }
 }
 
-impl From<scalar::Map> for InstanceExt<State> {
-    fn from(scalar: scalar::Map) -> InstanceExt<State> {
+impl From<Map<Scalar>> for InstanceExt<State> {
+    fn from(scalar: Map<Scalar>) -> InstanceExt<State> {
         let class = InstanceClass::from_class(scalar.class());
 
         InstanceExt {

@@ -6,7 +6,8 @@ use arrayfire as af;
 use bytes::Bytes;
 
 use crate::block::BlockData;
-use crate::error::{self, TCResult};
+use crate::error;
+use crate::general::TCResult;
 use crate::scalar::value::number::*;
 use crate::scalar::{CastFrom, CastInto};
 

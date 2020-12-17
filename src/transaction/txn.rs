@@ -15,9 +15,10 @@ use serde::de;
 use tokio::sync::mpsc;
 
 use crate::block::{BlockData, Dir, DirEntry, File};
-use crate::class::{State, TCBoxTryFuture, TCResult};
+use crate::class::State;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
+use crate::general::{TCBoxTryFuture, TCResult};
 use crate::lock::RwLock;
 use crate::request::Request;
 use crate::scalar::*;
@@ -201,7 +202,10 @@ impl Txn {
             let mut resolved = vec![];
 
             {
-                debug!("program is {}", Value::from_iter(program.iter().map(|(id, _)| id.clone())));
+                debug!(
+                    "program is {}",
+                    Value::from_iter(program.iter().map(|(id, _)| id.clone()))
+                );
 
                 let mut pending = FuturesUnordered::new();
                 let mut reduced = VecDeque::with_capacity(program.len());

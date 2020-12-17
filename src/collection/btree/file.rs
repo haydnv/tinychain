@@ -15,10 +15,11 @@ use uuid::Uuid;
 
 use crate::block::File;
 use crate::block::{BlockData, BlockId, BlockOwned, BlockOwnedMut};
-use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream};
+use crate::class::Instance;
 use crate::collection::schema::{Column, RowSchema};
 use crate::collection::Collection;
 use crate::error;
+use crate::general::{TCBoxTryFuture, TCResult, TCStream};
 use crate::scalar::*;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -67,7 +68,7 @@ impl fmt::Display for NodeKey {
         write!(
             f,
             "BTree node key: {}{}",
-            Value::Tuple(self.value.to_vec()),
+            Value::Tuple(self.value.to_vec().into()),
             if self.deleted { " (DELETED)" } else { "" }
         )
     }

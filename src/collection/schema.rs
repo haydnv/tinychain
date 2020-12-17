@@ -3,17 +3,18 @@ use std::fmt;
 
 use log::debug;
 
-use crate::error::{self, TCResult};
+use crate::error;
+use crate::general::{Map, TCResult};
 use crate::scalar::*;
 
 pub type Row = HashMap<Id, Value>;
 
-impl TryCastFrom<Map> for Row {
-    fn can_cast_from(object: &Map) -> bool {
+impl TryCastFrom<Map<Scalar>> for Row {
+    fn can_cast_from(object: &Map<Scalar>) -> bool {
         object.values().all(Value::can_cast_from)
     }
 
-    fn opt_cast_from(object: Map) -> Option<Row> {
+    fn opt_cast_from(object: Map<Scalar>) -> Option<Row> {
         let mut row = Row::new();
 
         for (id, value) in object.into_inner().into_iter() {
@@ -247,7 +248,7 @@ impl IndexSchema {
         if key.len() != self.key.len() {
             let key_columns: Vec<String> = self.key.iter().map(|c| c.to_string()).collect();
             return Err(error::bad_request(
-                format!("Invalid key {}, expected", Value::Tuple(key)),
+                format!("Invalid key {}, expected", Value::Tuple(key.into())),
                 format!("[{}]", key_columns.join(", ")),
             ));
         }

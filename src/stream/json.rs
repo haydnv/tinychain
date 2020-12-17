@@ -6,8 +6,8 @@ use futures::stream::{Fuse, Stream, StreamExt};
 use pin_project::pin_project;
 use serde::Serialize;
 
-use crate::class::TCResult;
 use crate::error;
+use crate::general::TCResult;
 
 #[pin_project]
 pub struct JsonListStream<I: Serialize, S: Stream<Item = I>> {

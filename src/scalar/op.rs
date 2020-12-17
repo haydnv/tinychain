@@ -5,14 +5,14 @@ use async_trait::async_trait;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::auth::{Scope, SCOPE_EXECUTE};
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
+use crate::general::{Map, TCResult};
 use crate::handler::Handler;
 use crate::request::Request;
 use crate::transaction::Txn;
 
 use super::link::{Link, TCPathBuf};
-use super::map::Map;
 use super::{
     label, Id, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TryCastFrom,
     TryCastInto, Value,
@@ -285,7 +285,12 @@ impl<'a> Handler for PostHandler<'a> {
         Some(SCOPE_EXECUTE.into())
     }
 
-    async fn handle_post(&self, request: &Request, txn: &Txn, params: Map) -> TCResult<State> {
+    async fn handle_post(
+        &self,
+        request: &Request,
+        txn: &Txn,
+        params: Map<Scalar>,
+    ) -> TCResult<State> {
         let graph = params
             .into_inner()
             .into_iter()

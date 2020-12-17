@@ -2,12 +2,13 @@ use async_trait::async_trait;
 use futures::stream;
 
 use crate::auth::{Scope, SCOPE_WRITE};
-use crate::class::{Instance, TCResult, TCStream, TCType};
+use crate::class::{Instance, TCType};
 use crate::collection::btree::BTreeFile;
 use crate::collection::table::TableIndex;
 use crate::collection::tensor::dense::{BlockListFile, DenseTensor};
 use crate::collection::tensor::sparse::{SparseTable, SparseTensor};
 use crate::error;
+use crate::general::{TCResult, TCStream};
 use crate::handler::*;
 use crate::scalar::{MethodType, PathSegment, Value};
 use crate::transaction::{Transact, Txn, TxnId};

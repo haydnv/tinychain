@@ -7,8 +7,9 @@ use bytes::Bytes;
 use serde::de;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-use crate::class::{Instance, NativeClass, State, TCResult, TCType};
+use crate::class::{Instance, NativeClass, State, TCType};
 use crate::error;
+use crate::general::{TCResult, Tuple};
 use crate::handler::{Handler, Route};
 use crate::transaction::Txn;
 
@@ -24,6 +25,7 @@ use crate::scalar::MethodType;
 pub use class::*;
 pub use link::*;
 pub use number::*;
+use std::ops::Deref;
 pub use string::*;
 pub use version::*;
 
@@ -34,7 +36,7 @@ pub enum Value {
     Class(TCType),
     Number(Number),
     TCString(TCString),
-    Tuple(Vec<Value>),
+    Tuple(Tuple<Value>),
 }
 
 impl Value {
@@ -72,17 +74,33 @@ impl ValueInstance for Value {
 
 impl Route for Value {
     fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
-        if method != MethodType::Get {
-            return None;
-        }
-
-        if !path.is_empty() && &path[0] == "eq" {
+        if method != MethodType::Get || path.is_empty() {
+            None
+        } else if &path[0] == "eq" {
             return Some(Box::new(EqHandler { value: self }));
         } else {
             match self {
                 Self::Number(n) => n.route(method, path),
+                Self::Tuple(tuple) => tuple.route(method, path),
                 _ => None,
             }
+        }
+    }
+}
+
+impl Route for Tuple<Value> {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        if method != MethodType::Get || path.is_empty() {
+            None
+        } else if usize::can_cast_from(&path[0]) {
+            let i = usize::opt_cast_from(path[0].clone()).unwrap();
+            if let Some(value) = self.deref().get(i) {
+                value.route(method, path)
+            } else {
+                None
+            }
+        } else {
+            None
         }
     }
 }
@@ -165,7 +183,7 @@ impl<T: Into<Value>> FromIterator<T> for Value {
         for item in iter {
             tuple.push(item.into());
         }
-        Value::Tuple(tuple)
+        Value::Tuple(tuple.into())
     }
 }
 
@@ -177,7 +195,7 @@ impl<T: Into<Value>> From<Vec<T>> for Value {
 
 impl<T1: Into<Value>, T2: Into<Value>> From<(T1, T2)> for Value {
     fn from(tuple: (T1, T2)) -> Value {
-        Value::Tuple(vec![tuple.0.into(), tuple.1.into()])
+        Value::Tuple(vec![tuple.0.into(), tuple.1.into()].into())
     }
 }
 
@@ -329,23 +347,23 @@ impl<'a> TryFrom<&'a Value> for &'a Id {
     }
 }
 
-impl TryFrom<Value> for Vec<Value> {
+impl TryFrom<Value> for Tuple<Value> {
     type Error = error::TCError;
 
-    fn try_from(v: Value) -> TCResult<Vec<Value>> {
+    fn try_from(v: Value) -> TCResult<Tuple<Value>> {
         match v {
-            Value::Tuple(t) => Ok(t),
+            Value::Tuple(t) => Ok(t.into()),
             other => Err(error::bad_request("Expected Tuple, found", other)),
         }
     }
 }
 
-impl TryCastFrom<Vec<Scalar>> for Value {
-    fn can_cast_from(tuple: &Vec<Scalar>) -> bool {
-        for s in tuple {
+impl TryCastFrom<Tuple<Scalar>> for Value {
+    fn can_cast_from(tuple: &Tuple<Scalar>) -> bool {
+        for s in tuple.iter() {
             match s {
                 Scalar::Value(_) => {}
-                Scalar::Tuple(nested) if Value::can_cast_from(nested) => {}
+                Scalar::Tuple(nested) if Self::can_cast_from(nested) => {}
                 _ => return false,
             }
         }
@@ -353,13 +371,13 @@ impl TryCastFrom<Vec<Scalar>> for Value {
         true
     }
 
-    fn opt_cast_from(tuple: Vec<Scalar>) -> Option<Value> {
+    fn opt_cast_from(tuple: Tuple<Scalar>) -> Option<Value> {
         let mut values = Vec::with_capacity(tuple.len());
-        for s in tuple.into_iter() {
+        for s in tuple.into_inner().into_iter() {
             match s {
                 Scalar::Value(value) => values.push(value),
                 Scalar::Tuple(nested) => {
-                    if let Some(nested) = Value::opt_cast_from(nested) {
+                    if let Some(nested) = Self::opt_cast_from(nested) {
                         values.push(nested);
                     } else {
                         return None;
@@ -369,7 +387,34 @@ impl TryCastFrom<Vec<Scalar>> for Value {
             }
         }
 
-        Some(Value::Tuple(values))
+        Some(Value::Tuple(values.into()))
+    }
+}
+
+impl TryCastFrom<Scalar> for Tuple<Value> {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Tuple(tuple) => tuple.iter().all(Value::can_cast_from),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Tuple<Value>> {
+        match scalar {
+            Scalar::Tuple(tuple) => {
+                let mut cast = Vec::with_capacity(tuple.len());
+                for item in tuple.into_inner().into_iter() {
+                    if let Some(value) = Value::opt_cast_from(item) {
+                        cast.push(value);
+                    } else {
+                        return None;
+                    }
+                }
+
+                Some(cast.into())
+            }
+            _ => None,
+        }
     }
 }
 
@@ -546,7 +591,7 @@ impl<T: TryCastFrom<Value>> TryCastFrom<Value> for Vec<T> {
     fn opt_cast_from(value: Value) -> Option<Vec<T>> {
         if let Value::Tuple(values) = value {
             let mut cast: Vec<T> = Vec::with_capacity(values.len());
-            for val in values.into_iter() {
+            for val in values.into_inner().into_iter() {
                 if let Some(val) = val.opt_cast_into() {
                     cast.push(val)
                 } else {
@@ -707,7 +752,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
             items.push(value)
         }
 
-        Ok(Value::Tuple(items))
+        Ok(Value::Tuple(items.into()))
     }
 
     fn visit_map<M: de::MapAccess<'de>>(self, mut access: M) -> Result<Self::Value, M::Error> {
@@ -722,7 +767,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
             } else if let Ok(link) = key.parse::<link::Link>() {
                 let path = link.path();
 
-                if value == Value::None || value == Value::Tuple(vec![]) {
+                if value == Value::None || value == Value::Tuple(Tuple::default()) {
                     Ok(Value::TCString(link.into()))
                 } else if link.host().is_none() && path[..].starts_with(&ValueType::prefix()[..]) {
                     if let Value::Tuple(mut tuple) = value {
@@ -785,7 +830,7 @@ impl Serialize for Value {
             Value::TCString(tc_string) => tc_string.serialize(s),
             Value::Tuple(v) => {
                 let mut seq = s.serialize_seq(Some(v.len()))?;
-                for item in v {
+                for item in v.iter() {
                     seq.serialize_element(item)?;
                 }
                 seq.end()

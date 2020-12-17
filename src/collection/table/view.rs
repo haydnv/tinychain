@@ -13,6 +13,7 @@ use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::Collection;
 use crate::error;
+use crate::general::{TCResult, TCStream};
 use crate::scalar::{Id, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 

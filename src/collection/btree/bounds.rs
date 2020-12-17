@@ -2,7 +2,8 @@ use std::cmp::Ordering;
 use std::fmt;
 
 use crate::collection::schema::Column;
-use crate::error::{self, TCResult};
+use crate::error;
+use crate::general::TCResult;
 use crate::scalar::*;
 
 use super::collator::Collator;

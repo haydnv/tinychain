@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, State, TCType};
-use crate::error::{self, TCResult};
+use crate::error;
+use crate::general::{Map, TCResult};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{
-    self, label, Id, Key, Link, MethodType, OpRef, PathSegment, Scalar, TCPath, TCPathBuf,
-    TryCastInto, Value,
+    label, Id, Key, Link, MethodType, OpRef, PathSegment, Scalar, TCPath, TCPathBuf, TryCastInto, Value,
 };
 use crate::transaction::Txn;
 
@@ -21,12 +21,10 @@ use super::{InstanceExt, ObjectType};
 pub struct InstanceClassType;
 
 impl InstanceClassType {
-    pub fn post(path: &[PathSegment], data: scalar::Map) -> TCResult<InstanceClass> {
+    pub fn post(path: &[PathSegment], mut data: Map<Scalar>) -> TCResult<InstanceClass> {
         debug!("InstanceClassType::post {}", TCPath::from(path));
 
         if path == &Self::prefix()[..] {
-            let mut data: HashMap<Id, Scalar> = data.into();
-
             let extends = if let Some(extends) = data.remove(&label("extends").into()) {
                 let link = extends.try_cast_into(|v| {
                     error::bad_request("'extends' must be a Link to a Class, not", v)
@@ -37,9 +35,9 @@ impl InstanceClassType {
                 None
             };
 
-            let proto: scalar::Map = data
+            let proto = data
                 .remove(&label("proto").into())
-                .unwrap_or_else(|| scalar::Map::default().into())
+                .unwrap_or_else(|| Scalar::Map(Map::<Scalar>::default()))
                 .try_into()?;
 
             if data.is_empty() {
@@ -95,13 +93,13 @@ impl fmt::Display for InstanceClassType {
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct InstanceClass {
     extends: Option<Link>,
-    proto: scalar::Map,
+    proto: Map<Scalar>,
 }
 
 impl InstanceClass {
     pub fn from_class<C: Class>(class: C) -> InstanceClass {
         let extends = Some(class.into());
-        let proto = scalar::Map::default();
+        let proto = Map::<Scalar>::default();
         Self { extends, proto }
     }
 
@@ -113,7 +111,7 @@ impl InstanceClass {
         }
     }
 
-    pub fn proto(&'_ self) -> &'_ scalar::Map {
+    pub fn proto(&'_ self) -> &'_ Map<Scalar> {
         &self.proto
     }
 

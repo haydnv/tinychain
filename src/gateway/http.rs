@@ -15,9 +15,10 @@ use serde::de::DeserializeOwned;
 use tokio::time::timeout;
 
 use crate::auth::Token;
-use crate::class::{State, TCResult, TCStream};
+use crate::class::State;
 use crate::collection::class::CollectionInstance;
 use crate::error;
+use crate::general::{TCResult, TCStream};
 use crate::request::Request;
 use crate::scalar::value::link::*;
 use crate::scalar::{Id, Scalar, Value};

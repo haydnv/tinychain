@@ -9,10 +9,10 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 use crate::chain;
-use crate::class::{TCBoxTryFuture, TCResult};
 use crate::collection::btree;
 use crate::collection::tensor;
 use crate::error;
+use crate::general::{TCBoxTryFuture, TCResult};
 use crate::lock::RwLock;
 use crate::scalar::value::link::{PathSegment, TCPath};
 use crate::transaction::lock::{Mutate, TxnLock};

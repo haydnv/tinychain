@@ -7,8 +7,8 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use signature::{Signature, Signer, Verifier};
 
-use crate::class::TCResult;
 use crate::error;
+use crate::general::TCResult;
 use crate::scalar::{path_label, Link, PathLabel, TCPathBuf, Value};
 
 pub type Scope = TCPathBuf;

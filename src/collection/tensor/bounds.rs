@@ -5,8 +5,8 @@ use std::ops::{self, Deref, DerefMut};
 
 use itertools::{Itertools, MultiProduct};
 
-use crate::class::TCResult;
 use crate::error;
+use crate::general::TCResult;
 use crate::scalar::{Bound, Scalar, ScalarInstance, Slice, TryCastFrom, TryCastInto, Value};
 
 pub type Coords = MultiProduct<AxisIter>;
@@ -145,7 +145,7 @@ impl Bounds {
             Scalar::Tuple(bounds) => {
                 let mut axes = Vec::with_capacity(shape.len());
 
-                for (axis, bound) in bounds.into_iter().enumerate() {
+                for (axis, bound) in bounds.into_inner().into_iter().enumerate() {
                     let bound = match bound {
                         bound if bound.is_none() => AxisBounds::In(0..shape[axis]),
                         Scalar::Slice(Slice::Range(range)) => {
@@ -166,7 +166,7 @@ impl Bounds {
                         Scalar::Value(Value::Tuple(indices)) => {
                             let indices = shape[..]
                                 .iter()
-                                .zip(indices.into_iter())
+                                .zip(indices.into_inner().into_iter())
                                 .map(|(dim, i)| Self::cast_bound(*dim, i.into()))
                                 .collect::<TCResult<Vec<u64>>>()?;
                             AxisBounds::Of(indices)
@@ -190,12 +190,12 @@ impl Bounds {
             }
             Scalar::Value(Value::Tuple(bounds)) => {
                 let mut axes = Vec::with_capacity(shape.len());
-                for (axis, bound) in bounds.into_iter().enumerate() {
+                for (axis, bound) in bounds.into_inner().into_iter().enumerate() {
                     let bound = match bound {
                         Value::Tuple(indices) => {
                             let indices = shape[..]
                                 .iter()
-                                .zip(indices.into_iter())
+                                .zip(indices.into_inner().into_iter())
                                 .map(|(dim, i)| Self::cast_bound(*dim, i.into()))
                                 .collect::<TCResult<Vec<u64>>>()?;
                             AxisBounds::Of(indices)

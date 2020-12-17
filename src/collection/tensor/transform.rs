@@ -3,8 +3,8 @@ use std::iter;
 
 use log::debug;
 
-use crate::class::TCResult;
 use crate::error;
+use crate::general::TCResult;
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 

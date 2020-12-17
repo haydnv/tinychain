@@ -8,8 +8,8 @@ use futures::future::join_all;
 use log::debug;
 use uuid::Uuid;
 
-use crate::class::TCResult;
 use crate::error;
+use crate::general::TCResult;
 use crate::lock::RwLock;
 use crate::scalar::value::link::PathSegment;
 use crate::transaction::lock::{Mutable, TxnLock, TxnLockReadGuard};

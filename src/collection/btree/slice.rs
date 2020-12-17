@@ -3,10 +3,11 @@ use futures::stream::{Stream, StreamExt};
 
 use log::debug;
 
-use crate::class::{Instance, TCResult, TCStream};
+use crate::class::Instance;
 use crate::collection::schema::Column;
 use crate::collection::Collection;
 use crate::error;
+use crate::general::{TCResult, TCStream};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::{BTree, BTreeFile, BTreeImpl, BTreeInstance, BTreeRange, BTreeType, Key};

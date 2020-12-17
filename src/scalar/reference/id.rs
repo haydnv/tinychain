@@ -7,7 +7,8 @@ use serde::de;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::State;
-use crate::error::{self, TCResult};
+use crate::error;
+use crate::general::TCResult;
 use crate::request::Request;
 use crate::scalar::{Id, Scalar, TCString, TryCastFrom, Value};
 use crate::transaction::Txn;

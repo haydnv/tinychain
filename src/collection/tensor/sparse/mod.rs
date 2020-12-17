@@ -7,11 +7,12 @@ use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
-use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
+use crate::class::Instance;
 use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::collection::Collection;
 use crate::error;
+use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
 use crate::handler::*;
 use crate::scalar::value::number::*;
 use crate::scalar::{label, Bound, Id, Label, MethodType, PathSegment, Value, ValueType};

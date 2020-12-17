@@ -4,7 +4,8 @@ use std::str::FromStr;
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
-use crate::error::{self, TCResult};
+use crate::error;
+use crate::general::TCResult;
 
 #[derive(Clone)]
 pub struct Version {

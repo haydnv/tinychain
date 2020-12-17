@@ -5,8 +5,9 @@ use std::ops::{Add, Mul, Sub};
 
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-use crate::class::{Instance, TCResult};
+use crate::class::Instance;
 use crate::error;
+use crate::general::TCResult;
 use crate::handler::{Handler, Route};
 use crate::scalar::{
     CastFrom, CastInto, Link, MethodType, PathSegment, ScalarInstance, ValueInstance,

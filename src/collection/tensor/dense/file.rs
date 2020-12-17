@@ -13,8 +13,9 @@ use num::integer::div_ceil;
 
 use crate::block::BlockId;
 use crate::block::File;
-use crate::class::{Instance, TCBoxTryFuture, TCResult, TCTryStream};
+use crate::class::Instance;
 use crate::error;
+use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 

@@ -7,9 +7,10 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 use log::debug;
 
-use crate::class::{Instance, TCBoxTryFuture, TCResult, TCStream, TCTryStream};
+use crate::class::Instance;
 use crate::collection::{from_dense, Collection};
 use crate::error;
+use crate::general::*;
 use crate::handler::*;
 use crate::scalar::number::*;
 use crate::scalar::{MethodType, PathSegment};

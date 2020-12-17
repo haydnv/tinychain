@@ -10,8 +10,8 @@ use futures::future::{self, Future};
 use futures::task::{Context, Poll, Waker};
 use log::debug;
 
-use crate::class::TCResult;
 use crate::error;
+use crate::general::TCResult;
 
 use super::{Transact, TxnId};
 

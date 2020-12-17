@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
-use crate::class::TCBoxTryFuture;
-use crate::error::{self, TCResult};
+use crate::error;
+use crate::general::{TCBoxTryFuture, TCResult};
 use crate::scalar::value::number::*;
 use crate::transaction::{Txn, TxnId};
 
@@ -14,9 +14,8 @@ pub mod class;
 pub mod dense;
 pub mod sparse;
 
-use crate::collection::tensor::class::TensorInstance;
 pub use bounds::*;
-pub use class::{Tensor, TensorType};
+pub use class::{Tensor, TensorInstance, TensorType};
 pub use dense::{from_sparse, Array, DenseTensor};
 pub use einsum::einsum;
 pub use sparse::{from_dense, SparseTensor};

@@ -3,10 +3,11 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::{Stream, TryFutureExt};
 
-use crate::class::{Class, Instance, NativeClass, TCResult, TCStream, TCType};
+use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::collection::class::*;
 use crate::collection::schema::Column;
 use crate::error;
+use crate::general::{TCResult, TCStream};
 use crate::scalar::{label, Link, PathSegment, TCPathBuf, TryCastInto, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 

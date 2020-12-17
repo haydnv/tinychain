@@ -3,7 +3,8 @@ use std::ops::{Add, Mul, Sub};
 
 use async_trait::async_trait;
 
-use crate::class::{Instance, State, TCResult, TCType};
+use crate::class::{Instance, State, TCType};
+use crate::general::TCResult;
 use crate::transaction::Txn;
 
 use crate::handler::*;

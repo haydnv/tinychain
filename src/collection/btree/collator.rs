@@ -2,8 +2,9 @@ use std::cmp::Ordering::{self, *};
 use std::convert::{TryFrom, TryInto};
 use std::ops::Deref;
 
-use crate::class::{Instance, TCResult};
+use crate::class::Instance;
 use crate::error;
+use crate::general::TCResult;
 use crate::scalar::{Bound, Id, Number, NumberType, StringType, TCString, Value, ValueType};
 
 #[derive(Clone)]

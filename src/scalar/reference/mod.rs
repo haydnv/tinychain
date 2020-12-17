@@ -4,8 +4,9 @@ use std::fmt;
 use async_trait::async_trait;
 use serde::ser::{Serialize, Serializer};
 
-use crate::class::{Class, Instance, NativeClass, State, TCResult, TCType};
+use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
+use crate::general::TCResult;
 use crate::request::Request;
 use crate::scalar::{
     label, Id, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TCPath,

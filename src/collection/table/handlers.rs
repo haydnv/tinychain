@@ -6,13 +6,14 @@ use futures::stream::StreamExt;
 use futures::TryFutureExt;
 
 use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
-use crate::class::{Instance, State, TCResult, TCStream, TCType};
+use crate::class::{Instance, State, TCType};
 use crate::collection::CollectionInstance;
 use crate::error;
+use crate::general::{Map, TCResult, TCStream};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{
-    Id, Map, MethodType, PathSegment, Scalar, ScalarInstance, TryCastFrom, TryCastInto, Value,
+    Id, MethodType, PathSegment, Scalar, ScalarInstance, TryCastFrom, TryCastInto, Value,
 };
 use crate::transaction::Txn;
 
@@ -220,7 +221,12 @@ where
         Some(SCOPE_WRITE.into())
     }
 
-    async fn handle_post(&self, _request: &Request, txn: &Txn, params: Map) -> TCResult<State> {
+    async fn handle_post(
+        &self,
+        _request: &Request,
+        txn: &Txn,
+        params: Map<Scalar>,
+    ) -> TCResult<State> {
         let update = params.try_cast_into(|v| error::bad_request("Invalid update", v))?;
 
         self.table
@@ -307,7 +313,12 @@ where
         }
     }
 
-    async fn handle_post(&self, _request: &Request, _txn: &Txn, params: Map) -> TCResult<State> {
+    async fn handle_post(
+        &self,
+        _request: &Request,
+        _txn: &Txn,
+        params: Map<Scalar>,
+    ) -> TCResult<State> {
         let bounds = Bounds::try_cast_from(params, |v| {
             error::bad_request("Cannot cast into Table Bounds from", v)
         })?;
@@ -402,13 +413,13 @@ impl<T: TableInstance> From<T> for TableImpl<T> {
 
 fn try_into_row(selector: Value, values: State) -> TCResult<(Vec<Value>, Vec<Value>)> {
     let key = match selector {
-        Value::Tuple(key) => key,
+        Value::Tuple(key) => key.into_inner(),
         other => vec![other],
     };
 
     let values = Value::try_cast_from(values, |v| error::bad_request("Invalid row value", v))?;
     let values = match values {
-        Value::Tuple(values) => values,
+        Value::Tuple(values) => values.into_inner(),
         other => vec![other],
     };
 

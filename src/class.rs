@@ -1,26 +1,16 @@
-use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::pin::Pin;
-
-use futures::future::Future;
-use futures::stream::Stream;
+use std::ops::Deref;
 
 use crate::chain::{Chain, ChainType};
 use crate::collection::{Collection, CollectionType};
 use crate::error;
+use crate::general::{Map, TCResult, Tuple};
 use crate::handler::*;
 use crate::object::{Object, ObjectType};
 use crate::scalar::{
-    label, path_label, Id, Link, MethodType, PathSegment, Scalar, ScalarType, TCPathBuf, Value,
-    ValueType,
+    label, Link, MethodType, PathSegment, Scalar, ScalarType, TCPathBuf, TryCastFrom, Value, ValueType,
 };
-
-pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send>>;
-pub type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
-pub type TCResult<T> = error::TCResult<T>;
-pub type TCStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin>>;
-pub type TCTryStream<T> = TCStream<TCResult<T>>;
 
 pub trait Class: Into<Link> + Clone + Eq + fmt::Display {
     type Instance: Instance;
@@ -114,10 +104,10 @@ impl From<TCType> for Link {
         match t {
             TCType::Chain(ct) => ct.into(),
             TCType::Collection(ct) => ct.into(),
-            TCType::Map => path_label(&["sbin", "map"]).into(),
+            TCType::Map => ScalarType::Map.into(),
             TCType::Object(ot) => ot.into(),
             TCType::Scalar(st) => st.into(),
-            TCType::Tuple => path_label(&["sbin", "tuple"]).into(),
+            TCType::Tuple => ScalarType::Tuple.into(),
         }
     }
 }
@@ -139,10 +129,10 @@ impl fmt::Display for TCType {
 pub enum State {
     Chain(Chain),
     Collection(Collection),
-    Map(Box<HashMap<Id, State>>),
+    Map(Map<State>),
     Object(Object),
     Scalar(Scalar),
-    Tuple(Box<Vec<State>>),
+    Tuple(Tuple<State>),
 }
 
 impl State {
@@ -181,9 +171,47 @@ impl Route for State {
         match self {
             Self::Chain(chain) => chain.route(method, path),
             Self::Collection(collection) => collection.route(method, path),
+            Self::Map(map) => map.route(method, path),
             Self::Object(object) => object.route(method, path),
             Self::Scalar(scalar) => scalar.route(method, path),
-            _ => None, // TODO: impl Route for Map and Tuple
+            Self::Tuple(tuple) => tuple.route(method, path),
+        }
+    }
+}
+
+impl Route for Map<State> {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        if path.is_empty() {
+            None
+        } else if let Some(state) = self.deref().get(&path[0]) {
+            match state {
+                State::Scalar(Scalar::Op(op_def)) if path.len() == 1 => {
+                    Some(op_def.handler(Some(self.clone().into())))
+                }
+                other => other.route(method, &path[1..]),
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl Route for Tuple<State> {
+    fn route(&'_ self, method: MethodType, path: &[PathSegment]) -> Option<Box<dyn Handler + '_>> {
+        if path.is_empty() {
+            None
+        } else if usize::can_cast_from(&path[0]) {
+            let i = usize::opt_cast_from(path[0].clone()).unwrap();
+
+            match self.deref().get(i) {
+                Some(State::Scalar(Scalar::Op(op_def))) if path.len() == 1 => {
+                    Some(op_def.handler(Some(self.clone().into())))
+                }
+                Some(other) => other.route(method, &path[1..]),
+                None => None,
+            }
+        } else {
+            None
         }
     }
 }
@@ -200,6 +228,12 @@ impl From<Collection> for State {
     }
 }
 
+impl From<Map<State>> for State {
+    fn from(map: Map<State>) -> State {
+        Self::Map(map)
+    }
+}
+
 impl From<Object> for State {
     fn from(o: Object) -> State {
         State::Object(o)
@@ -209,6 +243,12 @@ impl From<Object> for State {
 impl From<Scalar> for State {
     fn from(s: Scalar) -> State {
         Self::Scalar(s)
+    }
+}
+
+impl From<Tuple<State>> for State {
+    fn from(tuple: Tuple<State>) -> State {
+        State::Tuple(tuple)
     }
 }
 

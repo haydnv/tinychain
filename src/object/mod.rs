@@ -3,9 +3,10 @@ use std::fmt;
 use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, State, TCType};
-use crate::error::{self, TCResult};
+use crate::error;
+use crate::general::{Map, TCResult};
 use crate::handler::*;
-use crate::scalar::{self, label, Link, MethodType, PathSegment, TCPath, TCPathBuf};
+use crate::scalar::{label, Link, MethodType, PathSegment, Scalar, TCPath, TCPathBuf};
 
 mod class;
 mod instance;
@@ -20,7 +21,7 @@ pub enum ObjectType {
 }
 
 impl ObjectType {
-    pub fn post(path: &[PathSegment], data: scalar::Map) -> TCResult<Object> {
+    pub fn post(path: &[PathSegment], data: Map<Scalar>) -> TCResult<Object> {
         debug!("ObjectType::post {} <- {}", TCPath::from(path), data);
 
         if path.starts_with(&InstanceClassType::prefix()) {
