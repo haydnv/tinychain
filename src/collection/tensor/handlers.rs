@@ -7,10 +7,10 @@ use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
 use crate::class::{State, TCType};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{Map, TCResult};
+use crate::general::{Map, TCResult, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
-use crate::scalar::{label, MethodType, NumberType, PathSegment, Scalar, TryCastInto, Value};
+use crate::scalar::{label, MethodType, NumberType, PathSegment, Scalar, Value};
 use crate::transaction::Txn;
 
 use super::bounds::*;

@@ -4,8 +4,8 @@ use std::fmt;
 use log::debug;
 
 use crate::error;
-use crate::general::{Map, TCResult};
-use crate::scalar::*;
+use crate::general::{Map, TCResult, TryCastFrom, TryCastInto};
+use crate::scalar::{Id, NumberType, Scalar, ScalarClass, ScalarInstance, Value, ValueType};
 
 pub type Row = HashMap<Id, Value>;
 

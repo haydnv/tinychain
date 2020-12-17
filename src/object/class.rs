@@ -7,12 +7,11 @@ use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
-use crate::general::{Map, TCResult};
+use crate::general::{Map, TCResult, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{
-    label, Id, Key, Link, MethodType, OpRef, PathSegment, Scalar, TCPath, TCPathBuf, TryCastInto,
-    Value,
+    label, Id, Key, Link, MethodType, OpRef, PathSegment, Scalar, TCPath, TCPathBuf, Value,
 };
 use crate::transaction::Txn;
 

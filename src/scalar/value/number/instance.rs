@@ -7,11 +7,9 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::Instance;
 use crate::error;
-use crate::general::TCResult;
+use crate::general::{CastFrom, CastInto, TCResult};
 use crate::handler::{Handler, Route};
-use crate::scalar::{
-    CastFrom, CastInto, Link, MethodType, PathSegment, ScalarInstance, ValueInstance,
-};
+use crate::scalar::{Link, MethodType, PathSegment, ScalarInstance, ValueInstance};
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{NumberClass, NumberInstance};

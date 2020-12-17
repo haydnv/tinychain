@@ -10,7 +10,7 @@ use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCStream};
+use crate::general::{TCBoxTryFuture, TCResult, TCStream, TryCastInto};
 use crate::handler::*;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};

@@ -8,9 +8,9 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::State;
 use crate::error;
-use crate::general::TCResult;
+use crate::general::{TCResult, TryCastFrom};
 use crate::request::Request;
-use crate::scalar::{Id, Scalar, TCString, TryCastFrom, Value};
+use crate::scalar::{Id, Scalar, TCString, Value};
 use crate::transaction::Txn;
 
 use super::{Refer, TCRef};

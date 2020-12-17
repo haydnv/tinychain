@@ -4,11 +4,11 @@ use std::ops::{Add, Mul, Sub};
 use async_trait::async_trait;
 
 use crate::class::{Instance, State, TCType};
-use crate::general::TCResult;
+use crate::general::{CastFrom, TCResult};
 use crate::transaction::Txn;
 
 use crate::handler::*;
-use crate::scalar::{CastFrom, MethodType, PathSegment, Value};
+use crate::scalar::{MethodType, PathSegment, Value};
 
 use super::{Boolean, Number, NumberInstance};
 

@@ -10,14 +10,14 @@ use serde::ser::{Serialize, Serializer};
 
 use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
-use crate::general::{Map, TCResult};
+use crate::general::{Map, TCResult, TryCastFrom, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
 use crate::transaction::Txn;
 
 use super::reference::Refer;
 use super::value::{label, Id, Link, PathSegment, TCPathBuf};
-use super::{MethodType, Scalar, ScalarInstance, ScalarType, TryCastFrom, TryCastInto};
+use super::{MethodType, Scalar, ScalarInstance, ScalarType};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct MapType;

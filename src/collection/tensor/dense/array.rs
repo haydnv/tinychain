@@ -7,9 +7,8 @@ use bytes::Bytes;
 
 use crate::block::BlockData;
 use crate::error;
-use crate::general::TCResult;
+use crate::general::{CastFrom, CastInto, TCResult};
 use crate::scalar::value::number::*;
-use crate::scalar::{CastFrom, CastInto};
 
 const BATCH: bool = true;
 

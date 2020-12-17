@@ -6,8 +6,8 @@ use std::ops::{self, Deref, DerefMut};
 use itertools::{Itertools, MultiProduct};
 
 use crate::error;
-use crate::general::TCResult;
-use crate::scalar::{Bound, Scalar, ScalarInstance, Slice, TryCastFrom, TryCastInto, Value};
+use crate::general::{TCResult, TryCastFrom, TryCastInto};
+use crate::scalar::{Bound, Scalar, ScalarInstance, Slice, Value};
 
 pub type Coords = MultiProduct<AxisIter>;
 

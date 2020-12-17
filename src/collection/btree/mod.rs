@@ -9,10 +9,10 @@ use crate::class::{Instance, State, TCType};
 use crate::collection::class::CollectionInstance;
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{Map, TCResult, TCStream};
+use crate::general::{Map, TCResult, TCStream, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
-use crate::scalar::*;
+use crate::scalar::{label, MethodType, PathSegment, Scalar, ScalarClass, ScalarInstance, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::schema::Column;

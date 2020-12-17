@@ -8,7 +8,7 @@ use crate::chain::{ChainClass, ChainType};
 use crate::class::{NativeClass, State, TCType};
 use crate::collection::class::{CollectionClass, CollectionType};
 use crate::error::{self, ErrorType};
-use crate::general::TCResult;
+use crate::general::{TCResult, TryCastInto};
 use crate::object::ObjectType;
 use crate::request::Request;
 use crate::scalar::*;

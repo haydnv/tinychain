@@ -9,11 +9,11 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::class::{Instance, NativeClass, State, TCType};
 use crate::error;
-use crate::general::{TCResult, Tuple};
+use crate::general::{TCResult, TryCastFrom, TryCastInto, Tuple};
 use crate::handler::{Handler, Route};
 use crate::transaction::Txn;
 
-use super::{Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto};
+use super::{Scalar, ScalarClass, ScalarInstance};
 
 pub mod class;
 pub mod link;

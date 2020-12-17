@@ -9,11 +9,8 @@ use crate::class::Instance;
 use crate::collection::btree::{BTreeRange, Collator};
 use crate::collection::schema::Column;
 use crate::error;
-use crate::general::{Map, TCResult};
-use crate::scalar::{
-    Bound, Id, Range, Scalar, ScalarClass, ScalarInstance, TryCastFrom, TryCastInto, Value,
-    ValueType,
-};
+use crate::general::{Map, TCResult, TryCastFrom, TryCastInto};
+use crate::scalar::{Bound, Id, Range, Scalar, ScalarClass, ScalarInstance, Value, ValueType};
 use std::cmp::Ordering;
 
 #[derive(Clone)]

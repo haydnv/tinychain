@@ -5,12 +5,11 @@ use std::ops::Deref;
 use crate::chain::{Chain, ChainType};
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::general::{Map, TCResult, Tuple};
+use crate::general::{Map, TCResult, TryCastFrom, Tuple};
 use crate::handler::*;
 use crate::object::{Object, ObjectType};
 use crate::scalar::{
-    label, Link, MethodType, PathSegment, Scalar, ScalarType, TCPathBuf, TryCastFrom, Value,
-    ValueType,
+    label, Link, MethodType, PathSegment, Scalar, ScalarType, TCPathBuf, Value, ValueType,
 };
 
 pub trait Class: Into<Link> + Clone + Eq + fmt::Display {

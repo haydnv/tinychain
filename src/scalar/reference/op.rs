@@ -8,12 +8,11 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
-use crate::general::{Map, TCResult};
+use crate::general::{Map, TCResult, TryCastFrom, TryCastInto};
 use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::{
-    label, Id, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, TryCastFrom,
-    TryCastInto, Value,
+    label, Id, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, Value,
 };
 use crate::transaction::Txn;
 

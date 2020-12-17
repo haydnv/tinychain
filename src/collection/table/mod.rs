@@ -7,11 +7,9 @@ use futures::{Stream, StreamExt};
 
 use crate::class::*;
 use crate::error;
-use crate::general::{TCResult, TCStream};
+use crate::general::{TCResult, TCStream, TryCastInto};
 use crate::handler::*;
-use crate::scalar::{
-    label, Id, Link, MethodType, PathSegment, Scalar, TCPathBuf, TryCastInto, Value,
-};
+use crate::scalar::{label, Id, Link, MethodType, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::class::{CollectionClass, CollectionInstance};

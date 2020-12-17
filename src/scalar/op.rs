@@ -7,16 +7,13 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::auth::{Scope, SCOPE_EXECUTE};
 use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
-use crate::general::{Map, TCResult};
+use crate::general::{Map, TCResult, TryCastFrom, TryCastInto};
 use crate::handler::Handler;
 use crate::request::Request;
 use crate::transaction::Txn;
 
 use super::link::{Link, TCPathBuf};
-use super::{
-    label, Id, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TryCastFrom,
-    TryCastInto, Value,
-};
+use super::{label, Id, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, Value};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {

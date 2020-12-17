@@ -5,11 +5,11 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::collection::Collator;
 use crate::error;
-use crate::general::TCResult;
+use crate::general::{TCResult, TryCastFrom, TryCastInto};
 
 use super::{
     label, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, TCPath, TCPathBuf,
-    TryCastFrom, TryCastInto, Value,
+    Value,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
