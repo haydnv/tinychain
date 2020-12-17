@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::ops::Deref;
@@ -366,17 +366,26 @@ impl<T: Into<Scalar>> From<Vec<T>> for Scalar {
 
 impl<T: Clone + Into<Scalar>> From<Tuple<T>> for Scalar {
     fn from(v: Tuple<T>) -> Self {
-        Scalar::Tuple(v.into_inner().into_iter().map(|i| i.into()).collect())
+        Self::from_iter(v.into_inner())
     }
 }
 
-impl<T: Into<Scalar>> FromIterator<T> for Scalar {
+impl<T: Clone + Into<Scalar>> FromIterator<T> for Scalar {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut tuple = vec![];
-        for item in iter {
-            tuple.push(item.into());
+        Self::Tuple(Tuple::from_iter(iter.into_iter().map(T::into)))
+    }
+}
+
+impl TryCastFrom<State> for Scalar {
+    fn can_cast_from(state: &State) -> bool {
+        state.is_scalar()
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Some(scalar),
+            _ => None,
         }
-        Self::Tuple(tuple.into())
     }
 }
 
@@ -385,17 +394,10 @@ impl TryCastFrom<Tuple<State>> for Scalar {
         tuple.iter().all(State::is_scalar)
     }
 
-    fn opt_cast_from(tuple: Tuple<State>) -> Option<Scalar> {
-        let mut cast = Vec::with_capacity(tuple.len());
-        for item in tuple.into_inner().into_iter() {
-            if let State::Scalar(scalar) = item {
-                cast.push(scalar);
-            } else {
-                return None;
-            }
-        }
-
-        Some(Scalar::Tuple(cast.into()))
+    fn opt_cast_from(tuple: Tuple<State>) -> Option<Self> {
+        Vec::<Scalar>::opt_cast_from(tuple)
+            .map(Tuple::from)
+            .map(Scalar::Tuple)
     }
 }
 
@@ -438,20 +440,6 @@ impl TryFrom<Scalar> for Tuple<Scalar> {
             Scalar::Tuple(t) => Ok(t),
             other => Err(error::bad_request("Expected Tuple, found", other)),
         }
-    }
-}
-
-impl<T: TryFrom<Scalar, Error = error::TCError>> TryFrom<Scalar> for Vec<T> {
-    type Error = error::TCError;
-
-    fn try_from(source: Scalar) -> TCResult<Vec<T>> {
-        let source: Tuple<Scalar> = source.try_into()?;
-        let mut items = Vec::with_capacity(source.len());
-        for item in source.into_inner().into_iter() {
-            items.push(item.try_into()?);
-        }
-
-        Ok(items)
     }
 }
 
@@ -538,7 +526,7 @@ impl TryCastFrom<Scalar> for Id {
 impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
     fn can_cast_from(scalar: &Scalar) -> bool {
         if let Scalar::Tuple(values) = scalar {
-            values.iter().all(T::can_cast_from)
+            Self::can_cast_from(values)
         } else {
             false
         }
@@ -546,16 +534,7 @@ impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
 
     fn opt_cast_from(scalar: Scalar) -> Option<Vec<T>> {
         if let Scalar::Tuple(values) = scalar {
-            let mut cast: Vec<T> = Vec::with_capacity(values.len());
-            for val in values.into_inner().into_iter() {
-                if let Some(val) = val.opt_cast_into() {
-                    cast.push(val)
-                } else {
-                    return None;
-                }
-            }
-
-            Some(cast)
+            Self::opt_cast_from(values)
         } else {
             None
         }
@@ -564,54 +543,37 @@ impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
 
 impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (T,) {
     fn can_cast_from(source: &Scalar) -> bool {
-        debug!("can cast from {}?", source);
-
         if let Scalar::Tuple(source) = source {
-            if source.len() == 1 && T::can_cast_from(&source[0]) {
-                return true;
-            }
+            Self::can_cast_from(source)
+        } else {
+            false
         }
-
-        false
     }
 
     fn opt_cast_from(source: Scalar) -> Option<(T,)> {
-        debug!("cast from {}", source);
-
-        if let Scalar::Tuple(mut source) = source {
-            if source.len() == 1 {
-                return source.pop().unwrap().opt_cast_into().map(|item| (item,));
-            }
+        if let Scalar::Tuple(source) = source {
+            Self::opt_cast_from(source)
+        } else {
+            None
         }
-
-        None
     }
 }
 
 impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (T1, T2) {
     fn can_cast_from(source: &Scalar) -> bool {
         if let Scalar::Tuple(source) = source {
-            if source.len() == 2 && T1::can_cast_from(&source[0]) && T2::can_cast_from(&source[1]) {
-                return true;
-            }
+            Self::can_cast_from(source)
+        } else {
+            false
         }
-
-        false
     }
 
     fn opt_cast_from(source: Scalar) -> Option<(T1, T2)> {
-        if let Scalar::Tuple(mut source) = source {
-            if source.len() == 2 {
-                let second: Option<T2> = source.pop().unwrap().opt_cast_into();
-                let first: Option<T1> = source.pop().unwrap().opt_cast_into();
-                return match (first, second) {
-                    (Some(first), Some(second)) => Some((first, second)),
-                    _ => None,
-                };
-            }
+        if let Scalar::Tuple(source) = source {
+            Self::opt_cast_from(source)
+        } else {
+            None
         }
-
-        None
     }
 }
 
@@ -620,32 +582,18 @@ impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>, T3: TryCastFrom<Scalar>> 
 {
     fn can_cast_from(source: &Scalar) -> bool {
         if let Scalar::Tuple(source) = source {
-            if source.len() == 3
-                && T1::can_cast_from(&source[0])
-                && T2::can_cast_from(&source[1])
-                && T3::can_cast_from(&source[2])
-            {
-                return true;
-            }
+            Self::can_cast_from(source)
+        } else {
+            false
         }
-
-        false
     }
 
     fn opt_cast_from(source: Scalar) -> Option<(T1, T2, T3)> {
-        if let Scalar::Tuple(mut source) = source {
-            if source.len() == 3 {
-                let third: Option<T3> = source.pop().unwrap().opt_cast_into();
-                let second: Option<T2> = source.pop().unwrap().opt_cast_into();
-                let first: Option<T1> = source.pop().unwrap().opt_cast_into();
-                return match (first, second, third) {
-                    (Some(first), Some(second), Some(third)) => Some((first, second, third)),
-                    _ => None,
-                };
-            }
+        if let Scalar::Tuple(source) = source {
+            Self::opt_cast_from(source)
+        } else {
+            None
         }
-
-        None
     }
 }
 
@@ -658,36 +606,18 @@ impl<
 {
     fn can_cast_from(source: &Scalar) -> bool {
         if let Scalar::Tuple(source) = source {
-            if source.len() == 4
-                && T1::can_cast_from(&source[0])
-                && T2::can_cast_from(&source[1])
-                && T3::can_cast_from(&source[2])
-                && T4::can_cast_from(&source[3])
-            {
-                return true;
-            }
+            Self::can_cast_from(source)
+        } else {
+            false
         }
-
-        false
     }
 
     fn opt_cast_from(source: Scalar) -> Option<(T1, T2, T3, T4)> {
-        if let Scalar::Tuple(mut source) = source {
-            if source.len() == 4 {
-                let fourth: Option<T4> = source.pop().unwrap().opt_cast_into();
-                let third: Option<T3> = source.pop().unwrap().opt_cast_into();
-                let second: Option<T2> = source.pop().unwrap().opt_cast_into();
-                let first: Option<T1> = source.pop().unwrap().opt_cast_into();
-                return match (first, second, third, fourth) {
-                    (Some(first), Some(second), Some(third), Some(fourth)) => {
-                        Some((first, second, third, fourth))
-                    }
-                    _ => None,
-                };
-            }
+        if let Scalar::Tuple(source) = source {
+            Self::opt_cast_from(source)
+        } else {
+            None
         }
-
-        None
     }
 }
 

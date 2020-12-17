@@ -11,7 +11,8 @@ use crate::general::{Map, TCResult};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{
-    label, Id, Key, Link, MethodType, OpRef, PathSegment, Scalar, TCPath, TCPathBuf, TryCastInto, Value,
+    label, Id, Key, Link, MethodType, OpRef, PathSegment, Scalar, TCPath, TCPathBuf, TryCastInto,
+    Value,
 };
 use crate::transaction::Txn;
 

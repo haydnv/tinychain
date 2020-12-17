@@ -179,17 +179,13 @@ impl<T: Into<Value>> From<Option<T>> for Value {
 
 impl<T: Into<Value>> FromIterator<T> for Value {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Value {
-        let mut tuple = vec![];
-        for item in iter {
-            tuple.push(item.into());
-        }
-        Value::Tuple(tuple.into())
+        Value::Tuple(Tuple::from_iter(iter.into_iter().map(T::into)))
     }
 }
 
 impl<T: Into<Value>> From<Vec<T>> for Value {
     fn from(v: Vec<T>) -> Value {
-        Value::Tuple(v.into_iter().map(|i| i.into()).collect())
+        Self::from_iter(v)
     }
 }
 
@@ -360,34 +356,13 @@ impl TryFrom<Value> for Tuple<Value> {
 
 impl TryCastFrom<Tuple<Scalar>> for Value {
     fn can_cast_from(tuple: &Tuple<Scalar>) -> bool {
-        for s in tuple.iter() {
-            match s {
-                Scalar::Value(_) => {}
-                Scalar::Tuple(nested) if Self::can_cast_from(nested) => {}
-                _ => return false,
-            }
-        }
-
-        true
+        Vec::<Value>::can_cast_from(tuple)
     }
 
     fn opt_cast_from(tuple: Tuple<Scalar>) -> Option<Value> {
-        let mut values = Vec::with_capacity(tuple.len());
-        for s in tuple.into_inner().into_iter() {
-            match s {
-                Scalar::Value(value) => values.push(value),
-                Scalar::Tuple(nested) => {
-                    if let Some(nested) = Self::opt_cast_from(nested) {
-                        values.push(nested);
-                    } else {
-                        return None;
-                    }
-                }
-                _ => return None,
-            }
-        }
-
-        Some(Value::Tuple(values.into()))
+        Vec::<Value>::opt_cast_from(tuple)
+            .map(Tuple::from)
+            .map(Value::Tuple)
     }
 }
 
@@ -395,24 +370,15 @@ impl TryCastFrom<Scalar> for Tuple<Value> {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
             Scalar::Tuple(tuple) => tuple.iter().all(Value::can_cast_from),
+            Scalar::Value(Value::Tuple(_)) => true,
             _ => false,
         }
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Tuple<Value>> {
         match scalar {
-            Scalar::Tuple(tuple) => {
-                let mut cast = Vec::with_capacity(tuple.len());
-                for item in tuple.into_inner().into_iter() {
-                    if let Some(value) = Value::opt_cast_from(item) {
-                        cast.push(value);
-                    } else {
-                        return None;
-                    }
-                }
-
-                Some(cast.into())
-            }
+            Scalar::Tuple(tuple) => Vec::<Value>::opt_cast_from(tuple).map(Tuple::from),
+            Scalar::Value(Value::Tuple(tuple)) => Some(tuple),
             _ => None,
         }
     }
@@ -582,7 +548,7 @@ impl TryCastFrom<Value> for ValueType {
 impl<T: TryCastFrom<Value>> TryCastFrom<Value> for Vec<T> {
     fn can_cast_from(value: &Value) -> bool {
         if let Value::Tuple(values) = value {
-            values.iter().all(T::can_cast_from)
+            Self::can_cast_from(values)
         } else {
             false
         }
@@ -590,16 +556,7 @@ impl<T: TryCastFrom<Value>> TryCastFrom<Value> for Vec<T> {
 
     fn opt_cast_from(value: Value) -> Option<Vec<T>> {
         if let Value::Tuple(values) = value {
-            let mut cast: Vec<T> = Vec::with_capacity(values.len());
-            for val in values.into_inner().into_iter() {
-                if let Some(val) = val.opt_cast_into() {
-                    cast.push(val)
-                } else {
-                    return None;
-                }
-            }
-
-            Some(cast)
+            Self::opt_cast_from(values)
         } else {
             None
         }
@@ -609,27 +566,18 @@ impl<T: TryCastFrom<Value>> TryCastFrom<Value> for Vec<T> {
 impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>> TryCastFrom<Value> for (T1, T2) {
     fn can_cast_from(source: &Value) -> bool {
         if let Value::Tuple(source) = source {
-            if source.len() == 2 && T1::can_cast_from(&source[0]) && T2::can_cast_from(&source[1]) {
-                return true;
-            }
+            Self::can_cast_from(source)
+        } else {
+            false
         }
-
-        false
     }
 
-    fn opt_cast_from(source: Value) -> Option<(T1, T2)> {
-        if let Value::Tuple(mut source) = source {
-            if source.len() == 2 {
-                let second: Option<T2> = source.pop().unwrap().opt_cast_into();
-                let first: Option<T1> = source.pop().unwrap().opt_cast_into();
-                return match (first, second) {
-                    (Some(first), Some(second)) => Some((first, second)),
-                    _ => None,
-                };
-            }
+    fn opt_cast_from(source: Value) -> Option<Self> {
+        if let Value::Tuple(source) = source {
+            Self::opt_cast_from(source)
+        } else {
+            None
         }
-
-        None
     }
 }
 
@@ -638,32 +586,18 @@ impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>, T3: TryCastFrom<Value>> Try
 {
     fn can_cast_from(source: &Value) -> bool {
         if let Value::Tuple(source) = source {
-            if source.len() == 3
-                && T1::can_cast_from(&source[0])
-                && T2::can_cast_from(&source[1])
-                && T3::can_cast_from(&source[2])
-            {
-                return true;
-            }
+            Self::can_cast_from(source)
+        } else {
+            false
         }
-
-        false
     }
 
-    fn opt_cast_from(source: Value) -> Option<(T1, T2, T3)> {
-        if let Value::Tuple(mut source) = source {
-            if source.len() == 3 {
-                let third: Option<T3> = source.pop().unwrap().opt_cast_into();
-                let second: Option<T2> = source.pop().unwrap().opt_cast_into();
-                let first: Option<T1> = source.pop().unwrap().opt_cast_into();
-                return match (first, second, third) {
-                    (Some(first), Some(second), Some(third)) => Some((first, second, third)),
-                    _ => None,
-                };
-            }
+    fn opt_cast_from(source: Value) -> Option<Self> {
+        if let Value::Tuple(source) = source {
+            Self::opt_cast_from(source)
+        } else {
+            None
         }
-
-        None
     }
 }
 

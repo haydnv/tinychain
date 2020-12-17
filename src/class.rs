@@ -9,7 +9,8 @@ use crate::general::{Map, TCResult, Tuple};
 use crate::handler::*;
 use crate::object::{Object, ObjectType};
 use crate::scalar::{
-    label, Link, MethodType, PathSegment, Scalar, ScalarType, TCPathBuf, TryCastFrom, Value, ValueType,
+    label, Link, MethodType, PathSegment, Scalar, ScalarType, TCPathBuf, TryCastFrom, Value,
+    ValueType,
 };
 
 pub trait Class: Into<Link> + Clone + Eq + fmt::Display {
