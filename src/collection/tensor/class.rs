@@ -10,7 +10,7 @@ use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCStream, TryCastInto};
+use crate::general::{TCBoxTryFuture, TCResult, TCStreamOld, TryCastInto};
 use crate::handler::*;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
@@ -228,7 +228,7 @@ impl CollectionInstance for Tensor {
         self.any(txn.clone()).map_ok(|any| !any).await
     }
 
-    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
         match self {
             // TODO: Forward errors, don't panic!
             Self::Dense(_dense) => {

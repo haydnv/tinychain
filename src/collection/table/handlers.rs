@@ -9,7 +9,7 @@ use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
 use crate::class::{Instance, State, TCType};
 use crate::collection::CollectionInstance;
 use crate::error;
-use crate::general::{Map, TCResult, TCStream, TryCastFrom, TryCastInto};
+use crate::general::{Map, TCResult, TCStreamOld, TryCastFrom, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{Id, MethodType, PathSegment, Scalar, ScalarInstance, Value};
@@ -348,7 +348,7 @@ impl<T: TableInstance> CollectionInstance for TableImpl<T> {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
         let stream = self.inner.clone().stream(*txn.id()).await?;
         Ok(Box::pin(stream.map(Scalar::from)))
     }

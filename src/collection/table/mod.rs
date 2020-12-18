@@ -7,7 +7,7 @@ use futures::{Stream, StreamExt};
 
 use crate::class::*;
 use crate::error;
-use crate::general::{TCResult, TCStream, TryCastInto};
+use crate::general::{TCResult, TCStreamOld, TryCastInto};
 use crate::handler::*;
 use crate::scalar::{label, Id, Link, MethodType, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -237,7 +237,7 @@ impl CollectionInstance for Table {
         Ok(rows.next().await.is_none())
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
         let stream = self.clone().stream(*txn.id()).await?;
         Ok(Box::pin(stream.map(Scalar::from)))
     }
@@ -265,7 +265,7 @@ impl Route for Table {
 
 #[async_trait]
 impl TableInstance for Table {
-    type Stream = TCStream<Vec<Value>>;
+    type Stream = TCStreamOld<Vec<Value>>;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         match self {

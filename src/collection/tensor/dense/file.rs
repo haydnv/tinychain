@@ -15,7 +15,7 @@ use crate::block::BlockId;
 use crate::block::File;
 use crate::class::Instance;
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
+use crate::general::{TCBoxTryFuture, TCResult, TCTryStreamOld};
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -148,7 +148,7 @@ impl TensorAccessor for BlockListFile {
 
 #[async_trait]
 impl BlockList for BlockListFile {
-    fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
+    fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStreamOld<Array>> {
         Box::pin(async move {
             let file = self.file.clone();
             let block_stream = Box::pin(
@@ -160,7 +160,7 @@ impl BlockList for BlockListFile {
             let block_stream =
                 block_stream.and_then(|block| future::ready(Ok(block.deref().clone())));
 
-            let block_stream: TCTryStream<Array> = Box::pin(block_stream);
+            let block_stream: TCTryStreamOld<Array> = Box::pin(block_stream);
 
             Ok(block_stream)
         })
@@ -170,7 +170,7 @@ impl BlockList for BlockListFile {
         self: Arc<Self>,
         txn: Txn,
         bounds: Bounds,
-    ) -> TCResult<TCTryStream<Number>> {
+    ) -> TCResult<TCTryStreamOld<Number>> {
         if bounds == Bounds::all(self.shape()) {
             return self.value_stream(txn).await;
         }
@@ -228,7 +228,7 @@ impl BlockList for BlockListFile {
                 })
             });
 
-        let selected: TCTryStream<Number> = Box::pin(selected.flatten());
+        let selected: TCTryStreamOld<Number> = Box::pin(selected.flatten());
         Ok(selected)
     }
 

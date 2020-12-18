@@ -13,7 +13,7 @@ use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
+use crate::general::{TCBoxTryFuture, TCResult, TCTryStreamOld};
 use crate::handler::*;
 use crate::scalar::value::number::*;
 use crate::scalar::{label, Bound, Id, Label, MethodType, PathSegment, Value, ValueType};
@@ -187,7 +187,7 @@ impl SparseAccess for SparseTable {
             .await?
             .map(|coord| unwrap_coord(&coord));
 
-        let filled_at: TCTryStream<Vec<u64>> = Box::pin(filled_at);
+        let filled_at: TCTryStreamOld<Vec<u64>> = Box::pin(filled_at);
         Ok(filled_at)
     }
 

@@ -106,13 +106,13 @@ impl Client {
         }
     }
 
-    pub async fn post<S: Stream<Item = (Id, Scalar)> + Send + 'static>(
-        &self,
-        request: &Request,
-        txn: &Txn,
+    pub async fn post<'a, S: Stream<Item = (Id, Scalar)> + Send + 'a>(
+        &'a self,
+        request: &'a Request,
+        txn: &'a Txn,
         link: Link,
         data: S,
-    ) -> TCResult<State> {
+    ) -> TCResult<State> where S: 'static {
         if request.auth().is_some() {
             return Err(error::not_implemented("Authorization"));
         }
@@ -208,11 +208,11 @@ impl Server {
         Ok(response)
     }
 
-    async fn authenticate_and_route(
+    async fn authenticate_and_route<'a>(
         self: Arc<Self>,
         gateway: Arc<Gateway>,
         http_request: hyper::Request<Body>,
-    ) -> TCResult<TCStream<TCResult<Bytes>>> {
+    ) -> TCResult<TCStream<'a, TCResult<Bytes>>> {
         let token: Option<Token> = if let Some(header) = http_request.headers().get("Authorization")
         {
             let token = header
@@ -253,13 +253,13 @@ impl Server {
         }
     }
 
-    async fn route(
+    async fn route<'a>(
         self: Arc<Self>,
         gateway: Arc<Gateway>,
         request: Request,
         mut params: HashMap<String, String>,
         mut http_request: hyper::Request<Body>,
-    ) -> TCResult<TCStream<TCResult<Bytes>>> {
+    ) -> TCResult<TCStream<'a, TCResult<Bytes>>> {
         let uri = http_request.uri().clone();
         let path: TCPathBuf = uri.path().parse()?;
         let txn = gateway.transaction(&request).await?;
@@ -335,7 +335,7 @@ async fn deserialize_body<D: DeserializeOwned>(
     })
 }
 
-async fn to_stream(state: State, txn: Txn) -> TCResult<TCStream<TCResult<Bytes>>> {
+async fn to_stream<'a>(state: State, txn: Txn) -> TCResult<TCStream<'a, TCResult<Bytes>>> {
     match state {
         State::Collection(collection) => {
             let stream = collection.to_stream(txn).await?;
@@ -349,7 +349,7 @@ async fn to_stream(state: State, txn: Txn) -> TCResult<TCStream<TCResult<Bytes>>
                 .map(Bytes::from)
                 .map_err(error::TCError::from)?;
 
-            let response: TCStream<TCResult<Bytes>> =
+            let response: TCStream<'a, TCResult<Bytes>> =
                 Box::pin(stream::once(future::ready(Ok(response))));
 
             Ok(response)
@@ -361,7 +361,7 @@ async fn to_stream(state: State, txn: Txn) -> TCResult<TCStream<TCResult<Bytes>>
     }
 }
 
-fn stream_delimiter(token: &[u8]) -> TCStream<TCResult<Bytes>> {
+fn stream_delimiter<'a>(token: &[u8]) -> TCStream<'a, TCResult<Bytes>> {
     let token = Bytes::copy_from_slice(token);
     Box::pin(stream::once(future::ready(Ok(token))))
 }

@@ -13,7 +13,7 @@ use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCResult, TCStream};
+use crate::general::{TCResult, TCStreamOld};
 use crate::scalar::{Id, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -58,7 +58,7 @@ impl Instance for Aggregate {
 
 #[async_trait]
 impl TableInstance for Aggregate {
-    type Stream = TCStream<Vec<Value>>;
+    type Stream = TCStreamOld<Vec<Value>>;
 
     fn group_by(&self, _columns: Vec<Id>) -> TCResult<Aggregate> {
         Err(error::unsupported(ERR_AGGREGATE_NESTED))
@@ -96,7 +96,7 @@ impl TableInstance for Aggregate {
         let first = if let Some(first) = first {
             first
         } else {
-            let stream: TCStream<Vec<Value>> = Box::pin(stream::empty());
+            let stream: TCStreamOld<Vec<Value>> = Box::pin(stream::empty());
             return Ok(stream);
         };
 
@@ -111,7 +111,7 @@ impl TableInstance for Aggregate {
                 future::ready(Some(r))
             }
         });
-        let aggregate: TCStream<Vec<Value>> =
+        let aggregate: TCStreamOld<Vec<Value>> =
             Box::pin(stream::once(future::ready(first)).chain(aggregate));
 
         Ok(aggregate)
@@ -216,7 +216,7 @@ impl Instance for IndexSlice {
 
 #[async_trait]
 impl TableInstance for IndexSlice {
-    type Stream = TCStream<Vec<Value>>;
+    type Stream = TCStreamOld<Vec<Value>>;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.source.len(txn_id, self.range.clone()).await
@@ -338,7 +338,7 @@ impl Instance for Limited {
 
 #[async_trait]
 impl TableInstance for Limited {
-    type Stream = TCStream<Vec<Value>>;
+    type Stream = TCStreamOld<Vec<Value>>;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         let source_count = self.source.count(txn_id).await?;
@@ -376,7 +376,7 @@ impl TableInstance for Limited {
 
     async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
         let rows = self.source.clone().stream(txn_id).await?;
-        let rows: TCStream<Vec<Value>> = Box::pin(rows.take(self.limit as usize));
+        let rows: TCStreamOld<Vec<Value>> = Box::pin(rows.take(self.limit as usize));
         Ok(rows)
     }
 
@@ -543,7 +543,7 @@ impl Instance for Merged {
 
 #[async_trait]
 impl TableInstance for Merged {
-    type Stream = TCStream<Vec<Value>>;
+    type Stream = TCStreamOld<Vec<Value>>;
 
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
@@ -621,7 +621,7 @@ impl TableInstance for Merged {
             .map(|stream| stream.unwrap())
             .flatten();
 
-        let rows: TCStream<Vec<Value>> = Box::pin(rows);
+        let rows: TCStreamOld<Vec<Value>> = Box::pin(rows);
         Ok(rows)
     }
 
@@ -746,7 +746,7 @@ impl Instance for Selection {
 
 #[async_trait]
 impl TableInstance for Selection {
-    type Stream = TCStream<Vec<Value>>;
+    type Stream = TCStreamOld<Vec<Value>>;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.source.clone().count(txn_id).await
@@ -787,7 +787,7 @@ impl TableInstance for Selection {
             let selection: Vec<Value> = indices.iter().map(|i| row[*i].clone()).collect();
             selection
         });
-        let selected: TCStream<Vec<Value>> = Box::pin(selected);
+        let selected: TCStreamOld<Vec<Value>> = Box::pin(selected);
         Ok(selected)
     }
 
@@ -893,7 +893,7 @@ impl Instance for TableSlice {
 
 #[async_trait]
 impl TableInstance for TableSlice {
-    type Stream = TCStream<Vec<Value>>;
+    type Stream = TCStreamOld<Vec<Value>>;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         let index = self.table.supporting_index(&self.bounds)?;

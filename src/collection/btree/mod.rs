@@ -9,7 +9,7 @@ use crate::class::{Instance, State, TCType};
 use crate::collection::class::CollectionInstance;
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{Map, TCResult, TCStream, TryCastInto};
+use crate::general::{Map, TCResult, TCStreamOld, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{label, MethodType, PathSegment, Scalar, ScalarClass, ScalarInstance, Value};
@@ -310,7 +310,7 @@ impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
         self.inner.is_empty(txn).await
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
         let stream = self.stream(*txn.id(), BTreeRange::default(), false).await?;
         Ok(Box::pin(stream.map(Scalar::from)))
     }
@@ -384,7 +384,7 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
         match self {
             Self::Tree(tree) => tree.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,
@@ -456,7 +456,7 @@ impl BTreeInstance for BTree {
         txn_id: TxnId,
         range: BTreeRange,
         reverse: bool,
-    ) -> TCResult<TCStream<Key>> {
+    ) -> TCResult<TCStreamOld<Key>> {
         match self {
             Self::Tree(tree) => tree.stream(txn_id, range, reverse).await,
             Self::View(view) => view.stream(txn_id, range, reverse).await,

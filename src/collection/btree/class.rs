@@ -7,7 +7,7 @@ use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::collection::class::*;
 use crate::collection::schema::Column;
 use crate::error;
-use crate::general::{TCResult, TCStream, TryCastInto};
+use crate::general::{TCResult, TCStreamOld, TryCastInto};
 use crate::scalar::{label, Link, PathSegment, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -43,7 +43,7 @@ pub trait BTreeInstance: Instance<Class = BTreeType> + Transact {
         txn_id: TxnId,
         range: BTreeRange,
         reverse: bool,
-    ) -> TCResult<TCStream<Key>>;
+    ) -> TCResult<TCStreamOld<Key>>;
 }
 
 #[derive(Clone, Eq, PartialEq)]

@@ -12,7 +12,7 @@ use crate::collection::btree::{self, BTreeFile, BTreeInstance};
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCResult, TCStream};
+use crate::general::{TCResult, TCStreamOld};
 use crate::scalar::{Id, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -93,7 +93,7 @@ impl Instance for Index {
 
 #[async_trait]
 impl TableInstance for Index {
-    type Stream = TCStream<Vec<Value>>;
+    type Stream = TCStreamOld<Vec<Value>>;
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.len(txn_id).await

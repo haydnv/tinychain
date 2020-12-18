@@ -19,7 +19,7 @@ use crate::class::Instance;
 use crate::collection::schema::{Column, RowSchema};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCStream};
+use crate::general::{TCBoxTryFuture, TCResult, TCStreamOld};
 use crate::scalar::*;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -27,7 +27,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 use super::collator::Collator;
 use super::{validate_key, validate_range, BTreeInstance, BTreeRange, BTreeType, Key};
 
-type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStream<Key>> + Send + Unpin>>>;
+type Selection = FuturesOrdered<Pin<Box<dyn Future<Output = TCStreamOld<Key>> + Send + Unpin>>>;
 
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
@@ -209,7 +209,7 @@ impl BTreeFile {
         &self.collator
     }
 
-    fn _slice(self, txn_id: TxnId, node: BlockOwned<Node>, range: BTreeRange) -> TCStream<Key> {
+    fn _slice(self, txn_id: TxnId, node: BlockOwned<Node>, range: BTreeRange) -> TCStreamOld<Key> {
         let (l, r) = bisect(&range, &node.keys[..], &self.collator);
 
         debug!("_slice {} from {} to {}", node.deref(), l, r);
@@ -256,7 +256,7 @@ impl BTreeFile {
 
                 if !node.keys[i].deleted {
                     let key_at_i = node.keys[i].value.to_vec();
-                    let key_at_i: TCStream<Key> = Box::pin(stream::once(future::ready(key_at_i)));
+                    let key_at_i: TCStreamOld<Key> = Box::pin(stream::once(future::ready(key_at_i)));
                     selected.push(Box::pin(future::ready(key_at_i)));
                 }
             }
@@ -284,7 +284,7 @@ impl BTreeFile {
         txn_id: TxnId,
         node: BlockOwned<Node>,
         range: BTreeRange,
-    ) -> TCStream<Key> {
+    ) -> TCStreamOld<Key> {
         let (l, r) = bisect(&range, &node.keys, &self.collator);
 
         debug!("_slice_reverse {} from {} to {}", node.deref(), l, r);
@@ -335,7 +335,7 @@ impl BTreeFile {
 
                 if !node.keys[i].deleted {
                     let key_at_i = node.keys[i].value.to_vec();
-                    let key_at_i: TCStream<Key> = Box::pin(stream::once(future::ready(key_at_i)));
+                    let key_at_i: TCStreamOld<Key> = Box::pin(stream::once(future::ready(key_at_i)));
                     selected.push(Box::pin(future::ready(key_at_i)));
                 }
 
@@ -697,7 +697,7 @@ impl BTreeInstance for BTreeFile {
         txn_id: TxnId,
         range: BTreeRange,
         reverse: bool,
-    ) -> TCResult<TCStream<Key>> {
+    ) -> TCResult<TCStreamOld<Key>> {
         let range = validate_range(range, self.schema())?;
 
         let root_id = self.root.read(&txn_id).await?;
