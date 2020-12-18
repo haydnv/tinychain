@@ -112,7 +112,10 @@ impl Client {
         txn: &'a Txn,
         link: Link,
         data: S,
-    ) -> TCResult<State> where S: 'static {
+    ) -> TCResult<State>
+    where
+        S: 'static,
+    {
         if request.auth().is_some() {
             return Err(error::not_implemented("Authorization"));
         }

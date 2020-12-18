@@ -256,7 +256,8 @@ impl BTreeFile {
 
                 if !node.keys[i].deleted {
                     let key_at_i = node.keys[i].value.to_vec();
-                    let key_at_i: TCStreamOld<Key> = Box::pin(stream::once(future::ready(key_at_i)));
+                    let key_at_i: TCStreamOld<Key> =
+                        Box::pin(stream::once(future::ready(key_at_i)));
                     selected.push(Box::pin(future::ready(key_at_i)));
                 }
             }
@@ -335,7 +336,8 @@ impl BTreeFile {
 
                 if !node.keys[i].deleted {
                     let key_at_i = node.keys[i].value.to_vec();
-                    let key_at_i: TCStreamOld<Key> = Box::pin(stream::once(future::ready(key_at_i)));
+                    let key_at_i: TCStreamOld<Key> =
+                        Box::pin(stream::once(future::ready(key_at_i)));
                     selected.push(Box::pin(future::ready(key_at_i)));
                 }
 

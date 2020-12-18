@@ -458,7 +458,8 @@ impl<T: BlockList> BlockList for BlockListCast<T> {
     fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStreamOld<Array>> {
         Box::pin(async move {
             let dtype = self.dtype;
-            let blocks: TCStreamOld<TCResult<Array>> = self.source.clone().block_stream(txn).await?;
+            let blocks: TCStreamOld<TCResult<Array>> =
+                self.source.clone().block_stream(txn).await?;
             let cast = blocks.map_ok(move |array| array.into_type(dtype));
             let cast: TCTryStreamOld<Array> = Box::pin(cast);
             Ok(cast)

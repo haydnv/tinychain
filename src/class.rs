@@ -361,7 +361,7 @@ impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>> TryCastFrom<State> for (T1,
 }
 
 impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>, T3: TryCastFrom<State>> TryCastFrom<State>
-for (T1, T2, T3)
+    for (T1, T2, T3)
 {
     fn can_cast_from(state: &State) -> bool {
         if let State::Tuple(tuple) = state {
@@ -381,11 +381,11 @@ for (T1, T2, T3)
 }
 
 impl<
-    T1: TryCastFrom<State>,
-    T2: TryCastFrom<State>,
-    T3: TryCastFrom<State>,
-    T4: TryCastFrom<State>,
-> TryCastFrom<State> for (T1, T2, T3, T4)
+        T1: TryCastFrom<State>,
+        T2: TryCastFrom<State>,
+        T3: TryCastFrom<State>,
+        T4: TryCastFrom<State>,
+    > TryCastFrom<State> for (T1, T2, T3, T4)
 {
     fn can_cast_from(state: &State) -> bool {
         if let State::Tuple(tuple) = state {
