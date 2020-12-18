@@ -306,6 +306,104 @@ impl TryFrom<State> for Value {
     }
 }
 
+impl<T: TryCastFrom<State>> TryCastFrom<State> for Vec<T> {
+    fn can_cast_from(state: &State) -> bool {
+        if let State::Tuple(tuple) = state {
+            Self::can_cast_from(tuple)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Vec<T>> {
+        if let State::Tuple(tuple) = state {
+            Self::opt_cast_from(tuple)
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: TryCastFrom<State>> TryCastFrom<State> for (T,) {
+    fn can_cast_from(state: &State) -> bool {
+        if let State::Tuple(tuple) = state {
+            Self::can_cast_from(tuple)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        if let State::Tuple(tuple) = state {
+            Self::opt_cast_from(tuple)
+        } else {
+            None
+        }
+    }
+}
+
+impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>> TryCastFrom<State> for (T1, T2) {
+    fn can_cast_from(state: &State) -> bool {
+        if let State::Tuple(tuple) = state {
+            Self::can_cast_from(tuple)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        if let State::Tuple(tuple) = state {
+            Self::opt_cast_from(tuple)
+        } else {
+            None
+        }
+    }
+}
+
+impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>, T3: TryCastFrom<State>> TryCastFrom<State>
+for (T1, T2, T3)
+{
+    fn can_cast_from(state: &State) -> bool {
+        if let State::Tuple(tuple) = state {
+            Self::can_cast_from(tuple)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        if let State::Tuple(tuple) = state {
+            Self::opt_cast_from(tuple)
+        } else {
+            None
+        }
+    }
+}
+
+impl<
+    T1: TryCastFrom<State>,
+    T2: TryCastFrom<State>,
+    T3: TryCastFrom<State>,
+    T4: TryCastFrom<State>,
+> TryCastFrom<State> for (T1, T2, T3, T4)
+{
+    fn can_cast_from(state: &State) -> bool {
+        if let State::Tuple(tuple) = state {
+            Self::can_cast_from(tuple)
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        if let State::Tuple(tuple) = state {
+            Self::opt_cast_from(tuple)
+        } else {
+            None
+        }
+    }
+}
+
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
