@@ -5,7 +5,7 @@ use futures::TryFutureExt;
 
 use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::error;
-use crate::general::{TCResult, TCStreamOld};
+use crate::general::{TCResult, TCStream};
 use crate::handler::*;
 use crate::scalar::{label, Link, MethodType, PathSegment, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -91,7 +91,7 @@ impl ChainClass for ChainType {
 pub trait ChainInstance: Instance {
     type Class: ChainClass;
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Value>>;
+    async fn to_stream(&'_ self, txn: Txn) -> TCResult<TCStream<'_, Value>>;
 }
 
 #[derive(Clone)]
@@ -113,7 +113,7 @@ impl Instance for Chain {
 impl ChainInstance for Chain {
     type Class = ChainType;
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Value>> {
+    async fn to_stream(&'_ self, txn: Txn) -> TCResult<TCStream<'_, Value>> {
         match self {
             Self::Null(nc) => nc.to_stream(txn).await,
         }

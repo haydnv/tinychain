@@ -8,7 +8,7 @@ use crate::collection::table::TableIndex;
 use crate::collection::tensor::dense::{BlockListFile, DenseTensor};
 use crate::collection::tensor::sparse::{SparseTable, SparseTensor};
 use crate::error;
-use crate::general::{TCResult, TCStreamOld};
+use crate::general::{TCResult, TCStream};
 use crate::handler::*;
 use crate::scalar::{MethodType, PathSegment, Value};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -76,7 +76,7 @@ impl Instance for NullChain {
 impl ChainInstance for NullChain {
     type Class = ChainType;
 
-    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStreamOld<Value>> {
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<'_, Value>> {
         Ok(Box::pin(stream::empty()))
     }
 }
