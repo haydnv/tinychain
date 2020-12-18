@@ -7,6 +7,7 @@ use crate::transaction::{Txn, TxnId};
 
 mod einsum;
 mod handlers;
+mod stream;
 mod transform;
 
 pub mod bounds;
@@ -125,7 +126,6 @@ pub trait TensorTransform: TensorAccessor + Sized {
     type Broadcast: TensorInstance;
     type Expand: TensorInstance;
     type Slice: TensorInstance;
-    type Reshape: TensorInstance;
     type Transpose: TensorInstance;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast>;
@@ -135,8 +135,6 @@ pub trait TensorTransform: TensorAccessor + Sized {
     fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand>;
 
     fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self::Slice>;
-
-    fn reshape(&self, shape: bounds::Shape) -> TCResult<Self::Reshape>;
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 }

@@ -379,12 +379,12 @@ impl Transact for BlockListFile {
     }
 }
 
-pub async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Unpin + 'static>(
+pub async fn sort_coords<'a, S: Stream<Item = TCResult<Vec<u64>>> + Send + Unpin + 'a>(
     txn: Txn,
     coords: S,
     num_coords: u64,
     shape: &Shape,
-) -> TCResult<impl Stream<Item = TCResult<Vec<u64>>>> {
+) -> TCResult<impl Stream<Item = TCResult<Vec<u64>>> + 'a> {
     let blocks =
         coords_to_offsets(shape, coords).and_then(|block| future::ready(Array::try_from(block)));
 

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use arrayfire as af;
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -16,7 +15,7 @@ use crate::scalar::number::*;
 use crate::scalar::{MethodType, PathSegment};
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::bounds::{AxisBounds, Bounds, Shape};
+use super::bounds::{Bounds, Shape};
 use super::class::{Tensor, TensorInstance, TensorType};
 use super::sparse::{SparseAccess, SparseTensor};
 use super::transform;
@@ -725,89 +724,6 @@ impl<T: Clone + BlockList> Transact for BlockListReduce<T> {
 }
 
 #[derive(Clone)]
-pub struct BlockListReshape<T: BlockList> {
-    source: Arc<T>,
-    rebase: transform::Reshape,
-}
-
-impl<T: BlockList> TensorAccessor for BlockListReshape<T> {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.rebase.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.rebase.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.source.size()
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> BlockList for BlockListReshape<T> {
-    fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
-        self.source.clone().block_stream(txn)
-    }
-
-    fn value_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Number>> {
-        self.source.clone().value_stream(txn)
-    }
-
-    async fn value_stream_slice(
-        self: Arc<Self>,
-        _txn: Txn,
-        _bounds: Bounds,
-    ) -> TCResult<TCTryStream<Number>> {
-        Err(error::not_implemented(
-            "BlockListReshape::value_stream_slice",
-        ))
-    }
-
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        let coord = self.rebase.invert_coord(coord);
-        self.source.read_value_at(txn, &coord).await
-    }
-
-    async fn write_value(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        bounds: Bounds,
-        value: Number,
-    ) -> TCResult<()> {
-        stream::iter(bounds.affected())
-            .map(|coord| Ok(self.write_value_at(txn_id, coord, value.clone())))
-            .try_buffer_unordered(2)
-            .try_fold((), |_, _| future::ready(Ok(())))
-            .await
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
-        self.source
-            .write_value_at(txn_id, self.rebase.invert_coord(&coord), value)
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> Transact for BlockListReshape<T> {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        self.source.finalize(txn_id).await
-    }
-}
-
-#[derive(Clone)]
 pub struct BlockListSlice<T> {
     source: Arc<T>,
     rebase: transform::Slice,
@@ -919,51 +835,10 @@ impl<T: Clone + SparseAccess> TensorAccessor for BlockListSparse<T> {
 
 #[async_trait]
 impl<T: Clone + SparseAccess> BlockList for BlockListSparse<T> {
-    fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
-        Box::pin(async move {
-            let dtype = self.dtype();
-            let ndim = self.ndim();
-            let source = self.source.clone();
-            let source_size = source.size();
-
-            let block_offsets = ((file::PER_BLOCK as u64)..self.size()).step_by(PER_BLOCK);
-            let block_stream = stream::iter(block_offsets)
-                .map(|offset| (offset - file::PER_BLOCK as u64, offset))
-                .then(move |(start, end)| {
-                    let source = source.clone();
-                    let txn = txn.clone();
-
-                    Box::pin(async move {
-                        let filled: Vec<(Vec<u64>, Number)> = source
-                            .reshape(vec![source_size].into())?
-                            .slice(Bounds::from(vec![AxisBounds::In(start..end)]))?
-                            .filled(txn)
-                            .await?
-                            .try_collect()
-                            .await?;
-
-                        let mut block = Array::constant(dtype.zero(), file::PER_BLOCK);
-                        if filled.is_empty() {
-                            return Ok(block);
-                        }
-
-                        let (coords, values): (Vec<Vec<u64>>, Vec<Number>) =
-                            filled.into_iter().unzip();
-                        let coords: Vec<u64> = coords.into_iter().flatten().collect();
-                        let coords = af::Array::new(
-                            &coords,
-                            af::Dim4::new(&[ndim as u64, coords.len() as u64, 1, 1]),
-                        );
-                        let values = Array::try_from_values(values, dtype)?;
-                        block.set(coords, &values)?;
-
-                        Ok(block)
-                    })
-                });
-
-            let block_stream: TCTryStream<Array> = Box::pin(block_stream);
-            Ok(block_stream)
-        })
+    fn block_stream<'a>(self: Arc<Self>, _txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
+        Box::pin(future::ready(Err(error::not_implemented(
+            "BlockListSparse::block_stream",
+        ))))
     }
 
     async fn value_stream_slice(
@@ -1552,7 +1427,6 @@ impl<T: Clone + BlockList> TensorTransform for DenseTensor<T> {
     type Broadcast = DenseTensor<BlockListBroadcast<T>>;
     type Expand = DenseTensor<BlockListExpand<T>>;
     type Slice = DenseTensor<BlockListSlice<T>>;
-    type Reshape = DenseTensor<BlockListReshape<T>>;
     type Transpose = DenseTensor<BlockListTranspose<T>>;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
@@ -1587,16 +1461,6 @@ impl<T: Clone + BlockList> TensorTransform for DenseTensor<T> {
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
         let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
         let blocks = Arc::new(BlockListSlice {
-            source: self.blocks.clone(),
-            rebase,
-        });
-
-        Ok(DenseTensor { blocks })
-    }
-
-    fn reshape(&self, shape: Shape) -> TCResult<Self::Reshape> {
-        let rebase = transform::Reshape::new(self.shape().clone(), shape)?;
-        let blocks = Arc::new(BlockListReshape {
             source: self.blocks.clone(),
             rebase,
         });

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter;
-use std::sync::Arc;
+use std::pin::Pin;
+// use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
@@ -37,7 +38,7 @@ use combine::SparseCombine;
 const VALUE: Label = label("value");
 
 pub type SparseRow = (Vec<u64>, Number);
-pub type SparseStream = TCTryStream<SparseRow>;
+pub type SparseStream<'a> = Pin<Box<dyn Stream<Item = TCResult<SparseRow>> + Send + Unpin + 'a>>;
 
 const ERR_NOT_SPARSE: &str = "The result of the requested operation would not be sparse;\
 convert to a DenseTensor first.";
@@ -170,18 +171,14 @@ impl TensorAccessor for SparseTable {
 
 #[async_trait]
 impl SparseAccess for SparseTable {
-    async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
+    async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
         let rows = self.table.clone().stream(txn.id().clone()).await?;
         let filled = rows.map(unwrap_row);
         let filled: SparseStream = Box::pin(filled);
         Ok(filled)
     }
 
-    async fn filled_at(
-        self: Arc<Self>,
-        txn: Txn,
-        axes: Vec<usize>,
-    ) -> TCResult<TCTryStream<Vec<u64>>> {
+    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
         let columns: Vec<Id> = axes.iter().map(|x| (*x).into()).collect();
         let filled_at = self
             .table
@@ -194,11 +191,11 @@ impl SparseAccess for SparseTable {
         Ok(filled_at)
     }
 
-    async fn filled_count(self: Arc<Self>, txn: Txn) -> TCResult<u64> {
+    async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
         self.table.count(txn.id().clone()).await
     }
 
-    async fn filled_in(self: Arc<Self>, txn: Txn, bounds: Bounds) -> TCResult<SparseStream> {
+    async fn filled_in<'a>(&'a self, txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>> {
         let source = slice_table(self.table.clone().into(), &bounds).await?;
         let filled_in = source.stream(txn.id().clone()).await?.map(unwrap_row);
         let filled_in: SparseStream = Box::pin(filled_in);
@@ -264,122 +261,37 @@ impl Transact for SparseTable {
 }
 
 #[derive(Clone)]
-pub struct SparseUnary {
-    source: Arc<dyn SparseAccess>,
-    transform: fn(Number) -> Number,
-    dtype: NumberType,
-}
-
-impl TensorAccessor for SparseUnary {
-    fn dtype(&self) -> NumberType {
-        self.dtype
-    }
-
-    fn ndim(&self) -> usize {
-        self.source.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.source.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.source.size()
-    }
-}
-
-#[async_trait]
-impl SparseAccess for SparseUnary {
-    async fn filled(self: Arc<Self>, txn: Txn) -> TCResult<SparseStream> {
-        let transform = self.transform;
-        let filled = self.source.clone().filled(txn).await?;
-        let cast = filled.map_ok(move |(coord, value)| (coord, transform(value)));
-        let cast: SparseStream = Box::pin(cast);
-        Ok(cast)
-    }
-
-    async fn filled_at(
-        self: Arc<Self>,
-        txn: Txn,
-        axes: Vec<usize>,
-    ) -> TCResult<TCTryStream<Vec<u64>>> {
-        self.source.clone().filled_at(txn, axes).await
-    }
-
-    async fn filled_count(self: Arc<Self>, txn: Txn) -> TCResult<u64> {
-        self.source.clone().filled_count(txn).await
-    }
-
-    async fn filled_in(self: Arc<Self>, txn: Txn, bounds: Bounds) -> TCResult<SparseStream> {
-        let transform = self.transform;
-        let source = self.source.clone().filled_in(txn, bounds).await?;
-        let filled_in = source.map_ok(move |(coord, value)| (coord, transform(value)));
-        let filled_in: SparseStream = Box::pin(filled_in);
-        Ok(filled_in)
-    }
-
-    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        let dtype = self.dtype;
-        self.source
-            .read_value(txn, coord)
-            .map_ok(move |value| value.into_type(dtype))
-            .await
-    }
-
-    async fn write_value(&self, _txn_id: TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
-        Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
-    }
-}
-
-#[async_trait]
-impl Transact for SparseUnary {
-    async fn commit(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-
-    async fn rollback(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-
-    async fn finalize(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-}
-
-#[derive(Clone)]
 pub struct SparseTensor<T: Clone + SparseAccess> {
-    accessor: Arc<T>,
+    accessor: T,
 }
 
 impl<T: Clone + SparseAccess> SparseTensor<T> {
     pub fn into_dyn(self) -> SparseTensor<SparseAccessorDyn> {
-        let accessor = Arc::new(SparseAccessorDyn::new(self.clone_into()));
+        let accessor = SparseAccessorDyn::new(self.clone_into());
         SparseTensor { accessor }
     }
 
     pub fn clone_into(&self) -> T {
-        (*self.accessor).clone()
+        self.accessor.clone()
     }
 
-    pub async fn copy(&self, txn: Txn) -> TCResult<SparseTensor<SparseTable>> {
+    pub async fn copy(&self, txn: &Txn) -> TCResult<SparseTensor<SparseTable>> {
         self.accessor
-            .clone()
             .copy(txn)
             .await
-            .map(Arc::new)
             .map(|accessor| SparseTensor { accessor })
     }
 
-    pub fn filled(&'_ self, txn: Txn) -> TCBoxTryFuture<'_, SparseStream> {
-        self.accessor.clone().filled(txn)
+    pub async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
+        self.accessor.filled(txn).await
     }
 
-    fn filled_at(
-        &'_ self,
-        txn: Txn,
+    pub async fn filled_at<'a>(
+        &'a self,
+        txn: &'a Txn,
         axes: Vec<usize>,
-    ) -> TCBoxTryFuture<'_, TCTryStream<Vec<u64>>> {
-        self.accessor.clone().filled_at(txn, axes)
+    ) -> TCResult<CoordStream<'a>> {
+        self.accessor.filled_at(txn, axes).await
     }
 
     fn combine<OT: Clone + SparseAccess>(
@@ -401,8 +313,7 @@ impl<T: Clone + SparseAccess> SparseTensor<T> {
             other.accessor.clone(),
             combinator,
             dtype,
-        )
-        .map(Arc::new)?;
+        )?;
 
         Ok(SparseTensor { accessor })
     }
@@ -410,7 +321,7 @@ impl<T: Clone + SparseAccess> SparseTensor<T> {
     fn condense<'a, OT: Clone + SparseAccess>(
         &'a self,
         other: &'a SparseTensor<OT>,
-        txn: Txn,
+        txn: &'a Txn,
         default: Number,
         condensor: fn(Number, Number) -> Number,
     ) -> TCBoxTryFuture<'a, DenseTensor<BlockListFile>> {
@@ -425,8 +336,7 @@ impl<T: Clone + SparseAccess> SparseTensor<T> {
                 other.accessor.clone(),
                 condensor,
                 default.class(),
-            )
-            .map(Arc::new)?;
+            )?;
 
             let condensed = dense_constant(&txn, self.shape().clone(), default).await?;
 
@@ -467,7 +377,7 @@ impl<T: Clone + SparseAccess> TensorInstance for SparseTensor<T> {
 
 impl<T: Clone + SparseAccess> IntoView for SparseTensor<T> {
     fn into_view(self) -> Tensor {
-        let accessor = Arc::new(SparseAccessorDyn::new(self.clone_into()));
+        let accessor = SparseAccessorDyn::new(self.clone_into());
         Tensor::Sparse(SparseTensor { accessor })
     }
 }
@@ -515,20 +425,17 @@ impl<T: Clone + SparseAccess> TensorUnary for SparseTensor<T> {
     type Unary = SparseTensor<SparseUnary>;
 
     fn abs(&self) -> TCResult<Self::Unary> {
-        let accessor = Arc::new(SparseUnary {
-            source: self.accessor.clone(),
-            transform: <Number as NumberInstance>::abs,
-            dtype: NumberType::Bool,
-        });
+        let source = SparseAccessorDyn::new(self.accessor.clone());
+        let transform = <Number as NumberInstance>::abs;
 
+        let accessor = SparseUnary::new(source, transform, self.dtype());
         Ok(SparseTensor { accessor })
     }
 
     async fn all(&self, txn: Txn) -> TCResult<bool> {
         let mut coords = self
             .accessor
-            .clone()
-            .filled(txn)
+            .filled(&txn)
             .await?
             .map_ok(|(coord, _)| coord)
             .zip(stream::iter(Bounds::all(self.shape()).affected()))
@@ -545,7 +452,7 @@ impl<T: Clone + SparseAccess> TensorUnary for SparseTensor<T> {
     }
 
     async fn any(&self, txn: Txn) -> TCResult<bool> {
-        let mut filled = self.accessor.clone().filled(txn).await?;
+        let mut filled = self.accessor.filled(&txn).await?;
         Ok(filled.next().await.is_some())
     }
 
@@ -562,7 +469,7 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorCompare<SparseTens
     type Dense = DenseTensor<BlockListFile>;
 
     async fn eq(&self, other: &SparseTensor<OT>, txn: Txn) -> TCResult<Self::Dense> {
-        self.condense(other, txn, true.into(), <Number as NumberInstance>::eq)
+        self.condense(other, &txn, true.into(), <Number as NumberInstance>::eq)
             .await
     }
 
@@ -571,7 +478,7 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorCompare<SparseTens
     }
 
     async fn gte(&self, other: &SparseTensor<OT>, txn: Txn) -> TCResult<Self::Dense> {
-        self.condense(other, txn, true.into(), <Number as NumberInstance>::gte)
+        self.condense(other, &txn, true.into(), <Number as NumberInstance>::gte)
             .await
     }
 
@@ -580,7 +487,7 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorCompare<SparseTens
     }
 
     async fn lte(&self, other: &SparseTensor<OT>, txn: Txn) -> TCResult<Self::Dense> {
-        self.condense(other, txn, true.into(), <Number as NumberInstance>::lte)
+        self.condense(other, &txn, true.into(), <Number as NumberInstance>::lte)
             .await
     }
 
@@ -621,7 +528,7 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorDualIO<SparseTenso
         let txn_id = *txn.id();
 
         other
-            .filled(txn.clone())
+            .filled(txn)
             .await?
             .map_ok(|(coord, _)| self.write_value_at(txn_id, coord, zero.clone()))
             .try_buffer_unordered(2)
@@ -640,7 +547,7 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorDualIO<SparseTenso
         }
 
         let txn_id = *txn.id();
-        let filled = other.filled(txn).await?;
+        let filled = other.filled(&txn).await?;
         filled
             .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
             .try_buffer_unordered(2)
@@ -686,8 +593,7 @@ impl<T: Clone + SparseAccess> TensorReduce for SparseTensor<T> {
     type Reduce = SparseTensor<SparseReduce<T>>;
 
     fn product(&self, axis: usize) -> TCResult<Self::Reduce> {
-        let accessor =
-            SparseReduce::new(self.clone(), axis, SparseTensor::product_all).map(Arc::new)?;
+        let accessor = SparseReduce::new(self.clone(), axis, SparseTensor::product_all)?;
         Ok(SparseTensor { accessor })
     }
 
@@ -702,8 +608,7 @@ impl<T: Clone + SparseAccess> TensorReduce for SparseTensor<T> {
     }
 
     fn sum(&self, axis: usize) -> TCResult<Self::Reduce> {
-        let accessor =
-            SparseReduce::new(self.clone(), axis, SparseTensor::sum_all).map(Arc::new)?;
+        let accessor = SparseReduce::new(self.clone(), axis, SparseTensor::sum_all)?;
         Ok(SparseTensor { accessor })
     }
 
@@ -723,47 +628,39 @@ impl<T: Clone + SparseAccess> TensorTransform for SparseTensor<T> {
     type Broadcast = SparseTensor<SparseBroadcast<T>>;
     type Expand = SparseTensor<SparseExpand<T>>;
     type Slice = SparseTensor<SparseSlice>;
-    type Reshape = SparseTensor<SparseReshape>;
     type Transpose = SparseTensor<SparseTranspose<T>>;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
-        let source = self.accessor.clone();
-        let accessor = Arc::new(SparseCast::new(source, dtype));
+        let accessor = SparseCast::new(self.accessor.clone(), dtype);
 
         Ok(accessor.into())
     }
 
     fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast> {
         let rebase = transform::Broadcast::new(self.shape().clone(), shape)?;
-        let accessor = Arc::new(SparseBroadcast::new(self.accessor.clone(), rebase));
+        let accessor = SparseBroadcast::new(self.accessor.clone(), rebase);
 
         Ok(accessor.into())
     }
 
     fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand> {
         let rebase = transform::Expand::new(self.shape().clone(), axis)?;
-        let accessor = Arc::new(SparseExpand::new(self.accessor.clone(), rebase));
+        let accessor = SparseExpand::new(self.accessor.clone(), rebase);
 
         Ok(accessor.into())
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
         let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
-        let accessor = Arc::new(SparseSlice::new(self.accessor.clone(), rebase));
-
-        Ok(accessor.into())
-    }
-
-    fn reshape(&self, shape: Shape) -> TCResult<Self::Reshape> {
-        let rebase = transform::Reshape::new(self.shape().clone(), shape)?;
-        let accessor = Arc::new(SparseReshape::new(self.accessor.clone(), rebase));
+        let source = SparseAccessorDyn::new(self.accessor.clone());
+        let accessor = SparseSlice::new(source, rebase);
 
         Ok(accessor.into())
     }
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         let rebase = transform::Transpose::new(self.shape().clone(), permutation)?;
-        let accessor = Arc::new(SparseTranspose::new(self.accessor.clone(), rebase));
+        let accessor = SparseTranspose::new(self.accessor.clone(), rebase);
 
         Ok(accessor.into())
     }
@@ -796,13 +693,6 @@ impl<T: Clone + SparseAccess> Transact for SparseTensor<T> {
 
 impl<T: Clone + SparseAccess> From<T> for SparseTensor<T> {
     fn from(accessor: T) -> Self {
-        let accessor = Arc::new(accessor);
-        accessor.into()
-    }
-}
-
-impl<T: Clone + SparseAccess> From<Arc<T>> for SparseTensor<T> {
-    fn from(accessor: Arc<T>) -> Self {
         Self { accessor }
     }
 }
@@ -819,13 +709,12 @@ pub async fn create(
     dtype: NumberType,
 ) -> TCResult<SparseTensor<SparseTable>> {
     SparseTable::create(txn, shape, dtype)
-        .map_ok(Arc::new)
         .map_ok(|accessor| SparseTensor { accessor })
         .await
 }
 
 pub fn from_dense<T: Clone + BlockList>(source: DenseTensor<T>) -> SparseTensor<DenseAccessor<T>> {
-    let accessor = Arc::new(DenseAccessor::new(source));
+    let accessor = DenseAccessor::new(source);
     SparseTensor { accessor }
 }
 

@@ -268,19 +268,6 @@ pub fn route<'a, T: TensorInstance + TensorDualIO<Tensor>>(
                     }
                 },
             }),
-            "reshape" => Box::new(GetHandler {
-                tensor,
-                read_fn: |tensor, _txn, selector| {
-                    let shape =
-                        selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;
-
-                    tensor
-                        .reshape(shape)
-                        .map(IntoView::into_view)
-                        .map(Collection::from)
-                        .map(State::Collection)
-                },
-            }),
             "slice" => Box::new(SliceHandler { tensor }),
             "transpose" => Box::new(GetHandler {
                 tensor,

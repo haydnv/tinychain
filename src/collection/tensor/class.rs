@@ -228,25 +228,27 @@ impl CollectionInstance for Tensor {
         self.any(txn.clone()).map_ok(|any| !any).await
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Scalar>> {
         match self {
             // TODO: Forward errors, don't panic!
-            Self::Dense(dense) => {
-                let result_stream = dense.value_stream(txn).await?;
-                let values: TCStream<Scalar> = Box::pin(
-                    result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
-                );
-                Ok(values)
+            Self::Dense(_dense) => {
+                // let result_stream = dense.value_stream(txn).await?;
+                // let values: TCStream<Scalar> = Box::pin(
+                //     result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
+                // );
+                // Ok(values)
+                unimplemented!()
             }
-            Self::Sparse(sparse) => {
-                let result_stream = sparse.filled(txn).await?;
-                let values: TCStream<Scalar> = Box::pin(
-                    result_stream
-                        .map(|r| r.unwrap())
-                        .map(Value::from)
-                        .map(Scalar::Value),
-                );
-                Ok(values)
+            Self::Sparse(_sparse) => {
+                // let result_stream = sparse.filled(txn).await?;
+                // let values: TCStream<Scalar> = Box::pin(
+                //     result_stream
+                //         .map(|r| r.unwrap())
+                //         .map(Value::from)
+                //         .map(Scalar::Value),
+                // );
+                // Ok(values)
+                unimplemented!()
             }
         }
     }
@@ -623,7 +625,6 @@ impl TensorTransform for Tensor {
     type Broadcast = Self;
     type Expand = Self;
     type Slice = Self;
-    type Reshape = Self;
     type Transpose = Self;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self> {
@@ -654,13 +655,6 @@ impl TensorTransform for Tensor {
         }
     }
 
-    fn reshape(&self, shape: Shape) -> TCResult<Self> {
-        match self {
-            Self::Dense(dense) => dense.reshape(shape).map(Self::from),
-            Self::Sparse(sparse) => sparse.reshape(shape).map(Self::from),
-        }
-    }
-
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
         match self {
             Self::Dense(dense) => dense.transpose(permutation).map(Self::from),
@@ -688,7 +682,7 @@ impl<T: Clone + BlockList> From<DenseTensor<T>> for Tensor {
 
 impl<T: Clone + SparseAccess> From<SparseTensor<T>> for Tensor {
     fn from(sparse: SparseTensor<T>) -> Tensor {
-        let accessor = Arc::new(SparseAccessorDyn::new(sparse.clone_into()));
+        let accessor = SparseAccessorDyn::new(sparse.clone_into());
         Self::Sparse(SparseTensor::from(accessor))
     }
 }
