@@ -55,13 +55,11 @@ pub trait SparseAccess: TensorAccessor + Transact + 'static {
     async fn write_value(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
 }
 
-impl<T: Clone + SparseAccess> ReadValueAt for T {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
-        Box::pin(async move {
-            let value = self.read_value(txn, &coord).await?;
-            Ok((coord, value))
-        })
-    }
+fn read_value_at<'a, T: SparseAccess>(source: &'a T, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    Box::pin(async move {
+        let value = source.read_value(txn, &coord).await?;
+        Ok((coord, value))
+    })
 }
 
 #[derive(Clone)]
@@ -341,6 +339,12 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseBroadcast<T> {
 
     async fn write_value(&self, _txn_id: TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
         Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
+    }
+}
+
+impl<T: Clone + SparseAccess> ReadValueAt for SparseBroadcast<T> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+        read_value_at(self, txn, coord)
     }
 }
 
@@ -984,6 +988,12 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseTranspose<T> {
         self.source
             .write_value(txn_id, self.rebase.invert_coord(&coord), value)
             .await
+    }
+}
+
+impl<T: Clone + SparseAccess> ReadValueAt for SparseTranspose<T> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+        read_value_at(self, txn, coord)
     }
 }
 
