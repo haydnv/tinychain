@@ -4,7 +4,7 @@ use std::iter::FromIterator;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, join};
 use log::debug;
 
@@ -13,7 +13,7 @@ use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCResult, TCStreamOld};
+use crate::general::{TCResult, TCStream};
 use crate::scalar::{Id, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -42,9 +42,10 @@ impl Aggregate {
         Ok(Aggregate { source, columns })
     }
 
-    async fn stream_inner(&self, txn_id: TxnId) -> TCResult<impl Stream<Item = Vec<Value>>> {
-        let source = self.source.select(self.columns.to_vec())?;
-        source.stream(txn_id).await
+    async fn stream_inner<'a>(&'a self, _txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+        // let source = self.source.select(self.columns.to_vec())?;
+        // source.stream(txn_id).await
+        unimplemented!()
     }
 }
 
@@ -58,8 +59,6 @@ impl Instance for Aggregate {
 
 #[async_trait]
 impl TableInstance for Aggregate {
-    type Stream = TCStreamOld<Vec<Value>>;
-
     fn group_by(&self, _columns: Vec<Id>) -> TCResult<Aggregate> {
         Err(error::unsupported(ERR_AGGREGATE_NESTED))
     }
@@ -91,12 +90,12 @@ impl TableInstance for Aggregate {
         Ok(reversed.into())
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
         let first = self.stream_inner(txn_id).await?.next().await;
         let first = if let Some(first) = first {
             first
         } else {
-            let stream: TCStreamOld<Vec<Value>> = Box::pin(stream::empty());
+            let stream: TCStream<'_, Vec<Value>> = Box::pin(stream::empty());
             return Ok(stream);
         };
 
@@ -111,7 +110,7 @@ impl TableInstance for Aggregate {
                 future::ready(Some(r))
             }
         });
-        let aggregate: TCStreamOld<Vec<Value>> =
+        let aggregate: TCStream<'_, Vec<Value>> =
             Box::pin(stream::once(future::ready(first)).chain(aggregate));
 
         Ok(aggregate)
@@ -184,7 +183,7 @@ impl IndexSlice {
     }
 
     pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        let mut rows = self.clone().stream(txn.id().clone()).await?;
+        let mut rows = self.stream(txn.id()).await?;
         Ok(rows.next().await.is_none())
     }
 
@@ -216,8 +215,6 @@ impl Instance for IndexSlice {
 
 #[async_trait]
 impl TableInstance for IndexSlice {
-    type Stream = TCStreamOld<Vec<Value>>;
-
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.source.len(txn_id, self.range.clone()).await
     }
@@ -248,7 +245,7 @@ impl TableInstance for IndexSlice {
         Ok(self.clone().into_reversed().into())
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
         debug!("IndexSlice::stream where {}", self.range);
 
         self.source
@@ -338,8 +335,6 @@ impl Instance for Limited {
 
 #[async_trait]
 impl TableInstance for Limited {
-    type Stream = TCStreamOld<Vec<Value>>;
-
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         let source_count = self.source.count(txn_id).await?;
         Ok(u64::min(source_count, self.limit as u64))
@@ -349,7 +344,7 @@ impl TableInstance for Limited {
         let source = self.source.clone();
         let schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
-        self.stream(txn_id)
+        self.stream(&txn_id)
             .await?
             .map(|row| schema.row_from_values(row))
             .map_ok(|row| source.delete_row(&txn_id, row))
@@ -374,9 +369,9 @@ impl TableInstance for Limited {
         Err(error::unsupported(ERR_LIMITED_REVERSE))
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let rows = self.source.clone().stream(txn_id).await?;
-        let rows: TCStreamOld<Vec<Value>> = Box::pin(rows.take(self.limit as usize));
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+        let rows = self.source.stream(txn_id).await?;
+        let rows: TCStream<'_, Vec<Value>> = Box::pin(rows.take(self.limit as usize));
         Ok(rows)
     }
 
@@ -391,15 +386,16 @@ impl TableInstance for Limited {
     async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
         let source = self.source.clone();
         let schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
-        let txn_id = txn.id().clone();
 
-        self.stream(txn_id)
-            .await?
-            .map(|row| schema.row_from_values(row))
-            .map_ok(|row| source.update_row(txn_id, row, value.clone()))
+        let rows = self.stream(txn.id()).await?;
+
+        rows.map(|row| schema.row_from_values(row))
+            .map_ok(|row| source.update_row(txn.id(), row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
-            .await
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -543,13 +539,10 @@ impl Instance for Merged {
 
 #[async_trait]
 impl TableInstance for Merged {
-    type Stream = TCStreamOld<Vec<Value>>;
-
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
-        self.clone()
-            .stream(txn_id)
+        self.stream(&txn_id)
             .await?
             .map(|row| schema.row_from_values(row))
             .map_ok(|row| self.delete_row(&txn_id, row))
@@ -598,31 +591,32 @@ impl TableInstance for Merged {
         self.source().slice(bounds)
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        let key_columns = self.key().to_vec();
-        let key_names: Vec<Id> = key_columns.iter().map(|c| c.name()).cloned().collect();
-        let left = self.left.clone();
-        let left_clone = self.left.clone();
-        let txn_id_clone = txn_id;
-
-        debug!("Merged::stream from right {}", &self.right);
-        debug!("left is {}", &self.left);
-
-        let rows = self
-            .right
-            .select(key_names)?
-            .stream(txn_id)
-            .await?
-            .map(move |key| Bounds::from_key(key, &key_columns))
-            .filter(move |bounds| future::ready(left.validate_bounds(bounds).is_ok()))
-            .map(move |bounds| left_clone.clone().slice(bounds))
-            .map(|slice| slice.unwrap())
-            .then(move |slice| slice.stream(txn_id_clone.clone()))
-            .map(|stream| stream.unwrap())
-            .flatten();
-
-        let rows: TCStreamOld<Vec<Value>> = Box::pin(rows);
-        Ok(rows)
+    async fn stream<'a>(&'a self, _txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+        // let key_columns = self.key().to_vec();
+        // let key_names: Vec<Id> = key_columns.iter().map(|c| c.name()).cloned().collect();
+        // let left = self.left.clone();
+        // let left_clone = self.left.clone();
+        // let txn_id_clone = txn_id;
+        //
+        // debug!("Merged::stream from right {}", &self.right);
+        // debug!("left is {}", &self.left);
+        //
+        // let rows = self
+        //     .right
+        //     .select(key_names)?
+        //     .stream(txn_id)
+        //     .await?
+        //     .map(move |key| Bounds::from_key(key, &key_columns))
+        //     .filter(move |bounds| future::ready(left.validate_bounds(bounds).is_ok()))
+        //     .map(move |bounds| left_clone.clone().slice(bounds))
+        //     .map(|slice| slice.unwrap())
+        //     .then(move |slice| slice.stream(txn_id_clone.clone()))
+        //     .map(|stream| stream.unwrap())
+        //     .flatten();
+        //
+        // let rows: TCStreamOld<Vec<Value>> = Box::pin(rows);
+        // Ok(rows)
+        unimplemented!()
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -643,17 +637,16 @@ impl TableInstance for Merged {
     async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
-        self.clone()
-            .stream(txn.id().clone())
-            .await?
-            .map(|row| schema.row_from_values(row))
-            .map_ok(|row| self.update_row(txn.id().clone(), row, value.clone()))
+        let rows = self.stream(txn.id()).await?;
+
+        rows.map(|row| schema.row_from_values(row))
+            .map_ok(|row| self.update_row(txn.id(), row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
     }
 
-    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
+    async fn update_row(&self, txn_id: &TxnId, row: Row, value: Row) -> TCResult<()> {
         match &self.left {
             MergeSource::Table(table) => table.update_row(txn_id, row, value).await,
             MergeSource::Merge(merged) => merged.update_row(txn_id, row, value).await,
@@ -746,8 +739,6 @@ impl Instance for Selection {
 
 #[async_trait]
 impl TableInstance for Selection {
-    type Stream = TCStreamOld<Vec<Value>>;
-
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.source.clone().count(txn_id).await
     }
@@ -781,13 +772,13 @@ impl TableInstance for Selection {
             .map(|s| s.into())
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
         let indices = self.indices.to_vec();
         let selected = self.source.stream(txn_id).await?.map(move |row| {
             let selection: Vec<Value> = indices.iter().map(|i| row[*i].clone()).collect();
             selection
         });
-        let selected: TCStreamOld<Vec<Value>> = Box::pin(selected);
+        let selected: TCStream<'_, Vec<Value>> = Box::pin(selected);
         Ok(selected)
     }
 
@@ -893,8 +884,6 @@ impl Instance for TableSlice {
 
 #[async_trait]
 impl TableInstance for TableSlice {
-    type Stream = TCStreamOld<Vec<Value>>;
-
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         let index = self.table.supporting_index(&self.bounds)?;
         index.slice(self.bounds.clone())?.count(txn_id).await
@@ -904,7 +893,7 @@ impl TableInstance for TableSlice {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
         self.clone()
-            .stream(txn_id)
+            .stream(&txn_id)
             .await?
             .map(|row| schema.row_from_values(row))
             .map_ok(|row| self.delete_row(&txn_id, row))
@@ -941,17 +930,19 @@ impl TableInstance for TableSlice {
         self.table.slice(bounds)
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+    async fn stream<'a>(&'a self, _txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
         debug!("TableSlice::stream");
 
-        let index = self.table.supporting_index(&self.bounds)?;
-        let slice = index.slice(self.bounds.clone())?;
+        // let index = self.table.supporting_index(&self.bounds)?;
+        // let slice = index.slice(self.bounds.clone())?;
+        //
+        // if self.reversed {
+        //     slice.reversed()?.stream(txn_id).await
+        // } else {
+        //     slice.stream(txn_id).await
+        // }
 
-        if self.reversed {
-            slice.reversed()?.stream(txn_id).await
-        } else {
-            slice.stream(txn_id).await
-        }
+        unimplemented!()
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -968,19 +959,20 @@ impl TableInstance for TableSlice {
     }
 
     async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
-        let txn_id = txn.id().clone();
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
-        self.clone()
-            .stream(txn_id)
-            .await?
-            .map(|row| schema.row_from_values(row))
-            .map_ok(|row| self.update_row(txn_id, row, value.clone()))
+
+        let rows = self.stream(txn.id()).await?;
+
+        rows.map(|row| schema.row_from_values(row))
+            .map_ok(|row| self.update_row(txn.id(), row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
-            .await
+            .await?;
+
+        Ok(())
     }
 
-    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
+    async fn update_row(&self, txn_id: &TxnId, row: Row, value: Row) -> TCResult<()> {
         self.table.update_row(txn_id, row, value).await
     }
 }

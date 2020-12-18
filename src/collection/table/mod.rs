@@ -3,11 +3,11 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 
 use crate::class::*;
 use crate::error;
-use crate::general::{TCResult, TCStreamOld, TryCastInto};
+use crate::general::{TCResult, TCStream, TCStreamOld, TryCastInto};
 use crate::handler::*;
 use crate::scalar::{label, Id, Link, MethodType, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -118,16 +118,9 @@ impl fmt::Display for TableType {
 
 #[async_trait]
 pub trait TableInstance: Instance<Class = TableType> + Into<Table> + Sized + 'static {
-    type Stream: Stream<Item = Vec<Value>> + Send + Unpin;
-
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        let count = self
-            .clone()
-            .stream(txn_id)
-            .await?
-            .fold(0, |count, _| future::ready(count + 1))
-            .await;
-
+        let rows = self.stream(&txn_id).await?;
+        let count = rows.fold(0, |count, _| future::ready(count + 1)).await;
         Ok(count)
     }
 
@@ -147,7 +140,7 @@ pub trait TableInstance: Instance<Class = TableType> + Into<Table> + Sized + 'st
         index::ReadOnly::copy_from(self.clone().into(), txn, columns).await
     }
 
-    async fn insert(&self, _txn_id: TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
+    async fn insert(&self, _txn_id: &TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
         Err(error::bad_request(ERR_INSERT, self.class()))
     }
 
@@ -172,7 +165,7 @@ pub trait TableInstance: Instance<Class = TableType> + Into<Table> + Sized + 'st
         Err(error::bad_request(ERR_SLICE, self.class()))
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream>;
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>>;
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()>;
 
@@ -182,7 +175,7 @@ pub trait TableInstance: Instance<Class = TableType> + Into<Table> + Sized + 'st
         Err(error::bad_request(ERR_UPDATE, self.class()))
     }
 
-    async fn update_row(&self, _txn_id: TxnId, _row: Row, _value: Row) -> TCResult<()> {
+    async fn update_row(&self, _txn_id: &TxnId, _row: Row, _value: Row) -> TCResult<()> {
         Err(error::bad_request(ERR_UPDATE, self.class()))
     }
 
@@ -233,13 +226,14 @@ impl CollectionInstance for Table {
     type Item = Vec<Value>;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        let mut rows = self.clone().stream(*txn.id()).await?;
+        let mut rows = self.stream(txn.id()).await?;
         Ok(rows.next().await.is_none())
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
-        let stream = self.clone().stream(*txn.id()).await?;
-        Ok(Box::pin(stream.map(Scalar::from)))
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
+        // let stream = self.clone().stream(*txn.id()).await?;
+        // Ok(Box::pin(stream.map(Scalar::from)))
+        unimplemented!()
     }
 }
 
@@ -265,8 +259,6 @@ impl Route for Table {
 
 #[async_trait]
 impl TableInstance for Table {
-    type Stream = TCStreamOld<Vec<Value>>;
-
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         match self {
             Self::Index(index) => index.count(txn_id).await,
@@ -337,7 +329,7 @@ impl TableInstance for Table {
         }
     }
 
-    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
+    async fn insert(&self, txn_id: &TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
         match self {
             Self::Index(index) => TableInstance::insert(index.deref(), txn_id, key, values).await,
             Self::ROIndex(index) => TableInstance::insert(index.deref(), txn_id, key, values).await,
@@ -447,17 +439,17 @@ impl TableInstance for Table {
         }
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
         match self {
-            Self::Index(index) => index.into_inner().stream(txn_id).await,
-            Self::ROIndex(index) => index.into_inner().stream(txn_id).await,
-            Self::Table(table) => table.into_inner().stream(txn_id).await,
-            Self::Aggregate(aggregate) => aggregate.into_inner().stream(txn_id).await,
-            Self::IndexSlice(index_slice) => index_slice.into_inner().stream(txn_id).await,
-            Self::Limit(limited) => limited.into_inner().stream(txn_id).await,
-            Self::Merge(merged) => merged.into_inner().stream(txn_id).await,
-            Self::Selection(columns) => columns.into_inner().stream(txn_id).await,
-            Self::TableSlice(table_slice) => table_slice.into_inner().stream(txn_id).await,
+            Self::Index(index) => index.stream(txn_id).await,
+            Self::ROIndex(index) => index.stream(txn_id).await,
+            Self::Table(table) => table.stream(txn_id).await,
+            Self::Aggregate(aggregate) => aggregate.stream(txn_id).await,
+            Self::IndexSlice(index_slice) => index_slice.stream(txn_id).await,
+            Self::Limit(limited) => limited.stream(txn_id).await,
+            Self::Merge(merged) => merged.stream(txn_id).await,
+            Self::Selection(columns) => columns.stream(txn_id).await,
+            Self::TableSlice(table_slice) => table_slice.stream(txn_id).await,
         }
     }
 
@@ -503,7 +495,7 @@ impl TableInstance for Table {
         }
     }
 
-    async fn update_row(&self, txn_id: TxnId, row: Row, value: Row) -> TCResult<()> {
+    async fn update_row(&self, txn_id: &TxnId, row: Row, value: Row) -> TCResult<()> {
         match self {
             Self::Index(index) => index.update_row(txn_id, row, value).await,
             Self::ROIndex(index) => index.update_row(txn_id, row, value).await,

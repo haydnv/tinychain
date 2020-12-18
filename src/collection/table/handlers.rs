@@ -97,7 +97,7 @@ where
         value: State,
     ) -> TCResult<()> {
         let (key, values) = try_into_row(key, value)?;
-        self.table.insert(txn.id().clone(), key, values).await
+        self.table.insert(txn.id(), key, values).await
     }
 }
 
@@ -291,7 +291,7 @@ where
             if key.len() == self.table.key().len() {
                 let bounds = Bounds::from_key(key, self.table.key());
                 let slice = self.table.slice(bounds)?;
-                let mut stream = slice.stream(*txn.id()).await?;
+                let mut stream = slice.stream(txn.id()).await?;
                 stream
                     .next()
                     .await
@@ -340,7 +340,7 @@ impl<T: TableInstance> CollectionInstance for TableImpl<T> {
     type Item = Vec<Value>;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        let mut rows = self.inner.clone().stream(*txn.id()).await?;
+        let mut rows = self.inner.stream(txn.id()).await?;
         if let Some(_row) = rows.next().await {
             Ok(false)
         } else {
@@ -348,9 +348,10 @@ impl<T: TableInstance> CollectionInstance for TableImpl<T> {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
-        let stream = self.inner.clone().stream(*txn.id()).await?;
-        Ok(Box::pin(stream.map(Scalar::from)))
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
+        // let stream = self.inner.stream(*txn.id()).await?;
+        // Ok(Box::pin(stream.map(Scalar::from)))
+        unimplemented!()
     }
 }
 

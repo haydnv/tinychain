@@ -13,7 +13,7 @@ use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCTryStreamOld};
+use crate::general::{TCBoxTryFuture, TCResult};
 use crate::handler::*;
 use crate::scalar::value::number::*;
 use crate::scalar::{label, Bound, Id, Label, MethodType, PathSegment, Value, ValueType};
@@ -172,34 +172,42 @@ impl TensorAccessor for SparseTable {
 #[async_trait]
 impl SparseAccess for SparseTable {
     async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
-        let rows = self.table.clone().stream(txn.id().clone()).await?;
+        let rows = self.table.stream(txn.id()).await?;
         let filled = rows.map(unwrap_row);
         let filled: SparseStream = Box::pin(filled);
         Ok(filled)
     }
 
-    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        let columns: Vec<Id> = axes.iter().map(|x| (*x).into()).collect();
-        let filled_at = self
-            .table
-            .group_by(columns.to_vec())?
-            .stream(txn.id().clone())
-            .await?
-            .map(|coord| unwrap_coord(&coord));
-
-        let filled_at: TCTryStreamOld<Vec<u64>> = Box::pin(filled_at);
-        Ok(filled_at)
+    async fn filled_at<'a>(
+        &'a self,
+        _txn: &'a Txn,
+        _axes: Vec<usize>,
+    ) -> TCResult<CoordStream<'a>> {
+        // let columns: Vec<Id> = axes.iter().map(|x| (*x).into()).collect();
+        //
+        // let filled_at = self
+        //     .table
+        //     .group_by(columns.to_vec())?;
+        //
+        // let filled_at = filled_at.stream(txn.id().clone())
+        //     .await?
+        //     .map(|coord| unwrap_coord(&coord));
+        //
+        // let filled_at: TCTryStreamOld<Vec<u64>> = Box::pin(filled_at);
+        // Ok(filled_at)
+        unimplemented!()
     }
 
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
         self.table.count(txn.id().clone()).await
     }
 
-    async fn filled_in<'a>(&'a self, txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        let source = slice_table(self.table.clone().into(), &bounds).await?;
-        let filled_in = source.stream(txn.id().clone()).await?.map(unwrap_row);
-        let filled_in: SparseStream = Box::pin(filled_in);
-        Ok(filled_in)
+    async fn filled_in<'a>(&'a self, _txn: &'a Txn, _bounds: Bounds) -> TCResult<SparseStream<'a>> {
+        // let source = slice_table(self.table.clone().into(), &bounds).await?;
+        // let filled_in = source.stream(txn.id().clone()).await?.map(unwrap_row);
+        // let filled_in: SparseStream = Box::pin(filled_in);
+        // Ok(filled_in)
+        unimplemented!()
     }
 
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
@@ -216,12 +224,12 @@ impl SparseAccess for SparseTable {
             .map(|(axis, at)| (axis.into(), u64_to_value(*at).into()))
             .collect();
 
-        let mut slice = self
+        let slice = self
             .table
             .slice(selector.into())?
-            .select(vec![VALUE.into()])?
-            .stream(txn.id().clone())
-            .await?;
+            .select(vec![VALUE.into()])?;
+
+        let mut slice = slice.stream(txn.id()).await?;
 
         match slice.next().await {
             Some(mut number) if number.len() == 1 => number.pop().unwrap().try_into(),

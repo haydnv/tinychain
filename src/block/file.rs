@@ -98,9 +98,9 @@ impl<T: BlockData> File<T> {
     pub async fn get_block<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        block_id: &'a BlockId,
+        block_id: BlockId,
     ) -> TCResult<Block<'a, T>> {
-        let lock = self.lock_block(txn_id, block_id).await?;
+        let lock = self.lock_block(txn_id, &block_id).await?;
         let block = Block::new(self, block_id, lock);
         Ok(block)
     }

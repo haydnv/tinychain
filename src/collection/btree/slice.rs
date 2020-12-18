@@ -7,7 +7,7 @@ use crate::class::Instance;
 use crate::collection::schema::Column;
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCResult, TCStreamOld};
+use crate::general::{TCResult, TCStream};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::{BTree, BTreeFile, BTreeImpl, BTreeInstance, BTreeRange, BTreeType, Key};
@@ -114,8 +114,9 @@ impl BTreeInstance for BTreeSlice {
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         let mut rows = self
-            .stream(txn.id().clone(), self.range.clone(), self.reverse)
+            .stream(txn.id(), self.range.clone(), self.reverse)
             .await?;
+
         let empty = rows.next().await.is_none();
         Ok(empty)
     }
@@ -137,12 +138,12 @@ impl BTreeInstance for BTreeSlice {
         self.source.schema()
     }
 
-    async fn stream(
-        &self,
-        txn_id: TxnId,
+    async fn stream<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         range: BTreeRange,
         reverse: bool,
-    ) -> TCResult<TCStreamOld<Key>> {
+    ) -> TCResult<TCStream<'a, Key>> {
         debug!(
             "reverse: {} ^ {} = {}",
             reverse,

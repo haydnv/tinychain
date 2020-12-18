@@ -9,7 +9,7 @@ use crate::class::{Instance, State, TCType};
 use crate::collection::class::CollectionInstance;
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{Map, TCResult, TCStreamOld, TryCastInto};
+use crate::general::{Map, TCResult, TCStream, TCStreamOld, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{label, MethodType, PathSegment, Scalar, ScalarClass, ScalarInstance, Value};
@@ -136,10 +136,10 @@ where
         if range == BTreeRange::default() {
             Ok(State::Collection(self.btree.clone().into()))
         } else if range.is_key(self.btree.schema()) {
-            let mut rows = self.btree.stream(txn.id().clone(), range, false).await?;
+            let mut rows = self.btree.stream(txn.id(), range, false).await?;
             let row = rows.next().await;
             row.ok_or_else(|| error::not_found("(btree key)"))
-                .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key.into()))))
+                .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key.to_vec().into()))))
         } else {
             let slice = BTreeSlice::new(self.btree.clone().into(), range, false)?;
             Ok(State::Collection(slice.into()))
@@ -310,9 +310,10 @@ impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
         self.inner.is_empty(txn).await
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
-        let stream = self.stream(*txn.id(), BTreeRange::default(), false).await?;
-        Ok(Box::pin(stream.map(Scalar::from)))
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
+        // let stream = self.stream(*txn.id(), BTreeRange::default(), false).await?;
+        // Ok(Box::pin(stream.map(Scalar::from)))
+        unimplemented!()
     }
 }
 
@@ -384,11 +385,12 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
-        match self {
-            Self::Tree(tree) => tree.to_stream(txn).await,
-            Self::View(view) => view.to_stream(txn).await,
-        }
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
+        // match self {
+        //     Self::Tree(tree) => tree.to_stream(txn).await,
+        //     Self::View(view) => view.to_stream(txn).await,
+        // }
+        unimplemented!()
     }
 }
 
@@ -451,12 +453,12 @@ impl BTreeInstance for BTree {
         }
     }
 
-    async fn stream(
-        &self,
-        txn_id: TxnId,
+    async fn stream<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         range: BTreeRange,
         reverse: bool,
-    ) -> TCResult<TCStreamOld<Key>> {
+    ) -> TCResult<TCStream<'a, Key>> {
         match self {
             Self::Tree(tree) => tree.stream(txn_id, range, reverse).await,
             Self::View(view) => view.stream(txn_id, range, reverse).await,

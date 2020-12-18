@@ -98,7 +98,7 @@ impl BlockListFile {
             let block_id = BlockId::from(0u64);
             let mut block = self
                 .file
-                .get_block(txn_id, &block_id)
+                .get_block(txn_id, block_id)
                 .await?
                 .upgrade()
                 .await?;
@@ -111,8 +111,8 @@ impl BlockListFile {
             let next_block_id = BlockId::from(block_id + 1);
             let block_id = BlockId::from(block_id);
 
-            let left = self.file.get_block(txn_id, &block_id);
-            let right = self.file.get_block(txn_id, &next_block_id);
+            let left = self.file.get_block(txn_id, block_id);
+            let right = self.file.get_block(txn_id, next_block_id);
             let (left, right) = try_join!(left, right)?;
             let (mut left, mut right) = try_join!(left.upgrade(), right.upgrade())?;
 
@@ -207,12 +207,7 @@ impl BlockList for BlockListFile {
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
-                        match this
-                            .file
-                            .clone()
-                            .get_block(txn.id(), &block_id.into())
-                            .await
-                        {
+                        match this.file.clone().get_block(txn.id(), block_id.into()).await {
                             Ok(block) => {
                                 let array: &Array = block.deref();
                                 values.extend(array.get(block_offsets).into_values());
@@ -255,12 +250,11 @@ impl BlockList for BlockListFile {
         debug!("coord {:?} is offset {}", coord, offset);
 
         let block_id = BlockId::from(offset / PER_BLOCK as u64);
-        let block = self.file.get_block(txn.id(), &block_id).await?;
+        let block = self.file.get_block(txn.id(), block_id).await?;
 
         debug!(
-            "read offset {} at block {} (length {})",
+            "read offset {} from block of length {}",
             (offset % PER_BLOCK as u64),
-            block_id,
             block.len()
         );
         let value = block.get_value((offset % PER_BLOCK as u64) as usize);
@@ -312,7 +306,7 @@ impl BlockList for BlockListFile {
                         let block_id = BlockId::from(block_id);
                         let mut block = this
                             .file
-                            .get_block(&txn_id, &block_id)
+                            .get_block(&txn_id, block_id)
                             .await?
                             .upgrade()
                             .await?;
@@ -352,7 +346,7 @@ impl BlockList for BlockListFile {
 
             let mut block = self
                 .file
-                .get_block(&txn_id, &block_id)
+                .get_block(&txn_id, block_id)
                 .await?
                 .upgrade()
                 .await?;
