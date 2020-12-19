@@ -1,6 +1,5 @@
 use std::convert::TryFrom;
 use std::fmt;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -675,7 +674,7 @@ impl Route for Tensor {
 
 impl<T: Clone + BlockList> From<DenseTensor<T>> for Tensor {
     fn from(dense: DenseTensor<T>) -> Tensor {
-        let blocks = Arc::new(BlockListDyn::new(dense.clone_into()));
+        let blocks = BlockListDyn::new(dense.clone_into());
         Self::Dense(DenseTensor::from(blocks))
     }
 }
