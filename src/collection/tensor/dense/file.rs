@@ -162,12 +162,14 @@ impl BlockList for BlockListFile {
     fn block_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(async move {
             let file = &self.file;
-            let block_stream =
-                Box::pin(stream::iter(0..(div_ceil(self.size(), PER_BLOCK as u64)))
+            let block_stream = Box::pin(
+                stream::iter(0..(div_ceil(self.size(), PER_BLOCK as u64)))
                     .map(BlockId::from)
-                    .then(move |block_id| file.get_block(txn.id(), block_id)));
+                    .then(move |block_id| file.get_block(txn.id(), block_id)),
+            );
 
-            let block_stream = block_stream.and_then(|block| future::ready(Ok(block.deref().clone())));
+            let block_stream =
+                block_stream.and_then(|block| future::ready(Ok(block.deref().clone())));
 
             let block_stream: TCTryStream<'a, Array> = Box::pin(block_stream);
             Ok(block_stream)
@@ -270,12 +272,7 @@ impl BlockList for BlockListFile {
         Ok(value)
     }
 
-    async fn write_value(
-        &self,
-        txn_id: TxnId,
-        bounds: Bounds,
-        value: Number,
-    ) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
         debug!("BlockListFile::write_value {} at {}", value, bounds);
 
         if !self.shape().contains_bounds(&bounds) {
@@ -312,11 +309,7 @@ impl BlockList for BlockListFile {
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
                         let block_id = BlockId::from(block_id);
-                        let mut block = file
-                            .get_block(&txn_id, block_id)
-                            .await?
-                            .upgrade()
-                            .await?;
+                        let mut block = file.get_block(&txn_id, block_id).await?.upgrade().await?;
 
                         let value = Array::constant(value, (new_start - start) as usize);
                         block.deref_mut().set(block_offsets, &value)?;

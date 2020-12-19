@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future;
+use futures::future::{self, Future, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, StatusCode, Uri};
@@ -16,13 +16,12 @@ use tokio::time::timeout;
 
 use crate::auth::Token;
 use crate::class::State;
-use crate::collection::class::CollectionInstance;
 use crate::error;
 use crate::general::{TCResult, TCStream};
 use crate::request::Request;
 use crate::scalar::value::link::*;
 use crate::scalar::{Id, Scalar, Value};
-use crate::stream::json::JsonListStream;
+use crate::stream::{JsonListStream, StreamBuffer};
 use crate::transaction::Txn;
 
 use super::Gateway;
@@ -186,36 +185,8 @@ impl Server {
     async fn handle(
         self: Arc<Self>,
         gateway: Arc<Gateway>,
-        request: hyper::Request<Body>,
-    ) -> Result<hyper::Response<Body>, hyper::Error> {
-        let success_code = if request.method() == Method::PUT || request.method() == Method::DELETE
-        {
-            StatusCode::NO_CONTENT // 204, no response content
-        } else {
-            StatusCode::OK // 200, content to follow
-        };
-
-        let mut response = match self.authenticate_and_route(gateway, request).await {
-            Err(cause) => transform_error(cause),
-            Ok(response) => {
-                let mut response = hyper::Response::new(Body::wrap_stream(response));
-                *response.status_mut() = success_code;
-                response
-            }
-        };
-
-        response
-            .headers_mut()
-            .insert(hyper::header::CONTENT_TYPE, CONTENT_TYPE.parse().unwrap());
-
-        Ok(response)
-    }
-
-    async fn authenticate_and_route<'a>(
-        self: Arc<Self>,
-        gateway: Arc<Gateway>,
         http_request: hyper::Request<Body>,
-    ) -> TCResult<TCStream<'a, TCResult<Bytes>>> {
+    ) -> TCResult<(State, Txn)> {
         let token: Option<Token> = if let Some(header) = http_request.headers().get("Authorization")
         {
             let token = header
@@ -241,37 +212,31 @@ impl Server {
         let txn_id = get_param(&mut params, "txn_id")?;
 
         let request = Request::new(self.request_ttl, token, txn_id);
-        let response = timeout(
+        let result = timeout(
             request.ttl(),
             self.route(gateway, request, params, http_request),
         )
-        .await;
+        .map_err(|e| error::timeout(e))
+        .await?;
 
-        match response {
-            Ok(result) => result,
-            Err(cause) => Err(error::bad_request(
-                "Request timed out before completing",
-                cause,
-            )),
-        }
+        result
     }
 
-    async fn route<'a>(
+    async fn route(
         self: Arc<Self>,
         gateway: Arc<Gateway>,
         request: Request,
         mut params: HashMap<String, String>,
         mut http_request: hyper::Request<Body>,
-    ) -> TCResult<TCStream<'a, TCResult<Bytes>>> {
+    ) -> TCResult<(State, Txn)> {
         let uri = http_request.uri().clone();
         let path: TCPathBuf = uri.path().parse()?;
         let txn = gateway.transaction(&request).await?;
 
-        match http_request.method() {
+        let state = match http_request.method() {
             &Method::GET => {
                 let id = get_param(&mut params, "key")?.unwrap_or_else(|| Value::None);
-                let state = gateway.get(&request, &txn, &path.into(), id).await?;
-                to_stream(state, txn).await
+                gateway.get(&request, &txn, &path.into(), id).await
             }
 
             &Method::PUT => {
@@ -283,9 +248,8 @@ impl Server {
 
                 gateway
                     .put(&request, &txn, &path.into(), id, value.into())
-                    .await?;
-
-                Ok(Box::pin(stream::empty()))
+                    .map_ok(State::from)
+                    .await
             }
 
             &Method::POST => {
@@ -293,24 +257,26 @@ impl Server {
                 let request_body: Scalar =
                     deserialize_body(http_request.body_mut(), self.request_limit).await?;
 
-                let state = gateway
+                gateway
                     .post(&request, &txn, path.into(), request_body)
-                    .await?;
-
-                to_stream(state, txn).await
+                    .await
             }
 
             &Method::DELETE => {
                 let id = get_param(&mut params, "key")?.unwrap_or_else(|| Value::None);
-                gateway.delete(&request, &txn, &path.into(), id).await?;
-                Ok(Box::pin(stream::empty()))
+                gateway
+                    .delete(&request, &txn, &path.into(), id)
+                    .map_ok(State::from)
+                    .await
             }
 
             other => Err(error::method_not_allowed(format!(
                 "Tinychain does not support {}",
                 other
             ))),
-        }
+        }?;
+
+        Ok((state, txn))
     }
 }
 
@@ -341,8 +307,8 @@ async fn deserialize_body<D: DeserializeOwned>(
 async fn to_stream<'a>(state: State, txn: Txn) -> TCResult<TCStream<'a, TCResult<Bytes>>> {
     match state {
         State::Collection(collection) => {
-            let stream = collection.to_stream(txn).await?;
-            let json = JsonListStream::from(stream);
+            let buffer = StreamBuffer::new(collection, txn).await?;
+            let json = JsonListStream::from(buffer.into_stream());
             let response = Box::pin(json.map_ok(Bytes::from).chain(stream_delimiter(b"\r\n")));
             Ok(response)
         }
@@ -380,12 +346,41 @@ impl super::Server for Server {
                 let gateway = gateway.clone();
                 async {
                     Ok::<_, Infallible>(service_fn(move |request| {
-                        this.clone().handle(gateway.clone(), request)
+                        let method = request.method().clone();
+                        let state = this.clone().handle(gateway.clone(), request);
+                        encode_response(method, state)
                     }))
                 }
             }))
             .await
     }
+}
+
+async fn encode_response(
+    method: Method,
+    result: impl Future<Output = TCResult<(State, Txn)>>,
+) -> Result<hyper::Response<Body>, hyper::Error> {
+    let success_code = if method == Method::PUT || method == Method::DELETE {
+        StatusCode::NO_CONTENT // 204, no response content
+    } else {
+        StatusCode::OK // 200, content to follow
+    };
+
+    let mut response = match result.await {
+        Err(cause) => transform_error(cause),
+        Ok((state, txn)) => {
+            let response = to_stream(state, txn).await.unwrap();
+            let mut response = hyper::Response::new(Body::wrap_stream(response));
+            *response.status_mut() = success_code;
+            response
+        }
+    };
+
+    response
+        .headers_mut()
+        .insert(hyper::header::CONTENT_TYPE, CONTENT_TYPE.parse().unwrap());
+
+    Ok(response)
 }
 
 fn encode_query_string(data: Vec<(&str, &str)>) -> String {
@@ -423,6 +418,7 @@ fn transform_error(err: error::TCError) -> hyper::Response<Body> {
         MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
         NotFound => StatusCode::NOT_FOUND,
         NotImplemented => StatusCode::NOT_IMPLEMENTED,
+        Timeout => StatusCode::REQUEST_TIMEOUT,
         TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         Transport => StatusCode::from_u16(499).unwrap(), // custom status code
         Unauthorized => StatusCode::UNAUTHORIZED,

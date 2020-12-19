@@ -8,19 +8,33 @@ use crate::general::TCResult;
 use crate::scalar::UIntType;
 use crate::transaction::Txn;
 
-use super::super::dense::{PER_BLOCK, Array, BlockListFile};
 use super::super::bounds::Shape;
+use super::super::dense::{Array, BlockListFile, PER_BLOCK};
 use super::super::TensorAccessor;
 use super::{ReadValueAt, ValueReader};
 
-pub async fn sorted_coords<C: Stream<Item = TCResult<Vec<u64>>> + Send>(txn: &Txn, shape: &Shape, coords: C, num_coords: u64) -> TCResult<impl Stream<Item = TCResult<Vec<u64>>> + Unpin> {
+pub async fn sorted_coords<C: Stream<Item = TCResult<Vec<u64>>> + Send>(
+    txn: &Txn,
+    shape: &Shape,
+    coords: C,
+    num_coords: u64,
+) -> TCResult<impl Stream<Item = TCResult<Vec<u64>>> + Unpin> {
     let subcontext = txn.subcontext_tmp().await?;
     let offsets = sort_coords(subcontext, coords, num_coords, shape).await?;
     let coords = offsets_to_coords(shape, offsets.into_stream(*txn.id()));
     Ok(coords)
 }
 
-pub async fn sorted_values<'a, T: TensorAccessor + ReadValueAt + 'a, C: Stream<Item = TCResult<Vec<u64>>> + Send + 'a>(txn: &'a Txn, source: &'a T, coords: C, num_coords: u64) -> TCResult<ValueReader<'a, impl Stream<Item = TCResult<Vec<u64>>>, T>> {
+pub async fn sorted_values<
+    'a,
+    T: TensorAccessor + ReadValueAt + 'a,
+    C: Stream<Item = TCResult<Vec<u64>>> + Send + 'a,
+>(
+    txn: &'a Txn,
+    source: &'a T,
+    coords: C,
+    num_coords: u64,
+) -> TCResult<ValueReader<'a, impl Stream<Item = TCResult<Vec<u64>>>, T>> {
     let sorted_coords = sorted_coords(txn, source.shape(), coords, num_coords).await?;
     Ok(ValueReader::new(sorted_coords, txn, source))
 }
@@ -39,7 +53,8 @@ async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send>(
         Shape::from(vec![num_coords]),
         UIntType::U64.into(),
         Box::pin(blocks),
-    ).await?;
+    )
+    .await?;
 
     block_list.merge_sort(txn.id()).await?;
     Ok(block_list)
@@ -69,7 +84,10 @@ fn coords_to_offsets<S: Stream<Item = TCResult<Vec<u64>>>>(
         .map_ok(|block| af::moddims(&block, af::Dim4::new(&[block.elements() as u64, 1, 1, 1])))
 }
 
-fn offsets_to_coords<'a, S: Stream<Item = TCResult<Array>> + Unpin + 'a>(shape: &Shape, offsets: S) -> impl Stream<Item = TCResult<Vec<u64>>> + Unpin + 'a {
+fn offsets_to_coords<'a, S: Stream<Item = TCResult<Array>> + Unpin + 'a>(
+    shape: &Shape,
+    offsets: S,
+) -> impl Stream<Item = TCResult<Vec<u64>>> + Unpin + 'a {
     let ndim = shape.len() as u64;
     let coord_bounds = coord_bounds(shape);
     let af_coord_bounds: af::Array<u64> =
@@ -77,7 +95,8 @@ fn offsets_to_coords<'a, S: Stream<Item = TCResult<Array>> + Unpin + 'a>(shape: 
     let af_shape: af::Array<u64> = af::Array::new(&shape.to_vec(), af::Dim4::new(&[1, ndim, 1, 1]));
     let ndim = shape.len();
 
-    offsets.map_ok(|block| block.into_af_array::<u64>())
+    offsets
+        .map_ok(|block| block.into_af_array::<u64>())
         .map_ok(move |block| {
             let offsets = af::div(&block, &af_coord_bounds, true);
             af::modulo(&offsets, &af_shape, true)
@@ -114,7 +133,7 @@ pub fn block_offsets(
         &af::constant(block_id, af::Dim4::new(&[1, 1, 1, 1])),
         true,
     ))
-        .0;
+    .0;
 
     if num_to_update == 0f64 {
         return (af::Array::new_empty(af::Dim4::default()), start);
@@ -162,8 +181,8 @@ pub fn coord_block<I: Iterator<Item = Vec<u64>>>(
 
 #[cfg(test)]
 mod tests {
-    use crate::collection::tensor::Bounds;
     use super::*;
+    use crate::collection::tensor::Bounds;
 
     #[test]
     fn test_coord_block() {

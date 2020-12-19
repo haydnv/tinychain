@@ -16,9 +16,6 @@ pub type TCResult<T> = Result<T, error::TCError>;
 pub type TCStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin + 'a>>;
 pub type TCTryStream<'a, T> = TCStream<'a, TCResult<T>>;
 
-// TODO: DELETE
-pub type TCStreamOld<T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin>>;
-
 pub trait CastFrom<T> {
     fn cast_from(value: T) -> Self;
 }
@@ -87,7 +84,10 @@ impl<F, T: TryCastFrom<F>> TryCastInto<T> for F {
     }
 }
 
-pub async fn count_stream<S: TryStream + Unpin>(mut stream: S) -> TCResult<u64> where error::TCError: From<<S as TryStream>::Error> {
+pub async fn count_stream<S: TryStream + Unpin>(mut stream: S) -> TCResult<u64>
+where
+    error::TCError: From<<S as TryStream>::Error>,
+{
     let mut count = 0;
 
     while let Some(_) = stream.try_next().await? {

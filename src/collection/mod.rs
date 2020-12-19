@@ -3,7 +3,7 @@ use std::fmt;
 use async_trait::async_trait;
 
 use crate::class::Instance;
-use crate::general::{TCResult, TCStreamOld};
+use crate::general::{TCResult, TCStream};
 use crate::handler::*;
 use crate::scalar::{MethodType, PathSegment, Scalar};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -50,7 +50,7 @@ impl CollectionInstance for Collection {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCStream<'a, Scalar>> {
         match self {
             Self::BTree(btree) => btree.to_stream(txn).await,
             Self::Table(table) => table.to_stream(txn).await,

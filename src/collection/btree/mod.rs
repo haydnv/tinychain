@@ -9,7 +9,7 @@ use crate::class::{Instance, State, TCType};
 use crate::collection::class::CollectionInstance;
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{Map, TCResult, TCStream, TCStreamOld, TryCastInto};
+use crate::general::{Map, TCResult, TCStream, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{label, MethodType, PathSegment, Scalar, ScalarClass, ScalarInstance, Value};
@@ -254,7 +254,7 @@ impl<'a, T: BTreeInstance> Handler for WriteHandler<'a, T> {
         if range == BTreeRange::default() {
             match data {
                 State::Collection(collection) => {
-                    let keys = collection.to_stream(txn.clone()).await?;
+                    let keys = collection.to_stream(txn).await?;
                     let keys = keys
                         .map(|s| s.try_cast_into(|k| error::bad_request("Invalid BTree key", k)));
 
@@ -310,10 +310,9 @@ impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
         self.inner.is_empty(txn).await
     }
 
-    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
-        // let stream = self.stream(*txn.id(), BTreeRange::default(), false).await?;
-        // Ok(Box::pin(stream.map(Scalar::from)))
-        unimplemented!()
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCStream<'a, Scalar>> {
+        let stream = self.stream(txn.id(), BTreeRange::default(), false).await?;
+        Ok(Box::pin(stream.map(Scalar::from)))
     }
 }
 
@@ -385,12 +384,11 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStreamOld<Scalar>> {
-        // match self {
-        //     Self::Tree(tree) => tree.to_stream(txn).await,
-        //     Self::View(view) => view.to_stream(txn).await,
-        // }
-        unimplemented!()
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCStream<'a, Scalar>> {
+        match self {
+            Self::Tree(tree) => tree.to_stream(txn).await,
+            Self::View(view) => view.to_stream(txn).await,
+        }
     }
 }
 

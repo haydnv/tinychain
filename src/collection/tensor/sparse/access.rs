@@ -1043,12 +1043,19 @@ fn group_axes<'a, T: Clone + SparseAccess>(
             let filled_at: CoordStream<'_> = Box::pin(filled_at);
             Ok(filled_at)
         } else {
-            let (coords1, coords2) = try_join!(accessor.filled_at(txn, sorted_axes.to_vec()), accessor.filled_at(txn, sorted_axes))?;
+            let (coords1, coords2) = try_join!(
+                accessor.filled_at(txn, sorted_axes.to_vec()),
+                accessor.filled_at(txn, sorted_axes)
+            )?;
 
             let num_coords = count_stream(coords1).await?;
-            let coords = coords2.map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect::<Vec<u64>>());
+            let coords =
+                coords2.map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect::<Vec<u64>>());
 
-            let filled_at: CoordStream<'a> = sorted_coords(txn, accessor.shape(), coords, num_coords).map_ok(Box::pin).await?;
+            let filled_at: CoordStream<'a> =
+                sorted_coords(txn, accessor.shape(), coords, num_coords)
+                    .map_ok(Box::pin)
+                    .await?;
             Ok(filled_at)
         }
     })

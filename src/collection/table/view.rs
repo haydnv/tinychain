@@ -614,7 +614,7 @@ impl TableInstance for Merged {
         //     .map(|stream| stream.unwrap())
         //     .flatten();
         //
-        // let rows: TCStreamOld<Vec<Value>> = Box::pin(rows);
+        // let rows: TCStream<'_, Vec<Value>> = Box::pin(rows);
         // Ok(rows)
         unimplemented!()
     }
