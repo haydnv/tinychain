@@ -108,6 +108,8 @@ impl Instance for Index {
 
 #[async_trait]
 impl TableInstance for Index {
+    type OrderBy = IndexSlice;
+    type Reverse = IndexSlice;
     type Slice = IndexSlice;
 
     fn into_table(self) -> Table {
@@ -137,13 +139,13 @@ impl TableInstance for Index {
         self.schema.values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         if self.schema.starts_with(&order) {
-            if reverse {
-                self.reversed()
-            } else {
-                Ok(self.clone().into())
-            }
+            Ok(IndexSlice::all(
+                self.btree.clone(),
+                self.schema.clone(),
+                reverse,
+            ))
         } else {
             let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
             Err(error::bad_request(
@@ -153,7 +155,7 @@ impl TableInstance for Index {
         }
     }
 
-    fn reversed(&self) -> TCResult<Table> {
+    fn reversed(&self) -> TCResult<Self::Reverse> {
         Ok(IndexSlice::all(self.btree.clone(), self.schema.clone(), true).into())
     }
 
@@ -307,6 +309,8 @@ impl Instance for ReadOnly {
 
 #[async_trait]
 impl TableInstance for ReadOnly {
+    type OrderBy = Self;
+    type Reverse = Self;
     type Slice = Self;
 
     fn into_table(self) -> Table {
@@ -325,18 +329,18 @@ impl TableInstance for ReadOnly {
         self.index.values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         self.index.validate_order(&order)?;
 
         if reverse {
-            self.reversed()
+            Ok(self.clone().into_reversed())
         } else {
             Ok(self.clone().into())
         }
     }
 
-    fn reversed(&self) -> TCResult<Table> {
-        Ok(self.clone().into_reversed().into())
+    fn reversed(&self) -> TCResult<Self::Reverse> {
+        Ok(self.clone().into_reversed())
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -545,6 +549,8 @@ impl Instance for TableIndex {
 
 #[async_trait]
 impl TableInstance for TableIndex {
+    type OrderBy = Merged;
+    type Reverse = Merged;
     type Slice = Merged;
 
     fn into_table(self) -> Table {
@@ -591,17 +597,8 @@ impl TableInstance for TableIndex {
         self.primary.values()
     }
 
-    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         self.validate_order(&columns)?;
-
-        if self.primary.validate_order(&columns).is_ok() {
-            let ordered = TableSlice::new(self.clone(), Bounds::default())?;
-            return if reverse {
-                ordered.reversed()
-            } else {
-                Ok(ordered.into())
-            };
-        }
 
         let selection = TableSlice::new(self.clone(), Bounds::default())?;
         let mut merge_source = MergeSource::Table(selection);
@@ -692,7 +689,7 @@ impl TableInstance for TableIndex {
         }
     }
 
-    fn reversed(&self) -> TCResult<Table> {
+    fn reversed(&self) -> TCResult<Self::Reverse> {
         Err(error::unsupported(
             "Cannot reverse a Table itself, consider reversing a slice of the table instead",
         ))

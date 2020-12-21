@@ -66,6 +66,7 @@ where
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         let columns: Vec<Id> = try_into_columns(selector)?;
         self.table
+            .clone()
             .group_by(columns)
             .map(TableInstance::into_table)
             .map(State::from)
@@ -169,7 +170,10 @@ where
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         if selector.is_none() {
-            self.table.reversed().map(State::from)
+            self.table
+                .reversed()
+                .map(TableInstance::into_table)
+                .map(State::from)
         } else {
             Err(error::bad_request(
                 "Table::reverse takes no arguments but found",

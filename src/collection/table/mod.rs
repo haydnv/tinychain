@@ -118,6 +118,8 @@ impl fmt::Display for TableType {
 
 #[async_trait]
 pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
+    type OrderBy: TableInstance;
+    type Reverse: TableInstance;
     type Slice: TableInstance;
 
     fn into_table(self) -> Table;
@@ -136,8 +138,8 @@ pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
         Err(error::bad_request(ERR_DELETE, self.class()))
     }
 
-    fn group_by(&self, columns: Vec<Id>) -> TCResult<view::Aggregate> {
-        view::Aggregate::new(self.clone(), columns)
+    fn group_by(self, columns: Vec<Id>) -> TCResult<view::Aggregate<Self::OrderBy>> {
+        group_by(self, columns)
     }
 
     async fn index(&self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly> {
@@ -156,9 +158,9 @@ pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
         view::Limited::new(self.clone(), limit)
     }
 
-    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table>;
+    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy>;
 
-    fn reversed(&self) -> TCResult<Table>;
+    fn reversed(&self) -> TCResult<Self::Reverse>;
 
     fn select(self, columns: Vec<Id>) -> TCResult<view::Selection<Self>> {
         let selection = view::Selection::new(self, columns)?;
@@ -193,7 +195,7 @@ pub enum Table {
     Index(TableImpl<Index>),
     ROIndex(TableImpl<ReadOnly>),
     Table(TableImpl<TableIndex>),
-    Aggregate(TableImpl<Aggregate>),
+    Aggregate(Box<TableImpl<Aggregate<Table>>>),
     IndexSlice(TableImpl<IndexSlice>),
     Limit(TableImpl<Limited>),
     Merge(TableImpl<Merged>),
@@ -262,6 +264,8 @@ impl Route for Table {
 
 #[async_trait]
 impl TableInstance for Table {
+    type OrderBy = Self;
+    type Reverse = Self;
     type Slice = Self;
 
     fn into_table(self) -> Self {
@@ -310,17 +314,17 @@ impl TableInstance for Table {
         }
     }
 
-    fn group_by(&self, columns: Vec<Id>) -> TCResult<view::Aggregate> {
+    fn group_by(self, columns: Vec<Id>) -> TCResult<view::Aggregate<Table>> {
         match self {
-            Self::Index(index) => index.group_by(columns),
-            Self::ROIndex(index) => index.group_by(columns),
-            Self::Table(table) => table.group_by(columns),
-            Self::Aggregate(aggregate) => aggregate.group_by(columns),
-            Self::IndexSlice(index_slice) => index_slice.group_by(columns),
-            Self::Limit(limited) => limited.group_by(columns),
-            Self::Merge(merged) => merged.group_by(columns),
-            Self::Selection(selection) => selection.group_by(columns),
-            Self::TableSlice(table_slice) => table_slice.group_by(columns),
+            Self::Index(index) => index.into_table().group_by(columns),
+            Self::ROIndex(index) => index.into_table().group_by(columns),
+            Self::Table(table) => table.into_table().group_by(columns),
+            Self::Aggregate(aggregate) => aggregate.into_table().group_by(columns),
+            Self::IndexSlice(index_slice) => index_slice.into_table().group_by(columns),
+            Self::Limit(limited) => limited.into_table().group_by(columns),
+            Self::Merge(merged) => merged.into_table().group_by(columns),
+            Self::Selection(selection) => selection.into_table().group_by(columns),
+            Self::TableSlice(table_slice) => table_slice.into_table().group_by(columns),
         }
     }
 
@@ -392,31 +396,49 @@ impl TableInstance for Table {
         }
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         match self {
-            Self::Index(index) => index.order_by(order, reverse),
-            Self::ROIndex(index) => index.order_by(order, reverse),
-            Self::Table(table) => table.order_by(order, reverse),
-            Self::Aggregate(aggregate) => aggregate.order_by(order, reverse),
-            Self::IndexSlice(index_slice) => index_slice.order_by(order, reverse),
-            Self::Limit(limited) => limited.order_by(order, reverse),
-            Self::Merge(merged) => merged.order_by(order, reverse),
-            Self::Selection(columns) => columns.order_by(order, reverse),
-            Self::TableSlice(table_slice) => table_slice.order_by(order, reverse),
+            Self::Index(index) => index
+                .order_by(order, reverse)
+                .map(TableInstance::into_table),
+            Self::ROIndex(index) => index
+                .order_by(order, reverse)
+                .map(TableInstance::into_table),
+            Self::Table(table) => table
+                .order_by(order, reverse)
+                .map(TableInstance::into_table),
+            Self::Aggregate(aggregate) => aggregate
+                .order_by(order, reverse)
+                .map(TableInstance::into_table),
+            Self::IndexSlice(index_slice) => index_slice
+                .order_by(order, reverse)
+                .map(TableInstance::into_table),
+            Self::Limit(limited) => limited
+                .order_by(order, reverse)
+                .map(TableInstance::into_table),
+            Self::Merge(merged) => merged
+                .order_by(order, reverse)
+                .map(TableInstance::into_table),
+            Self::Selection(columns) => columns
+                .order_by(order, reverse)
+                .map(TableInstance::into_table),
+            Self::TableSlice(table_slice) => table_slice
+                .order_by(order, reverse)
+                .map(TableInstance::into_table),
         }
     }
 
-    fn reversed(&self) -> TCResult<Table> {
+    fn reversed(&self) -> TCResult<Self::Reverse> {
         match self {
-            Self::Index(index) => index.reversed(),
-            Self::ROIndex(index) => index.reversed(),
-            Self::Table(table) => table.reversed(),
-            Self::Aggregate(aggregate) => aggregate.reversed(),
-            Self::IndexSlice(index_slice) => index_slice.reversed(),
-            Self::Limit(limited) => limited.reversed(),
-            Self::Merge(merged) => merged.reversed(),
-            Self::Selection(columns) => columns.reversed(),
-            Self::TableSlice(table_slice) => table_slice.reversed(),
+            Self::Index(index) => index.reversed().map(TableInstance::into_table),
+            Self::ROIndex(index) => index.reversed().map(TableInstance::into_table),
+            Self::Table(table) => table.reversed().map(TableInstance::into_table),
+            Self::Aggregate(aggregate) => aggregate.reversed().map(TableInstance::into_table),
+            Self::IndexSlice(index_slice) => index_slice.reversed().map(TableInstance::into_table),
+            Self::Limit(limited) => limited.reversed().map(TableInstance::into_table),
+            Self::Merge(merged) => merged.reversed().map(TableInstance::into_table),
+            Self::Selection(columns) => columns.reversed().map(TableInstance::into_table),
+            Self::TableSlice(table_slice) => table_slice.reversed().map(TableInstance::into_table),
         }
     }
 
@@ -577,12 +599,6 @@ impl Transact for Table {
             Self::Selection(_) => (), // no-op
             Self::TableSlice(table_slice) => table_slice.finalize(txn_id).await,
         }
-    }
-}
-
-impl From<Aggregate> for Table {
-    fn from(aggregate: Aggregate) -> Table {
-        Table::Aggregate(aggregate.into())
     }
 }
 

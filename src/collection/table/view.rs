@@ -30,17 +30,12 @@ const ERR_LIMITED_REVERSE: &str = "Cannot reverse a limited selection. \
 Consider reversing a slice before limiting";
 
 #[derive(Clone)]
-pub struct Aggregate {
-    source: Box<Table>,
+pub struct Aggregate<T: TableInstance> {
+    source: T,
     columns: Vec<Id>,
 }
 
-impl Aggregate {
-    pub fn new<T: TableInstance>(source: T, columns: Vec<Id>) -> TCResult<Aggregate> {
-        let source = Box::new(source.order_by(columns.to_vec(), false)?);
-        Ok(Aggregate { source, columns })
-    }
-
+impl<T: TableInstance> Aggregate<T> {
     async fn stream_inner<'a>(&'a self, _txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
         // let source = self.source.select(self.columns.to_vec())?;
         // source.stream(txn_id).await
@@ -48,7 +43,7 @@ impl Aggregate {
     }
 }
 
-impl Instance for Aggregate {
+impl<T: TableInstance> Instance for Aggregate<T> {
     type Class = TableType;
 
     fn class(&self) -> Self::Class {
@@ -57,14 +52,18 @@ impl Instance for Aggregate {
 }
 
 #[async_trait]
-impl TableInstance for Aggregate {
+impl<T: TableInstance> TableInstance for Aggregate<T> {
+    type OrderBy = Aggregate<<T as TableInstance>::OrderBy>;
+    type Reverse = Aggregate<<T as TableInstance>::Reverse>;
     type Slice = Table;
 
     fn into_table(self) -> Table {
-        Table::Aggregate(self.into())
+        let columns = self.columns;
+        let source = self.source.into_table();
+        Table::Aggregate(Box::new(Aggregate { source, columns }.into()))
     }
 
-    fn group_by(&self, _columns: Vec<Id>) -> TCResult<Aggregate> {
+    fn group_by(self, _columns: Vec<Id>) -> TCResult<Aggregate<Self::OrderBy>> {
         Err(error::unsupported(ERR_AGGREGATE_NESTED))
     }
 
@@ -76,23 +75,19 @@ impl TableInstance for Aggregate {
         self.source.values()
     }
 
-    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
-        let source = Box::new(self.source.order_by(columns, reverse)?);
+    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+        let source = self.source.order_by(columns, reverse)?;
         Ok(Aggregate {
             source,
             columns: self.columns.to_vec(),
-        }
-        .into())
+        })
     }
 
-    fn reversed(&self) -> TCResult<Table> {
+    fn reversed(&self) -> TCResult<Self::Reverse> {
         let columns = self.columns.to_vec();
-        let reversed = self
-            .source
+        self.source
             .reversed()
-            .map(Box::new)
-            .map(|source| Aggregate { source, columns })?;
-        Ok(reversed.into())
+            .map(|source| Aggregate { source, columns })
     }
 
     async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
@@ -130,10 +125,22 @@ impl TableInstance for Aggregate {
     }
 }
 
-impl From<Aggregate> for Collection {
-    fn from(index: Aggregate) -> Collection {
-        Collection::Table(index.into())
+impl<T: TableInstance> From<Aggregate<T>> for Collection {
+    fn from(aggregate: Aggregate<T>) -> Collection {
+        let source = aggregate.source.into_table();
+        let columns = aggregate.columns;
+        Collection::Table(Table::Aggregate(Box::new(
+            Aggregate { source, columns }.into(),
+        )))
     }
+}
+
+pub fn group_by<T: TableInstance>(
+    source: T,
+    columns: Vec<Id>,
+) -> TCResult<Aggregate<<T as TableInstance>::OrderBy>> {
+    let source = source.order_by(columns.to_vec(), false)?;
+    Ok(Aggregate { source, columns })
 }
 
 #[derive(Clone)]
@@ -229,6 +236,8 @@ impl Instance for IndexSlice {
 
 #[async_trait]
 impl TableInstance for IndexSlice {
+    type OrderBy = Self;
+    type Reverse = Self;
     type Slice = Table;
 
     fn into_table(self) -> Table {
@@ -251,7 +260,7 @@ impl TableInstance for IndexSlice {
         self.schema.values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         self.validate_order(&order)?;
 
         if reverse {
@@ -261,8 +270,8 @@ impl TableInstance for IndexSlice {
         }
     }
 
-    fn reversed(&self) -> TCResult<Table> {
-        Ok(self.clone().into_reversed().into())
+    fn reversed(&self) -> TCResult<Self::Reverse> {
+        Ok(self.clone().into_reversed())
     }
 
     async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
@@ -355,6 +364,8 @@ impl Instance for Limited {
 
 #[async_trait]
 impl TableInstance for Limited {
+    type OrderBy = Table;
+    type Reverse = Table;
     type Slice = Table;
 
     fn into_table(self) -> Table {
@@ -622,6 +633,8 @@ impl Instance for Merged {
 
 #[async_trait]
 impl TableInstance for Merged {
+    type OrderBy = Self;
+    type Reverse = Self;
     type Slice = Self;
 
     fn into_table(self) -> Table {
@@ -658,15 +671,15 @@ impl TableInstance for Merged {
         }
     }
 
-    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         match &self.left {
             MergeSource::Merge(merged) => merged.order_by(columns, reverse),
             MergeSource::Table(table_slice) => table_slice.order_by(columns, reverse),
         }
     }
 
-    fn reversed(&self) -> TCResult<Table> {
-        Ok(self.as_reversed().into())
+    fn reversed(&self) -> TCResult<Self::Reverse> {
+        Ok(self.as_reversed())
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
@@ -815,7 +828,9 @@ impl<T: Clone + Send + Sync> Instance for Selection<T> {
 
 #[async_trait]
 impl<T: TableInstance> TableInstance for Selection<T> {
-    type Slice = Self;
+    type OrderBy = Selection<<T as TableInstance>::OrderBy>;
+    type Reverse = Selection<<T as TableInstance>::Reverse>;
+    type Slice = Selection<<T as TableInstance>::Slice>;
 
     fn into_table(self) -> Table {
         let this = Selection {
@@ -840,7 +855,7 @@ impl<T: TableInstance> TableInstance for Selection<T> {
         self.schema.values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         self.validate_order(&order)?;
 
         let source = self.source.order_by(order, reverse)?;
@@ -850,15 +865,11 @@ impl<T: TableInstance> TableInstance for Selection<T> {
             schema: self.schema.clone(),
             columns: self.columns.to_vec(),
             indices: self.indices.to_vec(),
-        }
-        .into_table())
+        })
     }
 
-    fn reversed(&self) -> TCResult<Table> {
-        self.source
-            .reversed()?
-            .select(self.columns.to_vec())
-            .map(|s| s.into())
+    fn reversed(&self) -> TCResult<Self::Reverse> {
+        self.source.reversed()?.select(self.columns.to_vec())
     }
 
     async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
@@ -977,6 +988,8 @@ impl Instance for TableSlice {
 
 #[async_trait]
 impl TableInstance for TableSlice {
+    type OrderBy = Merged;
+    type Reverse = TableSlice;
     type Slice = Merged;
 
     fn into_table(self) -> Table {
@@ -1011,16 +1024,16 @@ impl TableInstance for TableSlice {
         self.source().values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         let table = self.source().order_by(order, reverse)?;
         table.slice(self.slice.bounds().clone())
     }
 
-    fn reversed(&self) -> TCResult<Table> {
+    fn reversed(&self) -> TCResult<Self::Reverse> {
         let table = self.table.clone();
         let slice = self.slice.clone().into_reversed();
         let slice = Self { table, slice };
-        Ok(slice.into_table())
+        Ok(slice)
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Merged> {
