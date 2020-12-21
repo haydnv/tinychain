@@ -117,7 +117,11 @@ impl fmt::Display for TableType {
 }
 
 #[async_trait]
-pub trait TableInstance: Instance<Class = TableType> + Into<Table> + Sized + 'static {
+pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
+    type Slice: TableInstance;
+
+    fn into_table(self) -> Table;
+
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         let rows = self.stream(&txn_id).await?;
         let count = rows.fold(0, |count, _| future::ready(count + 1)).await;
@@ -133,11 +137,11 @@ pub trait TableInstance: Instance<Class = TableType> + Into<Table> + Sized + 'st
     }
 
     fn group_by(&self, columns: Vec<Id>) -> TCResult<view::Aggregate> {
-        view::Aggregate::new(self.clone().into(), columns)
+        view::Aggregate::new(self.clone(), columns)
     }
 
     async fn index(&self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly> {
-        index::ReadOnly::copy_from(self.clone().into(), txn, columns).await
+        index::ReadOnly::copy_from(self.clone(), txn, columns).await
     }
 
     async fn insert(&self, _txn_id: &TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
@@ -149,7 +153,7 @@ pub trait TableInstance: Instance<Class = TableType> + Into<Table> + Sized + 'st
     fn values(&'_ self) -> &'_ [Column];
 
     fn limit(&self, limit: u64) -> view::Limited {
-        view::Limited::new(self.clone().into(), limit)
+        view::Limited::new(self.clone(), limit)
     }
 
     fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table>;
@@ -157,11 +161,11 @@ pub trait TableInstance: Instance<Class = TableType> + Into<Table> + Sized + 'st
     fn reversed(&self) -> TCResult<Table>;
 
     fn select(&self, columns: Vec<Id>) -> TCResult<view::Selection> {
-        let selection = view::Selection::new(self.clone().into(), columns)?;
+        let selection = view::Selection::new(self.clone(), columns)?;
         Ok(selection)
     }
 
-    fn slice(&self, _bounds: Bounds) -> TCResult<Table> {
+    fn slice(&self, _bounds: Bounds) -> TCResult<Self::Slice> {
         Err(error::bad_request(ERR_SLICE, self.class()))
     }
 
@@ -258,6 +262,12 @@ impl Route for Table {
 
 #[async_trait]
 impl TableInstance for Table {
+    type Slice = Self;
+
+    fn into_table(self) -> Self {
+        self
+    }
+
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         match self {
             Self::Index(index) => index.count(txn_id).await,
@@ -426,15 +436,19 @@ impl TableInstance for Table {
 
     fn slice(&self, bounds: Bounds) -> TCResult<Table> {
         match self {
-            Self::Index(index) => index.slice(bounds),
-            Self::ROIndex(index) => index.slice(bounds),
-            Self::Table(table) => table.slice(bounds),
-            Self::Aggregate(aggregate) => aggregate.slice(bounds),
-            Self::Limit(limited) => limited.slice(bounds),
-            Self::IndexSlice(index_slice) => index_slice.slice(bounds),
-            Self::Merge(merged) => merged.slice(bounds),
-            Self::Selection(columns) => columns.slice(bounds),
-            Self::TableSlice(table_slice) => table_slice.slice(bounds),
+            Self::Index(index) => index.slice(bounds).map(TableInstance::into_table),
+            Self::ROIndex(index) => index.slice(bounds).map(TableInstance::into_table),
+            Self::Table(table) => table.slice(bounds).map(TableInstance::into_table),
+            Self::Aggregate(aggregate) => aggregate.slice(bounds).map(TableInstance::into_table),
+            Self::Limit(limited) => limited.slice(bounds).map(TableInstance::into_table),
+            Self::IndexSlice(index_slice) => {
+                index_slice.slice(bounds).map(TableInstance::into_table)
+            }
+            Self::Merge(merged) => merged.slice(bounds).map(TableInstance::into_table),
+            Self::Selection(columns) => columns.slice(bounds).map(TableInstance::into_table),
+            Self::TableSlice(table_slice) => {
+                table_slice.slice(bounds).map(TableInstance::into_table)
+            }
         }
     }
 

@@ -97,6 +97,12 @@ impl Instance for Index {
 
 #[async_trait]
 impl TableInstance for Index {
+    type Slice = IndexSlice;
+
+    fn into_table(self) -> Table {
+        Table::Index(self.into())
+    }
+
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.len(txn_id).await
     }
@@ -140,7 +146,7 @@ impl TableInstance for Index {
         Ok(IndexSlice::all(self.btree.clone(), self.schema.clone(), true).into())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+    fn slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
         self.index_slice(bounds).map(|is| is.into())
     }
 
@@ -235,8 +241,8 @@ pub struct ReadOnly {
 }
 
 impl ReadOnly {
-    pub async fn copy_from(
-        source: Table,
+    pub async fn copy_from<T: TableInstance>(
+        source: T,
         txn: Txn,
         key_columns: Option<Vec<Id>>,
     ) -> TCResult<ReadOnly> {
@@ -290,6 +296,12 @@ impl Instance for ReadOnly {
 
 #[async_trait]
 impl TableInstance for ReadOnly {
+    type Slice = Self;
+
+    fn into_table(self) -> Table {
+        Table::ROIndex(self.into())
+    }
+
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.index.clone().count(txn_id).await
     }
@@ -316,11 +328,11 @@ impl TableInstance for ReadOnly {
         Ok(self.clone().into_reversed().into())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+    fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
         self.validate_bounds(&bounds)?;
         self.index
             .slice_index(bounds)
-            .map(|index| ReadOnly { index }.into())
+            .map(|index| ReadOnly { index })
     }
 
     async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
@@ -517,6 +529,12 @@ impl Instance for TableIndex {
 
 #[async_trait]
 impl TableInstance for TableIndex {
+    type Slice = Merged;
+
+    fn into_table(self) -> Table {
+        Table::Table(self.into())
+    }
+
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.primary.count(txn_id).await
     }
@@ -664,14 +682,7 @@ impl TableInstance for TableIndex {
         ))
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
-        if self.primary.validate_bounds(&bounds).is_ok() {
-            debug!("primary key can slice bounds {}...", bounds);
-            return TableSlice::new(self.clone(), bounds).map(|t| t.into());
-        }
-
-        debug!("primary key cannot slice bounds {}", bounds);
-
+    fn slice(&self, bounds: Bounds) -> TCResult<Merged> {
         let columns: Vec<Id> = self
             .primary
             .schema()
@@ -705,7 +716,7 @@ impl TableInstance for TableIndex {
 
                     bounds = &bounds[i..];
                     if bounds.is_empty() {
-                        return Ok(merged.into());
+                        return Ok(merged);
                     }
 
                     merge_source = MergeSource::Merge(Arc::new(merged));
@@ -718,7 +729,7 @@ impl TableInstance for TableIndex {
 
                             bounds = &bounds[i..];
                             if bounds.is_empty() {
-                                return Ok(merged.into());
+                                return Ok(merged);
                             }
 
                             merge_source = MergeSource::Merge(Arc::new(merged));

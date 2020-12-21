@@ -37,7 +37,7 @@ pub struct Aggregate {
 }
 
 impl Aggregate {
-    pub fn new(source: Table, columns: Vec<Id>) -> TCResult<Aggregate> {
+    pub fn new<T: TableInstance>(source: T, columns: Vec<Id>) -> TCResult<Aggregate> {
         let source = Box::new(source.order_by(columns.to_vec(), false)?);
         Ok(Aggregate { source, columns })
     }
@@ -59,6 +59,12 @@ impl Instance for Aggregate {
 
 #[async_trait]
 impl TableInstance for Aggregate {
+    type Slice = Table;
+
+    fn into_table(self) -> Table {
+        Table::Aggregate(self.into())
+    }
+
     fn group_by(&self, _columns: Vec<Id>) -> TCResult<Aggregate> {
         Err(error::unsupported(ERR_AGGREGATE_NESTED))
     }
@@ -215,6 +221,12 @@ impl Instance for IndexSlice {
 
 #[async_trait]
 impl TableInstance for IndexSlice {
+    type Slice = Table;
+
+    fn into_table(self) -> Table {
+        Table::IndexSlice(self.into())
+    }
+
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.source.len(txn_id, self.range.clone()).await
     }
@@ -319,8 +331,8 @@ pub struct Limited {
 }
 
 impl Limited {
-    pub fn new<T: Into<Table>>(source: T, limit: u64) -> Limited {
-        let source = Box::new(source.into());
+    pub fn new<T: TableInstance>(source: T, limit: u64) -> Limited {
+        let source = Box::new(source.into_table());
         Limited { source, limit }
     }
 }
@@ -335,6 +347,12 @@ impl Instance for Limited {
 
 #[async_trait]
 impl TableInstance for Limited {
+    type Slice = Table;
+
+    fn into_table(self) -> Table {
+        Table::Limit(self.into())
+    }
+
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         let source_count = self.source.count(txn_id).await?;
         Ok(u64::min(source_count, self.limit as u64))
@@ -441,7 +459,7 @@ impl MergeSource {
         }
     }
 
-    fn slice(self, bounds: Bounds) -> TCResult<Table> {
+    fn slice(self, bounds: Bounds) -> TCResult<Merged> {
         match self {
             Self::Table(table) => table.slice(bounds),
             Self::Merge(merged) => merged.slice(bounds),
@@ -539,6 +557,12 @@ impl Instance for Merged {
 
 #[async_trait]
 impl TableInstance for Merged {
+    type Slice = Self;
+
+    fn into_table(self) -> Table {
+        Table::Merge(self.into())
+    }
+
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
@@ -583,7 +607,7 @@ impl TableInstance for Merged {
         Ok(self.as_reversed().into())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+    fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
         let bounds = self
             .source()
             .merge_bounds(vec![self.bounds.clone(), bounds])?;
@@ -690,8 +714,8 @@ pub struct Selection {
 }
 
 impl Selection {
-    pub fn new<T: Into<Table>>(source: T, columns: Vec<Id>) -> TCResult<Selection> {
-        let source: Table = source.into();
+    pub fn new<T: TableInstance>(source: T, columns: Vec<Id>) -> TCResult<Selection> {
+        let source = source.into_table();
 
         let column_set: HashSet<&Id> = columns.iter().collect();
         if column_set.len() != columns.len() {
@@ -739,6 +763,12 @@ impl Instance for Selection {
 
 #[async_trait]
 impl TableInstance for Selection {
+    type Slice = Self;
+
+    fn into_table(self) -> Table {
+        Table::Selection(self.into())
+    }
+
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         self.source.clone().count(txn_id).await
     }
@@ -884,6 +914,12 @@ impl Instance for TableSlice {
 
 #[async_trait]
 impl TableInstance for TableSlice {
+    type Slice = Merged;
+
+    fn into_table(self) -> Table {
+        Table::TableSlice(self.into())
+    }
+
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         let index = self.table.supporting_index(&self.bounds)?;
         index.slice(self.bounds.clone())?.count(txn_id).await
@@ -924,7 +960,7 @@ impl TableInstance for TableSlice {
         Ok(selection.into())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+    fn slice(&self, bounds: Bounds) -> TCResult<Merged> {
         let bounds = self.table.merge_bounds(vec![self.bounds.clone(), bounds])?;
         self.validate_bounds(&bounds)?;
         self.table.slice(bounds)

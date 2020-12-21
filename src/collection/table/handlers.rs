@@ -283,7 +283,7 @@ where
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
         if selector.is_none() {
-            let table: Table = self.table.clone().into();
+            let table: Table = self.table.clone().into_table();
             Ok(State::from(table))
         } else {
             let key: Vec<Value> =
@@ -321,7 +321,10 @@ where
             error::bad_request("Cannot cast into Table Bounds from", v)
         })?;
 
-        self.table.slice(bounds).map(State::from)
+        self.table
+            .slice(bounds)
+            .map(TableInstance::into_table)
+            .map(State::from)
     }
 }
 #[derive(Clone)]
