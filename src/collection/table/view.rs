@@ -865,20 +865,26 @@ impl From<Selection> for Collection {
 
 #[derive(Clone)]
 pub struct TableSlice {
+    // TODO: remove redundant fields
     table: TableIndex,
     bounds: Bounds,
     reversed: bool,
+    slice: IndexSlice,
 }
 
 impl TableSlice {
     pub fn new(table: TableIndex, bounds: Bounds) -> TCResult<TableSlice> {
         table.validate_bounds(&bounds)?;
 
+        let index = table.supporting_index(&bounds)?;
+        let slice = index.slice(bounds.clone())?;
+
         debug!("TableSlice::new w/bounds {}", bounds);
         Ok(TableSlice {
             table,
             bounds,
             reversed: false,
+            slice,
         })
     }
 
@@ -900,6 +906,7 @@ impl TableSlice {
             table: self.table,
             bounds: self.bounds,
             reversed: !self.reversed,
+            slice: self.slice.into_reversed()
         }
     }
 }
@@ -966,19 +973,9 @@ impl TableInstance for TableSlice {
         self.table.slice(bounds)
     }
 
-    async fn stream<'a>(&'a self, _txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
         debug!("TableSlice::stream");
-
-        // let index = self.table.supporting_index(&self.bounds)?;
-        // let slice = index.slice(self.bounds.clone())?;
-        //
-        // if self.reversed {
-        //     slice.reversed()?.stream(txn_id).await
-        // } else {
-        //     slice.stream(txn_id).await
-        // }
-
-        unimplemented!()
+        self.slice.stream(txn_id).await
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
