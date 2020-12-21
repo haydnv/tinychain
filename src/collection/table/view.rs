@@ -468,7 +468,7 @@ impl MergeSource {
 
     fn source(&'_ self) -> &'_ TableIndex {
         match self {
-            Self::Table(table_slice) => table_slice.table(),
+            Self::Table(table_slice) => table_slice.source(),
             Self::Merge(merged) => merged.source(),
         }
     }
@@ -865,10 +865,7 @@ impl From<Selection> for Collection {
 
 #[derive(Clone)]
 pub struct TableSlice {
-    // TODO: remove redundant fields
     table: TableIndex,
-    bounds: Bounds,
-    reversed: bool,
     slice: IndexSlice,
 }
 
@@ -880,33 +877,25 @@ impl TableSlice {
         let slice = index.slice(bounds.clone())?;
 
         debug!("TableSlice::new w/bounds {}", bounds);
-        Ok(TableSlice {
-            table,
-            bounds,
-            reversed: false,
-            slice,
-        })
+        Ok(TableSlice { table, slice })
     }
 
     pub fn bounds(&'_ self) -> &'_ Bounds {
-        &self.bounds
+        self.slice.bounds()
     }
 
     pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
-        let index = self.table.supporting_index(&bounds)?;
-        index.index_slice(bounds)
+        self.slice.slice_index(bounds)
     }
 
-    pub fn table(&'_ self) -> &'_ TableIndex {
+    pub fn source(&'_ self) -> &'_ TableIndex {
         &self.table
     }
 
     fn into_reversed(self) -> TableSlice {
         TableSlice {
             table: self.table,
-            bounds: self.bounds,
-            reversed: !self.reversed,
-            slice: self.slice.into_reversed()
+            slice: self.slice.into_reversed(),
         }
     }
 }
@@ -928,15 +917,13 @@ impl TableInstance for TableSlice {
     }
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        let index = self.table.supporting_index(&self.bounds)?;
-        index.slice(self.bounds.clone())?.count(txn_id).await
+        self.slice.count(txn_id).await
     }
 
     async fn delete(self, txn_id: TxnId) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
-        self.clone()
-            .stream(&txn_id)
+        self.stream(&txn_id)
             .await?
             .map(|row| schema.row_from_values(row))
             .map_ok(|row| self.delete_row(&txn_id, row))
@@ -946,31 +933,35 @@ impl TableInstance for TableSlice {
     }
 
     async fn delete_row(&self, txn_id: &TxnId, row: Row) -> TCResult<()> {
-        self.table.delete_row(txn_id, row).await
+        self.source().delete_row(txn_id, row).await
     }
 
     fn key(&'_ self) -> &'_ [Column] {
-        self.table.key()
+        self.source().key()
     }
 
     fn values(&'_ self) -> &'_ [Column] {
-        self.table.values()
+        self.source().values()
     }
 
     fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
-        self.table.order_by(order, reverse)
+        let table = self.source().order_by(order, reverse)?;
+        table.slice(self.slice.bounds().clone())
     }
 
     fn reversed(&self) -> TCResult<Table> {
-        let mut selection = self.clone();
-        selection.reversed = true;
-        Ok(selection.into())
+        let table = self.table.clone();
+        let slice = self.slice.clone().into_reversed();
+        let slice = Self { table, slice };
+        Ok(slice.into_table())
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Merged> {
-        let bounds = self.table.merge_bounds(vec![self.bounds.clone(), bounds])?;
+        let bounds = self
+            .source()
+            .merge_bounds(vec![self.slice.bounds().clone(), bounds])?;
         self.validate_bounds(&bounds)?;
-        self.table.slice(bounds)
+        self.source().slice(bounds)
     }
 
     async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
@@ -981,14 +972,14 @@ impl TableInstance for TableSlice {
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
         debug!("Table::validate_bounds {}", bounds);
 
-        let index = self.table.supporting_index(&self.bounds)?;
+        let index = self.source().supporting_index(self.slice.bounds())?;
         index
-            .validate_slice_bounds(self.bounds.clone(), bounds.clone())
+            .validate_slice_bounds(self.slice.bounds().clone(), bounds.clone())
             .map(|_| ())
     }
 
     fn validate_order(&self, order: &[Id]) -> TCResult<()> {
-        self.table.validate_order(order)
+        self.source().validate_order(order)
     }
 
     async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
@@ -1006,22 +997,22 @@ impl TableInstance for TableSlice {
     }
 
     async fn update_row(&self, txn_id: &TxnId, row: Row, value: Row) -> TCResult<()> {
-        self.table.update_row(txn_id, row, value).await
+        self.source().update_row(txn_id, row, value).await
     }
 }
 
 #[async_trait]
 impl Transact for TableSlice {
     async fn commit(&self, txn_id: &TxnId) {
-        self.table.commit(txn_id).await
+        self.slice.commit(txn_id).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.table.rollback(txn_id).await
+        self.slice.rollback(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.table.finalize(txn_id).await
+        self.slice.finalize(txn_id).await
     }
 }
 
@@ -1033,6 +1024,6 @@ impl From<TableSlice> for Collection {
 
 impl fmt::Display for TableSlice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TableSlice with bounds {}", self.bounds)
+        write!(f, "TableSlice with bounds {}", self.slice.bounds())
     }
 }
