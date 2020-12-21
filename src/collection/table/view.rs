@@ -31,16 +31,7 @@ Consider reversing a slice before limiting";
 
 #[derive(Clone)]
 pub struct Aggregate<T: TableInstance> {
-    source: T,
-    columns: Vec<Id>,
-}
-
-impl<T: TableInstance> Aggregate<T> {
-    async fn stream_inner<'a>(&'a self, _txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
-        // let source = self.source.select(self.columns.to_vec())?;
-        // source.stream(txn_id).await
-        unimplemented!()
-    }
+    source: Selection<T>,
 }
 
 impl<T: TableInstance> Instance for Aggregate<T> {
@@ -58,9 +49,8 @@ impl<T: TableInstance> TableInstance for Aggregate<T> {
     type Slice = Table;
 
     fn into_table(self) -> Table {
-        let columns = self.columns;
-        let source = self.source.into_table();
-        Table::Aggregate(Box::new(Aggregate { source, columns }.into()))
+        let source = self.source.into_table_selection();
+        Table::Aggregate(Box::new(Aggregate { source }.into()))
     }
 
     fn group_by(self, _columns: Vec<Id>) -> TCResult<Aggregate<Self::OrderBy>> {
@@ -77,21 +67,15 @@ impl<T: TableInstance> TableInstance for Aggregate<T> {
 
     fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         let source = self.source.order_by(columns, reverse)?;
-        Ok(Aggregate {
-            source,
-            columns: self.columns.to_vec(),
-        })
+        Ok(Aggregate { source })
     }
 
     fn reversed(&self) -> TCResult<Self::Reverse> {
-        let columns = self.columns.to_vec();
-        self.source
-            .reversed()
-            .map(|source| Aggregate { source, columns })
+        self.source.reversed().map(|source| Aggregate { source })
     }
 
     async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
-        let first = self.stream_inner(txn_id).await?.next().await;
+        let first = self.source.stream(txn_id).await?.next().await;
         let first = if let Some(first) = first {
             first
         } else {
@@ -100,8 +84,8 @@ impl<T: TableInstance> TableInstance for Aggregate<T> {
         };
 
         let left =
-            stream::once(future::ready(first.clone())).chain(self.stream_inner(txn_id).await?);
-        let right = self.stream_inner(txn_id).await?;
+            stream::once(future::ready(first.clone())).chain(self.source.stream(txn_id).await?);
+        let right = self.source.stream(txn_id).await?;
         let aggregate = left.zip(right).filter_map(|(l, r)| {
             debug!("group {:?}, {:?}?", l, r);
             if l == r {
@@ -127,11 +111,7 @@ impl<T: TableInstance> TableInstance for Aggregate<T> {
 
 impl<T: TableInstance> From<Aggregate<T>> for Collection {
     fn from(aggregate: Aggregate<T>) -> Collection {
-        let source = aggregate.source.into_table();
-        let columns = aggregate.columns;
-        Collection::Table(Table::Aggregate(Box::new(
-            Aggregate { source, columns }.into(),
-        )))
+        Collection::Table(aggregate.into_table())
     }
 }
 
@@ -140,7 +120,8 @@ pub fn group_by<T: TableInstance>(
     columns: Vec<Id>,
 ) -> TCResult<Aggregate<<T as TableInstance>::OrderBy>> {
     let source = source.order_by(columns.to_vec(), false)?;
-    Ok(Aggregate { source, columns })
+    let source = source.select(columns)?;
+    Ok(Aggregate { source })
 }
 
 #[derive(Clone)]
@@ -777,6 +758,19 @@ pub struct Selection<T> {
     schema: IndexSchema,
     columns: Vec<Id>,
     indices: Vec<usize>,
+}
+
+impl<T: TableInstance> Selection<T> {
+    fn into_table_selection(self) -> Selection<Table> {
+        let source = self.source.into_table();
+
+        Selection {
+            source,
+            schema: self.schema,
+            columns: self.columns,
+            indices: self.indices,
+        }
+    }
 }
 
 impl<T: TableInstance> Selection<T> {
