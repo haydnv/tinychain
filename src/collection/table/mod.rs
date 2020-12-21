@@ -160,8 +160,8 @@ pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
 
     fn reversed(&self) -> TCResult<Table>;
 
-    fn select(&self, columns: Vec<Id>) -> TCResult<view::Selection> {
-        let selection = view::Selection::new(self.clone(), columns)?;
+    fn select(self, columns: Vec<Id>) -> TCResult<view::Selection<Self>> {
+        let selection = view::Selection::new(self, columns)?;
         Ok(selection)
     }
 
@@ -197,7 +197,7 @@ pub enum Table {
     IndexSlice(TableImpl<IndexSlice>),
     Limit(TableImpl<Limited>),
     Merge(TableImpl<Merged>),
-    Selection(TableImpl<Selection>),
+    Selection(Box<TableImpl<Selection<Table>>>),
     TableSlice(TableImpl<TableSlice>),
 }
 
@@ -420,17 +420,17 @@ impl TableInstance for Table {
         }
     }
 
-    fn select(&self, columns: Vec<Id>) -> TCResult<view::Selection> {
+    fn select(self, columns: Vec<Id>) -> TCResult<view::Selection<Self>> {
         match self {
-            Self::Index(index) => index.select(columns),
-            Self::ROIndex(index) => index.select(columns),
-            Self::Table(table) => table.select(columns),
-            Self::Aggregate(aggregate) => aggregate.select(columns),
-            Self::Limit(limited) => limited.select(columns),
-            Self::IndexSlice(index_slice) => index_slice.select(columns),
-            Self::Merge(merged) => merged.select(columns),
-            Self::Selection(selection) => selection.select(columns),
-            Self::TableSlice(table_slice) => table_slice.select(columns),
+            Self::Index(index) => index.into_table().select(columns),
+            Self::ROIndex(index) => index.into_table().select(columns),
+            Self::Table(table) => table.into_table().select(columns),
+            Self::Aggregate(aggregate) => aggregate.into_table().select(columns),
+            Self::Limit(limited) => limited.into_table().select(columns),
+            Self::IndexSlice(index_slice) => index_slice.into_table().select(columns),
+            Self::Merge(merged) => merged.into_table().select(columns),
+            Self::Selection(selection) => selection.into_table().select(columns),
+            Self::TableSlice(table_slice) => table_slice.into_table().select(columns),
         }
     }
 
@@ -616,9 +616,9 @@ impl From<ReadOnly> for Table {
     }
 }
 
-impl From<Selection> for Table {
-    fn from(selection: Selection) -> Table {
-        Table::Selection(selection.into())
+impl From<Selection<Table>> for Table {
+    fn from(selection: Selection<Table>) -> Table {
+        Table::Selection(Box::new(selection.into()))
     }
 }
 

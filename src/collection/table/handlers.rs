@@ -67,7 +67,7 @@ where
         let columns: Vec<Id> = try_into_columns(selector)?;
         self.table
             .group_by(columns)
-            .map(Table::from)
+            .map(TableInstance::into_table)
             .map(State::from)
     }
 }
@@ -120,7 +120,7 @@ where
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         let limit = selector.try_cast_into(|v| error::bad_request("Invalid limit", v))?;
-        Ok(State::from(Table::from(self.table.limit(limit))))
+        Ok(State::from(self.table.limit(limit).into_table()))
     }
 }
 
@@ -145,7 +145,7 @@ where
         let columns: Vec<Id> = try_into_columns(selector)?;
         self.table
             .order_by(columns, false)
-            .map(Table::from)
+            .map(TableInstance::into_table)
             .map(State::from)
     }
 }
@@ -198,7 +198,11 @@ where
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         let columns = try_into_columns(selector)?;
-        self.table.select(columns).map(Table::from).map(State::from)
+        self.table
+            .clone()
+            .select(columns)
+            .map(TableInstance::into_table)
+            .map(State::from)
     }
 }
 
@@ -335,6 +339,10 @@ pub struct TableImpl<T: TableInstance> {
 impl<T: TableInstance> TableImpl<T> {
     pub fn into_inner(self) -> T {
         self.inner
+    }
+
+    pub fn into_table(self) -> Table {
+        self.inner.into_table()
     }
 }
 

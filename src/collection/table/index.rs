@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter::FromIterator;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
@@ -84,6 +83,18 @@ impl Index {
                 inner,
             ))
         }
+    }
+
+    pub async fn stream_slice<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        bounds: Bounds,
+        reverse: bool,
+    ) -> TCResult<TCStream<'a, Vec<Value>>> {
+        self.validate_bounds(&bounds)?;
+
+        let range = bounds.into_btree_range(&self.schema.columns())?;
+        self.btree.stream(txn_id, range, reverse).await
     }
 }
 
@@ -474,10 +485,6 @@ impl TableIndex {
         self.primary.get(txn_id, key).await
     }
 
-    // pub async fn get_owned(self, txn_id: TxnId, key: Vec<Value>) -> TCResult<Option<Vec<Value>>> {
-    //     self.get(txn_id, key).await
-    // }
-
     pub async fn insert(
         &self,
         txn_id: &TxnId,
@@ -516,6 +523,15 @@ impl TableIndex {
 
         try_join_all(inserts).await?;
         Ok(())
+    }
+
+    pub async fn stream_slice<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        bounds: Bounds,
+        reverse: bool,
+    ) -> TCResult<TCStream<'a, Vec<Value>>> {
+        self.primary.stream_slice(txn_id, bounds, reverse).await
     }
 }
 
@@ -620,7 +636,7 @@ impl TableInstance for TableIndex {
                         };
                     }
 
-                    merge_source = MergeSource::Merge(Arc::new(merged));
+                    merge_source = MergeSource::Merge(Box::new(merged));
                 } else {
                     debug!(
                         "primary key does not support order {}",
@@ -650,7 +666,7 @@ impl TableInstance for TableIndex {
                                 };
                             }
 
-                            merge_source = MergeSource::Merge(Arc::new(merged));
+                            merge_source = MergeSource::Merge(Box::new(merged));
                             break;
                         } else {
                             debug!(
@@ -719,7 +735,7 @@ impl TableInstance for TableIndex {
                         return Ok(merged);
                     }
 
-                    merge_source = MergeSource::Merge(Arc::new(merged));
+                    merge_source = MergeSource::Merge(Box::new(merged));
                 } else {
                     for (name, index) in self.auxiliary.iter() {
                         if index.validate_bounds(&subset).is_ok() {
@@ -732,7 +748,7 @@ impl TableInstance for TableIndex {
                                 return Ok(merged);
                             }
 
-                            merge_source = MergeSource::Merge(Arc::new(merged));
+                            merge_source = MergeSource::Merge(Box::new(merged));
                             break;
                         }
                     }
