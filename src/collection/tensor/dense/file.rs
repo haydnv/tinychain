@@ -23,7 +23,7 @@ use super::super::stream::{block_offsets, coord_block, coord_bounds};
 use super::super::TensorAccessor;
 
 use super::array::Array;
-use super::BlockList;
+use super::{BlockListSlice, DenseAccess, DenseAccessor};
 
 pub const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
@@ -158,7 +158,13 @@ impl TensorAccessor for BlockListFile {
 }
 
 #[async_trait]
-impl BlockList for BlockListFile {
+impl DenseAccess for BlockListFile {
+    type Slice = BlockListSlice<Self>;
+
+    fn accessor(self) -> DenseAccessor {
+        DenseAccessor::File(self)
+    }
+
     fn block_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(async move {
             let file = &self.file;
@@ -176,75 +182,18 @@ impl BlockList for BlockListFile {
         })
     }
 
-    async fn value_stream_slice<'a>(
-        &'a self,
-        txn: &'a Txn,
-        bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        if bounds == Bounds::all(self.shape()) {
-            return self.value_stream(txn).await;
-        }
-
-        if !self.shape.contains_bounds(&bounds) {
-            return Err(error::bad_request("Invalid bounds", bounds));
-        }
-
-        let bounds = self.shape().slice_bounds(bounds);
-        let coord_bounds = coord_bounds(self.shape());
-
-        let selected = stream::iter(bounds.affected())
-            .chunks(PER_BLOCK)
-            .then(move |coords| {
-                let ndim = coords[0].len();
-                let num_coords = coords.len() as u64;
-                let (block_ids, af_indices, af_offsets) = coord_block(
-                    coords.into_iter(),
-                    &coord_bounds,
-                    PER_BLOCK,
-                    ndim,
-                    num_coords,
-                );
-
-                let file = &self.file;
-                let txn_id = txn.id();
-
-                Box::pin(async move {
-                    let mut start = 0.0f64;
-                    let mut values = vec![];
-                    for block_id in block_ids {
-                        debug!("block {} starts at {}", block_id, start);
-
-                        let (block_offsets, new_start) =
-                            block_offsets(&af_indices, &af_offsets, start, block_id);
-
-                        match file.get_block(txn_id, block_id.into()).await {
-                            Ok(block) => {
-                                let array: &Array = block.deref();
-                                values.extend(array.get(block_offsets).into_values());
-                            }
-                            Err(cause) => return stream::iter(vec![Err(cause)]),
-                        }
-
-                        start = new_start;
-                    }
-
-                    let values: Vec<TCResult<Number>> = values.into_iter().map(Ok).collect();
-                    stream::iter(values)
-                })
-            });
-
-        let selected: TCTryStream<'a, Number> = Box::pin(selected.flatten());
-        Ok(selected)
+    async fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+        BlockListSlice::new(self.clone(), bounds)
     }
 
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+    async fn read_value_at(&self, txn: &Txn, coord: Vec<u64>) -> TCResult<Number> {
         debug!(
             "read value at {:?} from BlockListFile with shape {}",
             coord,
             self.shape()
         );
 
-        if !self.shape().contains_coord(coord) {
+        if !self.shape().contains_coord(&coord) {
             let coord: Vec<String> = coord.iter().map(|c| c.to_string()).collect();
             return Err(error::bad_request(
                 "Coordinate is out of bounds",

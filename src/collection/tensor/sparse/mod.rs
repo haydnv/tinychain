@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter;
 use std::pin::Pin;
-// use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
@@ -21,7 +20,9 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::class::{Tensor, TensorInstance, TensorType};
-use super::dense::{dense_constant, from_sparse, BlockList, BlockListFile, DenseTensor};
+use super::dense::{
+    dense_constant, from_sparse, BlockListFile, BlockListSparse, DenseAccess, DenseTensor,
+};
 use super::transform;
 use super::{
     broadcast, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
@@ -31,7 +32,6 @@ use super::{
 mod access;
 mod combine;
 
-use crate::collection::tensor::dense::BlockListSparse;
 pub use access::*;
 use combine::SparseCombine;
 
@@ -722,8 +722,10 @@ pub async fn create(
         .await
 }
 
-pub fn from_dense<T: Clone + BlockList>(source: DenseTensor<T>) -> SparseTensor<DenseAccessor<T>> {
-    let accessor = DenseAccessor::new(source);
+pub fn from_dense<T: Clone + DenseAccess>(
+    source: DenseTensor<T>,
+) -> SparseTensor<DenseToSparse<T>> {
+    let accessor = DenseToSparse::new(source);
     SparseTensor { accessor }
 }
 

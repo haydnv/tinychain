@@ -14,7 +14,7 @@ use crate::scalar::value::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::bounds::*;
-use super::super::dense::{BlockList, DenseTensor};
+use super::super::dense::{DenseAccess, DenseTensor};
 use super::super::stream::*;
 use super::super::transform;
 use super::{
@@ -140,17 +140,17 @@ impl Transact for SparseAccessorDyn {
 }
 
 #[derive(Clone)]
-pub struct DenseAccessor<T: Clone + BlockList> {
+pub struct DenseToSparse<T: Clone + DenseAccess> {
     source: DenseTensor<T>,
 }
 
-impl<T: Clone + BlockList> DenseAccessor<T> {
+impl<T: Clone + DenseAccess> DenseToSparse<T> {
     pub fn new(source: DenseTensor<T>) -> Self {
         Self { source }
     }
 }
 
-impl<T: Clone + BlockList> TensorAccessor for DenseAccessor<T> {
+impl<T: Clone + DenseAccess> TensorAccessor for DenseToSparse<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -169,7 +169,7 @@ impl<T: Clone + BlockList> TensorAccessor for DenseAccessor<T> {
 }
 
 #[async_trait]
-impl<T: Clone + BlockList> SparseAccess for DenseAccessor<T> {
+impl<T: Clone + DenseAccess> SparseAccess for DenseToSparse<T> {
     async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
         let values = self.source.value_stream(txn).await?;
 
@@ -220,7 +220,7 @@ impl<T: Clone + BlockList> SparseAccess for DenseAccessor<T> {
 }
 
 #[async_trait]
-impl<T: Clone + BlockList> Transact for DenseAccessor<T> {
+impl<T: Clone + DenseAccess> Transact for DenseToSparse<T> {
     async fn commit(&self, txn_id: &TxnId) {
         self.source.commit(txn_id).await
     }

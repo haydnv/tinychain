@@ -343,6 +343,10 @@ impl Slice {
     pub fn new(source_shape: Shape, bounds: Bounds) -> TCResult<Slice> {
         debug!("Slice::new {}[{}]", source_shape, bounds);
 
+        if !source_shape.contains_bounds(&bounds) {
+            return Err(error::bad_request("Invalid bounds", bounds));
+        }
+
         let mut shape: Vec<u64> = Vec::with_capacity(bounds.len());
         let mut offset = HashMap::new();
         let mut elided = HashMap::new();

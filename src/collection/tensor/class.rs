@@ -15,7 +15,7 @@ use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::*;
-use super::dense::{dense_constant, BlockList, BlockListDyn, BlockListFile, DenseTensor};
+use super::dense::{dense_constant, BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
 use super::sparse::{self, SparseAccess, SparseAccessorDyn, SparseTable, SparseTensor};
 use super::{
     IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
@@ -51,8 +51,7 @@ impl TensorType {
         match self {
             Self::Dense => {
                 dense_constant(txn, shape, number)
-                    .map_ok(DenseTensor::into_dyn)
-                    .map_ok(Tensor::Dense)
+                    .map_ok(Tensor::from)
                     .await
             }
             Self::Sparse => {
@@ -69,8 +68,7 @@ impl TensorType {
         match self {
             Self::Dense => {
                 dense_constant(txn, shape, dtype.zero())
-                    .map_ok(DenseTensor::into_dyn)
-                    .map_ok(Tensor::Dense)
+                    .map_ok(Tensor::from)
                     .await
             }
             Self::Sparse => {
@@ -155,7 +153,7 @@ impl CollectionClass for TensorType {
                     let file =
                         BlockListFile::from_values(txn, shape, dtype, stream::iter(values)).await?;
 
-                    Tensor::Dense(DenseTensor::from(file).into_dyn())
+                    Tensor::Dense(DenseAccessor::from(file).into())
                 }
                 Self::Sparse => {
                     let table =
@@ -204,7 +202,7 @@ impl fmt::Display for TensorType {
 
 #[derive(Clone)]
 pub enum Tensor {
-    Dense(DenseTensor<BlockListDyn>),
+    Dense(DenseTensor<DenseAccessor>),
     Sparse(SparseTensor<SparseAccessorDyn>),
 }
 
@@ -308,7 +306,7 @@ impl TensorInstance for Tensor {
     fn into_dense(self) -> Self {
         match self {
             Self::Dense(dense) => Self::Dense(dense),
-            Self::Sparse(sparse) => Self::Dense(sparse.into_dense().into_dyn()),
+            Self::Sparse(sparse) => Self::Dense(DenseAccessor::from(sparse).into()),
         }
     }
 
@@ -660,9 +658,9 @@ impl Route for Tensor {
     }
 }
 
-impl<T: Clone + BlockList> From<DenseTensor<T>> for Tensor {
+impl<T: Clone + DenseAccess> From<DenseTensor<T>> for Tensor {
     fn from(dense: DenseTensor<T>) -> Tensor {
-        let blocks = BlockListDyn::new(dense.clone_into());
+        let blocks = dense.into_inner().accessor();
         Self::Dense(DenseTensor::from(blocks))
     }
 }

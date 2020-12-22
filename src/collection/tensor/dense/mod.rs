@@ -1,15 +1,11 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
-use futures::try_join;
-use log::debug;
 
 use crate::class::Instance;
 use crate::collection::{from_dense, Collection};
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCStream, TCTryStream};
+use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
 use crate::handler::*;
 use crate::scalar::number::*;
 use crate::scalar::{MethodType, PathSegment};
@@ -17,22 +13,27 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{Bounds, Shape};
 use super::class::{Tensor, TensorInstance, TensorType};
-use super::sparse::{DenseAccessor, SparseAccess, SparseTensor};
+use super::sparse::{DenseToSparse, SparseAccess, SparseAccessorDyn, SparseTensor};
 use super::stream::*;
-use super::transform;
 use super::{
     IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
-    TensorReduce, TensorTransform, TensorUnary, ERR_NONBIJECTIVE_WRITE,
+    TensorReduce, TensorTransform, TensorUnary,
 };
 
+mod access;
 mod array;
 mod file;
 
+pub use access::*;
 pub use array::Array;
 pub use file::*;
 
 #[async_trait]
-pub trait BlockList: TensorAccessor + Transact + 'static {
+pub trait DenseAccess: TensorAccessor + Transact + 'static {
+    type Slice: Clone + DenseAccess;
+
+    fn accessor(self) -> DenseAccessor;
+
     fn block_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(async move {
             let dtype = self.dtype();
@@ -68,13 +69,10 @@ pub trait BlockList: TensorAccessor + Transact + 'static {
         })
     }
 
-    async fn value_stream_slice<'a>(
-        &'a self,
-        txn: &'a Txn,
-        bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>>;
+    async fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice>;
 
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number>;
+    // TODO: delete and use ReadValueAt trait
+    async fn read_value_at(&self, txn: &Txn, coord: Vec<u64>) -> TCResult<Number>;
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
 
@@ -82,951 +80,289 @@ pub trait BlockList: TensorAccessor + Transact + 'static {
 }
 
 #[derive(Clone)]
-pub struct BlockListDyn {
-    source: Arc<dyn BlockList>,
+pub enum DenseAccessor {
+    Broadcast(Box<BlockListBroadcast<DenseAccessor>>),
+    Cast(Box<BlockListCast<DenseAccessor>>),
+    Combine(Box<BlockListCombine<DenseAccessor, DenseAccessor>>),
+    Expand(Box<BlockListExpand<DenseAccessor>>),
+    File(BlockListFile),
+    Reduce(Box<BlockListReduce<DenseAccessor>>),
+    Slice(Box<BlockListSlice<DenseAccessor>>),
+    Sparse(BlockListSparse<SparseAccessorDyn>),
+    Transpose(Box<BlockListTranspose<DenseAccessor>>),
+    Unary(Box<BlockListUnary<DenseAccessor>>),
 }
 
-impl BlockListDyn {
-    pub fn new<T: BlockList>(source: T) -> BlockListDyn {
-        Self {
-            source: Arc::new(source),
-        }
-    }
-}
-
-impl TensorAccessor for BlockListDyn {
+impl TensorAccessor for DenseAccessor {
     fn dtype(&self) -> NumberType {
-        self.source.dtype()
+        match self {
+            Self::Broadcast(broadcast) => broadcast.dtype(),
+            Self::Cast(cast) => cast.dtype(),
+            Self::Combine(combine) => combine.dtype(),
+            Self::Expand(expand) => expand.dtype(),
+            Self::File(file) => file.dtype(),
+            Self::Reduce(reduce) => reduce.dtype(),
+            Self::Slice(slice) => slice.dtype(),
+            Self::Sparse(sparse) => sparse.dtype(),
+            Self::Transpose(transpose) => transpose.dtype(),
+            Self::Unary(unary) => unary.dtype(),
+        }
     }
 
     fn ndim(&self) -> usize {
-        self.source.ndim()
+        match self {
+            Self::Broadcast(broadcast) => broadcast.ndim(),
+            Self::Cast(cast) => cast.ndim(),
+            Self::Combine(combine) => combine.ndim(),
+            Self::Expand(expand) => expand.ndim(),
+            Self::File(file) => file.ndim(),
+            Self::Reduce(reduce) => reduce.ndim(),
+            Self::Slice(slice) => slice.ndim(),
+            Self::Sparse(sparse) => sparse.ndim(),
+            Self::Transpose(transpose) => transpose.ndim(),
+            Self::Unary(unary) => unary.ndim(),
+        }
     }
 
     fn shape(&self) -> &Shape {
-        self.source.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.source.size()
-    }
-}
-
-#[async_trait]
-impl BlockList for BlockListDyn {
-    fn block_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
-        self.source.block_stream(txn)
-    }
-
-    fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
-        self.source.value_stream(txn)
-    }
-
-    async fn value_stream_slice<'a>(
-        &'a self,
-        txn: &'a Txn,
-        bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        self.source.value_stream_slice(txn, bounds).await
-    }
-
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        self.source.read_value_at(txn, coord).await
-    }
-
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
-        self.source.write_value(txn_id, bounds, number).await
-    }
-
-    fn write_value_at(
-        &self,
-        txn_id: TxnId,
-        coord: Vec<u64>,
-        value: Number,
-    ) -> TCBoxTryFuture<'_, ()> {
-        self.source.write_value_at(txn_id, coord, value)
-    }
-}
-
-#[async_trait]
-impl Transact for BlockListDyn {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        self.source.finalize(txn_id).await
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockListCombine<L: BlockList, R: BlockList> {
-    left: L,
-    right: R,
-    combinator: fn(&Array, &Array) -> Array,
-    value_combinator: fn(Number, Number) -> Number,
-    dtype: NumberType,
-}
-
-impl<L: BlockList, R: BlockList> BlockListCombine<L, R> {
-    fn new(
-        left: L,
-        right: R,
-        combinator: fn(&Array, &Array) -> Array,
-        value_combinator: fn(Number, Number) -> Number,
-        dtype: NumberType,
-    ) -> TCResult<BlockListCombine<L, R>> {
-        if left.shape() != right.shape() {
-            return Err(error::bad_request(
-                &format!("Cannot combine shape {} with shape", left.shape()),
-                right.shape(),
-            ));
+        match self {
+            Self::Broadcast(broadcast) => broadcast.shape(),
+            Self::Cast(cast) => cast.shape(),
+            Self::Combine(combine) => combine.shape(),
+            Self::Expand(expand) => expand.shape(),
+            Self::File(file) => file.shape(),
+            Self::Reduce(reduce) => reduce.shape(),
+            Self::Slice(slice) => slice.shape(),
+            Self::Sparse(sparse) => sparse.shape(),
+            Self::Transpose(transpose) => transpose.shape(),
+            Self::Unary(unary) => unary.shape(),
         }
-
-        Ok(BlockListCombine {
-            left,
-            right,
-            combinator,
-            value_combinator,
-            dtype,
-        })
-    }
-}
-
-impl<L: BlockList, R: BlockList> TensorAccessor for BlockListCombine<L, R> {
-    fn dtype(&self) -> NumberType {
-        self.dtype
-    }
-
-    fn ndim(&self) -> usize {
-        self.left.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.left.shape()
     }
 
     fn size(&self) -> u64 {
-        self.left.size()
+        match self {
+            Self::Broadcast(broadcast) => broadcast.size(),
+            Self::Cast(cast) => cast.size(),
+            Self::Combine(combine) => combine.size(),
+            Self::Expand(expand) => expand.size(),
+            Self::File(file) => file.size(),
+            Self::Reduce(reduce) => reduce.size(),
+            Self::Slice(slice) => slice.size(),
+            Self::Sparse(sparse) => sparse.size(),
+            Self::Transpose(transpose) => transpose.size(),
+            Self::Unary(unary) => unary.size(),
+        }
     }
 }
 
 #[async_trait]
-impl<L: Clone + BlockList, R: Clone + BlockList> BlockList for BlockListCombine<L, R> {
+impl DenseAccess for DenseAccessor {
+    type Slice = Self;
+
+    fn accessor(self) -> Self {
+        self
+    }
+
     fn block_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
-        Box::pin(async move {
-            let left = self.left.block_stream(txn);
-            let right = self.right.block_stream(txn);
-            let (left, right) = try_join!(left, right)?;
-
-            let combinator = self.combinator;
-            let blocks = left
-                .zip(right)
-                .map(|(l, r)| Ok((l?, r?)))
-                .map_ok(move |(l, r)| combinator(&l, &r));
-
-            let blocks: TCTryStream<'a, Array> = Box::pin(blocks);
-            Ok(blocks)
-        })
+        match self {
+            Self::Broadcast(broadcast) => broadcast.block_stream(txn),
+            Self::Cast(cast) => cast.block_stream(txn),
+            Self::Combine(combine) => combine.block_stream(txn),
+            Self::Expand(expand) => expand.block_stream(txn),
+            Self::File(file) => file.block_stream(txn),
+            Self::Reduce(reduce) => reduce.block_stream(txn),
+            Self::Slice(slice) => slice.block_stream(txn),
+            Self::Sparse(sparse) => sparse.block_stream(txn),
+            Self::Transpose(transpose) => transpose.block_stream(txn),
+            Self::Unary(unary) => unary.block_stream(txn),
+        }
     }
 
-    async fn value_stream_slice<'a>(
-        &'a self,
-        _txn: &'a Txn,
-        _bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        // let rebase = transform::Slice::new(self.left.shape().clone(), bounds.clone())?;
-        // let left = BlockListSlice {
-        //     source: self.left.clone(),
-        //     rebase,
-        // };
-        //
-        // let rebase = transform::Slice::new(self.right.shape().clone(), bounds)?;
-        // let right = BlockListSlice {
-        //     source: self.right.clone(),
-        //     rebase,
-        // };
-        //
-        // let slice: BlockListCombine<BlockListSlice<L>, BlockListSlice<R>> = BlockListCombine::new(
-        //         left,
-        //         right,
-        //         self.combinator,
-        //         self.value_combinator,
-        //         self.dtype,
-        //     )?;
-        //
-        // slice.value_stream(txn).await
-        unimplemented!()
-    }
-
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        let left = self.left.read_value_at(txn, coord);
-        let right = self.right.read_value_at(txn, coord);
-        let (left, right) = try_join!(left, right)?;
-        let combinator = self.value_combinator;
-        Ok(combinator(left, right))
-    }
-
-    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
-        Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
-    }
-
-    fn write_value_at(
-        &self,
-        _txn_id: TxnId,
-        _coord: Vec<u64>,
-        _value: Number,
-    ) -> TCBoxTryFuture<()> {
-        Box::pin(future::ready(Err(error::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
-    }
-}
-
-#[async_trait]
-impl<L: BlockList, R: BlockList> Transact for BlockListCombine<L, R> {
-    async fn commit(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-
-    async fn rollback(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-
-    async fn finalize(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockListBroadcast<T: BlockList> {
-    source: T,
-    rebase: transform::Broadcast,
-}
-
-impl<T: BlockList> TensorAccessor for BlockListBroadcast<T> {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.source.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.rebase.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.source.size()
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> BlockList for BlockListBroadcast<T> {
     fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
-        let bounds = Bounds::all(self.shape());
-        self.value_stream_slice(txn, bounds)
+        match self {
+            Self::Broadcast(broadcast) => broadcast.value_stream(txn),
+            Self::Cast(cast) => cast.value_stream(txn),
+            Self::Combine(combine) => combine.value_stream(txn),
+            Self::Expand(expand) => expand.value_stream(txn),
+            Self::File(file) => file.value_stream(txn),
+            Self::Reduce(reduce) => reduce.value_stream(txn),
+            Self::Slice(slice) => slice.value_stream(txn),
+            Self::Sparse(sparse) => sparse.value_stream(txn),
+            Self::Transpose(transpose) => transpose.value_stream(txn),
+            Self::Unary(unary) => unary.value_stream(txn),
+        }
     }
 
-    async fn value_stream_slice<'a>(
-        &'a self,
-        txn: &'a Txn,
-        bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        let rebase = self.rebase.clone();
-        let source_bounds = self.rebase.invert_bounds(bounds);
-        let coords = source_bounds
-            .affected()
-            .map(move |coord| rebase.map_coord(coord))
-            .flatten();
-        let coords = stream::iter(coords.map(TCResult::Ok));
-
-        let values = sorted_values(txn, self, coords, source_bounds.size()).await?;
-        Ok(Box::pin(values.map_ok(|(_, value)| value)))
+    async fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self> {
+        match self {
+            Self::Broadcast(broadcast) => {
+                broadcast
+                    .slice(txn, bounds)
+                    .map_ok(DenseAccess::accessor)
+                    .await
+            }
+            Self::Cast(cast) => cast.slice(txn, bounds).map_ok(DenseAccess::accessor).await,
+            Self::Combine(combine) => {
+                combine
+                    .slice(txn, bounds)
+                    .map_ok(DenseAccess::accessor)
+                    .await
+            }
+            Self::Expand(expand) => {
+                expand
+                    .slice(txn, bounds)
+                    .map_ok(DenseAccess::accessor)
+                    .await
+            }
+            Self::File(file) => file.slice(txn, bounds).map_ok(DenseAccess::accessor).await,
+            Self::Reduce(reduce) => {
+                reduce
+                    .slice(txn, bounds)
+                    .map_ok(DenseAccess::accessor)
+                    .await
+            }
+            Self::Slice(slice) => slice.slice(txn, bounds).map_ok(DenseAccess::accessor).await,
+            Self::Sparse(sparse) => {
+                sparse
+                    .slice(txn, bounds)
+                    .map_ok(DenseAccess::accessor)
+                    .await
+            }
+            Self::Transpose(transpose) => {
+                transpose
+                    .slice(txn, bounds)
+                    .map_ok(DenseAccess::accessor)
+                    .await
+            }
+            Self::Unary(unary) => unary.slice(txn, bounds).map_ok(DenseAccess::accessor).await,
+        }
     }
 
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        let coord = self.rebase.invert_coord(coord);
-        self.source.read_value_at(txn, &coord).await
-    }
-
-    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
-        Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
-    }
-
-    fn write_value_at(
-        &self,
-        _txn_id: TxnId,
-        _coord: Vec<u64>,
-        _value: Number,
-    ) -> TCBoxTryFuture<()> {
-        Box::pin(future::ready(Err(error::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
-    }
-}
-
-impl<T: BlockList> ReadValueAt for BlockListBroadcast<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
-        Box::pin(async move {
-            let value = BlockList::read_value_at(self, txn, &coord).await?;
-            Ok((coord, value))
-        })
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> Transact for BlockListBroadcast<T> {
-    async fn commit(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-
-    async fn rollback(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-
-    async fn finalize(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockListCast<T: BlockList> {
-    source: T,
-    dtype: NumberType,
-}
-
-impl<T: BlockList> TensorAccessor for BlockListCast<T> {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.source.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.source.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.source.size()
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> BlockList for BlockListCast<T> {
-    fn block_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
-        Box::pin(async move {
-            let dtype = self.dtype;
-            let blocks: TCStream<'a, TCResult<Array>> = self.source.block_stream(txn).await?;
-            let cast = blocks.map_ok(move |array| array.into_type(dtype));
-            let cast: TCTryStream<'a, Array> = Box::pin(cast);
-            Ok(cast)
-        })
-    }
-
-    async fn value_stream_slice<'a>(
-        &'a self,
-        txn: &'a Txn,
-        bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        let dtype = self.dtype;
-        let value_stream = self.source.value_stream_slice(txn, bounds).await?;
-
-        let value_stream: TCTryStream<'a, Number> =
-            Box::pin(value_stream.map_ok(move |value| value.into_type(dtype)));
-        Ok(value_stream)
-    }
-
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        let dtype = self.dtype;
-        self.source
-            .read_value_at(txn, coord)
-            .map_ok(move |value| value.into_type(dtype))
-            .await
+    async fn read_value_at(&self, txn: &Txn, coord: Vec<u64>) -> TCResult<Number> {
+        match self {
+            Self::Broadcast(broadcast) => {
+                DenseAccess::read_value_at(&**broadcast, txn, coord).await
+            }
+            Self::Cast(cast) => DenseAccess::read_value_at(&**cast, txn, coord).await,
+            Self::Combine(combine) => DenseAccess::read_value_at(&**combine, txn, coord).await,
+            Self::Expand(expand) => DenseAccess::read_value_at(&**expand, txn, coord).await,
+            Self::File(file) => DenseAccess::read_value_at(file, txn, coord).await,
+            Self::Reduce(reduce) => DenseAccess::read_value_at(&**reduce, txn, coord).await,
+            Self::Slice(slice) => DenseAccess::read_value_at(&**slice, txn, coord).await,
+            Self::Sparse(sparse) => DenseAccess::read_value_at(sparse, txn, coord).await,
+            Self::Transpose(transpose) => {
+                DenseAccess::read_value_at(&**transpose, txn, coord).await
+            }
+            Self::Unary(unary) => DenseAccess::read_value_at(&**unary, txn, coord).await,
+        }
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
-        self.source.write_value(txn_id, bounds, number).await
+        match self {
+            Self::Broadcast(broadcast) => broadcast.write_value(txn_id, bounds, number).await,
+            Self::Cast(cast) => cast.write_value(txn_id, bounds, number).await,
+            Self::Combine(combine) => combine.write_value(txn_id, bounds, number).await,
+            Self::Expand(expand) => expand.write_value(txn_id, bounds, number).await,
+            Self::File(file) => file.write_value(txn_id, bounds, number).await,
+            Self::Reduce(reduce) => reduce.write_value(txn_id, bounds, number).await,
+            Self::Slice(slice) => slice.write_value(txn_id, bounds, number).await,
+            Self::Sparse(sparse) => sparse.write_value(txn_id, bounds, number).await,
+            Self::Transpose(transpose) => transpose.write_value(txn_id, bounds, number).await,
+            Self::Unary(unary) => unary.write_value(txn_id, bounds, number).await,
+        }
     }
 
     fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
-        self.source.write_value_at(txn_id, coord, value)
-    }
-}
-
-impl<T: BlockList> ReadValueAt for BlockListCast<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
-        Box::pin(async move {
-            let value = BlockList::read_value_at(self, txn, &coord).await?;
-            Ok((coord, value))
-        })
+        match self {
+            Self::Broadcast(broadcast) => broadcast.write_value_at(txn_id, coord, value),
+            Self::Cast(cast) => cast.write_value_at(txn_id, coord, value),
+            Self::Combine(combine) => combine.write_value_at(txn_id, coord, value),
+            Self::Expand(expand) => expand.write_value_at(txn_id, coord, value),
+            Self::File(file) => file.write_value_at(txn_id, coord, value),
+            Self::Reduce(reduce) => reduce.write_value_at(txn_id, coord, value),
+            Self::Slice(slice) => slice.write_value_at(txn_id, coord, value),
+            Self::Sparse(sparse) => sparse.write_value_at(txn_id, coord, value),
+            Self::Transpose(transpose) => transpose.write_value_at(txn_id, coord, value),
+            Self::Unary(unary) => unary.write_value_at(txn_id, coord, value),
+        }
     }
 }
 
 #[async_trait]
-impl<T: BlockList> Transact for BlockListCast<T> {
+impl Transact for DenseAccessor {
     async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
+        match self {
+            Self::Broadcast(broadcast) => broadcast.commit(txn_id).await,
+            Self::Cast(cast) => cast.commit(txn_id).await,
+            Self::Combine(combine) => combine.commit(txn_id).await,
+            Self::Expand(expand) => expand.commit(txn_id).await,
+            Self::File(file) => file.commit(txn_id).await,
+            Self::Reduce(reduce) => reduce.commit(txn_id).await,
+            Self::Slice(slice) => slice.commit(txn_id).await,
+            Self::Sparse(sparse) => sparse.commit(txn_id).await,
+            Self::Transpose(transpose) => transpose.commit(txn_id).await,
+            Self::Unary(unary) => unary.commit(txn_id).await,
+        }
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
+        match self {
+            Self::Broadcast(broadcast) => broadcast.rollback(txn_id).await,
+            Self::Cast(cast) => cast.rollback(txn_id).await,
+            Self::Combine(combine) => combine.rollback(txn_id).await,
+            Self::Expand(expand) => expand.rollback(txn_id).await,
+            Self::File(file) => file.rollback(txn_id).await,
+            Self::Reduce(reduce) => reduce.rollback(txn_id).await,
+            Self::Slice(slice) => slice.rollback(txn_id).await,
+            Self::Sparse(sparse) => sparse.rollback(txn_id).await,
+            Self::Transpose(transpose) => transpose.rollback(txn_id).await,
+            Self::Unary(unary) => unary.rollback(txn_id).await,
+        }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.source.finalize(txn_id).await
+        match self {
+            Self::Broadcast(broadcast) => broadcast.finalize(txn_id).await,
+            Self::Cast(cast) => cast.finalize(txn_id).await,
+            Self::Combine(combine) => combine.finalize(txn_id).await,
+            Self::Expand(expand) => expand.finalize(txn_id).await,
+            Self::File(file) => file.finalize(txn_id).await,
+            Self::Reduce(reduce) => reduce.finalize(txn_id).await,
+            Self::Slice(slice) => slice.finalize(txn_id).await,
+            Self::Sparse(sparse) => sparse.finalize(txn_id).await,
+            Self::Transpose(transpose) => transpose.finalize(txn_id).await,
+            Self::Unary(unary) => unary.finalize(txn_id).await,
+        }
+    }
+}
+
+impl From<BlockListFile> for DenseAccessor {
+    fn from(file: BlockListFile) -> Self {
+        Self::File(file)
+    }
+}
+
+impl<T: Clone + SparseAccess> From<SparseTensor<T>> for DenseAccessor {
+    fn from(sparse: SparseTensor<T>) -> Self {
+        BlockListSparse::new(sparse).accessor()
     }
 }
 
 #[derive(Clone)]
-pub struct BlockListExpand<T: BlockList> {
-    source: T,
-    rebase: transform::Expand,
-}
-
-impl<T: BlockList> TensorAccessor for BlockListExpand<T> {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.source.ndim() + 1
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.rebase.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.shape().size()
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> BlockList for BlockListExpand<T> {
-    fn block_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
-        self.source.block_stream(txn)
-    }
-
-    fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
-        self.source.value_stream(txn)
-    }
-
-    async fn value_stream_slice<'a>(
-        &'a self,
-        txn: &'a Txn,
-        bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        let bounds = self.rebase.invert_bounds(bounds);
-        self.source.value_stream_slice(txn, bounds).await
-    }
-
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        let coord = self.rebase.invert_coord(coord);
-        self.source.read_value_at(txn, &coord).await
-    }
-
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
-        let bounds = self.rebase.invert_bounds(bounds);
-        self.source.write_value(txn_id, bounds, number).await
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
-        let coord = self.rebase.invert_coord(&coord);
-        self.source.write_value_at(txn_id, coord, value)
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> Transact for BlockListExpand<T> {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        self.source.finalize(txn_id).await
-    }
-}
-
-// TODO: &Txn, not Txn
-type Reductor = fn(&DenseTensor<BlockListDyn>, Txn) -> TCBoxTryFuture<Number>;
-
-#[derive(Clone)]
-pub struct BlockListReduce<T: Clone + BlockList> {
-    source: DenseTensor<T>,
-    rebase: transform::Reduce,
-    reductor: Reductor,
-}
-
-impl<T: Clone + BlockList> BlockListReduce<T> {
-    fn new(
-        source: DenseTensor<T>,
-        axis: usize,
-        reductor: Reductor,
-    ) -> TCResult<BlockListReduce<T>> {
-        let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
-
-        Ok(BlockListReduce {
-            source,
-            rebase,
-            reductor,
-        })
-    }
-}
-
-impl<T: Clone + BlockList> TensorAccessor for BlockListReduce<T> {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.shape().len()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.rebase.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.shape().size()
-    }
-}
-
-#[async_trait]
-impl<T: Clone + BlockList> BlockList for BlockListReduce<T> {
-    fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
-        Box::pin(async move {
-            let values = stream::iter(Bounds::all(self.shape()).affected()).then(move |coord| {
-                let reductor = self.reductor;
-                let txn = txn.clone();
-                let source_bounds = self.rebase.invert_coord(&coord);
-                Box::pin(async move {
-                    let slice = self.source.slice(source_bounds)?;
-                    reductor(&slice.into_dyn(), txn).await
-                })
-            });
-
-            let values: TCTryStream<'a, Number> = Box::pin(values);
-            Ok(values)
-        })
-    }
-
-    async fn value_stream_slice<'a>(
-        &'a self,
-        _txn: &'a Txn,
-        _bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        // let (source_bounds, slice_reduce_axis) = self.rebase.invert_bounds(bounds);
-        // let slice = self.source.slice(source_bounds)?;
-        // BlockListReduce::new(slice, slice_reduce_axis, self.reductor)?
-        //     .value_stream(txn)
-        //     .await
-        unimplemented!()
-    }
-
-    async fn read_value_at(&self, _txn: &Txn, _coord: &[u64]) -> TCResult<Number> {
-        // let reductor = self.reductor;
-        // let source_bounds = self.rebase.invert_coord(coord);
-        // let slice = self.source.slice(source_bounds)?;
-        // reductor(&slice.into_dyn(), txn.clone()).await
-        unimplemented!()
-    }
-
-    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
-        Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
-    }
-
-    fn write_value_at(
-        &self,
-        _txn_id: TxnId,
-        _coord: Vec<u64>,
-        _value: Number,
-    ) -> TCBoxTryFuture<()> {
-        Box::pin(future::ready(Err(error::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
-    }
-}
-
-#[async_trait]
-impl<T: Clone + BlockList> Transact for BlockListReduce<T> {
-    async fn commit(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-
-    async fn rollback(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-
-    async fn finalize(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockListSlice<T> {
-    source: T,
-    rebase: transform::Slice,
-}
-
-impl<T: BlockList> TensorAccessor for BlockListSlice<T> {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.rebase.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.rebase.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.rebase.size()
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> BlockList for BlockListSlice<T> {
-    fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
-        self.source
-            .value_stream_slice(txn, self.rebase.bounds().clone())
-    }
-
-    async fn value_stream_slice<'a>(
-        &'a self,
-        txn: &'a Txn,
-        bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        self.source
-            .value_stream_slice(txn, self.rebase.invert_bounds(bounds))
-            .await
-    }
-
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        let coord = self.rebase.invert_coord(coord);
-        self.source.read_value_at(txn, &coord).await
-    }
-
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
-        debug!("BlockListSlice::write_value {} at {}", value, bounds);
-
-        let bounds = self.rebase.invert_bounds(bounds);
-        self.source.write_value(txn_id, bounds, value).await
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
-        let coord = self.rebase.invert_coord(&coord);
-        self.source.write_value_at(txn_id, coord, value)
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> Transact for BlockListSlice<T> {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        self.source.finalize(txn_id).await
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockListSparse<T: Clone + SparseAccess> {
-    source: SparseTensor<T>,
-}
-
-impl<T: Clone + SparseAccess> BlockListSparse<T> {
-    fn new(source: SparseTensor<T>) -> Self {
-        BlockListSparse { source }
-    }
-}
-
-impl<T: Clone + SparseAccess> TensorAccessor for BlockListSparse<T> {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.source.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.source.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.source.size()
-    }
-}
-
-#[async_trait]
-impl<T: Clone + SparseAccess> BlockList for BlockListSparse<T> {
-    fn block_stream<'a>(&'a self, _txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
-        Box::pin(future::ready(Err(error::not_implemented(
-            "BlockListSparse::block_stream",
-        ))))
-    }
-
-    async fn value_stream_slice<'a>(
-        &'a self,
-        _txn: &'a Txn,
-        _bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        // let source = self.source.slice(bounds)?;
-        // let blocks = BlockListSparse::new(source);
-        // blocks.value_stream(txn).await
-        unimplemented!()
-    }
-
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        self.source.read_value(txn, coord).await
-    }
-
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
-        self.source
-            .clone()
-            .write_value(txn_id, bounds, number)
-            .await
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
-        self.source.write_value_at(txn_id, coord, value)
-    }
-}
-
-#[async_trait]
-impl<T: Clone + SparseAccess> Transact for BlockListSparse<T> {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        self.source.finalize(txn_id).await
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockListTranspose<T: BlockList> {
-    source: T,
-    rebase: transform::Transpose,
-}
-
-impl<T: BlockList> TensorAccessor for BlockListTranspose<T> {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.source.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.rebase.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.source.size()
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> BlockList for BlockListTranspose<T> {
-    fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
-        Box::pin(async move {
-            let coords = stream::iter(Bounds::all(self.shape()).affected().map(TCResult::Ok));
-            let values: TCTryStream<'a, (Vec<u64>, Number)> =
-                Box::pin(ValueReader::new(coords, txn, self));
-            let values: TCTryStream<'a, Number> = Box::pin(values.map_ok(|(_, value)| value));
-            Ok(values)
-        })
-    }
-
-    async fn value_stream_slice<'a>(
-        &'a self,
-        txn: &'a Txn,
-        bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        let coords = stream::iter(bounds.affected().map(TCResult::Ok));
-        let values: TCTryStream<'a, (Vec<u64>, Number)> =
-            Box::pin(ValueReader::new(coords, txn, self));
-        let values: TCTryStream<'a, Number> = Box::pin(values.map_ok(|(_, value)| value));
-        Ok(values)
-    }
-
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        let coord = self.rebase.invert_coord(coord);
-        self.source.read_value_at(txn, &coord).await
-    }
-
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
-        let bounds = self.rebase.invert_bounds(bounds);
-        self.source.write_value(txn_id, bounds, number).await
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
-        let coord = self.rebase.invert_coord(&coord);
-        self.source.write_value_at(txn_id, coord, value)
-    }
-}
-
-impl<T: BlockList> ReadValueAt for BlockListTranspose<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
-        Box::pin(async move {
-            let value = BlockList::read_value_at(self, txn, &coord).await?;
-            Ok((coord, value))
-        })
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> Transact for BlockListTranspose<T> {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        self.source.finalize(txn_id).await
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockListUnary<T: BlockList> {
-    source: T,
-    transform: fn(&Array) -> Array,
-    value_transform: fn(Number) -> Number,
-    dtype: NumberType,
-}
-
-impl<T: BlockList> TensorAccessor for BlockListUnary<T> {
-    fn dtype(&self) -> NumberType {
-        self.dtype
-    }
-
-    fn ndim(&self) -> usize {
-        self.source.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.source.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.source.size()
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> BlockList for BlockListUnary<T> {
-    fn block_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
-        Box::pin(async move {
-            let transform = self.transform;
-            let blocks = self.source.block_stream(txn).await?;
-            let blocks: TCTryStream<'a, Array> =
-                Box::pin(blocks.map_ok(move |array| transform(&array)));
-            Ok(blocks)
-        })
-    }
-
-    async fn value_stream_slice<'a>(
-        &'a self,
-        _txn: &'a Txn,
-        _bounds: Bounds,
-    ) -> TCResult<TCTryStream<'a, Number>> {
-        // let rebase = transform::Slice::new(self.source.shape().clone(), bounds)?;
-        // let slice = BlockListSlice {
-        //     source: self.source.clone(),
-        //     rebase,
-        // };
-        //
-        // slice.value_stream(txn).await
-        unimplemented!()
-    }
-
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        let transform = self.value_transform;
-        self.source
-            .read_value_at(txn, coord)
-            .map_ok(transform)
-            .await
-    }
-
-    async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
-        Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
-    }
-
-    fn write_value_at(
-        &self,
-        _txn_id: TxnId,
-        _coord: Vec<u64>,
-        _value: Number,
-    ) -> TCBoxTryFuture<()> {
-        Box::pin(future::ready(Err(error::unsupported(
-            ERR_NONBIJECTIVE_WRITE,
-        ))))
-    }
-}
-
-#[async_trait]
-impl<T: BlockList> Transact for BlockListUnary<T> {
-    async fn commit(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-
-    async fn rollback(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-
-    async fn finalize(&self, _txn_id: &TxnId) {
-        // no-op
-    }
-}
-
-#[derive(Clone)]
-pub struct DenseTensor<T: Clone + BlockList> {
+pub struct DenseTensor<T: Clone + DenseAccess> {
     blocks: T,
 }
 
-impl<T: Clone + BlockList> DenseTensor<T> {
-    pub fn into_dyn(self) -> DenseTensor<BlockListDyn> {
-        let blocks = BlockListDyn::new(self.clone_into());
-        DenseTensor { blocks }
-    }
-
-    pub fn clone_into(&self) -> T {
-        self.blocks.clone()
+impl<T: Clone + DenseAccess> DenseTensor<T> {
+    pub fn into_inner(self) -> T {
+        self.blocks
     }
 
     pub async fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Number>> {
         self.blocks.value_stream(txn).await
     }
 
-    fn combine<OT: Clone + BlockList>(
+    fn combine<OT: Clone + DenseAccess>(
         &self,
         other: &DenseTensor<OT>,
         combinator: fn(&Array, &Array) -> Array,
@@ -1053,7 +389,7 @@ impl<T: Clone + BlockList> DenseTensor<T> {
     }
 }
 
-impl<T: Clone + BlockList> Instance for DenseTensor<T> {
+impl<T: Clone + DenseAccess> Instance for DenseTensor<T> {
     type Class = TensorType;
 
     fn class(&self) -> TensorType {
@@ -1061,9 +397,9 @@ impl<T: Clone + BlockList> Instance for DenseTensor<T> {
     }
 }
 
-impl<T: Clone + BlockList> TensorInstance for DenseTensor<T> {
+impl<T: Clone + DenseAccess> TensorInstance for DenseTensor<T> {
     type Dense = Self;
-    type Sparse = SparseTensor<DenseAccessor<T>>;
+    type Sparse = SparseTensor<DenseToSparse<T>>;
 
     fn into_dense(self) -> Self::Dense {
         self
@@ -1074,23 +410,23 @@ impl<T: Clone + BlockList> TensorInstance for DenseTensor<T> {
     }
 }
 
-impl<T: Clone + BlockList> IntoView for DenseTensor<T> {
+impl<T: Clone + DenseAccess> IntoView for DenseTensor<T> {
     fn into_view(self) -> Tensor {
-        let blocks = BlockListDyn::new(self.clone_into());
+        let blocks = self.into_inner().accessor();
         Tensor::Dense(DenseTensor { blocks })
     }
 }
 
-impl<T: Clone + BlockList> ReadValueAt for DenseTensor<T> {
+impl<T: Clone + DenseAccess> ReadValueAt for DenseTensor<T> {
     fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
         Box::pin(async move {
-            let value = BlockList::read_value_at(&self.blocks, txn, &coord).await?;
+            let value = DenseAccess::read_value_at(&self.blocks, txn, coord.to_vec()).await?;
             Ok((coord, value))
         })
     }
 }
 
-impl<T: Clone + BlockList> TensorAccessor for DenseTensor<T> {
+impl<T: Clone + DenseAccess> TensorAccessor for DenseTensor<T> {
     fn dtype(&self) -> NumberType {
         self.blocks.dtype()
     }
@@ -1109,7 +445,7 @@ impl<T: Clone + BlockList> TensorAccessor for DenseTensor<T> {
 }
 
 #[async_trait]
-impl<T: Clone + BlockList, OT: Clone + BlockList> TensorBoolean<DenseTensor<OT>>
+impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorBoolean<DenseTensor<OT>>
     for DenseTensor<T>
 {
     type Combine = DenseTensor<BlockListCombine<T, OT>>;
@@ -1128,17 +464,16 @@ impl<T: Clone + BlockList, OT: Clone + BlockList> TensorBoolean<DenseTensor<OT>>
 }
 
 #[async_trait]
-impl<T: Clone + BlockList> TensorUnary for DenseTensor<T> {
+impl<T: Clone + DenseAccess> TensorUnary for DenseTensor<T> {
     type Unary = DenseTensor<BlockListUnary<T>>;
 
     fn abs(&self) -> TCResult<Self::Unary> {
-        let blocks = BlockListUnary {
-            source: self.blocks.clone(),
-            transform: Array::abs,
-            value_transform: <Number as NumberInstance>::abs,
-            dtype: NumberType::Bool,
-        };
-
+        let blocks = BlockListUnary::new(
+            self.blocks.clone(),
+            Array::abs,
+            <Number as NumberInstance>::abs,
+            NumberType::Bool,
+        );
         Ok(DenseTensor { blocks })
     }
 
@@ -1166,19 +501,18 @@ impl<T: Clone + BlockList> TensorUnary for DenseTensor<T> {
     }
 
     fn not(&self) -> TCResult<Self::Unary> {
-        let blocks = BlockListUnary {
-            source: self.blocks.clone(),
-            transform: Array::not,
-            value_transform: Number::not,
-            dtype: NumberType::Bool,
-        };
-
+        let blocks = BlockListUnary::new(
+            self.blocks.clone(),
+            Array::not,
+            Number::not,
+            NumberType::Bool,
+        );
         Ok(DenseTensor { blocks })
     }
 }
 
 #[async_trait]
-impl<T: Clone + BlockList, OT: Clone + BlockList> TensorCompare<DenseTensor<OT>>
+impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorCompare<DenseTensor<OT>>
     for DenseTensor<T>
 {
     type Compare = DenseTensor<BlockListCombine<T, OT>>;
@@ -1239,7 +573,9 @@ impl<T: Clone + BlockList, OT: Clone + BlockList> TensorCompare<DenseTensor<OT>>
     }
 }
 
-impl<T: Clone + BlockList, OT: Clone + BlockList> TensorMath<DenseTensor<OT>> for DenseTensor<T> {
+impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorMath<DenseTensor<OT>>
+    for DenseTensor<T>
+{
     type Combine = DenseTensor<BlockListCombine<T, OT>>;
 
     fn add(&self, other: &DenseTensor<OT>) -> TCResult<Self::Combine> {
@@ -1259,9 +595,9 @@ impl<T: Clone + BlockList, OT: Clone + BlockList> TensorMath<DenseTensor<OT>> fo
 }
 
 #[async_trait]
-impl<T: Clone + BlockList> TensorIO for DenseTensor<T> {
+impl<T: Clone + DenseAccess> TensorIO for DenseTensor<T> {
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        self.blocks.read_value_at(txn, coord).await
+        self.blocks.read_value_at(txn, coord.to_vec()).await
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
@@ -1274,7 +610,9 @@ impl<T: Clone + BlockList> TensorIO for DenseTensor<T> {
 }
 
 #[async_trait]
-impl<T: Clone + BlockList, OT: Clone + BlockList> TensorDualIO<DenseTensor<OT>> for DenseTensor<T> {
+impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorDualIO<DenseTensor<OT>>
+    for DenseTensor<T>
+{
     async fn mask(&self, _txn: &Txn, _other: DenseTensor<OT>) -> TCResult<()> {
         Err(error::not_implemented("DenseTensor::mask"))
     }
@@ -1299,7 +637,7 @@ impl<T: Clone + BlockList, OT: Clone + BlockList> TensorDualIO<DenseTensor<OT>> 
 }
 
 #[async_trait]
-impl<T: Clone + BlockList> TensorDualIO<Tensor> for DenseTensor<T> {
+impl<T: Clone + DenseAccess> TensorDualIO<Tensor> for DenseTensor<T> {
     async fn mask(&self, txn: &Txn, other: Tensor) -> TCResult<()> {
         match other {
             Tensor::Sparse(sparse) => self.mask(txn, sparse.into_dense()).await,
@@ -1315,7 +653,7 @@ impl<T: Clone + BlockList> TensorDualIO<Tensor> for DenseTensor<T> {
     }
 }
 
-impl<T: Clone + BlockList> TensorReduce for DenseTensor<T> {
+impl<T: Clone + DenseAccess> TensorReduce for DenseTensor<T> {
     type Reduce = DenseTensor<BlockListReduce<T>>;
 
     fn product(&self, _axis: usize) -> TCResult<Self::Reduce> {
@@ -1360,7 +698,7 @@ impl<T: Clone + BlockList> TensorReduce for DenseTensor<T> {
     }
 }
 
-impl<T: Clone + BlockList> TensorTransform for DenseTensor<T> {
+impl<T: Clone + DenseAccess> TensorTransform for DenseTensor<T> {
     type Cast = DenseTensor<BlockListCast<T>>;
     type Broadcast = DenseTensor<BlockListBroadcast<T>>;
     type Expand = DenseTensor<BlockListExpand<T>>;
@@ -1368,56 +706,32 @@ impl<T: Clone + BlockList> TensorTransform for DenseTensor<T> {
     type Transpose = DenseTensor<BlockListTranspose<T>>;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
-        let blocks = BlockListCast {
-            source: self.blocks.clone(),
-            dtype,
-        };
-
+        let blocks = BlockListCast::new(self.blocks.clone(), dtype);
         Ok(DenseTensor { blocks })
     }
 
     fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast> {
-        let rebase = transform::Broadcast::new(self.shape().clone(), shape)?;
-        let blocks = BlockListBroadcast {
-            source: self.blocks.clone(),
-            rebase,
-        };
-
+        let blocks = BlockListBroadcast::new(self.blocks.clone(), shape)?;
         Ok(DenseTensor { blocks })
     }
 
     fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand> {
-        let rebase = transform::Expand::new(self.shape().clone(), axis)?;
-        let blocks = BlockListExpand {
-            source: self.blocks.clone(),
-            rebase,
-        };
-
+        let blocks = BlockListExpand::new(self.blocks.clone(), axis)?;
         Ok(DenseTensor { blocks })
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
-        let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
-        let blocks = BlockListSlice {
-            source: self.blocks.clone(),
-            rebase,
-        };
-
+        let blocks = BlockListSlice::new(self.blocks.clone(), bounds)?;
         Ok(DenseTensor { blocks })
     }
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        let rebase = transform::Transpose::new(self.shape().clone(), permutation)?;
-        let blocks = BlockListTranspose {
-            source: self.blocks.clone(),
-            rebase,
-        };
-
+        let blocks = BlockListTranspose::new(self.blocks.clone(), permutation)?;
         Ok(DenseTensor { blocks })
     }
 }
 
-impl<T: Clone + BlockList> Route for DenseTensor<T> {
+impl<T: Clone + DenseAccess> Route for DenseTensor<T> {
     fn route(
         &'_ self,
         method: MethodType,
@@ -1428,7 +742,7 @@ impl<T: Clone + BlockList> Route for DenseTensor<T> {
 }
 
 #[async_trait]
-impl<T: Clone + BlockList> Transact for DenseTensor<T> {
+impl<T: Clone + DenseAccess> Transact for DenseTensor<T> {
     async fn commit(&self, txn_id: &TxnId) {
         self.blocks.commit(txn_id).await
     }
@@ -1442,15 +756,16 @@ impl<T: Clone + BlockList> Transact for DenseTensor<T> {
     }
 }
 
-impl<T: Clone + BlockList> From<T> for DenseTensor<T> {
+impl<T: Clone + DenseAccess> From<T> for DenseTensor<T> {
     fn from(blocks: T) -> DenseTensor<T> {
         DenseTensor { blocks }
     }
 }
 
-impl<T: Clone + BlockList> From<DenseTensor<T>> for Collection {
+impl<T: Clone + DenseAccess> From<DenseTensor<T>> for Collection {
     fn from(dense: DenseTensor<T>) -> Collection {
-        Collection::Tensor(Tensor::Dense(dense.into_dyn()))
+        let blocks = dense.into_inner().accessor();
+        Collection::Tensor(Tensor::Dense(blocks.into()))
     }
 }
 
