@@ -3,11 +3,11 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
-use futures::StreamExt;
+use futures::TryStreamExt;
 
 use crate::class::*;
 use crate::error;
-use crate::general::{TCResult, TCStream, TCTryStream, TryCastInto};
+use crate::general::{TCResult, TCTryStream, TryCastInto};
 use crate::handler::*;
 use crate::scalar::{label, Id, Link, MethodType, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -126,8 +126,8 @@ pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
 
     async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         let rows = self.stream(&txn_id).await?;
-        let count = rows.fold(0, |count, _| future::ready(count + 1)).await;
-        Ok(count)
+        rows.try_fold(0, |count, _| future::ready(Ok(count + 1)))
+            .await
     }
 
     async fn delete(&self, _txn_id: &TxnId) -> TCResult<()> {
@@ -233,12 +233,13 @@ impl CollectionInstance for Table {
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         let mut rows = self.stream(txn.id()).await?;
-        Ok(rows.next().await.is_none())
+        let next = rows.try_next().await?;
+        Ok(next.is_none())
     }
 
-    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCStream<'a, Scalar>> {
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Scalar>> {
         let stream = self.stream(txn.id()).await?;
-        Ok(Box::pin(stream.map(|r| r.unwrap()).map(Scalar::from)))
+        Ok(Box::pin(stream.map_ok(Scalar::from)))
     }
 }
 

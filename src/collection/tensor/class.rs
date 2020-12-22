@@ -9,7 +9,7 @@ use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCStream, TryCastInto};
+use crate::general::{TCBoxTryFuture, TCResult, TCTryStream, TryCastInto};
 use crate::handler::*;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
@@ -227,25 +227,15 @@ impl CollectionInstance for Tensor {
         self.any(txn.clone()).map_ok(|any| !any).await
     }
 
-    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCStream<'a, Scalar>> {
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Scalar>> {
         match self {
-            // TODO: Forward errors, don't panic!
             Self::Dense(dense) => {
-                let result_stream = dense.value_stream(txn).await?;
-                let values: TCStream<'_, Scalar> = Box::pin(
-                    result_stream.map(|r| r.map(Value::Number).map(Scalar::Value).unwrap()),
-                );
-                Ok(values)
+                let values = dense.value_stream(txn).await?;
+                Ok(Box::pin(values.map_ok(Value::Number).map_ok(Scalar::Value)))
             }
             Self::Sparse(sparse) => {
-                let result_stream = sparse.filled(txn).await?;
-                let values: TCStream<'_, Scalar> = Box::pin(
-                    result_stream
-                        .map(|r| r.unwrap())
-                        .map(Value::from)
-                        .map(Scalar::Value),
-                );
-                Ok(values)
+                let values = sparse.filled(txn).await?;
+                Ok(Box::pin(values.map_ok(Value::from).map_ok(Scalar::Value)))
             }
         }
     }

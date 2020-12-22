@@ -2,14 +2,14 @@ use std::iter::FromIterator;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use futures::stream::StreamExt;
+use futures::stream::TryStreamExt;
 use futures::TryFutureExt;
 
 use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
 use crate::class::{Instance, State, TCType};
 use crate::collection::CollectionInstance;
 use crate::error;
-use crate::general::{Map, TCResult, TCStream, TryCastFrom, TryCastInto};
+use crate::general::{Map, TCResult, TCTryStream, TryCastFrom, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{Id, MethodType, PathSegment, Scalar, ScalarInstance, Value};
@@ -298,10 +298,9 @@ where
                 let bounds = Bounds::from_key(key, self.table.key());
                 let slice = self.table.clone().slice(bounds)?;
                 let mut stream = slice.stream(txn.id()).await?;
-                stream
-                    .next()
-                    .await
-                    .map(Value::from_iter)
+                let next = stream.try_next().await?;
+
+                next.map(Value::from_iter)
                     .map(Scalar::Value)
                     .map(State::Scalar)
                     .ok_or_else(|| error::not_found("(table row)"))
@@ -355,16 +354,16 @@ impl<T: TableInstance> CollectionInstance for TableImpl<T> {
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         let mut rows = self.inner.stream(txn.id()).await?;
-        if let Some(_row) = rows.next().await {
+        if let Some(_row) = rows.try_next().await? {
             Ok(false)
         } else {
             Ok(true)
         }
     }
 
-    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCStream<'a, Scalar>> {
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Scalar>> {
         let stream = self.inner.stream(txn.id()).await?;
-        Ok(Box::pin(stream.map(|r| r.unwrap()).map(Scalar::from)))
+        Ok(Box::pin(stream.map_ok(Scalar::from)))
     }
 }
 

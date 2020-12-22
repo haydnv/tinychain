@@ -9,7 +9,7 @@ use crate::class::{Instance, State, TCType};
 use crate::collection::class::CollectionInstance;
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{Map, TCResult, TCStream, TCTryStream, TryCastInto};
+use crate::general::{Map, TCResult, TCTryStream, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{label, MethodType, PathSegment, Scalar, ScalarClass, ScalarInstance, Value};
@@ -255,8 +255,11 @@ impl<'a, T: BTreeInstance> Handler for WriteHandler<'a, T> {
             match data {
                 State::Collection(collection) => {
                     let keys = collection.to_stream(txn).await?;
-                    let keys = keys
-                        .map(|s| s.try_cast_into(|k| error::bad_request("Invalid BTree key", k)));
+                    let keys = keys.map(|key| {
+                        key.and_then(|s| {
+                            s.try_cast_into(|k| error::bad_request("Invalid BTree key", k))
+                        })
+                    });
 
                     self.btree.try_insert_from(txn.id(), keys).await?;
                 }
@@ -310,9 +313,9 @@ impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
         self.inner.is_empty(txn).await
     }
 
-    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCStream<'a, Scalar>> {
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Scalar>> {
         let stream = self.stream(txn.id(), BTreeRange::default(), false).await?;
-        Ok(Box::pin(stream.map(|row| row.unwrap()).map(Scalar::from)))
+        Ok(Box::pin(stream.map_ok(Scalar::from)))
     }
 }
 
@@ -384,7 +387,7 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCStream<'a, Scalar>> {
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Scalar>> {
         match self {
             Self::Tree(tree) => tree.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,
