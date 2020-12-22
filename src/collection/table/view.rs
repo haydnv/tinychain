@@ -201,9 +201,11 @@ impl IndexSlice {
         &'a self,
         txn_id: &'a TxnId,
         bounds: Bounds,
+        reverse: bool,
     ) -> TCResult<TCStream<'a, Vec<Value>>> {
+        let reverse = self.reverse ^ reverse;
         let bounds = bounds.into_btree_range(&self.schema.columns())?;
-        self.source.stream(txn_id, bounds, self.reverse).await
+        self.source.stream(txn_id, bounds, reverse).await
     }
 }
 
@@ -477,12 +479,12 @@ impl MergeSource {
         &'a self,
         txn_id: &'a TxnId,
         bounds: Bounds,
+        reverse: bool,
     ) -> TCResult<TCStream<'a, Vec<Value>>> {
         match self {
-            Self::Table(table) => table.stream_slice(txn_id, bounds).await,
+            Self::Table(table) => table.stream_slice(txn_id, bounds, reverse).await,
             Self::Merge(merged) => {
-                // TODO: correctly propagate `reverse`
-                merged.stream_slice(txn_id, bounds, false).await
+                merged.stream_slice(txn_id, bounds, reverse).await
             }
         }
     }
@@ -693,7 +695,7 @@ impl TableInstance for Merged {
         let rows = keys
             .map(move |key| Bounds::from_key(key, key_columns))
             .filter(move |bounds| future::ready(left.validate_bounds(bounds).is_ok()))
-            .then(move |bounds| Box::pin(left.stream_slice(txn_id, bounds)))
+            .then(move |bounds| Box::pin(left.stream_slice(txn_id, bounds, false)))
             .map(|slice| slice.unwrap())
             .flatten();
 
@@ -975,8 +977,9 @@ impl TableSlice {
         &'a self,
         txn_id: &'a TxnId,
         bounds: Bounds,
+        reverse: bool,
     ) -> TCResult<TCStream<'a, Vec<Value>>> {
-        self.slice.stream_slice(txn_id, bounds).await
+        self.slice.stream_slice(txn_id, bounds, reverse).await
     }
 
     fn into_reversed(self) -> TableSlice {
