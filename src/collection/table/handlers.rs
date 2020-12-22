@@ -364,7 +364,7 @@ impl<T: TableInstance> CollectionInstance for TableImpl<T> {
 
     async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCStream<'a, Scalar>> {
         let stream = self.inner.stream(txn.id()).await?;
-        Ok(Box::pin(stream.map(Scalar::from)))
+        Ok(Box::pin(stream.map(|r| r.unwrap()).map(Scalar::from)))
     }
 }
 

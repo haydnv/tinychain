@@ -173,7 +173,7 @@ impl TensorAccessor for SparseTable {
 impl SparseAccess for SparseTable {
     async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
         let rows = self.table.stream(txn.id()).await?;
-        let filled = rows.map(unwrap_row);
+        let filled = rows.and_then(|row| future::ready(unwrap_row(row)));
         let filled: SparseStream = Box::pin(filled);
         Ok(filled)
     }
@@ -232,7 +232,7 @@ impl SparseAccess for SparseTable {
 
         let mut slice = slice.stream(txn.id()).await?;
 
-        match slice.next().await {
+        match slice.try_next().await? {
             Some(mut number) if number.len() == 1 => number.pop().unwrap().try_into(),
             None => Ok(self.dtype().zero()),
             _ => Err(error::internal(ERR_CORRUPT)),

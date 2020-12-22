@@ -11,7 +11,7 @@ use crate::collection::btree::{self, BTreeFile, BTreeInstance};
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCResult, TCStream};
+use crate::general::{TCResult, TCTryStream};
 use crate::scalar::{Id, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -44,7 +44,7 @@ impl Index {
     ) -> TCResult<Option<Vec<Value>>> {
         let key = self.schema.validate_key(key)?;
         let mut rows = self.btree.stream(&txn_id, key.into(), false).await?;
-        Ok(rows.next().await)
+        rows.try_next().await
     }
 
     pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
@@ -90,7 +90,7 @@ impl Index {
         txn_id: &'a TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.validate_bounds(&bounds)?;
 
         let range = bounds.into_btree_range(&self.schema.columns())?;
@@ -158,7 +158,7 @@ impl TableInstance for Index {
         self.index_slice(bounds).map(|is| is.into())
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         debug!("Index::stream");
 
         self.btree
@@ -264,7 +264,7 @@ impl ReadOnly {
 
             let source = source.select(columns)?;
             let rows = source.stream(txn.id()).await?;
-            btree.insert_from(txn.id(), rows).await?;
+            btree.try_insert_from(txn.id(), rows).await?;
             (schema, btree)
         } else {
             let btree =
@@ -272,7 +272,7 @@ impl ReadOnly {
                     .await?;
 
             let rows = source.stream(txn.id()).await?;
-            btree.insert_from(txn.id(), rows).await?;
+            btree.try_insert_from(txn.id(), rows).await?;
             (source_schema, btree)
         };
 
@@ -345,7 +345,7 @@ impl TableInstance for ReadOnly {
             .map(|index| ReadOnly { index })
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.index.stream(txn_id).await
     }
 
@@ -529,7 +529,7 @@ impl TableIndex {
         txn_id: &'a TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.primary.stream_slice(txn_id, bounds, reverse).await
     }
 }
@@ -758,7 +758,7 @@ impl TableInstance for TableIndex {
         }
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.primary.stream(txn_id).await
     }
 
@@ -874,7 +874,7 @@ impl TableInstance for TableIndex {
         let index = index.stream(txn.id()).await?;
 
         index
-            .map(|values| schema.row_from_values(values))
+            .map(|values| values.and_then(|values| schema.row_from_values(values)))
             .map_ok(|row| self.update_row(txn.id(), row, update.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))

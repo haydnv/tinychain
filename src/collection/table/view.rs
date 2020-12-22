@@ -12,7 +12,7 @@ use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCResult, TCStream};
+use crate::general::{TCResult, TCTryStream};
 use crate::scalar::{Id, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -74,27 +74,29 @@ impl<T: TableInstance> TableInstance for Aggregate<T> {
         self.source.reversed().map(|source| Aggregate { source })
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         let first = self.source.stream(txn_id).await?.next().await;
         let first = if let Some(first) = first {
             first
         } else {
-            let stream: TCStream<'_, Vec<Value>> = Box::pin(stream::empty());
+            let stream: TCTryStream<'_, Vec<Value>> = Box::pin(stream::empty());
             return Ok(stream);
         };
 
         let left =
             stream::once(future::ready(first.clone())).chain(self.source.stream(txn_id).await?);
         let right = self.source.stream(txn_id).await?;
-        let aggregate = left.zip(right).filter_map(|(l, r)| {
-            debug!("group {:?}, {:?}?", l, r);
-            if l == r {
-                future::ready(None)
-            } else {
-                future::ready(Some(r))
-            }
-        });
-        let aggregate: TCStream<'_, Vec<Value>> =
+
+        let aggregate = left
+            .zip(right)
+            .map(|(l, r)| Ok((l?, r?)))
+            .try_filter_map(|(l, r)| {
+                debug!("group {:?}, {:?}?", l, r);
+
+                future::ready(if l == r { Ok(None) } else { Ok(Some(r)) })
+            });
+
+        let aggregate: TCTryStream<'a, Vec<Value>> =
             Box::pin(stream::once(future::ready(first)).chain(aggregate));
 
         Ok(aggregate)
@@ -202,7 +204,7 @@ impl IndexSlice {
         txn_id: &'a TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         let reverse = self.reverse ^ reverse;
         let bounds = bounds.into_btree_range(&self.schema.columns())?;
         self.source.stream(txn_id, bounds, reverse).await
@@ -257,7 +259,7 @@ impl TableInstance for IndexSlice {
         Ok(self.into_reversed())
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         debug!("IndexSlice::stream where {}", self.range);
 
         self.source
@@ -364,9 +366,9 @@ impl TableInstance for Limited {
         let source = &self.source;
         let schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
-        self.stream(&txn_id)
-            .await?
-            .map(|row| schema.row_from_values(row))
+        let rows = self.stream(&txn_id).await?;
+
+        rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| source.delete_row(txn_id, row))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -389,9 +391,9 @@ impl TableInstance for Limited {
         Err(error::unsupported(ERR_LIMITED_REVERSE))
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         let rows = self.source.stream(txn_id).await?;
-        let rows: TCStream<'_, Vec<Value>> = Box::pin(rows.take(self.limit as usize));
+        let rows: TCTryStream<'_, Vec<Value>> = Box::pin(rows.take(self.limit as usize));
         Ok(rows)
     }
 
@@ -409,7 +411,7 @@ impl TableInstance for Limited {
 
         let rows = self.stream(txn.id()).await?;
 
-        rows.map(|row| schema.row_from_values(row))
+        rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| source.update_row(txn.id(), row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -480,12 +482,10 @@ impl MergeSource {
         txn_id: &'a TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         match self {
             Self::Table(table) => table.stream_slice(txn_id, bounds, reverse).await,
-            Self::Merge(merged) => {
-                merged.stream_slice(txn_id, bounds, reverse).await
-            }
+            Self::Merge(merged) => merged.stream_slice(txn_id, bounds, reverse).await,
         }
     }
 
@@ -576,7 +576,7 @@ impl Merged {
         txn_id: &'a TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         let bounds = self
             .source()
             .merge_bounds(vec![self.bounds.clone(), bounds])?;
@@ -640,7 +640,7 @@ impl TableInstance for Merged {
 
         let rows = self.stream(txn_id).await?;
 
-        rows.map(|row| schema.row_from_values(row))
+        rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.delete_row(&txn_id, row))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -684,7 +684,7 @@ impl TableInstance for Merged {
         self.left.into_source().slice(bounds)
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         debug!("Merged::stream from right {}", &self.right);
         debug!("left is {}", &self.left);
 
@@ -693,13 +693,12 @@ impl TableInstance for Merged {
 
         let left = &self.left;
         let rows = keys
-            .map(move |key| Bounds::from_key(key, key_columns))
-            .filter(move |bounds| future::ready(left.validate_bounds(bounds).is_ok()))
-            .then(move |bounds| Box::pin(left.stream_slice(txn_id, bounds, false)))
-            .map(|slice| slice.unwrap())
-            .flatten();
+            .map_ok(move |key| Bounds::from_key(key, key_columns))
+            .try_filter(move |bounds| future::ready(left.validate_bounds(bounds).is_ok()))
+            .and_then(move |bounds| Box::pin(left.stream_slice(txn_id, bounds, false)))
+            .try_flatten();
 
-        let rows: TCStream<'a, Vec<Value>> = Box::pin(rows);
+        let rows: TCTryStream<'a, Vec<Value>> = Box::pin(rows);
         Ok(rows)
     }
 
@@ -723,7 +722,7 @@ impl TableInstance for Merged {
 
         let rows = self.stream(txn.id()).await?;
 
-        rows.map(|row| schema.row_from_values(row))
+        rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.update_row(txn.id(), row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -879,13 +878,13 @@ impl<T: TableInstance> TableInstance for Selection<T> {
         self.source.reversed()?.select(self.columns.to_vec())
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         let indices = self.indices.to_vec();
-        let selected = self.source.stream(txn_id).await?.map(move |row| {
+        let selected = self.source.stream(txn_id).await?.map_ok(move |row| {
             let selection: Vec<Value> = indices.iter().map(|i| row[*i].clone()).collect();
             selection
         });
-        let selected: TCStream<'a, Vec<Value>> = Box::pin(selected);
+        let selected: TCTryStream<'a, Vec<Value>> = Box::pin(selected);
         Ok(selected)
     }
 
@@ -978,7 +977,7 @@ impl TableSlice {
         txn_id: &'a TxnId,
         bounds: Bounds,
         reverse: bool,
-    ) -> TCResult<TCStream<'a, Vec<Value>>> {
+    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.slice.stream_slice(txn_id, bounds, reverse).await
     }
 
@@ -1015,9 +1014,9 @@ impl TableInstance for TableSlice {
     async fn delete(&self, txn_id: &TxnId) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
-        self.stream(&txn_id)
-            .await?
-            .map(|row| schema.row_from_values(row))
+        let rows = self.stream(&txn_id).await?;
+
+        rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.delete_row(&txn_id, row))
             .try_buffer_unordered(2)
             .fold(Ok(()), |_, r| future::ready(r))
@@ -1057,7 +1056,7 @@ impl TableInstance for TableSlice {
         self.into_source().slice(bounds)
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         debug!("TableSlice::stream");
         self.slice.stream(txn_id).await
     }
@@ -1080,7 +1079,7 @@ impl TableInstance for TableSlice {
 
         let rows = self.stream(txn.id()).await?;
 
-        rows.map(|row| schema.row_from_values(row))
+        rows.map(|row| row.and_then(|row| schema.row_from_values(row)))
             .map_ok(|row| self.update_row(txn.id(), row, value.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))

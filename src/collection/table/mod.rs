@@ -7,7 +7,7 @@ use futures::StreamExt;
 
 use crate::class::*;
 use crate::error;
-use crate::general::{TCResult, TCStream, TryCastInto};
+use crate::general::{TCResult, TCStream, TCTryStream, TryCastInto};
 use crate::handler::*;
 use crate::scalar::{label, Id, Link, MethodType, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
@@ -171,7 +171,7 @@ pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
         Err(error::bad_request(ERR_SLICE, self.class()))
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>>;
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>>;
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()>;
 
@@ -238,7 +238,7 @@ impl CollectionInstance for Table {
 
     async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCStream<'a, Scalar>> {
         let stream = self.stream(txn.id()).await?;
-        Ok(Box::pin(stream.map(Scalar::from)))
+        Ok(Box::pin(stream.map(|r| r.unwrap()).map(Scalar::from)))
     }
 }
 
@@ -524,7 +524,7 @@ impl TableInstance for Table {
         }
     }
 
-    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         match self {
             Self::Index(index) => index.stream(txn_id).await,
             Self::ROIndex(index) => index.stream(txn_id).await,

@@ -7,7 +7,7 @@ use crate::class::Instance;
 use crate::collection::schema::Column;
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCResult, TCStream};
+use crate::general::{TCResult, TCTryStream};
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::{BTree, BTreeFile, BTreeImpl, BTreeInstance, BTreeRange, BTreeType, Key};
@@ -143,7 +143,7 @@ impl BTreeInstance for BTreeSlice {
         txn_id: &'a TxnId,
         range: BTreeRange,
         reverse: bool,
-    ) -> TCResult<TCStream<'a, Key>> {
+    ) -> TCResult<TCTryStream<'a, Key>> {
         debug!(
             "reverse: {} ^ {} = {}",
             reverse,
