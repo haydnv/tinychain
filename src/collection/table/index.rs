@@ -51,14 +51,14 @@ impl Index {
         BTreeInstance::is_empty(&self.btree, txn).await
     }
 
-    pub async fn len(&self, txn_id: TxnId) -> TCResult<u64> {
+    pub async fn len(&self, txn_id: &TxnId) -> TCResult<u64> {
         self.btree.len(txn_id, btree::BTreeRange::default()).await
     }
 
-    pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
+    pub fn index_slice(self, bounds: Bounds) -> TCResult<IndexSlice> {
         debug!("Index::index_slice");
         let bounds = bounds.validate(&self.schema.columns())?;
-        IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)
+        IndexSlice::new(self.btree, self.schema, bounds)
     }
 
     async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
@@ -116,13 +116,13 @@ impl TableInstance for Index {
         Table::Index(self.into())
     }
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         self.len(txn_id).await
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+    async fn delete(&self, txn_id: &TxnId) -> TCResult<()> {
         self.btree
-            .delete(&txn_id, btree::BTreeRange::default())
+            .delete(txn_id, btree::BTreeRange::default())
             .await
     }
 
@@ -139,27 +139,22 @@ impl TableInstance for Index {
         self.schema.values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+    fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         if self.schema.starts_with(&order) {
-            Ok(IndexSlice::all(
-                self.btree.clone(),
-                self.schema.clone(),
-                reverse,
-            ))
+            Ok(IndexSlice::all(self.btree, self.schema, reverse))
         } else {
-            let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
             Err(error::bad_request(
                 &format!("Index with schema {} does not support order", self.schema),
-                order.join(", "),
+                Value::from_iter(order),
             ))
         }
     }
 
-    fn reversed(&self) -> TCResult<Self::Reverse> {
-        Ok(IndexSlice::all(self.btree.clone(), self.schema.clone(), true).into())
+    fn reversed(self) -> TCResult<Self::Reverse> {
+        Ok(IndexSlice::all(self.btree, self.schema, true).into())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
+    fn slice(self, bounds: Bounds) -> TCResult<IndexSlice> {
         self.index_slice(bounds).map(|is| is.into())
     }
 
@@ -219,7 +214,7 @@ impl TableInstance for Index {
         }
     }
 
-    async fn update(self, txn: Txn, row: Row) -> TCResult<()> {
+    async fn update(&self, txn: &Txn, row: Row) -> TCResult<()> {
         let key: btree::Key = self.schema().values_from_row(row, false)?;
         self.btree
             .update(txn.id(), btree::BTreeRange::default(), &key)
@@ -317,8 +312,8 @@ impl TableInstance for ReadOnly {
         Table::ROIndex(self.into())
     }
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.index.clone().count(txn_id).await
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
+        self.index.count(txn_id).await
     }
 
     fn key(&'_ self) -> &'_ [Column] {
@@ -329,21 +324,21 @@ impl TableInstance for ReadOnly {
         self.index.values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+    fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         self.index.validate_order(&order)?;
 
         if reverse {
-            Ok(self.clone().into_reversed())
+            Ok(self.into_reversed())
         } else {
-            Ok(self.clone().into())
+            Ok(self)
         }
     }
 
-    fn reversed(&self) -> TCResult<Self::Reverse> {
-        Ok(self.clone().into_reversed())
+    fn reversed(self) -> TCResult<Self::Reverse> {
+        Ok(self.into_reversed())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         self.validate_bounds(&bounds)?;
         self.index
             .slice_index(bounds)
@@ -557,15 +552,15 @@ impl TableInstance for TableIndex {
         Table::Table(self.into())
     }
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         self.primary.count(txn_id).await
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+    async fn delete(&self, txn_id: &TxnId) -> TCResult<()> {
         let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
         deletes.push(self.primary.delete(txn_id));
         for index in self.auxiliary.values() {
-            deletes.push(index.clone().delete(txn_id));
+            deletes.push(index.delete(txn_id));
         }
 
         try_join_all(deletes).await?;
@@ -597,7 +592,7 @@ impl TableInstance for TableIndex {
         self.primary.values()
     }
 
-    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+    fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         self.validate_order(&columns)?;
 
         let selection = TableSlice::new(self.clone(), Bounds::default())?;
@@ -622,7 +617,7 @@ impl TableInstance for TableIndex {
                         Value::from_iter(subset.to_vec())
                     );
 
-                    let index_slice = self.primary.index_slice(Bounds::default())?;
+                    let index_slice = self.primary.clone().index_slice(Bounds::default())?;
                     let merged = Merged::new(merge_source, index_slice)?;
 
                     if columns.is_empty() {
@@ -652,7 +647,7 @@ impl TableInstance for TableIndex {
                                 Value::from_iter(subset.to_vec())
                             );
 
-                            let index_slice = index.index_slice(Bounds::default())?;
+                            let index_slice = index.clone().index_slice(Bounds::default())?;
                             let merged = Merged::new(merge_source, index_slice)?;
 
                             if columns.is_empty() {
@@ -689,13 +684,13 @@ impl TableInstance for TableIndex {
         }
     }
 
-    fn reversed(&self) -> TCResult<Self::Reverse> {
+    fn reversed(self) -> TCResult<Self::Reverse> {
         Err(error::unsupported(
             "Cannot reverse a Table itself, consider reversing a slice of the table instead",
         ))
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Merged> {
+    fn slice(self, bounds: Bounds) -> TCResult<Merged> {
         let columns: Vec<Id> = self
             .primary
             .schema()
@@ -724,7 +719,7 @@ impl TableInstance for TableIndex {
                 if self.primary.validate_bounds(&subset).is_ok() {
                     debug!("primary key can slice {}", subset);
 
-                    let index_slice = self.primary.index_slice(subset)?;
+                    let index_slice = self.primary.clone().index_slice(subset)?;
                     let merged = Merged::new(merge_source, index_slice)?;
 
                     bounds = &bounds[i..];
@@ -737,7 +732,7 @@ impl TableInstance for TableIndex {
                     for (name, index) in self.auxiliary.iter() {
                         if index.validate_bounds(&subset).is_ok() {
                             debug!("index {} can slice {}", name, subset);
-                            let index_slice = index.index_slice(subset)?;
+                            let index_slice = index.clone().index_slice(subset)?;
                             let merged = Merged::new(merge_source, index_slice)?;
 
                             bounds = &bounds[i..];
@@ -862,7 +857,7 @@ impl TableInstance for TableIndex {
         Ok(())
     }
 
-    async fn update(self, txn: Txn, update: Row) -> TCResult<()> {
+    async fn update(&self, txn: &Txn, update: Row) -> TCResult<()> {
         for col in self.primary.schema().key() {
             if update.contains_key(col.name()) {
                 return Err(error::bad_request(

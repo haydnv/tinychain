@@ -121,7 +121,7 @@ impl BTreeInstance for BTreeSlice {
         Ok(empty)
     }
 
-    async fn len(&self, txn_id: TxnId, range: BTreeRange) -> TCResult<u64> {
+    async fn len(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<u64> {
         if range == BTreeRange::default() {
             self.source.len(txn_id, self.range.clone()).await
         } else if self

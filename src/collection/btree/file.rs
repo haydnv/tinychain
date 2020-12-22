@@ -676,8 +676,8 @@ impl BTreeInstance for BTreeFile {
         Ok(root.keys.is_empty())
     }
 
-    async fn len(&self, txn_id: TxnId, range: BTreeRange) -> TCResult<u64> {
-        let slice = self.stream(&txn_id, range, false).await?;
+    async fn len(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<u64> {
+        let slice = self.stream(txn_id, range, false).await?;
         Ok(slice.fold(0u64, |len, _| future::ready(len + 1)).await)
     }
 

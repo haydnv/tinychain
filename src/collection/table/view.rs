@@ -65,12 +65,12 @@ impl<T: TableInstance> TableInstance for Aggregate<T> {
         self.source.values()
     }
 
-    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+    fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         let source = self.source.order_by(columns, reverse)?;
         Ok(Aggregate { source })
     }
 
-    fn reversed(&self) -> TCResult<Self::Reverse> {
+    fn reversed(self) -> TCResult<Self::Reverse> {
         self.source.reversed().map(|source| Aggregate { source })
     }
 
@@ -180,13 +180,13 @@ impl IndexSlice {
         Ok(rows.next().await.is_none())
     }
 
-    pub fn slice_index(&self, bounds: Bounds) -> TCResult<IndexSlice> {
+    pub fn slice_index(self, bounds: Bounds) -> TCResult<IndexSlice> {
         let columns = self.schema().columns();
         let outer = bounds.clone().into_btree_range(&columns)?;
         let inner = bounds.clone().into_btree_range(&columns)?;
 
-        if outer.contains(&inner, &self.schema.columns(), self.source.collator()) {
-            let mut slice = self.clone();
+        if outer.contains(&inner, &columns, self.source.collator()) {
+            let mut slice = self;
             slice.bounds = bounds;
             Ok(slice)
         } else {
@@ -225,12 +225,12 @@ impl TableInstance for IndexSlice {
         Table::IndexSlice(self.into())
     }
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         self.source.len(txn_id, self.range.clone()).await
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
-        self.source.delete(&txn_id, self.range).await
+    async fn delete(&self, txn_id: &TxnId) -> TCResult<()> {
+        self.source.delete(txn_id, self.range.clone()).await
     }
 
     fn key(&'_ self) -> &'_ [Column] {
@@ -241,7 +241,7 @@ impl TableInstance for IndexSlice {
         self.schema.values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+    fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         self.validate_order(&order)?;
 
         if reverse {
@@ -251,8 +251,8 @@ impl TableInstance for IndexSlice {
         }
     }
 
-    fn reversed(&self) -> TCResult<Self::Reverse> {
-        Ok(self.clone().into_reversed())
+    fn reversed(self) -> TCResult<Self::Reverse> {
+        Ok(self.into_reversed())
     }
 
     async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
@@ -289,9 +289,9 @@ impl TableInstance for IndexSlice {
         }
     }
 
-    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
+    async fn update(&self, txn: &Txn, value: Row) -> TCResult<()> {
         let key = self.schema.values_from_row(value, true)?;
-        self.source.update(txn.id(), self.range, &key).await
+        self.source.update(txn.id(), self.range.clone(), &key).await
     }
 }
 
@@ -353,19 +353,19 @@ impl TableInstance for Limited {
         Table::Limit(self.into())
     }
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         let source_count = self.source.count(txn_id).await?;
         Ok(u64::min(source_count, self.limit as u64))
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
-        let source = self.source.clone();
+    async fn delete(&self, txn_id: &TxnId) -> TCResult<()> {
+        let source = &self.source;
         let schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
         self.stream(&txn_id)
             .await?
             .map(|row| schema.row_from_values(row))
-            .map_ok(|row| source.delete_row(&txn_id, row))
+            .map_ok(|row| source.delete_row(txn_id, row))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await
@@ -379,11 +379,11 @@ impl TableInstance for Limited {
         self.source.values()
     }
 
-    fn order_by(&self, _order: Vec<Id>, _reverse: bool) -> TCResult<Table> {
+    fn order_by(self, _order: Vec<Id>, _reverse: bool) -> TCResult<Table> {
         Err(error::unsupported(ERR_LIMITED_ORDER))
     }
 
-    fn reversed(&self) -> TCResult<Table> {
+    fn reversed(self) -> TCResult<Table> {
         Err(error::unsupported(ERR_LIMITED_REVERSE))
     }
 
@@ -401,8 +401,8 @@ impl TableInstance for Limited {
         Err(error::unsupported(ERR_LIMITED_ORDER))
     }
 
-    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
-        let source = self.source.clone();
+    async fn update(&self, txn: &Txn, value: Row) -> TCResult<()> {
+        let source = &self.source;
         let schema: IndexSchema = (source.key().to_vec(), source.values().to_vec()).into();
 
         let rows = self.stream(txn.id()).await?;
@@ -462,7 +462,7 @@ impl MergeSource {
     fn into_reversed(self) -> MergeSource {
         match self {
             Self::Table(table_slice) => Self::Table(table_slice.into_reversed()),
-            Self::Merge(merged) => Self::Merge(Box::new(merged.as_reversed())),
+            Self::Merge(merged) => Self::Merge(Box::new(merged.into_reversed())),
         }
     }
 
@@ -491,6 +491,13 @@ impl MergeSource {
         match self {
             Self::Table(table_slice) => table_slice.source(),
             Self::Merge(merged) => merged.source(),
+        }
+    }
+
+    fn into_source(self) -> TableIndex {
+        match self {
+            Self::Table(table_slice) => table_slice.into_source(),
+            Self::Merge(merged) => merged.into_source(),
         }
     }
 
@@ -575,16 +582,16 @@ impl Merged {
         self.source().stream_slice(txn_id, bounds, reverse).await
     }
 
-    fn as_reversed(&self) -> Merged {
-        let right = self.right.clone().into_reversed();
+    fn into_reversed(self) -> Merged {
         let key_names = self
             .key_columns
             .iter()
             .map(|col| col.name())
             .cloned()
             .collect();
+
         let keys = Selection {
-            source: right,
+            source: self.right.clone().into_reversed(),
             schema: self.keys.schema.clone(),
             columns: key_names,
             indices: self.keys.indices.clone(),
@@ -592,8 +599,8 @@ impl Merged {
 
         Merged {
             key_columns: self.key_columns.to_vec(),
-            left: self.left.clone().into_reversed(),
-            right: self.right.clone().into_reversed(),
+            left: self.left.into_reversed(),
+            right: self.right.into_reversed(),
             bounds: self.bounds.clone(),
             keys,
         }
@@ -601,6 +608,10 @@ impl Merged {
 
     fn source(&'_ self) -> &'_ TableIndex {
         self.left.source()
+    }
+
+    fn into_source(self) -> TableIndex {
+        self.left.into_source()
     }
 }
 
@@ -622,12 +633,12 @@ impl TableInstance for Merged {
         Table::Merge(self.into())
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+    async fn delete(&self, txn_id: &TxnId) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
-        self.stream(&txn_id)
-            .await?
-            .map(|row| schema.row_from_values(row))
+        let rows = self.stream(txn_id).await?;
+
+        rows.map(|row| schema.row_from_values(row))
             .map_ok(|row| self.delete_row(&txn_id, row))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
@@ -652,23 +663,23 @@ impl TableInstance for Merged {
         }
     }
 
-    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
-        match &self.left {
+    fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+        match self.left {
             MergeSource::Merge(merged) => merged.order_by(columns, reverse),
             MergeSource::Table(table_slice) => table_slice.order_by(columns, reverse),
         }
     }
 
-    fn reversed(&self) -> TCResult<Self::Reverse> {
-        Ok(self.as_reversed())
+    fn reversed(self) -> TCResult<Self::Reverse> {
+        Ok(self.into_reversed())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let bounds = self
             .source()
             .merge_bounds(vec![self.bounds.clone(), bounds])?;
 
-        self.source().slice(bounds)
+        self.left.into_source().slice(bounds)
     }
 
     async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
@@ -705,7 +716,7 @@ impl TableInstance for Merged {
         }
     }
 
-    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
+    async fn update(&self, txn: &Txn, value: Row) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
         let rows = self.stream(txn.id()).await?;
@@ -837,7 +848,7 @@ impl<T: TableInstance> TableInstance for Selection<T> {
         Table::Selection(Box::new(this.into()))
     }
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         self.source.clone().count(txn_id).await
     }
 
@@ -849,20 +860,20 @@ impl<T: TableInstance> TableInstance for Selection<T> {
         self.schema.values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+    fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         self.validate_order(&order)?;
 
         let source = self.source.order_by(order, reverse)?;
 
         Ok(Selection {
             source,
-            schema: self.schema.clone(),
-            columns: self.columns.to_vec(),
-            indices: self.indices.to_vec(),
+            schema: self.schema,
+            columns: self.columns,
+            indices: self.indices,
         })
     }
 
-    fn reversed(&self) -> TCResult<Self::Reverse> {
+    fn reversed(self) -> TCResult<Self::Reverse> {
         self.source.reversed()?.select(self.columns.to_vec())
     }
 
@@ -948,12 +959,16 @@ impl TableSlice {
         self.slice.bounds()
     }
 
-    pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
+    pub fn index_slice(self, bounds: Bounds) -> TCResult<IndexSlice> {
         self.slice.slice_index(bounds)
     }
 
     pub fn source(&'_ self) -> &'_ TableIndex {
         &self.table
+    }
+
+    pub fn into_source(self) -> TableIndex {
+        self.table
     }
 
     pub async fn stream_slice<'a>(
@@ -990,11 +1005,11 @@ impl TableInstance for TableSlice {
         Table::TableSlice(self.into())
     }
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         self.slice.count(txn_id).await
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+    async fn delete(&self, txn_id: &TxnId) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
         self.stream(&txn_id)
@@ -1018,24 +1033,25 @@ impl TableInstance for TableSlice {
         self.source().values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
-        let table = self.source().order_by(order, reverse)?;
-        table.slice(self.slice.bounds().clone())
+    fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+        let bounds = self.slice.bounds;
+        let table = self.table.order_by(order, reverse)?;
+        table.slice(bounds)
     }
 
-    fn reversed(&self) -> TCResult<Self::Reverse> {
-        let table = self.table.clone();
-        let slice = self.slice.clone().into_reversed();
-        let slice = Self { table, slice };
-        Ok(slice)
+    fn reversed(self) -> TCResult<Self::Reverse> {
+        Ok(Self {
+            table: self.table,
+            slice: self.slice.into_reversed(),
+        })
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Merged> {
+    fn slice(self, bounds: Bounds) -> TCResult<Merged> {
         let bounds = self
             .source()
             .merge_bounds(vec![self.slice.bounds().clone(), bounds])?;
         self.validate_bounds(&bounds)?;
-        self.source().slice(bounds)
+        self.into_source().slice(bounds)
     }
 
     async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCStream<'a, Vec<Value>>> {
@@ -1056,7 +1072,7 @@ impl TableInstance for TableSlice {
         self.source().validate_order(order)
     }
 
-    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
+    async fn update(&self, txn: &Txn, value: Row) -> TCResult<()> {
         let schema: IndexSchema = (self.key().to_vec(), self.values().to_vec()).into();
 
         let rows = self.stream(txn.id()).await?;

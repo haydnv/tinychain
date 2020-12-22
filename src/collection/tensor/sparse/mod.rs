@@ -199,7 +199,7 @@ impl SparseAccess for SparseTable {
     }
 
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
-        self.table.count(txn.id().clone()).await
+        self.table.count(txn.id()).await
     }
 
     async fn filled_in<'a>(&'a self, _txn: &'a Txn, _bounds: Bounds) -> TCResult<SparseStream<'a>> {
@@ -226,6 +226,7 @@ impl SparseAccess for SparseTable {
 
         let slice = self
             .table
+            .clone()
             .slice(selector.into())?
             .select(vec![VALUE.into()])?;
 

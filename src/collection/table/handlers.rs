@@ -36,7 +36,7 @@ where
 
     async fn handle_delete(&self, txn: &Txn, key: Value) -> TCResult<()> {
         if key.is_none() {
-            self.table.clone().delete(txn.id().clone()).await
+            self.table.delete(txn.id()).await
         } else {
             Err(error::bad_request(
                 "Table::delete expected no arguments but found",
@@ -121,7 +121,7 @@ where
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         let limit = selector.try_cast_into(|v| error::bad_request("Invalid limit", v))?;
-        Ok(State::from(self.table.limit(limit).into_table()))
+        Ok(State::from(self.table.clone().limit(limit).into_table()))
     }
 }
 
@@ -145,6 +145,7 @@ where
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         let columns: Vec<Id> = try_into_columns(selector)?;
         self.table
+            .clone()
             .order_by(columns, false)
             .map(TableInstance::into_table)
             .map(State::from)
@@ -171,6 +172,7 @@ where
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         if selector.is_none() {
             self.table
+                .clone()
                 .reversed()
                 .map(TableInstance::into_table)
                 .map(State::from)
@@ -235,11 +237,7 @@ where
     ) -> TCResult<State> {
         let update = params.try_cast_into(|v| error::bad_request("Invalid update", v))?;
 
-        self.table
-            .clone()
-            .update(txn.clone(), update)
-            .map_ok(State::from)
-            .await
+        self.table.update(txn, update).map_ok(State::from).await
     }
 }
 
@@ -298,7 +296,7 @@ where
                 selector.try_cast_into(|v| error::bad_request("Invalid key for Table", v))?;
             if key.len() == self.table.key().len() {
                 let bounds = Bounds::from_key(key, self.table.key());
-                let slice = self.table.slice(bounds)?;
+                let slice = self.table.clone().slice(bounds)?;
                 let mut stream = slice.stream(txn.id()).await?;
                 stream
                     .next()
@@ -330,6 +328,7 @@ where
         })?;
 
         self.table
+            .clone()
             .slice(bounds)
             .map(TableInstance::into_table)
             .map(State::from)

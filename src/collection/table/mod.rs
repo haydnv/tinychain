@@ -124,13 +124,13 @@ pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
 
     fn into_table(self) -> Table;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         let rows = self.stream(&txn_id).await?;
         let count = rows.fold(0, |count, _| future::ready(count + 1)).await;
         Ok(count)
     }
 
-    async fn delete(self, _txn_id: TxnId) -> TCResult<()> {
+    async fn delete(&self, _txn_id: &TxnId) -> TCResult<()> {
         Err(error::bad_request(ERR_DELETE, self.class()))
     }
 
@@ -142,8 +142,8 @@ pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
         group_by(self, columns)
     }
 
-    async fn index(&self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly> {
-        index::ReadOnly::copy_from(self.clone(), txn, columns).await
+    async fn index(self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly> {
+        index::ReadOnly::copy_from(self, txn, columns).await
     }
 
     async fn insert(&self, _txn_id: &TxnId, _key: Vec<Value>, _value: Vec<Value>) -> TCResult<()> {
@@ -154,20 +154,20 @@ pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
 
     fn values(&'_ self) -> &'_ [Column];
 
-    fn limit(&self, limit: u64) -> view::Limited {
-        view::Limited::new(self.clone(), limit)
+    fn limit(self, limit: u64) -> view::Limited {
+        view::Limited::new(self, limit)
     }
 
-    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy>;
+    fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy>;
 
-    fn reversed(&self) -> TCResult<Self::Reverse>;
+    fn reversed(self) -> TCResult<Self::Reverse>;
 
     fn select(self, columns: Vec<Id>) -> TCResult<view::Selection<Self>> {
         let selection = view::Selection::new(self, columns)?;
         Ok(selection)
     }
 
-    fn slice(&self, _bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(self, _bounds: Bounds) -> TCResult<Self::Slice> {
         Err(error::bad_request(ERR_SLICE, self.class()))
     }
 
@@ -177,7 +177,7 @@ pub trait TableInstance: Instance<Class = TableType> + Sized + 'static {
 
     fn validate_order(&self, order: &[Id]) -> TCResult<()>;
 
-    async fn update(self, _txn: Txn, _value: Row) -> TCResult<()> {
+    async fn update(&self, _txn: &Txn, _value: Row) -> TCResult<()> {
         Err(error::bad_request(ERR_UPDATE, self.class()))
     }
 
@@ -272,7 +272,7 @@ impl TableInstance for Table {
         self
     }
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         match self {
             Self::Index(index) => index.count(txn_id).await,
             Self::ROIndex(index) => index.count(txn_id).await,
@@ -286,17 +286,17 @@ impl TableInstance for Table {
         }
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+    async fn delete(&self, txn_id: &TxnId) -> TCResult<()> {
         match self {
-            Self::Index(index) => index.into_inner().clone().delete(txn_id).await,
-            Self::ROIndex(index) => index.into_inner().clone().delete(txn_id).await,
-            Self::Table(table) => table.into_inner().clone().delete(txn_id).await,
-            Self::Aggregate(aggregate) => aggregate.into_inner().clone().delete(txn_id).await,
-            Self::IndexSlice(index_slice) => index_slice.into_inner().clone().delete(txn_id).await,
-            Self::Limit(limited) => limited.into_inner().clone().delete(txn_id).await,
-            Self::Merge(merged) => merged.into_inner().clone().delete(txn_id).await,
-            Self::Selection(columns) => columns.into_inner().clone().delete(txn_id).await,
-            Self::TableSlice(table_slice) => table_slice.into_inner().clone().delete(txn_id).await,
+            Self::Index(index) => index.deref().delete(txn_id).await,
+            Self::ROIndex(index) => index.deref().delete(txn_id).await,
+            Self::Table(table) => table.deref().delete(txn_id).await,
+            Self::Aggregate(aggregate) => aggregate.deref().deref().delete(txn_id).await,
+            Self::IndexSlice(index_slice) => index_slice.deref().delete(txn_id).await,
+            Self::Limit(limited) => limited.deref().delete(txn_id).await,
+            Self::Merge(merged) => merged.deref().delete(txn_id).await,
+            Self::Selection(columns) => columns.deref().deref().delete(txn_id).await,
+            Self::TableSlice(table_slice) => table_slice.deref().delete(txn_id).await,
         }
     }
 
@@ -328,17 +328,17 @@ impl TableInstance for Table {
         }
     }
 
-    async fn index(&self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly> {
+    async fn index(self, txn: Txn, columns: Option<Vec<Id>>) -> TCResult<index::ReadOnly> {
         match self {
-            Self::Index(index) => index.index(txn, columns).await,
-            Self::ROIndex(index) => index.index(txn, columns).await,
-            Self::Table(table) => table.index(txn, columns).await,
-            Self::Aggregate(aggregate) => aggregate.index(txn, columns).await,
-            Self::IndexSlice(index_slice) => index_slice.index(txn, columns).await,
-            Self::Limit(limited) => limited.index(txn, columns).await,
-            Self::Merge(merged) => merged.index(txn, columns).await,
-            Self::Selection(selection) => selection.index(txn, columns).await,
-            Self::TableSlice(table_slice) => table_slice.index(txn, columns).await,
+            Self::Index(index) => index.into_inner().index(txn, columns).await,
+            Self::ROIndex(index) => index.into_inner().index(txn, columns).await,
+            Self::Table(table) => table.into_inner().index(txn, columns).await,
+            Self::Aggregate(aggregate) => aggregate.into_inner().index(txn, columns).await,
+            Self::IndexSlice(index_slice) => index_slice.into_inner().index(txn, columns).await,
+            Self::Limit(limited) => limited.into_inner().index(txn, columns).await,
+            Self::Merge(merged) => merged.into_inner().index(txn, columns).await,
+            Self::Selection(selection) => selection.into_inner().index(txn, columns).await,
+            Self::TableSlice(table_slice) => table_slice.into_inner().index(txn, columns).await,
         }
     }
 
@@ -382,63 +382,90 @@ impl TableInstance for Table {
         }
     }
 
-    fn limit(&self, limit: u64) -> view::Limited {
+    fn limit(self, limit: u64) -> view::Limited {
         match self {
-            Self::Index(index) => index.limit(limit),
-            Self::ROIndex(index) => index.limit(limit),
-            Self::Table(table) => table.limit(limit),
-            Self::Aggregate(aggregate) => aggregate.limit(limit),
-            Self::IndexSlice(index_slice) => index_slice.limit(limit),
-            Self::Limit(limited) => limited.limit(limit),
-            Self::Merge(merged) => merged.limit(limit),
-            Self::Selection(columns) => columns.limit(limit),
-            Self::TableSlice(table_slice) => table_slice.limit(limit),
+            Self::Index(index) => index.into_inner().limit(limit),
+            Self::ROIndex(index) => index.into_inner().limit(limit),
+            Self::Table(table) => table.into_inner().limit(limit),
+            Self::Aggregate(aggregate) => aggregate.into_inner().limit(limit),
+            Self::IndexSlice(index_slice) => index_slice.into_inner().limit(limit),
+            Self::Limit(limited) => limited.into_inner().limit(limit),
+            Self::Merge(merged) => merged.into_inner().limit(limit),
+            Self::Selection(columns) => columns.into_inner().limit(limit),
+            Self::TableSlice(table_slice) => table_slice.into_inner().limit(limit),
         }
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
+    fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         match self {
             Self::Index(index) => index
+                .into_inner()
                 .order_by(order, reverse)
                 .map(TableInstance::into_table),
             Self::ROIndex(index) => index
+                .into_inner()
                 .order_by(order, reverse)
                 .map(TableInstance::into_table),
             Self::Table(table) => table
+                .into_inner()
                 .order_by(order, reverse)
                 .map(TableInstance::into_table),
             Self::Aggregate(aggregate) => aggregate
+                .into_inner()
                 .order_by(order, reverse)
                 .map(TableInstance::into_table),
             Self::IndexSlice(index_slice) => index_slice
+                .into_inner()
                 .order_by(order, reverse)
                 .map(TableInstance::into_table),
             Self::Limit(limited) => limited
+                .into_inner()
                 .order_by(order, reverse)
                 .map(TableInstance::into_table),
             Self::Merge(merged) => merged
+                .into_inner()
                 .order_by(order, reverse)
                 .map(TableInstance::into_table),
             Self::Selection(columns) => columns
+                .into_inner()
                 .order_by(order, reverse)
                 .map(TableInstance::into_table),
             Self::TableSlice(table_slice) => table_slice
+                .into_inner()
                 .order_by(order, reverse)
                 .map(TableInstance::into_table),
         }
     }
 
-    fn reversed(&self) -> TCResult<Self::Reverse> {
+    fn reversed(self) -> TCResult<Self::Reverse> {
         match self {
-            Self::Index(index) => index.reversed().map(TableInstance::into_table),
-            Self::ROIndex(index) => index.reversed().map(TableInstance::into_table),
-            Self::Table(table) => table.reversed().map(TableInstance::into_table),
-            Self::Aggregate(aggregate) => aggregate.reversed().map(TableInstance::into_table),
-            Self::IndexSlice(index_slice) => index_slice.reversed().map(TableInstance::into_table),
-            Self::Limit(limited) => limited.reversed().map(TableInstance::into_table),
-            Self::Merge(merged) => merged.reversed().map(TableInstance::into_table),
-            Self::Selection(columns) => columns.reversed().map(TableInstance::into_table),
-            Self::TableSlice(table_slice) => table_slice.reversed().map(TableInstance::into_table),
+            Self::Index(index) => index.into_inner().reversed().map(TableInstance::into_table),
+            Self::ROIndex(index) => index.into_inner().reversed().map(TableInstance::into_table),
+            Self::Table(table) => table.into_inner().reversed().map(TableInstance::into_table),
+            Self::Aggregate(aggregate) => aggregate
+                .into_inner()
+                .reversed()
+                .map(TableInstance::into_table),
+            Self::IndexSlice(index_slice) => index_slice
+                .into_inner()
+                .reversed()
+                .map(TableInstance::into_table),
+            Self::Limit(limited) => limited
+                .into_inner()
+                .reversed()
+                .map(TableInstance::into_table),
+            Self::Merge(merged) => merged
+                .into_inner()
+                .reversed()
+                .map(TableInstance::into_table),
+            Self::Selection(columns) => columns
+                .into_inner()
+                .reversed()
+                .map(TableInstance::into_table),
+            Self::TableSlice(table_slice) => table_slice
+                .into_inner()
+                .reversed()
+                .map(TableInstance::into_table),
         }
     }
 
@@ -456,21 +483,44 @@ impl TableInstance for Table {
         }
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+    fn slice(self, bounds: Bounds) -> TCResult<Table> {
         match self {
-            Self::Index(index) => index.slice(bounds).map(TableInstance::into_table),
-            Self::ROIndex(index) => index.slice(bounds).map(TableInstance::into_table),
-            Self::Table(table) => table.slice(bounds).map(TableInstance::into_table),
-            Self::Aggregate(aggregate) => aggregate.slice(bounds).map(TableInstance::into_table),
-            Self::Limit(limited) => limited.slice(bounds).map(TableInstance::into_table),
-            Self::IndexSlice(index_slice) => {
-                index_slice.slice(bounds).map(TableInstance::into_table)
-            }
-            Self::Merge(merged) => merged.slice(bounds).map(TableInstance::into_table),
-            Self::Selection(columns) => columns.slice(bounds).map(TableInstance::into_table),
-            Self::TableSlice(table_slice) => {
-                table_slice.slice(bounds).map(TableInstance::into_table)
-            }
+            Self::Index(index) => index
+                .into_inner()
+                .slice(bounds)
+                .map(TableInstance::into_table),
+            Self::ROIndex(index) => index
+                .into_inner()
+                .slice(bounds)
+                .map(TableInstance::into_table),
+            Self::Table(table) => table
+                .into_inner()
+                .slice(bounds)
+                .map(TableInstance::into_table),
+            Self::Aggregate(aggregate) => aggregate
+                .into_inner()
+                .slice(bounds)
+                .map(TableInstance::into_table),
+            Self::Limit(limited) => limited
+                .into_inner()
+                .slice(bounds)
+                .map(TableInstance::into_table),
+            Self::IndexSlice(index_slice) => index_slice
+                .into_inner()
+                .slice(bounds)
+                .map(TableInstance::into_table),
+            Self::Merge(merged) => merged
+                .into_inner()
+                .slice(bounds)
+                .map(TableInstance::into_table),
+            Self::Selection(columns) => columns
+                .into_inner()
+                .slice(bounds)
+                .map(TableInstance::into_table),
+            Self::TableSlice(table_slice) => table_slice
+                .into_inner()
+                .slice(bounds)
+                .map(TableInstance::into_table),
         }
     }
 
@@ -516,17 +566,17 @@ impl TableInstance for Table {
         }
     }
 
-    async fn update(self, txn: Txn, value: Row) -> TCResult<()> {
+    async fn update(&self, txn: &Txn, value: Row) -> TCResult<()> {
         match self {
-            Self::Index(index) => index.into_inner().update(txn, value).await,
-            Self::ROIndex(index) => index.into_inner().update(txn, value).await,
-            Self::Table(table) => table.into_inner().update(txn, value).await,
-            Self::Aggregate(aggregate) => aggregate.into_inner().update(txn, value).await,
-            Self::IndexSlice(index_slice) => index_slice.into_inner().update(txn, value).await,
-            Self::Limit(limited) => limited.into_inner().update(txn, value).await,
-            Self::Merge(merged) => merged.into_inner().update(txn, value).await,
-            Self::Selection(columns) => columns.into_inner().update(txn, value).await,
-            Self::TableSlice(table_slice) => table_slice.into_inner().update(txn, value).await,
+            Self::Index(index) => index.update(txn, value).await,
+            Self::ROIndex(index) => index.update(txn, value).await,
+            Self::Table(table) => table.update(txn, value).await,
+            Self::Aggregate(aggregate) => aggregate.update(txn, value).await,
+            Self::IndexSlice(index_slice) => index_slice.update(txn, value).await,
+            Self::Limit(limited) => limited.update(txn, value).await,
+            Self::Merge(merged) => merged.update(txn, value).await,
+            Self::Selection(columns) => columns.update(txn, value).await,
+            Self::TableSlice(table_slice) => table_slice.update(txn, value).await,
         }
     }
 

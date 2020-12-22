@@ -34,7 +34,7 @@ pub trait BTreeInstance: Instance<Class = BTreeType> + Transact {
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool>;
 
-    async fn len(&self, txn_id: TxnId, range: BTreeRange) -> TCResult<u64>;
+    async fn len(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<u64>;
 
     fn schema(&'_ self) -> &'_ [Column];
 

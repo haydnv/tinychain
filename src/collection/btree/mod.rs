@@ -98,7 +98,7 @@ impl<'a, T: BTreeInstance> Handler for CountHandler<'a, T> {
 
     async fn handle_get(&self, txn: &Txn, range: Value) -> TCResult<State> {
         let range = validate_range(range, self.btree.schema())?;
-        let count = self.btree.len(*txn.id(), range).await?;
+        let count = self.btree.len(txn.id(), range).await?;
         Ok(State::Scalar(Scalar::Value(Value::Number(count.into()))))
     }
 }
@@ -437,7 +437,7 @@ impl BTreeInstance for BTree {
         }
     }
 
-    async fn len(&self, txn_id: TxnId, range: BTreeRange) -> TCResult<u64> {
+    async fn len(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<u64> {
         match self {
             Self::Tree(tree) => tree.len(txn_id, range).await,
             Self::View(view) => view.len(txn_id, range).await,
