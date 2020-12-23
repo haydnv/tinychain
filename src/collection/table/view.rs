@@ -3,13 +3,14 @@ use std::fmt;
 use std::iter::FromIterator;
 
 use async_trait::async_trait;
-use futures::stream::{self, StreamExt, TryStreamExt};
-use futures::{future, join};
+use futures::stream::{StreamExt, TryStreamExt};
+use futures::{future, join, TryFutureExt};
 use log::debug;
 
 use crate::class::*;
 use crate::collection::btree::{BTreeFile, BTreeInstance, BTreeRange};
 use crate::collection::schema::{Column, IndexSchema, Row};
+use crate::collection::stream::GroupStream;
 use crate::collection::Collection;
 use crate::error;
 use crate::general::{TCResult, TCTryStream};
@@ -75,31 +76,9 @@ impl<T: TableInstance> TableInstance for Aggregate<T> {
     }
 
     async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
-        let first = self.source.stream(txn_id).await?.next().await;
-        let first = if let Some(first) = first {
-            first
-        } else {
-            let stream: TCTryStream<'_, Vec<Value>> = Box::pin(stream::empty());
-            return Ok(stream);
-        };
-
-        let left =
-            stream::once(future::ready(first.clone())).chain(self.source.stream(txn_id).await?);
-        let right = self.source.stream(txn_id).await?;
-
-        let aggregate = left
-            .zip(right)
-            .map(|(l, r)| Ok((l?, r?)))
-            .try_filter_map(|(l, r)| {
-                debug!("group {:?}, {:?}?", l, r);
-
-                future::ready(if l == r { Ok(None) } else { Ok(Some(r)) })
-            });
-
-        let aggregate: TCTryStream<'a, Vec<Value>> =
-            Box::pin(stream::once(future::ready(first)).chain(aggregate));
-
-        Ok(aggregate)
+        let grouped = self.source.stream(txn_id).map_ok(GroupStream::from).await?;
+        let grouped: TCTryStream<'a, Vec<Value>> = Box::pin(grouped);
+        Ok(grouped)
     }
 
     fn validate_bounds(&self, _bounds: &Bounds) -> TCResult<()> {

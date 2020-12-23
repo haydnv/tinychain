@@ -1,3 +1,4 @@
+use std::fmt;
 use std::pin::Pin;
 
 use futures::ready;
@@ -15,31 +16,32 @@ pub struct GroupStream<T, S: Stream<Item = TCResult<T>>> {
     group: Option<T>,
 }
 
-impl<T: Eq + Clone, S: Stream<Item = TCResult<T>>> Stream for GroupStream<T, S> {
+impl<T: Eq + Clone + fmt::Debug, S: Stream<Item = TCResult<T>>> Stream for GroupStream<T, S> {
     type Item = TCResult<T>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
+        Poll::Ready(loop {
+            if let Some(result) = ready!(this.source.as_mut().poll_next(cxt)) {
+                match result {
+                    Ok(item) => {
+                        let skip = if let Some(group) = this.group {
+                            &item == group
+                        } else {
+                            false
+                        };
 
-        let source = this.source.as_mut().get_pin_mut();
-        let item = match ready!(source.poll_next(cxt)) {
-            Some(Ok(item)) => item,
-            None => return Poll::Ready(None),
-            Some(Err(cause)) => return Poll::Ready(Some(Err(cause))),
-        };
-
-        let skip = if let Some(group) = this.group {
-            group == &item
-        } else {
-            false
-        };
-
-        if skip {
-            Poll::Pending
-        } else {
-            *(this.group) = Some(item.clone());
-            Poll::Ready(Some(Ok(item)))
-        }
+                        if !skip {
+                            *(this.group) = Some(item.clone());
+                            break Some(Ok(item));
+                        }
+                    }
+                    Err(cause) => break Some(Err(cause)),
+                }
+            } else {
+                break None;
+            }
+        })
     }
 }
 
