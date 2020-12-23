@@ -104,9 +104,9 @@ impl<L: Clone + DenseAccess, R: Clone + DenseAccess> DenseAccess for BlockListCo
         })
     }
 
-    async fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
-        let left = self.left.slice(txn, bounds.clone()).await?;
-        let right = self.right.slice(txn, bounds).await?;
+    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+        let left = self.left.slice(txn, bounds.clone())?;
+        let right = self.right.slice(txn, bounds)?;
 
         BlockListCombine::new(
             left,
@@ -213,7 +213,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListBroadcast<T> {
         Box::pin(future::ready(Ok(values)))
     }
 
-    async fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
         let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
         Ok(BlockListSlice {
             source: self.clone(),
@@ -315,8 +315,8 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListCast<T> {
         })
     }
 
-    async fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
-        let slice = self.source.slice(txn, bounds).await?;
+    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+        let slice = self.source.slice(txn, bounds)?;
         Ok(BlockListCast::new(slice, self.dtype))
     }
 
@@ -407,9 +407,9 @@ impl<T: DenseAccess> DenseAccess for BlockListExpand<T> {
         self.source.value_stream(txn)
     }
 
-    async fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.slice(txn, bounds).await
+        self.source.slice(txn, bounds)
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
@@ -453,18 +453,14 @@ impl<T: DenseAccess> Transact for BlockListExpand<T> {
 type Reductor = fn(&DenseTensor<DenseAccessor>, Txn) -> TCBoxTryFuture<Number>;
 
 #[derive(Clone)]
-pub struct BlockListReduce<T: Clone + DenseAccess> {
-    source: DenseTensor<T>, // TODO: replace DenseTensor<T> with T
+pub struct BlockListReduce<T> {
+    source: T,
     rebase: transform::Reduce,
     reductor: Reductor,
 }
 
-impl<T: Clone + DenseAccess> BlockListReduce<T> {
-    fn new(
-        source: DenseTensor<T>,
-        axis: usize,
-        reductor: Reductor,
-    ) -> TCResult<BlockListReduce<T>> {
+impl<T: DenseAccess> BlockListReduce<T> {
+    fn new(source: T, axis: usize, reductor: Reductor) -> TCResult<BlockListReduce<T>> {
         let rebase = transform::Reduce::new(source.shape().clone(), axis)?;
 
         Ok(BlockListReduce {
@@ -475,7 +471,7 @@ impl<T: Clone + DenseAccess> BlockListReduce<T> {
     }
 }
 
-impl<T: Clone + DenseAccess> TensorAccessor for BlockListReduce<T> {
+impl<T: DenseAccess> TensorAccessor for BlockListReduce<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -495,11 +491,11 @@ impl<T: Clone + DenseAccess> TensorAccessor for BlockListReduce<T> {
 
 #[async_trait]
 impl<T: Clone + DenseAccess> DenseAccess for BlockListReduce<T> {
-    type Slice = BlockListReduce<BlockListSlice<T>>;
+    type Slice = BlockListReduce<<T as DenseAccess>::Slice>;
 
     fn accessor(self) -> DenseAccessor {
         let reduce = BlockListReduce {
-            source: self.source.into_inner().accessor().into(),
+            source: self.source.accessor(),
             rebase: self.rebase,
             reductor: self.reductor,
         };
@@ -511,11 +507,10 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListReduce<T> {
         Box::pin(async move {
             let values = stream::iter(Bounds::all(self.shape()).affected()).then(move |coord| {
                 let reductor = self.reductor;
-                let txn = txn.clone();
                 let source_bounds = self.rebase.invert_coord(&coord);
                 Box::pin(async move {
-                    let slice = self.source.slice(source_bounds)?;
-                    reductor(&slice.into_inner().accessor().into(), txn).await
+                    let slice = self.source.slice(txn, source_bounds)?;
+                    reductor(&slice.accessor().into(), txn.clone()).await
                 })
             });
 
@@ -524,10 +519,10 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListReduce<T> {
         })
     }
 
-    async fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
         let (source_bounds, slice_reduce_axis) = self.rebase.invert_bounds(bounds);
-        let slice = self.source.slice(source_bounds)?.into_inner();
-        BlockListReduce::new(slice.into(), slice_reduce_axis, self.reductor)
+        let slice = self.source.slice(txn, source_bounds)?;
+        BlockListReduce::new(slice, slice_reduce_axis, self.reductor)
     }
 
     async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
@@ -551,8 +546,8 @@ impl<T: Clone + DenseAccess> ReadValueAt for BlockListReduce<T> {
         Box::pin(async move {
             let reductor = self.reductor;
             let source_bounds = self.rebase.invert_coord(&coord);
-            let slice = self.source.slice(source_bounds)?;
-            let value = reductor(&slice.into_inner().accessor().into(), txn.clone()).await?;
+            let slice = self.source.slice(txn, source_bounds)?;
+            let value = reductor(&slice.accessor().into(), txn.clone()).await?;
 
             Ok((coord, value))
         })
@@ -630,9 +625,9 @@ impl<T: DenseAccess> DenseAccess for BlockListSlice<T> {
         Box::pin(future::ready(Ok(values)))
     }
 
-    async fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.slice(txn, bounds).await
+        self.source.slice(txn, bounds)
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
@@ -718,7 +713,7 @@ impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
         ))))
     }
 
-    async fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
         self.source.slice(bounds).map(BlockListSparse::new)
     }
 
@@ -812,7 +807,7 @@ impl<T: DenseAccess> DenseAccess for BlockListTranspose<T> {
         })
     }
 
-    async fn slice(&self, _txn: &Txn, _bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(&self, _txn: &Txn, _bounds: Bounds) -> TCResult<Self::Slice> {
         Err(error::not_implemented("BlockListTranspose::slice"))
     }
 
@@ -919,7 +914,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListUnary<T> {
         })
     }
 
-    async fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
         let rebase = transform::Slice::new(self.source.shape().clone(), bounds)?;
         Ok(BlockListSlice {
             source: self.source.clone(),

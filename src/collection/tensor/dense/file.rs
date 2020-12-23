@@ -184,7 +184,7 @@ impl DenseAccess for BlockListFile {
         })
     }
 
-    async fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
         BlockListSlice::new(self.clone(), bounds)
     }
 
