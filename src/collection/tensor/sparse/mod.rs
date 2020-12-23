@@ -25,7 +25,7 @@ use super::dense::{
 };
 use super::transform;
 use super::{
-    broadcast, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
+    broadcast, Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
     TensorMath, TensorReduce, TensorTransform, TensorUnary, ERR_NONBIJECTIVE_WRITE,
 };
 
@@ -37,7 +37,7 @@ use combine::SparseCombine;
 
 const VALUE: Label = label("value");
 
-pub type SparseRow = (Vec<u64>, Number);
+pub type SparseRow = (Coord, Number);
 pub type SparseStream<'a> = Pin<Box<dyn Stream<Item = TCResult<SparseRow>> + Send + Unpin + 'a>>;
 
 const ERR_NOT_SPARSE: &str = "The result of the requested operation would not be sparse;\
@@ -193,7 +193,7 @@ impl SparseAccess for SparseTable {
         //     .await?
         //     .map(|coord| unwrap_coord(&coord));
         //
-        // let filled_at: TCTryStreamOld<Vec<u64>> = Box::pin(filled_at);
+        // let filled_at: TCTryStreamOld<Coord> = Box::pin(filled_at);
         // Ok(filled_at)
         unimplemented!()
     }
@@ -239,7 +239,7 @@ impl SparseAccess for SparseTable {
         }
     }
 
-    async fn write_value(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         let value = value.into_type(self.dtype);
 
         let key = coord
@@ -523,7 +523,7 @@ impl<T: Clone + SparseAccess> TensorIO for SparseTensor<T> {
         }
     }
 
-    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.accessor.write_value(txn_id, coord, value).await
     }
 }
@@ -755,11 +755,11 @@ fn u64_to_value(u: u64) -> Value {
     Value::Number(Number::UInt(UInt::U64(u)))
 }
 
-fn unwrap_coord(coord: &[Value]) -> TCResult<Vec<u64>> {
+fn unwrap_coord(coord: &[Value]) -> TCResult<Coord> {
     coord.iter().map(|val| unwrap_u64(val)).collect()
 }
 
-fn unwrap_row(mut row: Vec<Value>) -> TCResult<(Vec<u64>, Number)> {
+fn unwrap_row(mut row: Vec<Value>) -> TCResult<(Coord, Number)> {
     let coord = unwrap_coord(&row[0..row.len() - 1])?;
     if let Some(value) = row.pop() {
         Ok((coord, value.try_into()?))

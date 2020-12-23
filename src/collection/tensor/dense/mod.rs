@@ -16,7 +16,7 @@ use super::class::{Tensor, TensorInstance, TensorType};
 use super::sparse::{DenseToSparse, SparseAccess, SparseAccessorDyn, SparseTensor};
 use super::stream::*;
 use super::{
-    IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
+    Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
     TensorReduce, TensorTransform, TensorUnary,
 };
 
@@ -73,7 +73,7 @@ pub trait DenseAccess: ReadValueAt + TensorAccessor + Transact + 'static {
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
 
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()>;
+    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()>;
 }
 
 #[derive(Clone)]
@@ -220,7 +220,7 @@ impl DenseAccess for DenseAccessor {
         }
     }
 
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         match self {
             Self::Broadcast(broadcast) => broadcast.write_value_at(txn_id, coord, value),
             Self::Cast(cast) => cast.write_value_at(txn_id, coord, value),
@@ -237,7 +237,7 @@ impl DenseAccess for DenseAccessor {
 }
 
 impl ReadValueAt for DenseAccessor {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         match self {
             Self::Broadcast(broadcast) => broadcast.read_value_at(txn, coord),
             Self::Cast(cast) => cast.read_value_at(txn, coord),
@@ -383,7 +383,7 @@ impl<T: Clone + DenseAccess> IntoView for DenseTensor<T> {
 }
 
 impl<T: Clone + DenseAccess> ReadValueAt for DenseTensor<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         self.blocks.read_value_at(txn, coord)
     }
 }
@@ -569,7 +569,7 @@ impl<T: Clone + DenseAccess> TensorIO for DenseTensor<T> {
         self.blocks.clone().write_value(txn_id, bounds, value).await
     }
 
-    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.blocks.write_value_at(txn_id, coord, value).await
     }
 }
@@ -589,7 +589,7 @@ impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorDualIO<DenseTensor<O
             .as_type(self.dtype())?;
 
         let coords = stream::iter(Bounds::all(slice.shape()).affected().map(TCResult::Ok));
-        let values: TCTryStream<(Vec<u64>, Number)> =
+        let values: TCTryStream<(Coord, Number)> =
             Box::pin(ValueReader::new(coords, &txn, &other.blocks));
 
         values

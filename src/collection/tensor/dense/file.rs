@@ -20,12 +20,11 @@ use crate::scalar::Value;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::bounds::*;
-use super::super::stream::{block_offsets, coord_block, coord_bounds, ReadValueAt};
+use super::super::stream::{block_offsets, coord_block, coord_bounds, Read, ReadValueAt};
 use super::super::TensorAccessor;
 
 use super::array::Array;
-use super::{BlockListSlice, DenseAccess, DenseAccessor};
-use crate::collection::tensor::stream::Read;
+use super::{Coord, BlockListSlice, DenseAccess, DenseAccessor};
 
 pub const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
@@ -240,7 +239,7 @@ impl DenseAccess for BlockListFile {
             .await
     }
 
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         Box::pin(async move {
             if !self.shape().contains_coord(&coord) {
                 return Err(error::bad_request(
@@ -274,7 +273,7 @@ impl DenseAccess for BlockListFile {
 }
 
 impl ReadValueAt for BlockListFile {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         Box::pin(async move {
             debug!(
                 "read value at {:?} from BlockListFile with shape {}",

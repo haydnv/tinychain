@@ -21,6 +21,8 @@ pub use dense::{from_sparse, Array, DenseTensor};
 pub use einsum::einsum;
 pub use sparse::{from_dense, SparseTensor};
 
+pub type Coord = Vec<u64>;
+
 pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
 
@@ -91,7 +93,7 @@ pub trait TensorIO: TensorAccessor + Sized {
         value: Number,
     ) -> TCResult<()>;
 
-    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
 
 #[async_trait]

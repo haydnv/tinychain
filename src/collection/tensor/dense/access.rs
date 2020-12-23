@@ -13,7 +13,7 @@ use super::super::sparse::{SparseAccess, SparseSlice, SparseTensor};
 use super::super::stream::*;
 use super::super::transform;
 use super::super::{
-    Bounds, Shape, TensorAccessor, TensorIO, TensorTransform, ERR_NONBIJECTIVE_WRITE,
+    Bounds, Coord, Shape, TensorAccessor, TensorIO, TensorTransform, ERR_NONBIJECTIVE_WRITE,
 };
 use super::{Array, DenseAccess, DenseAccessor, DenseTensor};
 
@@ -124,7 +124,7 @@ impl<L: Clone + DenseAccess, R: Clone + DenseAccess> DenseAccess for BlockListCo
     fn write_value_at(
         &self,
         _txn_id: TxnId,
-        _coord: Vec<u64>,
+        _coord: Coord,
         _value: Number,
     ) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
@@ -134,7 +134,7 @@ impl<L: Clone + DenseAccess, R: Clone + DenseAccess> DenseAccess for BlockListCo
 }
 
 impl<L: DenseAccess, R: DenseAccess> ReadValueAt for BlockListCombine<L, R> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         Box::pin(async move {
             let left = self.left.read_value_at(txn, coord.to_vec());
             let right = self.right.read_value_at(txn, coord);
@@ -228,7 +228,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListBroadcast<T> {
     fn write_value_at(
         &self,
         _txn_id: TxnId,
-        _coord: Vec<u64>,
+        _coord: Coord,
         _value: Number,
     ) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
@@ -238,7 +238,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListBroadcast<T> {
 }
 
 impl<T: Clone + DenseAccess> ReadValueAt for BlockListBroadcast<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         let source_coord = self.rebase.invert_coord(&coord);
         let read = self
             .source
@@ -324,13 +324,13 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListCast<T> {
         self.source.write_value(txn_id, bounds, number).await
     }
 
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         self.source.write_value_at(txn_id, coord, value)
     }
 }
 
 impl<T: Clone + DenseAccess> ReadValueAt for BlockListCast<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         let dtype = self.dtype;
         let read = self
             .source
@@ -417,14 +417,14 @@ impl<T: DenseAccess> DenseAccess for BlockListExpand<T> {
         self.source.write_value(txn_id, bounds, number).await
     }
 
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
     }
 }
 
 impl<T: DenseAccess> ReadValueAt for BlockListExpand<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         let source_coord = self.rebase.invert_coord(&coord);
         let read = self
             .source
@@ -532,7 +532,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListReduce<T> {
     fn write_value_at(
         &self,
         _txn_id: TxnId,
-        _coord: Vec<u64>,
+        _coord: Coord,
         _value: Number,
     ) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
@@ -542,7 +542,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListReduce<T> {
 }
 
 impl<T: Clone + DenseAccess> ReadValueAt for BlockListReduce<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         Box::pin(async move {
             let reductor = self.reductor;
             let source_bounds = self.rebase.invert_coord(&coord);
@@ -637,14 +637,14 @@ impl<T: DenseAccess> DenseAccess for BlockListSlice<T> {
         self.source.write_value(txn_id, bounds, value).await
     }
 
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
     }
 }
 
 impl<T: DenseAccess> ReadValueAt for BlockListSlice<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         let source_coord = self.rebase.invert_coord(&coord);
         let read = self
             .source
@@ -724,13 +724,13 @@ impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
             .await
     }
 
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         self.source.write_value_at(txn_id, coord, value)
     }
 }
 
 impl<T: Clone + SparseAccess> ReadValueAt for BlockListSparse<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         Box::pin(async move {
             let value = self.source.read_value(txn, &coord).await?;
             Ok((coord, value))
@@ -799,7 +799,7 @@ impl<T: DenseAccess> DenseAccess for BlockListTranspose<T> {
     fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         Box::pin(async move {
             let coords = stream::iter(Bounds::all(self.shape()).affected().map(TCResult::Ok));
-            let values: TCTryStream<'a, (Vec<u64>, Number)> =
+            let values: TCTryStream<'a, (Coord, Number)> =
                 Box::pin(ValueReader::new(coords, txn, self));
 
             let values: TCTryStream<'a, Number> = Box::pin(values.map_ok(|(_, value)| value));
@@ -816,14 +816,14 @@ impl<T: DenseAccess> DenseAccess for BlockListTranspose<T> {
         self.source.write_value(txn_id, bounds, number).await
     }
 
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value_at(txn_id, coord, value)
     }
 }
 
 impl<T: DenseAccess> ReadValueAt for BlockListTranspose<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         let source_coord = self.rebase.invert_coord(&coord);
         let read = self
             .source
@@ -929,7 +929,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListUnary<T> {
     fn write_value_at(
         &self,
         _txn_id: TxnId,
-        _coord: Vec<u64>,
+        _coord: Coord,
         _value: Number,
     ) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
@@ -939,7 +939,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListUnary<T> {
 }
 
 impl<T: DenseAccess> ReadValueAt for BlockListUnary<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         Box::pin(async move {
             let transform = self.value_transform;
             self.source

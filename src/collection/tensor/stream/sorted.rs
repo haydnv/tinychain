@@ -10,15 +10,15 @@ use crate::transaction::Txn;
 
 use super::super::bounds::Shape;
 use super::super::dense::{Array, BlockListFile, PER_BLOCK};
-use super::super::TensorAccessor;
+use super::super::{Coord, TensorAccessor};
 use super::{ReadValueAt, ValueReader};
 
-pub async fn sorted_coords<C: Stream<Item = TCResult<Vec<u64>>> + Send>(
+pub async fn sorted_coords<C: Stream<Item = TCResult<Coord>> + Send>(
     txn: &Txn,
     shape: &Shape,
     coords: C,
     num_coords: u64,
-) -> TCResult<impl Stream<Item = TCResult<Vec<u64>>> + Unpin> {
+) -> TCResult<impl Stream<Item = TCResult<Coord>> + Unpin> {
     let subcontext = txn.subcontext_tmp().await?;
     let offsets = sort_coords(subcontext, coords, num_coords, shape).await?;
     let coords = offsets_to_coords(shape, offsets.into_stream(*txn.id()));
@@ -28,18 +28,18 @@ pub async fn sorted_coords<C: Stream<Item = TCResult<Vec<u64>>> + Send>(
 pub async fn sorted_values<
     'a,
     T: TensorAccessor + ReadValueAt + 'a,
-    C: Stream<Item = TCResult<Vec<u64>>> + Send + 'a,
+    C: Stream<Item = TCResult<Coord>> + Send + 'a,
 >(
     txn: &'a Txn,
     source: &'a T,
     coords: C,
     num_coords: u64,
-) -> TCResult<ValueReader<'a, impl Stream<Item = TCResult<Vec<u64>>>, T>> {
+) -> TCResult<ValueReader<'a, impl Stream<Item = TCResult<Coord>>, T>> {
     let sorted_coords = sorted_coords(txn, source.shape(), coords, num_coords).await?;
     Ok(ValueReader::new(sorted_coords, txn, source))
 }
 
-async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send>(
+async fn sort_coords<S: Stream<Item = TCResult<Coord>> + Send>(
     txn: Txn,
     coords: S,
     num_coords: u64,
@@ -60,7 +60,7 @@ async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send>(
     Ok(block_list)
 }
 
-fn coords_to_offsets<S: Stream<Item = TCResult<Vec<u64>>>>(
+fn coords_to_offsets<S: Stream<Item = TCResult<Coord>>>(
     shape: &Shape,
     coords: S,
 ) -> impl Stream<Item = TCResult<af::Array<u64>>> {
@@ -71,10 +71,10 @@ fn coords_to_offsets<S: Stream<Item = TCResult<Vec<u64>>>>(
 
     coords
         .chunks(PER_BLOCK)
-        .map(|block| block.into_iter().collect::<TCResult<Vec<Vec<u64>>>>())
+        .map(|block| block.into_iter().collect::<TCResult<Vec<Coord>>>())
         .map_ok(move |block| {
             let num_coords = block.len();
-            let block = block.into_iter().flatten().collect::<Vec<u64>>();
+            let block = block.into_iter().flatten().collect::<Coord>();
             af::Array::new(&block, af::Dim4::new(&[ndim, num_coords as u64, 1, 1]))
         })
         .map_ok(move |block| {
@@ -87,7 +87,7 @@ fn coords_to_offsets<S: Stream<Item = TCResult<Vec<u64>>>>(
 fn offsets_to_coords<'a, S: Stream<Item = TCResult<Array>> + Unpin + 'a>(
     shape: &Shape,
     offsets: S,
-) -> impl Stream<Item = TCResult<Vec<u64>>> + Unpin + 'a {
+) -> impl Stream<Item = TCResult<Coord>> + Unpin + 'a {
     let ndim = shape.len() as u64;
     let coord_bounds = coord_bounds(shape);
     let af_coord_bounds: af::Array<u64> =
@@ -109,12 +109,12 @@ fn offsets_to_coords<'a, S: Stream<Item = TCResult<Array>> + Unpin + 'a>(
         .map_ok(move |coords| {
             stream::iter(coords.into_iter())
                 .chunks(ndim)
-                .map(TCResult::<Vec<u64>>::Ok)
+                .map(TCResult::<Coord>::Ok)
         })
         .try_flatten()
 }
 
-pub fn coord_bounds(shape: &Shape) -> Vec<u64> {
+pub fn coord_bounds(shape: &Shape) -> Coord {
     (0..shape.len())
         .map(|axis| shape[axis + 1..].iter().product())
         .collect()
@@ -149,14 +149,14 @@ pub fn block_offsets(
     (block_offsets, (start + num_to_update))
 }
 
-pub fn coord_block<I: Iterator<Item = Vec<u64>>>(
+pub fn coord_block<I: Iterator<Item = Coord>>(
     coords: I,
     coord_bounds: &[u64],
     per_block: usize,
     ndim: usize,
     num_coords: u64,
-) -> (Vec<u64>, af::Array<u64>, af::Array<u64>) {
-    let coords: Vec<u64> = coords.flatten().collect();
+) -> (Coord, af::Array<u64>, af::Array<u64>) {
+    let coords: Coord = coords.flatten().collect();
     assert!(coords.len() > 0);
     assert!(ndim > 0);
 
@@ -188,7 +188,7 @@ mod tests {
     fn test_coord_block() {
         let shape = Shape::from(vec![2, 3, 4]);
         let bounds = coord_bounds(&shape);
-        let coords: Vec<Vec<u64>> = Bounds::all(&shape).affected().collect();
+        let coords: Vec<Coord> = Bounds::all(&shape).affected().collect();
 
         let num_coords = coords.len() as u64;
         let (block_ids, af_indices, af_offsets) = coord_block(
@@ -207,14 +207,14 @@ mod tests {
 
         assert_eq!(block_ids, vec![0]);
         assert_eq!(indices, vec![0; 24]);
-        assert_eq!(offsets, (0..24).collect::<Vec<u64>>());
+        assert_eq!(offsets, (0..24).collect::<Coord>());
     }
 
     #[test]
     fn test_block_offsets() {
         let shape = Shape::from(vec![2, 3, 4]);
         let bounds = coord_bounds(&shape);
-        let coords: Vec<Vec<u64>> = Bounds::all(&shape).affected().collect();
+        let coords: Vec<Coord> = Bounds::all(&shape).affected().collect();
 
         let num_coords = coords.len() as u64;
         let (_, af_indices, af_offsets) = coord_block(
@@ -230,6 +230,6 @@ mod tests {
         af_block_offsets.host(&mut block_offsets);
 
         assert_eq!(new_start, 24f64);
-        assert_eq!(block_offsets, (0..24).collect::<Vec<u64>>());
+        assert_eq!(block_offsets, (0..24).collect::<Coord>());
     }
 }

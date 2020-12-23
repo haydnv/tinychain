@@ -9,6 +9,7 @@ use pin_project::pin_project;
 use crate::general::TCResult;
 use crate::scalar::Number;
 
+use super::super::Coord;
 use super::super::bounds::Shape;
 use super::{SparseRow, SparseStream};
 
@@ -74,7 +75,7 @@ impl<'a> SparseCombine<'a> {
 }
 
 impl<'a> Stream for SparseCombine<'a> {
-    type Item = TCResult<(Vec<u64>, Option<Number>, Option<Number>)>;
+    type Item = TCResult<(Coord, Option<Number>, Option<Number>)>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut task::Context) -> Poll<Option<Self::Item>> {
         let this = self.project();

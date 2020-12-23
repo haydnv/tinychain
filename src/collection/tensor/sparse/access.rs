@@ -13,6 +13,7 @@ use crate::general::{count_stream, TCBoxTryFuture, TCResult};
 use crate::scalar::value::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
+use super::super::Coord;
 use super::super::bounds::*;
 use super::super::dense::{DenseAccess, DenseTensor};
 use super::super::stream::*;
@@ -22,7 +23,7 @@ use super::{
     TensorTransform, ERR_NONBIJECTIVE_WRITE,
 };
 
-pub type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Vec<u64>>> + Send + Unpin + 'a>>;
+pub type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
 
 #[async_trait]
 pub trait SparseAccess: TensorAccessor + Transact + 'static {
@@ -52,10 +53,10 @@ pub trait SparseAccess: TensorAccessor + Transact + 'static {
 
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number>;
 
-    async fn write_value(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
 
-fn read_value_at<'a, T: SparseAccess>(source: &'a T, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+fn read_value_at<'a, T: SparseAccess>(source: &'a T, txn: &'a Txn, coord: Coord) -> Read<'a> {
     Box::pin(async move {
         let value = source.read_value(txn, &coord).await?;
         Ok((coord, value))
@@ -119,7 +120,7 @@ impl SparseAccess for SparseAccessorDyn {
         self.source.read_value(txn, coord).await
     }
 
-    async fn write_value(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.source.write_value(txn_id, coord, value).await
     }
 }
@@ -186,7 +187,7 @@ impl<T: Clone + DenseAccess> SparseAccess for DenseToSparse<T> {
         let shape = self.shape();
         let filled_at = stream::iter(
             Bounds::all(&Shape::from(
-                axes.iter().map(|x| shape[*x]).collect::<Vec<u64>>(),
+                axes.iter().map(|x| shape[*x]).collect::<Coord>(),
             ))
             .affected(),
         )
@@ -214,7 +215,7 @@ impl<T: Clone + DenseAccess> SparseAccess for DenseToSparse<T> {
         self.source.read_value(txn, coord).await
     }
 
-    async fn write_value(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.source.write_value(txn_id, coord.into(), value).await
     }
 }
@@ -245,7 +246,7 @@ impl<T: Clone + SparseAccess> SparseBroadcast<T> {
         Self { source, rebase }
     }
 
-    async fn broadcast_coords<'a, S: Stream<Item = TCResult<Vec<u64>>> + 'a + Send + Unpin + 'a>(
+    async fn broadcast_coords<'a, S: Stream<Item = TCResult<Coord>> + 'a + Send + Unpin + 'a>(
         &'a self,
         txn: &'a Txn,
         coords: S,
@@ -328,13 +329,13 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseBroadcast<T> {
         self.source.read_value(txn, &coord).await
     }
 
-    async fn write_value(&self, _txn_id: TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
+    async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
         Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 }
 
 impl<T: Clone + SparseAccess> ReadValueAt for SparseBroadcast<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         read_value_at(self, txn, coord)
     }
 }
@@ -418,7 +419,7 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseCast<T> {
             .await
     }
 
-    async fn write_value(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.source.write_value(txn_id, coord, value).await
     }
 }
@@ -556,7 +557,7 @@ impl<L: Clone + SparseAccess, R: Clone + SparseAccess> SparseAccess for SparseCo
         Ok(combinator(left, right))
     }
 
-    async fn write_value(&self, _txn_id: TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
+    async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
         Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 }
@@ -642,7 +643,7 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseExpand<T> {
         self.source.read_value(txn, &coord).await
     }
 
-    async fn write_value(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value(txn_id, coord, value).await
     }
@@ -784,7 +785,7 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseReduce<T> {
         reductor(&slice.into_dyn(), txn.clone()).await
     }
 
-    async fn write_value(&self, _txn_id: TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
+    async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
         Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 }
@@ -883,7 +884,7 @@ impl SparseAccess for SparseSlice {
         self.source.read_value(txn, &coord).await
     }
 
-    async fn write_value(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         let coord = self.rebase.invert_coord(&coord);
         self.source.write_value(txn_id, coord, value).await
     }
@@ -975,7 +976,7 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseTranspose<T> {
         self.source.read_value(txn, &coord).await
     }
 
-    async fn write_value(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         self.source
             .write_value(txn_id, self.rebase.invert_coord(&coord), value)
             .await
@@ -983,7 +984,7 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseTranspose<T> {
 }
 
 impl<T: Clone + SparseAccess> ReadValueAt for SparseTranspose<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         read_value_at(self, txn, coord)
     }
 }
@@ -1015,8 +1016,8 @@ fn group_axes<'a, T: Clone + SparseAccess>(
         }
 
         let axes_clone = axes.to_vec();
-        let map = move |(coord, _): (Vec<u64>, Number)| {
-            axes_clone.iter().map(|x| coord[*x]).collect::<Vec<u64>>()
+        let map = move |(coord, _): (Coord, Number)| {
+            axes_clone.iter().map(|x| coord[*x]).collect::<Coord>()
         };
 
         let sorted_axes: Vec<usize> = itertools::sorted(axes.to_vec()).collect::<Vec<usize>>();
@@ -1050,7 +1051,7 @@ fn group_axes<'a, T: Clone + SparseAccess>(
 
             let num_coords = count_stream(coords1).await?;
             let coords =
-                coords2.map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect::<Vec<u64>>());
+                coords2.map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect::<Coord>());
 
             let filled_at: CoordStream<'a> =
                 sorted_coords(txn, accessor.shape(), coords, num_coords)
@@ -1132,7 +1133,7 @@ impl SparseAccess for SparseUnary {
             .await
     }
 
-    async fn write_value(&self, _txn_id: TxnId, _coord: Vec<u64>, _value: Number) -> TCResult<()> {
+    async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
         Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 }
