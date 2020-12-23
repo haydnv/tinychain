@@ -1,4 +1,5 @@
 use std::fmt;
+use std::mem;
 use std::pin::Pin;
 
 use futures::ready;
@@ -16,7 +17,7 @@ pub struct GroupStream<T, S: Stream<Item = TCResult<T>>> {
     group: Option<T>,
 }
 
-impl<T: Eq + Clone + fmt::Debug, S: Stream<Item = TCResult<T>>> Stream for GroupStream<T, S> {
+impl<T: Eq + fmt::Debug, S: Stream<Item = TCResult<T>>> Stream for GroupStream<T, S> {
     type Item = TCResult<T>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -25,21 +26,22 @@ impl<T: Eq + Clone + fmt::Debug, S: Stream<Item = TCResult<T>>> Stream for Group
             if let Some(result) = ready!(this.source.as_mut().poll_next(cxt)) {
                 match result {
                     Ok(item) => {
-                        let skip = if let Some(group) = this.group {
-                            &item == group
+                        if let Some(group) = this.group {
+                            if &item != group {
+                                let mut new_group = item;
+                                mem::swap(group, &mut new_group);
+                                break Some(Ok(new_group));
+                            }
                         } else {
-                            false
-                        };
-
-                        if !skip {
-                            *(this.group) = Some(item.clone());
-                            break Some(Ok(item));
+                            *(this.group) = Some(item);
                         }
                     }
                     Err(cause) => break Some(Err(cause)),
                 }
             } else {
-                break None;
+                let mut group = None;
+                mem::swap(this.group, &mut group);
+                break group.map(TCResult::Ok);
             }
         })
     }
