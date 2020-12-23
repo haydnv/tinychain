@@ -13,7 +13,7 @@ use super::super::sparse::{SparseAccess, SparseSlice, SparseTensor};
 use super::super::stream::*;
 use super::super::transform;
 use super::super::{
-    Bounds, Coord, Shape, TensorAccessor, TensorIO, TensorTransform, ERR_NONBIJECTIVE_WRITE,
+    Bounds, Coord, Shape, TensorAccess, TensorIO, TensorTransform, ERR_NONBIJECTIVE_WRITE,
 };
 use super::{Array, DenseAccess, DenseAccessor, DenseTensor};
 
@@ -51,7 +51,7 @@ impl<L: DenseAccess, R: DenseAccess> BlockListCombine<L, R> {
     }
 }
 
-impl<L: DenseAccess, R: DenseAccess> TensorAccessor for BlockListCombine<L, R> {
+impl<L: DenseAccess, R: DenseAccess> TensorAccess for BlockListCombine<L, R> {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -168,7 +168,7 @@ impl<T: DenseAccess> BlockListBroadcast<T> {
     }
 }
 
-impl<T: DenseAccess> TensorAccessor for BlockListBroadcast<T> {
+impl<T: DenseAccess> TensorAccess for BlockListBroadcast<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -265,7 +265,7 @@ impl<T: DenseAccess> BlockListCast<T> {
     }
 }
 
-impl<T: DenseAccess> TensorAccessor for BlockListCast<T> {
+impl<T: DenseAccess> TensorAccess for BlockListCast<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -359,7 +359,7 @@ impl<T: DenseAccess> BlockListExpand<T> {
     }
 }
 
-impl<T: DenseAccess> TensorAccessor for BlockListExpand<T> {
+impl<T: DenseAccess> TensorAccess for BlockListExpand<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -461,7 +461,7 @@ impl<T: DenseAccess> BlockListReduce<T> {
     }
 }
 
-impl<T: DenseAccess> TensorAccessor for BlockListReduce<T> {
+impl<T: DenseAccess> TensorAccess for BlockListReduce<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -567,7 +567,7 @@ impl<T: DenseAccess> BlockListSlice<T> {
     }
 }
 
-impl<T: DenseAccess> TensorAccessor for BlockListSlice<T> {
+impl<T: DenseAccess> TensorAccess for BlockListSlice<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -665,7 +665,7 @@ impl<T: Clone + SparseAccess> BlockListSparse<T> {
     }
 }
 
-impl<T: Clone + SparseAccess> TensorAccessor for BlockListSparse<T> {
+impl<T: Clone + SparseAccess> TensorAccess for BlockListSparse<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -748,7 +748,7 @@ impl<T: DenseAccess> BlockListTranspose<T> {
     }
 }
 
-impl<T: DenseAccess> TensorAccessor for BlockListTranspose<T> {
+impl<T: DenseAccess> TensorAccess for BlockListTranspose<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -854,7 +854,7 @@ impl<T: DenseAccess> BlockListUnary<T> {
     }
 }
 
-impl<T: DenseAccess> TensorAccessor for BlockListUnary<T> {
+impl<T: DenseAccess> TensorAccess for BlockListUnary<T> {
     fn dtype(&self) -> NumberType {
         self.dtype
     }

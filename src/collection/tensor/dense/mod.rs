@@ -16,7 +16,7 @@ use super::class::{Tensor, TensorInstance, TensorType};
 use super::sparse::{DenseToSparse, SparseAccess, SparseAccessor, SparseTensor};
 use super::stream::*;
 use super::{
-    Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
+    Coord, IntoView, TensorAccess, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
     TensorMath, TensorReduce, TensorTransform, TensorUnary,
 };
 
@@ -29,7 +29,7 @@ pub use array::Array;
 pub use file::*;
 
 #[async_trait]
-pub trait DenseAccess: ReadValueAt + TensorAccessor + Transact + 'static {
+pub trait DenseAccess: ReadValueAt + TensorAccess + Transact + 'static {
     type Slice: Clone + DenseAccess;
 
     fn accessor(self) -> DenseAccessor;
@@ -90,7 +90,7 @@ pub enum DenseAccessor {
     Unary(Box<BlockListUnary<DenseAccessor>>),
 }
 
-impl TensorAccessor for DenseAccessor {
+impl TensorAccess for DenseAccessor {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Broadcast(broadcast) => broadcast.dtype(),
@@ -388,7 +388,7 @@ impl<T: Clone + DenseAccess> ReadValueAt for DenseTensor<T> {
     }
 }
 
-impl<T: Clone + DenseAccess> TensorAccessor for DenseTensor<T> {
+impl<T: Clone + DenseAccess> TensorAccess for DenseTensor<T> {
     fn dtype(&self) -> NumberType {
         self.blocks.dtype()
     }

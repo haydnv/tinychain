@@ -10,7 +10,7 @@ use crate::transaction::Txn;
 
 use super::super::bounds::Shape;
 use super::super::dense::{Array, BlockListFile, PER_BLOCK};
-use super::super::{Coord, TensorAccessor};
+use super::super::{Coord, TensorAccess};
 use super::{ReadValueAt, ValueReader};
 
 pub async fn sorted_coords<C: Stream<Item = TCResult<Coord>> + Send>(
@@ -27,7 +27,7 @@ pub async fn sorted_coords<C: Stream<Item = TCResult<Coord>> + Send>(
 
 pub async fn sorted_values<
     'a,
-    T: TensorAccessor + ReadValueAt + 'a,
+    T: TensorAccess + ReadValueAt + 'a,
     C: Stream<Item = TCResult<Coord>> + Send + 'a,
 >(
     txn: &'a Txn,

@@ -18,7 +18,7 @@ use super::bounds::*;
 use super::dense::{dense_constant, BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
 use super::sparse::{self, SparseAccess, SparseAccessor, SparseTable, SparseTensor};
 use super::{
-    Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
+    Coord, IntoView, TensorAccess, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
     TensorMath, TensorReduce, TensorTransform, TensorUnary,
 };
 
@@ -234,7 +234,7 @@ impl CollectionInstance for Tensor {
     }
 }
 
-impl TensorAccessor for Tensor {
+impl TensorAccess for Tensor {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Dense(dense) => dense.dtype(),

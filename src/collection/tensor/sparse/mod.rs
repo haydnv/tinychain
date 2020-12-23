@@ -26,8 +26,8 @@ use super::dense::{
 use super::stream::*;
 use super::transform;
 use super::{
-    broadcast, Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO,
-    TensorIO, TensorMath, TensorReduce, TensorTransform, TensorUnary, ERR_NONBIJECTIVE_WRITE,
+    broadcast, Coord, IntoView, TensorAccess, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
+    TensorMath, TensorReduce, TensorTransform, TensorUnary, ERR_NONBIJECTIVE_WRITE,
 };
 
 mod access;
@@ -152,7 +152,7 @@ impl SparseTable {
     }
 }
 
-impl TensorAccessor for SparseTable {
+impl TensorAccess for SparseTable {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -403,7 +403,7 @@ impl<T: Clone + SparseAccess> IntoView for SparseTensor<T> {
     }
 }
 
-impl<T: Clone + SparseAccess> TensorAccessor for SparseTensor<T> {
+impl<T: Clone + SparseAccess> TensorAccess for SparseTensor<T> {
     fn dtype(&self) -> NumberType {
         self.accessor.dtype()
     }

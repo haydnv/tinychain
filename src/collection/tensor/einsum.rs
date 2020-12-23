@@ -4,7 +4,7 @@ use crate::error;
 use crate::general::TCResult;
 
 use super::class::TensorInstance;
-use super::{TensorAccessor, TensorMath, TensorReduce, TensorTransform};
+use super::{TensorAccess, TensorMath, TensorReduce, TensorTransform};
 
 const VALID_LABELS: [char; 52] = [
     'a', 'A', 'b', 'B', 'c', 'C', 'd', 'D', 'e', 'E', 'f', 'F', 'g', 'G', 'h', 'H', 'i', 'I', 'j',
@@ -52,7 +52,7 @@ fn parse_format(format: &str) -> TCResult<(Vec<Vec<char>>, Vec<char>)> {
     Ok((f_inputs, f_output))
 }
 
-fn validate_args<T: TensorAccessor>(
+fn validate_args<T: TensorAccess>(
     f_inputs: &[Vec<char>],
     tensors: &[T],
 ) -> TCResult<BTreeMap<char, u64>> {

@@ -21,7 +21,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::bounds::*;
 use super::super::stream::{block_offsets, coord_block, coord_bounds, Read, ReadValueAt};
-use super::super::TensorAccessor;
+use super::super::TensorAccess;
 
 use super::array::Array;
 use super::{BlockListSlice, Coord, DenseAccess, DenseAccessor};
@@ -140,7 +140,7 @@ impl BlockListFile {
     }
 }
 
-impl TensorAccessor for BlockListFile {
+impl TensorAccess for BlockListFile {
     fn dtype(&self) -> NumberType {
         self.dtype
     }

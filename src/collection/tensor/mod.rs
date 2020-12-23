@@ -30,7 +30,7 @@ pub trait IntoView {
     fn into_view(self) -> Tensor;
 }
 
-pub trait TensorAccessor: Send {
+pub trait TensorAccess: Send {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;
@@ -41,7 +41,7 @@ pub trait TensorAccessor: Send {
 }
 
 #[async_trait]
-pub trait TensorBoolean<O>: TensorAccessor + Sized {
+pub trait TensorBoolean<O>: TensorAccess + Sized {
     type Combine: TensorInstance;
 
     fn and(&self, other: &O) -> TCResult<Self::Combine>;
@@ -52,7 +52,7 @@ pub trait TensorBoolean<O>: TensorAccessor + Sized {
 }
 
 #[async_trait]
-pub trait TensorUnary: TensorAccessor + Sized {
+pub trait TensorUnary: TensorAccess + Sized {
     type Unary: TensorInstance;
 
     fn abs(&self) -> TCResult<Self::Unary>;
@@ -65,7 +65,7 @@ pub trait TensorUnary: TensorAccessor + Sized {
 }
 
 #[async_trait]
-pub trait TensorCompare<O>: TensorAccessor + Sized {
+pub trait TensorCompare<O>: TensorAccess + Sized {
     type Compare: TensorInstance;
     type Dense: TensorInstance;
 
@@ -83,7 +83,7 @@ pub trait TensorCompare<O>: TensorAccessor + Sized {
 }
 
 #[async_trait]
-pub trait TensorIO: TensorAccessor + Sized {
+pub trait TensorIO: TensorAccess + Sized {
     async fn read_value(&self, txn: &Txn, coord: Coord) -> TCResult<Number>;
 
     async fn write_value(
@@ -97,13 +97,13 @@ pub trait TensorIO: TensorAccessor + Sized {
 }
 
 #[async_trait]
-pub trait TensorDualIO<O>: TensorAccessor + Sized {
+pub trait TensorDualIO<O>: TensorAccess + Sized {
     async fn mask(&self, txn: &Txn, value: O) -> TCResult<()>;
 
     async fn write(&self, txn: &Txn, bounds: bounds::Bounds, value: O) -> TCResult<()>;
 }
 
-pub trait TensorMath<O>: TensorAccessor + Sized {
+pub trait TensorMath<O>: TensorAccess + Sized {
     type Combine: TensorInstance;
 
     fn add(&self, other: &O) -> TCResult<Self::Combine>;
@@ -111,7 +111,7 @@ pub trait TensorMath<O>: TensorAccessor + Sized {
     fn multiply(&self, other: &O) -> TCResult<Self::Combine>;
 }
 
-pub trait TensorReduce: TensorAccessor + Sized {
+pub trait TensorReduce: TensorAccess + Sized {
     type Reduce: TensorInstance;
 
     fn product(&self, axis: usize) -> TCResult<Self::Reduce>;
@@ -123,7 +123,7 @@ pub trait TensorReduce: TensorAccessor + Sized {
     fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number>;
 }
 
-pub trait TensorTransform: TensorAccessor + Sized {
+pub trait TensorTransform: TensorAccess + Sized {
     type Cast: TensorInstance;
     type Broadcast: TensorInstance;
     type Expand: TensorInstance;

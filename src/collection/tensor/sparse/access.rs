@@ -20,7 +20,7 @@ use super::super::stream::*;
 use super::super::transform;
 use super::super::Coord;
 use super::{
-    SparseCombine, SparseStream, SparseTable, SparseTensor, TensorAccessor, TensorIO,
+    SparseCombine, SparseStream, SparseTable, SparseTensor, TensorAccess, TensorIO,
     TensorTransform, ERR_NONBIJECTIVE_WRITE,
 };
 use crate::collection::tensor::dense::DenseAccessor;
@@ -28,7 +28,7 @@ use crate::collection::tensor::dense::DenseAccessor;
 pub type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
 
 #[async_trait]
-pub trait SparseAccess: ReadValueAt + TensorAccessor + Transact + 'static {
+pub trait SparseAccess: ReadValueAt + TensorAccess + Transact + 'static {
     fn accessor(self) -> SparseAccessor;
 
     fn copy<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, SparseTable> {
@@ -72,7 +72,7 @@ pub enum SparseAccessor {
     Unary(Box<SparseUnary>),
 }
 
-impl TensorAccessor for SparseAccessor {
+impl TensorAccess for SparseAccessor {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Broadcast(broadcast) => broadcast.dtype(),
@@ -287,7 +287,7 @@ impl<T: Clone + DenseAccess> DenseToSparse<T> {
     }
 }
 
-impl<T: Clone + DenseAccess> TensorAccessor for DenseToSparse<T> {
+impl<T: Clone + DenseAccess> TensorAccess for DenseToSparse<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -402,7 +402,7 @@ impl<T: Clone + SparseAccess> SparseBroadcast<T> {
     }
 }
 
-impl<T: SparseAccess> TensorAccessor for SparseBroadcast<T> {
+impl<T: SparseAccess> TensorAccess for SparseBroadcast<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -519,7 +519,7 @@ impl<T> SparseCast<T> {
     }
 }
 
-impl<T: SparseAccess> TensorAccessor for SparseCast<T> {
+impl<T: SparseAccess> TensorAccess for SparseCast<T> {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -658,7 +658,7 @@ impl<L: SparseAccess, R: SparseAccess> SparseCombinator<L, R> {
     }
 }
 
-impl<L: SparseAccess, R: SparseAccess> TensorAccessor for SparseCombinator<L, R> {
+impl<L: SparseAccess, R: SparseAccess> TensorAccess for SparseCombinator<L, R> {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -759,7 +759,7 @@ impl<T> SparseExpand<T> {
     }
 }
 
-impl<T: SparseAccess> TensorAccessor for SparseExpand<T> {
+impl<T: SparseAccess> TensorAccess for SparseExpand<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -870,7 +870,7 @@ impl<'a, T: Clone + SparseAccess> SparseReduce<T> {
     }
 }
 
-impl<T: Clone + SparseAccess> TensorAccessor for SparseReduce<T> {
+impl<T: Clone + SparseAccess> TensorAccess for SparseReduce<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -999,7 +999,7 @@ impl SparseSlice {
     }
 }
 
-impl TensorAccessor for SparseSlice {
+impl TensorAccess for SparseSlice {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -1109,7 +1109,7 @@ impl<T> SparseTranspose<T> {
     }
 }
 
-impl<T: SparseAccess> TensorAccessor for SparseTranspose<T> {
+impl<T: SparseAccess> TensorAccess for SparseTranspose<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -1211,7 +1211,7 @@ impl SparseUnary {
     }
 }
 
-impl TensorAccessor for SparseUnary {
+impl TensorAccess for SparseUnary {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
