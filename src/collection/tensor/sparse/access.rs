@@ -8,6 +8,7 @@ use futures::try_join;
 use log::debug;
 
 use crate::class::Instance;
+use crate::collection::stream::GroupStream;
 use crate::error;
 use crate::general::{count_stream, TCBoxTryFuture, TCResult};
 use crate::scalar::value::number::*;
@@ -177,6 +178,7 @@ impl<T: Clone + DenseAccess> SparseAccess for DenseToSparse<T> {
     }
 
     async fn filled_at<'a>(&'a self, _txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        // TODO: skip zero-valued coordinates
         let shape = self.shape();
         let filled_at = stream::iter(
             Bounds::all(&Shape::from(
@@ -716,7 +718,7 @@ impl<T: Clone + SparseAccess> TensorAccessor for SparseReduce<T> {
 
 #[async_trait]
 impl<T: Clone + SparseAccess> SparseAccess for SparseReduce<T> {
-    async fn filled<'b>(&'b self, txn: &'b Txn) -> TCResult<SparseStream<'b>> {
+    async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
         let reductor = self.reductor;
         let source = &self.source;
 
@@ -734,45 +736,28 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseReduce<T> {
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'b>(&'b self, txn: &'b Txn, axes: Vec<usize>) -> TCResult<CoordStream<'b>> {
+    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
         let reduce_axis = self.rebase.axis();
 
         if axes.is_empty() {
             let filled_at: CoordStream<'_> = Box::pin(stream::empty());
             return Ok(filled_at);
-        } else if axes.iter().cloned().fold(axes[0], Ord::max) < reduce_axis {
+        } else if axes.to_vec().into_iter().fold(axes[0], Ord::max) < reduce_axis {
             return self.source.filled_at(txn, axes).await;
         }
 
         let source_axes: Vec<usize> = axes
-            .iter()
-            .cloned()
+            .into_iter()
             .map(|x| if x < reduce_axis { x } else { x + 1 })
             .chain(iter::once(reduce_axis))
             .collect();
 
-        let left = self.source.filled_at(txn, source_axes.to_vec()).await?;
-        let mut right = self.source.filled_at(txn, source_axes).await?;
-
-        if right.next().await.is_none() {
-            let filled_at: CoordStream<'_> = Box::pin(stream::empty());
-            return Ok(filled_at);
-        }
-
-        let filled_at = left
-            .zip(right)
-            .map(|(lr, rr)| Ok((lr?, rr?)))
-            .map_ok(|(mut l, mut r)| {
-                l.pop();
-                r.pop();
-                (l, r)
-            })
-            .try_filter_map(|(l, r)| {
-                let row = if l == r { None } else { Some(l) };
-                future::ready(Ok(row))
-            });
-
-        let filled_at: CoordStream<'_> = Box::pin(filled_at);
+        let filled_at = self
+            .source
+            .filled_at(txn, source_axes)
+            .map_ok(GroupStream::from)
+            .await?;
+        let filled_at: CoordStream<'a> = Box::pin(filled_at);
         Ok(filled_at)
     }
 
@@ -783,7 +768,7 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseReduce<T> {
             .await
     }
 
-    async fn filled_in<'b>(&'b self, _txn: &'b Txn, _bounds: Bounds) -> TCResult<SparseStream<'b>> {
+    async fn filled_in<'a>(&'a self, _txn: &'a Txn, _bounds: Bounds) -> TCResult<SparseStream<'a>> {
         Err(error::not_implemented("SparseReduce::filled_in"))
     }
 
@@ -965,16 +950,7 @@ impl<T: SparseAccess> SparseAccess for SparseTranspose<T> {
     }
 
     async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        // can't use group_axes here because it would lead to a circular dependency in self.filled
-        let rebase = self.rebase.clone();
-        let source_axes = rebase.invert_axes(&axes);
-        let filled_at = self
-            .source
-            .filled_at(txn, source_axes.to_vec())
-            .await?
-            .map_ok(move |coord| rebase.map_coord_axes(coord, &source_axes));
-
-        Ok(Box::pin(filled_at))
+        group_axes(self, txn, axes).await
     }
 
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
@@ -1130,48 +1106,30 @@ fn group_axes<'a, T: SparseAccess>(
             return Err(error::bad_request("Axis out of bounds", axes.join(", ")));
         }
 
-        let axes_clone = axes.to_vec();
-        let map = move |(coord, _): (Coord, Number)| {
-            axes_clone.iter().map(|x| coord[*x]).collect::<Coord>()
-        };
-
         let sorted_axes: Vec<usize> = itertools::sorted(axes.to_vec()).collect::<Vec<usize>>();
         if axes == sorted_axes {
-            let left = accessor.filled(txn).await?.map_ok(map.clone());
-            let mut right = accessor.filled(txn).await?.map_ok(map);
+            let filled = accessor.filled(txn).await?;
+            let filled_coords = filled.map_ok(move |(coord, _)| {
+                axes.iter().map(|x| coord[*x]).collect::<Coord>()
+            });
 
-            if right.next().await.is_none() {
-                let filled_at: CoordStream<'_> = Box::pin(stream::empty());
-                return Ok(filled_at);
-            }
-
-            let filled_at = left
-                .zip(right)
-                .map(|(lr, rr)| Ok((lr?, rr?)))
-                .try_filter_map(|(l, r)| {
-                    if l == r {
-                        future::ready(Ok(Some(l)))
-                    } else {
-                        future::ready(Ok(None))
-                    }
-                });
-
-            let filled_at: CoordStream<'_> = Box::pin(filled_at);
+            let filled_at: CoordStream<'a> = Box::pin(GroupStream::from(filled_coords));
             Ok(filled_at)
         } else {
-            let (coords1, coords2) = try_join!(
+            let (coords_to_count, coords) = try_join!(
                 accessor.filled_at(txn, sorted_axes.to_vec()),
                 accessor.filled_at(txn, sorted_axes)
             )?;
 
-            let num_coords = count_stream(coords1).await?;
+            let num_coords = count_stream(coords_to_count).await?;
             let coords =
-                coords2.map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect::<Coord>());
+                coords.map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect::<Coord>());
 
             let filled_at: CoordStream<'a> =
                 sorted_coords(txn, accessor.shape(), coords, num_coords)
                     .map_ok(Box::pin)
                     .await?;
+
             Ok(filled_at)
         }
     })
