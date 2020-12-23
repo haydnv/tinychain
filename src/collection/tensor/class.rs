@@ -18,8 +18,8 @@ use super::bounds::*;
 use super::dense::{dense_constant, BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
 use super::sparse::{self, SparseAccess, SparseAccessorDyn, SparseTable, SparseTensor};
 use super::{
-    IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
-    TensorReduce, TensorTransform, TensorUnary,
+    Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
+    TensorMath, TensorReduce, TensorTransform, TensorUnary,
 };
 
 pub trait TensorInstance:
@@ -222,7 +222,7 @@ impl CollectionInstance for Tensor {
     type Item = Number;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        self.any(txn.clone()).map_ok(|any| !any).await
+        self.any(txn).map_ok(|any| !any).await
     }
 
     async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Scalar>> {
@@ -366,14 +366,14 @@ impl TensorUnary for Tensor {
         }
     }
 
-    async fn all(&self, txn: Txn) -> TCResult<bool> {
+    async fn all(&self, txn: &Txn) -> TCResult<bool> {
         match self {
             Self::Dense(dense) => dense.all(txn).await,
             Self::Sparse(sparse) => sparse.all(txn).await,
         }
     }
 
-    async fn any(&self, txn: Txn) -> TCResult<bool> {
+    async fn any(&self, txn: &Txn) -> TCResult<bool> {
         match self {
             Self::Dense(dense) => dense.any(txn).await,
             Self::Sparse(sparse) => sparse.any(txn).await,
@@ -393,7 +393,7 @@ impl TensorCompare<Tensor> for Tensor {
     type Compare = Self;
     type Dense = Self;
 
-    async fn eq(&self, other: &Self, txn: Txn) -> TCResult<Self> {
+    async fn eq(&self, other: &Self, txn: &Txn) -> TCResult<Self> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => {
                 left.eq(right, txn).map_ok(IntoView::into_view).await
@@ -429,7 +429,7 @@ impl TensorCompare<Tensor> for Tensor {
         }
     }
 
-    async fn gte(&self, other: &Self, txn: Txn) -> TCResult<Self> {
+    async fn gte(&self, other: &Self, txn: &Txn) -> TCResult<Self> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => {
                 left.gte(right, txn).map_ok(IntoView::into_view).await
@@ -465,7 +465,7 @@ impl TensorCompare<Tensor> for Tensor {
         }
     }
 
-    async fn lte(&self, other: &Self, txn: Txn) -> TCResult<Self> {
+    async fn lte(&self, other: &Self, txn: &Txn) -> TCResult<Self> {
         match (self, other) {
             (Self::Dense(left), Self::Dense(right)) => {
                 left.lte(right, txn).map_ok(IntoView::into_view).await
@@ -504,7 +504,7 @@ impl TensorCompare<Tensor> for Tensor {
 
 #[async_trait]
 impl TensorIO for Tensor {
-    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+    async fn read_value(&self, txn: &Txn, coord: Coord) -> TCResult<Number> {
         match self {
             Self::Dense(dense) => dense.read_value(txn, coord).await,
             Self::Sparse(sparse) => sparse.read_value(txn, coord).await,
@@ -535,7 +535,7 @@ impl TensorDualIO<Tensor> for Tensor {
         }
     }
 
-    async fn write(&self, txn: Txn, bounds: Bounds, value: Self) -> TCResult<()> {
+    async fn write(&self, txn: &Txn, bounds: Bounds, value: Self) -> TCResult<()> {
         match self {
             Self::Dense(dense) => dense.write(txn, bounds, value).await,
             Self::Sparse(sparse) => sparse.write(txn, bounds, value).await,

@@ -57,9 +57,9 @@ pub trait TensorUnary: TensorAccessor + Sized {
 
     fn abs(&self) -> TCResult<Self::Unary>;
 
-    async fn all(&self, txn: Txn) -> TCResult<bool>;
+    async fn all(&self, txn: &Txn) -> TCResult<bool>;
 
-    async fn any(&self, txn: Txn) -> TCResult<bool>;
+    async fn any(&self, txn: &Txn) -> TCResult<bool>;
 
     fn not(&self) -> TCResult<Self::Unary>;
 }
@@ -69,22 +69,22 @@ pub trait TensorCompare<O>: TensorAccessor + Sized {
     type Compare: TensorInstance;
     type Dense: TensorInstance;
 
-    async fn eq(&self, other: &O, txn: Txn) -> TCResult<Self::Dense>;
+    async fn eq(&self, other: &O, txn: &Txn) -> TCResult<Self::Dense>;
 
     fn gt(&self, other: &O) -> TCResult<Self::Compare>;
 
-    async fn gte(&self, other: &O, txn: Txn) -> TCResult<Self::Dense>;
+    async fn gte(&self, other: &O, txn: &Txn) -> TCResult<Self::Dense>;
 
     fn lt(&self, other: &O) -> TCResult<Self::Compare>;
 
-    async fn lte(&self, other: &O, txn: Txn) -> TCResult<Self::Dense>;
+    async fn lte(&self, other: &O, txn: &Txn) -> TCResult<Self::Dense>;
 
     fn ne(&self, other: &O) -> TCResult<Self::Compare>;
 }
 
 #[async_trait]
 pub trait TensorIO: TensorAccessor + Sized {
-    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number>;
+    async fn read_value(&self, txn: &Txn, coord: Coord) -> TCResult<Number>;
 
     async fn write_value(
         &self,
@@ -100,7 +100,7 @@ pub trait TensorIO: TensorAccessor + Sized {
 pub trait TensorDualIO<O>: TensorAccessor + Sized {
     async fn mask(&self, txn: &Txn, value: O) -> TCResult<()>;
 
-    async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: O) -> TCResult<()>;
+    async fn write(&self, txn: &Txn, bounds: bounds::Bounds, value: O) -> TCResult<()>;
 }
 
 pub trait TensorMath<O>: TensorAccessor + Sized {

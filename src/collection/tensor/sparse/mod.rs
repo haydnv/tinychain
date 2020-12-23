@@ -370,6 +370,12 @@ impl<T: Clone + SparseAccess> SparseTensor<T> {
     }
 }
 
+impl<T: Clone + SparseAccess> ReadValueAt for SparseTensor<T> {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
+        self.accessor.read_value_at(txn, coord)
+    }
+}
+
 impl<T: Clone + SparseAccess> Instance for SparseTensor<T> {
     type Class = TensorType;
 
@@ -448,10 +454,10 @@ impl<T: Clone + SparseAccess> TensorUnary for SparseTensor<T> {
         Ok(SparseTensor { accessor })
     }
 
-    async fn all(&self, txn: Txn) -> TCResult<bool> {
+    async fn all(&self, txn: &Txn) -> TCResult<bool> {
         let mut coords = self
             .accessor
-            .filled(&txn)
+            .filled(txn)
             .await?
             .map_ok(|(coord, _)| coord)
             .zip(stream::iter(Bounds::all(self.shape()).affected()))
@@ -467,8 +473,8 @@ impl<T: Clone + SparseAccess> TensorUnary for SparseTensor<T> {
         Ok(true)
     }
 
-    async fn any(&self, txn: Txn) -> TCResult<bool> {
-        let mut filled = self.accessor.filled(&txn).await?;
+    async fn any(&self, txn: &Txn) -> TCResult<bool> {
+        let mut filled = self.accessor.filled(txn).await?;
         Ok(filled.next().await.is_some())
     }
 
@@ -484,8 +490,8 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorCompare<SparseTens
     type Compare = SparseTensor<SparseCombinator<T, OT>>;
     type Dense = DenseTensor<BlockListFile>;
 
-    async fn eq(&self, other: &SparseTensor<OT>, txn: Txn) -> TCResult<Self::Dense> {
-        self.condense(other, &txn, true.into(), <Number as NumberInstance>::eq)
+    async fn eq(&self, other: &SparseTensor<OT>, txn: &Txn) -> TCResult<Self::Dense> {
+        self.condense(other, txn, true.into(), <Number as NumberInstance>::eq)
             .await
     }
 
@@ -493,8 +499,8 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorCompare<SparseTens
         self.combine(other, <Number as NumberInstance>::gt, NumberType::Bool)
     }
 
-    async fn gte(&self, other: &SparseTensor<OT>, txn: Txn) -> TCResult<Self::Dense> {
-        self.condense(other, &txn, true.into(), <Number as NumberInstance>::gte)
+    async fn gte(&self, other: &SparseTensor<OT>, txn: &Txn) -> TCResult<Self::Dense> {
+        self.condense(other, txn, true.into(), <Number as NumberInstance>::gte)
             .await
     }
 
@@ -502,8 +508,8 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorCompare<SparseTens
         self.combine(other, <Number as NumberInstance>::lt, NumberType::Bool)
     }
 
-    async fn lte(&self, other: &SparseTensor<OT>, txn: Txn) -> TCResult<Self::Dense> {
-        self.condense(other, &txn, true.into(), <Number as NumberInstance>::lte)
+    async fn lte(&self, other: &SparseTensor<OT>, txn: &Txn) -> TCResult<Self::Dense> {
+        self.condense(other, txn, true.into(), <Number as NumberInstance>::lte)
             .await
     }
 
@@ -514,9 +520,9 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorCompare<SparseTens
 
 #[async_trait]
 impl<T: Clone + SparseAccess> TensorIO for SparseTensor<T> {
-    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+    async fn read_value(&self, txn: &Txn, coord: Coord) -> TCResult<Number> {
         self.accessor
-            .read_value_at(txn, coord.to_vec())
+            .read_value_at(txn, coord)
             .map_ok(|(_coord, value)| value)
             .await
     }
@@ -555,7 +561,7 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorDualIO<SparseTenso
             .await
     }
 
-    async fn write(&self, txn: Txn, bounds: Bounds, other: SparseTensor<OT>) -> TCResult<()> {
+    async fn write(&self, txn: &Txn, bounds: Bounds, other: SparseTensor<OT>) -> TCResult<()> {
         let slice = self.slice(bounds)?;
         if slice.shape() != other.shape() {
             return Err(error::unsupported(format!(
@@ -566,7 +572,7 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorDualIO<SparseTenso
         }
 
         let txn_id = *txn.id();
-        let filled = other.filled(&txn).await?;
+        let filled = other.filled(txn).await?;
         filled
             .map_ok(|(coord, value)| slice.write_value_at(txn_id, coord, value))
             .try_buffer_unordered(2)
@@ -584,7 +590,7 @@ impl<T: Clone + SparseAccess> TensorDualIO<Tensor> for SparseTensor<T> {
         }
     }
 
-    async fn write(&self, txn: Txn, bounds: Bounds, value: Tensor) -> TCResult<()> {
+    async fn write(&self, txn: &Txn, bounds: Bounds, value: Tensor) -> TCResult<()> {
         match value {
             Tensor::Sparse(sparse) => self.write(txn, bounds, sparse).await,
             Tensor::Dense(dense) => self.write(txn, bounds, dense.into_sparse()).await,
@@ -618,7 +624,7 @@ impl<T: Clone + SparseAccess> TensorReduce for SparseTensor<T> {
 
     fn product_all(&self, txn: Txn) -> TCBoxTryFuture<Number> {
         Box::pin(async move {
-            if self.all(txn.clone()).await? {
+            if self.all(&txn).await? {
                 from_sparse(self.clone()).product_all(txn).await
             } else {
                 Ok(self.dtype().zero())
@@ -633,7 +639,7 @@ impl<T: Clone + SparseAccess> TensorReduce for SparseTensor<T> {
 
     fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number> {
         Box::pin(async move {
-            if self.any(txn.clone()).await? {
+            if self.any(&txn).await? {
                 from_sparse(self.clone()).sum_all(txn).await
             } else {
                 Ok(self.dtype().zero())

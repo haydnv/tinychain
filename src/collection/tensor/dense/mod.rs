@@ -439,8 +439,8 @@ impl<T: Clone + DenseAccess> TensorUnary for DenseTensor<T> {
         Ok(DenseTensor { blocks })
     }
 
-    async fn all(&self, txn: Txn) -> TCResult<bool> {
-        let mut blocks = self.blocks.block_stream(&txn).await?;
+    async fn all(&self, txn: &Txn) -> TCResult<bool> {
+        let mut blocks = self.blocks.block_stream(txn).await?;
 
         while let Some(array) = blocks.next().await {
             if !array?.all() {
@@ -451,8 +451,8 @@ impl<T: Clone + DenseAccess> TensorUnary for DenseTensor<T> {
         Ok(true)
     }
 
-    async fn any(&self, txn: Txn) -> TCResult<bool> {
-        let mut blocks = self.blocks.block_stream(&txn).await?;
+    async fn any(&self, txn: &Txn) -> TCResult<bool> {
+        let mut blocks = self.blocks.block_stream(txn).await?;
         while let Some(array) = blocks.next().await {
             if array?.any() {
                 return Ok(true);
@@ -480,7 +480,7 @@ impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorCompare<DenseTensor<
     type Compare = DenseTensor<BlockListCombine<T, OT>>;
     type Dense = DenseTensor<BlockListCombine<T, OT>>;
 
-    async fn eq(&self, other: &DenseTensor<OT>, _txn: Txn) -> TCResult<Self::Dense> {
+    async fn eq(&self, other: &DenseTensor<OT>, _txn: &Txn) -> TCResult<Self::Dense> {
         self.combine(
             other,
             Array::eq,
@@ -498,7 +498,7 @@ impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorCompare<DenseTensor<
         )
     }
 
-    async fn gte(&self, other: &DenseTensor<OT>, _txn: Txn) -> TCResult<Self::Dense> {
+    async fn gte(&self, other: &DenseTensor<OT>, _txn: &Txn) -> TCResult<Self::Dense> {
         self.combine(
             other,
             Array::gte,
@@ -516,7 +516,7 @@ impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorCompare<DenseTensor<
         )
     }
 
-    async fn lte(&self, other: &DenseTensor<OT>, _txn: Txn) -> TCResult<Self::Dense> {
+    async fn lte(&self, other: &DenseTensor<OT>, _txn: &Txn) -> TCResult<Self::Dense> {
         self.combine(
             other,
             Array::lte,
@@ -558,7 +558,7 @@ impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorMath<DenseTensor<OT>
 
 #[async_trait]
 impl<T: Clone + DenseAccess> TensorIO for DenseTensor<T> {
-    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
+    async fn read_value(&self, txn: &Txn, coord: Coord) -> TCResult<Number> {
         self.blocks
             .read_value_at(txn, coord.to_vec())
             .map_ok(|(_, val)| val)
@@ -582,7 +582,7 @@ impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorDualIO<DenseTensor<O
         Err(error::not_implemented("DenseTensor::mask"))
     }
 
-    async fn write(&self, txn: Txn, bounds: Bounds, other: DenseTensor<OT>) -> TCResult<()> {
+    async fn write(&self, txn: &Txn, bounds: Bounds, other: DenseTensor<OT>) -> TCResult<()> {
         let slice = self.slice(bounds)?;
         let other = other
             .broadcast(slice.shape().clone())?
@@ -590,7 +590,7 @@ impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorDualIO<DenseTensor<O
 
         let coords = stream::iter(Bounds::all(slice.shape()).affected().map(TCResult::Ok));
         let values: TCTryStream<(Coord, Number)> =
-            Box::pin(ValueReader::new(coords, &txn, &other.blocks));
+            Box::pin(ValueReader::new(coords, txn, &other.blocks));
 
         values
             .map_ok(|(coord, value)| slice.write_value_at(*txn.id(), coord, value))
@@ -610,7 +610,7 @@ impl<T: Clone + DenseAccess> TensorDualIO<Tensor> for DenseTensor<T> {
         }
     }
 
-    async fn write(&self, txn: Txn, bounds: Bounds, other: Tensor) -> TCResult<()> {
+    async fn write(&self, txn: &Txn, bounds: Bounds, other: Tensor) -> TCResult<()> {
         match other {
             Tensor::Sparse(sparse) => self.write(txn, bounds, sparse.into_dense()).await,
             Tensor::Dense(dense) => self.write(txn, bounds, dense).await,

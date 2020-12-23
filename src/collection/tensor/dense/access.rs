@@ -716,10 +716,7 @@ impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
 
 impl<T: Clone + SparseAccess> ReadValueAt for BlockListSparse<T> {
     fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
-        Box::pin(async move {
-            let value = self.source.read_value(txn, &coord).await?;
-            Ok((coord, value))
-        })
+        self.source.read_value_at(txn, coord)
     }
 }
 
