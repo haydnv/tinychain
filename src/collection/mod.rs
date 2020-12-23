@@ -8,6 +8,8 @@ use crate::handler::*;
 use crate::scalar::{MethodType, PathSegment, Scalar};
 use crate::transaction::{Transact, Txn, TxnId};
 
+mod stream;
+
 pub mod btree;
 pub mod class;
 pub mod schema;
