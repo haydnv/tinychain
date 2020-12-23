@@ -1,5 +1,5 @@
 use std::convert::TryInto;
-use std::iter;
+use std::iter::{self, FromIterator};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -16,14 +16,16 @@ use crate::class::Instance;
 use crate::error;
 use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
 use crate::scalar::number::*;
+use crate::scalar::Value;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::bounds::*;
-use super::super::stream::{block_offsets, coord_block, coord_bounds};
+use super::super::stream::{block_offsets, coord_block, coord_bounds, ReadValueAt};
 use super::super::TensorAccessor;
 
 use super::array::Array;
 use super::{BlockListSlice, DenseAccess, DenseAccessor};
+use crate::collection::tensor::stream::Read;
 
 pub const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
@@ -186,41 +188,6 @@ impl DenseAccess for BlockListFile {
         BlockListSlice::new(self.clone(), bounds)
     }
 
-    async fn read_value_at(&self, txn: &Txn, coord: Vec<u64>) -> TCResult<Number> {
-        debug!(
-            "read value at {:?} from BlockListFile with shape {}",
-            coord,
-            self.shape()
-        );
-
-        if !self.shape().contains_coord(&coord) {
-            let coord: Vec<String> = coord.iter().map(|c| c.to_string()).collect();
-            return Err(error::bad_request(
-                "Coordinate is out of bounds",
-                coord.join(", "),
-            ));
-        }
-
-        let offset: u64 = coord_bounds(self.shape())
-            .iter()
-            .zip(coord.iter())
-            .map(|(d, x)| d * x)
-            .sum();
-        debug!("coord {:?} is offset {}", coord, offset);
-
-        let block_id = BlockId::from(offset / PER_BLOCK as u64);
-        let block = self.file.get_block(txn.id(), block_id).await?;
-
-        debug!(
-            "read offset {} from block of length {}",
-            (offset % PER_BLOCK as u64),
-            block.len()
-        );
-        let value = block.get_value((offset % PER_BLOCK as u64) as usize);
-
-        Ok(value)
-    }
-
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
         debug!("BlockListFile::write_value {} at {}", value, bounds);
 
@@ -302,6 +269,44 @@ impl DenseAccess for BlockListFile {
             block
                 .deref_mut()
                 .set_value((offset % PER_BLOCK as u64) as usize, value)
+        })
+    }
+}
+
+impl ReadValueAt for BlockListFile {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+        Box::pin(async move {
+            debug!(
+                "read value at {:?} from BlockListFile with shape {}",
+                coord,
+                self.shape()
+            );
+
+            if !self.shape().contains_coord(&coord) {
+                return Err(error::bad_request(
+                    "Coordinate is out of bounds",
+                    Value::from_iter(coord),
+                ));
+            }
+
+            let offset: u64 = coord_bounds(self.shape())
+                .iter()
+                .zip(coord.iter())
+                .map(|(d, x)| d * x)
+                .sum();
+            debug!("coord {:?} is offset {}", coord, offset);
+
+            let block_id = BlockId::from(offset / PER_BLOCK as u64);
+            let block = self.file.get_block(txn.id(), block_id).await?;
+
+            debug!(
+                "read offset {} from block of length {}",
+                (offset % PER_BLOCK as u64),
+                block.len()
+            );
+            let value = block.get_value((offset % PER_BLOCK as u64) as usize);
+
+            Ok((coord, value))
         })
     }
 }

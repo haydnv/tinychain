@@ -29,7 +29,7 @@ pub use array::Array;
 pub use file::*;
 
 #[async_trait]
-pub trait DenseAccess: TensorAccessor + Transact + 'static {
+pub trait DenseAccess: ReadValueAt + TensorAccessor + Transact + 'static {
     type Slice: Clone + DenseAccess;
 
     fn accessor(self) -> DenseAccessor;
@@ -70,9 +70,6 @@ pub trait DenseAccess: TensorAccessor + Transact + 'static {
     }
 
     async fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice>;
-
-    // TODO: delete and use ReadValueAt trait
-    async fn read_value_at(&self, txn: &Txn, coord: Vec<u64>) -> TCResult<Number>;
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
 
@@ -238,25 +235,6 @@ impl DenseAccess for DenseAccessor {
         }
     }
 
-    async fn read_value_at(&self, txn: &Txn, coord: Vec<u64>) -> TCResult<Number> {
-        match self {
-            Self::Broadcast(broadcast) => {
-                DenseAccess::read_value_at(&**broadcast, txn, coord).await
-            }
-            Self::Cast(cast) => DenseAccess::read_value_at(&**cast, txn, coord).await,
-            Self::Combine(combine) => DenseAccess::read_value_at(&**combine, txn, coord).await,
-            Self::Expand(expand) => DenseAccess::read_value_at(&**expand, txn, coord).await,
-            Self::File(file) => DenseAccess::read_value_at(file, txn, coord).await,
-            Self::Reduce(reduce) => DenseAccess::read_value_at(&**reduce, txn, coord).await,
-            Self::Slice(slice) => DenseAccess::read_value_at(&**slice, txn, coord).await,
-            Self::Sparse(sparse) => DenseAccess::read_value_at(sparse, txn, coord).await,
-            Self::Transpose(transpose) => {
-                DenseAccess::read_value_at(&**transpose, txn, coord).await
-            }
-            Self::Unary(unary) => DenseAccess::read_value_at(&**unary, txn, coord).await,
-        }
-    }
-
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
         match self {
             Self::Broadcast(broadcast) => broadcast.write_value(txn_id, bounds, number).await,
@@ -284,6 +262,23 @@ impl DenseAccess for DenseAccessor {
             Self::Sparse(sparse) => sparse.write_value_at(txn_id, coord, value),
             Self::Transpose(transpose) => transpose.write_value_at(txn_id, coord, value),
             Self::Unary(unary) => unary.write_value_at(txn_id, coord, value),
+        }
+    }
+}
+
+impl ReadValueAt for DenseAccessor {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
+        match self {
+            Self::Broadcast(broadcast) => broadcast.read_value_at(txn, coord),
+            Self::Cast(cast) => cast.read_value_at(txn, coord),
+            Self::Combine(combine) => combine.read_value_at(txn, coord),
+            Self::Expand(expand) => expand.read_value_at(txn, coord),
+            Self::File(file) => file.read_value_at(txn, coord),
+            Self::Reduce(reduce) => reduce.read_value_at(txn, coord),
+            Self::Slice(slice) => slice.read_value_at(txn, coord),
+            Self::Sparse(sparse) => sparse.read_value_at(txn, coord),
+            Self::Transpose(transpose) => transpose.read_value_at(txn, coord),
+            Self::Unary(unary) => unary.read_value_at(txn, coord),
         }
     }
 }
@@ -419,10 +414,7 @@ impl<T: Clone + DenseAccess> IntoView for DenseTensor<T> {
 
 impl<T: Clone + DenseAccess> ReadValueAt for DenseTensor<T> {
     fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Vec<u64>) -> Read<'a> {
-        Box::pin(async move {
-            let value = DenseAccess::read_value_at(&self.blocks, txn, coord.to_vec()).await?;
-            Ok((coord, value))
-        })
+        self.blocks.read_value_at(txn, coord)
     }
 }
 
@@ -597,7 +589,10 @@ impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorMath<DenseTensor<OT>
 #[async_trait]
 impl<T: Clone + DenseAccess> TensorIO for DenseTensor<T> {
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        self.blocks.read_value_at(txn, coord.to_vec()).await
+        self.blocks
+            .read_value_at(txn, coord.to_vec())
+            .map_ok(|(_, val)| val)
+            .await
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
