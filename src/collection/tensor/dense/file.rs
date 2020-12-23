@@ -24,7 +24,7 @@ use super::super::stream::{block_offsets, coord_block, coord_bounds, Read, ReadV
 use super::super::TensorAccessor;
 
 use super::array::Array;
-use super::{Coord, BlockListSlice, DenseAccess, DenseAccessor};
+use super::{BlockListSlice, Coord, DenseAccess, DenseAccessor};
 
 pub const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 

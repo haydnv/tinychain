@@ -34,9 +34,7 @@ impl<'a, S: Stream + 'a, T> ValueReader<'a, S, T> {
     }
 }
 
-impl<'a, S: Stream<Item = TCResult<Coord>> + 'a, T: ReadValueAt> Stream
-    for ValueReader<'a, S, T>
-{
+impl<'a, S: Stream<Item = TCResult<Coord>> + 'a, T: ReadValueAt> Stream for ValueReader<'a, S, T> {
     type Item = TCResult<(Coord, Number)>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {

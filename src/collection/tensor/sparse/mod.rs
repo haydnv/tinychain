@@ -23,10 +23,11 @@ use super::class::{Tensor, TensorInstance, TensorType};
 use super::dense::{
     dense_constant, from_sparse, BlockListFile, BlockListSparse, DenseAccess, DenseTensor,
 };
+use super::stream::*;
 use super::transform;
 use super::{
-    broadcast, Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
-    TensorMath, TensorReduce, TensorTransform, TensorUnary, ERR_NONBIJECTIVE_WRITE,
+    broadcast, Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO,
+    TensorIO, TensorMath, TensorReduce, TensorTransform, TensorUnary, ERR_NONBIJECTIVE_WRITE,
 };
 
 mod access;
@@ -210,35 +211,6 @@ impl SparseAccess for SparseTable {
         unimplemented!()
     }
 
-    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        if !self.shape().contains_coord(coord) {
-            return Err(error::bad_request(
-                "Coordinate out of bounds",
-                Bounds::from(coord),
-            ));
-        }
-
-        let selector: HashMap<Id, ColumnBound> = coord
-            .iter()
-            .enumerate()
-            .map(|(axis, at)| (axis.into(), u64_to_value(*at).into()))
-            .collect();
-
-        let slice = self
-            .table
-            .clone()
-            .slice(selector.into())?
-            .select(vec![VALUE.into()])?;
-
-        let mut slice = slice.stream(txn.id()).await?;
-
-        match slice.try_next().await? {
-            Some(mut number) if number.len() == 1 => number.pop().unwrap().try_into(),
-            None => Ok(self.dtype().zero()),
-            _ => Err(error::internal(ERR_CORRUPT)),
-        }
-    }
-
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         let value = value.into_type(self.dtype);
 
@@ -251,6 +223,41 @@ impl SparseAccess for SparseTable {
         self.table
             .upsert(&txn_id, key, vec![Value::Number(value)])
             .await
+    }
+}
+
+impl ReadValueAt for SparseTable {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
+        Box::pin(async move {
+            if !self.shape().contains_coord(&coord) {
+                return Err(error::bad_request(
+                    "Coordinate out of bounds",
+                    Bounds::from(coord),
+                ));
+            }
+
+            let selector: HashMap<Id, ColumnBound> = coord
+                .iter()
+                .enumerate()
+                .map(|(axis, at)| (axis.into(), u64_to_value(*at).into()))
+                .collect();
+
+            let slice = self
+                .table
+                .clone()
+                .slice(selector.into())?
+                .select(vec![VALUE.into()])?;
+
+            let mut slice = slice.stream(txn.id()).await?;
+
+            let value = match slice.try_next().await? {
+                Some(mut number) if number.len() == 1 => number.pop().unwrap().try_into(),
+                None => Ok(self.dtype().zero()),
+                _ => Err(error::internal(ERR_CORRUPT)),
+            }?;
+
+            Ok((coord, value))
+        })
     }
 }
 
@@ -508,7 +515,10 @@ impl<T: Clone + SparseAccess, OT: Clone + SparseAccess> TensorCompare<SparseTens
 #[async_trait]
 impl<T: Clone + SparseAccess> TensorIO for SparseTensor<T> {
     async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        self.accessor.read_value(txn, coord).await
+        self.accessor
+            .read_value_at(txn, coord.to_vec())
+            .map_ok(|(_coord, value)| value)
+            .await
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {

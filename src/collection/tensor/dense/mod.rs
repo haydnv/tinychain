@@ -16,8 +16,8 @@ use super::class::{Tensor, TensorInstance, TensorType};
 use super::sparse::{DenseToSparse, SparseAccess, SparseAccessorDyn, SparseTensor};
 use super::stream::*;
 use super::{
-    Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO, TensorMath,
-    TensorReduce, TensorTransform, TensorUnary,
+    Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
+    TensorMath, TensorReduce, TensorTransform, TensorUnary,
 };
 
 mod access;

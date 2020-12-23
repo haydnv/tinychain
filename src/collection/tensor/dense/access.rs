@@ -121,12 +121,7 @@ impl<L: Clone + DenseAccess, R: Clone + DenseAccess> DenseAccess for BlockListCo
         Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at(
-        &self,
-        _txn_id: TxnId,
-        _coord: Coord,
-        _value: Number,
-    ) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
@@ -225,12 +220,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListBroadcast<T> {
         Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at(
-        &self,
-        _txn_id: TxnId,
-        _coord: Coord,
-        _value: Number,
-    ) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
@@ -529,12 +519,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListReduce<T> {
         Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at(
-        &self,
-        _txn_id: TxnId,
-        _coord: Coord,
-        _value: Number,
-    ) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
@@ -926,12 +911,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListUnary<T> {
         Err(error::unsupported(ERR_NONBIJECTIVE_WRITE))
     }
 
-    fn write_value_at(
-        &self,
-        _txn_id: TxnId,
-        _coord: Coord,
-        _value: Number,
-    ) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCBoxTryFuture<()> {
         Box::pin(future::ready(Err(error::unsupported(
             ERR_NONBIJECTIVE_WRITE,
         ))))
