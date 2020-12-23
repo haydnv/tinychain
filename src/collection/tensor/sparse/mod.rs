@@ -172,6 +172,10 @@ impl TensorAccessor for SparseTable {
 
 #[async_trait]
 impl SparseAccess for SparseTable {
+    fn accessor(self) -> SparseAccessor {
+        SparseAccessor::Table(self)
+    }
+
     async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
         let rows = self.table.stream(txn.id()).await?;
         let filled = rows.and_then(|row| future::ready(unwrap_row(row)));
@@ -282,13 +286,8 @@ pub struct SparseTensor<T: Clone + SparseAccess> {
 }
 
 impl<T: Clone + SparseAccess> SparseTensor<T> {
-    pub fn into_dyn(self) -> SparseTensor<SparseAccessorDyn> {
-        let accessor = SparseAccessorDyn::new(self.clone_into());
-        SparseTensor { accessor }
-    }
-
-    pub fn clone_into(&self) -> T {
-        self.accessor.clone()
+    pub fn into_inner(self) -> T {
+        self.accessor
     }
 
     pub async fn copy(&self, txn: &Txn) -> TCResult<SparseTensor<SparseTable>> {
@@ -399,7 +398,7 @@ impl<T: Clone + SparseAccess> TensorInstance for SparseTensor<T> {
 
 impl<T: Clone + SparseAccess> IntoView for SparseTensor<T> {
     fn into_view(self) -> Tensor {
-        let accessor = SparseAccessorDyn::new(self.clone_into());
+        let accessor = self.into_inner().accessor();
         Tensor::Sparse(SparseTensor { accessor })
     }
 }
@@ -447,7 +446,7 @@ impl<T: Clone + SparseAccess> TensorUnary for SparseTensor<T> {
     type Unary = SparseTensor<SparseUnary>;
 
     fn abs(&self) -> TCResult<Self::Unary> {
-        let source = SparseAccessorDyn::new(self.accessor.clone());
+        let source = self.accessor.clone().accessor();
         let transform = <Number as NumberInstance>::abs;
 
         let accessor = SparseUnary::new(source, transform, self.dtype());
@@ -677,8 +676,7 @@ impl<T: Clone + SparseAccess> TensorTransform for SparseTensor<T> {
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
         let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
-        let source = SparseAccessorDyn::new(self.accessor.clone());
-        let accessor = SparseSlice::new(source, rebase);
+        let accessor = SparseSlice::new(self.accessor.clone().accessor(), rebase);
 
         Ok(accessor.into())
     }
@@ -724,7 +722,8 @@ impl<T: Clone + SparseAccess> From<T> for SparseTensor<T> {
 
 impl<T: Clone + SparseAccess> From<SparseTensor<T>> for Collection {
     fn from(sparse: SparseTensor<T>) -> Collection {
-        Collection::Tensor(Tensor::Sparse(sparse.into_dyn()))
+        let accessor = sparse.into_inner().accessor();
+        Collection::Tensor(Tensor::Sparse(SparseTensor { accessor }))
     }
 }
 

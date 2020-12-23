@@ -688,8 +688,8 @@ impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
     type Slice = BlockListSparse<SparseSlice>;
 
     fn accessor(self) -> DenseAccessor {
-        let source = self.source.into_dyn();
-        DenseAccessor::Sparse(BlockListSparse { source })
+        let source = self.source.into_inner().accessor().into();
+        DenseAccessor::Sparse(Box::new(BlockListSparse { source }))
     }
 
     fn block_stream<'a>(&'a self, _txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {

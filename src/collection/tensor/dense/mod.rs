@@ -13,7 +13,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::{Bounds, Shape};
 use super::class::{Tensor, TensorInstance, TensorType};
-use super::sparse::{DenseToSparse, SparseAccess, SparseAccessorDyn, SparseTensor};
+use super::sparse::{DenseToSparse, SparseAccess, SparseAccessor, SparseTensor};
 use super::stream::*;
 use super::{
     Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
@@ -85,7 +85,7 @@ pub enum DenseAccessor {
     File(BlockListFile),
     Reduce(Box<BlockListReduce<DenseAccessor>>),
     Slice(Box<BlockListSlice<DenseAccessor>>),
-    Sparse(BlockListSparse<SparseAccessorDyn>),
+    Sparse(Box<BlockListSparse<SparseAccessor>>),
     Transpose(Box<BlockListTranspose<DenseAccessor>>),
     Unary(Box<BlockListUnary<DenseAccessor>>),
 }

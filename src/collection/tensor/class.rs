@@ -16,7 +16,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::bounds::*;
 use super::dense::{dense_constant, BlockListFile, DenseAccess, DenseAccessor, DenseTensor};
-use super::sparse::{self, SparseAccess, SparseAccessorDyn, SparseTable, SparseTensor};
+use super::sparse::{self, SparseAccess, SparseAccessor, SparseTable, SparseTensor};
 use super::{
     Coord, IntoView, TensorAccessor, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
     TensorMath, TensorReduce, TensorTransform, TensorUnary,
@@ -71,12 +71,7 @@ impl TensorType {
                     .map_ok(Tensor::from)
                     .await
             }
-            Self::Sparse => {
-                sparse::create(txn, shape, dtype)
-                    .map_ok(SparseTensor::into_dyn)
-                    .map_ok(Tensor::Sparse)
-                    .await
-            }
+            Self::Sparse => sparse::create(txn, shape, dtype).map_ok(Tensor::from).await,
         }
     }
 }
@@ -159,7 +154,7 @@ impl CollectionClass for TensorType {
                     let table =
                         SparseTable::from_values(txn, shape, dtype, stream::iter(values)).await?;
 
-                    Tensor::Sparse(SparseTensor::from(table).into_dyn())
+                    Tensor::Sparse(SparseAccessor::from(table).into())
                 }
             };
 
@@ -203,7 +198,7 @@ impl fmt::Display for TensorType {
 #[derive(Clone)]
 pub enum Tensor {
     Dense(DenseTensor<DenseAccessor>),
-    Sparse(SparseTensor<SparseAccessorDyn>),
+    Sparse(SparseTensor<SparseAccessor>),
 }
 
 impl Instance for Tensor {
@@ -312,7 +307,7 @@ impl TensorInstance for Tensor {
 
     fn into_sparse(self) -> Self {
         match self {
-            Self::Dense(dense) => Self::Sparse(dense.into_sparse().into_dyn()),
+            Self::Dense(dense) => Self::Sparse(SparseAccessor::from(dense).into()),
             Self::Sparse(sparse) => Self::Sparse(sparse),
         }
     }
@@ -667,7 +662,7 @@ impl<T: Clone + DenseAccess> From<DenseTensor<T>> for Tensor {
 
 impl<T: Clone + SparseAccess> From<SparseTensor<T>> for Tensor {
     fn from(sparse: SparseTensor<T>) -> Tensor {
-        let accessor = SparseAccessorDyn::new(sparse.clone_into());
+        let accessor = sparse.into_inner().accessor();
         Self::Sparse(SparseTensor::from(accessor))
     }
 }

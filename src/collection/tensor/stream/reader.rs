@@ -43,7 +43,7 @@ impl<'a, S: Stream<Item = TCResult<Coord>> + 'a, T: ReadValueAt> Stream for Valu
             if let Some(mut pending) = this.pending.as_mut().as_pin_mut() {
                 let result = ready!(pending.as_mut().poll(cxt));
                 this.pending.set(None);
-                break Some(result)
+                break Some(result);
             } else if let Some(coord) = ready!(this.coords.as_mut().poll_next(cxt)) {
                 match coord {
                     Ok(coord) => {
@@ -53,7 +53,7 @@ impl<'a, S: Stream<Item = TCResult<Coord>> + 'a, T: ReadValueAt> Stream for Valu
                     Err(cause) => break Some(Err(cause)),
                 }
             } else {
-                break None
+                break None;
             }
         })
     }
