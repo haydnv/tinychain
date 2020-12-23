@@ -39,22 +39,22 @@ impl<'a, S: Stream<Item = TCResult<Coord>> + 'a, T: ReadValueAt> Stream for Valu
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
-
-        if let Some(mut pending) = this.pending.as_mut().as_pin_mut() {
-            let result = ready!(pending.as_mut().poll(cxt));
-            this.pending.set(None);
-            Poll::Ready(Some(result))
-        } else if let Some(coord) = ready!(this.coords.as_mut().poll_next(cxt)) {
-            match coord {
-                Ok(coord) => {
-                    this.pending
-                        .set(Some(this.access.read_value_at(&this.txn, coord)));
-                    Poll::Pending
+        Poll::Ready(loop {
+            if let Some(mut pending) = this.pending.as_mut().as_pin_mut() {
+                let result = ready!(pending.as_mut().poll(cxt));
+                this.pending.set(None);
+                break Some(result)
+            } else if let Some(coord) = ready!(this.coords.as_mut().poll_next(cxt)) {
+                match coord {
+                    Ok(coord) => {
+                        let read = this.access.read_value_at(&this.txn, coord);
+                        this.pending.set(Some(read));
+                    }
+                    Err(cause) => break Some(Err(cause)),
                 }
-                Err(cause) => Poll::Ready(Some(Err(cause))),
+            } else {
+                break None
             }
-        } else {
-            Poll::Ready(None)
-        }
+        })
     }
 }
