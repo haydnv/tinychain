@@ -9,7 +9,7 @@ use crate::general::{TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::super::sparse::{SparseAccess, SparseSlice, SparseTensor};
+use super::super::sparse::{SparseAccess, SparseSlice, SparseTensor, SparseTranspose};
 use super::super::stream::*;
 use super::super::transform;
 use super::super::{
@@ -72,6 +72,7 @@ impl<L: DenseAccess, R: DenseAccess> TensorAccess for BlockListCombine<L, R> {
 #[async_trait]
 impl<L: Clone + DenseAccess, R: Clone + DenseAccess> DenseAccess for BlockListCombine<L, R> {
     type Slice = BlockListCombine<<L as DenseAccess>::Slice, <R as DenseAccess>::Slice>;
+    type Transpose = BlockListCombine<<L as DenseAccess>::Transpose, <R as DenseAccess>::Transpose>;
 
     fn accessor(self) -> DenseAccessor {
         let left = self.left.accessor();
@@ -104,9 +105,22 @@ impl<L: Clone + DenseAccess, R: Clone + DenseAccess> DenseAccess for BlockListCo
         })
     }
 
-    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
-        let left = self.left.slice(txn, bounds.clone())?;
-        let right = self.right.slice(txn, bounds)?;
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let left = self.left.slice(bounds.clone())?;
+        let right = self.right.slice(bounds)?;
+
+        BlockListCombine::new(
+            left,
+            right,
+            self.combinator,
+            self.value_combinator,
+            self.dtype,
+        )
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let left = self.left.transpose(permutation.clone())?;
+        let right = self.right.transpose(permutation)?;
 
         BlockListCombine::new(
             left,
@@ -189,6 +203,7 @@ impl<T: DenseAccess> TensorAccess for BlockListBroadcast<T> {
 #[async_trait]
 impl<T: Clone + DenseAccess> DenseAccess for BlockListBroadcast<T> {
     type Slice = BlockListSlice<Self>;
+    type Transpose = BlockListTranspose<Self>;
 
     fn accessor(self) -> DenseAccessor {
         let source = self.source.accessor();
@@ -208,12 +223,12 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListBroadcast<T> {
         Box::pin(future::ready(Ok(values)))
     }
 
-    fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
-        let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
-        Ok(BlockListSlice {
-            source: self.clone(),
-            rebase,
-        })
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        BlockListSlice::new(self, bounds)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        BlockListTranspose::new(self, permutation)
     }
 
     async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
@@ -286,12 +301,14 @@ impl<T: DenseAccess> TensorAccess for BlockListCast<T> {
 #[async_trait]
 impl<T: Clone + DenseAccess> DenseAccess for BlockListCast<T> {
     type Slice = BlockListCast<<T as DenseAccess>::Slice>;
+    type Transpose = BlockListCast<<T as DenseAccess>::Transpose>;
 
     fn accessor(self) -> DenseAccessor {
         let cast = BlockListCast {
             source: self.source.accessor(),
             dtype: self.dtype,
         };
+
         DenseAccessor::Cast(Box::new(cast))
     }
 
@@ -305,9 +322,14 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListCast<T> {
         })
     }
 
-    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
-        let slice = self.source.slice(txn, bounds)?;
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let slice = self.source.slice(bounds)?;
         Ok(BlockListCast::new(slice, self.dtype))
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let transpose = self.source.transpose(permutation)?;
+        Ok(BlockListCast::new(transpose, self.dtype))
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
@@ -380,6 +402,7 @@ impl<T: DenseAccess> TensorAccess for BlockListExpand<T> {
 #[async_trait]
 impl<T: DenseAccess> DenseAccess for BlockListExpand<T> {
     type Slice = <T as DenseAccess>::Slice;
+    type Transpose = <T as DenseAccess>::Transpose;
 
     fn accessor(self) -> DenseAccessor {
         let expand = BlockListExpand {
@@ -397,9 +420,14 @@ impl<T: DenseAccess> DenseAccess for BlockListExpand<T> {
         self.source.value_stream(txn)
     }
 
-    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.slice(txn, bounds)
+        self.source.slice(bounds) // TODO: expand the result
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let permutation = permutation.map(|axes| self.rebase.invert_axes(axes));
+        self.source.transpose(permutation) // TODO: expand the result
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
@@ -482,6 +510,7 @@ impl<T: DenseAccess> TensorAccess for BlockListReduce<T> {
 #[async_trait]
 impl<T: Clone + DenseAccess> DenseAccess for BlockListReduce<T> {
     type Slice = BlockListReduce<<T as DenseAccess>::Slice>;
+    type Transpose = BlockListReduce<<T as DenseAccess>::Transpose>;
 
     fn accessor(self) -> DenseAccessor {
         let reduce = BlockListReduce {
@@ -499,7 +528,7 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListReduce<T> {
                 let reductor = self.reductor;
                 let source_bounds = self.rebase.invert_coord(&coord);
                 Box::pin(async move {
-                    let slice = self.source.slice(txn, source_bounds)?;
+                    let slice = self.source.clone().slice(source_bounds)?;
                     reductor(&slice.accessor().into(), txn.clone()).await
                 })
             });
@@ -509,10 +538,16 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListReduce<T> {
         })
     }
 
-    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
-        let (source_bounds, slice_reduce_axis) = self.rebase.invert_bounds(bounds);
-        let slice = self.source.slice(txn, source_bounds)?;
-        BlockListReduce::new(slice, slice_reduce_axis, self.reductor)
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let (source_bounds, reduce_axis) = self.rebase.invert_bounds(bounds);
+        let slice = self.source.slice(source_bounds)?;
+        BlockListReduce::new(slice, reduce_axis, self.reductor)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let (source_axes, reduce_axis) = self.rebase.invert_axes(permutation);
+        let source = self.source.transpose(Some(source_axes))?;
+        BlockListReduce::new(source, reduce_axis, self.reductor)
     }
 
     async fn write_value(&self, _txn_id: TxnId, _bounds: Bounds, _number: Number) -> TCResult<()> {
@@ -531,7 +566,7 @@ impl<T: Clone + DenseAccess> ReadValueAt for BlockListReduce<T> {
         Box::pin(async move {
             let reductor = self.reductor;
             let source_bounds = self.rebase.invert_coord(&coord);
-            let slice = self.source.slice(txn, source_bounds)?;
+            let slice = self.source.clone().slice(source_bounds)?;
             let value = reductor(&slice.accessor().into(), txn.clone()).await?;
 
             Ok((coord, value))
@@ -540,7 +575,7 @@ impl<T: Clone + DenseAccess> ReadValueAt for BlockListReduce<T> {
 }
 
 #[async_trait]
-impl<T: Clone + DenseAccess> Transact for BlockListReduce<T> {
+impl<T: DenseAccess> Transact for BlockListReduce<T> {
     async fn commit(&self, _txn_id: &TxnId) {
         // no-op
     }
@@ -586,8 +621,9 @@ impl<T: DenseAccess> TensorAccess for BlockListSlice<T> {
 }
 
 #[async_trait]
-impl<T: DenseAccess> DenseAccess for BlockListSlice<T> {
+impl<T: Clone + DenseAccess> DenseAccess for BlockListSlice<T> {
     type Slice = <T as DenseAccess>::Slice;
+    type Transpose = BlockListTranspose<Self>;
 
     fn accessor(self) -> DenseAccessor {
         let slice = BlockListSlice {
@@ -610,9 +646,13 @@ impl<T: DenseAccess> DenseAccess for BlockListSlice<T> {
         Box::pin(future::ready(Ok(values)))
     }
 
-    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let bounds = self.rebase.invert_bounds(bounds);
-        self.source.slice(txn, bounds)
+        self.source.slice(bounds)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        BlockListTranspose::new(self, permutation)
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
@@ -686,6 +726,7 @@ impl<T: Clone + SparseAccess> TensorAccess for BlockListSparse<T> {
 #[async_trait]
 impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
     type Slice = BlockListSparse<SparseSlice>;
+    type Transpose = BlockListSparse<SparseTranspose<T>>;
 
     fn accessor(self) -> DenseAccessor {
         let source = self.source.into_inner().accessor().into();
@@ -698,8 +739,15 @@ impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
         ))))
     }
 
-    fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
-        self.source.slice(bounds).map(BlockListSparse::new)
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let slice = self.source.slice(bounds)?;
+        Ok(BlockListSparse::new(slice))
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let transpose = self.source.transpose(permutation)?;
+        let accessor = transpose.into_inner();
+        Ok(BlockListSparse::new(accessor.into()))
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
@@ -767,8 +815,9 @@ impl<T: DenseAccess> TensorAccess for BlockListTranspose<T> {
 }
 
 #[async_trait]
-impl<T: DenseAccess> DenseAccess for BlockListTranspose<T> {
+impl<T: Clone + DenseAccess> DenseAccess for BlockListTranspose<T> {
     type Slice = BlockListTranspose<<T as DenseAccess>::Slice>;
+    type Transpose = Self;
 
     fn accessor(self) -> DenseAccessor {
         let accessor = BlockListTranspose {
@@ -789,8 +838,12 @@ impl<T: DenseAccess> DenseAccess for BlockListTranspose<T> {
         })
     }
 
-    fn slice(&self, _txn: &Txn, _bounds: Bounds) -> TCResult<Self::Slice> {
+    fn slice(self, _bounds: Bounds) -> TCResult<Self::Slice> {
         Err(error::not_implemented("BlockListTranspose::slice"))
+    }
+
+    fn transpose(self, _permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        Err(error::not_implemented("BlockListTranspose::transpose"))
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
@@ -874,7 +927,8 @@ impl<T: DenseAccess> TensorAccess for BlockListUnary<T> {
 
 #[async_trait]
 impl<T: Clone + DenseAccess> DenseAccess for BlockListUnary<T> {
-    type Slice = BlockListSlice<T>;
+    type Slice = BlockListUnary<<T as DenseAccess>::Slice>;
+    type Transpose = BlockListUnary<<T as DenseAccess>::Transpose>;
 
     fn accessor(self) -> DenseAccessor {
         let unary = BlockListUnary {
@@ -896,11 +950,24 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListUnary<T> {
         })
     }
 
-    fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
-        let rebase = transform::Slice::new(self.source.shape().clone(), bounds)?;
-        Ok(BlockListSlice {
-            source: self.source.clone(),
-            rebase,
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let source = self.source.slice(bounds)?;
+        Ok(BlockListUnary {
+            source,
+            transform: self.transform,
+            value_transform: self.value_transform,
+            dtype: self.dtype,
+        })
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let source = self.source.transpose(permutation)?;
+
+        Ok(BlockListUnary {
+            source,
+            transform: self.transform,
+            value_transform: self.value_transform,
+            dtype: self.dtype,
         })
     }
 

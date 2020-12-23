@@ -139,6 +139,10 @@ impl Expand {
         &self.shape
     }
 
+    pub fn invert_axes(&self, _axes: Vec<usize>) -> Vec<usize> {
+        unimplemented!()
+    }
+
     pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
         if bounds.len() < self.expand {
             bounds.remove(self.expand);
@@ -198,6 +202,10 @@ impl Reduce {
 
     pub fn shape(&'_ self) -> &'_ Shape {
         &self.shape
+    }
+
+    pub fn invert_axes(&self, _permutation: Option<Vec<usize>>) -> (Vec<usize>, usize) {
+        unimplemented!()
     }
 
     pub fn invert_bounds(&self, bounds: Bounds) -> (Bounds, usize) {

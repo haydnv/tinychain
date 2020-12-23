@@ -24,7 +24,7 @@ use super::super::stream::{block_offsets, coord_block, coord_bounds, Read, ReadV
 use super::super::TensorAccess;
 
 use super::array::Array;
-use super::{BlockListSlice, Coord, DenseAccess, DenseAccessor};
+use super::{BlockListSlice, BlockListTranspose, Coord, DenseAccess, DenseAccessor};
 
 pub const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
@@ -161,6 +161,7 @@ impl TensorAccess for BlockListFile {
 #[async_trait]
 impl DenseAccess for BlockListFile {
     type Slice = BlockListSlice<Self>;
+    type Transpose = BlockListTranspose<Self>;
 
     fn accessor(self) -> DenseAccessor {
         DenseAccessor::File(self)
@@ -183,8 +184,12 @@ impl DenseAccess for BlockListFile {
         })
     }
 
-    fn slice(&self, _txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice> {
-        BlockListSlice::new(self.clone(), bounds)
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        BlockListSlice::new(self, bounds)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        BlockListTranspose::new(self, permutation)
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {

@@ -31,6 +31,7 @@ pub use file::*;
 #[async_trait]
 pub trait DenseAccess: ReadValueAt + TensorAccess + Transact + 'static {
     type Slice: Clone + DenseAccess;
+    type Transpose: Clone + DenseAccess;
 
     fn accessor(self) -> DenseAccessor;
 
@@ -69,7 +70,9 @@ pub trait DenseAccess: ReadValueAt + TensorAccess + Transact + 'static {
         })
     }
 
-    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self::Slice>;
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()>;
 
@@ -155,6 +158,7 @@ impl TensorAccess for DenseAccessor {
 #[async_trait]
 impl DenseAccess for DenseAccessor {
     type Slice = Self;
+    type Transpose = Self;
 
     fn accessor(self) -> Self {
         self
@@ -190,18 +194,37 @@ impl DenseAccess for DenseAccessor {
         }
     }
 
-    fn slice(&self, txn: &Txn, bounds: Bounds) -> TCResult<Self> {
+    fn slice(self, bounds: Bounds) -> TCResult<Self> {
         match self {
-            Self::Broadcast(broadcast) => broadcast.slice(txn, bounds).map(DenseAccess::accessor),
-            Self::Cast(cast) => cast.slice(txn, bounds).map(DenseAccess::accessor),
-            Self::Combine(combine) => combine.slice(txn, bounds).map(DenseAccess::accessor),
-            Self::Expand(expand) => expand.slice(txn, bounds).map(DenseAccess::accessor),
-            Self::File(file) => file.slice(txn, bounds).map(DenseAccess::accessor),
-            Self::Reduce(reduce) => reduce.slice(txn, bounds).map(DenseAccess::accessor),
-            Self::Slice(slice) => slice.slice(txn, bounds).map(DenseAccess::accessor),
-            Self::Sparse(sparse) => sparse.slice(txn, bounds).map(DenseAccess::accessor),
-            Self::Transpose(transpose) => transpose.slice(txn, bounds).map(DenseAccess::accessor),
-            Self::Unary(unary) => unary.slice(txn, bounds).map(DenseAccess::accessor),
+            Self::Broadcast(broadcast) => broadcast.slice(bounds).map(DenseAccess::accessor),
+            Self::Cast(cast) => cast.slice(bounds).map(DenseAccess::accessor),
+            Self::Combine(combine) => combine.slice(bounds).map(DenseAccess::accessor),
+            Self::Expand(expand) => expand.slice(bounds).map(DenseAccess::accessor),
+            Self::File(file) => file.slice(bounds).map(DenseAccess::accessor),
+            Self::Reduce(reduce) => reduce.slice(bounds).map(DenseAccess::accessor),
+            Self::Slice(slice) => slice.slice(bounds).map(DenseAccess::accessor),
+            Self::Sparse(sparse) => sparse.slice(bounds).map(DenseAccess::accessor),
+            Self::Transpose(transpose) => transpose.slice(bounds).map(DenseAccess::accessor),
+            Self::Unary(unary) => unary.slice(bounds).map(DenseAccess::accessor),
+        }
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        match self {
+            Self::Broadcast(broadcast) => {
+                broadcast.transpose(permutation).map(DenseAccess::accessor)
+            }
+            Self::Cast(cast) => cast.transpose(permutation).map(DenseAccess::accessor),
+            Self::Combine(combine) => combine.transpose(permutation).map(DenseAccess::accessor),
+            Self::Expand(expand) => expand.transpose(permutation).map(DenseAccess::accessor),
+            Self::File(file) => file.transpose(permutation).map(DenseAccess::accessor),
+            Self::Reduce(reduce) => reduce.transpose(permutation).map(DenseAccess::accessor),
+            Self::Slice(slice) => slice.transpose(permutation).map(DenseAccess::accessor),
+            Self::Sparse(sparse) => sparse.transpose(permutation).map(DenseAccess::accessor),
+            Self::Transpose(transpose) => {
+                transpose.transpose(permutation).map(DenseAccess::accessor)
+            }
+            Self::Unary(unary) => unary.transpose(permutation).map(DenseAccess::accessor),
         }
     }
 
