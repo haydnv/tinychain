@@ -470,36 +470,6 @@ impl Transpose {
         axes.iter().map(|x| self.permutation[*x]).collect()
     }
 
-    pub fn invert_bounds(&self, bounds: Bounds) -> Bounds {
-        let mut source_bounds = Bounds::all(&self.source_shape);
-        for axis in 0..bounds.len() {
-            source_bounds[self.permutation[axis]] = bounds[axis].clone();
-        }
-        source_bounds
-    }
-
-    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
-        assert_eq!(coord.len(), self.permutation.len());
-
-        let mut source_coord = vec![0; coord.len()];
-        for axis in 0..coord.len() {
-            source_coord[self.permutation[axis]] = coord[axis];
-        }
-
-        source_coord
-    }
-
-    pub fn map_coord(&self, source_coord: Coord) -> Coord {
-        assert_eq!(source_coord.len(), self.permutation.len());
-
-        let mut coord = vec![0; source_coord.len()];
-        for axis in 0..source_coord.len() {
-            coord[self.permutation[axis]] = source_coord[axis];
-        }
-
-        coord
-    }
-
     pub fn map_coord_axes(&self, partial_source_coord: Coord, axes: &[usize]) -> Coord {
         assert_eq!(partial_source_coord.len(), axes.len());
 
@@ -520,5 +490,40 @@ impl Transpose {
 
     pub fn shape(&'_ self) -> &'_ Shape {
         &self.shape
+    }
+}
+
+impl Rebase for Transpose {
+    type Invert = Coord;
+    type Map = Coord;
+
+    fn invert_bounds(&self, bounds: Bounds) -> Bounds {
+        let mut source_bounds = Bounds::all(&self.source_shape);
+        for axis in 0..bounds.len() {
+            source_bounds[self.permutation[axis]] = bounds[axis].clone();
+        }
+        source_bounds
+    }
+
+    fn invert_coord(&self, coord: &[u64]) -> Self::Invert {
+        assert_eq!(coord.len(), self.permutation.len());
+
+        let mut source_coord = vec![0; coord.len()];
+        for axis in 0..coord.len() {
+            source_coord[self.permutation[axis]] = coord[axis];
+        }
+
+        source_coord
+    }
+
+    fn map_coord(&self, source_coord: Coord) -> Self::Map {
+        assert_eq!(source_coord.len(), self.permutation.len());
+
+        let mut coord = vec![0; source_coord.len()];
+        for axis in 0..source_coord.len() {
+            coord[self.permutation[axis]] = source_coord[axis];
+        }
+
+        coord
     }
 }
