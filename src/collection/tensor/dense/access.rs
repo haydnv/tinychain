@@ -539,7 +539,8 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListReduce<T> {
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        let (source_bounds, reduce_axis) = self.rebase.invert_bounds(bounds);
+        let reduce_axis = self.rebase.reduce_axis(&bounds);
+        let source_bounds = self.rebase.invert_bounds(bounds);
         let slice = self.source.slice(source_bounds)?;
         BlockListReduce::new(slice, reduce_axis, self.reductor)
     }

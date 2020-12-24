@@ -230,31 +230,41 @@ impl Reduce {
         unimplemented!()
     }
 
-    pub fn invert_bounds(&self, bounds: Bounds) -> (Bounds, usize) {
-        let axis_offset = if bounds.len() < self.axis {
+    pub fn reduce_axis(&self, bounds: &Bounds) -> usize {
+        if bounds.len() < self.axis {
             0
         } else {
-            bounds.to_vec()[..self.axis]
+            bounds[..self.axis]
                 .iter()
                 .fold(0usize, |offset, b| match b {
                     AxisBounds::At(_) => offset + 1,
                     _ => offset,
                 })
-        };
+        }
+    }
+}
 
+impl Rebase for Reduce {
+    type Invert = Bounds;
+    type Map = Coord;
+
+    fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
         if bounds.len() < self.axis {
-            (bounds, self.axis - axis_offset)
+            bounds
         } else {
-            let mut source_bounds = bounds.to_vec();
-            source_bounds.insert(self.axis, AxisBounds::all(self.source_shape[self.axis]));
-            (source_bounds.into(), self.axis - axis_offset)
+            bounds.insert(self.axis, AxisBounds::all(self.source_shape[self.axis]));
+            bounds
         }
     }
 
-    pub fn invert_coord(&self, coord: &[u64]) -> Bounds {
+    fn invert_coord(&self, coord: &[u64]) -> Bounds {
         let mut bounds: Vec<AxisBounds> = coord.iter().map(|i| AxisBounds::At(*i)).collect();
         bounds.insert(self.axis, AxisBounds::all(self.source_shape[self.axis]));
         bounds.into()
+    }
+
+    fn map_coord(&self, _coord: Coord) -> Coord {
+        panic!("Reduced coordinate has no mapping")
     }
 }
 
