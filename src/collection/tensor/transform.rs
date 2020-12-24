@@ -9,6 +9,14 @@ use crate::general::TCResult;
 use super::bounds::{AxisBounds, Bounds, Shape};
 use super::Coord;
 
+pub trait Rebase {
+    fn map(&self, coord: Coord) -> Bounds;
+
+    fn invert_coord(&self, coord: &[u64]) -> Bounds;
+
+    fn invert_bounds(&self, bounds: Bounds) -> Bounds;
+}
+
 #[derive(Clone)]
 pub struct Broadcast {
     source_shape: Shape,
