@@ -11,12 +11,13 @@ use super::Coord;
 
 pub trait Rebase {
     type Invert;
+    type Map;
 
     fn invert_bounds(&self, bounds: Bounds) -> Bounds;
 
     fn invert_coord(&self, coord: &[u64]) -> Self::Invert;
 
-    fn map_coord(&self, coord: Coord) -> Bounds;
+    fn map_coord(&self, coord: Coord) -> Self::Map;
 }
 
 #[derive(Clone)]
@@ -86,6 +87,7 @@ impl Broadcast {
 
 impl Rebase for Broadcast {
     type Invert = Coord;
+    type Map = Bounds;
 
     fn invert_bounds(&self, bounds: Bounds) -> Bounds {
         let source_ndim = self.source_shape.len();
@@ -115,7 +117,7 @@ impl Rebase for Broadcast {
         source_coord
     }
 
-    fn map_coord(&self, coord: Coord) -> Bounds {
+    fn map_coord(&self, coord: Coord) -> Self::Map {
         self.map_bounds(coord.into())
     }
 }
@@ -157,8 +159,13 @@ impl Expand {
     pub fn invert_axes(&self, _axes: Vec<usize>) -> Vec<usize> {
         unimplemented!()
     }
+}
 
-    pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+impl Rebase for Expand {
+    type Invert = Coord;
+    type Map = Coord;
+
+    fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
         if bounds.len() < self.expand {
             bounds.remove(self.expand);
         }
@@ -166,7 +173,7 @@ impl Expand {
         bounds
     }
 
-    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
+    fn invert_coord(&self, coord: &[u64]) -> Self::Invert {
         assert_eq!(coord.len(), self.shape.len());
 
         let mut inverted = Vec::with_capacity(self.source_shape.len());
@@ -179,7 +186,7 @@ impl Expand {
         inverted
     }
 
-    pub fn map_coord(&self, mut coord: Coord) -> Coord {
+    fn map_coord(&self, mut coord: Coord) -> Self::Map {
         assert_eq!(coord.len(), self.source_shape.len());
         coord.insert(self.expand, 0);
         coord
