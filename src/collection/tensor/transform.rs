@@ -341,8 +341,13 @@ impl Slice {
     pub fn size(&self) -> u64 {
         self.shape.size()
     }
+}
 
-    pub fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+impl Rebase for Slice {
+    type Invert = Coord;
+    type Map = Coord;
+
+    fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
         if bounds.is_empty() || bounds == Bounds::all(self.shape()) {
             return self.bounds.clone();
         }
@@ -384,7 +389,9 @@ impl Slice {
         source_bounds.into()
     }
 
-    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
+    fn invert_coord(&self, coord: &[u64]) -> Self::Invert {
+        assert_eq!(coord.len(), self.shape.len());
+
         let mut source_coord = Vec::with_capacity(self.source_shape.len());
         let mut source_axis = 0;
         for axis in 0..self.source_shape.len() {
@@ -400,8 +407,9 @@ impl Slice {
         source_coord
     }
 
-    pub fn map_coord(&self, source_coord: Coord) -> Coord {
+    fn map_coord(&self, source_coord: Coord) -> Self::Map {
         assert_eq!(source_coord.len(), self.source_shape.len());
+
         let mut coord = Vec::with_capacity(self.shape.len());
         for (axis, c) in source_coord.iter().enumerate() {
             if self.elided.contains_key(&axis) {
