@@ -15,15 +15,16 @@ use crate::scalar::value::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::bounds::*;
-use super::super::dense::{DenseAccess, DenseTensor};
+use super::super::dense::{DenseAccess, DenseAccessor, DenseTensor};
 use super::super::stream::*;
 use super::super::transform;
 use super::super::Coord;
+
+use super::combine::SparseCombine;
 use super::{
-    SparseCombine, SparseStream, SparseTable, SparseTensor, TensorAccess, TensorIO,
+    SparseStream, SparseTable, SparseTensor, TensorAccess, TensorIO,
     TensorTransform, ERR_NONBIJECTIVE_WRITE,
 };
-use crate::collection::tensor::dense::DenseAccessor;
 
 pub type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
 
