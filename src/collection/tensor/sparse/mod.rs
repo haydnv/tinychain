@@ -30,7 +30,7 @@ mod combine;
 mod table;
 
 pub use access::*;
-pub use table::SparseTable;
+pub use table::*;
 
 pub type SparseRow = (Coord, Number);
 pub type SparseStream<'a> = Pin<Box<dyn Stream<Item = TCResult<SparseRow>> + Send + Unpin + 'a>>;

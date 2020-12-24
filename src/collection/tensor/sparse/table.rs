@@ -8,7 +8,7 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use crate::class::Instance;
 use crate::collection::schema::{Column, IndexSchema};
-use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
+use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance, TableSlice};
 use crate::error;
 use crate::general::TCResult;
 use crate::scalar::value::number::*;
@@ -17,6 +17,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::bounds::{AxisBounds, Bounds, Shape};
 use super::super::stream::*;
+use super::super::transform::{self, Rebase};
 use super::super::{Coord, TensorAccess};
 
 use super::access::{SparseAccess, SparseAccessor};
@@ -196,17 +197,7 @@ impl SparseAccess for SparseTable {
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        let value = value.into_type(self.dtype);
-
-        let key = coord
-            .into_iter()
-            .map(Number::from)
-            .map(Value::Number)
-            .collect();
-
-        self.table
-            .upsert(&txn_id, key, vec![Value::Number(value)])
-            .await
+        upsert_value(&self.table, txn_id, coord, value).await
     }
 }
 
@@ -220,33 +211,105 @@ impl ReadValueAt for SparseTable {
                 ));
             }
 
-            let selector: HashMap<Id, ColumnBound> = coord
-                .iter()
-                .enumerate()
-                .map(|(axis, at)| (axis.into(), u64_to_value(*at).into()))
-                .collect();
-
-            let slice = self
-                .table
-                .clone()
-                .slice(selector.into())?
-                .select(vec![VALUE.into()])?;
-
-            let mut slice = slice.stream(txn.id()).await?;
-
-            let value = match slice.try_next().await? {
-                Some(mut number) if number.len() == 1 => number.pop().unwrap().try_into(),
-                None => Ok(self.dtype().zero()),
-                _ => Err(error::internal(ERR_CORRUPT)),
-            }?;
-
-            Ok((coord, value))
+            read_value_at(&self.table, txn, coord, self.dtype).await
         })
     }
 }
 
 #[async_trait]
 impl Transact for SparseTable {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.table.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.table.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.table.finalize(txn_id).await
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseTableSlice {
+    table: TableSlice,
+    dtype: NumberType,
+    rebase: transform::Slice,
+}
+
+impl TensorAccess for SparseTableSlice {
+    fn dtype(&self) -> NumberType {
+        self.dtype
+    }
+
+    fn ndim(&self) -> usize {
+        self.rebase.ndim()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.rebase.size()
+    }
+}
+
+#[async_trait]
+impl SparseAccess for SparseTableSlice {
+    fn accessor(self) -> SparseAccessor {
+        SparseAccessor::TableSlice(self)
+    }
+
+    async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
+        let rebase = &self.rebase;
+        let rows = self.table.stream(txn.id()).await?;
+        let filled = rows
+            .and_then(|row| future::ready(unwrap_row(row)))
+            .map_ok(move |(coord, value)| (rebase.map_coord(coord), value));
+
+        let filled: SparseStream<'a> = Box::pin(filled);
+        Ok(filled)
+    }
+
+    async fn filled_at<'a>(&'a self, _txn: &'a Txn, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
+        unimplemented!()
+    }
+
+    async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
+        self.table.count(txn.id()).await
+    }
+
+    async fn filled_in<'a>(&'a self, _txn: &'a Txn, _bounds: Bounds) -> TCResult<SparseStream<'a>> {
+        unimplemented!()
+    }
+
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        let source_coord = self.rebase.invert_coord(&coord);
+        let value = value.into_type(self.dtype);
+        upsert_value(&self.table, txn_id, source_coord, value).await
+    }
+}
+
+impl ReadValueAt for SparseTableSlice {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
+        Box::pin(async move {
+            if !self.shape().contains_coord(&coord) {
+                return Err(error::bad_request(
+                    "Coordinate out of bounds",
+                    Bounds::from(coord),
+                ));
+            }
+
+            let source_coord = self.rebase.invert_coord(&coord);
+            read_value_at(&self.table, txn, source_coord, self.dtype).await
+        })
+    }
+}
+
+#[async_trait]
+impl Transact for SparseTableSlice {
     async fn commit(&self, txn_id: &TxnId) {
         self.table.commit(txn_id).await
     }
@@ -280,6 +343,39 @@ async fn slice_table(mut table: Table, bounds: &'_ Bounds) -> TCResult<Table> {
     }
 
     Ok(table)
+}
+
+async fn read_value_at<T: TableInstance>(table: &T, txn: &Txn, coord: Coord, dtype: NumberType) -> TCResult<(Coord, Number)> {
+    let selector: HashMap<Id, ColumnBound> = coord
+        .iter()
+        .enumerate()
+        .map(|(axis, at)| (axis.into(), u64_to_value(*at).into()))
+        .collect();
+
+    let slice = table
+        .clone()
+        .slice(selector.into())? // TODO: replace with a table.get_row_by_primary_key method
+        .select(vec![VALUE.into()])?;
+
+    let mut slice = slice.stream(txn.id()).await?;
+
+    let value = match slice.try_next().await? {
+        Some(mut number) if number.len() == 1 => number.pop().unwrap().try_into(),
+        None => Ok(dtype.zero()),
+        _ => Err(error::internal(ERR_CORRUPT)),
+    }?;
+
+    Ok((coord, value))
+}
+
+async fn upsert_value<T: TableInstance>(table: &T, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+    let key = coord
+        .into_iter()
+        .map(Number::from)
+        .map(Value::Number)
+        .collect();
+
+    table.upsert(&txn_id, key, vec![Value::Number(value)]).await
 }
 
 fn u64_to_value(u: u64) -> Value {

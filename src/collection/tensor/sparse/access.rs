@@ -22,7 +22,7 @@ use super::super::Coord;
 
 use super::combine::SparseCombine;
 use super::{
-    SparseStream, SparseTable, SparseTensor, TensorAccess, TensorIO, TensorTransform,
+    SparseStream, SparseTable, SparseTableSlice, SparseTensor, TensorAccess, TensorIO, TensorTransform,
     ERR_NONBIJECTIVE_WRITE,
 };
 
@@ -69,6 +69,7 @@ pub enum SparseAccessor {
     Slice(Box<SparseSlice>),
     Reduce(Box<SparseReduce<SparseAccessor>>),
     Table(SparseTable),
+    TableSlice(SparseTableSlice),
     Transpose(Box<SparseTranspose<SparseAccessor>>),
     Unary(Box<SparseUnary>),
 }
@@ -84,6 +85,7 @@ impl TensorAccess for SparseAccessor {
             Self::Slice(slice) => slice.dtype(),
             Self::Reduce(reduce) => reduce.dtype(),
             Self::Table(table) => table.dtype(),
+            Self::TableSlice(slice) => slice.dtype(),
             Self::Transpose(transpose) => transpose.dtype(),
             Self::Unary(unary) => unary.dtype(),
         }
@@ -99,6 +101,7 @@ impl TensorAccess for SparseAccessor {
             Self::Slice(slice) => slice.ndim(),
             Self::Reduce(reduce) => reduce.ndim(),
             Self::Table(table) => table.ndim(),
+            Self::TableSlice(slice) => slice.ndim(),
             Self::Transpose(transpose) => transpose.ndim(),
             Self::Unary(unary) => unary.ndim(),
         }
@@ -114,6 +117,7 @@ impl TensorAccess for SparseAccessor {
             Self::Slice(slice) => slice.shape(),
             Self::Reduce(reduce) => reduce.shape(),
             Self::Table(table) => table.shape(),
+            Self::TableSlice(slice) => slice.shape(),
             Self::Transpose(transpose) => transpose.shape(),
             Self::Unary(unary) => unary.shape(),
         }
@@ -129,6 +133,7 @@ impl TensorAccess for SparseAccessor {
             Self::Slice(slice) => slice.size(),
             Self::Reduce(reduce) => reduce.size(),
             Self::Table(table) => table.size(),
+            Self::TableSlice(slice) => slice.size(),
             Self::Transpose(transpose) => transpose.size(),
             Self::Unary(unary) => unary.size(),
         }
@@ -151,6 +156,7 @@ impl SparseAccess for SparseAccessor {
             Self::Slice(slice) => slice.filled(txn).await,
             Self::Reduce(reduce) => reduce.filled(txn).await,
             Self::Table(table) => table.filled(txn).await,
+            Self::TableSlice(slice) => slice.filled(txn).await,
             Self::Transpose(transpose) => transpose.filled(txn).await,
             Self::Unary(unary) => unary.filled(txn).await,
         }
@@ -174,6 +180,7 @@ impl SparseAccess for SparseAccessor {
             Self::Slice(slice) => slice.filled_count(txn).await,
             Self::Reduce(reduce) => reduce.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
+            Self::TableSlice(slice) => slice.filled_count(txn).await,
             Self::Transpose(transpose) => transpose.filled_count(txn).await,
             Self::Unary(unary) => unary.filled_count(txn).await,
         }
@@ -193,6 +200,7 @@ impl SparseAccess for SparseAccessor {
             Self::Slice(slice) => slice.write_value(txn_id, coord, value).await,
             Self::Reduce(reduce) => reduce.write_value(txn_id, coord, value).await,
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
+            Self::TableSlice(slice) => slice.write_value(txn_id, coord, value).await,
             Self::Transpose(transpose) => transpose.write_value(txn_id, coord, value).await,
             Self::Unary(unary) => unary.write_value(txn_id, coord, value).await,
         }
@@ -210,6 +218,7 @@ impl ReadValueAt for SparseAccessor {
             Self::Slice(slice) => slice.read_value_at(txn, coord),
             Self::Reduce(reduce) => reduce.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
+            Self::TableSlice(slice) => slice.read_value_at(txn, coord),
             Self::Transpose(transpose) => transpose.read_value_at(txn, coord),
             Self::Unary(unary) => unary.read_value_at(txn, coord),
         }
@@ -228,6 +237,7 @@ impl Transact for SparseAccessor {
             Self::Slice(slice) => slice.commit(txn_id).await,
             Self::Reduce(reduce) => reduce.commit(txn_id).await,
             Self::Table(table) => table.commit(txn_id).await,
+            Self::TableSlice(slice) => slice.commit(txn_id).await,
             Self::Transpose(transpose) => transpose.commit(txn_id).await,
             Self::Unary(unary) => unary.commit(txn_id).await,
         }
@@ -243,6 +253,7 @@ impl Transact for SparseAccessor {
             Self::Slice(slice) => slice.rollback(txn_id).await,
             Self::Reduce(reduce) => reduce.rollback(txn_id).await,
             Self::Table(table) => table.rollback(txn_id).await,
+            Self::TableSlice(slice) => slice.rollback(txn_id).await,
             Self::Transpose(transpose) => transpose.rollback(txn_id).await,
             Self::Unary(unary) => unary.rollback(txn_id).await,
         }
@@ -258,6 +269,7 @@ impl Transact for SparseAccessor {
             Self::Slice(slice) => slice.finalize(txn_id).await,
             Self::Reduce(reduce) => reduce.finalize(txn_id).await,
             Self::Table(table) => table.finalize(txn_id).await,
+            Self::TableSlice(slice) => slice.finalize(txn_id).await,
             Self::Transpose(transpose) => transpose.finalize(txn_id).await,
             Self::Unary(unary) => unary.finalize(txn_id).await,
         }
