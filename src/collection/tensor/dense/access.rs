@@ -11,7 +11,7 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::sparse::{SparseAccess, SparseSlice, SparseTensor, SparseTranspose};
 use super::super::stream::*;
-use super::super::transform;
+use super::super::transform::{self, Rebase};
 use super::super::{
     Bounds, Coord, Shape, TensorAccess, TensorIO, TensorTransform, ERR_NONBIJECTIVE_WRITE,
 };

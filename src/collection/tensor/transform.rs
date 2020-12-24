@@ -10,11 +10,13 @@ use super::bounds::{AxisBounds, Bounds, Shape};
 use super::Coord;
 
 pub trait Rebase {
-    fn map(&self, coord: Coord) -> Bounds;
-
-    fn invert_coord(&self, coord: &[u64]) -> Bounds;
+    type Invert;
 
     fn invert_bounds(&self, bounds: Bounds) -> Bounds;
+
+    fn invert_coord(&self, coord: &[u64]) -> Self::Invert;
+
+    fn map_coord(&self, coord: Coord) -> Bounds;
 }
 
 #[derive(Clone)]
@@ -63,38 +65,6 @@ impl Broadcast {
         })
     }
 
-    pub fn invert_bounds(&self, bounds: Bounds) -> Bounds {
-        let source_ndim = self.source_shape.len();
-        let mut source_bounds = Vec::with_capacity(source_ndim);
-        for axis in 0..source_ndim {
-            if self.broadcast[axis + self.offset] {
-                source_bounds.push(AxisBounds::from(0))
-            } else {
-                source_bounds.push(bounds[axis + self.offset].clone())
-            }
-        }
-
-        source_bounds.into()
-    }
-
-    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
-        let source_ndim = self.source_shape.len();
-        let mut source_coord = Vec::with_capacity(source_ndim);
-        for axis in 0..source_ndim {
-            if self.broadcast[axis + self.offset] {
-                source_coord.push(0);
-            } else {
-                source_coord.push(coord[axis + self.offset]);
-            }
-        }
-
-        source_coord
-    }
-
-    pub fn map_coord(&self, coord: Coord) -> impl Iterator<Item = Coord> {
-        self.map_bounds(coord.into()).affected()
-    }
-
     pub fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
         assert_eq!(source_bounds.len(), self.source_shape.len());
 
@@ -111,6 +81,42 @@ impl Broadcast {
 
     pub fn shape(&'_ self) -> &'_ Shape {
         &self.shape
+    }
+}
+
+impl Rebase for Broadcast {
+    type Invert = Coord;
+
+    fn invert_bounds(&self, bounds: Bounds) -> Bounds {
+        let source_ndim = self.source_shape.len();
+        let mut source_bounds = Vec::with_capacity(source_ndim);
+        for axis in 0..source_ndim {
+            if self.broadcast[axis + self.offset] {
+                source_bounds.push(AxisBounds::from(0))
+            } else {
+                source_bounds.push(bounds[axis + self.offset].clone())
+            }
+        }
+
+        source_bounds.into()
+    }
+
+    fn invert_coord(&self, coord: &[u64]) -> Self::Invert {
+        let source_ndim = self.source_shape.len();
+        let mut source_coord = Vec::with_capacity(source_ndim);
+        for axis in 0..source_ndim {
+            if self.broadcast[axis + self.offset] {
+                source_coord.push(0);
+            } else {
+                source_coord.push(coord[axis + self.offset]);
+            }
+        }
+
+        source_coord
+    }
+
+    fn map_coord(&self, coord: Coord) -> Bounds {
+        self.map_bounds(coord.into())
     }
 }
 

@@ -17,13 +17,13 @@ use crate::transaction::{Transact, Txn, TxnId};
 use super::super::bounds::*;
 use super::super::dense::{DenseAccess, DenseAccessor, DenseTensor};
 use super::super::stream::*;
-use super::super::transform;
+use super::super::transform::{self, Rebase};
 use super::super::Coord;
 
 use super::combine::SparseCombine;
 use super::{
-    SparseStream, SparseTable, SparseTensor, TensorAccess, TensorIO,
-    TensorTransform, ERR_NONBIJECTIVE_WRITE,
+    SparseStream, SparseTable, SparseTensor, TensorAccess, TensorIO, TensorTransform,
+    ERR_NONBIJECTIVE_WRITE,
 };
 
 pub type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
@@ -392,6 +392,7 @@ impl<T: Clone + SparseAccess> SparseBroadcast<T> {
         Self { source, rebase }
     }
 
+    // TODO: require values in the input stream to avoid the redundant lookup
     async fn broadcast_coords<'a, S: Stream<Item = TCResult<Coord>> + 'a + Send + Unpin + 'a>(
         &'a self,
         txn: &'a Txn,
@@ -431,15 +432,14 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseBroadcast<T> {
     }
 
     async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
-        let rebase = self.rebase.clone();
-
+        let rebase = &self.rebase;
         let num_coords = self.source.filled_count(txn).await?;
+        let filled = self.source.filled(txn).await?;
 
-        let filled = self
-            .source
-            .filled(txn)
-            .await?
-            .map_ok(move |(coord, _)| stream::iter(rebase.map_coord(coord).map(TCResult::Ok)))
+        let filled = filled
+            .map_ok(move |(coord, _)| {
+                stream::iter(rebase.map_coord(coord).affected().map(TCResult::Ok))
+            })
             .try_flatten();
 
         self.broadcast_coords(txn, filled, num_coords).await
@@ -471,7 +471,9 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseBroadcast<T> {
         let num_coords = count_stream(source_filled_in1).await?;
 
         let filled_in = source_filled_in2
-            .map_ok(move |(coord, _)| stream::iter(rebase.map_coord(coord).map(TCResult::Ok)))
+            .map_ok(move |(coord, _)| {
+                stream::iter(rebase.map_coord(coord).affected().map(TCResult::Ok))
+            })
             .try_flatten();
 
         self.broadcast_coords(txn, filled_in, num_coords).await
@@ -489,6 +491,7 @@ impl<T: SparseAccess> ReadValueAt for SparseBroadcast<T> {
             .source
             .read_value_at(txn, source_coord)
             .map_ok(|(_, val)| (coord, val));
+
         Box::pin(read)
     }
 }
