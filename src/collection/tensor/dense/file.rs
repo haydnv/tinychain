@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::iter::{self, FromIterator};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -197,8 +196,10 @@ impl DenseAccess for BlockListFile {
 
         if !self.shape().contains_bounds(&bounds) {
             return Err(error::bad_request("Bounds out of bounds", bounds));
-        } else if bounds.len() == self.ndim() && bounds.is_coord() {
-            return self.write_value_at(txn_id, bounds.try_into()?, value).await;
+        } else if bounds.len() == self.ndim() {
+            if let Some(coord) = bounds.as_coord() {
+                return self.write_value_at(txn_id, coord, value).await;
+            }
         }
 
         let bounds = self.shape().slice_bounds(bounds);

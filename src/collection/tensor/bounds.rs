@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::fmt;
 use std::iter;
 use std::ops::{self, Deref, DerefMut};
@@ -8,6 +7,8 @@ use itertools::{Itertools, MultiProduct};
 use crate::error;
 use crate::general::{TCResult, TryCastFrom, TryCastInto};
 use crate::scalar::{Bound, Scalar, ScalarInstance, Slice, Value};
+
+use super::Coord;
 
 pub type Coords = MultiProduct<AxisIter>;
 
@@ -256,11 +257,17 @@ impl Bounds {
         true
     }
 
-    pub fn is_coord(&self) -> bool {
-        self.axes.iter().all(|bound| match bound {
-            AxisBounds::At(_) => true,
-            _ => false,
-        })
+    pub fn as_coord(&self) -> Option<Coord> {
+        let mut coord = Coord::new();
+        for bound in &self.axes {
+            if let AxisBounds::At(i) = bound {
+                coord.push(*i);
+            } else {
+                return None;
+            }
+        }
+
+        Some(coord)
     }
 
     pub fn normalize(&mut self, shape: &Shape) {
@@ -360,24 +367,6 @@ impl TryCastFrom<Value> for Bounds {
     fn opt_cast_from(value: Value) -> Option<Bounds> {
         let bounds: Option<Vec<AxisBounds>> = value.opt_cast_into();
         bounds.map(Bounds::from)
-    }
-}
-
-impl TryFrom<Bounds> for Vec<u64> {
-    type Error = error::TCError;
-
-    fn try_from(bounds: Bounds) -> TCResult<Vec<u64>> {
-        let mut coord = Vec::with_capacity(bounds.len());
-        for bound in bounds.axes.into_iter() {
-            match bound {
-                AxisBounds::At(x) => coord.push(x),
-                other => {
-                    return Err(error::bad_request("Not a coordinate", other));
-                }
-            }
-        }
-
-        Ok(coord)
     }
 }
 

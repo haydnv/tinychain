@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::iter::FromIterator;
 
 use async_trait::async_trait;
@@ -116,8 +115,7 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
             selector.try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?
         };
 
-        if bounds.is_coord() {
-            let coord: Vec<u64> = bounds.try_into()?;
+        if let Some(coord) = bounds.as_coord() {
             let value = self.tensor.read_value(&txn, coord).await?;
             Ok(State::Scalar(Scalar::Value(Value::Number(value))))
         } else {
