@@ -7,6 +7,7 @@ use crate::error;
 use crate::general::TCResult;
 
 use super::bounds::{AxisBounds, Bounds, Shape};
+use super::Coord;
 
 #[derive(Clone)]
 pub struct Broadcast {
@@ -68,7 +69,7 @@ impl Broadcast {
         source_bounds.into()
     }
 
-    pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
+    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
         let source_ndim = self.source_shape.len();
         let mut source_coord = Vec::with_capacity(source_ndim);
         for axis in 0..source_ndim {
@@ -82,12 +83,12 @@ impl Broadcast {
         source_coord
     }
 
-    pub fn map_coord(&self, coord: Vec<u64>) -> impl Iterator<Item = Vec<u64>> {
+    pub fn map_coord(&self, coord: Coord) -> impl Iterator<Item = Coord> {
         self.map_bounds(coord.into()).affected()
     }
 
     pub fn map_bounds(&self, source_bounds: Bounds) -> Bounds {
-        assert!(source_bounds.len() == self.source_shape.len());
+        assert_eq!(source_bounds.len(), self.source_shape.len());
 
         let mut bounds = Bounds::all(&self.shape);
 
@@ -151,8 +152,8 @@ impl Expand {
         bounds
     }
 
-    pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
-        assert!(coord.len() == self.shape.len());
+    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
+        assert_eq!(coord.len(), self.shape.len());
 
         let mut inverted = Vec::with_capacity(self.source_shape.len());
         inverted.extend(&coord[..self.expand]);
@@ -164,8 +165,8 @@ impl Expand {
         inverted
     }
 
-    pub fn map_coord(&self, mut coord: Vec<u64>) -> Vec<u64> {
-        assert!(coord.len() == self.source_shape.len());
+    pub fn map_coord(&self, mut coord: Coord) -> Coord {
+        assert_eq!(coord.len(), self.source_shape.len());
         coord.insert(self.expand, 0);
         coord
     }
@@ -237,107 +238,6 @@ impl Reduce {
 }
 
 #[derive(Clone)]
-pub struct Reshape {
-    source_shape: Shape,
-    source_coord_index: Vec<u64>,
-
-    dest_shape: Shape,
-    dest_coord_index: Vec<u64>,
-}
-
-impl Reshape {
-    pub fn new(source_shape: Shape, dest_shape: Shape) -> TCResult<Reshape> {
-        if source_shape.size() != dest_shape.size() {
-            return Err(error::bad_request(
-                &format!("Cannot reshape {} into", source_shape),
-                dest_shape,
-            ));
-        }
-
-        let source_coord_index: Vec<u64> = (0..source_shape.len())
-            .map(|x| source_shape[x + 1..].iter().product())
-            .collect();
-
-        let dest_coord_index: Vec<u64> = (0..dest_shape.len())
-            .map(|x| dest_shape[x + 1..].iter().product())
-            .collect();
-
-        Ok(Reshape {
-            source_shape,
-            source_coord_index,
-            dest_shape,
-            dest_coord_index,
-        })
-    }
-
-    pub fn ndim(&self) -> usize {
-        self.dest_shape.len()
-    }
-
-    pub fn shape(&'_ self) -> &'_ Shape {
-        &self.dest_shape
-    }
-
-    pub fn offset(&self, coord: &[u64]) -> u64 {
-        assert!(coord.len() == self.dest_shape.len());
-
-        self.dest_coord_index
-            .iter()
-            .zip(coord)
-            .map(|(i, c)| i * c)
-            .sum()
-    }
-
-    pub fn offsets(&self, bounds: &Bounds) -> (u64, u64) {
-        let start: Vec<u64> = bounds
-            .iter()
-            .map(|bound| match bound {
-                AxisBounds::At(x) => *x,
-                AxisBounds::In(range) => range.start,
-                AxisBounds::Of(indices) => *indices.iter().min().unwrap(),
-            })
-            .collect();
-
-        let end: Vec<u64> = bounds
-            .iter()
-            .map(|bound| match bound {
-                AxisBounds::At(x) => *x,
-                AxisBounds::In(range) => range.end,
-                AxisBounds::Of(indices) => indices.iter().cloned().fold(0u64, u64::max),
-            })
-            .collect();
-
-        (self.offset(&start), self.offset(&end))
-    }
-
-    pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
-        let offset = self.offset(coord);
-        self.source_coord_index
-            .iter()
-            .zip(self.shape().to_vec().iter())
-            .map(|(i, dim)| (offset / i) % dim)
-            .collect()
-    }
-
-    pub fn map_coord(&self, coord: Vec<u64>) -> Vec<u64> {
-        assert!(coord.len() == self.source_shape.len());
-
-        let offset: u64 = self
-            .source_coord_index
-            .iter()
-            .zip(coord)
-            .map(|(i, c)| i * c)
-            .sum();
-
-        self.dest_coord_index
-            .iter()
-            .zip(self.shape().to_vec().iter())
-            .map(|(i, dim)| (offset / i) % dim)
-            .collect()
-    }
-}
-
-#[derive(Clone)]
 pub struct Slice {
     source_shape: Shape,
     shape: Shape,
@@ -355,7 +255,7 @@ impl Slice {
             return Err(error::bad_request("Invalid bounds", bounds));
         }
 
-        let mut shape: Vec<u64> = Vec::with_capacity(bounds.len());
+        let mut shape: Coord = Vec::with_capacity(bounds.len());
         let mut offset = HashMap::new();
         let mut elided = HashMap::new();
         let mut inverted_axes = Vec::with_capacity(bounds.len());
@@ -434,19 +334,13 @@ impl Slice {
                         let end = start + (range.end - range.start);
                         source_bounds.push((start..end).into());
                     } else {
-                        assert!(range.start == 0);
+                        assert_eq!(range.start, 0);
                         source_bounds.push(self.bounds[axis].clone());
                     }
                 }
                 Of(indices) => {
                     let offset = self.offset.get(&axis).unwrap_or(&0);
-                    source_bounds.push(
-                        indices
-                            .iter()
-                            .map(|i| i + offset)
-                            .collect::<Vec<u64>>()
-                            .into(),
-                    )
+                    source_bounds.push(indices.iter().map(|i| i + offset).collect::<Coord>().into())
                 }
                 At(i) => {
                     let offset = self.offset.get(&axis).unwrap_or(&0);
@@ -459,7 +353,7 @@ impl Slice {
         source_bounds.into()
     }
 
-    pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
+    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
         let mut source_coord = Vec::with_capacity(self.source_shape.len());
         let mut source_axis = 0;
         for axis in 0..self.source_shape.len() {
@@ -475,8 +369,8 @@ impl Slice {
         source_coord
     }
 
-    pub fn map_coord(&self, source_coord: Vec<u64>) -> Vec<u64> {
-        assert!(source_coord.len() == self.source_shape.len());
+    pub fn map_coord(&self, source_coord: Coord) -> Coord {
+        assert_eq!(source_coord.len(), self.source_shape.len());
         let mut coord = Vec::with_capacity(self.shape.len());
         for (axis, c) in source_coord.iter().enumerate() {
             if self.elided.contains_key(&axis) {
@@ -521,7 +415,7 @@ impl Transpose {
             ));
         }
 
-        let mut shape: Vec<u64> = Vec::with_capacity(ndim);
+        let mut shape: Coord = Vec::with_capacity(ndim);
         for axis in &permutation {
             shape.push(source_shape[*axis]);
         }
@@ -545,7 +439,7 @@ impl Transpose {
         source_bounds
     }
 
-    pub fn invert_coord(&self, coord: &[u64]) -> Vec<u64> {
+    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
         assert_eq!(coord.len(), self.permutation.len());
 
         let mut source_coord = vec![0; coord.len()];
@@ -556,7 +450,7 @@ impl Transpose {
         source_coord
     }
 
-    pub fn map_coord(&self, source_coord: Vec<u64>) -> Vec<u64> {
+    pub fn map_coord(&self, source_coord: Coord) -> Coord {
         assert_eq!(source_coord.len(), self.permutation.len());
 
         let mut coord = vec![0; source_coord.len()];
@@ -567,7 +461,7 @@ impl Transpose {
         coord
     }
 
-    pub fn map_coord_axes(&self, partial_source_coord: Vec<u64>, axes: &[usize]) -> Vec<u64> {
+    pub fn map_coord_axes(&self, partial_source_coord: Coord, axes: &[usize]) -> Coord {
         assert_eq!(partial_source_coord.len(), axes.len());
 
         let mut source_coord: HashMap<usize, u64> = axes
