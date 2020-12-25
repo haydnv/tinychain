@@ -1,5 +1,5 @@
 use std::fmt;
-use std::iter;
+use std::iter::{self, FromIterator};
 use std::ops::{self, Deref, DerefMut};
 
 use itertools::{Itertools, MultiProduct};
@@ -464,6 +464,20 @@ impl Shape {
                 self, bounds
             )))
         }
+    }
+
+    pub fn validate_coord(&self, coord: &[u64]) -> TCResult<()> {
+        for (axis, index) in coord.iter().enumerate() {
+            if index >= &self[axis] {
+                return Err(error::unsupported(format!(
+                    "Tensor of shape {} does not contain {}",
+                    self,
+                    Value::from_iter(coord.to_vec())
+                )));
+            }
+        }
+
+        Ok(())
     }
 }
 

@@ -281,9 +281,10 @@ impl SparseAccess for SparseTableSlice {
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        self.shape().validate_coord(&coord)?;
+
         let source_coord = self.rebase.invert_coord(&coord);
-        let value = value.into_type(self.dtype());
-        upsert_value(&self.table, txn_id, source_coord, value).await
+        self.source.write_value(txn_id, source_coord, value).await
     }
 }
 
