@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use futures::future::{self, TryFutureExt};
+use futures::future::{self, try_join_all, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 use log::debug;
@@ -9,12 +9,10 @@ use crate::general::{TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::super::sparse::{SparseAccess, SparseTensor};
+use super::super::sparse::SparseAccess;
 use super::super::stream::*;
 use super::super::transform::{self, Rebase};
-use super::super::{
-    Bounds, Coord, Shape, TensorAccess, TensorIO, TensorTransform, ERR_NONBIJECTIVE_WRITE,
-};
+use super::super::{Bounds, Coord, Shape, TensorAccess, ERR_NONBIJECTIVE_WRITE};
 use super::{Array, DenseAccess, DenseAccessor, DenseTensor};
 
 #[derive(Clone)]
@@ -696,14 +694,8 @@ impl<T: DenseAccess> Transact for BlockListSlice<T> {
 }
 
 #[derive(Clone)]
-pub struct BlockListSparse<T: Clone + SparseAccess> {
-    source: SparseTensor<T>,
-}
-
-impl<T: Clone + SparseAccess> BlockListSparse<T> {
-    pub fn new(source: SparseTensor<T>) -> Self {
-        BlockListSparse { source }
-    }
+pub struct BlockListSparse<T> {
+    source: T,
 }
 
 impl<T: Clone + SparseAccess> TensorAccess for BlockListSparse<T> {
@@ -730,7 +722,7 @@ impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
     type Transpose = BlockListSparse<<T as SparseAccess>::Transpose>;
 
     fn accessor(self) -> DenseAccessor {
-        let source = self.source.into_inner().accessor().into();
+        let source = self.source.accessor();
         DenseAccessor::Sparse(Box::new(BlockListSparse { source }))
     }
 
@@ -742,23 +734,25 @@ impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         let slice = self.source.slice(bounds)?;
-        Ok(BlockListSparse::new(slice))
+        Ok(slice.into())
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         let transpose = self.source.transpose(permutation)?;
-        Ok(BlockListSparse::new(transpose))
+        Ok(transpose.into())
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
-        self.source
-            .clone()
-            .write_value(txn_id, bounds, number)
-            .await
+        let writes = bounds
+            .affected()
+            .into_iter()
+            .map(|coord| self.source.write_value(txn_id, coord, number));
+        try_join_all(writes).await?;
+        Ok(())
     }
 
     fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
-        self.source.write_value_at(txn_id, coord, value)
+        self.source.write_value(txn_id, coord, value)
     }
 }
 
@@ -780,6 +774,12 @@ impl<T: Clone + SparseAccess> Transact for BlockListSparse<T> {
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.source.finalize(txn_id).await
+    }
+}
+
+impl<T> From<T> for BlockListSparse<T> {
+    fn from(source: T) -> Self {
+        BlockListSparse { source }
     }
 }
 

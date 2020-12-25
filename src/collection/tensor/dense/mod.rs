@@ -332,7 +332,7 @@ impl From<BlockListFile> for DenseAccessor {
 
 impl<T: Clone + SparseAccess> From<SparseTensor<T>> for DenseAccessor {
     fn from(sparse: SparseTensor<T>) -> Self {
-        BlockListSparse::new(sparse).accessor()
+        BlockListSparse::from(sparse.into_inner()).accessor()
     }
 }
 
@@ -769,6 +769,6 @@ pub async fn dense_constant(
 pub fn from_sparse<T: Clone + SparseAccess>(
     sparse: SparseTensor<T>,
 ) -> DenseTensor<BlockListSparse<T>> {
-    let blocks = BlockListSparse::new(sparse);
+    let blocks = BlockListSparse::from(sparse.into_inner());
     DenseTensor { blocks }
 }
