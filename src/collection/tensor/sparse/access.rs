@@ -13,17 +13,15 @@ use crate::scalar::value::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::bounds::*;
-use super::super::dense::{
-    BlockListSlice, BlockListTranspose, DenseAccess, DenseAccessor, DenseTensor,
-};
+use super::super::dense::{DenseAccess, DenseAccessor, DenseTensor};
 use super::super::stream::*;
 use super::super::transform::{self, Rebase};
 use super::super::Coord;
 
 use super::combine::SparseCombine;
 use super::{
-    SparseStream, SparseTable, SparseTableSlice, SparseTensor, TensorAccess, TensorIO,
-    TensorTransform, ERR_NONBIJECTIVE_WRITE,
+    SparseStream, SparseTable, SparseTableSlice, SparseTensor, TensorAccess, TensorTransform,
+    ERR_NONBIJECTIVE_WRITE,
 };
 
 pub type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
@@ -308,17 +306,17 @@ impl<T: Clone + DenseAccess> From<DenseTensor<T>> for SparseAccessor {
 }
 
 #[derive(Clone)]
-pub struct DenseToSparse<T: Clone + DenseAccess> {
-    source: DenseTensor<T>, // TODO: replace with just T
+pub struct DenseToSparse<T> {
+    source: T,
 }
 
-impl<T: Clone + DenseAccess> DenseToSparse<T> {
-    pub fn new(source: DenseTensor<T>) -> Self {
+impl<T> DenseToSparse<T> {
+    pub fn new(source: T) -> Self {
         Self { source }
     }
 }
 
-impl<T: Clone + DenseAccess> TensorAccess for DenseToSparse<T> {
+impl<T: DenseAccess> TensorAccess for DenseToSparse<T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -337,13 +335,13 @@ impl<T: Clone + DenseAccess> TensorAccess for DenseToSparse<T> {
 }
 
 #[async_trait]
-impl<T: Clone + DenseAccess> SparseAccess for DenseToSparse<T> {
-    type Slice = DenseToSparse<BlockListSlice<T>>;
-    type Transpose = DenseToSparse<BlockListTranspose<T>>;
+impl<T: DenseAccess> SparseAccess for DenseToSparse<T> {
+    type Slice = DenseToSparse<<T as DenseAccess>::Slice>;
+    type Transpose = DenseToSparse<<T as DenseAccess>::Transpose>;
 
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::Dense(Box::new(DenseToSparse {
-            source: self.source.into_inner().accessor().into(),
+            source: self.source.accessor(),
         }))
     }
 
@@ -380,14 +378,14 @@ impl<T: Clone + DenseAccess> SparseAccess for DenseToSparse<T> {
     }
 }
 
-impl<T: Clone + DenseAccess> ReadValueAt for DenseToSparse<T> {
+impl<T: DenseAccess> ReadValueAt for DenseToSparse<T> {
     fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
         self.source.read_value_at(txn, coord)
     }
 }
 
 #[async_trait]
-impl<T: Clone + DenseAccess> Transact for DenseToSparse<T> {
+impl<T: DenseAccess> Transact for DenseToSparse<T> {
     async fn commit(&self, txn_id: &TxnId) {
         self.source.commit(txn_id).await
     }
@@ -402,7 +400,13 @@ impl<T: Clone + DenseAccess> Transact for DenseToSparse<T> {
 }
 
 impl<T: Clone + DenseAccess> From<DenseTensor<T>> for DenseToSparse<T> {
-    fn from(source: DenseTensor<T>) -> Self {
+    fn from(dense: DenseTensor<T>) -> Self {
+        dense.into_inner().into()
+    }
+}
+
+impl<T: DenseAccess> From<T> for DenseToSparse<T> {
+    fn from(source: T) -> DenseToSparse<T> {
         Self { source }
     }
 }

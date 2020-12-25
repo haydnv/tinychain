@@ -480,6 +480,6 @@ pub async fn create(
 pub fn from_dense<T: Clone + DenseAccess>(
     source: DenseTensor<T>,
 ) -> SparseTensor<DenseToSparse<T>> {
-    let accessor = DenseToSparse::new(source);
+    let accessor = DenseToSparse::new(source.into_inner());
     SparseTensor { accessor }
 }
