@@ -152,12 +152,16 @@ impl Expand {
         })
     }
 
-    pub fn shape(&'_ self) -> &'_ Shape {
-        &self.shape
+    pub fn expand_axis(&self) -> usize {
+        self.expand
     }
 
     pub fn invert_axes(&self, _axes: Vec<usize>) -> Vec<usize> {
         unimplemented!()
+    }
+
+    pub fn shape(&'_ self) -> &'_ Shape {
+        &self.shape
     }
 }
 
@@ -231,16 +235,14 @@ impl Reduce {
     }
 
     pub fn reduce_axis(&self, bounds: &Bounds) -> usize {
-        if bounds.len() < self.axis {
-            0
-        } else {
-            bounds[..self.axis]
-                .iter()
-                .fold(0usize, |offset, b| match b {
-                    AxisBounds::At(_) => offset + 1,
-                    _ => offset,
-                })
+        let mut reduce_axis = self.axis;
+        for bound in bounds.iter() {
+            if bound.is_index() {
+                reduce_axis -= 1;
+            }
         }
+
+        reduce_axis
     }
 }
 
@@ -281,10 +283,7 @@ pub struct Slice {
 impl Slice {
     pub fn new(source_shape: Shape, bounds: Bounds) -> TCResult<Slice> {
         debug!("Slice::new {}[{}]", source_shape, bounds);
-
-        if !source_shape.contains_bounds(&bounds) {
-            return Err(error::bad_request("Invalid bounds", bounds));
-        }
+        source_shape.validate_bounds(&bounds)?;
 
         let mut shape: Coord = Vec::with_capacity(bounds.len());
         let mut offset = HashMap::new();
@@ -470,6 +469,10 @@ impl Transpose {
         axes.iter().map(|x| self.permutation[*x]).collect()
     }
 
+    pub fn invert_permutation(&self, _bounds: &Bounds) -> Vec<usize> {
+        todo!()
+    }
+
     pub fn map_coord_axes(&self, partial_source_coord: Coord, axes: &[usize]) -> Coord {
         assert_eq!(partial_source_coord.len(), axes.len());
 
@@ -486,6 +489,10 @@ impl Transpose {
             }
         }
         coord
+    }
+
+    pub fn permutation(&'_ self) -> &'_ [usize] {
+        &self.permutation
     }
 
     pub fn shape(&'_ self) -> &'_ Shape {

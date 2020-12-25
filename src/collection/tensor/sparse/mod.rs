@@ -19,7 +19,6 @@ use super::dense::{
     dense_constant, from_sparse, BlockListFile, BlockListSparse, DenseAccess, DenseTensor,
 };
 use super::stream::*;
-use super::transform;
 use super::{
     broadcast, Coord, IntoView, TensorAccess, TensorBoolean, TensorCompare, TensorDualIO, TensorIO,
     TensorMath, TensorReduce, TensorTransform, TensorUnary, ERR_NONBIJECTIVE_WRITE,
@@ -57,14 +56,6 @@ impl<T: Clone + SparseAccess> SparseTensor<T> {
 
     pub async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
         self.accessor.filled(txn).await
-    }
-
-    pub async fn filled_at<'a>(
-        &'a self,
-        txn: &'a Txn,
-        axes: Vec<usize>,
-    ) -> TCResult<CoordStream<'a>> {
-        self.accessor.filled_at(txn, axes).await
     }
 
     fn combine<OT: Clone + SparseAccess>(
@@ -409,40 +400,31 @@ impl<T: Clone + SparseAccess> TensorTransform for SparseTensor<T> {
     type Cast = SparseTensor<SparseCast<T>>;
     type Broadcast = SparseTensor<SparseBroadcast<T>>;
     type Expand = SparseTensor<SparseExpand<T>>;
-    type Slice = SparseTensor<SparseSlice>;
-    type Transpose = SparseTensor<SparseTranspose<T>>;
+    type Slice = SparseTensor<<T as SparseAccess>::Slice>;
+    type Transpose = SparseTensor<<T as SparseAccess>::Transpose>;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
         let accessor = SparseCast::new(self.accessor.clone(), dtype);
-
         Ok(accessor.into())
     }
 
     fn broadcast(&self, shape: Shape) -> TCResult<Self::Broadcast> {
-        let rebase = transform::Broadcast::new(self.shape().clone(), shape)?;
-        let accessor = SparseBroadcast::new(self.accessor.clone(), rebase);
-
+        let accessor = SparseBroadcast::new(self.accessor.clone(), shape)?;
         Ok(accessor.into())
     }
 
     fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand> {
-        let rebase = transform::Expand::new(self.shape().clone(), axis)?;
-        let accessor = SparseExpand::new(self.accessor.clone(), rebase);
-
+        let accessor = SparseExpand::new(self.accessor.clone(), axis)?;
         Ok(accessor.into())
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
-        let rebase = transform::Slice::new(self.shape().clone(), bounds)?;
-        let accessor = SparseSlice::new(self.accessor.clone().accessor(), rebase);
-
+        let accessor = self.accessor.clone().slice(bounds)?;
         Ok(accessor.into())
     }
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        let rebase = transform::Transpose::new(self.shape().clone(), permutation)?;
-        let accessor = SparseTranspose::new(self.accessor.clone(), rebase);
-
+        let accessor = self.accessor.clone().transpose(permutation)?;
         Ok(accessor.into())
     }
 }

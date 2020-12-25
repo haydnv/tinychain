@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::iter;
 
 use async_trait::async_trait;
 use futures::future;
@@ -8,7 +7,7 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use crate::class::Instance;
 use crate::collection::schema::{Column, IndexSchema};
-use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance, TableSlice};
+use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::error;
 use crate::general::TCResult;
 use crate::scalar::value::number::*;
@@ -21,7 +20,8 @@ use super::super::transform::{self, Rebase};
 use super::super::{Coord, TensorAccess};
 
 use super::access::{SparseAccess, SparseAccessor};
-use super::{CoordStream, SparseStream};
+use super::SparseStream;
+use crate::collection::tensor::sparse::SparseTranspose;
 
 const VALUE: Label = label("value");
 
@@ -153,6 +153,9 @@ impl TensorAccess for SparseTable {
 
 #[async_trait]
 impl SparseAccess for SparseTable {
+    type Slice = SparseTableSlice;
+    type Transpose = SparseTranspose<Self>;
+
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::Table(self)
     }
@@ -164,36 +167,22 @@ impl SparseAccess for SparseTable {
         Ok(filled)
     }
 
-    async fn filled_at<'a>(
-        &'a self,
-        _txn: &'a Txn,
-        _axes: Vec<usize>,
-    ) -> TCResult<CoordStream<'a>> {
-        // let columns: Vec<Id> = axes.iter().map(|x| (*x).into()).collect();
-        //
-        // let filled_at = self
-        //     .table
-        //     .group_by(columns.to_vec())?;
-        //
-        // let filled_at = filled_at.stream(txn.id().clone())
-        //     .await?
-        //     .map(|coord| unwrap_coord(&coord));
-        //
-        // let filled_at: TCTryStreamOld<Coord> = Box::pin(filled_at);
-        // Ok(filled_at)
-        unimplemented!()
-    }
-
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
         self.table.count(txn.id()).await
     }
 
-    async fn filled_in<'a>(&'a self, _txn: &'a Txn, _bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        // let source = slice_table(self.table.clone().into(), &bounds).await?;
-        // let filled_in = source.stream(txn.id().clone()).await?.map(unwrap_row);
-        // let filled_in: SparseStream = Box::pin(filled_in);
-        // Ok(filled_in)
-        unimplemented!()
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let table = slice_table(self.table.clone(), &bounds)?;
+        let rebase = transform::Slice::new(self.shape.clone(), bounds)?;
+        Ok(SparseTableSlice {
+            source: self,
+            table,
+            rebase,
+        })
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        SparseTranspose::new(self, permutation)
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -233,14 +222,14 @@ impl Transact for SparseTable {
 
 #[derive(Clone)]
 pub struct SparseTableSlice {
-    table: TableSlice,
-    dtype: NumberType,
+    source: SparseTable,
+    table: table::Merged,
     rebase: transform::Slice,
 }
 
 impl TensorAccess for SparseTableSlice {
     fn dtype(&self) -> NumberType {
-        self.dtype
+        self.source.dtype
     }
 
     fn ndim(&self) -> usize {
@@ -258,6 +247,9 @@ impl TensorAccess for SparseTableSlice {
 
 #[async_trait]
 impl SparseAccess for SparseTableSlice {
+    type Slice = Self;
+    type Transpose = SparseTranspose<Self>;
+
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::TableSlice(self)
     }
@@ -273,21 +265,24 @@ impl SparseAccess for SparseTableSlice {
         Ok(filled)
     }
 
-    async fn filled_at<'a>(&'a self, _txn: &'a Txn, _axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        unimplemented!()
-    }
-
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
         self.table.count(txn.id()).await
     }
 
-    async fn filled_in<'a>(&'a self, _txn: &'a Txn, _bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        unimplemented!()
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
+
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        self.source.slice(source_bounds)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        SparseTranspose::new(self, permutation)
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         let source_coord = self.rebase.invert_coord(&coord);
-        let value = value.into_type(self.dtype);
+        let value = value.into_type(self.dtype());
         upsert_value(&self.table, txn_id, source_coord, value).await
     }
 }
@@ -303,7 +298,7 @@ impl ReadValueAt for SparseTableSlice {
             }
 
             let source_coord = self.rebase.invert_coord(&coord);
-            read_value_at(&self.table, txn, source_coord, self.dtype).await
+            read_value_at(&self.table, txn, source_coord, self.dtype()).await
         })
     }
 }
@@ -323,9 +318,13 @@ impl Transact for SparseTableSlice {
     }
 }
 
-async fn slice_table(mut table: Table, bounds: &'_ Bounds) -> TCResult<Table> {
+fn slice_table<T: TableInstance>(
+    table: T,
+    bounds: &Bounds,
+) -> TCResult<<T as TableInstance>::Slice> {
     use AxisBounds::*;
 
+    let mut table_bounds = HashMap::new();
     for (axis, axis_bound) in bounds.to_vec().into_iter().enumerate() {
         let axis: Id = axis.into();
         let column_bound = match axis_bound {
@@ -338,14 +337,18 @@ async fn slice_table(mut table: Table, bounds: &'_ Bounds) -> TCResult<Table> {
             _ => todo!(),
         };
 
-        let bounds: HashMap<Id, ColumnBound> = iter::once((axis, column_bound)).collect();
-        table = table.slice(bounds.into())?
+        table_bounds.insert(axis, column_bound);
     }
 
-    Ok(table)
+    table.slice(table_bounds.into())
 }
 
-async fn read_value_at<T: TableInstance>(table: &T, txn: &Txn, coord: Coord, dtype: NumberType) -> TCResult<(Coord, Number)> {
+async fn read_value_at<T: TableInstance>(
+    table: &T,
+    txn: &Txn,
+    coord: Coord,
+    dtype: NumberType,
+) -> TCResult<(Coord, Number)> {
     let selector: HashMap<Id, ColumnBound> = coord
         .iter()
         .enumerate()
@@ -368,7 +371,12 @@ async fn read_value_at<T: TableInstance>(table: &T, txn: &Txn, coord: Coord, dty
     Ok((coord, value))
 }
 
-async fn upsert_value<T: TableInstance>(table: &T, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+async fn upsert_value<T: TableInstance>(
+    table: &T,
+    txn_id: TxnId,
+    coord: Coord,
+    value: Number,
+) -> TCResult<()> {
     let key = coord
         .into_iter()
         .map(Number::from)

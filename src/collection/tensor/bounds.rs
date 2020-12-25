@@ -49,6 +49,14 @@ impl AxisBounds {
     pub fn all(dim: u64) -> AxisBounds {
         AxisBounds::In(0..dim)
     }
+
+    pub fn is_index(&self) -> bool {
+        if let Self::At(_) = self {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl PartialEq for AxisBounds {
@@ -278,21 +286,21 @@ impl Bounds {
         }
     }
 
-    pub fn size(&self) -> u64 {
-        if self.is_empty() {
-            return 0;
-        }
-
-        let mut size = 1;
+    pub fn to_shape(&self) -> Shape {
+        let mut shape = Vec::with_capacity(self.len());
         for bound in &self.axes {
             match bound {
                 AxisBounds::At(_) => {}
-                AxisBounds::In(range) => size *= range.end - range.start,
-                AxisBounds::Of(indices) => size *= indices.len() as u64,
+                AxisBounds::In(range) => shape.push(range.end - range.start),
+                AxisBounds::Of(indices) => shape.push(indices.len() as u64),
             }
         }
 
-        size
+        shape.into()
+    }
+
+    pub fn size(&self) -> u64 {
+        self.to_shape().size()
     }
 }
 
@@ -446,6 +454,17 @@ impl Shape {
 
         bounds
     }
+
+    pub fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        if self.contains_bounds(bounds) {
+            Ok(())
+        } else {
+            Err(error::unsupported(format!(
+                "Tensor of shape {} does not contain bounds {}",
+                self, bounds
+            )))
+        }
+    }
 }
 
 impl Deref for Shape {
@@ -498,5 +517,11 @@ impl fmt::Display for Shape {
                 .collect::<Vec<String>>()
                 .join(", ")
         )
+    }
+}
+
+impl fmt::Debug for Shape {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }

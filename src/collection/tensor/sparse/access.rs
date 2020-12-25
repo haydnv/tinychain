@@ -1,35 +1,38 @@
-use std::iter;
 use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
-use log::debug;
 
 use crate::class::Instance;
 use crate::collection::stream::GroupStream;
 use crate::error;
-use crate::general::{count_stream, TCBoxTryFuture, TCResult};
+use crate::general::{TCBoxTryFuture, TCResult};
 use crate::scalar::value::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::bounds::*;
-use super::super::dense::{DenseAccess, DenseAccessor, DenseTensor};
+use super::super::dense::{
+    BlockListSlice, BlockListTranspose, DenseAccess, DenseAccessor, DenseTensor,
+};
 use super::super::stream::*;
 use super::super::transform::{self, Rebase};
 use super::super::Coord;
 
 use super::combine::SparseCombine;
 use super::{
-    SparseStream, SparseTable, SparseTableSlice, SparseTensor, TensorAccess, TensorIO, TensorTransform,
-    ERR_NONBIJECTIVE_WRITE,
+    SparseStream, SparseTable, SparseTableSlice, SparseTensor, TensorAccess, TensorIO,
+    TensorTransform, ERR_NONBIJECTIVE_WRITE,
 };
 
 pub type CoordStream<'a> = Pin<Box<dyn Stream<Item = TCResult<Coord>> + Send + Unpin + 'a>>;
 
 #[async_trait]
 pub trait SparseAccess: ReadValueAt + TensorAccess + Transact + 'static {
+    type Slice: Clone + SparseAccess;
+    type Transpose: Clone + SparseAccess;
+
     fn accessor(self) -> SparseAccessor;
 
     fn copy<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, SparseTable> {
@@ -50,11 +53,11 @@ pub trait SparseAccess: ReadValueAt + TensorAccess + Transact + 'static {
 
     async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>>;
 
-    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'_>>;
-
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64>;
 
-    async fn filled_in<'a>(&'a self, txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>>;
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice>;
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
@@ -66,7 +69,6 @@ pub enum SparseAccessor {
     Combine(Box<SparseCombinator<SparseAccessor, SparseAccessor>>),
     Dense(Box<DenseToSparse<DenseAccessor>>),
     Expand(Box<SparseExpand<SparseAccessor>>),
-    Slice(Box<SparseSlice>),
     Reduce(Box<SparseReduce<SparseAccessor>>),
     Table(SparseTable),
     TableSlice(SparseTableSlice),
@@ -82,7 +84,6 @@ impl TensorAccess for SparseAccessor {
             Self::Combine(combinator) => combinator.dtype(),
             Self::Dense(dense) => dense.dtype(),
             Self::Expand(expand) => expand.dtype(),
-            Self::Slice(slice) => slice.dtype(),
             Self::Reduce(reduce) => reduce.dtype(),
             Self::Table(table) => table.dtype(),
             Self::TableSlice(slice) => slice.dtype(),
@@ -98,7 +99,6 @@ impl TensorAccess for SparseAccessor {
             Self::Combine(combinator) => combinator.ndim(),
             Self::Dense(dense) => dense.ndim(),
             Self::Expand(expand) => expand.ndim(),
-            Self::Slice(slice) => slice.ndim(),
             Self::Reduce(reduce) => reduce.ndim(),
             Self::Table(table) => table.ndim(),
             Self::TableSlice(slice) => slice.ndim(),
@@ -114,7 +114,6 @@ impl TensorAccess for SparseAccessor {
             Self::Combine(combinator) => combinator.shape(),
             Self::Dense(dense) => dense.shape(),
             Self::Expand(expand) => expand.shape(),
-            Self::Slice(slice) => slice.shape(),
             Self::Reduce(reduce) => reduce.shape(),
             Self::Table(table) => table.shape(),
             Self::TableSlice(slice) => slice.shape(),
@@ -130,7 +129,6 @@ impl TensorAccess for SparseAccessor {
             Self::Combine(combinator) => combinator.size(),
             Self::Dense(dense) => dense.size(),
             Self::Expand(expand) => expand.size(),
-            Self::Slice(slice) => slice.size(),
             Self::Reduce(reduce) => reduce.size(),
             Self::Table(table) => table.size(),
             Self::TableSlice(slice) => slice.size(),
@@ -142,6 +140,9 @@ impl TensorAccess for SparseAccessor {
 
 #[async_trait]
 impl SparseAccess for SparseAccessor {
+    type Slice = Self;
+    type Transpose = Self;
+
     fn accessor(self) -> SparseAccessor {
         self
     }
@@ -153,21 +154,12 @@ impl SparseAccess for SparseAccessor {
             Self::Combine(combinator) => combinator.filled(txn).await,
             Self::Dense(dense) => dense.filled(txn).await,
             Self::Expand(expand) => expand.filled(txn).await,
-            Self::Slice(slice) => slice.filled(txn).await,
             Self::Reduce(reduce) => reduce.filled(txn).await,
             Self::Table(table) => table.filled(txn).await,
             Self::TableSlice(slice) => slice.filled(txn).await,
             Self::Transpose(transpose) => transpose.filled(txn).await,
             Self::Unary(unary) => unary.filled(txn).await,
         }
-    }
-
-    async fn filled_at<'a>(
-        &'a self,
-        _txn: &'a Txn,
-        _axes: Vec<usize>,
-    ) -> TCResult<CoordStream<'a>> {
-        unimplemented!()
     }
 
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
@@ -177,7 +169,6 @@ impl SparseAccess for SparseAccessor {
             Self::Combine(combinator) => combinator.filled_count(txn).await,
             Self::Dense(dense) => dense.filled_count(txn).await,
             Self::Expand(expand) => expand.filled_count(txn).await,
-            Self::Slice(slice) => slice.filled_count(txn).await,
             Self::Reduce(reduce) => reduce.filled_count(txn).await,
             Self::Table(table) => table.filled_count(txn).await,
             Self::TableSlice(slice) => slice.filled_count(txn).await,
@@ -186,8 +177,40 @@ impl SparseAccess for SparseAccessor {
         }
     }
 
-    async fn filled_in<'a>(&'a self, _txn: &'a Txn, _bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        unimplemented!()
+    fn slice(self, bounds: Bounds) -> TCResult<Self> {
+        match self {
+            Self::Broadcast(broadcast) => broadcast.slice(bounds).map(SparseAccess::accessor),
+            Self::Cast(cast) => cast.slice(bounds).map(SparseAccess::accessor),
+            Self::Combine(combinator) => combinator.slice(bounds).map(SparseAccess::accessor),
+            Self::Dense(dense) => dense.slice(bounds).map(SparseAccess::accessor),
+            Self::Expand(expand) => expand.slice(bounds).map(SparseAccess::accessor),
+            Self::Reduce(reduce) => reduce.slice(bounds).map(SparseAccess::accessor),
+            Self::Table(table) => table.slice(bounds).map(SparseAccess::accessor),
+            Self::TableSlice(slice) => slice.slice(bounds).map(SparseAccess::accessor),
+            Self::Transpose(transpose) => transpose.slice(bounds).map(SparseAccess::accessor),
+            Self::Unary(unary) => unary.slice(bounds).map(SparseAccess::accessor),
+        }
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        match self {
+            Self::Broadcast(broadcast) => {
+                broadcast.transpose(permutation).map(SparseAccess::accessor)
+            }
+            Self::Cast(cast) => cast.transpose(permutation).map(SparseAccess::accessor),
+            Self::Combine(combinator) => combinator
+                .transpose(permutation)
+                .map(SparseAccess::accessor),
+            Self::Dense(dense) => dense.transpose(permutation).map(SparseAccess::accessor),
+            Self::Expand(expand) => expand.transpose(permutation).map(SparseAccess::accessor),
+            Self::Reduce(reduce) => reduce.transpose(permutation).map(SparseAccess::accessor),
+            Self::Table(table) => table.transpose(permutation).map(SparseAccess::accessor),
+            Self::TableSlice(slice) => slice.transpose(permutation).map(SparseAccess::accessor),
+            Self::Transpose(transpose) => {
+                transpose.transpose(permutation).map(SparseAccess::accessor)
+            }
+            Self::Unary(unary) => unary.transpose(permutation).map(SparseAccess::accessor),
+        }
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -197,7 +220,6 @@ impl SparseAccess for SparseAccessor {
             Self::Combine(combinator) => combinator.write_value(txn_id, coord, value).await,
             Self::Dense(dense) => dense.write_value(txn_id, coord, value).await,
             Self::Expand(expand) => expand.write_value(txn_id, coord, value).await,
-            Self::Slice(slice) => slice.write_value(txn_id, coord, value).await,
             Self::Reduce(reduce) => reduce.write_value(txn_id, coord, value).await,
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
             Self::TableSlice(slice) => slice.write_value(txn_id, coord, value).await,
@@ -215,7 +237,6 @@ impl ReadValueAt for SparseAccessor {
             Self::Combine(combinator) => combinator.read_value_at(txn, coord),
             Self::Dense(dense) => dense.read_value_at(txn, coord),
             Self::Expand(expand) => expand.read_value_at(txn, coord),
-            Self::Slice(slice) => slice.read_value_at(txn, coord),
             Self::Reduce(reduce) => reduce.read_value_at(txn, coord),
             Self::Table(table) => table.read_value_at(txn, coord),
             Self::TableSlice(slice) => slice.read_value_at(txn, coord),
@@ -234,7 +255,6 @@ impl Transact for SparseAccessor {
             Self::Combine(combinator) => combinator.commit(txn_id).await,
             Self::Dense(dense) => dense.commit(txn_id).await,
             Self::Expand(expand) => expand.commit(txn_id).await,
-            Self::Slice(slice) => slice.commit(txn_id).await,
             Self::Reduce(reduce) => reduce.commit(txn_id).await,
             Self::Table(table) => table.commit(txn_id).await,
             Self::TableSlice(slice) => slice.commit(txn_id).await,
@@ -250,7 +270,6 @@ impl Transact for SparseAccessor {
             Self::Combine(combinator) => combinator.rollback(txn_id).await,
             Self::Dense(dense) => dense.rollback(txn_id).await,
             Self::Expand(expand) => expand.rollback(txn_id).await,
-            Self::Slice(slice) => slice.rollback(txn_id).await,
             Self::Reduce(reduce) => reduce.rollback(txn_id).await,
             Self::Table(table) => table.rollback(txn_id).await,
             Self::TableSlice(slice) => slice.rollback(txn_id).await,
@@ -266,7 +285,6 @@ impl Transact for SparseAccessor {
             Self::Combine(combinator) => combinator.finalize(txn_id).await,
             Self::Dense(dense) => dense.finalize(txn_id).await,
             Self::Expand(expand) => expand.finalize(txn_id).await,
-            Self::Slice(slice) => slice.finalize(txn_id).await,
             Self::Reduce(reduce) => reduce.finalize(txn_id).await,
             Self::Table(table) => table.finalize(txn_id).await,
             Self::TableSlice(slice) => slice.finalize(txn_id).await,
@@ -291,7 +309,7 @@ impl<T: Clone + DenseAccess> From<DenseTensor<T>> for SparseAccessor {
 
 #[derive(Clone)]
 pub struct DenseToSparse<T: Clone + DenseAccess> {
-    source: DenseTensor<T>,
+    source: DenseTensor<T>, // TODO: replace with just T
 }
 
 impl<T: Clone + DenseAccess> DenseToSparse<T> {
@@ -320,6 +338,9 @@ impl<T: Clone + DenseAccess> TensorAccess for DenseToSparse<T> {
 
 #[async_trait]
 impl<T: Clone + DenseAccess> SparseAccess for DenseToSparse<T> {
+    type Slice = DenseToSparse<BlockListSlice<T>>;
+    type Transpose = DenseToSparse<BlockListTranspose<T>>;
+
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::Dense(Box::new(DenseToSparse {
             source: self.source.into_inner().accessor().into(),
@@ -338,20 +359,6 @@ impl<T: Clone + DenseAccess> SparseAccess for DenseToSparse<T> {
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(&'a self, _txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        // TODO: skip zero-valued coordinates
-        let shape = self.shape();
-        let filled_at = stream::iter(
-            Bounds::all(&Shape::from(
-                axes.iter().map(|x| shape[*x]).collect::<Coord>(),
-            ))
-            .affected(),
-        )
-        .map(Ok);
-
-        Ok(Box::pin(filled_at))
-    }
-
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
         self.source
             .value_stream(txn)
@@ -360,11 +367,12 @@ impl<T: Clone + DenseAccess> SparseAccess for DenseToSparse<T> {
             .await
     }
 
-    async fn filled_in<'a>(&'a self, _txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        match self.source.slice(bounds) {
-            Ok(_source) => Err(error::not_implemented("DenseAccessor::filled_in")),
-            Err(cause) => Err(cause),
-        }
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.source.slice(bounds).map(DenseToSparse::from)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        self.source.transpose(permutation).map(DenseToSparse::from)
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -393,6 +401,12 @@ impl<T: Clone + DenseAccess> Transact for DenseToSparse<T> {
     }
 }
 
+impl<T: Clone + DenseAccess> From<DenseTensor<T>> for DenseToSparse<T> {
+    fn from(source: DenseTensor<T>) -> Self {
+        Self { source }
+    }
+}
+
 #[derive(Clone)]
 pub struct SparseBroadcast<T> {
     source: T,
@@ -400,8 +414,9 @@ pub struct SparseBroadcast<T> {
 }
 
 impl<T: Clone + SparseAccess> SparseBroadcast<T> {
-    pub fn new(source: T, rebase: transform::Broadcast) -> Self {
-        Self { source, rebase }
+    pub fn new(source: T, shape: Shape) -> TCResult<Self> {
+        let rebase = transform::Broadcast::new(source.shape().clone(), shape)?;
+        Ok(Self { source, rebase })
     }
 
     // TODO: require values in the input stream to avoid the redundant lookup
@@ -436,6 +451,9 @@ impl<T: SparseAccess> TensorAccess for SparseBroadcast<T> {
 
 #[async_trait]
 impl<T: Clone + SparseAccess> SparseAccess for SparseBroadcast<T> {
+    type Slice = SparseBroadcast<<T as SparseAccess>::Slice>;
+    type Transpose = SparseTranspose<Self>;
+
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::Broadcast(Box::new(SparseBroadcast {
             source: self.source.accessor(),
@@ -457,38 +475,27 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseBroadcast<T> {
         self.broadcast_coords(txn, filled, num_coords).await
     }
 
-    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        group_axes(self, txn, axes).await
-    }
-
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
+        let rebase = &self.rebase;
         let filled = self.source.filled(txn).await?;
-        let rebase = self.rebase.clone();
         filled
-            .try_fold(0u64, |count, (coord, _)| {
+            .try_fold(0u64, move |count, (coord, _)| {
                 future::ready(Ok(count + rebase.map_bounds(coord.into()).size()))
             })
             .await
     }
 
-    async fn filled_in<'a>(&'a self, txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>> {
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
+
+        let shape = bounds.to_shape();
         let source_bounds = self.rebase.invert_bounds(bounds);
-        let source_filled_in1 = self.source.filled_in(txn, source_bounds.clone());
-        let source_filled_in2 = self.source.filled_in(txn, source_bounds);
-        let (source_filled_in1, source_filled_in2) =
-            try_join!(source_filled_in1, source_filled_in2)?;
+        let source = self.source.slice(source_bounds)?;
+        SparseBroadcast::new(source, shape)
+    }
 
-        let rebase = self.rebase.clone();
-
-        let num_coords = count_stream(source_filled_in1).await?;
-
-        let filled_in = source_filled_in2
-            .map_ok(move |(coord, _)| {
-                stream::iter(rebase.map_coord(coord).affected().map(TCResult::Ok))
-            })
-            .try_flatten();
-
-        self.broadcast_coords(txn, filled_in, num_coords).await
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        SparseTranspose::new(self, permutation)
     }
 
     async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
@@ -555,6 +562,9 @@ impl<T: SparseAccess> TensorAccess for SparseCast<T> {
 
 #[async_trait]
 impl<T: SparseAccess> SparseAccess for SparseCast<T> {
+    type Slice = SparseCast<<T as SparseAccess>::Slice>;
+    type Transpose = SparseCast<<T as SparseAccess>::Transpose>;
+
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::Cast(Box::new(SparseCast {
             source: self.source.accessor(),
@@ -570,20 +580,24 @@ impl<T: SparseAccess> SparseAccess for SparseCast<T> {
         Ok(Box::pin(cast))
     }
 
-    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        self.source.filled_at(txn, axes).await
-    }
-
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
         self.source.filled_count(txn).await
     }
 
-    async fn filled_in<'a>(&'a self, txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        let dtype = self.dtype;
-        let source = self.source.filled_in(txn, bounds).await?;
-        let filled_in = source.map_ok(move |(coord, value)| (coord, value.into_type(dtype)));
-        let filled_in: SparseStream = Box::pin(filled_in);
-        Ok(filled_in)
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let source = self.source.slice(bounds)?;
+        Ok(SparseCast {
+            source,
+            dtype: self.dtype,
+        })
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let source = self.source.transpose(permutation)?;
+        Ok(SparseCast {
+            source,
+            dtype: self.dtype,
+        })
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -694,6 +708,10 @@ impl<L: SparseAccess, R: SparseAccess> TensorAccess for SparseCombinator<L, R> {
 
 #[async_trait]
 impl<L: SparseAccess, R: SparseAccess> SparseAccess for SparseCombinator<L, R> {
+    type Slice = SparseCombinator<<L as SparseAccess>::Slice, <R as SparseAccess>::Slice>;
+    type Transpose =
+        SparseCombinator<<L as SparseAccess>::Transpose, <R as SparseAccess>::Transpose>;
+
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::Combine(Box::new(SparseCombinator {
             left: self.left.accessor(),
@@ -710,10 +728,6 @@ impl<L: SparseAccess, R: SparseAccess> SparseAccess for SparseCombinator<L, R> {
         Ok(self.filled_inner(left, right))
     }
 
-    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        group_axes(self, txn, axes).await
-    }
-
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
         let count = self
             .filled(txn)
@@ -724,11 +738,30 @@ impl<L: SparseAccess, R: SparseAccess> SparseAccess for SparseCombinator<L, R> {
         Ok(count)
     }
 
-    async fn filled_in<'a>(&'a self, txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        let left = self.left.filled_in(txn, bounds.clone());
-        let right = self.right.filled_in(txn, bounds);
-        let (left, right) = try_join!(left, right)?;
-        Ok(self.filled_inner(left, right))
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let left = self.left.slice(bounds.clone())?;
+        let right = self.right.slice(bounds)?;
+        assert_eq!(left.shape(), right.shape());
+
+        Ok(SparseCombinator {
+            left,
+            right,
+            combinator: self.combinator,
+            dtype: self.dtype,
+        })
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let left = self.left.transpose(permutation.clone())?;
+        let right = self.right.transpose(permutation)?;
+        assert_eq!(left.shape(), right.shape());
+
+        Ok(SparseCombinator {
+            left,
+            right,
+            combinator: self.combinator,
+            dtype: self.dtype,
+        })
     }
 
     async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
@@ -769,9 +802,10 @@ pub struct SparseExpand<T> {
     rebase: transform::Expand,
 }
 
-impl<T> SparseExpand<T> {
-    pub fn new(source: T, rebase: transform::Expand) -> Self {
-        Self { source, rebase }
+impl<T: SparseAccess> SparseExpand<T> {
+    pub fn new(source: T, axis: usize) -> TCResult<Self> {
+        let rebase = transform::Expand::new(source.shape().clone(), axis)?;
+        Ok(Self { source, rebase })
     }
 }
 
@@ -795,6 +829,9 @@ impl<T: SparseAccess> TensorAccess for SparseExpand<T> {
 
 #[async_trait]
 impl<T: SparseAccess> SparseAccess for SparseExpand<T> {
+    type Slice = <T as SparseAccess>::Slice;
+    type Transpose = SparseExpand<<T as SparseAccess>::Transpose>;
+
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::Expand(Box::new(SparseExpand {
             source: self.source.accessor(),
@@ -812,23 +849,34 @@ impl<T: SparseAccess> SparseAccess for SparseExpand<T> {
         Ok(Box::pin(filled))
     }
 
-    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        group_axes(self, txn, axes).await
-    }
-
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
         self.source.filled_count(txn).await
     }
 
-    async fn filled_in<'a>(&'a self, txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        let bounds = self.rebase.invert_bounds(bounds);
-        let filled_in = self
-            .source
-            .filled_in(txn, bounds)
-            .await?
-            .map_ok(move |(coord, value)| (self.rebase.map_coord(coord), value));
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
 
-        Ok(Box::pin(filled_in))
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        self.source.slice(source_bounds)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let expand_axis = if let Some(permutation) = &permutation {
+            if permutation.len() != self.ndim() {
+                return Err(error::unsupported(format!(
+                    "Invalid permutation for tensor of shape {}: {:?}",
+                    self.shape(),
+                    permutation
+                )));
+            }
+
+            permutation[self.rebase.expand_axis()]
+        } else {
+            self.ndim() - self.rebase.expand_axis()
+        };
+
+        let source = self.source.transpose(permutation)?;
+        SparseExpand::new(source, expand_axis)
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -872,7 +920,7 @@ pub struct SparseReduce<T: Clone + SparseAccess> {
     reductor: Reductor,
 }
 
-impl<'a, T: Clone + SparseAccess> SparseReduce<T> {
+impl<T: Clone + SparseAccess> SparseReduce<T> {
     pub fn new(
         source: SparseTensor<T>,
         axis: usize,
@@ -883,6 +931,20 @@ impl<'a, T: Clone + SparseAccess> SparseReduce<T> {
             rebase,
             reductor,
         })
+    }
+
+    async fn filled_at<'a>(&'a self, txn: &'a Txn) -> TCResult<CoordStream<'a>> {
+        let reduce_axis = self.rebase.axis();
+
+        let source = self.source.filled(txn).await?;
+
+        let filled_at = source.map_ok(move |(mut coord, _)| {
+            coord.remove(reduce_axis);
+            coord
+        });
+
+        let filled_at: CoordStream<'a> = Box::pin(GroupStream::from(filled_at));
+        Ok(filled_at)
     }
 }
 
@@ -906,6 +968,9 @@ impl<T: Clone + SparseAccess> TensorAccess for SparseReduce<T> {
 
 #[async_trait]
 impl<T: Clone + SparseAccess> SparseAccess for SparseReduce<T> {
+    type Slice = SparseReduce<<T as SparseAccess>::Slice>;
+    type Transpose = SparseTranspose<Self>;
+
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::Reduce(Box::new(SparseReduce {
             source: self.source.into_inner().accessor().into(),
@@ -918,46 +983,20 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseReduce<T> {
         let reductor = self.reductor;
         let source = &self.source;
 
-        let filled = self.filled_at(txn, (0..self.ndim()).collect()).await?;
+        let filled = self.filled_at(txn).await?;
 
         let filled = filled.and_then(move |coord| {
             let source_bounds = self.rebase.invert_coord(&coord);
             let txn = txn.clone();
             Box::pin(async move {
                 let slice = source.slice(source_bounds)?;
-                Ok((
-                    coord,
-                    reductor(&slice.into_inner().accessor().into(), txn).await?,
-                ))
+                let slice = slice.into_inner().accessor().into();
+                let value = reductor(&slice, txn).await?;
+                Ok((coord, value))
             })
         });
 
         Ok(Box::pin(filled))
-    }
-
-    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        let reduce_axis = self.rebase.axis();
-
-        if axes.is_empty() {
-            let filled_at: CoordStream<'_> = Box::pin(stream::empty());
-            return Ok(filled_at);
-        } else if axes.to_vec().into_iter().fold(axes[0], Ord::max) < reduce_axis {
-            return self.source.filled_at(txn, axes).await;
-        }
-
-        let source_axes: Vec<usize> = axes
-            .into_iter()
-            .map(|x| if x < reduce_axis { x } else { x + 1 })
-            .chain(iter::once(reduce_axis))
-            .collect();
-
-        let filled_at = self
-            .source
-            .filled_at(txn, source_axes)
-            .map_ok(GroupStream::from)
-            .await?;
-        let filled_at: CoordStream<'a> = Box::pin(filled_at);
-        Ok(filled_at)
     }
 
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
@@ -967,8 +1006,17 @@ impl<T: Clone + SparseAccess> SparseAccess for SparseReduce<T> {
             .await
     }
 
-    async fn filled_in<'a>(&'a self, _txn: &'a Txn, _bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        Err(error::not_implemented("SparseReduce::filled_in"))
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
+
+        let reduce_axis = self.rebase.reduce_axis(&bounds);
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        let source = self.source.slice(source_bounds)?;
+        SparseReduce::new(source.into_inner().into(), reduce_axis, self.reductor)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        SparseTranspose::new(self, permutation)
     }
 
     async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
@@ -1004,124 +1052,15 @@ impl<T: Clone + SparseAccess> Transact for SparseReduce<T> {
 }
 
 #[derive(Clone)]
-pub struct SparseSlice {
-    source: SparseAccessor,
-    rebase: transform::Slice,
-}
-
-impl SparseSlice {
-    pub fn new(source: SparseAccessor, rebase: transform::Slice) -> Self {
-        Self { source, rebase }
-    }
-}
-
-impl TensorAccess for SparseSlice {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.rebase.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.rebase.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.rebase.size()
-    }
-}
-
-#[async_trait]
-impl SparseAccess for SparseSlice {
-    fn accessor(self) -> SparseAccessor {
-        SparseAccessor::Slice(Box::new(self))
-    }
-
-    async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
-        debug!(
-            "SparseSlice::filled, source bounds: {}",
-            self.rebase.bounds()
-        );
-
-        let rebase = self.rebase.clone();
-        let filled = self
-            .source
-            .filled_in(txn, rebase.bounds().clone())
-            .await?
-            .inspect_ok(|(coord, value)| debug!("source coord: {:?} = {}", coord, value))
-            .map_ok(move |(coord, value)| (rebase.map_coord(coord), value));
-
-        Ok(Box::pin(filled))
-    }
-
-    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        group_axes(self, txn, axes).await
-    }
-
-    async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
-        let count = self
-            .filled(txn)
-            .await?
-            .fold(0u64, |count, _| future::ready(count + 1))
-            .await;
-
-        Ok(count)
-    }
-
-    async fn filled_in<'a>(&'a self, txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        let bounds = self.rebase.invert_bounds(bounds);
-        let filled_in = self
-            .source
-            .filled_in(txn, bounds)
-            .await?
-            .map_ok(move |(coord, value)| (self.rebase.map_coord(coord), value));
-
-        Ok(Box::pin(filled_in))
-    }
-
-    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        let coord = self.rebase.invert_coord(&coord);
-        self.source.write_value(txn_id, coord, value).await
-    }
-}
-
-impl ReadValueAt for SparseSlice {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
-        let source_coord = self.rebase.invert_coord(&coord);
-        let read = self
-            .source
-            .read_value_at(txn, source_coord)
-            .map_ok(|(_, val)| (coord, val));
-        Box::pin(read)
-    }
-}
-
-#[async_trait]
-impl Transact for SparseSlice {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        self.source.finalize(txn_id).await
-    }
-}
-
-#[derive(Clone)]
 pub struct SparseTranspose<T> {
     source: T,
     rebase: transform::Transpose,
 }
 
-impl<T> SparseTranspose<T> {
-    pub fn new(source: T, rebase: transform::Transpose) -> Self {
-        Self { source, rebase }
+impl<T: SparseAccess> SparseTranspose<T> {
+    pub fn new(source: T, permutation: Option<Vec<usize>>) -> TCResult<Self> {
+        let rebase = transform::Transpose::new(source.shape().clone(), permutation)?;
+        Ok(Self { source, rebase })
     }
 }
 
@@ -1145,6 +1084,9 @@ impl<T: SparseAccess> TensorAccess for SparseTranspose<T> {
 
 #[async_trait]
 impl<T: SparseAccess> SparseAccess for SparseTranspose<T> {
+    type Slice = <<T as SparseAccess>::Slice as SparseAccess>::Transpose;
+    type Transpose = <T as SparseAccess>::Transpose;
+
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::Transpose(Box::new(SparseTranspose {
             source: self.source.accessor(),
@@ -1153,28 +1095,29 @@ impl<T: SparseAccess> SparseAccess for SparseTranspose<T> {
     }
 
     async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
-        let ndim = self.ndim();
-        let coords = self.filled_at(txn, (0..ndim).collect()).await?;
-
-        Ok(Box::pin(ValueReader::new(coords, txn, self)))
-    }
-
-    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        group_axes(self, txn, axes).await
+        let num_coords = self.filled_count(txn).await?;
+        let coords = self.source.filled(txn).await?;
+        let coords = coords.map_ok(|(coord, _)| coord); // TODO: forward the values as well
+        let filled = sorted_values(txn, self, coords, num_coords).await?;
+        Ok(Box::pin(filled))
     }
 
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
         self.source.filled_count(txn).await
     }
 
-    async fn filled_in<'a>(&'a self, txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        let filled_in = self
-            .source
-            .filled_in(txn, self.rebase.invert_bounds(bounds))
-            .await?
-            .map_ok(move |(coord, value)| (self.rebase.map_coord(coord), value));
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        self.shape().validate_bounds(&bounds)?;
 
-        Ok(Box::pin(filled_in))
+        let slice_permutation = self.rebase.invert_permutation(&bounds);
+        let source_bounds = self.rebase.invert_bounds(bounds);
+        let source = self.source.slice(source_bounds)?;
+        source.transpose(Some(slice_permutation))
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let permutation = permutation.map(|axes| self.rebase.invert_axes(&axes));
+        self.source.transpose(permutation)
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
@@ -1212,17 +1155,17 @@ impl<T: SparseAccess> Transact for SparseTranspose<T> {
 
 #[derive(Clone)]
 pub struct SparseUnary {
-    source: SparseAccessor,
-    transform: fn(Number) -> Number,
+    source: SparseAccessor, // TODO: can this be a type parameter?
     dtype: NumberType,
+    transform: fn(Number) -> Number,
 }
 
 impl SparseUnary {
     pub fn new(source: SparseAccessor, transform: fn(Number) -> Number, dtype: NumberType) -> Self {
         Self {
             source,
-            transform,
             dtype,
+            transform,
         }
     }
 }
@@ -1247,6 +1190,9 @@ impl TensorAccess for SparseUnary {
 
 #[async_trait]
 impl SparseAccess for SparseUnary {
+    type Slice = Self;
+    type Transpose = Self;
+
     fn accessor(self) -> SparseAccessor {
         SparseAccessor::Unary(Box::new(self))
     }
@@ -1258,19 +1204,26 @@ impl SparseAccess for SparseUnary {
         Ok(Box::pin(cast))
     }
 
-    async fn filled_at<'a>(&'a self, txn: &'a Txn, axes: Vec<usize>) -> TCResult<CoordStream<'a>> {
-        self.source.filled_at(txn, axes).await
-    }
-
     async fn filled_count(&self, txn: &Txn) -> TCResult<u64> {
         self.source.filled_count(txn).await
     }
 
-    async fn filled_in<'a>(&'a self, txn: &'a Txn, bounds: Bounds) -> TCResult<SparseStream<'a>> {
-        let transform = self.transform;
-        let source = self.source.filled_in(txn, bounds).await?;
-        let filled_in = source.map_ok(move |(coord, value)| (coord, transform(value)));
-        Ok(Box::pin(filled_in))
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let source = self.source.slice(bounds)?;
+        Ok(SparseUnary {
+            source: source.accessor(),
+            dtype: self.dtype,
+            transform: self.transform,
+        })
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        let source = self.source.transpose(permutation)?;
+        Ok(SparseUnary {
+            source: source.accessor(),
+            dtype: self.dtype,
+            transform: self.transform,
+        })
     }
 
     async fn write_value(&self, _txn_id: TxnId, _coord: Coord, _value: Number) -> TCResult<()> {
@@ -1303,43 +1256,4 @@ impl Transact for SparseUnary {
     async fn finalize(&self, _txn_id: &TxnId) {
         // no-op
     }
-}
-
-fn group_axes<'a, T: SparseAccess>(
-    accessor: &'a T,
-    txn: &'a Txn,
-    axes: Vec<usize>,
-) -> TCBoxTryFuture<'a, CoordStream<'a>> {
-    Box::pin(async move {
-        if axes.len() > accessor.ndim() {
-            let axes: Vec<String> = axes.iter().map(|x| x.to_string()).collect();
-            return Err(error::bad_request("Axis out of bounds", axes.join(", ")));
-        }
-
-        let sorted_axes: Vec<usize> = itertools::sorted(axes.to_vec()).collect::<Vec<usize>>();
-        if axes == sorted_axes {
-            let filled = accessor.filled(txn).await?;
-            let filled_coords =
-                filled.map_ok(move |(coord, _)| axes.iter().map(|x| coord[*x]).collect::<Coord>());
-
-            let filled_at: CoordStream<'a> = Box::pin(GroupStream::from(filled_coords));
-            Ok(filled_at)
-        } else {
-            let (coords_to_count, coords) = try_join!(
-                accessor.filled_at(txn, sorted_axes.to_vec()),
-                accessor.filled_at(txn, sorted_axes)
-            )?;
-
-            let num_coords = count_stream(coords_to_count).await?;
-            let coords =
-                coords.map_ok(move |coord| axes.iter().map(|x| coord[*x]).collect::<Coord>());
-
-            let filled_at: CoordStream<'a> =
-                sorted_coords(txn, accessor.shape(), coords, num_coords)
-                    .map_ok(Box::pin)
-                    .await?;
-
-            Ok(filled_at)
-        }
-    })
 }

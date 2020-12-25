@@ -9,7 +9,7 @@ use crate::general::{TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
 
-use super::super::sparse::{SparseAccess, SparseSlice, SparseTensor, SparseTranspose};
+use super::super::sparse::{SparseAccess, SparseTensor};
 use super::super::stream::*;
 use super::super::transform::{self, Rebase};
 use super::super::{
@@ -726,8 +726,8 @@ impl<T: Clone + SparseAccess> TensorAccess for BlockListSparse<T> {
 
 #[async_trait]
 impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
-    type Slice = BlockListSparse<SparseSlice>;
-    type Transpose = BlockListSparse<SparseTranspose<T>>;
+    type Slice = BlockListSparse<<T as SparseAccess>::Slice>;
+    type Transpose = BlockListSparse<<T as SparseAccess>::Transpose>;
 
     fn accessor(self) -> DenseAccessor {
         let source = self.source.into_inner().accessor().into();
@@ -747,8 +747,7 @@ impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         let transpose = self.source.transpose(permutation)?;
-        let accessor = transpose.into_inner();
-        Ok(BlockListSparse::new(accessor.into()))
+        Ok(BlockListSparse::new(transpose))
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
