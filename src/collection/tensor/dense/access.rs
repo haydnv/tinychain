@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use futures::future::{self, try_join_all, TryFutureExt};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
-use log::debug;
 
 use crate::error;
 use crate::general::{TCBoxTryFuture, TCResult, TCStream, TCTryStream};
@@ -201,7 +200,7 @@ impl<T: DenseAccess> TensorAccess for BlockListBroadcast<T> {
 
 #[async_trait]
 impl<T: Clone + DenseAccess> DenseAccess for BlockListBroadcast<T> {
-    type Slice = BlockListSlice<Self>;
+    type Slice = BlockListBroadcast<<T as DenseAccess>::Slice>;
     type Transpose = BlockListTranspose<Self>;
 
     fn accessor(self) -> DenseAccessor {
@@ -223,7 +222,12 @@ impl<T: Clone + DenseAccess> DenseAccess for BlockListBroadcast<T> {
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        BlockListSlice::new(self, bounds)
+        self.shape().validate_bounds(&bounds)?;
+
+        let shape = bounds.to_shape();
+        let bounds = self.rebase.invert_bounds(bounds);
+        let source = self.source.slice(bounds)?;
+        BlockListBroadcast::new(source, shape)
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
@@ -586,111 +590,6 @@ impl<T: DenseAccess> Transact for BlockListReduce<T> {
 
     async fn finalize(&self, _txn_id: &TxnId) {
         // no-op
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockListSlice<T> {
-    source: T,
-    rebase: transform::Slice,
-}
-
-impl<T: DenseAccess> BlockListSlice<T> {
-    pub fn new(source: T, bounds: Bounds) -> TCResult<Self> {
-        let rebase = transform::Slice::new(source.shape().clone(), bounds)?;
-        Ok(Self { source, rebase })
-    }
-}
-
-impl<T: DenseAccess> TensorAccess for BlockListSlice<T> {
-    fn dtype(&self) -> NumberType {
-        self.source.dtype()
-    }
-
-    fn ndim(&self) -> usize {
-        self.rebase.ndim()
-    }
-
-    fn shape(&'_ self) -> &'_ Shape {
-        self.rebase.shape()
-    }
-
-    fn size(&self) -> u64 {
-        self.rebase.size()
-    }
-}
-
-#[async_trait]
-impl<T: Clone + DenseAccess> DenseAccess for BlockListSlice<T> {
-    type Slice = <T as DenseAccess>::Slice;
-    type Transpose = BlockListTranspose<Self>;
-
-    fn accessor(self) -> DenseAccessor {
-        let slice = BlockListSlice {
-            source: self.source.accessor(),
-            rebase: self.rebase,
-        };
-
-        DenseAccessor::Slice(Box::new(slice))
-    }
-
-    fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
-        let bounds = self.rebase.invert_bounds(Bounds::all(self.shape()));
-        let values = stream::iter(bounds.affected()).then(move |coord| {
-            self.source
-                .read_value_at(txn, coord)
-                .map_ok(|(_, value)| value)
-        });
-
-        let values: TCTryStream<'a, Number> = Box::pin(values);
-        Box::pin(future::ready(Ok(values)))
-    }
-
-    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        let bounds = self.rebase.invert_bounds(bounds);
-        self.source.slice(bounds)
-    }
-
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        BlockListTranspose::new(self, permutation)
-    }
-
-    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
-        debug!("BlockListSlice::write_value {} at {}", value, bounds);
-
-        let bounds = self.rebase.invert_bounds(bounds);
-        self.source.write_value(txn_id, bounds, value).await
-    }
-
-    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
-        let coord = self.rebase.invert_coord(&coord);
-        self.source.write_value_at(txn_id, coord, value)
-    }
-}
-
-impl<T: DenseAccess> ReadValueAt for BlockListSlice<T> {
-    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
-        let source_coord = self.rebase.invert_coord(&coord);
-        let read = self
-            .source
-            .read_value_at(txn, source_coord)
-            .map_ok(|(_, val)| (coord, val));
-        Box::pin(read)
-    }
-}
-
-#[async_trait]
-impl<T: DenseAccess> Transact for BlockListSlice<T> {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.source.commit(txn_id).await
-    }
-
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.source.rollback(txn_id).await
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        self.source.finalize(txn_id).await
     }
 }
 

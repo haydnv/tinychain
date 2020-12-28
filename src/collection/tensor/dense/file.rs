@@ -369,7 +369,7 @@ impl DenseAccess for BlockListFileSlice {
     type Transpose = BlockListTranspose<Self>;
 
     fn accessor(self) -> DenseAccessor {
-        unimplemented!()
+        DenseAccessor::Slice(self)
     }
 
     fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {

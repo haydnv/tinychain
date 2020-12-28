@@ -50,6 +50,14 @@ impl AxisBounds {
         AxisBounds::In(0..dim)
     }
 
+    pub fn dim(&self) -> u64 {
+        match self {
+            Self::At(_) => 0,
+            Self::In(range) => range.end - range.start,
+            Self::Of(indices) => indices.len() as u64,
+        }
+    }
+
     pub fn is_index(&self) -> bool {
         if let Self::At(_) = self {
             true
@@ -289,10 +297,9 @@ impl Bounds {
     pub fn to_shape(&self) -> Shape {
         let mut shape = Vec::with_capacity(self.len());
         for bound in &self.axes {
-            match bound {
-                AxisBounds::At(_) => {}
-                AxisBounds::In(range) => shape.push(range.end - range.start),
-                AxisBounds::Of(indices) => shape.push(indices.len() as u64),
+            let dim = bound.dim();
+            if dim > 0 {
+                shape.push(dim);
             }
         }
 

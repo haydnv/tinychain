@@ -88,7 +88,7 @@ pub enum DenseAccessor {
     Expand(Box<BlockListExpand<DenseAccessor>>),
     File(BlockListFile),
     Reduce(Box<BlockListReduce<DenseAccessor>>),
-    Slice(Box<BlockListSlice<DenseAccessor>>),
+    Slice(BlockListFileSlice),
     Sparse(Box<BlockListSparse<SparseAccessor>>),
     Transpose(Box<BlockListTranspose<DenseAccessor>>),
     Unary(Box<BlockListUnary<DenseAccessor>>),
@@ -691,8 +691,8 @@ impl<T: Clone + DenseAccess> TensorTransform for DenseTensor<T> {
     type Cast = DenseTensor<BlockListCast<T>>;
     type Broadcast = DenseTensor<BlockListBroadcast<T>>;
     type Expand = DenseTensor<BlockListExpand<T>>;
-    type Slice = DenseTensor<BlockListSlice<T>>;
-    type Transpose = DenseTensor<BlockListTranspose<T>>;
+    type Slice = DenseTensor<<T as DenseAccess>::Slice>;
+    type Transpose = DenseTensor<<T as DenseAccess>::Transpose>;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast> {
         let blocks = BlockListCast::new(self.blocks.clone(), dtype);
@@ -710,12 +710,12 @@ impl<T: Clone + DenseAccess> TensorTransform for DenseTensor<T> {
     }
 
     fn slice(&self, bounds: Bounds) -> TCResult<Self::Slice> {
-        let blocks = BlockListSlice::new(self.blocks.clone(), bounds)?;
+        let blocks = self.blocks.clone().slice(bounds)?;
         Ok(DenseTensor { blocks })
     }
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
-        let blocks = BlockListTranspose::new(self.blocks.clone(), permutation)?;
+        let blocks = self.blocks.clone().transpose(permutation)?;
         Ok(DenseTensor { blocks })
     }
 }
