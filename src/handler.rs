@@ -24,17 +24,17 @@ pub trait Handler: Send + Sync {
         Ok(())
     }
 
-    async fn handle_get(&self, _txn: &Txn, _key: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, _txn: &Txn, _key: Value) -> TCResult<State> {
         Err(error::method_not_allowed(self.subject()))
     }
 
-    async fn get(&self, request: &Request, txn: &Txn, key: Value) -> TCResult<State> {
+    async fn get(self: Box<Self>, request: &Request, txn: &Txn, key: Value) -> TCResult<State> {
         self.authorize(request)?;
         self.handle_get(txn, key).await
     }
 
     async fn handle_put(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         _txn: &Txn,
         _key: Value,
@@ -43,14 +43,20 @@ pub trait Handler: Send + Sync {
         Err(error::method_not_allowed(self.subject()))
     }
 
-    async fn put(&self, request: &Request, txn: &Txn, key: Value, value: State) -> TCResult<()> {
+    async fn put(
+        self: Box<Self>,
+        request: &Request,
+        txn: &Txn,
+        key: Value,
+        value: State,
+    ) -> TCResult<()> {
         self.authorize(request)?;
         self.handle_put(request, txn, key, value).await
     }
 
     // TODO: params: Map<State>
     async fn handle_post(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         _txn: &Txn,
         _params: Map<Scalar>,
@@ -58,17 +64,22 @@ pub trait Handler: Send + Sync {
         Err(error::method_not_allowed(self.subject()))
     }
 
-    async fn post(&self, request: &Request, txn: &Txn, params: Map<Scalar>) -> TCResult<State> {
+    async fn post(
+        self: Box<Self>,
+        request: &Request,
+        txn: &Txn,
+        params: Map<Scalar>,
+    ) -> TCResult<State> {
         self.authorize(request)?;
         self.handle_post(request, txn, params).await
     }
 
-    async fn handle_delete(&self, _txn: &Txn, _key: Value) -> TCResult<()> {
+    async fn handle_delete(self: Box<Self>, _txn: &Txn, _key: Value) -> TCResult<()> {
         Err(error::method_not_allowed(self.subject()))
     }
 
-    async fn delete(&self, _request: &Request, txn: &Txn, key: Value) -> TCResult<()> {
-        // TODO: validate scope
+    async fn delete(self: Box<Self>, request: &Request, txn: &Txn, key: Value) -> TCResult<()> {
+        self.authorize(request)?;
         self.handle_delete(txn, key).await
     }
 }

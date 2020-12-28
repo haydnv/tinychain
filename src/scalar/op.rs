@@ -219,14 +219,14 @@ impl<'a> Handler for GetHandler<'a> {
         Some(SCOPE_EXECUTE.into())
     }
 
-    async fn get(&self, request: &Request, txn: &Txn, key: Value) -> TCResult<State> {
+    async fn get(self: Box<Self>, request: &Request, txn: &Txn, key: Value) -> TCResult<State> {
         self.authorize(request)?;
 
         let (key_id, op) = self.op.clone();
         let mut graph = HashMap::new();
         graph.insert(key_id, State::from(key));
-        if let Some(context) = &self.context {
-            graph.insert(label("self").into(), context.clone());
+        if let Some(context) = self.context {
+            graph.insert(label("self").into(), context);
         }
 
         txn.execute(request, graph, op.to_vec()).await
@@ -244,7 +244,7 @@ impl<'a> Handler for PutHandler<'a> {
         if let Some(context) = &self.context {
             context.class()
         } else {
-            OpDefType::Get.into()
+            OpDefType::Put.into()
         }
     }
 
@@ -253,7 +253,7 @@ impl<'a> Handler for PutHandler<'a> {
     }
 
     async fn handle_put(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         _txn: &Txn,
         _key: Value,
@@ -283,16 +283,20 @@ impl<'a> Handler for PostHandler<'a> {
     }
 
     async fn handle_post(
-        &self,
+        self: Box<Self>,
         request: &Request,
         txn: &Txn,
         params: Map<Scalar>,
     ) -> TCResult<State> {
-        let graph = params
+        let mut graph: HashMap<Id, State> = params
             .into_inner()
             .into_iter()
             .map(|(id, scalar)| (id, State::from(scalar)))
             .collect();
+
+        if let Some(context) = self.context {
+            graph.insert(label("self").into(), context);
+        }
 
         txn.execute(request, graph, self.op.to_vec()).await
     }
@@ -317,7 +321,7 @@ impl<'a> Handler for DeleteHandler<'a> {
         Some(SCOPE_EXECUTE.into())
     }
 
-    async fn handle_delete(&self, _txn: &Txn, _key: Value) -> TCResult<()> {
+    async fn handle_delete(self: Box<Self>, _txn: &Txn, _key: Value) -> TCResult<()> {
         Err(error::not_implemented("OpDef::delete"))
     }
 }

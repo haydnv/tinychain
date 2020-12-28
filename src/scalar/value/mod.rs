@@ -809,7 +809,7 @@ impl<'a> Handler for EqHandler<'a> {
         self.value.class().into()
     }
 
-    async fn handle_get(&self, _txn: &Txn, other: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, _txn: &Txn, other: Value) -> TCResult<State> {
         Ok(State::from(Value::Number(Number::Bool(Boolean::from(
             self.value == &other,
         )))))

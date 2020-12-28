@@ -34,7 +34,7 @@ where
         Some(SCOPE_WRITE.into())
     }
 
-    async fn handle_delete(&self, txn: &Txn, key: Value) -> TCResult<()> {
+    async fn handle_delete(self: Box<Self>, txn: &Txn, key: Value) -> TCResult<()> {
         if key.is_none() {
             self.table.delete(txn.id()).await
         } else {
@@ -63,7 +63,7 @@ where
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, _txn: &Txn, selector: Value) -> TCResult<State> {
         let columns: Vec<Id> = try_into_columns(selector)?;
         self.table
             .clone()
@@ -91,7 +91,7 @@ where
     }
 
     async fn handle_put(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         txn: &Txn,
         key: Value,
@@ -119,7 +119,7 @@ where
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, _txn: &Txn, selector: Value) -> TCResult<State> {
         let limit = selector.try_cast_into(|v| error::bad_request("Invalid limit", v))?;
         Ok(State::from(self.table.clone().limit(limit).into_table()))
     }
@@ -142,7 +142,7 @@ where
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, _txn: &Txn, selector: Value) -> TCResult<State> {
         let columns: Vec<Id> = try_into_columns(selector)?;
         self.table
             .clone()
@@ -169,7 +169,7 @@ where
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, _txn: &Txn, selector: Value) -> TCResult<State> {
         if selector.is_none() {
             self.table
                 .clone()
@@ -202,7 +202,7 @@ where
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, _txn: &Txn, selector: Value) -> TCResult<State> {
         let columns = try_into_columns(selector)?;
         self.table
             .clone()
@@ -230,7 +230,7 @@ where
     }
 
     async fn handle_post(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         txn: &Txn,
         params: Map<Scalar>,
@@ -259,7 +259,7 @@ where
     }
 
     async fn handle_put(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         txn: &Txn,
         key: Value,
@@ -287,7 +287,7 @@ where
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, txn: &Txn, selector: Value) -> TCResult<State> {
         if selector.is_none() {
             let table: Table = self.table.clone().into_table();
             Ok(State::from(table))
@@ -317,7 +317,7 @@ where
     }
 
     async fn handle_post(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         _txn: &Txn,
         params: Map<Scalar>,

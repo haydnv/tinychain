@@ -30,7 +30,7 @@ impl<'a, T: TensorInstance> Handler for AllHandler<'a, T> {
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, txn: &Txn, selector: Value) -> TCResult<State> {
         let all = if selector.is_none() {
             self.tensor.all(txn).await
         } else {
@@ -58,7 +58,7 @@ impl<'a, T: TensorInstance> Handler for AnyHandler<'a, T> {
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, txn: &Txn, selector: Value) -> TCResult<State> {
         let any = if selector.is_none() {
             self.tensor.any(txn).await
         } else {
@@ -89,7 +89,7 @@ impl<'a, T: TensorInstance, R: Fn(&T, &Txn, Value) -> TCResult<State> + Send + S
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, txn: &Txn, selector: Value) -> TCResult<State> {
         (self.read_fn)(self.tensor, txn, selector)
     }
 }
@@ -108,7 +108,7 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, txn: &Txn, selector: Value) -> TCResult<State> {
         let bounds = if selector.is_none() {
             Bounds::all(self.tensor.shape())
         } else {
@@ -125,7 +125,7 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
     }
 
     async fn handle_post(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         _txn: &Txn,
         mut params: Map<Scalar>,
@@ -165,7 +165,7 @@ impl<'a, T: TensorInstance + TensorDualIO<Tensor>> Handler for WriteHandler<'a, 
     }
 
     async fn handle_put(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         txn: &Txn,
         selector: Value,

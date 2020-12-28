@@ -847,7 +847,7 @@ impl<'a> Handler for SelfHandler<'a> {
         self.scalar.class().into()
     }
 
-    async fn handle_get(&self, _txn: &Txn, key: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, _txn: &Txn, key: Value) -> TCResult<State> {
         if key.is_none() {
             return Ok(State::from(self.scalar.clone()));
         } else if let Scalar::Tuple(tuple) = self.scalar {

@@ -172,7 +172,7 @@ impl<'a> Handler for Initializer<'a> {
         self.class.class().into()
     }
 
-    async fn get(&self, request: &Request, txn: &Txn, schema: Value) -> TCResult<State> {
+    async fn get(self: Box<Self>, request: &Request, txn: &Txn, schema: Value) -> TCResult<State> {
         let ctr = OpRef::Get((self.class.extends(), Key::Value(schema)));
         let parent = txn.resolve_op(request, &HashMap::new(), ctr.into()).await?;
         Ok(InstanceExt::new(parent, self.class.clone()).into())

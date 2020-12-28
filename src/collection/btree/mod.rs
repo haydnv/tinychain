@@ -96,7 +96,7 @@ impl<'a, T: BTreeInstance> Handler for CountHandler<'a, T> {
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, txn: &Txn, range: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, txn: &Txn, range: Value) -> TCResult<State> {
         let range = validate_range(range, self.btree.schema())?;
         let count = self.btree.len(txn.id(), range).await?;
         Ok(State::Scalar(Scalar::Value(Value::Number(count.into()))))
@@ -117,7 +117,7 @@ impl<'a, T: BTreeInstance> Handler for DeleteHandler<'a, T> {
         Some(SCOPE_WRITE.into())
     }
 
-    async fn handle_delete(&self, txn: &Txn, range: Value) -> TCResult<()> {
+    async fn handle_delete(self: Box<Self>, txn: &Txn, range: Value) -> TCResult<()> {
         let range = validate_range(range, self.btree.schema())?;
         BTreeInstance::delete(self.btree, txn.id(), range).await
     }
@@ -161,13 +161,13 @@ where
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, txn: &Txn, range: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, txn: &Txn, range: Value) -> TCResult<State> {
         let range = validate_range(range, self.btree.schema())?;
         self.slice(txn, range).await
     }
 
     async fn handle_post(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         txn: &Txn,
         mut params: Map<Scalar>,
@@ -208,13 +208,13 @@ where
         Some(SCOPE_READ.into())
     }
 
-    async fn handle_get(&self, _txn: &Txn, range: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, _txn: &Txn, range: Value) -> TCResult<State> {
         let range = validate_range(range, self.btree.schema())?;
         self.reverse(range)
     }
 
     async fn handle_post(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         _txn: &Txn,
         mut params: Map<Scalar>,
@@ -243,7 +243,7 @@ impl<'a, T: BTreeInstance> Handler for WriteHandler<'a, T> {
     }
 
     async fn handle_put(
-        &self,
+        self: Box<Self>,
         _request: &Request,
         txn: &Txn,
         range: Value,

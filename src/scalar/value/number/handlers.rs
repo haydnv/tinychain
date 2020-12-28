@@ -34,7 +34,7 @@ where
         self.number.class().into()
     }
 
-    async fn handle_get(&self, _txn: &Txn, key: Value) -> TCResult<State> {
+    async fn handle_get(self: Box<Self>, _txn: &Txn, key: Value) -> TCResult<State> {
         let that = T::cast_from(Number::try_from(key)?);
 
         let result: Number = (self.call)(self.number, that).into();
