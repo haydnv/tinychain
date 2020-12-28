@@ -25,7 +25,6 @@ pub async fn sorted_coords<C: Stream<Item = TCResult<Coord>> + Send>(
     Ok(coords)
 }
 
-// TODO: accept a stream of (Coord, Number)
 pub async fn sorted_values<
     'a,
     T: TensorAccess + ReadValueAt + 'a,

@@ -83,7 +83,10 @@ impl BlockListFile {
         while let Some(chunk) = values.next().await {
             let block_id = BlockId::from(i);
             let block = Array::cast_from_values(chunk, dtype)?;
-            let block = file.clone().create_block(txn.id().clone(), block_id, block).await?;
+            let block = file
+                .clone()
+                .create_block(txn.id().clone(), block_id, block)
+                .await?;
 
             debug!("created block {} with {} values", i, block.len());
 

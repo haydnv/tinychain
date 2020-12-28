@@ -423,7 +423,6 @@ impl<T: Clone + SparseAccess> SparseBroadcast<T> {
         Ok(Self { source, rebase })
     }
 
-    // TODO: require values in the input stream to avoid the redundant lookup
     async fn broadcast_coords<'a, S: Stream<Item = TCResult<Coord>> + 'a + Send + Unpin + 'a>(
         &'a self,
         txn: &'a Txn,
@@ -1099,9 +1098,10 @@ impl<T: SparseAccess> SparseAccess for SparseTranspose<T> {
     }
 
     async fn filled<'a>(&'a self, txn: &'a Txn) -> TCResult<SparseStream<'a>> {
+        let rebase = &self.rebase;
         let num_coords = self.filled_count(txn).await?;
         let coords = self.source.filled(txn).await?;
-        let coords = coords.map_ok(|(coord, _)| coord); // TODO: forward the values as well
+        let coords = coords.map_ok(move |(coord, _)| rebase.map_coord(coord));
         let filled = sorted_values(txn, self, coords, num_coords).await?;
         Ok(Box::pin(filled))
     }
