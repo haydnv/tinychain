@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
+use log::debug;
 
 use crate::class::Instance;
 use crate::collection::{from_dense, Collection};
@@ -607,17 +608,22 @@ impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorDualIO<DenseTensor<O
     }
 
     async fn write(&self, txn: &Txn, bounds: Bounds, other: DenseTensor<OT>) -> TCResult<()> {
-        let slice = self.slice(bounds)?;
+        debug!("write dense tensor to dense {}", bounds);
+
+        let coords = bounds.affected();
+        let slice = self.slice(bounds.clone())?;
         let other = other
             .broadcast(slice.shape().clone())?
             .as_type(self.dtype())?;
 
-        let coords = futures::stream::iter(Bounds::all(slice.shape()).affected().map(TCResult::Ok));
-        let values: TCTryStream<(Coord, Number)> =
-            Box::pin(ValueReader::new(coords, txn, &other.blocks));
+        let other_values = other.value_stream(txn).await?;
+        let values = futures::stream::iter(coords).zip(other_values);
 
         values
+            .map(|(coord, r)| r.map(|value| (coord, value)))
+            .inspect_ok(|(coord, value)| debug!("write {} at {:?}", value, coord))
             .map_ok(|(coord, value)| slice.write_value_at(*txn.id(), coord, value))
+            .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
             .await?;
 
@@ -635,6 +641,8 @@ impl<T: Clone + DenseAccess> TensorDualIO<Tensor> for DenseTensor<T> {
     }
 
     async fn write(&self, txn: &Txn, bounds: Bounds, other: Tensor) -> TCResult<()> {
+        debug!("write {} to dense {}", other, bounds);
+
         match other {
             Tensor::Sparse(sparse) => self.write(txn, bounds, sparse.into_dense()).await,
             Tensor::Dense(dense) => self.write(txn, bounds, dense).await,

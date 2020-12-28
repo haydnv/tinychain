@@ -248,6 +248,8 @@ impl DenseAccess for BlockListFile {
 
     fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         Box::pin(async move {
+            debug!("BlockListFile::write_value_at {:?} <- {}", coord, value);
+
             if !self.shape().contains_coord(&coord) {
                 return Err(error::bad_request(
                     "Invalid coordinate",

@@ -4,6 +4,7 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{future, TryFutureExt};
+use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::collection::class::*;
@@ -531,6 +532,8 @@ impl TensorDualIO<Tensor> for Tensor {
     }
 
     async fn write(&self, txn: &Txn, bounds: Bounds, value: Self) -> TCResult<()> {
+        debug!("write {} to {}", value, bounds);
+
         match self {
             Self::Dense(dense) => dense.write(txn, bounds, value).await,
             Self::Sparse(sparse) => sparse.write(txn, bounds, value).await,
