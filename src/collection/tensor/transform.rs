@@ -347,11 +347,11 @@ impl Rebase for Slice {
     type Map = Coord;
 
     fn invert_bounds(&self, mut bounds: Bounds) -> Bounds {
+        bounds.normalize(&self.shape);
+
         if bounds.is_empty() || bounds == Bounds::all(self.shape()) {
             return self.bounds.clone();
         }
-
-        bounds.normalize(&self.shape);
 
         let mut source_bounds = Vec::with_capacity(self.source_shape.len());
         let mut source_axis = 0;

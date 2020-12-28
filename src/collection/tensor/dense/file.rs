@@ -83,9 +83,9 @@ impl BlockListFile {
         while let Some(chunk) = values.next().await {
             let block_id = BlockId::from(i);
             let block = Array::cast_from_values(chunk, dtype)?;
-            file.clone()
-                .create_block(txn.id().clone(), block_id, block)
-                .await?;
+            let block = file.clone().create_block(txn.id().clone(), block_id, block).await?;
+
+            debug!("created block {} with {} values", i, block.len());
 
             i += 1;
         }
@@ -376,10 +376,12 @@ impl DenseAccess for BlockListFileSlice {
 
     fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
         let file = &self.source.file;
-        let bounds = self.rebase.bounds();
+        let mut bounds = self.rebase.bounds().clone();
+        bounds.normalize(self.source.shape());
         let coord_bounds = coord_bounds(self.source.shape());
 
         let values = stream::iter(bounds.affected())
+            .inspect(|coord| debug!("reading value from source coord {:?}", coord))
             .chunks(PER_BLOCK)
             .then(move |coords| {
                 let ndim = coords[0].len();
@@ -401,6 +403,7 @@ impl DenseAccess for BlockListFileSlice {
                         let (block_offsets, new_start) =
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
+                        debug!("reading {} block_offsets", block_offsets.elements());
                         match file.get_block(txn.id(), block_id.into()).await {
                             Ok(block) => {
                                 let array: &Array = block.deref();
