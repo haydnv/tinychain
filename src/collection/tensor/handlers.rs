@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::iter::FromIterator;
 
 use async_trait::async_trait;
@@ -33,12 +32,12 @@ impl<'a, T: TensorInstance> Handler for AllHandler<'a, T> {
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
         let all = if selector.is_none() {
-            self.tensor.all(txn.clone()).await
+            self.tensor.all(txn).await
         } else {
             let bounds =
                 selector.try_cast_into(|v| error::bad_request("Invalid Tensor bounds", v))?;
             let slice = self.tensor.slice(bounds)?;
-            slice.into_view().all(txn.clone()).await
+            slice.into_view().all(txn).await
         };
 
         all.map(Value::from).map(State::from)
@@ -61,12 +60,12 @@ impl<'a, T: TensorInstance> Handler for AnyHandler<'a, T> {
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
         let any = if selector.is_none() {
-            self.tensor.any(txn.clone()).await
+            self.tensor.any(txn).await
         } else {
             let bounds =
                 selector.try_cast_into(|v| error::bad_request("Invalid Tensor bounds", v))?;
             let slice = self.tensor.slice(bounds)?;
-            slice.into_view().any(txn.clone()).await
+            slice.into_view().any(txn).await
         };
 
         any.map(Value::from).map(State::from)
@@ -116,9 +115,8 @@ impl<'a, T: TensorInstance> Handler for SliceHandler<'a, T> {
             selector.try_cast_into(|s| error::bad_request("Expected Tensor bounds but found", s))?
         };
 
-        if bounds.is_coord() {
-            let coord: Vec<u64> = bounds.try_into()?;
-            let value = self.tensor.read_value(&txn, &coord).await?;
+        if let Some(coord) = bounds.as_coord() {
+            let value = self.tensor.read_value(&txn, coord).await?;
             Ok(State::Scalar(Scalar::Value(Value::Number(value))))
         } else {
             let slice = self.tensor.slice(bounds)?;
@@ -186,7 +184,7 @@ impl<'a, T: TensorInstance + TensorDualIO<Tensor>> Handler for WriteHandler<'a, 
                     .await
             }
             State::Collection(Collection::Tensor(tensor)) => {
-                self.tensor.write(txn.clone(), bounds, tensor).await
+                self.tensor.write(txn, bounds, tensor).await
             }
             other => Err(error::bad_request(
                 "Not a valid Tensor value or slice",
@@ -266,19 +264,6 @@ pub fn route<'a, T: TensorInstance + TensorDualIO<Tensor>>(
                             selector,
                         ))
                     }
-                },
-            }),
-            "reshape" => Box::new(GetHandler {
-                tensor,
-                read_fn: |tensor, _txn, selector| {
-                    let shape =
-                        selector.try_cast_into(|v| error::bad_request("Invalid shape", v))?;
-
-                    tensor
-                        .reshape(shape)
-                        .map(IntoView::into_view)
-                        .map(Collection::from)
-                        .map(State::Collection)
                 },
             }),
             "slice" => Box::new(SliceHandler { tensor }),

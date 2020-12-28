@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter::FromIterator;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
@@ -12,7 +11,7 @@ use crate::collection::btree::{self, BTreeFile, BTreeInstance};
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCResult, TCStream};
+use crate::general::{TCResult, TCTryStream};
 use crate::scalar::{Id, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};
 
@@ -38,24 +37,28 @@ impl Index {
         &self.btree
     }
 
-    pub async fn get(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<Option<Vec<Value>>> {
+    pub async fn get<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        key: Vec<Value>,
+    ) -> TCResult<Option<Vec<Value>>> {
         let key = self.schema.validate_key(key)?;
-        let mut rows = self.btree.stream(txn_id, key.into(), false).await?;
-        Ok(rows.next().await)
+        let mut rows = self.btree.stream(&txn_id, key.into(), false).await?;
+        rows.try_next().await
     }
 
     pub async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
         BTreeInstance::is_empty(&self.btree, txn).await
     }
 
-    pub async fn len(&self, txn_id: TxnId) -> TCResult<u64> {
+    pub async fn len(&self, txn_id: &TxnId) -> TCResult<u64> {
         self.btree.len(txn_id, btree::BTreeRange::default()).await
     }
 
-    pub fn index_slice(&self, bounds: Bounds) -> TCResult<IndexSlice> {
+    pub fn index_slice(self, bounds: Bounds) -> TCResult<IndexSlice> {
         debug!("Index::index_slice");
         let bounds = bounds.validate(&self.schema.columns())?;
-        IndexSlice::new(self.btree.clone(), self.schema().clone(), bounds)
+        IndexSlice::new(self.btree, self.schema, bounds)
     }
 
     async fn insert(&self, txn_id: &TxnId, row: Row, reject_extra_columns: bool) -> TCResult<()> {
@@ -81,6 +84,18 @@ impl Index {
             ))
         }
     }
+
+    pub async fn stream_slice<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        bounds: Bounds,
+        reverse: bool,
+    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+        self.validate_bounds(&bounds)?;
+
+        let range = bounds.into_btree_range(&self.schema.columns())?;
+        self.btree.stream(txn_id, range, reverse).await
+    }
 }
 
 impl Instance for Index {
@@ -93,15 +108,21 @@ impl Instance for Index {
 
 #[async_trait]
 impl TableInstance for Index {
-    type Stream = TCStream<Vec<Value>>;
+    type OrderBy = IndexSlice;
+    type Reverse = IndexSlice;
+    type Slice = IndexSlice;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    fn into_table(self) -> Table {
+        Table::Index(self.into())
+    }
+
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         self.len(txn_id).await
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+    async fn delete(&self, txn_id: &TxnId) -> TCResult<()> {
         self.btree
-            .delete(&txn_id, btree::BTreeRange::default())
+            .delete(txn_id, btree::BTreeRange::default())
             .await
     }
 
@@ -118,31 +139,26 @@ impl TableInstance for Index {
         self.schema.values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         if self.schema.starts_with(&order) {
-            if reverse {
-                self.reversed()
-            } else {
-                Ok(self.clone().into())
-            }
+            Ok(IndexSlice::all(self.btree, self.schema, reverse))
         } else {
-            let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
             Err(error::bad_request(
                 &format!("Index with schema {} does not support order", self.schema),
-                order.join(", "),
+                Value::from_iter(order),
             ))
         }
     }
 
-    fn reversed(&self) -> TCResult<Table> {
-        Ok(IndexSlice::all(self.btree.clone(), self.schema.clone(), true).into())
+    fn reversed(self) -> TCResult<Self::Reverse> {
+        Ok(IndexSlice::all(self.btree, self.schema, true).into())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+    fn slice(self, bounds: Bounds) -> TCResult<IndexSlice> {
         self.index_slice(bounds).map(|is| is.into())
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         debug!("Index::stream");
 
         self.btree
@@ -198,7 +214,7 @@ impl TableInstance for Index {
         }
     }
 
-    async fn update(self, txn: Txn, row: Row) -> TCResult<()> {
+    async fn update(&self, txn: &Txn, row: Row) -> TCResult<()> {
         let key: btree::Key = self.schema().values_from_row(row, false)?;
         self.btree
             .update(txn.id(), btree::BTreeRange::default(), &key)
@@ -233,8 +249,8 @@ pub struct ReadOnly {
 }
 
 impl ReadOnly {
-    pub async fn copy_from(
-        source: Table,
+    pub async fn copy_from<T: TableInstance>(
+        source: T,
         txn: Txn,
         key_columns: Option<Vec<Id>>,
     ) -> TCResult<ReadOnly> {
@@ -246,16 +262,17 @@ impl ReadOnly {
             let btree =
                 BTreeFile::create(&txn.subcontext_tmp().await?, schema.clone().into()).await?;
 
-            let rows = source.select(columns)?.stream(txn.id().clone()).await?;
-            btree.insert_from(txn.id(), rows).await?;
+            let source = source.select(columns)?;
+            let rows = source.stream(txn.id()).await?;
+            btree.try_insert_from(txn.id(), rows).await?;
             (schema, btree)
         } else {
             let btree =
                 BTreeFile::create(&txn.subcontext_tmp().await?, source_schema.clone().into())
                     .await?;
 
-            let rows = source.stream(txn.id().clone()).await?;
-            btree.insert_from(txn.id(), rows).await?;
+            let rows = source.stream(txn.id()).await?;
+            btree.try_insert_from(txn.id(), rows).await?;
             (source_schema, btree)
         };
 
@@ -287,10 +304,16 @@ impl Instance for ReadOnly {
 
 #[async_trait]
 impl TableInstance for ReadOnly {
-    type Stream = <Index as TableInstance>::Stream;
+    type OrderBy = Self;
+    type Reverse = Self;
+    type Slice = Self;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        self.index.clone().count(txn_id).await
+    fn into_table(self) -> Table {
+        Table::ROIndex(self.into())
+    }
+
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
+        self.index.count(txn_id).await
     }
 
     fn key(&'_ self) -> &'_ [Column] {
@@ -301,29 +324,29 @@ impl TableInstance for ReadOnly {
         self.index.values()
     }
 
-    fn order_by(&self, order: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(self, order: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         self.index.validate_order(&order)?;
 
         if reverse {
-            self.reversed()
+            Ok(self.into_reversed())
         } else {
-            Ok(self.clone().into())
+            Ok(self)
         }
     }
 
-    fn reversed(&self) -> TCResult<Table> {
-        Ok(self.clone().into_reversed().into())
+    fn reversed(self) -> TCResult<Self::Reverse> {
+        Ok(self.into_reversed())
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
         self.validate_bounds(&bounds)?;
         self.index
             .slice_index(bounds)
-            .map(|index| ReadOnly { index }.into())
+            .map(|index| ReadOnly { index })
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
-        self.index.clone().stream(txn_id).await
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+        self.index.stream(txn_id).await
     }
 
     fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
@@ -453,15 +476,20 @@ impl TableIndex {
         ))
     }
 
-    pub async fn get(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<Option<Vec<Value>>> {
+    pub async fn get<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        key: Vec<Value>,
+    ) -> TCResult<Option<Vec<Value>>> {
         self.primary.get(txn_id, key).await
     }
 
-    pub async fn get_owned(self, txn_id: TxnId, key: Vec<Value>) -> TCResult<Option<Vec<Value>>> {
-        self.get(txn_id, key).await
-    }
-
-    pub async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
+    pub async fn insert(
+        &self,
+        txn_id: &TxnId,
+        key: Vec<Value>,
+        values: Vec<Value>,
+    ) -> TCResult<()> {
         if self.get(txn_id, key.to_vec()).await?.is_some() {
             let key: Vec<String> = key.iter().map(|v| v.to_string()).collect();
             Err(error::bad_request(
@@ -469,7 +497,7 @@ impl TableIndex {
                 format!("[{}]", key.join(", ")),
             ))
         } else {
-            self.upsert(&txn_id, key, values).await
+            self.upsert(txn_id, key, values).await
         }
     }
 
@@ -479,8 +507,8 @@ impl TableIndex {
         key: Vec<Value>,
         values: Vec<Value>,
     ) -> TCResult<()> {
-        if let Some(row) = self.get(*txn_id, key.to_vec()).await? {
-            let row = self.primary.schema.row_from_values(row)?;
+        if let Some(row) = self.get(txn_id, key.to_vec()).await? {
+            let row = self.primary.schema.row_from_values(row.to_vec())?;
             self.delete_row(txn_id, row.clone()).await?;
         }
 
@@ -495,6 +523,15 @@ impl TableIndex {
         try_join_all(inserts).await?;
         Ok(())
     }
+
+    pub async fn stream_slice<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        bounds: Bounds,
+        reverse: bool,
+    ) -> TCResult<TCTryStream<'a, Vec<Value>>> {
+        self.primary.stream_slice(txn_id, bounds, reverse).await
+    }
 }
 
 impl Instance for TableIndex {
@@ -507,17 +544,23 @@ impl Instance for TableIndex {
 
 #[async_trait]
 impl TableInstance for TableIndex {
-    type Stream = <Index as TableInstance>::Stream;
+    type OrderBy = Merged;
+    type Reverse = Merged;
+    type Slice = Merged;
 
-    async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+    fn into_table(self) -> Table {
+        Table::Table(self.into())
+    }
+
+    async fn count(&self, txn_id: &TxnId) -> TCResult<u64> {
         self.primary.count(txn_id).await
     }
 
-    async fn delete(self, txn_id: TxnId) -> TCResult<()> {
+    async fn delete(&self, txn_id: &TxnId) -> TCResult<()> {
         let mut deletes = Vec::with_capacity(self.auxiliary.len() + 1);
         deletes.push(self.primary.delete(txn_id));
         for index in self.auxiliary.values() {
-            deletes.push(index.clone().delete(txn_id));
+            deletes.push(index.delete(txn_id));
         }
 
         try_join_all(deletes).await?;
@@ -537,7 +580,7 @@ impl TableInstance for TableIndex {
         Ok(())
     }
 
-    async fn insert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
+    async fn insert(&self, txn_id: &TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
         TableIndex::insert(self, txn_id, key, values).await
     }
 
@@ -549,17 +592,8 @@ impl TableInstance for TableIndex {
         self.primary.values()
     }
 
-    fn order_by(&self, columns: Vec<Id>, reverse: bool) -> TCResult<Table> {
+    fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
         self.validate_order(&columns)?;
-
-        if self.primary.validate_order(&columns).is_ok() {
-            let ordered = TableSlice::new(self.clone(), Bounds::default())?;
-            return if reverse {
-                ordered.reversed()
-            } else {
-                Ok(ordered.into())
-            };
-        }
 
         let selection = TableSlice::new(self.clone(), Bounds::default())?;
         let mut merge_source = MergeSource::Table(selection);
@@ -583,7 +617,7 @@ impl TableInstance for TableIndex {
                         Value::from_iter(subset.to_vec())
                     );
 
-                    let index_slice = self.primary.index_slice(Bounds::default())?;
+                    let index_slice = self.primary.clone().index_slice(Bounds::default())?;
                     let merged = Merged::new(merge_source, index_slice)?;
 
                     if columns.is_empty() {
@@ -594,7 +628,7 @@ impl TableInstance for TableIndex {
                         };
                     }
 
-                    merge_source = MergeSource::Merge(Arc::new(merged));
+                    merge_source = MergeSource::Merge(Box::new(merged));
                 } else {
                     debug!(
                         "primary key does not support order {}",
@@ -613,7 +647,7 @@ impl TableInstance for TableIndex {
                                 Value::from_iter(subset.to_vec())
                             );
 
-                            let index_slice = index.index_slice(Bounds::default())?;
+                            let index_slice = index.clone().index_slice(Bounds::default())?;
                             let merged = Merged::new(merge_source, index_slice)?;
 
                             if columns.is_empty() {
@@ -624,7 +658,7 @@ impl TableInstance for TableIndex {
                                 };
                             }
 
-                            merge_source = MergeSource::Merge(Arc::new(merged));
+                            merge_source = MergeSource::Merge(Box::new(merged));
                             break;
                         } else {
                             debug!(
@@ -650,20 +684,13 @@ impl TableInstance for TableIndex {
         }
     }
 
-    fn reversed(&self) -> TCResult<Table> {
+    fn reversed(self) -> TCResult<Self::Reverse> {
         Err(error::unsupported(
             "Cannot reverse a Table itself, consider reversing a slice of the table instead",
         ))
     }
 
-    fn slice(&self, bounds: Bounds) -> TCResult<Table> {
-        if self.primary.validate_bounds(&bounds).is_ok() {
-            debug!("primary key can slice bounds {}...", bounds);
-            return TableSlice::new(self.clone(), bounds).map(|t| t.into());
-        }
-
-        debug!("primary key cannot slice bounds {}", bounds);
-
+    fn slice(self, bounds: Bounds) -> TCResult<Merged> {
         let columns: Vec<Id> = self
             .primary
             .schema()
@@ -692,28 +719,28 @@ impl TableInstance for TableIndex {
                 if self.primary.validate_bounds(&subset).is_ok() {
                     debug!("primary key can slice {}", subset);
 
-                    let index_slice = self.primary.index_slice(subset)?;
+                    let index_slice = self.primary.clone().index_slice(subset)?;
                     let merged = Merged::new(merge_source, index_slice)?;
 
                     bounds = &bounds[i..];
                     if bounds.is_empty() {
-                        return Ok(merged.into());
+                        return Ok(merged);
                     }
 
-                    merge_source = MergeSource::Merge(Arc::new(merged));
+                    merge_source = MergeSource::Merge(Box::new(merged));
                 } else {
                     for (name, index) in self.auxiliary.iter() {
                         if index.validate_bounds(&subset).is_ok() {
                             debug!("index {} can slice {}", name, subset);
-                            let index_slice = index.index_slice(subset)?;
+                            let index_slice = index.clone().index_slice(subset)?;
                             let merged = Merged::new(merge_source, index_slice)?;
 
                             bounds = &bounds[i..];
                             if bounds.is_empty() {
-                                return Ok(merged.into());
+                                return Ok(merged);
                             }
 
-                            merge_source = MergeSource::Merge(Arc::new(merged));
+                            merge_source = MergeSource::Merge(Box::new(merged));
                             break;
                         }
                     }
@@ -731,7 +758,7 @@ impl TableInstance for TableIndex {
         }
     }
 
-    async fn stream(self, txn_id: TxnId) -> TCResult<Self::Stream> {
+    async fn stream<'a>(&'a self, txn_id: &'a TxnId) -> TCResult<TCTryStream<'a, Vec<Value>>> {
         self.primary.stream(txn_id).await
     }
 
@@ -830,7 +857,7 @@ impl TableInstance for TableIndex {
         Ok(())
     }
 
-    async fn update(self, txn: Txn, update: Row) -> TCResult<()> {
+    async fn update(&self, txn: &Txn, update: Row) -> TCResult<()> {
         for col in self.primary.schema().key() {
             if update.contains_key(col.name()) {
                 return Err(error::bad_request(
@@ -844,25 +871,24 @@ impl TableInstance for TableIndex {
         let update = schema.validate_row_partial(update)?;
 
         let index = self.clone().index(txn.clone(), None).await?;
+        let index = index.stream(txn.id()).await?;
 
-        let txn_id = txn.id();
         index
-            .stream(*txn_id)
-            .await?
-            .map(|values| schema.row_from_values(values))
-            .map_ok(|row| self.update_row(*txn_id, row, update.clone()))
+            .map(|values| values.and_then(|values| schema.row_from_values(values)))
+            .map_ok(|row| self.update_row(txn.id(), row, update.clone()))
             .try_buffer_unordered(2)
             .try_fold((), |_, _| future::ready(Ok(())))
-            .await
+            .await?;
+
+        Ok(())
     }
 
-    async fn update_row(&self, txn_id: TxnId, row: Row, update: Row) -> TCResult<()> {
+    async fn update_row(&self, txn_id: &TxnId, row: Row, update: Row) -> TCResult<()> {
         let mut updated_row = row.clone();
         updated_row.extend(update);
         let (key, values) = self.primary.schema.key_values_from_row(updated_row)?;
-        let txn_id_clone = txn_id;
-        self.delete_row(&txn_id, row)
-            .and_then(|()| self.insert(txn_id_clone, key, values))
+        self.delete_row(txn_id, row)
+            .and_then(|()| self.insert(txn_id, key, values))
             .await
     }
 

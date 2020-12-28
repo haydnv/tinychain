@@ -91,7 +91,7 @@ impl ChainClass for ChainType {
 pub trait ChainInstance: Instance {
     type Class: ChainClass;
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Value>>;
+    async fn to_stream(&'_ self, txn: Txn) -> TCResult<TCStream<'_, Value>>;
 }
 
 #[derive(Clone)]
@@ -113,7 +113,7 @@ impl Instance for Chain {
 impl ChainInstance for Chain {
     type Class = ChainType;
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&'_ self, txn: Txn) -> TCResult<TCStream<'_, Value>> {
         match self {
             Self::Null(nc) => nc.to_stream(txn).await,
         }

@@ -24,16 +24,12 @@ pub type File<B> = file::File<B>;
 
 pub struct Block<'a, B: BlockData> {
     file: &'a File<B>,
-    block_id: &'a BlockId,
+    block_id: BlockId,
     lock: TxnLockReadGuard<B>,
 }
 
 impl<'a, B: BlockData> Block<'a, B> {
-    pub fn new(
-        file: &'a File<B>,
-        block_id: &'a BlockId,
-        lock: TxnLockReadGuard<B>,
-    ) -> Block<'a, B> {
+    pub fn new(file: &'a File<B>, block_id: BlockId, lock: TxnLockReadGuard<B>) -> Block<'a, B> {
         Block {
             file,
             block_id,
@@ -75,7 +71,7 @@ impl<'a, B: BlockData> fmt::Display for Block<'a, B> {
 
 pub struct BlockMut<'a, B: BlockData> {
     file: &'a File<B>,
-    block_id: &'a BlockId,
+    block_id: BlockId,
     lock: TxnLockWriteGuard<B>,
 }
 

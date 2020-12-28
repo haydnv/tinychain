@@ -5,7 +5,7 @@ use futures::TryFutureExt;
 
 use crate::class::{Class, NativeClass, TCType};
 use crate::error;
-use crate::general::{CastInto, TCResult, TCStream, TryCastFrom};
+use crate::general::{CastInto, TCResult, TCTryStream, TryCastFrom};
 use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::Txn;
 
@@ -27,7 +27,7 @@ pub trait CollectionInstance {
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool>;
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>>;
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Scalar>>;
 }
 
 #[derive(Clone, Eq, PartialEq)]

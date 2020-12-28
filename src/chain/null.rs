@@ -76,7 +76,7 @@ impl Instance for NullChain {
 impl ChainInstance for NullChain {
     type Class = ChainType;
 
-    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<Value>> {
+    async fn to_stream(&self, _txn: Txn) -> TCResult<TCStream<'_, Value>> {
         Ok(Box::pin(stream::empty()))
     }
 }

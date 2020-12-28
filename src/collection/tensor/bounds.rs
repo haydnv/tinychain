@@ -1,6 +1,5 @@
-use std::convert::TryFrom;
 use std::fmt;
-use std::iter;
+use std::iter::{self, FromIterator};
 use std::ops::{self, Deref, DerefMut};
 
 use itertools::{Itertools, MultiProduct};
@@ -8,6 +7,8 @@ use itertools::{Itertools, MultiProduct};
 use crate::error;
 use crate::general::{TCResult, TryCastFrom, TryCastInto};
 use crate::scalar::{Bound, Scalar, ScalarInstance, Slice, Value};
+
+use super::Coord;
 
 pub type Coords = MultiProduct<AxisIter>;
 
@@ -47,6 +48,22 @@ pub enum AxisBounds {
 impl AxisBounds {
     pub fn all(dim: u64) -> AxisBounds {
         AxisBounds::In(0..dim)
+    }
+
+    pub fn dim(&self) -> u64 {
+        match self {
+            Self::At(_) => 0,
+            Self::In(range) => range.end - range.start,
+            Self::Of(indices) => indices.len() as u64,
+        }
+    }
+
+    pub fn is_index(&self) -> bool {
+        if let Self::At(_) = self {
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -256,11 +273,17 @@ impl Bounds {
         true
     }
 
-    pub fn is_coord(&self) -> bool {
-        self.axes.iter().all(|bound| match bound {
-            AxisBounds::At(_) => true,
-            _ => false,
-        })
+    pub fn as_coord(&self) -> Option<Coord> {
+        let mut coord = Coord::new();
+        for bound in &self.axes {
+            if let AxisBounds::At(i) = bound {
+                coord.push(*i);
+            } else {
+                return None;
+            }
+        }
+
+        Some(coord)
     }
 
     pub fn normalize(&mut self, shape: &Shape) {
@@ -271,21 +294,20 @@ impl Bounds {
         }
     }
 
-    pub fn size(&self) -> u64 {
-        if self.is_empty() {
-            return 0;
-        }
-
-        let mut size = 1;
+    pub fn to_shape(&self) -> Shape {
+        let mut shape = Vec::with_capacity(self.len());
         for bound in &self.axes {
-            match bound {
-                AxisBounds::At(_) => {}
-                AxisBounds::In(range) => size *= range.end - range.start,
-                AxisBounds::Of(indices) => size *= indices.len() as u64,
+            let dim = bound.dim();
+            if dim > 0 {
+                shape.push(dim);
             }
         }
 
-        size
+        shape.into()
+    }
+
+    pub fn size(&self) -> u64 {
+        self.to_shape().size()
     }
 }
 
@@ -360,24 +382,6 @@ impl TryCastFrom<Value> for Bounds {
     fn opt_cast_from(value: Value) -> Option<Bounds> {
         let bounds: Option<Vec<AxisBounds>> = value.opt_cast_into();
         bounds.map(Bounds::from)
-    }
-}
-
-impl TryFrom<Bounds> for Vec<u64> {
-    type Error = error::TCError;
-
-    fn try_from(bounds: Bounds) -> TCResult<Vec<u64>> {
-        let mut coord = Vec::with_capacity(bounds.len());
-        for bound in bounds.axes.into_iter() {
-            match bound {
-                AxisBounds::At(x) => coord.push(x),
-                other => {
-                    return Err(error::bad_request("Not a coordinate", other));
-                }
-            }
-        }
-
-        Ok(coord)
     }
 }
 
@@ -457,6 +461,31 @@ impl Shape {
 
         bounds
     }
+
+    pub fn validate_bounds(&self, bounds: &Bounds) -> TCResult<()> {
+        if self.contains_bounds(bounds) {
+            Ok(())
+        } else {
+            Err(error::unsupported(format!(
+                "Tensor of shape {} does not contain bounds {}",
+                self, bounds
+            )))
+        }
+    }
+
+    pub fn validate_coord(&self, coord: &[u64]) -> TCResult<()> {
+        for (axis, index) in coord.iter().enumerate() {
+            if index >= &self[axis] {
+                return Err(error::unsupported(format!(
+                    "Tensor of shape {} does not contain {}",
+                    self,
+                    Value::from_iter(coord.to_vec())
+                )));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Deref for Shape {
@@ -509,5 +538,11 @@ impl fmt::Display for Shape {
                 .collect::<Vec<String>>()
                 .join(", ")
         )
+    }
+}
+
+impl fmt::Debug for Shape {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }

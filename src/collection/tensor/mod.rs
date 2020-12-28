@@ -7,6 +7,7 @@ use crate::transaction::{Txn, TxnId};
 
 mod einsum;
 mod handlers;
+mod stream;
 mod transform;
 
 pub mod bounds;
@@ -20,6 +21,8 @@ pub use dense::{from_sparse, Array, DenseTensor};
 pub use einsum::einsum;
 pub use sparse::{from_dense, SparseTensor};
 
+pub type Coord = Vec<u64>;
+
 pub const ERR_NONBIJECTIVE_WRITE: &str = "Cannot write to a derived Tensor which is not a \
 bijection of its source. Consider copying first, or writing directly to the source Tensor.";
 
@@ -27,7 +30,7 @@ pub trait IntoView {
     fn into_view(self) -> Tensor;
 }
 
-pub trait TensorAccessor: Send {
+pub trait TensorAccess: Send {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize;
@@ -38,7 +41,7 @@ pub trait TensorAccessor: Send {
 }
 
 #[async_trait]
-pub trait TensorBoolean<O>: TensorAccessor + Sized {
+pub trait TensorBoolean<O>: TensorAccess + Sized {
     type Combine: TensorInstance;
 
     fn and(&self, other: &O) -> TCResult<Self::Combine>;
@@ -49,39 +52,39 @@ pub trait TensorBoolean<O>: TensorAccessor + Sized {
 }
 
 #[async_trait]
-pub trait TensorUnary: TensorAccessor + Sized {
+pub trait TensorUnary: TensorAccess + Sized {
     type Unary: TensorInstance;
 
     fn abs(&self) -> TCResult<Self::Unary>;
 
-    async fn all(&self, txn: Txn) -> TCResult<bool>;
+    async fn all(&self, txn: &Txn) -> TCResult<bool>;
 
-    async fn any(&self, txn: Txn) -> TCResult<bool>;
+    async fn any(&self, txn: &Txn) -> TCResult<bool>;
 
     fn not(&self) -> TCResult<Self::Unary>;
 }
 
 #[async_trait]
-pub trait TensorCompare<O>: TensorAccessor + Sized {
+pub trait TensorCompare<O>: TensorAccess + Sized {
     type Compare: TensorInstance;
     type Dense: TensorInstance;
 
-    async fn eq(&self, other: &O, txn: Txn) -> TCResult<Self::Dense>;
+    async fn eq(&self, other: &O, txn: &Txn) -> TCResult<Self::Dense>;
 
     fn gt(&self, other: &O) -> TCResult<Self::Compare>;
 
-    async fn gte(&self, other: &O, txn: Txn) -> TCResult<Self::Dense>;
+    async fn gte(&self, other: &O, txn: &Txn) -> TCResult<Self::Dense>;
 
     fn lt(&self, other: &O) -> TCResult<Self::Compare>;
 
-    async fn lte(&self, other: &O, txn: Txn) -> TCResult<Self::Dense>;
+    async fn lte(&self, other: &O, txn: &Txn) -> TCResult<Self::Dense>;
 
     fn ne(&self, other: &O) -> TCResult<Self::Compare>;
 }
 
 #[async_trait]
-pub trait TensorIO: TensorAccessor + Sized {
-    async fn read_value(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number>;
+pub trait TensorIO: TensorAccess + Sized {
+    async fn read_value(&self, txn: &Txn, coord: Coord) -> TCResult<Number>;
 
     async fn write_value(
         &self,
@@ -90,17 +93,17 @@ pub trait TensorIO: TensorAccessor + Sized {
         value: Number,
     ) -> TCResult<()>;
 
-    async fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCResult<()>;
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
 }
 
 #[async_trait]
-pub trait TensorDualIO<O>: TensorAccessor + Sized {
+pub trait TensorDualIO<O>: TensorAccess + Sized {
     async fn mask(&self, txn: &Txn, value: O) -> TCResult<()>;
 
-    async fn write(&self, txn: Txn, bounds: bounds::Bounds, value: O) -> TCResult<()>;
+    async fn write(&self, txn: &Txn, bounds: bounds::Bounds, value: O) -> TCResult<()>;
 }
 
-pub trait TensorMath<O>: TensorAccessor + Sized {
+pub trait TensorMath<O>: TensorAccess + Sized {
     type Combine: TensorInstance;
 
     fn add(&self, other: &O) -> TCResult<Self::Combine>;
@@ -108,7 +111,7 @@ pub trait TensorMath<O>: TensorAccessor + Sized {
     fn multiply(&self, other: &O) -> TCResult<Self::Combine>;
 }
 
-pub trait TensorReduce: TensorAccessor + Sized {
+pub trait TensorReduce: TensorAccess + Sized {
     type Reduce: TensorInstance;
 
     fn product(&self, axis: usize) -> TCResult<Self::Reduce>;
@@ -120,12 +123,11 @@ pub trait TensorReduce: TensorAccessor + Sized {
     fn sum_all(&self, txn: Txn) -> TCBoxTryFuture<Number>;
 }
 
-pub trait TensorTransform: TensorAccessor + Sized {
+pub trait TensorTransform: TensorAccess + Sized {
     type Cast: TensorInstance;
     type Broadcast: TensorInstance;
     type Expand: TensorInstance;
     type Slice: TensorInstance;
-    type Reshape: TensorInstance;
     type Transpose: TensorInstance;
 
     fn as_type(&self, dtype: NumberType) -> TCResult<Self::Cast>;
@@ -135,8 +137,6 @@ pub trait TensorTransform: TensorAccessor + Sized {
     fn expand_dims(&self, axis: usize) -> TCResult<Self::Expand>;
 
     fn slice(&self, bounds: bounds::Bounds) -> TCResult<Self::Slice>;
-
-    fn reshape(&self, shape: bounds::Shape) -> TCResult<Self::Reshape>;
 
     fn transpose(&self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 }

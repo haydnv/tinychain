@@ -1,9 +1,7 @@
-use std::convert::{TryFrom, TryInto};
-use std::iter;
+use std::iter::{self, FromIterator};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use arrayfire as af;
 use async_trait::async_trait;
 use futures::future;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
@@ -17,13 +15,16 @@ use crate::class::Instance;
 use crate::error;
 use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
 use crate::scalar::number::*;
+use crate::scalar::Value;
 use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::bounds::*;
-use super::super::TensorAccessor;
+use super::super::stream::{block_offsets, coord_block, coord_bounds, Read, ReadValueAt};
+use super::super::transform::{self, Rebase};
+use super::super::TensorAccess;
 
 use super::array::Array;
-use super::BlockList;
+use super::{BlockListTranspose, Coord, DenseAccess, DenseAccessor};
 
 pub const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
@@ -82,9 +83,12 @@ impl BlockListFile {
         while let Some(chunk) = values.next().await {
             let block_id = BlockId::from(i);
             let block = Array::cast_from_values(chunk, dtype)?;
-            file.clone()
+            let block = file
+                .clone()
                 .create_block(txn.id().clone(), block_id, block)
                 .await?;
+
+            debug!("created block {} with {} values", i, block.len());
 
             i += 1;
         }
@@ -92,13 +96,24 @@ impl BlockListFile {
         Ok(BlockListFile { dtype, shape, file })
     }
 
-    async fn merge_sort(&self, txn_id: &TxnId) -> TCResult<()> {
+    pub fn into_stream(self, txn_id: TxnId) -> impl Stream<Item = TCResult<Array>> + Unpin {
+        // TODO: add a method in File to delete the block and return its contents
+
+        let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
+        let blocks = stream::iter((0..num_blocks).into_iter().map(BlockId::from))
+            .then(move |block_id| self.file.clone().get_block_owned(txn_id, block_id))
+            .map_ok(|block| block.deref().clone());
+
+        Box::pin(blocks)
+    }
+
+    pub async fn merge_sort(&self, txn_id: &TxnId) -> TCResult<()> {
         let num_blocks = div_ceil(self.size(), PER_BLOCK as u64);
         if num_blocks == 1 {
             let block_id = BlockId::from(0u64);
             let mut block = self
                 .file
-                .get_block(txn_id, &block_id)
+                .get_block(txn_id, block_id)
                 .await?
                 .upgrade()
                 .await?;
@@ -111,8 +126,8 @@ impl BlockListFile {
             let next_block_id = BlockId::from(block_id + 1);
             let block_id = BlockId::from(block_id);
 
-            let left = self.file.get_block(txn_id, &block_id);
-            let right = self.file.get_block(txn_id, &next_block_id);
+            let left = self.file.get_block(txn_id, block_id);
+            let right = self.file.get_block(txn_id, next_block_id);
             let (left, right) = try_join!(left, right)?;
             let (mut left, mut right) = try_join!(left.upgrade(), right.upgrade())?;
 
@@ -128,7 +143,7 @@ impl BlockListFile {
     }
 }
 
-impl TensorAccessor for BlockListFile {
+impl TensorAccess for BlockListFile {
     fn dtype(&self) -> NumberType {
         self.dtype
     }
@@ -147,139 +162,48 @@ impl TensorAccessor for BlockListFile {
 }
 
 #[async_trait]
-impl BlockList for BlockListFile {
-    fn block_stream<'a>(self: Arc<Self>, txn: Txn) -> TCBoxTryFuture<'a, TCTryStream<Array>> {
+impl DenseAccess for BlockListFile {
+    type Slice = BlockListFileSlice;
+    type Transpose = BlockListTranspose<Self>;
+
+    fn accessor(self) -> DenseAccessor {
+        DenseAccessor::File(self)
+    }
+
+    fn block_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
         Box::pin(async move {
-            let file = self.file.clone();
+            let file = &self.file;
             let block_stream = Box::pin(
                 stream::iter(0..(div_ceil(self.size(), PER_BLOCK as u64)))
                     .map(BlockId::from)
-                    .then(move |block_id| file.clone().get_block_owned(txn.id().clone(), block_id)),
+                    .then(move |block_id| file.get_block(txn.id(), block_id)),
             );
 
             let block_stream =
                 block_stream.and_then(|block| future::ready(Ok(block.deref().clone())));
 
-            let block_stream: TCTryStream<Array> = Box::pin(block_stream);
-
+            let block_stream: TCTryStream<'a, Array> = Box::pin(block_stream);
             Ok(block_stream)
         })
     }
 
-    async fn value_stream_slice(
-        self: Arc<Self>,
-        txn: Txn,
-        bounds: Bounds,
-    ) -> TCResult<TCTryStream<Number>> {
-        if bounds == Bounds::all(self.shape()) {
-            return self.value_stream(txn).await;
-        }
-
-        if !self.shape.contains_bounds(&bounds) {
-            return Err(error::bad_request("Invalid bounds", bounds));
-        }
-
-        let bounds = self.shape().slice_bounds(bounds);
-        let coord_bounds = coord_bounds(self.shape());
-
-        let selected = stream::iter(bounds.affected())
-            .chunks(PER_BLOCK)
-            .then(move |coords| {
-                let ndim = coords[0].len();
-                let num_coords = coords.len() as u64;
-                let (block_ids, af_indices, af_offsets) = coord_block(
-                    coords.into_iter(),
-                    &coord_bounds,
-                    PER_BLOCK,
-                    ndim,
-                    num_coords,
-                );
-
-                let this = self.clone();
-                let txn = txn.clone();
-
-                Box::pin(async move {
-                    let mut start = 0.0f64;
-                    let mut values = vec![];
-                    for block_id in block_ids {
-                        debug!("block {} starts at {}", block_id, start);
-
-                        let (block_offsets, new_start) =
-                            block_offsets(&af_indices, &af_offsets, start, block_id);
-
-                        match this
-                            .file
-                            .clone()
-                            .get_block(txn.id(), &block_id.into())
-                            .await
-                        {
-                            Ok(block) => {
-                                let array: &Array = block.deref();
-                                values.extend(array.get(block_offsets).into_values());
-                            }
-                            Err(cause) => return stream::iter(vec![Err(cause)]),
-                        }
-
-                        start = new_start;
-                    }
-
-                    let values: Vec<TCResult<Number>> = values.into_iter().map(Ok).collect();
-                    stream::iter(values)
-                })
-            });
-
-        let selected: TCTryStream<Number> = Box::pin(selected.flatten());
-        Ok(selected)
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        BlockListFileSlice::new(self, bounds)
     }
 
-    async fn read_value_at(&self, txn: &Txn, coord: &[u64]) -> TCResult<Number> {
-        debug!(
-            "read value at {:?} from BlockListFile with shape {}",
-            coord,
-            self.shape()
-        );
-
-        if !self.shape().contains_coord(coord) {
-            let coord: Vec<String> = coord.iter().map(|c| c.to_string()).collect();
-            return Err(error::bad_request(
-                "Coordinate is out of bounds",
-                coord.join(", "),
-            ));
-        }
-
-        let offset: u64 = coord_bounds(self.shape())
-            .iter()
-            .zip(coord.iter())
-            .map(|(d, x)| d * x)
-            .sum();
-        debug!("coord {:?} is offset {}", coord, offset);
-
-        let block_id = BlockId::from(offset / PER_BLOCK as u64);
-        let block = self.file.get_block(txn.id(), &block_id).await?;
-
-        debug!(
-            "read offset {} at block {} (length {})",
-            (offset % PER_BLOCK as u64),
-            block_id,
-            block.len()
-        );
-        let value = block.get_value((offset % PER_BLOCK as u64) as usize);
-
-        Ok(value)
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        BlockListTranspose::new(self, permutation)
     }
 
-    async fn write_value(
-        self: Arc<Self>,
-        txn_id: TxnId,
-        bounds: Bounds,
-        value: Number,
-    ) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, value: Number) -> TCResult<()> {
         debug!("BlockListFile::write_value {} at {}", value, bounds);
 
         if !self.shape().contains_bounds(&bounds) {
             return Err(error::bad_request("Bounds out of bounds", bounds));
-        } else if bounds.len() == self.ndim() && bounds.is_coord() {
-            return self.write_value_at(txn_id, bounds.try_into()?, value).await;
+        } else if bounds.len() == self.ndim() {
+            if let Some(coord) = bounds.as_coord() {
+                return self.write_value_at(txn_id, coord, value).await;
+            }
         }
 
         let bounds = self.shape().slice_bounds(bounds);
@@ -298,7 +222,7 @@ impl BlockList for BlockListFile {
                     num_coords,
                 );
 
-                let this = self.clone();
+                let file = &self.file;
                 let value = value.clone();
                 let txn_id = txn_id;
 
@@ -310,14 +234,8 @@ impl BlockList for BlockListFile {
                             block_offsets(&af_indices, &af_offsets, start, block_id);
 
                         let block_id = BlockId::from(block_id);
-                        let mut block = this
-                            .file
-                            .get_block(&txn_id, &block_id)
-                            .await?
-                            .upgrade()
-                            .await?;
+                        let mut block = file.get_block(&txn_id, block_id).await?.upgrade().await?;
 
-                        debug!("write {} to", value);
                         let value = Array::constant(value, (new_start - start) as usize);
                         block.deref_mut().set(block_offsets, &value)?;
                         start = new_start;
@@ -331,8 +249,10 @@ impl BlockList for BlockListFile {
             .await
     }
 
-    fn write_value_at(&self, txn_id: TxnId, coord: Vec<u64>, value: Number) -> TCBoxTryFuture<()> {
+    fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCBoxTryFuture<()> {
         Box::pin(async move {
+            debug!("BlockListFile::write_value_at {:?} <- {}", coord, value);
+
             if !self.shape().contains_coord(&coord) {
                 return Err(error::bad_request(
                     "Invalid coordinate",
@@ -352,7 +272,7 @@ impl BlockList for BlockListFile {
 
             let mut block = self
                 .file
-                .get_block(&txn_id, &block_id)
+                .get_block(&txn_id, block_id)
                 .await?
                 .upgrade()
                 .await?;
@@ -360,6 +280,44 @@ impl BlockList for BlockListFile {
             block
                 .deref_mut()
                 .set_value((offset % PER_BLOCK as u64) as usize, value)
+        })
+    }
+}
+
+impl ReadValueAt for BlockListFile {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
+        Box::pin(async move {
+            debug!(
+                "read value at {:?} from BlockListFile with shape {}",
+                coord,
+                self.shape()
+            );
+
+            if !self.shape().contains_coord(&coord) {
+                return Err(error::bad_request(
+                    "Coordinate is out of bounds",
+                    Value::from_iter(coord),
+                ));
+            }
+
+            let offset: u64 = coord_bounds(self.shape())
+                .iter()
+                .zip(coord.iter())
+                .map(|(d, x)| d * x)
+                .sum();
+            debug!("coord {:?} is offset {}", coord, offset);
+
+            let block_id = BlockId::from(offset / PER_BLOCK as u64);
+            let block = self.file.get_block(txn.id(), block_id).await?;
+
+            debug!(
+                "read offset {} from block of length {}",
+                (offset % PER_BLOCK as u64),
+                block.len()
+            );
+            let value = block.get_value((offset % PER_BLOCK as u64) as usize);
+
+            Ok((coord, value))
         })
     }
 }
@@ -379,198 +337,147 @@ impl Transact for BlockListFile {
     }
 }
 
-pub async fn sort_coords<S: Stream<Item = TCResult<Vec<u64>>> + Send + Unpin + 'static>(
-    txn: Txn,
-    coords: S,
-    num_coords: u64,
-    shape: &Shape,
-) -> TCResult<impl Stream<Item = TCResult<Vec<u64>>>> {
-    let blocks =
-        coords_to_offsets(shape, coords).and_then(|block| future::ready(Array::try_from(block)));
-
-    let block_list = BlockListFile::from_blocks(
-        &txn,
-        Shape::from(vec![num_coords]),
-        UIntType::U64.into(),
-        Box::pin(blocks),
-    )
-    .await?;
-
-    block_list.merge_sort(txn.id()).await?;
-
-    let blocks = Arc::new(block_list).block_stream(txn).await?;
-    Ok(offsets_to_coords(shape, blocks))
+#[derive(Clone)]
+pub struct BlockListFileSlice {
+    source: BlockListFile,
+    rebase: transform::Slice,
 }
 
-fn coords_to_offsets<S: Stream<Item = TCResult<Vec<u64>>>>(
-    shape: &Shape,
-    coords: S,
-) -> impl Stream<Item = TCResult<af::Array<u64>>> {
-    let ndim = shape.len() as u64;
-    let coord_bounds = coord_bounds(shape);
-    let af_coord_bounds: af::Array<u64> =
-        af::Array::new(&coord_bounds, af::Dim4::new(&[ndim, 1, 1, 1]));
-
-    coords
-        .chunks(PER_BLOCK)
-        .map(|block| block.into_iter().collect::<TCResult<Vec<Vec<u64>>>>())
-        .map_ok(move |block| {
-            let num_coords = block.len();
-            let block = block.into_iter().flatten().collect::<Vec<u64>>();
-            af::Array::new(&block, af::Dim4::new(&[ndim, num_coords as u64, 1, 1]))
-        })
-        .map_ok(move |block| {
-            let offsets = af::mul(&block, &af_coord_bounds, true);
-            af::sum(&offsets, 0)
-        })
-        .map_ok(|block| af::moddims(&block, af::Dim4::new(&[block.elements() as u64, 1, 1, 1])))
+impl BlockListFileSlice {
+    fn new(source: BlockListFile, bounds: Bounds) -> TCResult<Self> {
+        let rebase = transform::Slice::new(source.shape().clone(), bounds)?;
+        Ok(Self { source, rebase })
+    }
 }
 
-fn offsets_to_coords<S: Stream<Item = TCResult<Array>>>(
-    shape: &Shape,
-    blocks: S,
-) -> impl Stream<Item = TCResult<Vec<u64>>> {
-    let ndim = shape.len() as u64;
-    let coord_bounds = coord_bounds(shape);
-    let af_coord_bounds: af::Array<u64> =
-        af::Array::new(&coord_bounds, af::Dim4::new(&[1, ndim, 1, 1]));
-    let af_shape: af::Array<u64> = af::Array::new(&shape.to_vec(), af::Dim4::new(&[1, ndim, 1, 1]));
-    let ndim = shape.len();
-
-    blocks
-        .map_ok(|block| block.into_af_array::<u64>())
-        .map_ok(move |block| {
-            let offsets = af::div(&block, &af_coord_bounds, true);
-            af::modulo(&offsets, &af_shape, true)
-        })
-        .map_ok(|coord_block| {
-            let mut coords = vec![0u64; coord_block.elements()];
-            af::transpose(&coord_block, false).host(&mut coords);
-            coords
-        })
-        .map_ok(move |coords| {
-            stream::iter(coords.into_iter())
-                .chunks(ndim)
-                .map(TCResult::<Vec<u64>>::Ok)
-        })
-        .try_flatten()
-}
-
-fn coord_bounds(shape: &Shape) -> Vec<u64> {
-    (0..shape.len())
-        .map(|axis| shape[axis + 1..].iter().product())
-        .collect()
-}
-
-fn block_offsets(
-    af_indices: &af::Array<u64>,
-    af_offsets: &af::Array<u64>,
-    start: f64,
-    block_id: u64,
-) -> (af::Array<u64>, f64) {
-    assert_eq!(af_indices.elements(), af_offsets.elements());
-
-    let num_to_update = af::sum_all(&af::eq(
-        af_indices,
-        &af::constant(block_id, af::Dim4::new(&[1, 1, 1, 1])),
-        true,
-    ))
-    .0;
-
-    if num_to_update == 0f64 {
-        return (af::Array::new_empty(af::Dim4::default()), start);
+impl TensorAccess for BlockListFileSlice {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
     }
 
-    assert!((start + num_to_update) as usize <= af_offsets.elements());
-
-    let block_offsets = af::index(
-        af_offsets,
-        &[af::Seq::new(start, (start + num_to_update) - 1f64, 1f64)],
-    );
-
-    (block_offsets, (start + num_to_update))
-}
-
-fn coord_block<I: Iterator<Item = Vec<u64>>>(
-    coords: I,
-    coord_bounds: &[u64],
-    per_block: usize,
-    ndim: usize,
-    num_coords: u64,
-) -> (Vec<u64>, af::Array<u64>, af::Array<u64>) {
-    let coords: Vec<u64> = coords.flatten().collect();
-    assert!(coords.len() > 0);
-    assert!(ndim > 0);
-
-    let af_per_block = af::constant(per_block as u64, af::Dim4::new(&[1, 1, 1, 1]));
-    let af_coord_bounds = af::Array::new(coord_bounds, af::Dim4::new(&[ndim as u64, 1, 1, 1]));
-
-    let af_coords = af::Array::new(
-        &coords,
-        af::Dim4::new(&[ndim as u64, num_coords as u64, 1, 1]),
-    );
-    let af_coords = af::mul(&af_coords, &af_coord_bounds, true);
-    let af_coords = af::sum(&af_coords, 0);
-
-    let af_offsets = af::modulo(&af_coords, &af_per_block, true);
-    let af_indices = af_coords / af_per_block;
-
-    let af_block_ids = af::set_unique(&af_indices, true);
-    let mut block_ids = vec![0u64; af_block_ids.elements()];
-    af_block_ids.host(&mut block_ids);
-    (block_ids, af_indices, af_offsets)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_coord_block() {
-        let shape = Shape::from(vec![2, 3, 4]);
-        let bounds = coord_bounds(&shape);
-        let coords: Vec<Vec<u64>> = Bounds::all(&shape).affected().collect();
-
-        let num_coords = coords.len() as u64;
-        let (block_ids, af_indices, af_offsets) = coord_block(
-            coords.into_iter(),
-            &bounds,
-            PER_BLOCK,
-            shape.len(),
-            num_coords,
-        );
-
-        let mut indices = vec![0u64; af_indices.elements()];
-        af_indices.host(&mut indices);
-
-        let mut offsets = vec![0u64; af_offsets.elements()];
-        af_offsets.host(&mut offsets);
-
-        assert_eq!(block_ids, vec![0]);
-        assert_eq!(indices, vec![0; 24]);
-        assert_eq!(offsets, (0..24).collect::<Vec<u64>>());
+    fn ndim(&self) -> usize {
+        self.rebase.ndim()
     }
 
-    #[test]
-    fn test_block_offsets() {
-        let shape = Shape::from(vec![2, 3, 4]);
-        let bounds = coord_bounds(&shape);
-        let coords: Vec<Vec<u64>> = Bounds::all(&shape).affected().collect();
+    fn shape(&self) -> &Shape {
+        self.rebase.shape()
+    }
 
-        let num_coords = coords.len() as u64;
-        let (block_ids, af_indices, af_offsets) = coord_block(
-            coords.into_iter(),
-            &bounds,
-            PER_BLOCK,
-            shape.len(),
-            num_coords,
-        );
+    fn size(&self) -> u64 {
+        self.rebase.size()
+    }
+}
 
-        let (af_block_offsets, new_start) = block_offsets(&af_indices, &af_offsets, 0f64, 0u64);
-        let mut block_offsets = vec![0u64; af_block_offsets.elements()];
-        af_block_offsets.host(&mut block_offsets);
+#[async_trait]
+impl DenseAccess for BlockListFileSlice {
+    type Slice = Self;
+    type Transpose = BlockListTranspose<Self>;
 
-        assert_eq!(new_start, 24f64);
-        assert_eq!(block_offsets, (0..24).collect::<Vec<u64>>());
+    fn accessor(self) -> DenseAccessor {
+        DenseAccessor::Slice(self)
+    }
+
+    fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+        let file = &self.source.file;
+        let mut bounds = self.rebase.bounds().clone();
+        bounds.normalize(self.source.shape());
+        let coord_bounds = coord_bounds(self.source.shape());
+
+        let values = stream::iter(bounds.affected())
+            .inspect(|coord| debug!("reading value from source coord {:?}", coord))
+            .chunks(PER_BLOCK)
+            .then(move |coords| {
+                let ndim = coords[0].len();
+                let num_coords = coords.len() as u64;
+                let (block_ids, af_indices, af_offsets) = coord_block(
+                    coords.into_iter(),
+                    &coord_bounds,
+                    PER_BLOCK,
+                    ndim,
+                    num_coords,
+                );
+
+                Box::pin(async move {
+                    let mut start = 0.0f64;
+                    let mut values = vec![];
+                    for block_id in block_ids {
+                        debug!("block {} starts at {}", block_id, start);
+
+                        let (block_offsets, new_start) =
+                            block_offsets(&af_indices, &af_offsets, start, block_id);
+
+                        debug!("reading {} block_offsets", block_offsets.elements());
+                        match file.get_block(txn.id(), block_id.into()).await {
+                            Ok(block) => {
+                                let array: &Array = block.deref();
+                                values.extend(array.get(block_offsets).into_values());
+                            }
+                            Err(cause) => return stream::iter(vec![Err(cause)]),
+                        }
+
+                        start = new_start;
+                    }
+
+                    let values: Vec<TCResult<Number>> = values.into_iter().map(Ok).collect();
+                    stream::iter(values)
+                })
+            });
+
+        let values: TCTryStream<Number> = Box::pin(values.flatten());
+        Box::pin(future::ready(Ok(values)))
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let bounds = self.rebase.invert_bounds(bounds);
+        self.source.slice(bounds)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        BlockListTranspose::new(self, permutation)
+    }
+
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
+        self.shape().validate_bounds(&bounds)?;
+
+        let bounds = self.rebase.invert_bounds(bounds);
+        self.source.write_value(txn_id, bounds, number).await
+    }
+
+    fn write_value_at(
+        &'_ self,
+        txn_id: TxnId,
+        coord: Coord,
+        value: Number,
+    ) -> TCBoxTryFuture<'_, ()> {
+        Box::pin(async move {
+            self.shape().validate_coord(&coord)?;
+            let coord = self.rebase.invert_coord(&coord);
+            self.source.write_value_at(txn_id, coord, value).await
+        })
+    }
+}
+
+impl ReadValueAt for BlockListFileSlice {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
+        Box::pin(async move {
+            self.shape().validate_coord(&coord)?;
+            let coord = self.rebase.invert_coord(&coord);
+            self.source.read_value_at(txn, coord).await
+        })
+    }
+}
+
+#[async_trait]
+impl Transact for BlockListFileSlice {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }

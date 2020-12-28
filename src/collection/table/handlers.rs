@@ -2,14 +2,14 @@ use std::iter::FromIterator;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use futures::stream::StreamExt;
+use futures::stream::TryStreamExt;
 use futures::TryFutureExt;
 
 use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
 use crate::class::{Instance, State, TCType};
 use crate::collection::CollectionInstance;
 use crate::error;
-use crate::general::{Map, TCResult, TCStream, TryCastFrom, TryCastInto};
+use crate::general::{Map, TCResult, TCTryStream, TryCastFrom, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{Id, MethodType, PathSegment, Scalar, ScalarInstance, Value};
@@ -36,7 +36,7 @@ where
 
     async fn handle_delete(&self, txn: &Txn, key: Value) -> TCResult<()> {
         if key.is_none() {
-            self.table.clone().delete(txn.id().clone()).await
+            self.table.delete(txn.id()).await
         } else {
             Err(error::bad_request(
                 "Table::delete expected no arguments but found",
@@ -66,8 +66,9 @@ where
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         let columns: Vec<Id> = try_into_columns(selector)?;
         self.table
+            .clone()
             .group_by(columns)
-            .map(Table::from)
+            .map(TableInstance::into_table)
             .map(State::from)
     }
 }
@@ -97,7 +98,7 @@ where
         value: State,
     ) -> TCResult<()> {
         let (key, values) = try_into_row(key, value)?;
-        self.table.insert(txn.id().clone(), key, values).await
+        self.table.insert(txn.id(), key, values).await
     }
 }
 
@@ -120,7 +121,7 @@ where
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         let limit = selector.try_cast_into(|v| error::bad_request("Invalid limit", v))?;
-        Ok(State::from(Table::from(self.table.limit(limit))))
+        Ok(State::from(self.table.clone().limit(limit).into_table()))
     }
 }
 
@@ -144,8 +145,9 @@ where
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         let columns: Vec<Id> = try_into_columns(selector)?;
         self.table
+            .clone()
             .order_by(columns, false)
-            .map(Table::from)
+            .map(TableInstance::into_table)
             .map(State::from)
     }
 }
@@ -169,7 +171,11 @@ where
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         if selector.is_none() {
-            self.table.reversed().map(State::from)
+            self.table
+                .clone()
+                .reversed()
+                .map(TableInstance::into_table)
+                .map(State::from)
         } else {
             Err(error::bad_request(
                 "Table::reverse takes no arguments but found",
@@ -198,7 +204,11 @@ where
 
     async fn handle_get(&self, _txn: &Txn, selector: Value) -> TCResult<State> {
         let columns = try_into_columns(selector)?;
-        self.table.select(columns).map(Table::from).map(State::from)
+        self.table
+            .clone()
+            .select(columns)
+            .map(TableInstance::into_table)
+            .map(State::from)
     }
 }
 
@@ -227,11 +237,7 @@ where
     ) -> TCResult<State> {
         let update = params.try_cast_into(|v| error::bad_request("Invalid update", v))?;
 
-        self.table
-            .clone()
-            .update(txn.clone(), update)
-            .map_ok(State::from)
-            .await
+        self.table.update(txn, update).map_ok(State::from).await
     }
 }
 
@@ -283,19 +289,18 @@ where
 
     async fn handle_get(&self, txn: &Txn, selector: Value) -> TCResult<State> {
         if selector.is_none() {
-            let table: Table = self.table.clone().into();
+            let table: Table = self.table.clone().into_table();
             Ok(State::from(table))
         } else {
             let key: Vec<Value> =
                 selector.try_cast_into(|v| error::bad_request("Invalid key for Table", v))?;
             if key.len() == self.table.key().len() {
                 let bounds = Bounds::from_key(key, self.table.key());
-                let slice = self.table.slice(bounds)?;
-                let mut stream = slice.stream(*txn.id()).await?;
-                stream
-                    .next()
-                    .await
-                    .map(Value::from_iter)
+                let slice = self.table.clone().slice(bounds)?;
+                let mut stream = slice.stream(txn.id()).await?;
+                let next = stream.try_next().await?;
+
+                next.map(Value::from_iter)
                     .map(Scalar::Value)
                     .map(State::Scalar)
                     .ok_or_else(|| error::not_found("(table row)"))
@@ -321,7 +326,11 @@ where
             error::bad_request("Cannot cast into Table Bounds from", v)
         })?;
 
-        self.table.slice(bounds).map(State::from)
+        self.table
+            .clone()
+            .slice(bounds)
+            .map(TableInstance::into_table)
+            .map(State::from)
     }
 }
 #[derive(Clone)]
@@ -333,6 +342,10 @@ impl<T: TableInstance> TableImpl<T> {
     pub fn into_inner(self) -> T {
         self.inner
     }
+
+    pub fn into_table(self) -> Table {
+        self.inner.into_table()
+    }
 }
 
 #[async_trait]
@@ -340,17 +353,17 @@ impl<T: TableInstance> CollectionInstance for TableImpl<T> {
     type Item = Vec<Value>;
 
     async fn is_empty(&self, txn: &Txn) -> TCResult<bool> {
-        let mut rows = self.inner.clone().stream(*txn.id()).await?;
-        if let Some(_row) = rows.next().await {
+        let mut rows = self.inner.stream(txn.id()).await?;
+        if let Some(_row) = rows.try_next().await? {
             Ok(false)
         } else {
             Ok(true)
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        let stream = self.inner.clone().stream(*txn.id()).await?;
-        Ok(Box::pin(stream.map(Scalar::from)))
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Scalar>> {
+        let stream = self.inner.stream(txn.id()).await?;
+        Ok(Box::pin(stream.map_ok(Scalar::from)))
     }
 }
 

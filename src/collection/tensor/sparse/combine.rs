@@ -10,15 +10,16 @@ use crate::general::TCResult;
 use crate::scalar::Number;
 
 use super::super::bounds::Shape;
+use super::super::Coord;
 use super::{SparseRow, SparseStream};
 
 // Based on: https://github.com/rust-lang/futures-rs/blob/master/futures-util/src/stream/select.rs
 #[pin_project]
-pub struct SparseCombine {
+pub struct SparseCombine<'a> {
     #[pin]
-    left: Fuse<SparseStream>,
+    left: Fuse<SparseStream<'a>>,
     #[pin]
-    right: Fuse<SparseStream>,
+    right: Fuse<SparseStream<'a>>,
 
     coord_bounds: Vec<u64>,
 
@@ -26,8 +27,12 @@ pub struct SparseCombine {
     pending_right: Option<(u64, SparseRow)>,
 }
 
-impl SparseCombine {
-    pub fn new(shape: &Shape, left: SparseStream, right: SparseStream) -> SparseCombine {
+impl<'a> SparseCombine<'a> {
+    pub fn new(
+        shape: &Shape,
+        left: SparseStream<'a>,
+        right: SparseStream<'a>,
+    ) -> SparseCombine<'a> {
         let coord_bounds = (0..shape.len())
             .map(|axis| shape[axis + 1..].iter().product())
             .collect();
@@ -42,7 +47,7 @@ impl SparseCombine {
     }
 
     fn poll_inner(
-        stream: Pin<&mut Fuse<SparseStream>>,
+        stream: Pin<&mut Fuse<SparseStream<'a>>>,
         coord_bounds: &[u64],
         pending: &mut Option<(u64, SparseRow)>,
         cxt: &mut task::Context,
@@ -69,8 +74,8 @@ impl SparseCombine {
     }
 }
 
-impl Stream for SparseCombine {
-    type Item = TCResult<(Vec<u64>, Option<Number>, Option<Number>)>;
+impl<'a> Stream for SparseCombine<'a> {
+    type Item = TCResult<(Coord, Option<Number>, Option<Number>)>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut task::Context) -> Poll<Option<Self::Item>> {
         let this = self.project();

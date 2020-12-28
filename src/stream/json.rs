@@ -18,7 +18,10 @@ pub struct JsonListStream<I: Serialize, S: Stream<Item = I>> {
     next: Option<TCResult<String>>,
 }
 
-impl<I: Serialize, S: Stream<Item = I>> Stream for JsonListStream<I, S> {
+impl<'a, I: Serialize, S: Stream<Item = I> + 'a> Stream for JsonListStream<I, S>
+where
+    S: 'a,
+{
     type Item = TCResult<String>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut task::Context) -> Poll<Option<Self::Item>> {

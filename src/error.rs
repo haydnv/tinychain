@@ -28,6 +28,9 @@ pub enum ErrorType {
     // "This is marked for implementation in the future"
     NotImplemented,
 
+    // "The request failed to complete in the allotted time"
+    Timeout,
+
     // "The payload itself is dangerously large"
     TooLarge,
 
@@ -66,6 +69,7 @@ impl NativeClass for ErrorType {
                 "not_found" => Self::NotFound,
                 "method_not_allowed" => Self::MethodNotAllowed,
                 "conflict" => Self::Conflict,
+                "timeout" => Self::Timeout,
                 "too_large" => Self::TooLarge,
                 "transport" => Self::Transport,
                 "internal" => Self::Internal,
@@ -95,6 +99,7 @@ impl From<u16> for ErrorType {
             403 => Forbidden,
             404 => NotFound,
             405 => MethodNotAllowed,
+            408 => Timeout,
             409 => Conflict,
             413 => TooLarge,
             499 => Transport,
@@ -116,6 +121,7 @@ impl From<ErrorType> for Link {
             NotFound => label("not_found"),
             MethodNotAllowed => label("method_not_allowed"),
             Conflict => label("conflict"),
+            Timeout => label("timeout"),
             TooLarge => label("too_large"),
             Transport => label("transport"),
             Internal => label("internal"),
@@ -137,6 +143,7 @@ impl fmt::Display for ErrorType {
             ErrorType::MethodNotAllowed => write!(f, "Method not allowed"),
             ErrorType::NotFound => write!(f, "Not found"),
             ErrorType::NotImplemented => write!(f, "Not implemented"),
+            ErrorType::Timeout => write!(f, "Timeout"),
             ErrorType::TooLarge => write!(f, "Request too large"),
             ErrorType::Transport => write!(f, "Transport protocol error"),
             ErrorType::Unauthorized => write!(f, "Unauthorized"),
@@ -258,6 +265,10 @@ pub fn not_implemented<I: fmt::Display>(feature: I) -> TCError {
 
 pub fn unsupported<I: fmt::Display>(hint: I) -> TCError {
     TCError::of(ErrorType::BadRequest, hint.to_string())
+}
+
+pub fn timeout<I: fmt::Display>(info: I) -> TCError {
+    TCError::of(ErrorType::Timeout, info.to_string())
 }
 
 pub fn too_large(max_size: usize) -> TCError {

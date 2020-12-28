@@ -2,14 +2,14 @@ use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use futures::stream::{self, Stream, StreamExt};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
 use crate::class::{Instance, State, TCType};
 use crate::collection::class::CollectionInstance;
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{Map, TCResult, TCStream, TryCastInto};
+use crate::general::{Map, TCResult, TCTryStream, TryCastInto};
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{label, MethodType, PathSegment, Scalar, ScalarClass, ScalarInstance, Value};
@@ -98,7 +98,7 @@ impl<'a, T: BTreeInstance> Handler for CountHandler<'a, T> {
 
     async fn handle_get(&self, txn: &Txn, range: Value) -> TCResult<State> {
         let range = validate_range(range, self.btree.schema())?;
-        let count = self.btree.len(*txn.id(), range).await?;
+        let count = self.btree.len(txn.id(), range).await?;
         Ok(State::Scalar(Scalar::Value(Value::Number(count.into()))))
     }
 }
@@ -136,10 +136,10 @@ where
         if range == BTreeRange::default() {
             Ok(State::Collection(self.btree.clone().into()))
         } else if range.is_key(self.btree.schema()) {
-            let mut rows = self.btree.stream(txn.id().clone(), range, false).await?;
-            let row = rows.next().await;
+            let mut rows = self.btree.stream(txn.id(), range, false).await?;
+            let row = rows.try_next().await?;
             row.ok_or_else(|| error::not_found("(btree key)"))
-                .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key.into()))))
+                .map(|key| State::Scalar(Scalar::Value(Value::Tuple(key.to_vec().into()))))
         } else {
             let slice = BTreeSlice::new(self.btree.clone().into(), range, false)?;
             Ok(State::Collection(slice.into()))
@@ -254,9 +254,12 @@ impl<'a, T: BTreeInstance> Handler for WriteHandler<'a, T> {
         if range == BTreeRange::default() {
             match data {
                 State::Collection(collection) => {
-                    let keys = collection.to_stream(txn.clone()).await?;
-                    let keys = keys
-                        .map(|s| s.try_cast_into(|k| error::bad_request("Invalid BTree key", k)));
+                    let keys = collection.to_stream(txn).await?;
+                    let keys = keys.map(|key| {
+                        key.and_then(|s| {
+                            s.try_cast_into(|k| error::bad_request("Invalid BTree key", k))
+                        })
+                    });
 
                     self.btree.try_insert_from(txn.id(), keys).await?;
                 }
@@ -310,9 +313,9 @@ impl<T: BTreeInstance> CollectionInstance for BTreeImpl<T> {
         self.inner.is_empty(txn).await
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
-        let stream = self.stream(*txn.id(), BTreeRange::default(), false).await?;
-        Ok(Box::pin(stream.map(Scalar::from)))
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Scalar>> {
+        let stream = self.stream(txn.id(), BTreeRange::default(), false).await?;
+        Ok(Box::pin(stream.map_ok(Scalar::from)))
     }
 }
 
@@ -384,7 +387,7 @@ impl CollectionInstance for BTree {
         }
     }
 
-    async fn to_stream(&self, txn: Txn) -> TCResult<TCStream<Scalar>> {
+    async fn to_stream<'a>(&'a self, txn: &'a Txn) -> TCResult<TCTryStream<'a, Scalar>> {
         match self {
             Self::Tree(tree) => tree.to_stream(txn).await,
             Self::View(view) => view.to_stream(txn).await,
@@ -437,7 +440,7 @@ impl BTreeInstance for BTree {
         }
     }
 
-    async fn len(&self, txn_id: TxnId, range: BTreeRange) -> TCResult<u64> {
+    async fn len(&self, txn_id: &TxnId, range: BTreeRange) -> TCResult<u64> {
         match self {
             Self::Tree(tree) => tree.len(txn_id, range).await,
             Self::View(view) => view.len(txn_id, range).await,
@@ -451,12 +454,12 @@ impl BTreeInstance for BTree {
         }
     }
 
-    async fn stream(
-        &self,
-        txn_id: TxnId,
+    async fn stream<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
         range: BTreeRange,
         reverse: bool,
-    ) -> TCResult<TCStream<Key>> {
+    ) -> TCResult<TCTryStream<'a, Key>> {
         match self {
             Self::Tree(tree) => tree.stream(txn_id, range, reverse).await,
             Self::View(view) => view.stream(txn_id, range, reverse).await,
