@@ -20,10 +20,11 @@ use crate::transaction::{Transact, Txn, TxnId};
 
 use super::super::bounds::*;
 use super::super::stream::{block_offsets, coord_block, coord_bounds, Read, ReadValueAt};
+use super::super::transform::{self, Rebase};
 use super::super::TensorAccess;
 
 use super::array::Array;
-use super::{BlockListSlice, BlockListTranspose, Coord, DenseAccess, DenseAccessor};
+use super::{BlockListTranspose, Coord, DenseAccess, DenseAccessor};
 
 pub const PER_BLOCK: usize = 131_072; // = 1 mibibyte / 64 bits
 
@@ -159,7 +160,7 @@ impl TensorAccess for BlockListFile {
 
 #[async_trait]
 impl DenseAccess for BlockListFile {
-    type Slice = BlockListSlice<Self>;
+    type Slice = BlockListFileSlice;
     type Transpose = BlockListTranspose<Self>;
 
     fn accessor(self) -> DenseAccessor {
@@ -184,7 +185,7 @@ impl DenseAccess for BlockListFile {
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
-        BlockListSlice::new(self, bounds)
+        BlockListFileSlice::new(self, bounds)
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
@@ -328,5 +329,147 @@ impl Transact for BlockListFile {
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.file.finalize(txn_id).await
+    }
+}
+
+#[derive(Clone)]
+pub struct BlockListFileSlice {
+    source: BlockListFile,
+    rebase: transform::Slice,
+}
+
+impl BlockListFileSlice {
+    fn new(source: BlockListFile, bounds: Bounds) -> TCResult<Self> {
+        let rebase = transform::Slice::new(source.shape().clone(), bounds)?;
+        Ok(Self { source, rebase })
+    }
+}
+
+impl TensorAccess for BlockListFileSlice {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn ndim(&self) -> usize {
+        self.rebase.ndim()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.rebase.shape()
+    }
+
+    fn size(&self) -> u64 {
+        self.rebase.size()
+    }
+}
+
+#[async_trait]
+impl DenseAccess for BlockListFileSlice {
+    type Slice = Self;
+    type Transpose = BlockListTranspose<Self>;
+
+    fn accessor(self) -> DenseAccessor {
+        unimplemented!()
+    }
+
+    fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+        let file = &self.source.file;
+        let bounds = self.rebase.bounds();
+        let coord_bounds = coord_bounds(self.source.shape());
+
+        let values = stream::iter(bounds.affected())
+            .chunks(PER_BLOCK)
+            .then(move |coords| {
+                let ndim = coords[0].len();
+                let num_coords = coords.len() as u64;
+                let (block_ids, af_indices, af_offsets) = coord_block(
+                    coords.into_iter(),
+                    &coord_bounds,
+                    PER_BLOCK,
+                    ndim,
+                    num_coords,
+                );
+
+                Box::pin(async move {
+                    let mut start = 0.0f64;
+                    let mut values = vec![];
+                    for block_id in block_ids {
+                        debug!("block {} starts at {}", block_id, start);
+
+                        let (block_offsets, new_start) =
+                            block_offsets(&af_indices, &af_offsets, start, block_id);
+
+                        match file.get_block(txn.id(), block_id.into()).await {
+                            Ok(block) => {
+                                let array: &Array = block.deref();
+                                values.extend(array.get(block_offsets).into_values());
+                            }
+                            Err(cause) => return stream::iter(vec![Err(cause)]),
+                        }
+
+                        start = new_start;
+                    }
+
+                    let values: Vec<TCResult<Number>> = values.into_iter().map(Ok).collect();
+                    stream::iter(values)
+                })
+            });
+
+        let values: TCTryStream<Number> = Box::pin(values.flatten());
+        Box::pin(future::ready(Ok(values)))
+    }
+
+    fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {
+        let bounds = self.rebase.invert_bounds(bounds);
+        self.source.slice(bounds)
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        BlockListTranspose::new(self, permutation)
+    }
+
+    async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
+        self.shape().validate_bounds(&bounds)?;
+
+        let bounds = self.rebase.invert_bounds(bounds);
+        self.source.write_value(txn_id, bounds, number).await
+    }
+
+    fn write_value_at(
+        &'_ self,
+        txn_id: TxnId,
+        coord: Coord,
+        value: Number,
+    ) -> TCBoxTryFuture<'_, ()> {
+        Box::pin(async move {
+            self.shape().validate_coord(&coord)?;
+            let coord = self.rebase.invert_coord(&coord);
+            self.source.write_value_at(txn_id, coord, value).await
+        })
+    }
+}
+
+impl ReadValueAt for BlockListFileSlice {
+    fn read_value_at<'a>(&'a self, txn: &'a Txn, coord: Coord) -> Read<'a> {
+        Box::pin(async move {
+            self.shape().validate_coord(&coord)?;
+            let coord = self.rebase.invert_coord(&coord);
+            self.source.read_value_at(txn, coord).await
+        })
+    }
+}
+
+#[async_trait]
+impl Transact for BlockListFileSlice {
+    async fn commit(&self, txn_id: &TxnId) {
+        self.source.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.source.rollback(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.source.finalize(txn_id).await
     }
 }
