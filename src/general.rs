@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 
 use futures::Future;
-use futures::{Stream, TryStream, TryStreamExt};
+use futures::Stream;
 
 use crate::error;
 use crate::scalar::Id;
@@ -82,19 +82,6 @@ impl<F, T: TryCastFrom<F>> TryCastInto<T> for F {
     fn opt_cast_into(self) -> Option<T> {
         T::opt_cast_from(self)
     }
-}
-
-pub async fn count_stream<S: TryStream + Unpin>(mut stream: S) -> TCResult<u64>
-where
-    error::TCError: From<<S as TryStream>::Error>,
-{
-    let mut count = 0;
-
-    while let Some(_) = stream.try_next().await? {
-        count += 1;
-    }
-
-    Ok(count)
 }
 
 #[derive(Clone)]

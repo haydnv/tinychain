@@ -473,28 +473,6 @@ impl Transpose {
         todo!()
     }
 
-    pub fn map_coord_axes(&self, partial_source_coord: Coord, axes: &[usize]) -> Coord {
-        assert_eq!(partial_source_coord.len(), axes.len());
-
-        let mut source_coord: HashMap<usize, u64> = axes
-            .into_iter()
-            .cloned()
-            .zip(partial_source_coord.into_iter())
-            .collect();
-
-        let mut coord = Vec::with_capacity(self.shape.len());
-        for axis in &self.permutation {
-            if let Some(i) = source_coord.remove(axis) {
-                coord.push(i)
-            }
-        }
-        coord
-    }
-
-    pub fn permutation(&'_ self) -> &'_ [usize] {
-        &self.permutation
-    }
-
     pub fn shape(&'_ self) -> &'_ Shape {
         &self.shape
     }
