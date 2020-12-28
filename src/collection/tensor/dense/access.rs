@@ -13,6 +13,7 @@ use super::super::sparse::SparseAccess;
 use super::super::stream::*;
 use super::super::transform::{self, Rebase};
 use super::super::{Bounds, Coord, Shape, TensorAccess, ERR_NONBIJECTIVE_WRITE};
+use super::stream::SparseValueStream;
 use super::{Array, DenseAccess, DenseAccessor, DenseTensor};
 
 #[derive(Clone)]
@@ -726,10 +727,15 @@ impl<T: Clone + SparseAccess> DenseAccess for BlockListSparse<T> {
         DenseAccessor::Sparse(Box::new(BlockListSparse { source }))
     }
 
-    fn block_stream<'a>(&'a self, _txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Array>> {
-        Box::pin(future::ready(Err(error::not_implemented(
-            "BlockListSparse::block_stream",
-        ))))
+    fn value_stream<'a>(&'a self, txn: &'a Txn) -> TCBoxTryFuture<'a, TCTryStream<'a, Number>> {
+        Box::pin(async move {
+            let filled = self.source.filled(txn).await?;
+            let values =
+                SparseValueStream::new(filled, Bounds::all(self.shape()), self.dtype().zero())
+                    .await?;
+            let values: TCTryStream<'a, Number> = Box::pin(values);
+            Ok(values)
+        })
     }
 
     fn slice(self, bounds: Bounds) -> TCResult<Self::Slice> {

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use futures::future::{self, TryFutureExt};
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::class::Instance;
 use crate::collection::{from_dense, Collection};
@@ -23,6 +23,7 @@ use super::{
 mod access;
 mod array;
 mod file;
+mod stream;
 
 pub use access::*;
 pub use array::Array;
@@ -62,7 +63,7 @@ pub trait DenseAccess: ReadValueAt + TensorAccess + Transact + 'static {
                         .map(Ok)
                         .collect::<Vec<TCResult<Number>>>()
                 })
-                .map_ok(stream::iter)
+                .map_ok(futures::stream::iter)
                 .try_flatten();
 
             let values: TCTryStream<'a, Number> = Box::pin(values);
@@ -611,7 +612,7 @@ impl<T: Clone + DenseAccess, OT: Clone + DenseAccess> TensorDualIO<DenseTensor<O
             .broadcast(slice.shape().clone())?
             .as_type(self.dtype())?;
 
-        let coords = stream::iter(Bounds::all(slice.shape()).affected().map(TCResult::Ok));
+        let coords = futures::stream::iter(Bounds::all(slice.shape()).affected().map(TCResult::Ok));
         let values: TCTryStream<(Coord, Number)> =
             Box::pin(ValueReader::new(coords, txn, &other.blocks));
 
