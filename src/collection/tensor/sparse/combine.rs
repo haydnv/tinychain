@@ -6,8 +6,8 @@ use std::task::{self, Poll};
 use futures::stream::{Fuse, Stream, StreamExt};
 use pin_project::pin_project;
 
-use crate::general::TCResult;
 use crate::scalar::Number;
+use crate::TCResult;
 
 use super::super::bounds::Shape;
 use super::super::Coord;

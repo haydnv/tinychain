@@ -9,9 +9,10 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 use crate::class::{Instance, NativeClass, State, TCType};
 use crate::error;
-use crate::general::{TCResult, TryCastFrom, TryCastInto, Tuple};
+use crate::general::Tuple;
 use crate::handler::{Handler, Route};
 use crate::transaction::Txn;
+use crate::{TCResult, TryCastFrom, TryCastInto};
 
 use super::{Scalar, ScalarClass, ScalarInstance};
 

@@ -11,9 +11,9 @@ use crate::collection::btree::{self, BTreeFile, BTreeInstance};
 use crate::collection::schema::{Column, IndexSchema, Row, TableSchema};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCResult, TCTryStream};
 use crate::scalar::{Id, Scalar, Value};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCResult, TCTryStream};
 
 use super::bounds::{Bounds, ColumnBound};
 use super::view::{IndexSlice, MergeSource, Merged, TableSlice};

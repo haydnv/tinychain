@@ -3,9 +3,9 @@ use std::collections::VecDeque;
 use futures::stream::{self, Stream, TryStreamExt};
 
 use crate::collection::{Collection, CollectionInstance};
-use crate::general::TCResult;
 use crate::scalar::Scalar;
 use crate::transaction::Txn;
+use crate::TCResult;
 
 pub struct StreamBuffer {
     // TODO: use the filesystem to buffer

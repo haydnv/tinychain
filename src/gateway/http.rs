@@ -17,12 +17,12 @@ use tokio::time::timeout;
 use crate::auth::Token;
 use crate::class::State;
 use crate::error;
-use crate::general::{TCResult, TCStream};
 use crate::request::Request;
 use crate::scalar::value::link::*;
 use crate::scalar::{Id, Scalar, Value};
 use crate::stream::{JsonListStream, StreamBuffer};
 use crate::transaction::Txn;
+use crate::{TCResult, TCStream};
 
 use super::Gateway;
 

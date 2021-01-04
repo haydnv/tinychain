@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 use std::iter::FromIterator;
@@ -9,9 +10,9 @@ use crate::class::Instance;
 use crate::collection::btree::{BTreeRange, Collator};
 use crate::collection::schema::Column;
 use crate::error;
-use crate::general::{Map, TCResult, TryCastFrom, TryCastInto};
-use crate::scalar::{Bound, Id, Range, Scalar, ScalarClass, ScalarInstance, Value, ValueType};
-use std::cmp::Ordering;
+use crate::general::Map;
+use crate::scalar::{Bound, Id, Range, Scalar, ScalarClass, Value, ValueType};
+use crate::{Match, TCResult, TryCastFrom, TryCastInto};
 
 #[derive(Clone)]
 pub enum ColumnBound {

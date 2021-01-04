@@ -10,10 +10,10 @@ use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::collection::class::*;
 use crate::collection::{Collection, CollectionType};
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCTryStream, TryCastInto};
 use crate::handler::*;
 use crate::scalar::*;
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{Match, TCBoxTryFuture, TCResult, TCTryStream, TryCastInto};
 
 use super::bounds::*;
 use super::dense::{dense_constant, BlockListFile, DenseAccess, DenseAccessor, DenseTensor};

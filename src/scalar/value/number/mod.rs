@@ -1,6 +1,6 @@
 use num;
 
-use crate::general::{CastFrom, CastInto};
+use crate::{CastFrom, CastInto};
 
 pub mod class;
 mod handlers;

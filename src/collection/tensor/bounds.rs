@@ -5,8 +5,8 @@ use std::ops::{self, Deref, DerefMut};
 use itertools::{Itertools, MultiProduct};
 
 use crate::error;
-use crate::general::{TCResult, TryCastFrom, TryCastInto};
-use crate::scalar::{Bound, Scalar, ScalarInstance, Slice, Value};
+use crate::scalar::{Bound, Scalar, Slice, Value};
+use crate::{Match, TCResult, TryCastFrom, TryCastInto};
 
 use super::Coord;
 

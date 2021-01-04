@@ -4,9 +4,9 @@ use std::task::{Context, Poll};
 use futures::{ready, Future, Stream};
 use pin_project::pin_project;
 
-use crate::general::TCResult;
 use crate::scalar::Number;
 use crate::transaction::Txn;
+use crate::TCResult;
 
 use super::super::Coord;
 use super::{Read, ReadValueAt};

@@ -3,10 +3,11 @@ use async_trait::async_trait;
 use crate::auth;
 use crate::class::{State, TCType};
 use crate::error;
-use crate::general::{Map, TCResult};
+use crate::general::Map;
 use crate::request::Request;
 use crate::scalar::{MethodType, PathSegment, Scalar, Value};
 use crate::transaction::Txn;
+use crate::TCResult;
 
 #[async_trait]
 pub trait Handler: Send + Sync {

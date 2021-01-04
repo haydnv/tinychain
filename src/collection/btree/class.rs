@@ -7,9 +7,9 @@ use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::collection::class::*;
 use crate::collection::schema::Column;
 use crate::error;
-use crate::general::{TCResult, TCTryStream, TryCastInto};
 use crate::scalar::{label, Link, PathSegment, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCResult, TCTryStream, TryCastInto};
 
 use super::{BTree, BTreeRange, Key};
 use crate::collection::{BTreeFile, BTreeImpl};

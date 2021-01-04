@@ -5,7 +5,7 @@ use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
 use crate::error;
-use crate::general::TCResult;
+use crate::TCResult;
 
 #[derive(Clone)]
 pub struct Version {

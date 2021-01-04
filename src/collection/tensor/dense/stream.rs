@@ -7,8 +7,8 @@ use futures::task::{Context, Poll};
 use pin_project::pin_project;
 
 use crate::collection::Coords;
-use crate::general::TCResult;
 use crate::scalar::Number;
+use crate::TCResult;
 
 use super::super::{Bounds, Coord};
 

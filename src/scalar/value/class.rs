@@ -2,8 +2,8 @@ use std::fmt;
 
 use crate::class::{Class, NativeClass, TCType};
 use crate::error;
-use crate::general::{TCResult, TryCastFrom, TryCastInto};
 use crate::scalar::{Scalar, ScalarClass, ScalarInstance, ScalarType};
+use crate::{TCResult, TryCastFrom, TryCastInto};
 
 use super::link::{Link, PathSegment, TCPathBuf};
 use super::number::NumberType;

@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult};
 use crate::scalar::value::number::*;
 use crate::transaction::{Txn, TxnId};
+use crate::{TCBoxTryFuture, TCResult};
 
 mod einsum;
 mod handlers;

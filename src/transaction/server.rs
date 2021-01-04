@@ -6,8 +6,8 @@ use tokio::sync::mpsc;
 
 use crate::block::Dir;
 use crate::gateway::Gateway;
-use crate::general::TCResult;
 use crate::lock::RwLock;
+use crate::TCResult;
 
 use super::{Transact, Txn, TxnId};
 

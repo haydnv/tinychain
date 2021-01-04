@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::class::{Class, Instance, NativeClass, TCType};
 use crate::error;
-use crate::general::{TCResult, TryCastFrom};
 use crate::scalar::{Scalar, ScalarClass, ScalarInstance};
+use crate::{TCResult, TryCastFrom};
 
 use super::class::{ValueClass, ValueInstance, ValueType};
 use super::link::{Link, PathSegment, TCPath, TCPathBuf};

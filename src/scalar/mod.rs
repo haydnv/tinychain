@@ -13,10 +13,11 @@ use serde::ser::{Serialize, SerializeSeq, Serializer};
 
 use crate::class::*;
 use crate::error;
-use crate::general::{Map, TCResult, TryCastFrom, TryCastInto, Tuple};
+use crate::general::{Map, Tuple};
 use crate::handler::*;
 use crate::request::Request;
 use crate::transaction::Txn;
+use crate::{Match, TCResult, TryCastFrom, TryCastInto};
 
 pub mod map;
 pub mod op;
@@ -31,10 +32,6 @@ pub use value::*;
 
 pub trait ScalarInstance: Instance + Sized {
     type Class: ScalarClass;
-
-    fn matches<T: TryCastFrom<Self>>(&self) -> bool {
-        T::can_cast_from(self)
-    }
 }
 
 pub trait ScalarClass: Class {

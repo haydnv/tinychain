@@ -8,9 +8,9 @@ use futures::try_join;
 use crate::class::Instance;
 use crate::collection::stream::GroupStream;
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult};
 use crate::scalar::value::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCBoxTryFuture, TCResult};
 
 use super::super::bounds::*;
 use super::super::dense::{DenseAccess, DenseAccessor, DenseTensor};

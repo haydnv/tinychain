@@ -4,8 +4,8 @@ use std::ops::Deref;
 
 use crate::class::Instance;
 use crate::error;
-use crate::general::TCResult;
 use crate::scalar::{Bound, Id, Number, NumberType, StringType, TCString, Value, ValueType};
+use crate::TCResult;
 
 #[derive(Clone)]
 pub struct Collator {

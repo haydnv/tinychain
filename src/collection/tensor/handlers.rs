@@ -6,11 +6,12 @@ use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
 use crate::class::{State, TCType};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{Map, TCResult, TryCastInto};
+use crate::general::Map;
 use crate::handler::*;
 use crate::request::Request;
 use crate::scalar::{label, MethodType, NumberType, PathSegment, Scalar, Value};
 use crate::transaction::Txn;
+use crate::{TCResult, TryCastInto};
 
 use super::bounds::*;
 use super::class::{Tensor, TensorInstance};

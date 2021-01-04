@@ -13,9 +13,9 @@ use crate::collection::schema::{Column, IndexSchema, Row};
 use crate::collection::stream::GroupStream;
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCResult, TCTryStream};
 use crate::scalar::{Id, Value};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCResult, TCTryStream};
 
 use super::bounds::Bounds;
 use super::index::TableIndex;

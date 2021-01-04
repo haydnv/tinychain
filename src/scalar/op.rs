@@ -7,10 +7,11 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use crate::auth::{Scope, SCOPE_EXECUTE};
 use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
-use crate::general::{Map, TCResult, TryCastFrom, TryCastInto};
+use crate::general::Map;
 use crate::handler::Handler;
 use crate::request::Request;
 use crate::transaction::Txn;
+use crate::{Match, TCResult, TryCastFrom, TryCastInto};
 
 use super::link::{Link, TCPathBuf};
 use super::{label, Id, PathSegment, Scalar, ScalarClass, ScalarInstance, ScalarType, Value};

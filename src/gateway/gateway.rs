@@ -11,12 +11,12 @@ use crate::auth::Token;
 use crate::block::Dir;
 use crate::class::State;
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TryCastInto};
 use crate::handler::Public;
 use crate::kernel;
 use crate::request::Request;
 use crate::scalar::{Id, Link, Scalar, TCPath, Value};
 use crate::transaction::{Txn, TxnServer};
+use crate::{TCBoxTryFuture, TCResult, TryCastInto};
 
 use super::http;
 use super::{Hosted, NetworkTime, Server};

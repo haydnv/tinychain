@@ -12,8 +12,8 @@ use serde::de;
 use serde::ser::{SerializeMap, Serializer};
 
 use crate::error;
-use crate::general::{TCResult, TryCastFrom};
 use crate::scalar::{label, Id, Label, Scalar, TCString, Value};
+use crate::{TCResult, TryCastFrom};
 
 const EMPTY_SLICE: &[usize] = &[];
 

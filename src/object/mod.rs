@@ -4,9 +4,10 @@ use log::debug;
 
 use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
-use crate::general::{Map, TCResult};
+use crate::general::Map;
 use crate::handler::*;
 use crate::scalar::{label, Link, MethodType, PathSegment, Scalar, TCPath, TCPathBuf};
+use crate::TCResult;
 
 mod class;
 mod instance;

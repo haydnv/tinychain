@@ -6,11 +6,11 @@ use log::debug;
 use crate::class::Instance;
 use crate::collection::{from_dense, Collection};
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
 use crate::handler::*;
 use crate::scalar::number::*;
 use crate::scalar::{MethodType, PathSegment};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCBoxTryFuture, TCResult, TCTryStream};
 
 use super::bounds::{Bounds, Shape};
 use super::class::{Tensor, TensorInstance, TensorType};

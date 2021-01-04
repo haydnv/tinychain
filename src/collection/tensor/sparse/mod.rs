@@ -7,11 +7,11 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use crate::class::Instance;
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult};
 use crate::handler::*;
 use crate::scalar::value::number::*;
 use crate::scalar::{MethodType, PathSegment};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCBoxTryFuture, TCResult};
 
 use super::bounds::{Bounds, Shape};
 use super::class::{Tensor, TensorInstance, TensorType};

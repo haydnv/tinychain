@@ -13,10 +13,10 @@ use crate::block::BlockId;
 use crate::block::File;
 use crate::class::Instance;
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
 use crate::scalar::number::*;
 use crate::scalar::Value;
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCBoxTryFuture, TCResult, TCTryStream};
 
 use super::super::bounds::*;
 use super::super::stream::{block_offsets, coord_block, coord_bounds, Read, ReadValueAt};

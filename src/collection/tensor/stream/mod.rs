@@ -2,9 +2,9 @@ use std::pin::Pin;
 
 use futures::Future;
 
-use crate::general::TCResult;
 use crate::scalar::Number;
 use crate::transaction::Txn;
+use crate::TCResult;
 
 use super::Coord;
 

@@ -1,10 +1,12 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use arrayfire as af;
+use futures::{Future, Stream};
 use log::debug;
 use structopt::StructOpt;
 
@@ -27,10 +29,18 @@ mod scalar;
 mod stream;
 mod transaction;
 
+use safecast::*;
+
+type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send>>;
+type TCBoxTryFuture<'a, T> = TCBoxFuture<'a, TCResult<T>>;
+type TCResult<T> = Result<T, error::TCError>;
+type TCStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin + 'a>>;
+type TCTryStream<'a, T> = TCStream<'a, TCResult<T>>;
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 static LOGGER: logger::Logger = logger::Logger;
 
-fn data_size(flag: &str) -> general::TCResult<usize> {
+fn data_size(flag: &str) -> TCResult<usize> {
     if flag.is_empty() {
         return Err(error::bad_request("Invalid size specified", flag));
     }
@@ -48,7 +58,7 @@ fn data_size(flag: &str) -> general::TCResult<usize> {
     }
 }
 
-fn duration(flag: &str) -> general::TCResult<Duration> {
+fn duration(flag: &str) -> TCResult<Duration> {
     u64::from_str(flag)
         .map(Duration::from_secs)
         .map_err(|_| error::bad_request("Invalid duration", flag))
@@ -133,7 +143,7 @@ async fn configure(
     clusters: Vec<scalar::value::link::TCPathBuf>,
     data_dir: Arc<block::Dir>,
     workspace: Arc<block::Dir>,
-) -> general::TCResult<gateway::Hosted> {
+) -> TCResult<gateway::Hosted> {
     const RESERVED: [&str; 2] = ["/sbin", "/txn"];
 
     let mut hosted = gateway::Hosted::new();

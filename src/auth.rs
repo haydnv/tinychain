@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use signature::{Signature, Signer, Verifier};
 
 use crate::error;
-use crate::general::TCResult;
 use crate::scalar::{path_label, Link, PathLabel, TCPathBuf, Value};
+use crate::TCResult;
 
 pub type Scope = TCPathBuf;
 

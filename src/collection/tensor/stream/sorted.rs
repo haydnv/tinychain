@@ -4,9 +4,9 @@ use arrayfire as af;
 use futures::future;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
-use crate::general::TCResult;
 use crate::scalar::UIntType;
 use crate::transaction::Txn;
+use crate::TCResult;
 
 use super::super::bounds::Shape;
 use super::super::dense::{Array, BlockListFile, PER_BLOCK};

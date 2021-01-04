@@ -4,10 +4,10 @@ use std::pin::Pin;
 
 use futures::ready;
 use futures::stream::{Fuse, Stream, StreamExt};
+use futures::task::{Context, Poll};
 use pin_project::pin_project;
 
-use crate::general::TCResult;
-use futures::task::{Context, Poll};
+use crate::TCResult;
 
 #[pin_project]
 pub struct GroupStream<T, S: Stream<Item = TCResult<T>>> {

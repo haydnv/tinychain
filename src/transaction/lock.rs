@@ -11,7 +11,7 @@ use futures::task::{Context, Poll, Waker};
 use log::debug;
 
 use crate::error;
-use crate::general::TCResult;
+use crate::TCResult;
 
 use super::{Transact, TxnId};
 

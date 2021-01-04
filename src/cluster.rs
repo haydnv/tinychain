@@ -8,12 +8,13 @@ use log::debug;
 use crate::block::Dir;
 use crate::class::State;
 use crate::error;
-use crate::general::{Map, TCResult};
+use crate::general::Map;
 use crate::handler::Public;
 use crate::request::Request;
 use crate::scalar::*;
 use crate::transaction::lock::{Mutate, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::TCResult;
 
 const ERR_ID: &str = "Invalid Id for Cluster member";
 

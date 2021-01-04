@@ -6,10 +6,10 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::{Class, Instance, NativeClass, State, TCType};
 use crate::error;
-use crate::general::{TCResult, TryCastFrom, TryCastInto};
 use crate::scalar::{
     label, Id, Link, PathSegment, Scalar, ScalarClass, ScalarInstance, TCPathBuf, Value,
 };
+use crate::{Match, TCResult, TryCastFrom, TryCastInto};
 
 use super::{RefType, Refer, TCRef};
 use crate::request::Request;

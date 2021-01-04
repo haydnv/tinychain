@@ -9,10 +9,10 @@ use crate::class::Instance;
 use crate::collection::schema::{Column, IndexSchema};
 use crate::collection::table::{self, ColumnBound, Table, TableIndex, TableInstance};
 use crate::error;
-use crate::general::TCResult;
 use crate::scalar::value::number::*;
 use crate::scalar::{label, Bound, Id, Label, Value, ValueType};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::TCResult;
 
 use super::super::bounds::{AxisBounds, Bounds, Shape};
 use super::super::stream::*;

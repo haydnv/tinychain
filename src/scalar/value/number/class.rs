@@ -7,12 +7,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::class::{Class, NativeClass, TCType};
 use crate::error;
-use crate::general::{CastInto, TCResult, TryCastFrom};
 use crate::handler::Route;
 use crate::scalar::{
     label, Link, PathSegment, Scalar, ScalarClass, ScalarType, TCPathBuf, Value, ValueClass,
     ValueInstance, ValueType,
 };
+use crate::{CastInto, TCResult, TryCastFrom};
 
 use super::instance::{Boolean, Complex, Float, Int, Number, UInt};
 

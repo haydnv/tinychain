@@ -3,8 +3,8 @@ use std::fmt;
 
 use crate::collection::schema::Column;
 use crate::error;
-use crate::general::{TCResult, TryCastFrom, TryCastInto};
 use crate::scalar::*;
+use crate::{Match, TCResult, TryCastFrom, TryCastInto};
 
 use super::collator::Collator;
 use super::Key;

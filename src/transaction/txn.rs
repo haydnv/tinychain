@@ -18,10 +18,10 @@ use crate::block::{BlockData, Dir, DirEntry, File};
 use crate::class::State;
 use crate::error;
 use crate::gateway::{Gateway, NetworkTime};
-use crate::general::{TCBoxTryFuture, TCResult};
 use crate::lock::RwLock;
 use crate::request::Request;
 use crate::scalar::*;
+use crate::{TCBoxTryFuture, TCResult};
 
 use super::Transact;
 

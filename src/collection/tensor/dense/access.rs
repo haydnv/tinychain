@@ -4,9 +4,9 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::try_join;
 
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 use crate::scalar::number::*;
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCBoxTryFuture, TCResult, TCStream, TCTryStream};
 
 use super::super::sparse::SparseAccess;
 use super::super::stream::*;

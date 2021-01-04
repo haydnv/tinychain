@@ -8,10 +8,10 @@ use crate::collection::table::TableIndex;
 use crate::collection::tensor::dense::{BlockListFile, DenseTensor};
 use crate::collection::tensor::sparse::{SparseTable, SparseTensor};
 use crate::error;
-use crate::general::{TCResult, TCStream};
 use crate::handler::*;
 use crate::scalar::{MethodType, PathSegment, Value};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCResult, TCStream};
 
 use super::{ChainInstance, ChainType};
 

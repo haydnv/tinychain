@@ -5,9 +5,9 @@ use futures::TryFutureExt;
 
 use crate::class::{Class, NativeClass, TCType};
 use crate::error;
-use crate::general::{CastInto, TCResult, TCTryStream, TryCastFrom};
 use crate::scalar::{label, Link, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::Txn;
+use crate::{CastInto, TCResult, TCTryStream, TryCastFrom};
 
 use super::btree::BTreeType;
 use super::table::TableType;

@@ -3,10 +3,10 @@ use std::fmt;
 use async_trait::async_trait;
 
 use crate::class::Instance;
-use crate::general::{TCResult, TCTryStream};
 use crate::handler::*;
 use crate::scalar::{MethodType, PathSegment, Scalar};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCResult, TCTryStream};
 
 mod stream;
 

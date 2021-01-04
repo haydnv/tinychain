@@ -7,10 +7,10 @@ use futures::TryStreamExt;
 
 use crate::class::*;
 use crate::error;
-use crate::general::{TCResult, TCTryStream, TryCastInto};
 use crate::handler::*;
 use crate::scalar::{label, Id, Link, MethodType, PathSegment, Scalar, TCPathBuf, Value};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCResult, TCTryStream, TryCastInto};
 
 use super::class::{CollectionClass, CollectionInstance};
 use super::schema::{Column, Row, TableSchema};

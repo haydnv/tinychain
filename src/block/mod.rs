@@ -7,10 +7,10 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use crate::error;
-use crate::general::TCResult;
 use crate::scalar::value::link::PathSegment;
 use crate::transaction::lock::{Mutate, TxnLockReadGuard, TxnLockWriteGuard};
 use crate::transaction::TxnId;
+use crate::TCResult;
 
 mod cache;
 mod dir;

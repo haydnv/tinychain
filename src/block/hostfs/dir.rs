@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use bytes::Bytes;
 
 use crate::error;
-use crate::general::TCResult;
 use crate::lock::RwLock;
 use crate::scalar::value::link::PathSegment;
+use crate::TCResult;
 
 pub enum DirEntry {
     Block(RwLock<Bytes>),

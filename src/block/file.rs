@@ -9,11 +9,11 @@ use log::debug;
 use uuid::Uuid;
 
 use crate::error;
-use crate::general::TCResult;
 use crate::lock::RwLock;
 use crate::scalar::value::link::PathSegment;
 use crate::transaction::lock::{Mutable, TxnLock, TxnLockReadGuard};
 use crate::transaction::{Transact, TxnId};
+use crate::TCResult;
 
 use super::cache::Cache;
 use super::hostfs;

@@ -19,10 +19,10 @@ use crate::class::Instance;
 use crate::collection::schema::{Column, RowSchema};
 use crate::collection::Collection;
 use crate::error;
-use crate::general::{TCBoxTryFuture, TCResult, TCTryStream};
 use crate::scalar::*;
 use crate::transaction::lock::{Mutable, TxnLock};
 use crate::transaction::{Transact, Txn, TxnId};
+use crate::{TCBoxTryFuture, TCResult, TCTryStream};
 
 use super::collator::Collator;
 use super::{validate_key, validate_range, BTreeInstance, BTreeRange, BTreeType, Key};

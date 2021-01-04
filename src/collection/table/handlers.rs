@@ -9,11 +9,12 @@ use crate::auth::{Scope, SCOPE_READ, SCOPE_WRITE};
 use crate::class::{Instance, State, TCType};
 use crate::collection::CollectionInstance;
 use crate::error;
-use crate::general::{Map, TCResult, TCTryStream, TryCastFrom, TryCastInto};
+use crate::general::Map;
 use crate::handler::*;
 use crate::request::Request;
-use crate::scalar::{Id, MethodType, PathSegment, Scalar, ScalarInstance, Value};
+use crate::scalar::{Id, MethodType, PathSegment, Scalar, Value};
 use crate::transaction::Txn;
+use crate::{Match, TCResult, TCTryStream, TryCastFrom, TryCastInto};
 
 use super::{Bounds, Table, TableInstance};
 

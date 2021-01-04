@@ -7,9 +7,9 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use crate::class::Instance;
 use crate::error;
-use crate::general::{CastFrom, CastInto, TCResult};
 use crate::handler::{Handler, Route};
 use crate::scalar::{Link, MethodType, PathSegment, ScalarInstance, ValueInstance};
+use crate::{CastFrom, CastInto, TCResult};
 
 use super::class::{BooleanType, ComplexType, FloatType, IntType, NumberType, UIntType};
 use super::class::{NumberClass, NumberInstance};
@@ -1371,16 +1371,6 @@ impl NumberInstance for Number {
     type Abs = Number;
     type Class = NumberType;
 
-    fn abs(self) -> Number {
-        use Number::*;
-        match self {
-            Complex(c) => Float(c.abs()),
-            Float(f) => Float(f.abs()),
-            Int(i) => Int(i.abs()),
-            other => other,
-        }
-    }
-
     fn into_type(self, dtype: NumberType) -> Number {
         use NumberType as NT;
 
@@ -1406,6 +1396,16 @@ impl NumberInstance for Number {
                 u.into_type(ut).into()
             }
             NT::Number => self,
+        }
+    }
+
+    fn abs(self) -> Number {
+        use Number::*;
+        match self {
+            Complex(c) => Float(c.abs()),
+            Float(f) => Float(f.abs()),
+            Int(i) => Int(i.abs()),
+            other => other,
         }
     }
 }
