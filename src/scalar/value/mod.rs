@@ -1,6 +1,7 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
+use std::ops::Deref;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -14,21 +15,17 @@ use crate::handler::{Handler, Route};
 use crate::transaction::Txn;
 use crate::{TCResult, TryCastFrom, TryCastInto};
 
-use super::{Scalar, ScalarClass, ScalarInstance};
+use super::{MethodType, Scalar, ScalarClass, ScalarInstance};
 
 pub mod class;
 pub mod link;
 pub mod number;
 pub mod string;
-pub mod version;
 
-use crate::scalar::MethodType;
 pub use class::*;
 pub use link::*;
 pub use number::*;
-use std::ops::Deref;
 pub use string::*;
-pub use version::*;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Value {
