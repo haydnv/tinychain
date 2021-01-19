@@ -11,3 +11,4 @@ keywords = ["tinychain"]
 categories = ["data structures"]
 
 [dependencies]
+value = {path = "value"}
