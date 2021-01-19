@@ -12,3 +12,5 @@ keywords = ["database", "host", "platform", "runtime", "environment"]
 categories = ["concurrency", "database implementations", "data structures", "web programming"]
 
 [dependencies]
+env_logger = "0.8"
+log = { version = "0.4", features = ["release_max_level_warn"] }
