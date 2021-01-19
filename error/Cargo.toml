@@ -3,5 +3,11 @@ name = "error"
 version = "0.1.0"
 authors = ["haydnv"]
 edition = "2018"
+description = "Tinychain's generic error type"
+license = "Apache-2.0"
+repository = "http://github.com/haydnv/tinychain.git"
+
+keywords = ["tinychain"]
+categories = ["data structures", "rust patterns"]
 
 [dependencies]
