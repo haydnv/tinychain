@@ -3,10 +3,8 @@ use destream::{FromStream, ToStream, Decoder, Encoder};
 use number_general::Number;
 
 pub mod link;
-pub mod string;
 
 pub use link::*;
-pub use string::*;
 
 #[derive(Eq, PartialEq)]
 pub enum Value {

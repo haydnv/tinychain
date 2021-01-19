@@ -10,10 +10,11 @@ use std::str::FromStr;
 use addr::DomainName;
 use async_trait::async_trait;
 use destream::{de, Decoder, Encoder, EncodeMap, FromStream, ToStream};
+use generic::{label, Id, Label};
 use error::*;
 use safecast::TryCastFrom;
 
-use super::{label, Id, Label, Value};
+use super::Value;
 
 const EMPTY_SLICE: &[usize] = &[];
 
@@ -613,6 +614,21 @@ impl FromStream for TCPathBuf {
 impl<'en> ToStream<'en> for TCPathBuf {
     fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
         e.encode_str(&self.to_string())
+    }
+}
+
+impl TryCastFrom<TCPathBuf> for Id {
+    fn can_cast_from(path: &TCPathBuf) -> bool {
+        path.as_slice().len() == 1
+    }
+
+    fn opt_cast_from(path: TCPathBuf) -> Option<Id> {
+        let mut segments = path.into_vec();
+        if segments.len() == 1 {
+            segments.pop()
+        } else {
+            None
+        }
     }
 }
 

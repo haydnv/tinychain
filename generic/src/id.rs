@@ -8,8 +8,6 @@ use regex::Regex;
 
 use error::*;
 
-use super::TCPathBuf;
-
 const RESERVED_CHARS: [&str; 21] = [
     "/", "..", "~", "$", "`", "^", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":",
     "//", "@", "#",
@@ -81,7 +79,7 @@ impl de::Visitor for IdVisitor {
 
     async fn visit_map<M: de::MapAccess>(self, mut access: M) -> Result<Self::Value, M::Error> {
         if let Some(key) = access.next_key::<String>().await? {
-            let value: Vec<super::Value> = access.next_value().await?;
+            let value: [u8; 0] = access.next_value().await?;
             if value.is_empty() {
                 Id::from_str(&key).map_err(de::Error::custom)
             } else {
@@ -135,21 +133,6 @@ impl TryCastFrom<String> for Id {
         match id.parse() {
             Ok(id) => Some(id),
             Err(_) => None,
-        }
-    }
-}
-
-impl TryCastFrom<TCPathBuf> for Id {
-    fn can_cast_from(path: &TCPathBuf) -> bool {
-        path.as_slice().len() == 1
-    }
-
-    fn opt_cast_from(path: TCPathBuf) -> Option<Id> {
-        let mut segments = path.into_vec();
-        if segments.len() == 1 {
-            segments.pop()
-        } else {
-            None
         }
     }
 }
