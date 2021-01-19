@@ -1,0 +1,13 @@
+[package]
+name = "scalar"
+version = "0.1.0"
+authors = ["haydnv"]
+edition = "2018"
+description = "Tinychain's representation of a scalar value"
+license = "Apache-2.0"
+repository = "http://github.com/haydnv/tinychain.git"
+
+keywords = ["tinychain"]
+categories = ["data structures"]
+
+[dependencies]
