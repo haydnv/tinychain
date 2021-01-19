@@ -1,7 +1,11 @@
+use generic::{Map, Tuple};
 use value::Value;
 
 pub use value::*;
 
+#[derive(Clone)]
 pub enum Scalar {
-    Value(Value)
+    Map(Map<Self>),
+    Tuple(Tuple<Self>),
+    Value(Value),
 }

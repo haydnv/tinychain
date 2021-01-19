@@ -2,15 +2,19 @@ use async_trait::async_trait;
 use destream::{FromStream, ToStream, Decoder, Encoder};
 use number_general::Number;
 
+use generic::{Map, Tuple};
+
 pub mod link;
 
 pub use link::*;
 
-#[derive(Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Value {
     Link(Link),
+    Map(Map<Self>),
     Number(Number),
     String(String),
+    Tuple(Tuple<Self>),
 }
 
 #[async_trait]
