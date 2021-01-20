@@ -12,8 +12,13 @@ keywords = ["database", "host", "platform", "runtime", "environment"]
 categories = ["concurrency", "database implementations", "data structures", "web programming"]
 
 [dependencies]
+auth = { path = "auth" }
 env_logger = "0.8"
+error = { path = "error" }
+generic = { path = "generic" }
 log = { version = "0.4", features = ["release_max_level_warn"] }
+rand = "0.7"
 safecast = "0.1"
 scalar = { path = "state/scalar" }
+serde = { version = "1.0", features = []}
 value = { path = "state/scalar/value" }
