@@ -13,7 +13,7 @@ use generic::*;
 
 use super::Link;
 
-const PREFIX: PathLabel = path_label(&["sbin", "value"]);
+const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ValueType {
@@ -32,28 +32,55 @@ impl Class for ValueType {
 impl NativeClass for ValueType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         use ComplexType as CT;
+        use FloatType as FT;
+        use IntType as IT;
         use NumberType as NT;
+        use UIntType as UT;
 
-        if path.len() >= 2 && &path[..2] == &PREFIX[..] {
-            if path.len() == 2 {
+        if path.len() >= 3 && &path[..3] == &PREFIX[..] {
+            if path.len() == 3 {
                 Some(Self::Value)
-            } else if path.len() == 3 {
-                match path[2].as_str() {
+            } else if path.len() == 4 {
+                match path[3].as_str() {
                     "link" => Some(Self::Link),
                     "none" => Some(Self::None),
                     "string" => Some(Self::String),
                     "tuple" => Some(Self::Tuple),
                     _ => None,
                 }
-            } else if path.len() == 4 {
-                match (path[2].as_str(), path[3].as_str()) {
-                    ("number", "complex") => Some(Self::Number(NT::Complex(CT::Complex))),
+            } else if path.len() == 5 && &path[3] == "number" {
+                match path[4].as_str() {
+                    "bool" => Some(Self::Number(NT::Bool)),
+                    "complex" => Some(Self::Number(NT::Complex(CT::Complex))),
+                    "int" => Some(Self::Number(NT::Int(IT::Int))),
+                    "uint" => Some(Self::Number(NT::UInt(UT::UInt))),
                     _ => None,
                 }
-            } else if path.len() == 5 {
-                match (path[2].as_str(), path[3].as_str(), path[4].as_str()) {
-                    ("number", "complex", "32") => Some(Self::Number(NT::Complex(CT::C32))),
-                    ("number", "complex", "64") => Some(Self::Number(NT::Complex(CT::C64))),
+            } else if path.len() == 6 && &path[3] == "number" {
+                match path[4].as_str() {
+                    "complex" => match path[5].as_str() {
+                        "32" => Some(Self::Number(NT::Complex(CT::C32))),
+                        "64" => Some(Self::Number(NT::Complex(CT::C64))),
+                        _ => None,
+                    },
+                    "float" => match path[5].as_str() {
+                        "32" => Some(Self::Number(NT::Float(FT::F32))),
+                        "64" => Some(Self::Number(NT::Float(FT::F64))),
+                        _ => None,
+                    },
+                    "int" => match path[5].as_str() {
+                        "16" => Some(Self::Number(NT::Int(IT::I16))),
+                        "32" => Some(Self::Number(NT::Int(IT::I32))),
+                        "64" => Some(Self::Number(NT::Int(IT::I64))),
+                        _ => None,
+                    },
+                    "uint" => match path[5].as_str() {
+                        "8" => Some(Self::Number(NT::UInt(UT::U8))),
+                        "16" => Some(Self::Number(NT::UInt(UT::U16))),
+                        "32" => Some(Self::Number(NT::UInt(UT::U32))),
+                        "64" => Some(Self::Number(NT::UInt(UT::U64))),
+                        _ => None,
+                    },
                     _ => None,
                 }
             } else {
