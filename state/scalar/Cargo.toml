@@ -18,5 +18,4 @@ futures = "0.3"
 error = {path = "../../error"}
 generic = {path = "../../generic" }
 safecast = "0.1"
-txn = {path = "../../txn"}
 value = {path = "value" }
