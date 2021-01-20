@@ -4,23 +4,93 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::{de, Decoder, Encoder, FromStream, IntoStream, MapAccess, SeqAccess, ToStream};
-use number_general::{Number, NumberInstance, NumberType};
+use number_general::*;
 use safecast::{CastFrom, TryCastFrom};
 
-use generic::{TCPathBuf, Tuple};
+use generic::*;
 
 pub mod link;
 
 pub use link::*;
 
+const PREFIX: PathLabel = path_label(&["sbin", "value"]);
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ValueType {
-    None,
     Link,
+    None,
     Number(NumberType),
     String,
     Tuple,
     Value,
+}
+
+impl Class for ValueType {
+    type Instance = Value;
+
+    fn path(&self) -> TCPathBuf {
+        let prefix = TCPathBuf::from(PREFIX);
+
+        match self {
+            Self::Link => prefix.append(label("link")),
+            Self::None => prefix.append(label("none")),
+            Self::Number(nt) => {
+                const N8: Label = label("8");
+                const N16: Label = label("16");
+                const N32: Label = label("32");
+                const N64: Label = label("64");
+
+                let prefix = prefix.append(label("number"));
+                use NumberType as NT;
+                match nt {
+                    NT::Bool => prefix.append("bool"),
+                    NT::Complex(ct) => {
+                        let prefix = prefix.append(label("complex"));
+                        use ComplexType as CT;
+                        match ct {
+                            CT::C32 => prefix.append(N32),
+                            CT::C64 => prefix.append(N64),
+                            CT::Complex => prefix,
+                        }
+                    }
+                    NT::Float(ft) => {
+                        let prefix = prefix.append(label("float"));
+                        use FloatType as FT;
+                        match ft {
+                            FT::F32 => prefix.append(N32),
+                            FT::F64 => prefix.append(N64),
+                            FT::Float => prefix,
+                        }
+                    }
+                    NT::Int(it) => {
+                        let prefix = prefix.append(label("int"));
+                        use IntType as IT;
+                        match it {
+                            IT::I16 => prefix.append(N16),
+                            IT::I32 => prefix.append(N32),
+                            IT::I64 => prefix.append(N64),
+                            IT::Int => prefix,
+                        }
+                    }
+                    NT::UInt(ut) => {
+                        let prefix = prefix.append(label("uint"));
+                        use UIntType as UT;
+                        match ut {
+                            UT::U8 => prefix.append(N8),
+                            UT::U16 => prefix.append(N16),
+                            UT::U32 => prefix.append(N32),
+                            UT::U64 => prefix.append(N64),
+                            UT::UInt => prefix,
+                        }
+                    }
+                    NT::Number => prefix,
+                }
+            }
+            Self::String => prefix.append("string"),
+            Self::Tuple => prefix.append("tuple"),
+            Self::Value => prefix,
+        }
+    }
 }
 
 impl Ord for ValueType {
@@ -65,7 +135,19 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn class(&self) -> ValueType {
+    pub fn is_none(&self) -> bool {
+        match self {
+            Self::None => true,
+            Self::Tuple(tuple) => tuple.is_empty(),
+            _ => false,
+        }
+    }
+}
+
+impl Instance for Value {
+    type Class = ValueType;
+
+    fn class(&self) -> ValueType {
         use ValueType as VT;
         match self {
             Self::Link(_) => VT::Link,
@@ -73,14 +155,6 @@ impl Value {
             Self::Number(n) => VT::Number(n.class()),
             Self::String(_) => VT::String,
             Self::Tuple(_) => VT::Tuple,
-        }
-    }
-
-    pub fn is_none(&self) -> bool {
-        match self {
-            Self::None => true,
-            Self::Tuple(tuple) => tuple.is_empty(),
-            _ => false,
         }
     }
 }
