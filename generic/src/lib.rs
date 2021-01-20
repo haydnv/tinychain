@@ -6,8 +6,10 @@ pub use id::*;
 pub use map::*;
 pub use tuple::*;
 
-pub trait Class {
+pub trait Class: Sized {
     type Instance;
+
+    fn from_path(path: &[PathSegment]) -> Option<Self>;
 
     fn path(&self) -> TCPathBuf;
 }

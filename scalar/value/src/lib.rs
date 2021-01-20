@@ -30,6 +30,40 @@ pub enum ValueType {
 impl Class for ValueType {
     type Instance = Value;
 
+    fn from_path(path: &[PathSegment]) -> Option<Self> {
+        use ComplexType as CT;
+        use NumberType as NT;
+
+        if path.len() >= 2 && &path[..2] == &PREFIX[..] {
+            if path.len() == 2 {
+                Some(Self::Value)
+            } else if path.len() == 3 {
+                match path[2].as_str() {
+                    "link" => Some(Self::Link),
+                    "none" => Some(Self::None),
+                    "string" => Some(Self::String),
+                    "tuple" => Some(Self::Tuple),
+                    _ => None,
+                }
+            } else if path.len() == 4 {
+                match (path[2].as_str(), path[3].as_str()) {
+                    ("number", "complex") => Some(Self::Number(NT::Complex(CT::Complex))),
+                    _ => None,
+                }
+            } else if path.len() == 5 {
+                match (path[2].as_str(), path[3].as_str(), path[4].as_str()) {
+                    ("number", "complex", "32") => Some(Self::Number(NT::Complex(CT::C32))),
+                    ("number", "complex", "64") => Some(Self::Number(NT::Complex(CT::C64))),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     fn path(&self) -> TCPathBuf {
         let prefix = TCPathBuf::from(PREFIX);
 
@@ -176,7 +210,7 @@ impl<'en> ToStream<'en> for Value {
             Self::Number(n) => match n {
                 Number::Complex(c) => {
                     let mut map = encoder.encode_map(Some(1))?;
-                    map.encode_entry(self.class().path().to_string(), c)?;
+                    map.encode_entry(self.class().path().to_string(), Number::Complex(*c))?;
                     map.end()
                 }
                 n => n.to_stream(encoder),
@@ -298,6 +332,38 @@ impl de::Visitor for ValueVisitor {
     async fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
         if let Some(key) = map.next_key::<String>().await? {
             if let Ok(link) = Link::from_str(&key) {
+                if link.host().is_none() {
+                    use ValueType as VT;
+                    if let Some(class) = VT::from_path(link.path()) {
+                        return match class {
+                            VT::Link => {
+                                let link = map.next_value().await?;
+                                Ok(Value::Link(link))
+                            }
+                            VT::None => {
+                                let _ = map.next_value::<()>().await?;
+                                Ok(Value::None)
+                            }
+                            VT::Number(nt) => {
+                                let n = map.next_value::<Number>().await?;
+                                Ok(Value::Number(n.into_type(nt)))
+                            }
+                            VT::String => {
+                                let s = map.next_value().await?;
+                                Ok(Value::String(s))
+                            }
+                            VT::Tuple => {
+                                let t = map.next_value::<Vec<Value>>().await?;
+                                Ok(Value::Tuple(t.into()))
+                            }
+                            VT::Value => {
+                                let v = map.next_value().await?;
+                                Ok(v)
+                            }
+                        };
+                    }
+                }
+
                 if let Some(key) = map.next_key::<String>().await? {
                     Err(de::Error::custom(format!(
                         "the end of the map specifying this Value by type, not a second key \"{}\"",

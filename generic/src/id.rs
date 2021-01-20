@@ -47,6 +47,30 @@ impl Id {
     }
 }
 
+impl PartialEq<str> for Id {
+    fn eq(&self, other: &str) -> bool {
+        self.id == other
+    }
+}
+
+impl<'a> PartialEq<&'a str> for Id {
+    fn eq(&self, other: &&'a str) -> bool {
+        self.id == *other
+    }
+}
+
+impl PartialEq<Label> for Id {
+    fn eq(&self, other: &Label) -> bool {
+        self.id == other.id
+    }
+}
+
+impl PartialEq<Id> for &str {
+    fn eq(&self, other: &Id) -> bool {
+        self == &other.id
+    }
+}
+
 impl From<usize> for Id {
     fn from(u: usize) -> Id {
         u.to_string().parse().unwrap()
@@ -97,24 +121,6 @@ impl de::Visitor for IdVisitor {
 impl<'en> ToStream<'en> for Id {
     fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
         e.encode_str(&self.id)
-    }
-}
-
-impl PartialEq<Label> for Id {
-    fn eq(&self, other: &Label) -> bool {
-        self.id == other.id
-    }
-}
-
-impl PartialEq<str> for Id {
-    fn eq(&self, other: &str) -> bool {
-        &self.id == other
-    }
-}
-
-impl PartialEq<Id> for &str {
-    fn eq(&self, other: &Id) -> bool {
-        self == &other.id
     }
 }
 
@@ -192,6 +198,14 @@ pub type PathSegment = Id;
 
 pub struct PathLabel {
     segments: &'static [&'static str],
+}
+
+impl<Idx: std::slice::SliceIndex<[&'static str]>> std::ops::Index<Idx> for PathLabel {
+    type Output = Idx::Output;
+
+    fn index(&self, index: Idx) -> &Self::Output {
+        &self.segments[index]
+    }
 }
 
 pub const fn path_label(segments: &'static [&'static str]) -> PathLabel {
