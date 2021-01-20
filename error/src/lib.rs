@@ -6,9 +6,11 @@ pub type TCResult<T> = Result<T, TCError>;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ErrorType {
     BadRequest,
+    Forbidden,
     Internal,
     MethodNotAllowed,
     Timeout,
+    Unauthorized,
 }
 
 impl fmt::Debug for ErrorType {
@@ -21,9 +23,11 @@ impl fmt::Display for ErrorType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::BadRequest => write!(f, "bad request"),
+            Self::Forbidden => write!(f, "forbidden"),
             Self::Internal => write!(f, "internal"),
             Self::MethodNotAllowed => write!(f, "method not allowed"),
             Self::Timeout => write!(f, "request timeout"),
+            Self::Unauthorized => write!(f, "unauthorized"),
         }
     }
 }
@@ -36,10 +40,19 @@ pub struct TCError {
 
 impl TCError {
     /// Error indicating that the request is badly-constructed or nonsensical.
-    pub fn bad_request<M: fmt::Display, I: fmt::Display>(message: M, info: I) -> Self {
+    pub fn bad_request<M: fmt::Display, I: fmt::Display>(message: M, cause: I) -> Self {
         Self {
             code: ErrorType::Internal,
-            message: format!("{}: {}", message, info),
+            message: format!("{}: {}", message, cause),
+        }
+    }
+
+    /// Error indicating that the requestor's credentials do not authorize them to access the
+    /// specified resource.
+    pub fn forbidden<M: fmt::Display, I: fmt::Display>(message: M, id: I) -> Self {
+        Self {
+            code: ErrorType::Forbidden,
+            message: format!("{}: {}", message, id),
         }
     }
 
@@ -65,6 +78,14 @@ impl TCError {
         Self {
             code: ErrorType::Timeout,
             message: info.to_string(),
+        }
+    }
+
+    /// Error indicating that the user's credentials are missing or nonsensical.
+    pub fn unauthorized<I: fmt::Display>(info: I) -> Self {
+        Self {
+            code: ErrorType::Unauthorized,
+            message: format!("invalid credentials: {}", info),
         }
     }
 
