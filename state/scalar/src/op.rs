@@ -1,20 +1,13 @@
-use std::collections::HashMap;
 use std::fmt;
 
-use async_trait::async_trait;
-use destream::en::{Encoder, EncodeMap, ToStream};
+use destream::en::{EncodeMap, Encoder, ToStream};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use auth::{Scope, SCOPE_EXECUTE};
 use generic::*;
-use error::*;
-use txn::Txn;
-use value::{Link, Value};
 
-use crate::handler::Handler;
-use crate::request::Request;
+use super::Scalar;
 
-use super::{State, StateType};
+const PREFIX: PathLabel = path_label(&["state", "scalar", "op"]);
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {
@@ -29,78 +22,31 @@ impl Class for OpDefType {
 }
 
 impl NativeClass for OpDefType {
-    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
-        let suffix = Self::prefix().try_suffix(path)?;
-
-        if suffix.len() == 1 {
-            match suffix[0].as_str() {
-                "get" => Ok(OpDefType::Get),
-                "put" => Ok(OpDefType::Put),
-                "post" => Ok(OpDefType::Post),
-                "delete" => Ok(OpDefType::Delete),
-                other => Err(error::not_found(other)),
+    fn from_path(path: &[PathSegment]) -> Option<Self> {
+        if path.len() == 4 && &path[..3] == &PREFIX[..] {
+            match path[3].as_str() {
+                "get" => Some(Self::Get),
+                "put" => Some(Self::Put),
+                "post" => Some(Self::Post),
+                "delete" => Some(Self::Delete),
+                _ => None,
             }
         } else {
-            Err(error::path_not_found(suffix))
+            None
         }
     }
 
-    fn prefix() -> TCPathBuf {
-        ScalarType::prefix().append(label("op"))
-    }
-}
+    fn path(&self) -> TCPathBuf {
+        let prefix = TCPathBuf::from(PREFIX);
 
-impl ScalarClass for OpDefType {
-    type Instance = OpDef;
-
-    fn try_cast<S>(&self, scalar: S) -> TCResult<OpDef>
-    where
-        Scalar: From<S>,
-    {
-        let scalar = Scalar::from(scalar);
-
-        match self {
-            Self::Get => {
-                if scalar.matches::<GetOp>() {
-                    Ok(OpDef::Get(scalar.opt_cast_into().unwrap()))
-                } else if scalar.matches::<Vec<(Id, Scalar)>>() {
-                    Ok(OpDef::Get((
-                        label("key").into(),
-                        scalar.opt_cast_into().unwrap(),
-                    )))
-                } else {
-                    Err(error::bad_request("Invalid GET definition", scalar))
-                }
-            }
-            Self::Put => scalar
-                .try_cast_into(|v| error::bad_request("Invalid PUT definition", v))
-                .map(OpDef::Put),
-            Self::Post => scalar
-                .try_cast_into(|v| error::bad_request("Invalid POST definition", v))
-                .map(OpDef::Post),
-            Self::Delete => scalar
-                .try_cast_into(|v| error::bad_request("Invalid DELETE definition", v))
-                .map(OpDef::Delete),
-        }
-    }
-}
-
-impl From<OpDefType> for Link {
-    fn from(odt: OpDefType) -> Link {
-        let suffix = match odt {
-            OpDefType::Get => label("get"),
-            OpDefType::Put => label("put"),
-            OpDefType::Post => label("post"),
-            OpDefType::Delete => label("delete"),
+        let suffix = match self {
+            Self::Get => "get",
+            Self::Put => "put",
+            Self::Post => "post",
+            Self::Delete => "delete",
         };
 
-        OpDefType::prefix().append(suffix).into()
-    }
-}
-
-impl From<OpDefType> for TCType {
-    fn from(odt: OpDefType) -> TCType {
-        ScalarType::Op(odt).into()
+        prefix.append(label(suffix)).into()
     }
 }
 
@@ -128,17 +74,6 @@ pub enum OpDef {
     Delete(DeleteOp),
 }
 
-impl OpDef {
-    pub fn handler<'a>(&'a self, context: Option<State>) -> Box<dyn Handler + 'a> {
-        match self {
-            Self::Get(op) => Box::new(GetHandler { op, context }),
-            Self::Put(op) => Box::new(PutHandler { op, context }),
-            Self::Post(op) => Box::new(PostHandler { op, context }),
-            Self::Delete(op) => Box::new(DeleteHandler { op, context }),
-        }
-    }
-}
-
 impl Instance for OpDef {
     type Class = OpDefType;
 
@@ -150,10 +85,6 @@ impl Instance for OpDef {
             Self::Delete(_) => OpDefType::Delete,
         }
     }
-}
-
-impl ScalarInstance for OpDef {
-    type Class = OpDefType;
 }
 
 impl TryCastFrom<Scalar> for OpDef {
@@ -174,16 +105,16 @@ impl TryCastFrom<Scalar> for OpDef {
     }
 }
 
-impl Serialize for OpDef {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let class = Link::from(self.class()).to_string();
-        let mut map = s.serialize_map(Some(1))?;
+impl<'en> ToStream<'en> for OpDef {
+    fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
+        let class = self.class().to_string();
+        let mut map = e.encode_map(Some(1))?;
 
         match self {
-            Self::Get(def) => map.serialize_entry(&class, def),
-            Self::Put(def) => map.serialize_entry(&class, def),
-            Self::Post(def) => map.serialize_entry(&class, def),
-            Self::Delete(def) => map.serialize_entry(&class, def),
+            Self::Get(def) => map.encode_entry(class, def),
+            Self::Put(def) => map.encode_entry(class, def),
+            Self::Post(def) => map.encode_entry(class, def),
+            Self::Delete(def) => map.encode_entry(class, def),
         }?;
 
         map.end()
@@ -198,131 +129,5 @@ impl fmt::Display for OpDef {
             Self::Post(_) => write!(f, "POST Op"),
             Self::Delete(_) => write!(f, "DELETE Op"),
         }
-    }
-}
-
-struct GetHandler<'a> {
-    op: &'a GetOp,
-    context: Option<State>,
-}
-
-#[async_trait]
-impl<'a> Handler for GetHandler<'a> {
-    fn subject(&self) -> TCType {
-        if let Some(context) = &self.context {
-            context.class()
-        } else {
-            OpDefType::Get.into()
-        }
-    }
-
-    fn scope(&self) -> Option<Scope> {
-        Some(SCOPE_EXECUTE.into())
-    }
-
-    async fn get(self: Box<Self>, request: &Request, txn: &Txn, key: Value) -> TCResult<State> {
-        self.authorize(request)?;
-
-        let (key_id, op) = self.op.clone();
-        let mut graph = HashMap::new();
-        graph.insert(key_id, State::from(key));
-        if let Some(context) = self.context {
-            graph.insert(label("self").into(), context);
-        }
-
-        txn.execute(request, graph, op.to_vec()).await
-    }
-}
-
-struct PutHandler<'a> {
-    op: &'a PutOp,
-    context: Option<State>,
-}
-
-#[async_trait]
-impl<'a> Handler for PutHandler<'a> {
-    fn subject(&self) -> TCType {
-        if let Some(context) = &self.context {
-            context.class()
-        } else {
-            OpDefType::Put.into()
-        }
-    }
-
-    fn scope(&self) -> Option<Scope> {
-        Some(SCOPE_EXECUTE.into())
-    }
-
-    async fn handle_put(
-        self: Box<Self>,
-        _request: &Request,
-        _txn: &Txn,
-        _key: Value,
-        _value: State,
-    ) -> TCResult<()> {
-        Err(error::not_implemented("OpDef::put"))
-    }
-}
-
-struct PostHandler<'a> {
-    op: &'a PostOp,
-    context: Option<State>,
-}
-
-#[async_trait]
-impl<'a> Handler for PostHandler<'a> {
-    fn subject(&self) -> TCType {
-        if let Some(context) = &self.context {
-            context.class()
-        } else {
-            OpDefType::Get.into()
-        }
-    }
-
-    fn scope(&self) -> Option<Scope> {
-        Some(SCOPE_EXECUTE.into())
-    }
-
-    async fn handle_post(
-        self: Box<Self>,
-        request: &Request,
-        txn: &Txn,
-        params: Map<Scalar>,
-    ) -> TCResult<State> {
-        let mut graph: HashMap<Id, State> = params
-            .into_inner()
-            .into_iter()
-            .map(|(id, scalar)| (id, State::from(scalar)))
-            .collect();
-
-        if let Some(context) = self.context {
-            graph.insert(label("self").into(), context);
-        }
-
-        txn.execute(request, graph, self.op.to_vec()).await
-    }
-}
-
-struct DeleteHandler<'a> {
-    op: &'a DeleteOp,
-    context: Option<State>,
-}
-
-#[async_trait]
-impl<'a> Handler for DeleteHandler<'a> {
-    fn subject(&self) -> TCType {
-        if let Some(context) = &self.context {
-            context.class()
-        } else {
-            OpDefType::Get.into()
-        }
-    }
-
-    fn scope(&self) -> Option<Scope> {
-        Some(SCOPE_EXECUTE.into())
-    }
-
-    async fn handle_delete(self: Box<Self>, _txn: &Txn, _key: Value) -> TCResult<()> {
-        Err(error::not_implemented("OpDef::delete"))
     }
 }

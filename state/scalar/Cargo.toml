@@ -11,5 +11,11 @@ keywords = ["tinychain"]
 categories = ["data structures"]
 
 [dependencies]
+async-trait = "0.1"
+auth = {path = "../../auth"}
+destream = "0.1"
+error = {path = "../../error"}
 generic = {path = "../../generic" }
+safecast = "0.1"
+txn = {path = "../../txn"}
 value = {path = "value" }

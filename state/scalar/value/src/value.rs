@@ -292,6 +292,22 @@ impl TryCastFrom<Value> for TCPathBuf {
     }
 }
 
+impl TryCastFrom<Value> for Id {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::String(s) => Self::can_cast_from(s),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::String(s) => Self::opt_cast_from(s),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -311,7 +327,7 @@ impl fmt::Display for Value {
     }
 }
 
-struct ValueVisitor;
+pub struct ValueVisitor;
 
 impl ValueVisitor {
     fn expect(f: &mut fmt::Formatter) -> fmt::Result {
