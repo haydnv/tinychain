@@ -4,7 +4,6 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, ToStream};
-use safecast::{Match, TryCastFrom, TryCastInto};
 
 use generic::*;
 
@@ -86,24 +85,6 @@ impl Instance for OpDef {
             Self::Put(_) => OpDefType::Put,
             Self::Post(_) => OpDefType::Post,
             Self::Delete(_) => OpDefType::Delete,
-        }
-    }
-}
-
-impl TryCastFrom<Scalar> for OpDef {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        scalar.matches::<PutOp>() || scalar.matches::<GetOp>() || scalar.matches::<PostOp>()
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<OpDef> {
-        if scalar.matches::<PutOp>() {
-            scalar.opt_cast_into().map(OpDef::Put)
-        } else if scalar.matches::<GetOp>() {
-            scalar.opt_cast_into().map(OpDef::Get)
-        } else if scalar.matches::<PostOp>() {
-            scalar.opt_cast_into().map(OpDef::Post)
-        } else {
-            None
         }
     }
 }
