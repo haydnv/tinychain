@@ -3,7 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::{de, Decoder, Encoder, FromStream, MapAccess, SeqAccess, ToStream};
+use destream::{de, Decoder, Encoder, FromStream, IntoStream, MapAccess, SeqAccess, ToStream};
 use number_general::{Number, NumberInstance, NumberType};
 use safecast::CastFrom;
 
@@ -93,8 +93,17 @@ impl FromStream for Value {
 }
 
 impl<'en> ToStream<'en> for Value {
-    fn to_stream<E: Encoder<'en>>(&'en self, _encoder: E) -> Result<E::Ok, E::Error> {
-        unimplemented!()
+    fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::Link(link) => link.to_stream(encoder),
+            Self::None => encoder.encode_unit(),
+            Self::Number(n) => match n {
+                Number::Complex(_c) => unimplemented!(),
+                n => n.to_stream(encoder),
+            },
+            Self::String(s) => s.to_stream(encoder),
+            Self::Tuple(t) => t.as_slice().into_stream(encoder),
+        }
     }
 }
 
