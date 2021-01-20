@@ -3,7 +3,7 @@ name = "state"
 version = "0.1.0"
 authors = ["haydnv"]
 edition = "2018"
-description = "Tinychain's representation of a scalar value"
+description = "Tinychain's representation of a persistent state"
 license = "Apache-2.0"
 repository = "http://github.com/haydnv/tinychain.git"
 
