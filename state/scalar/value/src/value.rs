@@ -340,6 +340,74 @@ impl ValueVisitor {
     {
         Ok(Value::Number(Number::cast_from(n)))
     }
+
+    pub fn visit_map_value<'de, A: serde::de::MapAccess<'de>>(
+        class: ValueType,
+        mut map: A,
+    ) -> Result<Value, A::Error> {
+        use ValueType as VT;
+
+        return match class {
+            VT::Link => {
+                let link = map.next_value()?;
+                Ok(Value::Link(link))
+            }
+            VT::None => {
+                let _ = map.next_value::<()>()?;
+                Ok(Value::None)
+            }
+            VT::Number(nt) => {
+                let n = map.next_value::<Number>()?;
+                Ok(Value::Number(n.into_type(nt)))
+            }
+            VT::String => {
+                let s = map.next_value()?;
+                Ok(Value::String(s))
+            }
+            VT::Tuple => {
+                let t = map.next_value::<Vec<Value>>()?;
+                Ok(Value::Tuple(t.into()))
+            }
+            VT::Value => {
+                let v = map.next_value()?;
+                Ok(v)
+            }
+        };
+    }
+
+    pub async fn visit_map_value_async<A: destream::MapAccess>(
+        class: ValueType,
+        mut map: A,
+    ) -> Result<Value, A::Error> {
+        use ValueType as VT;
+
+        return match class {
+            VT::Link => {
+                let link = map.next_value().await?;
+                Ok(Value::Link(link))
+            }
+            VT::None => {
+                let _ = map.next_value::<()>().await?;
+                Ok(Value::None)
+            }
+            VT::Number(nt) => {
+                let n = map.next_value::<Number>().await?;
+                Ok(Value::Number(n.into_type(nt)))
+            }
+            VT::String => {
+                let s = map.next_value().await?;
+                Ok(Value::String(s))
+            }
+            VT::Tuple => {
+                let t = map.next_value::<Vec<Value>>().await?;
+                Ok(Value::Tuple(t.into()))
+            }
+            VT::Value => {
+                let v = map.next_value().await?;
+                Ok(v)
+            }
+        };
+    }
 }
 
 impl<'de> serde::de::Visitor<'de> for ValueVisitor {
@@ -429,32 +497,7 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
                 if link.host().is_none() {
                     use ValueType as VT;
                     if let Some(class) = VT::from_path(link.path()) {
-                        return match class {
-                            VT::Link => {
-                                let link = map.next_value()?;
-                                Ok(Value::Link(link))
-                            }
-                            VT::None => {
-                                let _ = map.next_value::<()>()?;
-                                Ok(Value::None)
-                            }
-                            VT::Number(nt) => {
-                                let n = map.next_value::<Number>()?;
-                                Ok(Value::Number(n.into_type(nt)))
-                            }
-                            VT::String => {
-                                let s = map.next_value()?;
-                                Ok(Value::String(s))
-                            }
-                            VT::Tuple => {
-                                let t = map.next_value::<Vec<Value>>()?;
-                                Ok(Value::Tuple(t.into()))
-                            }
-                            VT::Value => {
-                                let v = map.next_value()?;
-                                Ok(v)
-                            }
-                        };
+                        return Self::visit_map_value(class, map);
                     }
                 }
 
@@ -538,37 +581,13 @@ impl destream::de::Visitor for ValueVisitor {
     }
 
     async fn visit_map<A: destream::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        use ValueType as VT;
+
         if let Some(key) = map.next_key::<String>().await? {
             if let Ok(link) = Link::from_str(&key) {
                 if link.host().is_none() {
-                    use ValueType as VT;
                     if let Some(class) = VT::from_path(link.path()) {
-                        return match class {
-                            VT::Link => {
-                                let link = map.next_value().await?;
-                                Ok(Value::Link(link))
-                            }
-                            VT::None => {
-                                let _ = map.next_value::<()>().await?;
-                                Ok(Value::None)
-                            }
-                            VT::Number(nt) => {
-                                let n = map.next_value::<Number>().await?;
-                                Ok(Value::Number(n.into_type(nt)))
-                            }
-                            VT::String => {
-                                let s = map.next_value().await?;
-                                Ok(Value::String(s))
-                            }
-                            VT::Tuple => {
-                                let t = map.next_value::<Vec<Value>>().await?;
-                                Ok(Value::Tuple(t.into()))
-                            }
-                            VT::Value => {
-                                let v = map.next_value().await?;
-                                Ok(v)
-                            }
-                        };
+                        return Self::visit_map_value_async(class, map).await;
                     }
                 }
 
