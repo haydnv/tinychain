@@ -13,6 +13,7 @@ categories = ["data structures"]
 [dependencies]
 addr = "0.2"
 async-trait = "0.1"
+collate = "0.1"
 destream = "0.1"
 generic = {path = "../../generic"}
 number-general = "0.1"

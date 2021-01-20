@@ -3,8 +3,8 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::{de, Decoder, Encoder, FromStream, ToStream};
-use safecast::TryCastFrom;
 use regex::Regex;
+use safecast::TryCastFrom;
 
 use error::*;
 

@@ -9,9 +9,9 @@ use std::str::FromStr;
 
 use addr::DomainName;
 use async_trait::async_trait;
-use destream::{de, Decoder, Encoder, EncodeMap, FromStream, ToStream};
-use generic::{label, Id, Label};
+use destream::{de, Decoder, EncodeMap, Encoder, FromStream, ToStream};
 use error::*;
+use generic::{label, Id, Label};
 use safecast::TryCastFrom;
 
 use super::Value;
@@ -433,7 +433,10 @@ impl FromStream for Link {
         if m.len() != 1 {
             Err(de::Error::custom(format!(
                 "Expected Link, found Map: {}",
-                m.into_iter().map(|(k, _)| k).collect::<Vec<String>>().join(", ")
+                m.into_iter()
+                    .map(|(k, _)| k)
+                    .collect::<Vec<String>>()
+                    .join(", ")
             )))
         } else {
             let mut m: Vec<_> = m.into_iter().collect();
