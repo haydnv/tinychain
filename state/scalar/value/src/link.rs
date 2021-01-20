@@ -10,6 +10,8 @@ use async_trait::async_trait;
 use destream::{de, Decoder, EncodeMap, Encoder, FromStream, ToStream};
 use error::*;
 use generic::{Id, PathLabel, PathSegment, TCPathBuf};
+use serde::de::{Deserialize, Deserializer, Error};
+use serde::ser::{Serialize, Serializer};
 
 use super::Value;
 
@@ -389,13 +391,16 @@ impl FromStr for Link {
     }
 }
 
-impl fmt::Display for Link {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(host) = &self.host {
-            write!(f, "{}", host)?;
-        }
+impl<'de> Deserialize<'de> for Link {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let link = String::deserialize(deserializer)?;
+        Self::from_str(&link).map_err(D::Error::custom)
+    }
+}
 
-        write!(f, "{}", self.path)
+impl Serialize for Link {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.to_string().serialize(serializer)
     }
 }
 
@@ -432,5 +437,15 @@ impl<'en> ToStream<'en> for Link {
         let mut map = e.encode_map(Some(1))?;
         map.encode_entry(self.to_string(), &EMPTY_SLICE)?;
         map.end()
+    }
+}
+
+impl fmt::Display for Link {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(host) = &self.host {
+            write!(f, "{}", host)?;
+        }
+
+        write!(f, "{}", self.path)
     }
 }

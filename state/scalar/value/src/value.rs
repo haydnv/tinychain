@@ -3,11 +3,12 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::{
-    de, Decoder, EncodeMap, Encoder, FromStream, IntoStream, MapAccess, SeqAccess, ToStream,
-};
+use destream::de::Error as DestreamError;
+use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
 use number_general::*;
 use safecast::{CastFrom, TryCastFrom};
+use serde::de::{Deserialize, Deserializer, Error as SerdeError};
+use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use generic::*;
 
@@ -222,6 +223,31 @@ impl Instance for Value {
     }
 }
 
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(ValueVisitor)
+    }
+}
+
+impl Serialize for Value {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Link(link) => link.serialize(serializer),
+            Self::None => serializer.serialize_unit(),
+            Self::Number(n) => match n {
+                Number::Complex(c) => {
+                    let mut map = serializer.serialize_map(Some(1))?;
+                    map.serialize_entry(&self.class().path().to_string(), &Number::Complex(*c))?;
+                    map.end()
+                }
+                n => n.serialize(serializer),
+            },
+            Self::String(s) => s.serialize(serializer),
+            Self::Tuple(t) => t.as_slice().serialize(serializer),
+        }
+    }
+}
+
 #[async_trait]
 impl FromStream for Value {
     async fn from_stream<D: Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
@@ -288,7 +314,11 @@ impl fmt::Display for Value {
 struct ValueVisitor;
 
 impl ValueVisitor {
-    fn visit_number<E: de::Error, N>(self, n: N) -> Result<Value, E>
+    fn expect(f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a Tinychain value, e.g. 1 or \"two\" or [3]")
+    }
+
+    fn visit_number<E, N>(self, n: N) -> Result<Value, E>
     where
         Number: CastFrom<N>,
     {
@@ -296,67 +326,202 @@ impl ValueVisitor {
     }
 }
 
-#[async_trait]
-impl de::Visitor for ValueVisitor {
+impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     type Value = Value;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "a Tinychain value, e.g. 1 or \"two\" or [3]")
+        Self::expect(f)
     }
 
-    fn visit_bool<E: de::Error>(self, b: bool) -> Result<Self::Value, E> {
+    fn visit_bool<E: SerdeError>(self, b: bool) -> Result<Self::Value, E> {
         self.visit_number(b)
     }
 
-    fn visit_i8<E: de::Error>(self, i: i8) -> Result<Self::Value, E> {
+    fn visit_i8<E: SerdeError>(self, i: i8) -> Result<Self::Value, E> {
         self.visit_number(i as i16)
     }
 
-    fn visit_i16<E: de::Error>(self, i: i16) -> Result<Self::Value, E> {
+    fn visit_i16<E: SerdeError>(self, i: i16) -> Result<Self::Value, E> {
         self.visit_number(i)
     }
 
-    fn visit_i32<E: de::Error>(self, i: i32) -> Result<Self::Value, E> {
+    fn visit_i32<E: SerdeError>(self, i: i32) -> Result<Self::Value, E> {
         self.visit_number(i)
     }
 
-    fn visit_i64<E: de::Error>(self, i: i64) -> Result<Self::Value, E> {
+    fn visit_i64<E: SerdeError>(self, i: i64) -> Result<Self::Value, E> {
         self.visit_number(i)
     }
 
-    fn visit_u8<E: de::Error>(self, u: u8) -> Result<Self::Value, E> {
+    fn visit_u8<E: SerdeError>(self, u: u8) -> Result<Self::Value, E> {
         self.visit_number(u)
     }
 
-    fn visit_u16<E: de::Error>(self, u: u16) -> Result<Self::Value, E> {
+    fn visit_u16<E: SerdeError>(self, u: u16) -> Result<Self::Value, E> {
         self.visit_number(u)
     }
 
-    fn visit_u32<E: de::Error>(self, u: u32) -> Result<Self::Value, E> {
+    fn visit_u32<E: SerdeError>(self, u: u32) -> Result<Self::Value, E> {
         self.visit_number(u)
     }
 
-    fn visit_u64<E: de::Error>(self, u: u64) -> Result<Self::Value, E> {
+    fn visit_u64<E: SerdeError>(self, u: u64) -> Result<Self::Value, E> {
         self.visit_number(u)
     }
 
-    fn visit_f32<E: de::Error>(self, f: f32) -> Result<Self::Value, E> {
+    fn visit_f32<E: SerdeError>(self, f: f32) -> Result<Self::Value, E> {
         self.visit_number(f)
     }
 
-    fn visit_f64<E: de::Error>(self, f: f64) -> Result<Self::Value, E> {
+    fn visit_f64<E: SerdeError>(self, f: f64) -> Result<Self::Value, E> {
         self.visit_number(f)
     }
 
-    fn visit_string<E: de::Error>(self, s: String) -> Result<Self::Value, E> {
+    fn visit_str<E: SerdeError>(self, s: &str) -> Result<Self::Value, E> {
+        Ok(Value::String(s.to_string()))
+    }
+
+    fn visit_borrowed_str<E: SerdeError>(self, s: &'de str) -> Result<Self::Value, E> {
+        Ok(Value::String(s.to_string()))
+    }
+
+    fn visit_string<E: SerdeError>(self, s: String) -> Result<Self::Value, E> {
         Ok(Value::String(s))
     }
 
-    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+    fn visit_unit<E: SerdeError>(self) -> Result<Self::Value, E> {
         Ok(Value::None)
     }
 
-    async fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut value = if let Some(len) = seq.size_hint() {
+            Vec::with_capacity(len)
+        } else {
+            Vec::new()
+        };
+
+        while let Some(element) = seq.next_element()? {
+            value.push(element)
+        }
+
+        Ok(Value::Tuple(value.into()))
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        if let Some(key) = map.next_key::<String>()? {
+            if let Ok(link) = Link::from_str(&key) {
+                if link.host().is_none() {
+                    use ValueType as VT;
+                    if let Some(class) = VT::from_path(link.path()) {
+                        return match class {
+                            VT::Link => {
+                                let link = map.next_value()?;
+                                Ok(Value::Link(link))
+                            }
+                            VT::None => {
+                                let _ = map.next_value::<()>()?;
+                                Ok(Value::None)
+                            }
+                            VT::Number(nt) => {
+                                let n = map.next_value::<Number>()?;
+                                Ok(Value::Number(n.into_type(nt)))
+                            }
+                            VT::String => {
+                                let s = map.next_value()?;
+                                Ok(Value::String(s))
+                            }
+                            VT::Tuple => {
+                                let t = map.next_value::<Vec<Value>>()?;
+                                Ok(Value::Tuple(t.into()))
+                            }
+                            VT::Value => {
+                                let v = map.next_value()?;
+                                Ok(v)
+                            }
+                        };
+                    }
+                }
+
+                if let Some(key) = map.next_key::<String>()? {
+                    Err(A::Error::custom(format!(
+                        "the end of the map specifying this Value by type, not a second key \"{}\"",
+                        key
+                    )))
+                } else {
+                    Ok(Value::Link(link))
+                }
+            } else {
+                Err(A::Error::custom(format!("expected a Link, found {}", key)))
+            }
+        } else {
+            Err(A::Error::custom(format!(
+                "expected a Link, found an empty map"
+            )))
+        }
+    }
+}
+
+#[async_trait]
+impl destream::de::Visitor for ValueVisitor {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        Self::expect(f)
+    }
+
+    fn visit_bool<E: DestreamError>(self, b: bool) -> Result<Self::Value, E> {
+        self.visit_number(b)
+    }
+
+    fn visit_i8<E: DestreamError>(self, i: i8) -> Result<Self::Value, E> {
+        self.visit_number(i as i16)
+    }
+
+    fn visit_i16<E: DestreamError>(self, i: i16) -> Result<Self::Value, E> {
+        self.visit_number(i)
+    }
+
+    fn visit_i32<E: DestreamError>(self, i: i32) -> Result<Self::Value, E> {
+        self.visit_number(i)
+    }
+
+    fn visit_i64<E: DestreamError>(self, i: i64) -> Result<Self::Value, E> {
+        self.visit_number(i)
+    }
+
+    fn visit_u8<E: DestreamError>(self, u: u8) -> Result<Self::Value, E> {
+        self.visit_number(u)
+    }
+
+    fn visit_u16<E: DestreamError>(self, u: u16) -> Result<Self::Value, E> {
+        self.visit_number(u)
+    }
+
+    fn visit_u32<E: DestreamError>(self, u: u32) -> Result<Self::Value, E> {
+        self.visit_number(u)
+    }
+
+    fn visit_u64<E: DestreamError>(self, u: u64) -> Result<Self::Value, E> {
+        self.visit_number(u)
+    }
+
+    fn visit_f32<E: DestreamError>(self, f: f32) -> Result<Self::Value, E> {
+        self.visit_number(f)
+    }
+
+    fn visit_f64<E: DestreamError>(self, f: f64) -> Result<Self::Value, E> {
+        self.visit_number(f)
+    }
+
+    fn visit_string<E: DestreamError>(self, s: String) -> Result<Self::Value, E> {
+        Ok(Value::String(s))
+    }
+
+    fn visit_unit<E: DestreamError>(self) -> Result<Self::Value, E> {
+        Ok(Value::None)
+    }
+
+    async fn visit_map<A: destream::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
         if let Some(key) = map.next_key::<String>().await? {
             if let Ok(link) = Link::from_str(&key) {
                 if link.host().is_none() {
@@ -392,7 +557,7 @@ impl de::Visitor for ValueVisitor {
                 }
 
                 if let Some(key) = map.next_key::<String>().await? {
-                    Err(de::Error::custom(format!(
+                    Err(DestreamError::custom(format!(
                         "the end of the map specifying this Value by type, not a second key \"{}\"",
                         key
                     )))
@@ -400,14 +565,14 @@ impl de::Visitor for ValueVisitor {
                     Ok(Value::Link(link))
                 }
             } else {
-                Err(de::Error::invalid_value(key, &"a Link"))
+                Err(DestreamError::invalid_value(key, &"a Link"))
             }
         } else {
-            Err(de::Error::invalid_value("empty map", &"a Link"))
+            Err(DestreamError::invalid_value("empty map", &"a Link"))
         }
     }
 
-    async fn visit_seq<A: SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+    async fn visit_seq<A: destream::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let mut value = if let Some(len) = seq.size_hint() {
             Vec::with_capacity(len)
         } else {
