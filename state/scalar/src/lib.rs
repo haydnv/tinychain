@@ -1,5 +1,4 @@
 use generic::{Map, Tuple};
-use value::Value;
 
 pub use value::*;
 

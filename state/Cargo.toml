@@ -1,5 +1,5 @@
 [package]
-name = "scalar"
+name = "state"
 version = "0.1.0"
 authors = ["haydnv"]
 edition = "2018"
@@ -11,5 +11,4 @@ keywords = ["tinychain"]
 categories = ["data structures"]
 
 [dependencies]
-generic = {path = "../generic"}
-value = {path = "value"}
+scalar = {path = "scalar"}

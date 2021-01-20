@@ -15,5 +15,5 @@ categories = ["concurrency", "database implementations", "data structures", "web
 env_logger = "0.8"
 log = { version = "0.4", features = ["release_max_level_warn"] }
 safecast = "0.1"
-scalar = { path = "scalar" }
-value = { path = "scalar/value" }
+scalar = { path = "state/scalar" }
+value = { path = "state/scalar/value" }
