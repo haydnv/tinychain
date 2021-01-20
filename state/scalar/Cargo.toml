@@ -14,6 +14,7 @@ categories = ["data structures"]
 async-trait = "0.1"
 auth = {path = "../../auth"}
 destream = "0.1"
+futures = "0.3"
 error = {path = "../../error"}
 generic = {path = "../../generic" }
 safecast = "0.1"

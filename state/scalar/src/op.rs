@@ -1,5 +1,8 @@
 use std::fmt;
+use std::str::FromStr;
 
+use async_trait::async_trait;
+use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, ToStream};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
@@ -53,10 +56,10 @@ impl NativeClass for OpDefType {
 impl fmt::Display for OpDefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Get => write!(f, "type: GET Op definition"),
-            Self::Put => write!(f, "type: PUT Op definition"),
-            Self::Post => write!(f, "type: POST Op definition"),
-            Self::Delete => write!(f, "type: DELETE Op definition"),
+            Self::Get => write!(f, "GET Op definition"),
+            Self::Put => write!(f, "PUT Op definition"),
+            Self::Post => write!(f, "POST Op definition"),
+            Self::Delete => write!(f, "DELETE Op definition"),
         }
     }
 }
@@ -102,6 +105,62 @@ impl TryCastFrom<Scalar> for OpDef {
         } else {
             None
         }
+    }
+}
+
+pub struct OpDefVisitor;
+
+impl OpDefVisitor {
+    pub async fn visit_map_value<A: MapAccess>(
+        class: OpDefType,
+        mut map: A,
+    ) -> Result<OpDef, A::Error> {
+        use OpDefType as ODT;
+
+        match class {
+            ODT::Get => {
+                let op = map.next_value().await?;
+                Ok(OpDef::Get(op))
+            }
+            ODT::Put => {
+                let op = map.next_value().await?;
+                Ok(OpDef::Put(op))
+            }
+            ODT::Post => {
+                let op = map.next_value().await?;
+                Ok(OpDef::Post(op))
+            }
+            ODT::Delete => {
+                let op = map.next_value().await?;
+                Ok(OpDef::Delete(op))
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl Visitor for OpDefVisitor {
+    type Value = OpDef;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("an Op definition")
+    }
+
+    async fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let err = || A::Error::custom("Expected an Op definition type, e.g. \"/state/op/get\"");
+
+        let class = map.next_key::<String>().await?.ok_or_else(err)?;
+        let class = TCPathBuf::from_str(&class).map_err(A::Error::custom)?;
+        let class = OpDefType::from_path(&class).ok_or_else(err)?;
+
+        Self::visit_map_value(class, map).await
+    }
+}
+
+#[async_trait]
+impl FromStream for OpDef {
+    async fn from_stream<D: Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_map(OpDefVisitor).await
     }
 }
 
