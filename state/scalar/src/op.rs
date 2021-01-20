@@ -2,18 +2,19 @@ use std::collections::HashMap;
 use std::fmt;
 
 use async_trait::async_trait;
-use destream::en::{EncodeMap, Encoder, ToStream};
+use destream::en::{Encoder, EncodeMap, ToStream};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use error::*;
+use auth::{Scope, SCOPE_EXECUTE};
 use generic::*;
+use error::*;
+use txn::Txn;
 use value::{Link, Value};
 
-use crate::transaction::Txn;
+use crate::handler::Handler;
+use crate::request::Request;
 
-use super::{Scalar, ScalarType};
-
-const PREFIX: PathLabel = path_label(&["sbin", "op"]);
+use super::{State, StateType};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {
@@ -28,18 +29,78 @@ impl Class for OpDefType {
 }
 
 impl NativeClass for OpDefType {
-    fn from_path(path: &[PathSegment]) -> Option<Self> {
-        if path.len() == 3 && path[..2] == &PREFIX[..] {
+    fn from_path(path: &[PathSegment]) -> TCResult<Self> {
+        let suffix = Self::prefix().try_suffix(path)?;
+
+        if suffix.len() == 1 {
             match suffix[0].as_str() {
-                "get" => Some(OpDefType::Get),
-                "put" => Some(OpDefType::Put),
-                "post" => Some(OpDefType::Post),
-                "delete" => Some(OpDefType::Delete),
-                other => None,
+                "get" => Ok(OpDefType::Get),
+                "put" => Ok(OpDefType::Put),
+                "post" => Ok(OpDefType::Post),
+                "delete" => Ok(OpDefType::Delete),
+                other => Err(error::not_found(other)),
             }
         } else {
-            None
+            Err(error::path_not_found(suffix))
         }
+    }
+
+    fn prefix() -> TCPathBuf {
+        ScalarType::prefix().append(label("op"))
+    }
+}
+
+impl ScalarClass for OpDefType {
+    type Instance = OpDef;
+
+    fn try_cast<S>(&self, scalar: S) -> TCResult<OpDef>
+    where
+        Scalar: From<S>,
+    {
+        let scalar = Scalar::from(scalar);
+
+        match self {
+            Self::Get => {
+                if scalar.matches::<GetOp>() {
+                    Ok(OpDef::Get(scalar.opt_cast_into().unwrap()))
+                } else if scalar.matches::<Vec<(Id, Scalar)>>() {
+                    Ok(OpDef::Get((
+                        label("key").into(),
+                        scalar.opt_cast_into().unwrap(),
+                    )))
+                } else {
+                    Err(error::bad_request("Invalid GET definition", scalar))
+                }
+            }
+            Self::Put => scalar
+                .try_cast_into(|v| error::bad_request("Invalid PUT definition", v))
+                .map(OpDef::Put),
+            Self::Post => scalar
+                .try_cast_into(|v| error::bad_request("Invalid POST definition", v))
+                .map(OpDef::Post),
+            Self::Delete => scalar
+                .try_cast_into(|v| error::bad_request("Invalid DELETE definition", v))
+                .map(OpDef::Delete),
+        }
+    }
+}
+
+impl From<OpDefType> for Link {
+    fn from(odt: OpDefType) -> Link {
+        let suffix = match odt {
+            OpDefType::Get => label("get"),
+            OpDefType::Put => label("put"),
+            OpDefType::Post => label("post"),
+            OpDefType::Delete => label("delete"),
+        };
+
+        OpDefType::prefix().append(suffix).into()
+    }
+}
+
+impl From<OpDefType> for TCType {
+    fn from(odt: OpDefType) -> TCType {
+        ScalarType::Op(odt).into()
     }
 }
 
@@ -91,6 +152,10 @@ impl Instance for OpDef {
     }
 }
 
+impl ScalarInstance for OpDef {
+    type Class = OpDefType;
+}
+
 impl TryCastFrom<Scalar> for OpDef {
     fn can_cast_from(scalar: &Scalar) -> bool {
         scalar.matches::<PutOp>() || scalar.matches::<GetOp>() || scalar.matches::<PostOp>()
@@ -109,16 +174,16 @@ impl TryCastFrom<Scalar> for OpDef {
     }
 }
 
-impl<'en> ToStream<'en> for OpDef {
-    fn to_stream<E: Encoder<'en>>(&self, e: E) -> Result<E::Ok, E::Error> {
-        let class = Link::from(self.class().path()).to_string();
-        let mut map = e.encode_map(Some(1))?;
+impl Serialize for OpDef {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let class = Link::from(self.class()).to_string();
+        let mut map = s.serialize_map(Some(1))?;
 
         match self {
-            Self::Get(def) => map.encode_entry(&class, def),
-            Self::Put(def) => map.encode_entry(&class, def),
-            Self::Post(def) => map.encode_entry(&class, def),
-            Self::Delete(def) => map.encode_entry(&class, def),
+            Self::Get(def) => map.serialize_entry(&class, def),
+            Self::Put(def) => map.serialize_entry(&class, def),
+            Self::Post(def) => map.serialize_entry(&class, def),
+            Self::Delete(def) => map.serialize_entry(&class, def),
         }?;
 
         map.end()

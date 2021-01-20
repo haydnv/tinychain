@@ -11,6 +11,7 @@ keywords = ["tinychain", "transaction"]
 categories = ["asynchronous", "concurrency"]
 
 [dependencies]
+auth = {path = "../auth"}
 error = {path = "../error"}
 generic = {path = "../generic"}
 rand = "0.7"

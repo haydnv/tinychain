@@ -13,3 +13,4 @@ categories = ["data structures"]
 [dependencies]
 generic = {path = "../generic"}
 scalar = {path = "scalar"}
+txn = {path = "../txn"}

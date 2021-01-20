@@ -2,6 +2,8 @@ use generic::*;
 
 pub use scalar::*;
 
+pub mod handler;
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum StateType {
     Map,

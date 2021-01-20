@@ -7,6 +7,10 @@ use serde::de;
 use error::*;
 use generic::{NetworkTime, PathSegment};
 
+mod request;
+
+pub use request::Request;
+
 const INVALID_ID: &str = "Invalid transaction ID";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -89,4 +93,4 @@ impl fmt::Display for TxnId {
 }
 
 #[derive(Clone)]
-struct Txn;
+pub struct Txn;
