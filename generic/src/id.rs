@@ -8,6 +8,8 @@ use async_trait::async_trait;
 use destream::{de, Decoder, Encoder, FromStream, ToStream};
 use regex::Regex;
 use safecast::TryCastFrom;
+use serde::de::{Deserialize, Deserializer, Error};
+use serde::ser::{Serialize, Serializer};
 
 use error::*;
 
@@ -356,6 +358,19 @@ impl iter::FromIterator<PathSegment> for TCPathBuf {
         TCPathBuf {
             segments: iter.into_iter().collect(),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for TCPathBuf {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let path = String::deserialize(deserializer)?;
+        Self::from_str(&path).map_err(D::Error::custom)
+    }
+}
+
+impl Serialize for TCPathBuf {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.to_string().serialize(serializer)
     }
 }
 
