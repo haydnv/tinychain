@@ -5,9 +5,9 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::{de, Decoder, Encoder, FromStream, IntoStream, MapAccess, SeqAccess, ToStream};
 use number_general::{Number, NumberInstance, NumberType};
-use safecast::CastFrom;
+use safecast::{CastFrom, TryCastFrom};
 
-use generic::Tuple;
+use generic::{TCPathBuf, Tuple};
 
 pub mod link;
 
@@ -103,6 +103,24 @@ impl<'en> ToStream<'en> for Value {
             },
             Self::String(s) => s.to_stream(encoder),
             Self::Tuple(t) => t.as_slice().into_stream(encoder),
+        }
+    }
+}
+
+impl TryCastFrom<Value> for TCPathBuf {
+    fn can_cast_from(value: &Value) -> bool {
+        if let Value::String(s) = value {
+            Self::from_str(s).is_ok()
+        } else {
+            false
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        if let Value::String(s) = value {
+            Self::from_str(&s).ok()
+        } else {
+            None
         }
     }
 }
