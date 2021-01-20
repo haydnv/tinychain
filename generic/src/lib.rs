@@ -8,7 +8,9 @@ pub use tuple::*;
 
 pub trait Class: Sized {
     type Instance;
+}
 
+pub trait NativeClass: Class {
     fn from_path(path: &[PathSegment]) -> Option<Self>;
 
     fn path(&self) -> TCPathBuf;

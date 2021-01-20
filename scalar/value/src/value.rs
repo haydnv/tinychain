@@ -27,7 +27,9 @@ pub enum ValueType {
 
 impl Class for ValueType {
     type Instance = Value;
+}
 
+impl NativeClass for ValueType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         use ComplexType as CT;
         use NumberType as NT;
