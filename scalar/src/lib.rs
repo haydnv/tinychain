@@ -209,8 +209,19 @@ impl<'en> ToStream<'en> for Scalar {
         match self {
             Scalar::Map(map) => map.to_stream(e),
             Scalar::Op(op_def) => op_def.to_stream(e),
-            Scalar::Tuple(tuple) => tuple.as_slice().into_stream(e),
+            Scalar::Tuple(tuple) => tuple.to_stream(e),
             Scalar::Value(value) => value.to_stream(e),
+        }
+    }
+}
+
+impl<'en> IntoStream<'en> for Scalar {
+    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Scalar::Map(map) => map.into_inner().into_stream(e),
+            Scalar::Op(op_def) => op_def.into_stream(e),
+            Scalar::Tuple(tuple) => tuple.into_inner().into_stream(e),
+            Scalar::Value(value) => value.into_stream(e),
         }
     }
 }

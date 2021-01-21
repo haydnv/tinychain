@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use addr::DomainName;
 use async_trait::async_trait;
-use destream::{de, Decoder, EncodeMap, Encoder, FromStream, ToStream};
+use destream::{de, Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
 use error::*;
 use generic::{Id, PathLabel, PathSegment, TCPathBuf};
 use serde::de::{Deserialize, Deserializer, Error};
@@ -434,6 +434,14 @@ impl FromStream for Link {
 
 impl<'en> ToStream<'en> for Link {
     fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
+        let mut map = e.encode_map(Some(1))?;
+        map.encode_entry(self.to_string(), &EMPTY_SLICE)?;
+        map.end()
+    }
+}
+
+impl<'en> IntoStream<'en> for Link {
+    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
         let mut map = e.encode_map(Some(1))?;
         map.encode_entry(self.to_string(), &EMPTY_SLICE)?;
         map.end()

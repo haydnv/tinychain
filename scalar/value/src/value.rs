@@ -269,7 +269,26 @@ impl<'en> ToStream<'en> for Value {
                 n => n.to_stream(encoder),
             },
             Self::String(s) => s.to_stream(encoder),
-            Self::Tuple(t) => t.as_slice().into_stream(encoder),
+            Self::Tuple(t) => t.to_stream(encoder),
+        }
+    }
+}
+
+impl<'en> IntoStream<'en> for Value {
+    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::Link(link) => link.into_stream(encoder),
+            Self::None => encoder.encode_unit(),
+            Self::Number(n) => match n {
+                Number::Complex(c) => {
+                    let mut map = encoder.encode_map(Some(1))?;
+                    map.encode_entry(self.class().path().to_string(), Number::Complex(c))?;
+                    map.end()
+                }
+                n => n.into_stream(encoder),
+            },
+            Self::String(s) => s.into_stream(encoder),
+            Self::Tuple(t) => t.into_inner().into_stream(encoder),
         }
     }
 }

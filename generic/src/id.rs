@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::{de, Decoder, Encoder, FromStream, ToStream};
+use destream::{de, Decoder, Encoder, FromStream, IntoStream, ToStream};
 use regex::Regex;
 use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer, Error};
@@ -122,6 +122,12 @@ impl de::Visitor for IdVisitor {
 
 impl<'en> ToStream<'en> for Id {
     fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
+        e.encode_str(&self.id)
+    }
+}
+
+impl<'en> IntoStream<'en> for Id {
+    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
         e.encode_str(&self.id)
     }
 }
