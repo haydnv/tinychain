@@ -26,6 +26,8 @@ impl NativeClass for StateType {
                 }
             } else if path.len() > 2 && &path[1] == "scalar" {
                 ScalarType::from_path(path).map(Self::Scalar)
+            } else {
+                None
             }
         } else {
             None

@@ -1,9 +1,9 @@
 [package]
-name = "scalar"
+name = "value"
 version = "0.1.0"
 authors = ["haydnv"]
 edition = "2018"
-description = "Tinychain's representation of a scalar value"
+description = "Tinychain's representation of a value which can be collated and stored"
 license = "Apache-2.0"
 repository = "http://github.com/haydnv/tinychain.git"
 
@@ -11,11 +11,12 @@ keywords = ["tinychain"]
 categories = ["data structures"]
 
 [dependencies]
+addr = "0.2"
 async-trait = "0.1"
-auth = {path = "../../auth"}
+collate = "0.1"
 destream = "0.1"
-futures = "0.3"
-error = {path = "../../error"}
 generic = {path = "../../generic" }
+number-general = "0.1"
+error = {path = "../../error" }
 safecast = "0.1"
-value = {path = "value" }
+serde = {version = "1.0", features = []}
