@@ -18,10 +18,15 @@ env_logger = "0.8"
 error = { path = "error" }
 futures = "0.3"
 generic = { path = "generic" }
-hyper = { version = "0.14", features = ["full"] }
+hyper = { version = "0.14", features = ["full"], optional = true }
 log = { version = "0.4", features = ["release_max_level_warn"] }
 rand = "0.7"
 safecast = "0.1"
 serde = { version = "1.0", features = []}
 scalar = { path = "scalar" }
+structopt = "0.3"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
+
+[features]
+default = ["http"]
+http = ["hyper"]
