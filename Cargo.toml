@@ -12,12 +12,16 @@ keywords = ["database", "host", "platform", "runtime", "environment"]
 categories = ["concurrency", "database implementations", "data structures", "web programming"]
 
 [dependencies]
+async-trait = "0.1"
 auth = { path = "auth" }
 env_logger = "0.8"
 error = { path = "error" }
+futures = "0.3"
 generic = { path = "generic" }
+hyper = { version = "0.14", features = ["full"] }
 log = { version = "0.4", features = ["release_max_level_warn"] }
 rand = "0.7"
 safecast = "0.1"
 serde = { version = "1.0", features = []}
 scalar = { path = "scalar" }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
