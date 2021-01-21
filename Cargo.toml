@@ -25,10 +25,12 @@ log = { version = "0.4", features = ["release_max_level_warn"] }
 rand = "0.7"
 safecast = "0.1"
 serde = { version = "1.0", features = []}
+serde_json = { version = "1.0", optional = true }
 scalar = { path = "scalar" }
 structopt = "0.3"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
+url = { version = "2.2", optional = true }
 
 [features]
 default = ["http"]
-http = ["hyper", "destream_json"]
+http = ["hyper", "destream_json", "url", "serde_json"]
