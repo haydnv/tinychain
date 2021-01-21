@@ -3,13 +3,13 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::de::{self, Decoder, FromStream, Visitor};
+use destream::de::{self, Decoder, FromStream, MapAccess, SeqAccess, Visitor};
+use destream::en::{Encoder, IntoStream, ToStream};
 use futures::TryFutureExt;
 use safecast::TryCastFrom;
 
 use generic::*;
 
-use destream::{MapAccess, SeqAccess};
 pub use scalar::*;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -210,5 +210,25 @@ impl Visitor for StateVisitor {
 impl FromStream for State {
     async fn from_stream<D: Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
         decoder.decode_any(StateVisitor::default()).await
+    }
+}
+
+impl<'en> ToStream<'en> for State {
+    fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::Map(map) => map.to_stream(encoder),
+            Self::Scalar(scalar) => scalar.to_stream(encoder),
+            Self::Tuple(tuple) => tuple.to_stream(encoder),
+        }
+    }
+}
+
+impl<'en> IntoStream<'en> for State {
+    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::Map(map) => map.into_inner().into_stream(encoder),
+            Self::Scalar(scalar) => scalar.into_stream(encoder),
+            Self::Tuple(tuple) => tuple.into_inner().into_stream(encoder),
+        }
     }
 }
