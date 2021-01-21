@@ -78,8 +78,43 @@ impl Instance for Scalar {
     }
 }
 
-struct ScalarVisitor {
-    value_visitor: value::ValueVisitor,
+#[derive(Default)]
+pub struct ScalarVisitor {
+    value: value::ValueVisitor,
+}
+
+impl ScalarVisitor {
+    pub async fn visit_map_value<A: MapAccess>(
+        class: ScalarType,
+        mut access: A,
+    ) -> Result<Scalar, A::Error> {
+        match class {
+            ScalarType::Map => {
+                access
+                    .next_value::<HashMap<Id, Scalar>>()
+                    .map_ok(Map::from)
+                    .map_ok(Scalar::Map)
+                    .await
+            }
+            ScalarType::Op(odt) => {
+                OpDefVisitor::visit_map_value(odt, access)
+                    .map_ok(Scalar::Op)
+                    .await
+            }
+            ScalarType::Tuple => {
+                access
+                    .next_value::<Vec<Scalar>>()
+                    .map_ok(Tuple::from)
+                    .map_ok(Scalar::Tuple)
+                    .await
+            }
+            ScalarType::Value(vt) => {
+                ValueVisitor::visit_map_value_async(vt, access)
+                    .map_ok(Scalar::Value)
+                    .await
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -90,76 +125,67 @@ impl Visitor for ScalarVisitor {
         f.write_str("a Tinychain Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"id\", \"$state\"]\"}")
     }
 
+    fn visit_i8<E: Error>(self, value: i8) -> Result<Self::Value, E> {
+        self.value.visit_i8(value).map(Scalar::Value)
+    }
+
     fn visit_i16<E: Error>(self, value: i16) -> Result<Self::Value, E> {
-        self.value_visitor.visit_i16(value).map(Scalar::Value)
+        self.value.visit_i16(value).map(Scalar::Value)
     }
 
     fn visit_i32<E: Error>(self, value: i32) -> Result<Self::Value, E> {
-        self.value_visitor.visit_i32(value).map(Scalar::Value)
+        self.value.visit_i32(value).map(Scalar::Value)
     }
 
     fn visit_i64<E: Error>(self, value: i64) -> Result<Self::Value, E> {
-        self.value_visitor.visit_i64(value).map(Scalar::Value)
+        self.value.visit_i64(value).map(Scalar::Value)
     }
 
     fn visit_u8<E: Error>(self, value: u8) -> Result<Self::Value, E> {
-        self.value_visitor.visit_u8(value).map(Scalar::Value)
+        self.value.visit_u8(value).map(Scalar::Value)
     }
 
     fn visit_u16<E: Error>(self, value: u16) -> Result<Self::Value, E> {
-        self.value_visitor.visit_u16(value).map(Scalar::Value)
+        self.value.visit_u16(value).map(Scalar::Value)
     }
 
     fn visit_u32<E: Error>(self, value: u32) -> Result<Self::Value, E> {
-        self.value_visitor.visit_u32(value).map(Scalar::Value)
+        self.value.visit_u32(value).map(Scalar::Value)
     }
 
     fn visit_u64<E: Error>(self, value: u64) -> Result<Self::Value, E> {
-        self.value_visitor.visit_u64(value).map(Scalar::Value)
+        self.value.visit_u64(value).map(Scalar::Value)
     }
 
     fn visit_f32<E: Error>(self, value: f32) -> Result<Self::Value, E> {
-        self.value_visitor.visit_f32(value).map(Scalar::Value)
+        self.value.visit_f32(value).map(Scalar::Value)
     }
 
     fn visit_f64<E: Error>(self, value: f64) -> Result<Self::Value, E> {
-        self.value_visitor.visit_f64(value).map(Scalar::Value)
+        self.value.visit_f64(value).map(Scalar::Value)
     }
 
     fn visit_string<E: Error>(self, value: String) -> Result<Self::Value, E> {
-        self.value_visitor.visit_string(value).map(Scalar::Value)
+        self.value.visit_string(value).map(Scalar::Value)
+    }
+
+    fn visit_byte_buf<E: Error>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
+        self.value.visit_byte_buf(buf).map(Scalar::Value)
+    }
+
+    fn visit_unit<E: Error>(self) -> Result<Self::Value, E> {
+        self.value.visit_unit().map(Scalar::Value)
+    }
+
+    fn visit_none<E: Error>(self) -> Result<Self::Value, E> {
+        self.value.visit_none().map(Scalar::Value)
     }
 
     async fn visit_map<A: MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         if let Some(key) = access.next_key::<String>().await? {
             if let Ok(path) = TCPathBuf::from_str(&key) {
                 if let Some(class) = ScalarType::from_path(&path) {
-                    return match class {
-                        ScalarType::Map => {
-                            access
-                                .next_value::<HashMap<Id, Scalar>>()
-                                .map_ok(Map::from)
-                                .map_ok(Scalar::Map)
-                                .await
-                        }
-                        ScalarType::Op(odt) => {
-                            OpDefVisitor::visit_map_value(odt, access)
-                                .map_ok(Scalar::Op)
-                                .await
-                        }
-                        ScalarType::Tuple => {
-                            access
-                                .next_value::<Vec<Scalar>>()
-                                .map_ok(Tuple::from)
-                                .map_ok(Scalar::Tuple)
-                                .await
-                        }
-                        ScalarType::Value(vt) => {
-                            ValueVisitor::visit_map_value_async(vt, access)
-                                .map_ok(Scalar::Value)
-                                .await
-                        }
-                    };
+                    return Self::visit_map_value(class, access).await;
                 }
             }
 
@@ -199,8 +225,7 @@ impl Visitor for ScalarVisitor {
 #[async_trait]
 impl FromStream for Scalar {
     async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
-        let value_visitor = value::ValueVisitor;
-        d.decode_any(ScalarVisitor { value_visitor }).await
+        d.decode_any(ScalarVisitor::default()).await
     }
 }
 

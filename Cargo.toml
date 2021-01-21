@@ -14,6 +14,7 @@ categories = ["concurrency", "database implementations", "data structures", "web
 [dependencies]
 async-trait = "0.1"
 auth = { path = "auth" }
+destream = "0.1"
 destream_json = { version = "0.1", optional = true }
 env_logger = "0.8"
 error = { path = "error" }

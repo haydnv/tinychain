@@ -346,6 +346,7 @@ impl fmt::Display for Value {
     }
 }
 
+#[derive(Default)]
 pub struct ValueVisitor;
 
 impl ValueVisitor {
@@ -595,7 +596,15 @@ impl destream::de::Visitor for ValueVisitor {
         Ok(Value::String(s))
     }
 
+    fn visit_byte_buf<E: DestreamError>(self, _buf: Vec<u8>) -> Result<Self::Value, E> {
+        unimplemented!()
+    }
+
     fn visit_unit<E: DestreamError>(self) -> Result<Self::Value, E> {
+        Ok(Value::None)
+    }
+
+    fn visit_none<E: DestreamError>(self) -> Result<Self::Value, E> {
         Ok(Value::None)
     }
 
