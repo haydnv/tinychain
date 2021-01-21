@@ -14,6 +14,7 @@ categories = ["concurrency", "database implementations", "data structures", "web
 [dependencies]
 async-trait = "0.1"
 auth = { path = "auth" }
+destream_json = { version = "0.1", optional = true }
 env_logger = "0.8"
 error = { path = "error" }
 futures = "0.3"
@@ -29,4 +30,4 @@ tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"]
 
 [features]
 default = ["http"]
-http = ["hyper"]
+http = ["hyper", "destream_json"]

@@ -32,7 +32,8 @@ pub trait Server {
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = Config::from_args();
 
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(config.log_level)).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(config.log_level))
+        .init();
 
     #[allow(unused_mut)]
     let mut servers = Vec::<Box<dyn Future<Output = Result<(), Box<dyn std::error::Error>>> + Unpin>>::with_capacity(1);

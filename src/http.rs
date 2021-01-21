@@ -5,9 +5,8 @@ use async_trait::async_trait;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response};
 
-const HELLO: &[u8] = b"Hello, world!";
+const CONTENT_TYPE: &str = "application/json";
 
-#[derive(Clone)]
 pub struct HTTPServer {
     addr: SocketAddr,
 }
@@ -17,8 +16,16 @@ impl HTTPServer {
         Self { addr }
     }
 
-    async fn route(_: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-        Ok(Response::new(Body::from(HELLO)))
+    async fn handle(_: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+        let response =
+            destream_json::encode(scalar::Value::String("Hello, world!".into())).unwrap();
+
+        let mut response = Response::new(Body::wrap_stream(response));
+        response
+            .headers_mut()
+            .insert(hyper::header::CONTENT_TYPE, CONTENT_TYPE.parse().unwrap());
+
+        Ok(response)
     }
 }
 
@@ -32,7 +39,7 @@ impl super::Server for HTTPServer {
 
         hyper::Server::bind(&this.addr)
             .serve(make_service_fn(|_| async {
-                Ok::<_, hyper::Error>(service_fn(HTTPServer::route))
+                Ok::<_, hyper::Error>(service_fn(HTTPServer::handle))
             }))
             .await
     }
