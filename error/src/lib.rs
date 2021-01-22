@@ -6,6 +6,7 @@ pub type TCResult<T> = Result<T, TCError>;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ErrorType {
     BadRequest,
+    Conflict,
     Forbidden,
     Internal,
     MethodNotAllowed,
@@ -24,6 +25,7 @@ impl fmt::Display for ErrorType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::BadRequest => f.write_str("bad request"),
+            Self::Conflict => f.write_str("conflict"),
             Self::Forbidden => f.write_str("forbidden"),
             Self::Internal => f.write_str("internal error"),
             Self::MethodNotAllowed => f.write_str("method not allowed"),
@@ -46,6 +48,15 @@ impl TCError {
         Self {
             code: ErrorType::Internal,
             message: format!("{}: {}", message, cause),
+        }
+    }
+
+    /// Error indicating that the request depends on a resource which is exclusively locked
+    /// by another request.
+    pub fn conflict() -> Self {
+        Self {
+            code: ErrorType::Conflict,
+            message: String::default(),
         }
     }
 

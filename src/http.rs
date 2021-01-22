@@ -105,6 +105,7 @@ fn transform_error(err: TCError) -> hyper::Response<Body> {
     *response.status_mut() = match err.code() {
         BadRequest => StatusCode::BAD_REQUEST,
         Forbidden => StatusCode::FORBIDDEN,
+        Conflict => StatusCode::CONFLICT,
         Internal => StatusCode::INTERNAL_SERVER_ERROR,
         MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
         NotFound => StatusCode::NOT_FOUND,
