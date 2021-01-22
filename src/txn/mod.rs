@@ -12,12 +12,20 @@ use generic::{Id, NetworkTime, PathSegment};
 
 use crate::state::State;
 
+pub mod lock;
 mod request;
 
 use destream::SeqAccess;
 pub use request::Request;
 
 const INVALID_ID: &str = "Invalid transaction ID";
+
+#[async_trait]
+pub trait Transact {
+    async fn commit(&self, txn_id: &TxnId);
+
+    async fn finalize(&self, txn_id: &TxnId);
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct TxnId {
