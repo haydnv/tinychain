@@ -9,24 +9,28 @@ use log::debug;
 use serde::de::DeserializeOwned;
 
 use error::*;
-use generic::NetworkTime;
+use generic::{NetworkTime, TCPathBuf};
 
+use crate::kernel::Kernel;
 use crate::state::State;
 use crate::txn::TxnId;
 
 const CONTENT_TYPE: &str = "application/json";
 
 pub struct HTTPServer {
-    addr: SocketAddr,
+    kernel: Kernel,
 }
 
 impl HTTPServer {
-    pub fn new(addr: SocketAddr) -> Self {
-        Self { addr }
+    pub fn new(kernel: Kernel) -> Self {
+        Self { kernel }
     }
 
-    async fn handle(request: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-        match Self::route(request) {
+    async fn handle(
+        self: Arc<Self>,
+        request: Request<Body>,
+    ) -> Result<Response<Body>, hyper::Error> {
+        match self.route(request).await {
             Ok(state) => match destream_json::encode(state) {
                 Ok(response) => {
                     let mut response = Response::new(Body::wrap_stream(response));
@@ -42,7 +46,9 @@ impl HTTPServer {
         }
     }
 
-    fn route(request: hyper::Request<Body>) -> TCResult<State> {
+    async fn route(&self, request: hyper::Request<Body>) -> TCResult<State> {
+        let path: TCPathBuf = request.uri().path().parse()?;
+
         let mut params = request
             .uri()
             .query()
@@ -54,15 +60,16 @@ impl HTTPServer {
             })
             .unwrap_or_else(HashMap::new);
 
-        let _txn_id = if let Some(txn_id) = get_param(&mut params, "txn_id")? {
+        let txn_id = if let Some(txn_id) = get_param(&mut params, "txn_id")? {
             txn_id
         } else {
             TxnId::new(NetworkTime::now())
         };
 
-        Ok(State::Scalar(scalar::Scalar::Value(scalar::Value::String(
-            "Hello, world!".into(),
-        ))))
+        match request.method() {
+            &hyper::Method::POST => self.kernel.post(txn_id, &path, request.into_body()).await,
+            other => Err(TCError::method_not_allowed(other)),
+        }
     }
 }
 
@@ -70,15 +77,21 @@ impl HTTPServer {
 impl super::Server for HTTPServer {
     type Error = hyper::Error;
 
-    async fn listen(self) -> Result<(), Self::Error> {
-        println!("HTTP server listening on {}", self.addr);
-        let this = Arc::new(self);
+    async fn listen(self, addr: SocketAddr) -> Result<(), Self::Error> {
+        println!("HTTP server listening on {}", &addr);
+        let server = Arc::new(self);
 
-        hyper::Server::bind(&this.addr)
-            .serve(make_service_fn(|_| async {
-                Ok::<_, hyper::Error>(service_fn(HTTPServer::handle))
-            }))
-            .await
+        let new_service = make_service_fn(move |_| {
+            let server = server.clone();
+            async {
+                Ok::<_, hyper::Error>(service_fn(move |req| {
+                    let server = server.clone();
+                    HTTPServer::handle(server, req)
+                }))
+            }
+        });
+
+        hyper::Server::bind(&addr).serve(new_service).await
     }
 }
 

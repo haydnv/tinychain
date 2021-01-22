@@ -28,11 +28,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(feature = "http")]
     {
         use futures::TryFutureExt;
-        use tinychain::{http, Server};
+        use tinychain::{http, Kernel, Server};
 
         let http_addr = (config.address, config.http_port).into();
-        let server = http::HTTPServer::new(http_addr);
-        servers.push(Box::new(server.listen().map_err(|e| {
+        let server = http::HTTPServer::new(Kernel);
+        servers.push(Box::new(server.listen(http_addr).map_err(|e| {
             let e: Box<dyn std::error::Error> = Box::new(e);
             e
         })));
