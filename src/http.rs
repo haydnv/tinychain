@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, StatusCode};
+use hyper::{Body, Request, Response};
 use log::debug;
 use serde::de::DeserializeOwned;
 
@@ -101,11 +101,13 @@ fn transform_error(err: TCError) -> hyper::Response<Body> {
     let mut response = hyper::Response::new(Body::from(format!("{}\r\n", err.message())));
 
     use error::ErrorType::*;
+    use hyper::StatusCode;
     *response.status_mut() = match err.code() {
         BadRequest => StatusCode::BAD_REQUEST,
         Forbidden => StatusCode::FORBIDDEN,
         Internal => StatusCode::INTERNAL_SERVER_ERROR,
         MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
+        NotFound => StatusCode::NOT_FOUND,
         Timeout => StatusCode::REQUEST_TIMEOUT,
         Unauthorized => StatusCode::UNAUTHORIZED,
     };

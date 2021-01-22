@@ -9,6 +9,7 @@ pub enum ErrorType {
     Forbidden,
     Internal,
     MethodNotAllowed,
+    NotFound,
     Timeout,
     Unauthorized,
 }
@@ -22,12 +23,13 @@ impl fmt::Debug for ErrorType {
 impl fmt::Display for ErrorType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::BadRequest => write!(f, "bad request"),
-            Self::Forbidden => write!(f, "forbidden"),
-            Self::Internal => write!(f, "internal"),
-            Self::MethodNotAllowed => write!(f, "method not allowed"),
-            Self::Timeout => write!(f, "request timeout"),
-            Self::Unauthorized => write!(f, "unauthorized"),
+            Self::BadRequest => f.write_str("bad request"),
+            Self::Forbidden => f.write_str("forbidden"),
+            Self::Internal => f.write_str("internal error"),
+            Self::MethodNotAllowed => f.write_str("method not allowed"),
+            Self::NotFound => f.write_str("not found"),
+            Self::Timeout => f.write_str("request timeout"),
+            Self::Unauthorized => f.write_str("unauthorized"),
         }
     }
 }
@@ -70,6 +72,14 @@ impl TCError {
         Self {
             code: ErrorType::MethodNotAllowed,
             message: info.to_string(),
+        }
+    }
+
+    /// Error indicating that the requested resource does not exist at the specified location.
+    pub fn not_found<I: fmt::Display>(locator: I) -> Self {
+        Self {
+            code: ErrorType::MethodNotAllowed,
+            message: locator.to_string(),
         }
     }
 
