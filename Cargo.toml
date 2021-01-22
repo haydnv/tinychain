@@ -11,6 +11,14 @@ repository = "http://github.com/haydnv/tinychain.git"
 keywords = ["database", "host", "platform", "runtime", "environment"]
 categories = ["concurrency", "database implementations", "data structures", "web programming"]
 
+[lib]
+name = "tinychain"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tinychain-host"
+path = "src/main.rs"
+
 [dependencies]
 async-trait = "0.1"
 auth = { path = "auth" }
