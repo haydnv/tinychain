@@ -1,15 +1,7 @@
 use std::net::IpAddr;
 
-use async_trait::async_trait;
 use futures::future::{try_join_all, Future};
 use structopt::StructOpt;
-
-pub mod block;
-
-#[cfg(feature = "http")]
-pub mod http;
-pub mod state;
-pub mod txn;
 
 #[derive(Clone, StructOpt)]
 struct Config {
@@ -21,13 +13,6 @@ struct Config {
 
     #[structopt(long = "log_level", default_value = "warn")]
     pub log_level: String,
-}
-
-#[async_trait]
-pub trait Server {
-    type Error: std::error::Error;
-
-    async fn listen(self) -> Result<(), Self::Error>;
 }
 
 #[tokio::main]
@@ -43,6 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(feature = "http")]
     {
         use futures::TryFutureExt;
+        use tinychain::{http, Server};
 
         let http_addr = (config.address, config.http_port).into();
         let server = http::HTTPServer::new(http_addr);
