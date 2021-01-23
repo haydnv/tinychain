@@ -18,6 +18,11 @@ pub use request::Request;
 
 const INVALID_ID: &str = "Invalid transaction ID";
 
+pub const MIN_ID: TxnId = TxnId {
+    timestamp: 0,
+    nonce: 0,
+};
+
 #[async_trait]
 pub trait Transact {
     async fn commit(&self, txn_id: &TxnId);
@@ -41,13 +46,6 @@ impl TxnId {
 
     pub fn to_path(&self) -> PathSegment {
         self.to_string().parse().unwrap()
-    }
-
-    pub fn zero() -> TxnId {
-        TxnId {
-            timestamp: 0,
-            nonce: 0,
-        }
     }
 }
 
