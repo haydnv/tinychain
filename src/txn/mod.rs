@@ -116,7 +116,7 @@ impl Txn {
         Self { id, state }
     }
 
-    pub async fn execute(&mut self, _capture: Id) -> TCResult<State> {
-        unimplemented!()
+    pub async fn execute(&mut self, capture: Id) -> TCResult<State> {
+        self.state.remove(&capture).ok_or_else(|| TCError::not_found(capture))
     }
 }
