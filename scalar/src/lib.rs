@@ -56,6 +56,17 @@ impl NativeClass for ScalarType {
     }
 }
 
+impl fmt::Display for ScalarType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Map => f.write_str("Map<Scalar>"),
+            Self::Op(odt) => fmt::Display::fmt(odt, f),
+            Self::Value(vt) => fmt::Display::fmt(vt, f),
+            Self::Tuple => f.write_str("Tuple<Scalar>"),
+        }
+    }
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub enum Scalar {
     Map(Map<Self>),
@@ -75,6 +86,12 @@ impl Instance for Scalar {
             Self::Tuple(_) => ST::Tuple,
             Self::Value(value) => ST::Value(value.class()),
         }
+    }
+}
+
+impl From<Value> for Scalar {
+    fn from(value: Value) -> Scalar {
+        Scalar::Value(value)
     }
 }
 

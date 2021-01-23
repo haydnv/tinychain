@@ -189,6 +189,19 @@ impl PartialOrd for ValueType {
     }
 }
 
+impl fmt::Display for ValueType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Link => f.write_str("Link"),
+            Self::None => f.write_str("None"),
+            Self::Number(nt) => fmt::Display::fmt(nt, f),
+            Self::String => f.write_str("String"),
+            Self::Tuple => f.write_str("Tuple<Value>"),
+            Self::Value => f.write_str("Value"),
+        }
+    }
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub enum Value {
     Link(Link),
@@ -205,6 +218,12 @@ impl Value {
             Self::Tuple(tuple) => tuple.is_empty(),
             _ => false,
         }
+    }
+}
+
+impl Default for Value {
+    fn default() -> Self {
+        Self::None
     }
 }
 
@@ -293,6 +312,60 @@ impl<'en> IntoStream<'en> for Value {
     }
 }
 
+impl TryCastFrom<Value> for Id {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::String(s) => Self::can_cast_from(s),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::String(s) => Self::opt_cast_from(s),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Value> for Number {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(_) => false,
+            Value::None => true,
+            Value::Number(_) => true,
+            Value::Tuple(t) if t.is_empty() => true,
+            Value::Tuple(t) if t.len() == 1 => Self::can_cast_from(&t[0]),
+            Value::Tuple(t) if t.len() == 2 => Self::can_cast_from(&t[0]) && Self::can_cast_from(&t[1]),
+            Value::Tuple(_) => false,
+            Value::String(s) => f64::from_str(&s).is_ok(),
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(_) => None,
+            Value::None => Some(false.into()),
+            Value::Number(n) => Some(n),
+            Value::Tuple(t) if t.is_empty() => Some(false.into()),
+            Value::Tuple(mut t) if t.len() == 1 => Self::opt_cast_from(t.pop().unwrap()),
+            Value::Tuple(mut t) if t.len() == 2 => {
+                let im = Self::opt_cast_from(t.pop().unwrap());
+                let re = Self::opt_cast_from(t.pop().unwrap());
+                match (re, im) {
+                    (Some(re), Some(im)) => {
+                        let c = Complex::cast_from((re, im));
+                        Some(Self::Complex(c))
+                    }
+                    _ => None
+                }
+            }
+            Value::Tuple(_) => None,
+            Value::String(s) => f64::from_str(&s).map(Float::F64).map(Self::Float).ok(),
+        }
+    }
+}
+
 impl TryCastFrom<Value> for TCPathBuf {
     fn can_cast_from(value: &Value) -> bool {
         if let Value::String(s) = value {
@@ -307,22 +380,6 @@ impl TryCastFrom<Value> for TCPathBuf {
             Self::from_str(&s).ok()
         } else {
             None
-        }
-    }
-}
-
-impl TryCastFrom<Value> for Id {
-    fn can_cast_from(value: &Value) -> bool {
-        match value {
-            Value::String(s) => Self::can_cast_from(s),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(value: Value) -> Option<Self> {
-        match value {
-            Value::String(s) => Self::opt_cast_from(s),
-            _ => None,
         }
     }
 }

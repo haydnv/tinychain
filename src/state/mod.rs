@@ -53,6 +53,16 @@ impl NativeClass for StateType {
     }
 }
 
+impl fmt::Display for StateType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Map => f.write_str("Map<Id, State>"),
+            Self::Scalar(st) => fmt::Display::fmt(st, f),
+            Self::Tuple => f.write_str("Tuple<State>"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum State {
     Map(Map<Self>),
@@ -69,6 +79,18 @@ impl Instance for State {
             State::Scalar(scalar) => StateType::Scalar(scalar.class()),
             Self::Tuple(_) => StateType::Tuple,
         }
+    }
+}
+
+impl From<Scalar> for State {
+    fn from(scalar: Scalar) -> State {
+        State::Scalar(scalar)
+    }
+}
+
+impl From<Value> for State {
+    fn from(value: Value) -> State {
+        State::Scalar(value.into())
     }
 }
 

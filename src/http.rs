@@ -67,6 +67,10 @@ impl HTTPServer {
         };
 
         match request.method() {
+            &hyper::Method::GET => {
+                let key = get_param(&mut params, "key")?.unwrap_or_default();
+                self.kernel.get(txn_id, &path, key).await
+            }
             &hyper::Method::POST => self.kernel.post(txn_id, &path, request.into_body()).await,
             other => Err(TCError::method_not_allowed(other)),
         }
@@ -122,6 +126,7 @@ fn transform_error(err: TCError) -> hyper::Response<Body> {
         Internal => StatusCode::INTERNAL_SERVER_ERROR,
         MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
         NotFound => StatusCode::NOT_FOUND,
+        NotImplemented => StatusCode::NOT_IMPLEMENTED,
         Timeout => StatusCode::REQUEST_TIMEOUT,
         Unauthorized => StatusCode::UNAUTHORIZED,
     };

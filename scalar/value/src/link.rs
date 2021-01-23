@@ -8,10 +8,13 @@ use std::str::FromStr;
 use addr::DomainName;
 use async_trait::async_trait;
 use destream::{de, Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
-use error::*;
-use generic::{Id, PathLabel, PathSegment, TCPathBuf};
+use number_general::Number;
+use safecast::{CastFrom, TryCastFrom};
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
+
+use error::*;
+use generic::{Id, PathLabel, PathSegment, TCPathBuf};
 
 use super::Value;
 
@@ -348,6 +351,45 @@ impl From<(LinkHost, TCPathBuf)> for Link {
         Link {
             host: Some(host),
             path,
+        }
+    }
+}
+
+impl TryCastFrom<Value> for Link {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(_) => true,
+            Value::None => true,
+            Value::Number(n) => match n {
+                Number::UInt(_) => true,
+                _ => false,
+            },
+            Value::String(s) => Self::from_str(s).is_ok(),
+            Value::Tuple(t) => t.iter().all(|v| Id::can_cast_from(v)),
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(l) => Some(l),
+            Value::None => Some(TCPathBuf::default().into()),
+            Value::Number(n) => match n {
+                Number::UInt(u) => Some(TCPathBuf::from(vec![Id::from(u64::cast_from(u))]).into()),
+                _ => None,
+            },
+            Value::String(s) => Self::from_str(&s).ok(),
+            Value::Tuple(t) => {
+                let mut path = Vec::with_capacity(t.len());
+                for id in t.into_inner().into_iter() {
+                    if let Some(id) = Id::opt_cast_from(id) {
+                        path.push(id);
+                    } else {
+                        return None;
+                    }
+                }
+
+                Some(TCPathBuf::from(path).into())
+            },
         }
     }
 }

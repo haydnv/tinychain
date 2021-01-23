@@ -359,6 +359,12 @@ impl FromStr for TCPathBuf {
     }
 }
 
+impl From<Vec<PathSegment>> for TCPathBuf {
+    fn from(segments: Vec<PathSegment>) -> Self {
+        Self { segments }
+    }
+}
+
 impl iter::FromIterator<PathSegment> for TCPathBuf {
     fn from_iter<T: IntoIterator<Item = PathSegment>>(iter: T) -> Self {
         TCPathBuf {

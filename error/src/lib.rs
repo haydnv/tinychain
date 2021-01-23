@@ -11,6 +11,7 @@ pub enum ErrorType {
     Internal,
     MethodNotAllowed,
     NotFound,
+    NotImplemented,
     Timeout,
     Unauthorized,
 }
@@ -30,6 +31,7 @@ impl fmt::Display for ErrorType {
             Self::Internal => f.write_str("internal error"),
             Self::MethodNotAllowed => f.write_str("method not allowed"),
             Self::NotFound => f.write_str("not found"),
+            Self::NotImplemented => f.write_str("not implemented"),
             Self::Timeout => f.write_str("request timeout"),
             Self::Unauthorized => f.write_str("unauthorized"),
         }
@@ -60,8 +62,8 @@ impl TCError {
         }
     }
 
-    /// Error indicating that the requestor's credentials do not authorize them to access the
-    /// specified resource.
+    /// Error indicating that the request actor's credentials do not authorize access to some
+    /// request dependencies.
     pub fn forbidden<M: fmt::Display, I: fmt::Display>(message: M, id: I) -> Self {
         Self {
             code: ErrorType::Forbidden,
@@ -89,8 +91,16 @@ impl TCError {
     /// Error indicating that the requested resource does not exist at the specified location.
     pub fn not_found<I: fmt::Display>(locator: I) -> Self {
         Self {
-            code: ErrorType::MethodNotAllowed,
+            code: ErrorType::NotFound,
             message: locator.to_string(),
+        }
+    }
+
+    /// Error indicating that a required feature is not yet implemented.
+    pub fn not_implemented<F: fmt::Display>(feature: F) -> Self {
+        Self {
+            code: ErrorType::NotImplemented,
+            message: feature.to_string(),
         }
     }
 
@@ -129,6 +139,6 @@ impl fmt::Debug for TCError {
 
 impl fmt::Display for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} error: {}", self.code, self.message)
+        write!(f, "{}: {}", self.code, self.message)
     }
 }
