@@ -70,6 +70,12 @@ pub enum State {
     Tuple(Tuple<Self>),
 }
 
+impl Default for State {
+    fn default() -> Self {
+        Self::Scalar(Scalar::default())
+    }
+}
+
 impl Instance for State {
     type Class = StateType;
 
@@ -91,6 +97,75 @@ impl From<Scalar> for State {
 impl From<Value> for State {
     fn from(value: Value) -> State {
         State::Scalar(value.into())
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Map(map) => fmt::Display::fmt(map, f),
+            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
+            Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
+        }
+    }
+}
+
+impl TryCastFrom<State> for Id {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
+impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>> TryCastFrom<State> for (T1, T2) {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Tuple(tuple) => tuple.iter().all(T::can_cast_from),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Tuple(source) => {
+                let mut dest = Vec::with_capacity(source.len());
+                for item in source.into_iter() {
+                    if let Some(item) = T::opt_cast_from(item) {
+                        dest.push(item);
+                    } else {
+                        return None;
+                    }
+                }
+
+                Some(Tuple::from(dest))
+            }
+            _ => None,
+        }
     }
 }
 

@@ -75,6 +75,12 @@ pub enum Scalar {
     Value(Value),
 }
 
+impl Default for Scalar {
+    fn default() -> Self {
+        Self::Value(Value::default())
+    }
+}
+
 impl Instance for Scalar {
     type Class = ScalarType;
 
@@ -92,6 +98,22 @@ impl Instance for Scalar {
 impl From<Value> for Scalar {
     fn from(value: Value) -> Scalar {
         Scalar::Value(value)
+    }
+}
+
+impl TryCastFrom<Scalar> for Id {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Value(value) => Self::can_cast_from(value),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Value(value) => Self::opt_cast_from(value),
+            _ => None,
+        }
     }
 }
 

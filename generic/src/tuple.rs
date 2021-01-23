@@ -2,7 +2,7 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::*;
 
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct Tuple<T: Clone> {
@@ -45,6 +45,15 @@ impl<T: Clone> FromIterator<T> for Tuple<T> {
 impl<T: Clone> From<Vec<T>> for Tuple<T> {
     fn from(inner: Vec<T>) -> Self {
         Tuple { inner }
+    }
+}
+
+impl<T: Clone> IntoIterator for Tuple<T> {
+    type Item = T;
+    type IntoIter = <Vec<T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
     }
 }
 

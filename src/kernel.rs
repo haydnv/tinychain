@@ -1,11 +1,13 @@
 use error::*;
-use generic::{NativeClass, PathSegment, TCPath};
+use generic::*;
 use number_general::{Number, NumberInstance};
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::{Match, TryCastFrom, TryCastInto};
 use scalar::*;
 
 use crate::state::{State, StateType};
-use crate::txn::TxnId;
+use crate::txn::*;
+
+const CAPTURE: Label = label("capture");
 
 pub struct Kernel;
 
@@ -47,14 +49,38 @@ impl Kernel {
         }
     }
 
-    pub async fn post<T>(
-        &self,
-        _txn_id: TxnId,
-        _path: &[PathSegment],
-        _data: T,
-    ) -> TCResult<State> {
-        Ok(State::Scalar(scalar::Scalar::Value(scalar::Value::String(
-            "Hello, world!".into(),
-        ))))
+    pub async fn post(&self, txn_id: TxnId, path: &[PathSegment], data: State) -> TCResult<State> {
+        if path.is_empty() {
+            return Err(TCError::method_not_allowed(TCPath::from(path)));
+        }
+
+        match path[0].as_str() {
+            "transact" if path.len() == 1 => Err(TCError::method_not_allowed(path[0].as_str())),
+            "transact" if path.len() == 2 => match path[1].as_str() {
+                "execute" => {
+                    if data.matches::<Tuple<(Id, State)>>() {
+                        let data = Tuple::<(Id, State)>::try_cast_from(data, |s| {
+                            TCError::bad_request(
+                                "A transaction is a list of (Id, State) tuples, not",
+                                s,
+                            )
+                        })?;
+                        if data.is_empty() {
+                            return Ok(State::Tuple(Tuple::default()));
+                        }
+
+                        let capture = data.last().unwrap().0.clone();
+                        let mut txn = Txn::new(data, txn_id);
+                        txn.execute(capture).await
+                    } else {
+                        let mut txn = Txn::new(vec![(CAPTURE.into(), data)], txn_id);
+                        txn.execute(CAPTURE.into()).await
+                    }
+                }
+                "hypothetical" => Err(TCError::not_implemented("hypothetical queries")),
+                other => Err(TCError::not_found(other)),
+            },
+            other => Err(TCError::not_found(other)),
+        }
     }
 }

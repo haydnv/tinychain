@@ -3,7 +3,6 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::de::{Decoder, FromStream, Visitor};
 use rand::Rng;
 use serde::de;
 
@@ -15,7 +14,6 @@ use crate::state::State;
 pub mod lock;
 mod request;
 
-use destream::SeqAccess;
 pub use request::Request;
 
 const INVALID_ID: &str = "Invalid transaction ID";
@@ -108,33 +106,17 @@ impl fmt::Display for TxnId {
 
 #[derive(Clone)]
 pub struct Txn {
+    id: TxnId,
     state: HashMap<Id, State>,
 }
 
-struct TxnVisitor;
-
-#[async_trait]
-impl Visitor for TxnVisitor {
-    type Value = Txn;
-
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Transaction definition, i.e. a list of (Id, State) tuples terminating in a reference to resolve")
+impl Txn {
+    pub fn new<I: IntoIterator<Item = (Id, State)>>(data: I, id: TxnId) -> Self {
+        let state = data.into_iter().collect();
+        Self { id, state }
     }
 
-    async fn visit_seq<A: SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let mut state = HashMap::new();
-
-        while let Some((id, value)) = seq.next_element().await? {
-            state.insert(id, value);
-        }
-
-        Ok(Txn { state })
-    }
-}
-
-#[async_trait]
-impl FromStream for Txn {
-    async fn from_stream<D: Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_seq(TxnVisitor).await
+    pub async fn execute(&mut self, _capture: Id) -> TCResult<State> {
+        unimplemented!()
     }
 }

@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::{TryFutureExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response};
 use log::debug;
@@ -71,7 +72,13 @@ impl HTTPServer {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
                 self.kernel.get(txn_id, &path, key).await
             }
-            &hyper::Method::POST => self.kernel.post(txn_id, &path, request.into_body()).await,
+            &hyper::Method::POST => {
+                let data = request.into_body().map_ok(|bytes| bytes.to_vec());
+                let data = destream_json::try_decode(data)
+                    .map_err(|e| TCError::bad_request("error deserializing POST data", e))
+                    .await?;
+                self.kernel.post(txn_id, &path, data).await
+            }
             other => Err(TCError::method_not_allowed(other)),
         }
     }
