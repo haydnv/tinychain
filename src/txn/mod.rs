@@ -43,10 +43,6 @@ impl TxnId {
             nonce: rand::thread_rng().gen(),
         }
     }
-
-    pub fn to_path(&self) -> PathSegment {
-        self.to_string().parse().unwrap()
-    }
 }
 
 impl FromStr for TxnId {
@@ -93,6 +89,12 @@ impl<'de> de::Deserialize<'de> for TxnId {
     {
         let s = String::deserialize(d)?;
         Self::from_str(&s).map_err(de::Error::custom)
+    }
+}
+
+impl From<&'_ TxnId> for PathSegment {
+    fn from(txn_id: &'_ TxnId) -> Self {
+        txn_id.to_string().parse().unwrap()
     }
 }
 

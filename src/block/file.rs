@@ -122,7 +122,7 @@ impl<T: BlockData> File<T> {
         if let Some(block) = self.cache.read().await.get(block_id) {
             block.read(txn_id).await
         } else if self.listing.read(txn_id).await?.contains(block_id) {
-            let txn_dir = self.pending.read().await.get_dir(&txn_id.to_path())?;
+            let txn_dir = self.pending.read().await.get_dir(&txn_id.into())?;
             let block = if let Some(txn_dir) = txn_dir {
                 if let Some(block) = txn_dir.read().await.get_block(block_id)? {
                     block
@@ -178,7 +178,7 @@ impl<T: BlockData> Transact for File<T> {
             return;
         }
 
-        let txn_dir = pending.create_or_get_dir(&txn_id.to_path()).unwrap();
+        let txn_dir = pending.create_or_get_dir(&txn_id.into()).unwrap();
 
         let copy_ops = mutated
             .into_iter()
@@ -212,7 +212,7 @@ impl<T: BlockData> Transact for File<T> {
         self.pending
             .write()
             .await
-            .delete_dir(&txn_id.to_path())
+            .delete_dir(&txn_id.into())
             .unwrap();
 
         self.listing.finalize(txn_id).await;
