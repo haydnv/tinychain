@@ -380,7 +380,7 @@ impl TryCastFrom<Value> for Link {
             Value::String(s) => Self::from_str(&s).ok(),
             Value::Tuple(t) => {
                 let mut path = Vec::with_capacity(t.len());
-                for id in t.into_inner().into_iter() {
+                for id in t.into_iter() {
                     if let Some(id) = Id::opt_cast_from(id) {
                         path.push(id);
                     } else {

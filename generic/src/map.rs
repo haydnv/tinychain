@@ -50,6 +50,15 @@ impl<T: Clone> DerefMut for Map<T> {
     }
 }
 
+impl<T: Clone> IntoIterator for Map<T> {
+    type Item = (Id, T);
+    type IntoIter = <HashMap<Id, T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
 impl<T: Clone> FromIterator<(Id, T)> for Map<T> {
     fn from_iter<I: IntoIterator<Item = (Id, T)>>(iter: I) -> Self {
         let inner = HashMap::from_iter(iter);
