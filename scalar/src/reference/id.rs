@@ -1,0 +1,98 @@
+use std::collections::HashSet;
+use std::fmt;
+use std::str::FromStr;
+
+use async_trait::async_trait;
+use destream::de;
+use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
+
+use error::*;
+use generic::Id;
+
+use super::RefInstance;
+
+const EMPTY_SLICE: &[usize] = &[];
+
+#[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct IdRef {
+    to: Id,
+}
+
+impl IdRef {
+    pub fn into_id(self) -> Id {
+        self.to
+    }
+
+    pub fn id(&'_ self) -> &'_ Id {
+        &self.to
+    }
+}
+
+#[async_trait]
+impl RefInstance for IdRef {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        deps.insert(self.to.clone());
+    }
+}
+
+impl From<Id> for IdRef {
+    fn from(to: Id) -> IdRef {
+        IdRef { to }
+    }
+}
+
+impl FromStr for IdRef {
+    type Err = TCError;
+
+    fn from_str(to: &str) -> TCResult<IdRef> {
+        if !to.starts_with('$') || to.len() < 2 {
+            Err(TCError::bad_request("Invalid Ref", to))
+        } else {
+            Ok(IdRef {
+                to: to[1..].parse()?,
+            })
+        }
+    }
+}
+
+impl PartialEq<Id> for IdRef {
+    fn eq(&self, other: &Id) -> bool {
+        self.id() == other
+    }
+}
+
+impl From<IdRef> for Id {
+    fn from(r: IdRef) -> Id {
+        r.to
+    }
+}
+
+impl fmt::Display for IdRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "${}", self.to)
+    }
+}
+
+#[async_trait]
+impl de::FromStream for IdRef {
+    async fn from_stream<D: de::Decoder>(d: &mut D) -> Result<Self, D::Error> {
+        let id_ref = String::from_stream(d).await?;
+        id_ref.parse().map_err(de::Error::custom)
+    }
+}
+
+impl<'en> ToStream<'en> for IdRef {
+    fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
+        let mut map = e.encode_map(Some(1))?;
+        map.encode_entry(self.to_string(), EMPTY_SLICE)?;
+        map.end()
+    }
+}
+
+impl<'en> IntoStream<'en> for IdRef {
+    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
+        let mut map = e.encode_map(Some(1))?;
+        map.encode_entry(self.to_string(), EMPTY_SLICE)?;
+        map.end()
+    }
+}
