@@ -326,7 +326,7 @@ impl Visitor for StateVisitor {
                                     .map_ok(State::Tuple)
                                     .await
                             }
-                        }
+                        };
                     }
                 } else {
                     let params: State = access.next_value().await?;

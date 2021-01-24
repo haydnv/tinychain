@@ -12,8 +12,10 @@ use safecast::{Match, TryCastFrom};
 use generic::*;
 
 pub mod op;
+pub mod reference;
 
 pub use op::*;
+pub use reference::*;
 pub use value::*;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar"]);
@@ -22,6 +24,7 @@ const PREFIX: PathLabel = path_label(&["state", "scalar"]);
 pub enum ScalarType {
     Map,
     Op(OpDefType),
+    Ref(RefType),
     Tuple,
     Value(ValueType),
 }
@@ -53,6 +56,7 @@ impl NativeClass for ScalarType {
         match self {
             Self::Map => prefix.append(label("map")),
             Self::Op(odt) => odt.path(),
+            Self::Ref(rt) => rt.path(),
             Self::Value(vt) => vt.path(),
             Self::Tuple => prefix.append(label("tuple")),
         }
@@ -64,6 +68,7 @@ impl fmt::Display for ScalarType {
         match self {
             Self::Map => f.write_str("Map<Scalar>"),
             Self::Op(odt) => fmt::Display::fmt(odt, f),
+            Self::Ref(rt) => fmt::Display::fmt(rt, f),
             Self::Value(vt) => fmt::Display::fmt(vt, f),
             Self::Tuple => f.write_str("Tuple<Scalar>"),
         }
@@ -74,6 +79,7 @@ impl fmt::Display for ScalarType {
 pub enum Scalar {
     Map(Map<Self>),
     Op(OpDef),
+    Ref(TCRef),
     Tuple(Tuple<Self>),
     Value(Value),
 }
@@ -102,6 +108,7 @@ impl Instance for Scalar {
         match self {
             Self::Map(_) => ST::Map,
             Self::Op(op) => ST::Op(op.class()),
+            Self::Ref(tc_ref) => ST::Ref(tc_ref.class()),
             Self::Tuple(_) => ST::Tuple,
             Self::Value(value) => ST::Value(value.class()),
         }
@@ -117,17 +124,14 @@ impl From<Value> for Scalar {
 impl TryCastFrom<Scalar> for Value {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
-            Scalar::Map(_) => false,
-            Scalar::Op(_) => false,
             Scalar::Tuple(tuple) => tuple.iter().all(Self::can_cast_from),
             Scalar::Value(_) => true,
+            _ => false,
         }
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
-            Scalar::Map(_) => None,
-            Scalar::Op(_) => None,
             Scalar::Tuple(tuple) => {
                 let mut value = Vec::with_capacity(tuple.len());
                 for item in tuple.into_iter() {
@@ -140,6 +144,7 @@ impl TryCastFrom<Scalar> for Value {
                 Some(Value::Tuple(value.into()))
             }
             Scalar::Value(value) => Some(value),
+            _ => None,
         }
     }
 }
@@ -214,6 +219,9 @@ impl ScalarVisitor {
                 OpDefVisitor::visit_map_value(odt, access)
                     .map_ok(Scalar::Op)
                     .await
+            }
+            ScalarType::Ref(_rt) => {
+                unimplemented!()
             }
             ScalarType::Tuple => {
                 access
@@ -366,6 +374,7 @@ impl<'en> ToStream<'en> for Scalar {
         match self {
             Scalar::Map(map) => map.to_stream(e),
             Scalar::Op(op_def) => op_def.to_stream(e),
+            Scalar::Ref(tc_ref) => tc_ref.to_stream(e),
             Scalar::Tuple(tuple) => tuple.to_stream(e),
             Scalar::Value(value) => value.to_stream(e),
         }
@@ -377,6 +386,7 @@ impl<'en> IntoStream<'en> for Scalar {
         match self {
             Scalar::Map(map) => map.into_inner().into_stream(e),
             Scalar::Op(op_def) => op_def.into_stream(e),
+            Scalar::Ref(tc_ref) => tc_ref.into_stream(e),
             Scalar::Tuple(tuple) => tuple.into_inner().into_stream(e),
             Scalar::Value(value) => value.into_stream(e),
         }
@@ -386,25 +396,11 @@ impl<'en> IntoStream<'en> for Scalar {
 impl fmt::Display for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Scalar::Map(map) => write!(
-                f,
-                "{{{}}}",
-                map.iter()
-                    .map(|(k, v)| format!("{}: {}", k, v))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
-            Scalar::Op(op) => write!(f, "{}", op),
-            Scalar::Tuple(tuple) => write!(
-                f,
-                "[{}]",
-                tuple
-                    .iter()
-                    .map(|i| i.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
-            Scalar::Value(value) => write!(f, "{}", value),
+            Scalar::Map(map) => fmt::Display::fmt(map, f),
+            Scalar::Op(op) => fmt::Display::fmt(op, f),
+            Scalar::Ref(tc_ref) => fmt::Display::fmt(tc_ref, f),
+            Scalar::Tuple(tuple) => fmt::Display::fmt(tuple, f),
+            Scalar::Value(value) => fmt::Display::fmt(value, f),
         }
     }
 }
