@@ -389,7 +389,7 @@ impl TryCastFrom<Value> for Link {
                 }
 
                 Some(TCPathBuf::from(path).into())
-            },
+            }
         }
     }
 }

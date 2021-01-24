@@ -16,6 +16,7 @@ async-trait = "0.1"
 collate = "0.1"
 destream = "0.1"
 generic = {path = "../../generic" }
+log = { version = "0.4", features = [] }
 number-general = "0.1"
 error = {path = "../../error" }
 safecast = "0.1"

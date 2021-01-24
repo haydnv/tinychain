@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream, MapAccess, SeqAccess, Visitor};
 use destream::en::{Encoder, IntoStream, ToStream};
 use futures::TryFutureExt;
-use safecast::TryCastFrom;
+use log::debug;
+use safecast::{Match, TryCastFrom};
 
 use generic::*;
 
@@ -25,6 +26,8 @@ impl Class for StateType {
 
 impl NativeClass for StateType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
+        debug!("StateType::from_path {}", TCPath::from(path));
+
         if path.is_empty() {
             None
         } else if &path[0] == "state" {
@@ -68,6 +71,16 @@ pub enum State {
     Map(Map<Self>),
     Scalar(Scalar),
     Tuple(Tuple<Self>),
+}
+
+impl State {
+    fn is_none(&self) -> bool {
+        match self {
+            Self::Scalar(scalar) => scalar.is_none(),
+            Self::Tuple(tuple) => tuple.is_empty(),
+            _ => false,
+        }
+    }
 }
 
 impl Default for State {
@@ -121,6 +134,50 @@ impl TryCastFrom<State> for Id {
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for Value {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Map(_) => false,
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            State::Tuple(tuple) => tuple.iter().all(Self::can_cast_from),
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Map(_) => None,
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            State::Tuple(tuple) => {
+                let mut value = Vec::with_capacity(tuple.len());
+                for item in tuple.into_iter() {
+                    if let Some(v) = Self::opt_cast_from(item) {
+                        value.push(v);
+                    } else {
+                        return None;
+                    }
+                }
+                Some(Value::Tuple(value.into()).into())
+            }
+        }
+    }
+}
+
+impl<T: TryCastFrom<State>> TryCastFrom<State> for (T,) {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
         }
     }
@@ -244,28 +301,59 @@ impl Visitor for StateVisitor {
 
     async fn visit_map<A: MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         if let Some(key) = access.next_key::<String>().await? {
-            if let Ok(path) = TCPathBuf::from_str(&key) {
-                if let Some(class) = StateType::from_path(&path) {
-                    return match class {
-                        StateType::Map => {
-                            access
-                                .next_value::<HashMap<Id, State>>()
-                                .map_ok(Map::from)
-                                .map_ok(State::Map)
-                                .await
-                        }
-                        StateType::Scalar(st) => {
-                            scalar::ScalarVisitor::visit_map_value(st, access)
-                                .map_ok(State::Scalar)
-                                .await
-                        }
-                        StateType::Tuple => {
-                            access
-                                .next_value::<Vec<State>>()
-                                .map_ok(Tuple::from)
-                                .map_ok(State::Tuple)
-                                .await
-                        }
+            log::debug!("deserialize: key is {}", key);
+
+            if let Ok(link) = Link::from_str(&key) {
+                if link.host().is_none() {
+                    if let Some(class) = StateType::from_path(link.path()) {
+                        let state = match class {
+                            StateType::Map => {
+                                access
+                                    .next_value::<HashMap<Id, State>>()
+                                    .map_ok(Map::from)
+                                    .map_ok(State::Map)
+                                    .await
+                            }
+                            StateType::Scalar(st) => {
+                                scalar::ScalarVisitor::visit_map_value(st, &mut access)
+                                    .map_ok(State::Scalar)
+                                    .await
+                            }
+                            StateType::Tuple => {
+                                access
+                                    .next_value::<Vec<State>>()
+                                    .map_ok(Tuple::from)
+                                    .map_ok(State::Tuple)
+                                    .await
+                            }
+                        }?;
+
+                        return if let Some(key) = access.next_key::<String>().await? {
+                            Err(de::Error::invalid_type(key, &"end of map"))
+                        } else {
+                            Ok(state)
+                        };
+                    }
+                } else {
+                    let params: State = access.next_value().await?;
+                    log::debug!("key is a Link, value is {}", params);
+
+                    let state = if params.is_none() {
+                        Ok(Value::Link(link).into())
+                    } else if params.matches::<(Value, State)>() {
+                        unimplemented!()
+                    } else if params.matches::<(Value,)>() {
+                        unimplemented!()
+                    } else if let State::Map(_params) = params {
+                        unimplemented!()
+                    } else {
+                        Err(de::Error::invalid_type(params, &"a Link or OpRef"))
+                    }?;
+
+                    return if let Some(key) = access.next_key::<String>().await? {
+                        Err(de::Error::invalid_type(key, &"end of map"))
+                    } else {
+                        Ok(state)
                     };
                 }
             }

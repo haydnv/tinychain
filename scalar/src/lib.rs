@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use destream::de::*;
 use destream::en::{Encoder, IntoStream, ToStream};
 use futures::TryFutureExt;
-use safecast::TryCastFrom;
+use log::debug;
+use safecast::{Match, TryCastFrom};
 
 use generic::*;
 
@@ -31,6 +32,8 @@ impl Class for ScalarType {
 
 impl NativeClass for ScalarType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
+        debug!("ScalarType::from_path {}", TCPath::from(path));
+
         if path.len() > 2 && &path[..2] == &PREFIX[..] {
             match path[2].as_str() {
                 "map" if path.len() == 3 => Some(Self::Map),
@@ -75,6 +78,16 @@ pub enum Scalar {
     Value(Value),
 }
 
+impl Scalar {
+    pub fn is_none(&self) -> bool {
+        match self {
+            Self::Tuple(tuple) => tuple.is_empty(),
+            Self::Value(value) => value.is_none(),
+            _ => false,
+        }
+    }
+}
+
 impl Default for Scalar {
     fn default() -> Self {
         Self::Value(Value::default())
@@ -101,6 +114,36 @@ impl From<Value> for Scalar {
     }
 }
 
+impl TryCastFrom<Scalar> for Value {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Map(_) => false,
+            Scalar::Op(_) => false,
+            Scalar::Tuple(tuple) => tuple.iter().all(Self::can_cast_from),
+            Scalar::Value(_) => true,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Map(_) => None,
+            Scalar::Op(_) => None,
+            Scalar::Tuple(tuple) => {
+                let mut value = Vec::with_capacity(tuple.len());
+                for item in tuple.into_iter() {
+                    if let Some(item) = Self::opt_cast_from(item) {
+                        value.push(item);
+                    } else {
+                        return None;
+                    }
+                }
+                Some(Value::Tuple(value.into()))
+            }
+            Scalar::Value(value) => Some(value),
+        }
+    }
+}
+
 impl TryCastFrom<Scalar> for Id {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
@@ -117,6 +160,38 @@ impl TryCastFrom<Scalar> for Id {
     }
 }
 
+impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (T,) {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
+impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (T1, T2) {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ScalarVisitor {
     value: value::ValueVisitor,
@@ -125,7 +200,7 @@ pub struct ScalarVisitor {
 impl ScalarVisitor {
     pub async fn visit_map_value<A: MapAccess>(
         class: ScalarType,
-        mut access: A,
+        access: &mut A,
     ) -> Result<Scalar, A::Error> {
         match class {
             ScalarType::Map => {
@@ -222,9 +297,39 @@ impl Visitor for ScalarVisitor {
 
     async fn visit_map<A: MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         if let Some(key) = access.next_key::<String>().await? {
-            if let Ok(path) = TCPathBuf::from_str(&key) {
-                if let Some(class) = ScalarType::from_path(&path) {
-                    return Self::visit_map_value(class, access).await;
+            if let Ok(link) = Link::from_str(&key) {
+                if link.host().is_none() {
+                    if let Some(class) = ScalarType::from_path(link.path()) {
+                        let scalar = Self::visit_map_value(class, &mut access).await;
+
+                        return if let Some(key) = access.next_key::<String>().await? {
+                            Err(destream::de::Error::invalid_type(key, &"end of map"))
+                        } else {
+                            scalar
+                        };
+                    }
+                } else {
+                    let params: Scalar = access.next_value().await?;
+                    let scalar = if params.is_none() {
+                        Ok(Value::Link(link).into())
+                    } else if params.matches::<(Value, Scalar)>() {
+                        unimplemented!()
+                    } else if params.matches::<(Value,)>() {
+                        unimplemented!()
+                    } else if let Scalar::Map(_params) = params {
+                        unimplemented!()
+                    } else {
+                        Err(destream::de::Error::invalid_type(
+                            params,
+                            &"a Link or OpRef",
+                        ))
+                    }?;
+
+                    return if let Some(key) = access.next_key::<String>().await? {
+                        Err(destream::de::Error::invalid_type(key, &"end of map"))
+                    } else {
+                        Ok(scalar)
+                    };
                 }
             }
 

@@ -5,6 +5,7 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::de::Error as DestreamError;
 use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
+use log::debug;
 use number_general::*;
 use safecast::{CastFrom, TryCastFrom};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
@@ -26,12 +27,20 @@ pub enum ValueType {
     Value,
 }
 
+impl Default for ValueType {
+    fn default() -> Self {
+        Self::Value
+    }
+}
+
 impl Class for ValueType {
     type Instance = Value;
 }
 
 impl NativeClass for ValueType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
+        debug!("ValueType::from_path {}", TCPath::from(path));
+
         use ComplexType as CT;
         use FloatType as FT;
         use IntType as IT;
@@ -40,10 +49,11 @@ impl NativeClass for ValueType {
 
         if path.len() >= 3 && &path[..3] == &PREFIX[..] {
             if path.len() == 3 {
-                Some(Self::Value)
+                Some(Self::default())
             } else if path.len() == 4 {
                 match path[3].as_str() {
                     "link" => Some(Self::Link),
+                    "number" => Some(Self::Number(NT::Number)),
                     "none" => Some(Self::None),
                     "string" => Some(Self::String),
                     "tuple" => Some(Self::Tuple),
@@ -53,6 +63,7 @@ impl NativeClass for ValueType {
                 match path[4].as_str() {
                     "bool" => Some(Self::Number(NT::Bool)),
                     "complex" => Some(Self::Number(NT::Complex(CT::Complex))),
+                    "float" => Some(Self::Number(NT::Float(FT::Float))),
                     "int" => Some(Self::Number(NT::Int(IT::Int))),
                     "uint" => Some(Self::Number(NT::UInt(UT::UInt))),
                     _ => None,
@@ -336,7 +347,9 @@ impl TryCastFrom<Value> for Number {
             Value::Number(_) => true,
             Value::Tuple(t) if t.is_empty() => true,
             Value::Tuple(t) if t.len() == 1 => Self::can_cast_from(&t[0]),
-            Value::Tuple(t) if t.len() == 2 => Self::can_cast_from(&t[0]) && Self::can_cast_from(&t[1]),
+            Value::Tuple(t) if t.len() == 2 => {
+                Self::can_cast_from(&t[0]) && Self::can_cast_from(&t[1])
+            }
             Value::Tuple(_) => false,
             Value::String(s) => f64::from_str(&s).is_ok(),
         }
@@ -357,7 +370,7 @@ impl TryCastFrom<Value> for Number {
                         let c = Complex::cast_from((re, im));
                         Some(Self::Complex(c))
                     }
-                    _ => None
+                    _ => None,
                 }
             }
             Value::Tuple(_) => None,
@@ -454,7 +467,7 @@ impl ValueVisitor {
 
     pub async fn visit_map_value_async<A: destream::MapAccess>(
         class: ValueType,
-        mut map: A,
+        map: &mut A,
     ) -> Result<Value, A::Error> {
         use ValueType as VT;
 
@@ -670,19 +683,20 @@ impl destream::de::Visitor for ValueVisitor {
 
         if let Some(key) = map.next_key::<String>().await? {
             if let Ok(link) = Link::from_str(&key) {
-                if link.host().is_none() {
+                let value = if link.host().is_none() {
                     if let Some(class) = VT::from_path(link.path()) {
-                        return Self::visit_map_value_async(class, map).await;
+                        Self::visit_map_value_async(class, &mut map).await?
+                    } else {
+                        Value::Link(link)
                     }
-                }
+                } else {
+                    Value::Link(link)
+                };
 
                 if let Some(key) = map.next_key::<String>().await? {
-                    Err(DestreamError::custom(format!(
-                        "the end of the map specifying this Value by type, not a second key \"{}\"",
-                        key
-                    )))
+                    Err(DestreamError::invalid_type(key, &"end of map"))
                 } else {
-                    Ok(Value::Link(link))
+                    Ok(value)
                 }
             } else {
                 Err(DestreamError::invalid_value(key, &"a Link"))
