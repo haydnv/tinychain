@@ -2,7 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::de::{self, Decoder, Error, FromStream, MapAccess, Visitor};
+use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 
 use generic::*;
@@ -134,13 +134,7 @@ impl Visitor for OpDefVisitor {
         let class = TCPathBuf::from_str(&class).map_err(A::Error::custom)?;
         let class = OpDefType::from_path(&class).ok_or_else(err)?;
 
-        let op = Self::visit_map_value(class, &mut map).await?;
-
-        if let Some(key) = map.next_key::<String>().await? {
-            Err(de::Error::invalid_type(key, &"end of map"))
-        } else {
-            Ok(op)
-        }
+        Self::visit_map_value(class, &mut map).await
     }
 }
 

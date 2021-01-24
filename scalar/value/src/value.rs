@@ -683,21 +683,13 @@ impl destream::de::Visitor for ValueVisitor {
 
         if let Some(key) = map.next_key::<String>().await? {
             if let Ok(link) = Link::from_str(&key) {
-                let value = if link.host().is_none() {
+                if link.host().is_none() {
                     if let Some(class) = VT::from_path(link.path()) {
-                        Self::visit_map_value_async(class, &mut map).await?
-                    } else {
-                        Value::Link(link)
+                        return Self::visit_map_value_async(class, &mut map).await;
                     }
-                } else {
-                    Value::Link(link)
-                };
-
-                if let Some(key) = map.next_key::<String>().await? {
-                    Err(DestreamError::invalid_type(key, &"end of map"))
-                } else {
-                    Ok(value)
                 }
+
+                Ok(Value::Link(link))
             } else {
                 Err(DestreamError::invalid_value(key, &"a Link"))
             }

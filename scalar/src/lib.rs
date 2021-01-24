@@ -300,17 +300,11 @@ impl Visitor for ScalarVisitor {
             if let Ok(link) = Link::from_str(&key) {
                 if link.host().is_none() {
                     if let Some(class) = ScalarType::from_path(link.path()) {
-                        let scalar = Self::visit_map_value(class, &mut access).await;
-
-                        return if let Some(key) = access.next_key::<String>().await? {
-                            Err(destream::de::Error::invalid_type(key, &"end of map"))
-                        } else {
-                            scalar
-                        };
+                        return Self::visit_map_value(class, &mut access).await;
                     }
                 } else {
                     let params: Scalar = access.next_value().await?;
-                    let scalar = if params.is_none() {
+                    return if params.is_none() {
                         Ok(Value::Link(link).into())
                     } else if params.matches::<(Value, Scalar)>() {
                         unimplemented!()
@@ -323,12 +317,6 @@ impl Visitor for ScalarVisitor {
                             params,
                             &"a Link or OpRef",
                         ))
-                    }?;
-
-                    return if let Some(key) = access.next_key::<String>().await? {
-                        Err(destream::de::Error::invalid_type(key, &"end of map"))
-                    } else {
-                        Ok(scalar)
                     };
                 }
             }

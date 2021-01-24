@@ -306,7 +306,7 @@ impl Visitor for StateVisitor {
             if let Ok(link) = Link::from_str(&key) {
                 if link.host().is_none() {
                     if let Some(class) = StateType::from_path(link.path()) {
-                        let state = match class {
+                        return match class {
                             StateType::Map => {
                                 access
                                     .next_value::<HashMap<Id, State>>()
@@ -326,19 +326,13 @@ impl Visitor for StateVisitor {
                                     .map_ok(State::Tuple)
                                     .await
                             }
-                        }?;
-
-                        return if let Some(key) = access.next_key::<String>().await? {
-                            Err(de::Error::invalid_type(key, &"end of map"))
-                        } else {
-                            Ok(state)
-                        };
+                        }
                     }
                 } else {
                     let params: State = access.next_value().await?;
                     log::debug!("key is a Link, value is {}", params);
 
-                    let state = if params.is_none() {
+                    return if params.is_none() {
                         Ok(Value::Link(link).into())
                     } else if params.matches::<(Value, State)>() {
                         unimplemented!()
@@ -348,12 +342,6 @@ impl Visitor for StateVisitor {
                         unimplemented!()
                     } else {
                         Err(de::Error::invalid_type(params, &"a Link or OpRef"))
-                    }?;
-
-                    return if let Some(key) = access.next_key::<String>().await? {
-                        Err(de::Error::invalid_type(key, &"end of map"))
-                    } else {
-                        Ok(state)
                     };
                 }
             }
