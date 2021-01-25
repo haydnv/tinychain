@@ -12,9 +12,10 @@ use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 use error::*;
 use generic::*;
 
-use crate::scalar::{Link, Scalar, TCRef, Value};
+use crate::scalar::{Link, Scalar, Value};
+use crate::state::State;
 
-use super::{IdRef, RefInstance};
+use super::{IdRef, RefInstance, TCRef};
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref", "op"]);
 
@@ -167,25 +168,31 @@ impl CastFrom<Value> for Key {
     }
 }
 
-impl TryCastFrom<Scalar> for Key {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Ref(tc_ref) => match &**tc_ref {
+impl TryCastFrom<State> for Key {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Ref(tc_ref) => match &**tc_ref {
                 TCRef::Id(_) => true,
                 _ => false,
             },
-            Scalar::Value(_) => true,
+            State::Scalar(scalar) => match scalar {
+                Scalar::Value(_) => true,
+                _ => false,
+            },
             _ => false,
         }
     }
 
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Ref(tc_ref) => match *tc_ref {
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Ref(tc_ref) => match *tc_ref {
                 TCRef::Id(id_ref) => Some(Self::Ref(id_ref)),
                 _ => None,
             },
-            Scalar::Value(value) => Some(Self::Value(value)),
+            State::Scalar(scalar) => match scalar {
+                Scalar::Value(value) => Some(Self::Value(value)),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -194,9 +201,9 @@ impl TryCastFrom<Scalar> for Key {
 #[async_trait]
 impl FromStream for Key {
     async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
-        match Scalar::from_stream(d).await? {
-            Scalar::Value(value) => Ok(Self::Value(value)),
-            Scalar::Ref(tc_ref) => match *tc_ref {
+        match State::from_stream(d).await? {
+            State::Scalar(Scalar::Value(value)) => Ok(Self::Value(value)),
+            State::Ref(tc_ref) => match *tc_ref {
                 TCRef::Id(id_ref) => Ok(Self::Ref(id_ref)),
                 other => Err(de::Error::invalid_type(other, &"IdRef")),
             },
@@ -233,11 +240,11 @@ impl fmt::Display for Key {
 }
 
 pub type GetRef = (Subject, Key);
-pub type PutRef = (Subject, Key, Scalar);
-pub type PostRef = (Subject, Map<Scalar>);
+pub type PutRef = (Subject, Key, State);
+pub type PostRef = (Subject, Map<State>);
 pub type DeleteRef = (Subject, Key);
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub enum OpRef {
     Get(GetRef),
     Put(PutRef),
@@ -272,13 +279,13 @@ impl RefInstance for OpRef {
                     deps.insert(id_ref.id().clone());
                 }
 
-                if let Scalar::Ref(tc_ref) = value {
+                if let State::Ref(tc_ref) = value {
                     tc_ref.requires(deps);
                 }
             }
             OpRef::Post((_path, params)) => {
                 for provider in params.values() {
-                    if let Scalar::Ref(tc_ref) = provider {
+                    if let State::Ref(tc_ref) = provider {
                         tc_ref.requires(deps);
                     }
                 }
@@ -308,6 +315,21 @@ impl OpRefVisitor {
             ORT::Delete => access.next_value().map_ok(OpRef::Delete).await,
         }
     }
+
+    pub fn visit_ref_value<E: de::Error>(subject: Subject, params: State) -> Result<OpRef, E> {
+        match params {
+            State::Map(params) => Ok(OpRef::Post((subject, params))),
+            State::Tuple(params) if params.matches::<(Value, Scalar)>() => {
+                let (key, value) = params.opt_cast_into().unwrap();
+                Ok(OpRef::Put((subject, key, value)))
+            }
+            State::Tuple(params) if params.matches::<(Value,)>() => {
+                let (key,) = params.opt_cast_into().unwrap();
+                Ok(OpRef::Get((subject, key)))
+            }
+            other => Err(de::Error::invalid_type(other, &"OpRef")),
+        }
+    }
 }
 
 #[async_trait]
@@ -332,19 +354,8 @@ impl de::Visitor for OpRefVisitor {
             }
         }
 
-        let params: Scalar = access.next_value().await?;
-        match params {
-            Scalar::Map(params) => Ok(OpRef::Post((subject, params))),
-            Scalar::Tuple(params) if params.matches::<(Value, Scalar)>() => {
-                let (key, value) = params.opt_cast_into().unwrap();
-                Ok(OpRef::Put((subject, key, value)))
-            }
-            Scalar::Tuple(params) if params.matches::<(Value,)>() => {
-                let (key,) = params.opt_cast_into().unwrap();
-                Ok(OpRef::Get((subject, key)))
-            }
-            other => Err(de::Error::invalid_type(other, &"OpRef")),
-        }
+        let params: State = access.next_value().await?;
+        Self::visit_ref_value(subject, params)
     }
 }
 

@@ -6,7 +6,7 @@ use number_general::{Number, NumberInstance};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use crate::scalar::*;
-use crate::state::{State, StateType};
+use crate::state::*;
 use crate::txn::*;
 
 const CAPTURE: Label = label("capture");
@@ -61,34 +61,33 @@ impl Kernel {
                         },
                         VT::Value => Ok(key.into()),
                     },
-                    ScalarType::Tuple => {
+                    ST::Tuple => {
                         let tuple = Tuple::<Scalar>::try_cast_from(key, try_cast_err(ST::Tuple))?;
                         Ok(Scalar::Tuple(tuple).into())
                     }
-                    ScalarType::Ref(rt) => match rt {
-                        RT::Id => {
-                            let id_ref = IdRef::try_cast_from(key, try_cast_err(RT::Id))?;
-                            Ok(Scalar::from(id_ref).into())
+                },
+                StateType::Ref(rt) => match rt {
+                    RT::Id => {
+                        let id_ref = IdRef::try_cast_from(key, try_cast_err(RT::Id))?;
+                        Ok(State::from(id_ref))
+                    }
+                    RT::Op(ort) => match ort {
+                        ORT::Get => {
+                            let get_ref = GetRef::try_cast_from(key, try_cast_err(ORT::Get))?;
+                            Ok(State::from(OpRef::Get(get_ref)))
                         }
-                        RT::Op(ort) => match ort {
-                            ORT::Get => {
-                                let get_ref = GetRef::try_cast_from(key, try_cast_err(ORT::Get))?;
-                                Ok(Scalar::from(OpRef::Get(get_ref)).into())
-                            }
-                            ORT::Put => {
-                                let put_ref = PutRef::try_cast_from(key, try_cast_err(ORT::Put))?;
-                                Ok(Scalar::from(OpRef::Put(put_ref)).into())
-                            }
-                            ORT::Post => {
-                                let post_ref = PostRef::try_cast_from(key, try_cast_err(ORT::Put))?;
-                                Ok(Scalar::from(OpRef::Post(post_ref)).into())
-                            }
-                            ORT::Delete => {
-                                let delete_ref =
-                                    DeleteRef::try_cast_from(key, try_cast_err(ORT::Put))?;
-                                Ok(Scalar::from(OpRef::Delete(delete_ref)).into())
-                            }
-                        },
+                        ORT::Put => {
+                            let put_ref = PutRef::try_cast_from(key, try_cast_err(ORT::Put))?;
+                            Ok(State::from(OpRef::Put(put_ref)))
+                        }
+                        ORT::Post => {
+                            let post_ref = PostRef::try_cast_from(key, try_cast_err(ORT::Put))?;
+                            Ok(State::from(OpRef::Post(post_ref)))
+                        }
+                        ORT::Delete => {
+                            let delete_ref = DeleteRef::try_cast_from(key, try_cast_err(ORT::Put))?;
+                            Ok(State::from(OpRef::Delete(delete_ref)))
+                        }
                     },
                 },
                 other => Err(TCError::bad_request(

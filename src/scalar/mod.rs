@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
@@ -12,10 +11,8 @@ use safecast::TryCastFrom;
 use generic::*;
 
 pub mod op;
-pub mod reference;
 
 pub use op::*;
-pub use reference::*;
 pub use value::*;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar"]);
@@ -24,7 +21,6 @@ const PREFIX: PathLabel = path_label(&["state", "scalar"]);
 pub enum ScalarType {
     Map,
     Op(OpDefType),
-    Ref(RefType),
     Tuple,
     Value(ValueType),
 }
@@ -56,7 +52,6 @@ impl NativeClass for ScalarType {
         match self {
             Self::Map => prefix.append(label("map")),
             Self::Op(odt) => odt.path(),
-            Self::Ref(rt) => rt.path(),
             Self::Value(vt) => vt.path(),
             Self::Tuple => prefix.append(label("tuple")),
         }
@@ -68,7 +63,6 @@ impl fmt::Display for ScalarType {
         match self {
             Self::Map => f.write_str("Map<Scalar>"),
             Self::Op(odt) => fmt::Display::fmt(odt, f),
-            Self::Ref(rt) => fmt::Display::fmt(rt, f),
             Self::Value(vt) => fmt::Display::fmt(vt, f),
             Self::Tuple => f.write_str("Tuple<Scalar>"),
         }
@@ -79,7 +73,6 @@ impl fmt::Display for ScalarType {
 pub enum Scalar {
     Map(Map<Self>),
     Op(OpDef),
-    Ref(Box<TCRef>),
     Tuple(Tuple<Self>),
     Value(Value),
 }
@@ -108,28 +101,9 @@ impl Instance for Scalar {
         match self {
             Self::Map(_) => ST::Map,
             Self::Op(op) => ST::Op(op.class()),
-            Self::Ref(tc_ref) => ST::Ref(tc_ref.class()),
             Self::Tuple(_) => ST::Tuple,
             Self::Value(value) => ST::Value(value.class()),
         }
-    }
-}
-
-impl From<IdRef> for Scalar {
-    fn from(id_ref: IdRef) -> Self {
-        TCRef::Id(id_ref).into()
-    }
-}
-
-impl From<OpRef> for Scalar {
-    fn from(op_ref: OpRef) -> Self {
-        TCRef::Op(op_ref).into()
-    }
-}
-
-impl From<TCRef> for Scalar {
-    fn from(tc_ref: TCRef) -> Self {
-        Self::Ref(Box::new(tc_ref))
     }
 }
 
@@ -256,12 +230,6 @@ impl ScalarVisitor {
                     .map_ok(Scalar::Op)
                     .await
             }
-            ScalarType::Ref(rt) => {
-                RefVisitor::visit_map_value(rt, access)
-                    .map_ok(Box::new)
-                    .map_ok(Scalar::Ref)
-                    .await
-            }
             ScalarType::Tuple => {
                 access
                     .next_value::<Vec<Scalar>>()
@@ -343,43 +311,14 @@ impl de::Visitor for ScalarVisitor {
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        if let Some(key) = access.next_key::<String>().await? {
-            if let Ok(subject) = Subject::from_str(&key) {
-                if let Subject::Link(link) = &subject {
-                    if link.host().is_none() {
-                        if let Some(class) = ScalarType::from_path(link.path()) {
-                            return Self::visit_map_value(class, &mut access).await;
-                        }
-                    }
-                }
+        let mut map = HashMap::new();
 
-                let params: Scalar = access.next_value().await?;
-                return if params.is_none() {
-                    match subject {
-                        Subject::Link(link) => Ok(Value::Link(link).into()),
-                        Subject::Ref(id_ref) => Ok(id_ref.into()),
-                    }
-                } else {
-                    RefVisitor::visit_ref_value(subject, params).map(Scalar::from)
-                };
-            }
-
-            let key = Id::try_cast_from(key, |id| format!("invalid Id: {}", id))
-                .map_err(de::Error::custom)?;
-
-            let mut map = HashMap::new();
+        while let Some(key) = access.next_key().await? {
             let value = access.next_value().await?;
             map.insert(key, value);
-
-            while let Some(key) = access.next_key().await? {
-                let value = access.next_value().await?;
-                map.insert(key, value);
-            }
-
-            Ok(Scalar::Map(map.into()))
-        } else {
-            Ok(Scalar::Map(Map::default()))
         }
+
+        Ok(Scalar::Map(map.into()))
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
@@ -409,7 +348,6 @@ impl<'en> ToStream<'en> for Scalar {
         match self {
             Scalar::Map(map) => map.to_stream(e),
             Scalar::Op(op_def) => op_def.to_stream(e),
-            Scalar::Ref(tc_ref) => tc_ref.to_stream(e),
             Scalar::Tuple(tuple) => tuple.to_stream(e),
             Scalar::Value(value) => value.to_stream(e),
         }
@@ -421,7 +359,6 @@ impl<'en> IntoStream<'en> for Scalar {
         match self {
             Scalar::Map(map) => map.into_inner().into_stream(e),
             Scalar::Op(op_def) => op_def.into_stream(e),
-            Scalar::Ref(tc_ref) => tc_ref.into_stream(e),
             Scalar::Tuple(tuple) => tuple.into_inner().into_stream(e),
             Scalar::Value(value) => value.into_stream(e),
         }
@@ -433,7 +370,6 @@ impl fmt::Display for Scalar {
         match self {
             Scalar::Map(map) => fmt::Display::fmt(map, f),
             Scalar::Op(op) => fmt::Display::fmt(op, f),
-            Scalar::Ref(tc_ref) => fmt::Display::fmt(tc_ref, f),
             Scalar::Tuple(tuple) => fmt::Display::fmt(tuple, f),
             Scalar::Value(value) => fmt::Display::fmt(value, f),
         }

@@ -107,6 +107,26 @@ impl<T: Clone + FromStream> FromStream for Map<T> {
     }
 }
 
+impl<F: Clone, T: TryCastFrom<F>> TryCastFrom<Map<F>> for HashMap<Id, T> {
+    fn can_cast_from(map: &Map<F>) -> bool {
+        map.values().all(|f| T::can_cast_from(f))
+    }
+
+    fn opt_cast_from(source: Map<F>) -> Option<Self> {
+        let mut map = HashMap::new();
+
+        for (id, f) in source.into_iter() {
+            if let Some(t) = T::opt_cast_from(f) {
+                map.insert(id, t);
+            } else {
+                return None;
+            }
+        }
+
+        Some(map)
+    }
+}
+
 impl<T: Clone + fmt::Display> fmt::Display for Map<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

@@ -4,11 +4,10 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, Decoder, Encoder, FromStream, IntoStream, ToStream};
 use futures::TryFutureExt;
-use safecast::{Match, TryCastInto};
 
 use generic::*;
 
-use super::Scalar;
+use crate::state::State;
 
 pub mod id;
 pub mod op;
@@ -64,7 +63,7 @@ impl fmt::Display for RefType {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub enum TCRef {
     Id(IdRef),
     Op(OpRef),
@@ -107,24 +106,15 @@ impl RefVisitor {
         }
     }
 
-    pub fn visit_ref_value<E: de::Error>(subject: Subject, params: Scalar) -> Result<TCRef, E> {
-        return if params.is_none() {
+    pub fn visit_ref_value<E: de::Error>(subject: Subject, params: State) -> Result<TCRef, E> {
+        if params.is_none() {
             match subject {
                 Subject::Link(link) => Err(de::Error::invalid_type(link, &"a Ref")),
                 Subject::Ref(id_ref) => Ok(TCRef::Id(id_ref)),
             }
-        } else if params.matches::<(Key, Scalar)>() {
-            let (key, value) = params.opt_cast_into().unwrap();
-            Ok(TCRef::Op(OpRef::Put((subject, key, value))))
-        } else if params.matches::<(Key,)>() {
-            let (key,) = params.opt_cast_into().unwrap();
-            Ok(TCRef::Op(OpRef::Get((subject, key))))
-        } else if params.matches::<Map<Scalar>>() {
-            let params = params.opt_cast_into().unwrap();
-            Ok(TCRef::Op(OpRef::Post((subject, params))))
         } else {
-            Err(de::Error::invalid_type(params, &"an OpRef"))
-        };
+            OpRefVisitor::visit_ref_value(subject, params).map(TCRef::Op)
+        }
     }
 }
 
@@ -150,7 +140,7 @@ impl de::Visitor for RefVisitor {
             }
         }
 
-        let params: Scalar = access.next_value().await?;
+        let params = access.next_value().await?;
         Self::visit_ref_value(subject, params)
     }
 }

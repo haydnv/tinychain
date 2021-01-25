@@ -11,11 +11,16 @@ use safecast::{Match, TryCastFrom};
 
 use generic::*;
 
-pub use crate::scalar::*;
+use crate::scalar::{Link, Scalar, ScalarType, ScalarVisitor, Value};
+
+pub mod reference;
+
+pub use reference::*;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum StateType {
     Map,
+    Ref(RefType),
     Scalar(ScalarType),
     Tuple,
 }
@@ -39,6 +44,8 @@ impl NativeClass for StateType {
                 }
             } else if path.len() > 2 && &path[1] == "scalar" {
                 ScalarType::from_path(path).map(Self::Scalar)
+            } else if path.len() > 2 && &path[1] == "ref" {
+                RefType::from_path(path).map(Self::Ref)
             } else {
                 None
             }
@@ -50,6 +57,7 @@ impl NativeClass for StateType {
     fn path(&self) -> TCPathBuf {
         match self {
             Self::Map => path_label(&["state", "map"]).into(),
+            Self::Ref(rt) => rt.path(),
             Self::Scalar(st) => st.path(),
             Self::Tuple => path_label(&["state", "tuple"]).into(),
         }
@@ -60,6 +68,7 @@ impl fmt::Display for StateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Map => f.write_str("Map<Id, State>"),
+            Self::Ref(rt) => fmt::Display::fmt(rt, f),
             Self::Scalar(st) => fmt::Display::fmt(st, f),
             Self::Tuple => f.write_str("Tuple<State>"),
         }
@@ -69,12 +78,13 @@ impl fmt::Display for StateType {
 #[derive(Clone)]
 pub enum State {
     Map(Map<Self>),
+    Ref(Box<TCRef>),
     Scalar(Scalar),
     Tuple(Tuple<Self>),
 }
 
 impl State {
-    fn is_none(&self) -> bool {
+    pub fn is_none(&self) -> bool {
         match self {
             Self::Scalar(scalar) => scalar.is_none(),
             Self::Tuple(tuple) => tuple.is_empty(),
@@ -95,9 +105,28 @@ impl Instance for State {
     fn class(&self) -> StateType {
         match self {
             Self::Map(_) => StateType::Map,
-            State::Scalar(scalar) => StateType::Scalar(scalar.class()),
+            Self::Ref(tc_ref) => StateType::Ref(tc_ref.class()),
+            Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
             Self::Tuple(_) => StateType::Tuple,
         }
+    }
+}
+
+impl From<IdRef> for State {
+    fn from(id_ref: IdRef) -> Self {
+        TCRef::Id(id_ref).into()
+    }
+}
+
+impl From<OpRef> for State {
+    fn from(op_ref: OpRef) -> Self {
+        TCRef::Op(op_ref).into()
+    }
+}
+
+impl From<TCRef> for State {
+    fn from(tc_ref: TCRef) -> Self {
+        Self::Ref(Box::new(tc_ref))
     }
 }
 
@@ -110,60 +139,6 @@ impl From<Scalar> for State {
 impl From<Value> for State {
     fn from(value: Value) -> State {
         State::Scalar(value.into())
-    }
-}
-
-impl fmt::Display for State {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Map(map) => fmt::Display::fmt(map, f),
-            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
-            Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
-        }
-    }
-}
-
-impl TryCastFrom<State> for Id {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            _ => None,
-        }
-    }
-}
-
-impl TryCastFrom<State> for Value {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Map(_) => false,
-            State::Scalar(scalar) => Self::can_cast_from(scalar),
-            State::Tuple(tuple) => tuple.iter().all(Self::can_cast_from),
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Map(_) => None,
-            State::Scalar(scalar) => Self::opt_cast_from(scalar),
-            State::Tuple(tuple) => {
-                let mut value = Vec::with_capacity(tuple.len());
-                for item in tuple.into_iter() {
-                    if let Some(v) = Self::opt_cast_from(item) {
-                        value.push(v);
-                    } else {
-                        return None;
-                    }
-                }
-                Some(Value::Tuple(value.into()).into())
-            }
-        }
     }
 }
 
@@ -221,6 +196,79 @@ impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
 
                 Some(Tuple::from(dest))
             }
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Map(map) => fmt::Display::fmt(map, f),
+            Self::Ref(tc_ref) => fmt::Display::fmt(tc_ref, f),
+            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
+            Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
+        }
+    }
+}
+
+impl TryCastFrom<State> for Id {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for Scalar {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Map(map) => HashMap::<Id, Scalar>::can_cast_from(map),
+            State::Scalar(_) => true,
+            State::Tuple(tuple) => Vec::<Scalar>::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Map(map) => HashMap::<Id, Scalar>::opt_cast_from(map)
+                .map(Map::from)
+                .map(Scalar::Map),
+            State::Scalar(_) => None,
+            State::Tuple(tuple) => Vec::<Scalar>::opt_cast_from(tuple)
+                .map(Tuple::from)
+                .map(Scalar::Tuple),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for Value {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Map(_) => false,
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            State::Tuple(tuple) => tuple.iter().all(Self::can_cast_from),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Map(_) => None,
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            State::Tuple(tuple) => Vec::<Value>::opt_cast_from(tuple)
+                .map(Tuple::from)
+                .map(Value::Tuple),
             _ => None,
         }
     }
@@ -314,6 +362,11 @@ impl Visitor for StateVisitor {
                                     .map_ok(State::Map)
                                     .await
                             }
+                            StateType::Ref(rt) => {
+                                RefVisitor::visit_map_value(rt, &mut access)
+                                    .map_ok(State::from)
+                                    .await
+                            }
                             StateType::Scalar(st) => {
                                 ScalarVisitor::visit_map_value(st, &mut access)
                                     .map_ok(State::Scalar)
@@ -390,6 +443,7 @@ impl<'en> ToStream<'en> for State {
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Map(map) => map.to_stream(encoder),
+            Self::Ref(tc_ref) => tc_ref.to_stream(encoder),
             Self::Scalar(scalar) => scalar.to_stream(encoder),
             Self::Tuple(tuple) => tuple.to_stream(encoder),
         }
@@ -400,6 +454,7 @@ impl<'en> IntoStream<'en> for State {
     fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Map(map) => map.into_inner().into_stream(encoder),
+            Self::Ref(tc_ref) => tc_ref.into_stream(encoder),
             Self::Scalar(scalar) => scalar.into_stream(encoder),
             Self::Tuple(tuple) => tuple.into_inner().into_stream(encoder),
         }
