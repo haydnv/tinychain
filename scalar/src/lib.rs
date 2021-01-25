@@ -79,7 +79,7 @@ impl fmt::Display for ScalarType {
 pub enum Scalar {
     Map(Map<Self>),
     Op(OpDef),
-    Ref(TCRef),
+    Ref(Box<TCRef>),
     Tuple(Tuple<Self>),
     Value(Value),
 }

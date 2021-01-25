@@ -10,8 +10,10 @@ use generic::*;
 use super::{Link, Scalar};
 
 pub mod id;
+pub mod op;
 
 pub use id::*;
+pub use op::*;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref"]);
 
@@ -22,6 +24,7 @@ pub trait RefInstance {
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RefType {
     Id,
+    Op(OpRefType),
 }
 
 impl Class for RefType {
@@ -33,6 +36,7 @@ impl NativeClass for RefType {
         if path.len() > 3 && &path[0..3] == &PREFIX[..] {
             match path[3].as_str() {
                 "id" if path.len() == 4 => Some(Self::Id),
+                "op" => OpRefType::from_path(path).map(RefType::Op),
                 _ => None,
             }
         } else {
@@ -43,6 +47,7 @@ impl NativeClass for RefType {
     fn path(&self) -> TCPathBuf {
         let suffix = match self {
             Self::Id => "id",
+            Self::Op(ort) => return ort.path(),
         };
 
         TCPathBuf::from(PREFIX).append(label(suffix))
@@ -53,6 +58,7 @@ impl fmt::Display for RefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Id => f.write_str("Id"),
+            Self::Op(ort) => fmt::Display::fmt(ort, f),
         }
     }
 }
@@ -60,6 +66,7 @@ impl fmt::Display for RefType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCRef {
     Id(IdRef),
+    Op(OpRef),
 }
 
 impl Instance for TCRef {
@@ -68,6 +75,7 @@ impl Instance for TCRef {
     fn class(&self) -> Self::Class {
         match self {
             Self::Id(_) => RefType::Id,
+            Self::Op(op_ref) => RefType::Op(op_ref.class()),
         }
     }
 }
@@ -76,6 +84,7 @@ impl RefInstance for TCRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Id(id_ref) => id_ref.requires(deps),
+            Self::Op(op_ref) => op_ref.requires(deps),
         }
     }
 }
@@ -123,6 +132,7 @@ impl<'en> ToStream<'en> for TCRef {
     fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Id(id_ref) => id_ref.to_stream(e),
+            Self::Op(op_ref) => op_ref.to_stream(e),
         }
     }
 }
@@ -131,6 +141,7 @@ impl<'en> IntoStream<'en> for TCRef {
     fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Id(id_ref) => id_ref.into_stream(e),
+            Self::Op(op_ref) => op_ref.into_stream(e),
         }
     }
 }
@@ -139,6 +150,7 @@ impl fmt::Display for TCRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Id(id_ref) => fmt::Display::fmt(id_ref, f),
+            Self::Op(op_ref) => fmt::Display::fmt(op_ref, f),
         }
     }
 }
