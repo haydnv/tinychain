@@ -1,15 +1,16 @@
 use std::collections::HashSet;
 use std::fmt;
 use std::ops::Deref;
+use std::str::FromStr;
 
-use async_trait::async_trait;
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 
+use error::*;
 use generic::*;
 
 use crate::{Link, Scalar, Value};
 
-use super::{IdRef, RefInstance, TCRef};
+use super::{IdRef, RefInstance};
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref", "op"]);
 
@@ -64,13 +65,24 @@ impl fmt::Display for OpRefType {
 }
 
 #[derive(Clone, Eq, PartialEq)]
-pub enum Key {
+pub enum Subject {
+    Link(Link),
     Ref(IdRef),
-    Value(Value),
 }
 
-#[async_trait]
-impl RefInstance for Key {
+impl FromStr for Subject {
+    type Err = TCError;
+
+    fn from_str(s: &str) -> TCResult<Self> {
+        if s.starts_with('$') {
+            IdRef::from_str(s).map(Self::Ref)
+        } else {
+            Link::from_str(s).map(Self::Link)
+        }
+    }
+}
+
+impl RefInstance for Subject {
     fn requires(&self, deps: &mut HashSet<Id>) {
         if let Self::Ref(id_ref) = self {
             deps.insert(id_ref.id().clone());
@@ -78,11 +90,43 @@ impl RefInstance for Key {
     }
 }
 
-impl From<Key> for Scalar {
-    fn from(key: Key) -> Scalar {
-        match key {
-            Key::Ref(id_ref) => Scalar::Ref(Box::new(TCRef::Id(id_ref))),
-            Key::Value(value) => Scalar::Value(value),
+impl<'en> ToStream<'en> for Subject {
+    fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::Link(link) => link.to_stream(e),
+            Self::Ref(id_ref) => id_ref.to_stream(e),
+        }
+    }
+}
+
+impl<'en> IntoStream<'en> for Subject {
+    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::Link(link) => link.into_stream(e),
+            Self::Ref(id_ref) => id_ref.into_stream(e),
+        }
+    }
+}
+
+impl fmt::Display for Subject {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Link(link) => fmt::Display::fmt(link, f),
+            Self::Ref(id_ref) => fmt::Display::fmt(id_ref, f),
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub enum Key {
+    Ref(IdRef),
+    Value(Value),
+}
+
+impl RefInstance for Key {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        if let Self::Ref(id_ref) = self {
+            deps.insert(id_ref.id().clone());
         }
     }
 }
@@ -114,10 +158,10 @@ impl fmt::Display for Key {
     }
 }
 
-type GetRef = (Link, Key);
-type PutRef = (Link, Key, Scalar);
-type PostRef = (Link, Map<Scalar>);
-type DeleteRef = (Link, Key);
+type GetRef = (Subject, Key);
+type PutRef = (Subject, Key, Scalar);
+type PostRef = (Subject, Map<Scalar>);
+type DeleteRef = (Subject, Key);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {
