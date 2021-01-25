@@ -447,6 +447,16 @@ impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>, T3: TryCastFrom<Value>> Try
     }
 }
 
+impl<T: Clone + TryCastFrom<Value>> TryCastFrom<Value> for Map<T> {
+    fn can_cast_from(value: &Value) -> bool {
+        Vec::<(Id, T)>::can_cast_from(value)
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        Vec::<(Id, T)>::opt_cast_from(value).map(|entries| entries.into_iter().collect())
+    }
+}
+
 impl<T: TryCastFrom<Value>> TryCastFrom<Value> for Vec<T> {
     fn can_cast_from(value: &Value) -> bool {
         match value {
@@ -460,6 +470,16 @@ impl<T: TryCastFrom<Value>> TryCastFrom<Value> for Vec<T> {
             Value::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
         }
+    }
+}
+
+impl<T: Clone + TryCastFrom<Value>> TryCastFrom<Value> for Tuple<T> {
+    fn can_cast_from(value: &Value) -> bool {
+        Vec::<T>::can_cast_from(value)
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        Vec::<T>::opt_cast_from(value).map(Tuple::from)
     }
 }
 

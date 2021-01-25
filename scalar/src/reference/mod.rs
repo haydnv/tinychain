@@ -1,13 +1,14 @@
 use std::collections::HashSet;
 use std::fmt;
-use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::{de, Decoder, Encoder, FromStream, IntoStream, MapAccess, ToStream};
+use destream::{de, Decoder, Encoder, FromStream, IntoStream, ToStream};
+use futures::TryFutureExt;
+use safecast::{Match, TryCastInto};
 
 use generic::*;
 
-use super::{Link, Scalar};
+use super::Scalar;
 
 pub mod id;
 pub mod op;
@@ -89,7 +90,43 @@ impl RefInstance for TCRef {
     }
 }
 
-struct RefVisitor;
+pub struct RefVisitor;
+
+impl RefVisitor {
+    pub async fn visit_map_value<A: de::MapAccess>(
+        class: RefType,
+        access: &mut A,
+    ) -> Result<TCRef, A::Error> {
+        match class {
+            RefType::Id => access.next_value().map_ok(TCRef::Id).await,
+            RefType::Op(ort) => {
+                OpRefVisitor::visit_map_value(ort, access)
+                    .map_ok(TCRef::Op)
+                    .await
+            }
+        }
+    }
+
+    pub fn visit_ref_value<E: de::Error>(subject: Subject, params: Scalar) -> Result<TCRef, E> {
+        return if params.is_none() {
+            match subject {
+                Subject::Link(link) => Err(de::Error::invalid_type(link, &"a Ref")),
+                Subject::Ref(id_ref) => Ok(TCRef::Id(id_ref)),
+            }
+        } else if params.matches::<(Key, Scalar)>() {
+            let (key, value) = params.opt_cast_into().unwrap();
+            Ok(TCRef::Op(OpRef::Put((subject, key, value))))
+        } else if params.matches::<(Key,)>() {
+            let (key,) = params.opt_cast_into().unwrap();
+            Ok(TCRef::Op(OpRef::Get((subject, key))))
+        } else if params.matches::<Map<Scalar>>() {
+            let params = params.opt_cast_into().unwrap();
+            Ok(TCRef::Op(OpRef::Post((subject, params))))
+        } else {
+            Err(de::Error::invalid_type(params, &"an OpRef"))
+        };
+    }
+}
 
 #[async_trait]
 impl de::Visitor for RefVisitor {
@@ -99,25 +136,22 @@ impl de::Visitor for RefVisitor {
         f.write_str("a Ref, like {\"$subject\": []} or {\"/path/to/op\": [\"key\"]")
     }
 
-    async fn visit_map<A: MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        let key = access
-            .next_key::<String>()
+    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        let subject = access
+            .next_key::<Subject>()
             .await?
             .ok_or_else(|| de::Error::custom("expected a Ref or Link, found empty map"))?;
-        let value = access.next_value::<Scalar>().await?;
 
-        if key.starts_with('$') {
-            let subject = IdRef::from_str(&key).map_err(de::Error::custom)?;
-            if value.is_none() {
-                Ok(TCRef::Id(subject))
-            } else {
-                unimplemented!()
+        if let Subject::Link(link) = &subject {
+            if link.host().is_none() {
+                if let Some(class) = RefType::from_path(link.path()) {
+                    return Self::visit_map_value(class, &mut access).await;
+                }
             }
-        } else if let Ok(_link) = Link::from_str(&key) {
-            unimplemented!()
-        } else {
-            Err(de::Error::invalid_type(key, &"Ref or Link"))
         }
+
+        let params: Scalar = access.next_value().await?;
+        Self::visit_ref_value(subject, params)
     }
 }
 

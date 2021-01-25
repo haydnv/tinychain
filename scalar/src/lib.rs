@@ -3,11 +3,11 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::de::*;
+use destream::de::{self, Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
 use futures::TryFutureExt;
 use log::debug;
-use safecast::{Match, TryCastFrom};
+use safecast::TryCastFrom;
 
 use generic::*;
 
@@ -115,9 +115,45 @@ impl Instance for Scalar {
     }
 }
 
+impl From<IdRef> for Scalar {
+    fn from(id_ref: IdRef) -> Self {
+        TCRef::Id(id_ref).into()
+    }
+}
+
+impl From<OpRef> for Scalar {
+    fn from(op_ref: OpRef) -> Self {
+        TCRef::Op(op_ref).into()
+    }
+}
+
+impl From<TCRef> for Scalar {
+    fn from(tc_ref: TCRef) -> Self {
+        Self::Ref(Box::new(tc_ref))
+    }
+}
+
 impl From<Value> for Scalar {
     fn from(value: Value) -> Scalar {
         Scalar::Value(value)
+    }
+}
+
+impl TryCastFrom<Scalar> for Map<Scalar> {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Map(_) => true,
+            Scalar::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Map(map) => Some(map),
+            Scalar::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
     }
 }
 
@@ -203,7 +239,7 @@ pub struct ScalarVisitor {
 }
 
 impl ScalarVisitor {
-    pub async fn visit_map_value<A: MapAccess>(
+    pub async fn visit_map_value<A: de::MapAccess>(
         class: ScalarType,
         access: &mut A,
     ) -> Result<Scalar, A::Error> {
@@ -220,8 +256,11 @@ impl ScalarVisitor {
                     .map_ok(Scalar::Op)
                     .await
             }
-            ScalarType::Ref(_rt) => {
-                unimplemented!()
+            ScalarType::Ref(rt) => {
+                RefVisitor::visit_map_value(rt, access)
+                    .map_ok(Box::new)
+                    .map_ok(Scalar::Ref)
+                    .await
             }
             ScalarType::Tuple => {
                 access
@@ -240,97 +279,93 @@ impl ScalarVisitor {
 }
 
 #[async_trait]
-impl Visitor for ScalarVisitor {
+impl de::Visitor for ScalarVisitor {
     type Value = Scalar;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Tinychain Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"id\", \"$state\"]\"}")
     }
 
-    fn visit_i8<E: Error>(self, value: i8) -> Result<Self::Value, E> {
+    fn visit_i8<E: de::Error>(self, value: i8) -> Result<Self::Value, E> {
         self.value.visit_i8(value).map(Scalar::Value)
     }
 
-    fn visit_i16<E: Error>(self, value: i16) -> Result<Self::Value, E> {
+    fn visit_i16<E: de::Error>(self, value: i16) -> Result<Self::Value, E> {
         self.value.visit_i16(value).map(Scalar::Value)
     }
 
-    fn visit_i32<E: Error>(self, value: i32) -> Result<Self::Value, E> {
+    fn visit_i32<E: de::Error>(self, value: i32) -> Result<Self::Value, E> {
         self.value.visit_i32(value).map(Scalar::Value)
     }
 
-    fn visit_i64<E: Error>(self, value: i64) -> Result<Self::Value, E> {
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
         self.value.visit_i64(value).map(Scalar::Value)
     }
 
-    fn visit_u8<E: Error>(self, value: u8) -> Result<Self::Value, E> {
+    fn visit_u8<E: de::Error>(self, value: u8) -> Result<Self::Value, E> {
         self.value.visit_u8(value).map(Scalar::Value)
     }
 
-    fn visit_u16<E: Error>(self, value: u16) -> Result<Self::Value, E> {
+    fn visit_u16<E: de::Error>(self, value: u16) -> Result<Self::Value, E> {
         self.value.visit_u16(value).map(Scalar::Value)
     }
 
-    fn visit_u32<E: Error>(self, value: u32) -> Result<Self::Value, E> {
+    fn visit_u32<E: de::Error>(self, value: u32) -> Result<Self::Value, E> {
         self.value.visit_u32(value).map(Scalar::Value)
     }
 
-    fn visit_u64<E: Error>(self, value: u64) -> Result<Self::Value, E> {
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
         self.value.visit_u64(value).map(Scalar::Value)
     }
 
-    fn visit_f32<E: Error>(self, value: f32) -> Result<Self::Value, E> {
+    fn visit_f32<E: de::Error>(self, value: f32) -> Result<Self::Value, E> {
         self.value.visit_f32(value).map(Scalar::Value)
     }
 
-    fn visit_f64<E: Error>(self, value: f64) -> Result<Self::Value, E> {
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
         self.value.visit_f64(value).map(Scalar::Value)
     }
 
-    fn visit_string<E: Error>(self, value: String) -> Result<Self::Value, E> {
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
         self.value.visit_string(value).map(Scalar::Value)
     }
 
-    fn visit_byte_buf<E: Error>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
+    fn visit_byte_buf<E: de::Error>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
         self.value.visit_byte_buf(buf).map(Scalar::Value)
     }
 
-    fn visit_unit<E: Error>(self) -> Result<Self::Value, E> {
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
         self.value.visit_unit().map(Scalar::Value)
     }
 
-    fn visit_none<E: Error>(self) -> Result<Self::Value, E> {
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
         self.value.visit_none().map(Scalar::Value)
     }
 
-    async fn visit_map<A: MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         if let Some(key) = access.next_key::<String>().await? {
-            if let Ok(link) = Link::from_str(&key) {
-                if link.host().is_none() {
-                    if let Some(class) = ScalarType::from_path(link.path()) {
-                        return Self::visit_map_value(class, &mut access).await;
+            if let Ok(subject) = Subject::from_str(&key) {
+                if let Subject::Link(link) = &subject {
+                    if link.host().is_none() {
+                        if let Some(class) = ScalarType::from_path(link.path()) {
+                            return Self::visit_map_value(class, &mut access).await;
+                        }
+                    }
+                }
+
+                let params: Scalar = access.next_value().await?;
+                return if params.is_none() {
+                    match subject {
+                        Subject::Link(link) => Ok(Value::Link(link).into()),
+                        Subject::Ref(id_ref) => Ok(id_ref.into()),
                     }
                 } else {
-                    let params: Scalar = access.next_value().await?;
-                    return if params.is_none() {
-                        Ok(Value::Link(link).into())
-                    } else if params.matches::<(Value, Scalar)>() {
-                        unimplemented!()
-                    } else if params.matches::<(Value,)>() {
-                        unimplemented!()
-                    } else if let Scalar::Map(_params) = params {
-                        unimplemented!()
-                    } else {
-                        Err(destream::de::Error::invalid_type(
-                            params,
-                            &"a Link or OpRef",
-                        ))
-                    };
-                }
+                    RefVisitor::visit_ref_value(subject, params).map(Scalar::from)
+                };
             }
 
             let key = Id::try_cast_from(key, |id| format!("invalid Id: {}", id))
-                .map_err(A::Error::custom)?;
+                .map_err(de::Error::custom)?;
 
             let mut map = HashMap::new();
             let value = access.next_value().await?;
@@ -347,7 +382,7 @@ impl Visitor for ScalarVisitor {
         }
     }
 
-    async fn visit_seq<A: SeqAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+    async fn visit_seq<A: de::SeqAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         let mut items: Vec<Scalar> = if let Some(size) = access.size_hint() {
             Vec::with_capacity(size)
         } else {

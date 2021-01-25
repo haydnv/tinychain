@@ -3,12 +3,16 @@ use std::fmt;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use async_trait::async_trait;
+use destream::de::{self, Decoder, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
+use futures::TryFutureExt;
+use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 
 use error::*;
 use generic::*;
 
-use crate::{Link, Scalar, Value};
+use crate::{Link, Scalar, TCRef, Value};
 
 use super::{IdRef, RefInstance};
 
@@ -70,6 +74,14 @@ pub enum Subject {
     Ref(IdRef),
 }
 
+impl RefInstance for Subject {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        if let Self::Ref(id_ref) = self {
+            deps.insert(id_ref.id().clone());
+        }
+    }
+}
+
 impl FromStr for Subject {
     type Err = TCError;
 
@@ -82,11 +94,11 @@ impl FromStr for Subject {
     }
 }
 
-impl RefInstance for Subject {
-    fn requires(&self, deps: &mut HashSet<Id>) {
-        if let Self::Ref(id_ref) = self {
-            deps.insert(id_ref.id().clone());
-        }
+#[async_trait]
+impl FromStream for Subject {
+    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
+        let subject = String::from_stream(d).await?;
+        Subject::from_str(&subject).map_err(de::Error::custom)
     }
 }
 
@@ -104,6 +116,24 @@ impl<'en> IntoStream<'en> for Subject {
         match self {
             Self::Link(link) => link.into_stream(e),
             Self::Ref(id_ref) => id_ref.into_stream(e),
+        }
+    }
+}
+
+impl TryCastFrom<Value> for Subject {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(_) => true,
+            Value::String(s) => IdRef::from_str(s).is_ok(),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(link) => Some(Self::Link(link)),
+            Value::String(s) => IdRef::from_str(&s).ok().map(Self::Ref),
+            _ => None,
         }
     }
 }
@@ -127,6 +157,50 @@ impl RefInstance for Key {
     fn requires(&self, deps: &mut HashSet<Id>) {
         if let Self::Ref(id_ref) = self {
             deps.insert(id_ref.id().clone());
+        }
+    }
+}
+
+impl CastFrom<Value> for Key {
+    fn cast_from(value: Value) -> Self {
+        Self::Value(value)
+    }
+}
+
+impl TryCastFrom<Scalar> for Key {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Ref(tc_ref) => match &**tc_ref {
+                TCRef::Id(_) => true,
+                _ => false,
+            },
+            Scalar::Value(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Ref(tc_ref) => match *tc_ref {
+                TCRef::Id(id_ref) => Some(Self::Ref(id_ref)),
+                _ => None,
+            },
+            Scalar::Value(value) => Some(Self::Value(value)),
+            _ => None,
+        }
+    }
+}
+
+#[async_trait]
+impl FromStream for Key {
+    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
+        match Scalar::from_stream(d).await? {
+            Scalar::Value(value) => Ok(Self::Value(value)),
+            Scalar::Ref(tc_ref) => match *tc_ref {
+                TCRef::Id(id_ref) => Ok(Self::Ref(id_ref)),
+                other => Err(de::Error::invalid_type(other, &"IdRef")),
+            },
+            other => Err(de::Error::invalid_type(other, &"a Value or IdRef")),
         }
     }
 }
@@ -158,10 +232,10 @@ impl fmt::Display for Key {
     }
 }
 
-type GetRef = (Subject, Key);
-type PutRef = (Subject, Key, Scalar);
-type PostRef = (Subject, Map<Scalar>);
-type DeleteRef = (Subject, Key);
+pub type GetRef = (Subject, Key);
+pub type PutRef = (Subject, Key, Scalar);
+pub type PostRef = (Subject, Map<Scalar>);
+pub type DeleteRef = (Subject, Key);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {
@@ -215,6 +289,69 @@ impl RefInstance for OpRef {
                 }
             }
         }
+    }
+}
+
+pub struct OpRefVisitor;
+
+impl OpRefVisitor {
+    pub async fn visit_map_value<A: de::MapAccess>(
+        class: OpRefType,
+        access: &mut A,
+    ) -> Result<OpRef, A::Error> {
+        use OpRefType as ORT;
+
+        match class {
+            ORT::Get => access.next_value().map_ok(OpRef::Get).await,
+            ORT::Put => access.next_value().map_ok(OpRef::Put).await,
+            ORT::Post => access.next_value().map_ok(OpRef::Post).await,
+            ORT::Delete => access.next_value().map_ok(OpRef::Delete).await,
+        }
+    }
+}
+
+#[async_trait]
+impl de::Visitor for OpRefVisitor {
+    type Value = OpRef;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("an OpRef, e.g. {\"$subject\": [\"key\"]}")
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        let subject = access
+            .next_key::<Subject>()
+            .await?
+            .ok_or_else(|| de::Error::custom("expected OpRef, found empty map"))?;
+
+        if let Subject::Link(link) = &subject {
+            if link.host().is_none() {
+                if let Some(class) = OpRefType::from_path(link.path()) {
+                    return Self::visit_map_value(class, &mut access).await;
+                }
+            }
+        }
+
+        let params: Scalar = access.next_value().await?;
+        match params {
+            Scalar::Map(params) => Ok(OpRef::Post((subject, params))),
+            Scalar::Tuple(params) if params.matches::<(Value, Scalar)>() => {
+                let (key, value) = params.opt_cast_into().unwrap();
+                Ok(OpRef::Put((subject, key, value)))
+            }
+            Scalar::Tuple(params) if params.matches::<(Value,)>() => {
+                let (key,) = params.opt_cast_into().unwrap();
+                Ok(OpRef::Get((subject, key)))
+            }
+            other => Err(de::Error::invalid_type(other, &"OpRef")),
+        }
+    }
+}
+
+#[async_trait]
+impl FromStream for OpRef {
+    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
+        d.decode_map(OpRefVisitor).await
     }
 }
 

@@ -1,3 +1,5 @@
+use std::fmt;
+
 use error::*;
 use generic::*;
 use number_general::{Number, NumberInstance};
@@ -13,53 +15,42 @@ pub struct Kernel;
 
 impl Kernel {
     pub async fn get(&self, _txn_id: TxnId, path: &[PathSegment], key: Value) -> TCResult<State> {
+        use OpDefType as ODT;
+        use OpRefType as ORT;
+        use RefType as RT;
+        use ScalarType as ST;
         use ValueType as VT;
 
         if let Some(class) = StateType::from_path(path) {
             match class {
                 StateType::Scalar(class) => match class {
-                    ScalarType::Map => Err(TCError::bad_request(
-                        "Cannot cast into Map<Scalar> from {}",
-                        key,
-                    )),
-                    ScalarType::Op(ot) => match ot {
-                        OpDefType::Get => {
-                            let op = key.try_cast_into(|v| {
-                                TCError::bad_request("Invalid GET Op definition", v)
-                            })?;
+                    ST::Map => Err(cast_err(ST::Map, &key)),
+                    ST::Op(ot) => match ot {
+                        ODT::Get => {
+                            let op = key.try_cast_into(try_cast_err(ODT::Get))?;
                             Ok(Scalar::Op(OpDef::Get(op)).into())
                         }
-                        OpDefType::Put => {
-                            let op = key.try_cast_into(|v| {
-                                TCError::bad_request("Invalid GET Op definition", v)
-                            })?;
+                        ODT::Put => {
+                            let op = key.try_cast_into(try_cast_err(ODT::Put))?;
                             Ok(Scalar::Op(OpDef::Put(op)).into())
                         }
-                        OpDefType::Post => {
-                            let op = key.try_cast_into(|v| {
-                                TCError::bad_request("Invalid GET Op definition", v)
-                            })?;
+                        ODT::Post => {
+                            let op = key.try_cast_into(try_cast_err(ODT::Post))?;
                             Ok(Scalar::Op(OpDef::Post(op)).into())
                         }
-                        OpDefType::Delete => {
-                            let op = key.try_cast_into(|v| {
-                                TCError::bad_request("Invalid GET Op definition", v)
-                            })?;
+                        ODT::Delete => {
+                            let op = key.try_cast_into(try_cast_err(ODT::Delete))?;
                             Ok(Scalar::Op(OpDef::Delete(op)).into())
                         }
                     },
                     ScalarType::Value(class) => match class {
                         VT::Link => {
-                            let l = Link::try_cast_from(key, |v| {
-                                TCError::bad_request("Cannot cast into Link from {}", v)
-                            })?;
+                            let l = Link::try_cast_from(key, try_cast_err(VT::Link))?;
                             Ok(Value::Link(l).into())
                         }
                         VT::None => Ok(Value::None.into()),
                         VT::Number(nt) => {
-                            let n: Number = key.try_cast_into(|v| {
-                                TCError::bad_request("Cannot cast into Number from {}", v)
-                            })?;
+                            let n: Number = key.try_cast_into(try_cast_err(nt))?;
                             let n = n.into_type(nt);
                             Ok(Value::Number(n).into())
                         }
@@ -71,22 +62,33 @@ impl Kernel {
                         VT::Value => Ok(key.into()),
                     },
                     ScalarType::Tuple => {
-                        let tuple = Vec::<Scalar>::try_cast_from(key, |v| {
-                            TCError::bad_request("Cannot cast into Tuple<Scalar> from {}", v)
-                        })?;
-                        Ok(Scalar::Tuple(tuple.into()).into())
+                        let tuple = Tuple::<Scalar>::try_cast_from(key, try_cast_err(ST::Tuple))?;
+                        Ok(Scalar::Tuple(tuple).into())
                     }
                     ScalarType::Ref(rt) => match rt {
-                        RefType::Id => {
-                            let id_ref = IdRef::try_cast_from(key, |v| {
-                                TCError::bad_request("Cannot cast into IdRef from {}", v)
-                            })?;
-                            Ok(Scalar::Ref(Box::new(TCRef::Id(id_ref))).into())
+                        RT::Id => {
+                            let id_ref = IdRef::try_cast_from(key, try_cast_err(RT::Id))?;
+                            Ok(Scalar::from(id_ref).into())
                         }
-                        other => Err(TCError::bad_request(
-                            format!("Cannot cast into {} from", other),
-                            key,
-                        )),
+                        RT::Op(ort) => match ort {
+                            ORT::Get => {
+                                let get_ref = GetRef::try_cast_from(key, try_cast_err(ORT::Get))?;
+                                Ok(Scalar::from(OpRef::Get(get_ref)).into())
+                            }
+                            ORT::Put => {
+                                let put_ref = PutRef::try_cast_from(key, try_cast_err(ORT::Put))?;
+                                Ok(Scalar::from(OpRef::Put(put_ref)).into())
+                            }
+                            ORT::Post => {
+                                let post_ref = PostRef::try_cast_from(key, try_cast_err(ORT::Put))?;
+                                Ok(Scalar::from(OpRef::Post(post_ref)).into())
+                            }
+                            ORT::Delete => {
+                                let delete_ref =
+                                    DeleteRef::try_cast_from(key, try_cast_err(ORT::Put))?;
+                                Ok(Scalar::from(OpRef::Delete(delete_ref)).into())
+                            }
+                        },
                     },
                 },
                 other => Err(TCError::bad_request(
@@ -133,4 +135,12 @@ impl Kernel {
             other => Err(TCError::not_found(other)),
         }
     }
+}
+
+fn cast_err<T: fmt::Display>(to: T, from: &Value) -> TCError {
+    TCError::bad_request(format!("Cannot cast into {} from", to), from)
+}
+
+fn try_cast_err<T: fmt::Display>(to: T) -> impl FnOnce(&Value) -> TCError {
+    move |v| cast_err(to, v)
 }

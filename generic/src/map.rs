@@ -5,8 +5,9 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
+use safecast::{Match, TryCastFrom, TryCastInto};
 
-use super::Id;
+use super::{Id, Tuple};
 
 #[derive(Clone)]
 pub struct Map<T: Clone> {
@@ -72,6 +73,29 @@ impl<T: Clone> FromIterator<(Id, T)> for Map<T> {
 impl<T: Clone> From<HashMap<Id, T>> for Map<T> {
     fn from(inner: HashMap<Id, T>) -> Self {
         Map { inner }
+    }
+}
+
+impl<F: Clone, T: Clone> TryCastFrom<Tuple<F>> for Map<T>
+where
+    (Id, T): TryCastFrom<F>,
+{
+    fn can_cast_from(tuple: &Tuple<F>) -> bool {
+        tuple.iter().all(|e| e.matches::<(Id, T)>())
+    }
+
+    fn opt_cast_from(tuple: Tuple<F>) -> Option<Self> {
+        let mut inner = HashMap::<Id, T>::new();
+
+        for f in tuple.into_iter() {
+            if let Some((id, t)) = f.opt_cast_into() {
+                inner.insert(id, t);
+            } else {
+                return None;
+            }
+        }
+
+        Some(Self { inner })
     }
 }
 
