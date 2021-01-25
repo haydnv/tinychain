@@ -18,6 +18,36 @@ impl Kernel {
         if let Some(class) = StateType::from_path(path) {
             match class {
                 StateType::Scalar(class) => match class {
+                    ScalarType::Map => Err(TCError::bad_request(
+                        "Cannot cast into Map<Scalar> from {}",
+                        key,
+                    )),
+                    ScalarType::Op(ot) => match ot {
+                        OpDefType::Get => {
+                            let op = key.try_cast_into(|v| {
+                                TCError::bad_request("Invalid GET Op definition", v)
+                            })?;
+                            Ok(Scalar::Op(OpDef::Get(op)).into())
+                        }
+                        OpDefType::Put => {
+                            let op = key.try_cast_into(|v| {
+                                TCError::bad_request("Invalid GET Op definition", v)
+                            })?;
+                            Ok(Scalar::Op(OpDef::Put(op)).into())
+                        }
+                        OpDefType::Post => {
+                            let op = key.try_cast_into(|v| {
+                                TCError::bad_request("Invalid GET Op definition", v)
+                            })?;
+                            Ok(Scalar::Op(OpDef::Post(op)).into())
+                        }
+                        OpDefType::Delete => {
+                            let op = key.try_cast_into(|v| {
+                                TCError::bad_request("Invalid GET Op definition", v)
+                            })?;
+                            Ok(Scalar::Op(OpDef::Delete(op)).into())
+                        }
+                    },
                     ScalarType::Value(class) => match class {
                         VT::Link => {
                             let l = Link::try_cast_from(key, |v| {
@@ -40,9 +70,29 @@ impl Kernel {
                         },
                         VT::Value => Ok(key.into()),
                     },
-                    other => Err(TCError::not_implemented(other)),
+                    ScalarType::Tuple => {
+                        let tuple = Vec::<Scalar>::try_cast_from(key, |v| {
+                            TCError::bad_request("Cannot cast into Tuple<Scalar> from {}", v)
+                        })?;
+                        Ok(Scalar::Tuple(tuple.into()).into())
+                    }
+                    ScalarType::Ref(rt) => match rt {
+                        RefType::Id => {
+                            let id_ref = IdRef::try_cast_from(key, |v| {
+                                TCError::bad_request("Cannot cast into IdRef from {}", v)
+                            })?;
+                            Ok(Scalar::Ref(Box::new(TCRef::Id(id_ref))).into())
+                        }
+                        other => Err(TCError::bad_request(
+                            format!("Cannot cast into {} from", other),
+                            key,
+                        )),
+                    },
                 },
-                other => Err(TCError::not_implemented(other)),
+                other => Err(TCError::bad_request(
+                    format!("Cannot cast into {} from", other),
+                    key,
+                )),
             }
         } else {
             Err(TCError::not_found(TCPath::from(path)))

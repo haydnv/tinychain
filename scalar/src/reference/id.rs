@@ -5,9 +5,12 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::de;
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
+use safecast::TryCastFrom;
 
 use error::*;
 use generic::Id;
+
+use crate::Value;
 
 use super::RefInstance;
 
@@ -35,6 +38,12 @@ impl RefInstance for IdRef {
     }
 }
 
+impl PartialEq<Id> for IdRef {
+    fn eq(&self, other: &Id) -> bool {
+        self.id() == other
+    }
+}
+
 impl From<Id> for IdRef {
     fn from(to: Id) -> IdRef {
         IdRef { to }
@@ -55,9 +64,19 @@ impl FromStr for IdRef {
     }
 }
 
-impl PartialEq<Id> for IdRef {
-    fn eq(&self, other: &Id) -> bool {
-        self.id() == other
+impl TryCastFrom<Value> for IdRef {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::String(s) => Self::from_str(s).is_ok(),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::String(s) => Self::from_str(&s).ok(),
+            _ => None,
+        }
     }
 }
 

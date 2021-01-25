@@ -397,6 +397,72 @@ impl TryCastFrom<Value> for TCPathBuf {
     }
 }
 
+impl<T: TryCastFrom<Value>> TryCastFrom<Value> for (T,) {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
+impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>> TryCastFrom<Value> for (T1, T2) {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
+impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>, T3: TryCastFrom<Value>> TryCastFrom<Value>
+    for (T1, T2, T3)
+{
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
+impl<T: TryCastFrom<Value>> TryCastFrom<Value> for Vec<T> {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
