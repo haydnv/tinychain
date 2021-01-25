@@ -48,7 +48,7 @@ impl TCError {
     /// Error indicating that the request is badly-constructed or nonsensical.
     pub fn bad_request<M: fmt::Display, I: fmt::Display>(message: M, cause: I) -> Self {
         Self {
-            code: ErrorType::Internal,
+            code: ErrorType::BadRequest,
             message: format!("{}: {}", message, cause),
         }
     }

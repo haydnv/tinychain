@@ -114,6 +114,38 @@ impl From<Value> for Scalar {
     }
 }
 
+impl TryCastFrom<Scalar> for Link {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Value(value) => Self::can_cast_from(value),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Value(value) => Self::opt_cast_from(value),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Scalar> for Number {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Value(value) => Self::can_cast_from(value),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Value(value) => Self::opt_cast_from(value),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<Scalar> for Map<Scalar> {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {

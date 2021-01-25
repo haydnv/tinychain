@@ -139,6 +139,30 @@ impl TryCastFrom<Value> for Subject {
     }
 }
 
+impl TryCastFrom<State> for Subject {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Ref(tc_ref) => match &**tc_ref {
+                TCRef::Id(_) => true,
+                _ => false,
+            },
+            State::Scalar(scalar) => Link::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Ref(tc_ref) => match *tc_ref {
+                TCRef::Id(id_ref) => Some(Self::Ref(id_ref)),
+                _ => None,
+            },
+            State::Scalar(scalar) => Link::opt_cast_from(scalar).map(Self::Link),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for Subject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

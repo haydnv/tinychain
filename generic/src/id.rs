@@ -147,10 +147,7 @@ impl TryCastFrom<String> for Id {
     }
 
     fn opt_cast_from(id: String) -> Option<Id> {
-        match id.parse() {
-            Ok(id) => Some(id),
-            Err(_) => None,
-        }
+        id.parse().ok()
     }
 }
 

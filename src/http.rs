@@ -77,6 +77,7 @@ impl HTTPServer {
                 let data = destream_json::try_decode(data)
                     .map_err(|e| TCError::bad_request("error deserializing POST data", e))
                     .await?;
+
                 self.kernel.post(txn_id, &path, data).await
             }
             other => Err(TCError::method_not_allowed(other)),

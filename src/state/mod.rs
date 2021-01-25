@@ -5,13 +5,13 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream, MapAccess, SeqAccess, Visitor};
 use destream::en::{Encoder, IntoStream, ToStream};
-use futures::TryFutureExt;
 use log::debug;
-use safecast::TryCastFrom;
+use safecast::{Match, TryCastFrom, TryCastInto};
 
+use error::*;
 use generic::*;
 
-use crate::scalar::{Scalar, ScalarType, ScalarVisitor, Value};
+use crate::scalar::*;
 
 pub mod reference;
 
@@ -91,6 +91,89 @@ impl State {
             _ => false,
         }
     }
+
+    pub fn into_type(self, class: StateType) -> TCResult<Self> {
+        use OpDefType as ODT;
+        use OpRefType as ORT;
+        use RefType as RT;
+        use ScalarType as ST;
+        use ValueType as VT;
+
+        match class {
+            StateType::Scalar(class) => match class {
+                ST::Map => Err(cast_err(ST::Map, &self)),
+                ST::Op(ot) => match ot {
+                    ODT::Get => {
+                        let op = self.try_cast_into(try_cast_err(ODT::Get))?;
+                        Ok(Scalar::Op(OpDef::Get(op)).into())
+                    }
+                    ODT::Put => {
+                        let op = self.try_cast_into(try_cast_err(ODT::Put))?;
+                        Ok(Scalar::Op(OpDef::Put(op)).into())
+                    }
+                    ODT::Post => {
+                        let op = self.try_cast_into(try_cast_err(ODT::Post))?;
+                        Ok(Scalar::Op(OpDef::Post(op)).into())
+                    }
+                    ODT::Delete => {
+                        let op = self.try_cast_into(try_cast_err(ODT::Delete))?;
+                        Ok(Scalar::Op(OpDef::Delete(op)).into())
+                    }
+                },
+                ScalarType::Value(class) => match class {
+                    VT::Link => {
+                        let l = Link::try_cast_from(self, try_cast_err(VT::Link))?;
+                        Ok(Value::Link(l).into())
+                    }
+                    VT::None => Ok(Value::None.into()),
+                    VT::Number(nt) => {
+                        let v: Value = self.try_cast_into(try_cast_err(nt))?;
+                        let n: Number = v.try_cast_into(try_cast_err(nt))?;
+                        let n = n.into_type(nt);
+                        Ok(Value::Number(n).into())
+                    }
+                    VT::String => Ok(Value::String(self.to_string()).into()),
+                    VT::Tuple => {
+                        let tuple = Tuple::<Value>::try_cast_from(self, try_cast_err(ST::Tuple))?;
+                        Ok(Value::Tuple(tuple).into())
+                    }
+                    VT::Value => Ok(self.into()),
+                },
+                ST::Tuple => {
+                    let tuple = Tuple::<Scalar>::try_cast_from(self, try_cast_err(ST::Tuple))?;
+                    Ok(Scalar::Tuple(tuple).into())
+                }
+            },
+            StateType::Ref(rt) => match rt {
+                RT::Id => {
+                    let id_ref = IdRef::try_cast_from(self, try_cast_err(RT::Id))?;
+                    Ok(State::from(id_ref))
+                }
+                RT::Op(ort) => match ort {
+                    ORT::Get => {
+                        let get_ref = GetRef::try_cast_from(self, try_cast_err(ORT::Get))?;
+                        Ok(State::from(OpRef::Get(get_ref)))
+                    }
+                    ORT::Put => {
+                        let put_ref = PutRef::try_cast_from(self, try_cast_err(ORT::Put))?;
+                        Ok(State::from(OpRef::Put(put_ref)))
+                    }
+                    ORT::Post => {
+                        let post_ref = PostRef::try_cast_from(self, try_cast_err(ORT::Put))?;
+                        Ok(State::from(OpRef::Post(post_ref)))
+                    }
+                    ORT::Delete => {
+                        let delete_ref = DeleteRef::try_cast_from(self, try_cast_err(ORT::Put))?;
+                        Ok(State::from(OpRef::Delete(delete_ref)))
+                    }
+                },
+            },
+            other => Err(TCError::bad_request(
+                format!("Cannot cast into {} from", other),
+                self,
+            )),
+        }
+    }
 }
 
 impl Default for State {
@@ -142,6 +225,24 @@ impl From<Value> for State {
     }
 }
 
+impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Map<T> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Map(map) => HashMap::<Id, T>::can_cast_from(map),
+            State::Tuple(tuple) => Map::<T>::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Map(map) => HashMap::<Id, T>::opt_cast_from(map).map(Map::from),
+            State::Tuple(tuple) => Map::<T>::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
 impl<T: TryCastFrom<State>> TryCastFrom<State> for (T,) {
     fn can_cast_from(state: &State) -> bool {
         match state {
@@ -174,45 +275,95 @@ impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>> TryCastFrom<State> for (T1,
     }
 }
 
-impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
+impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>, T3: TryCastFrom<State>> TryCastFrom<State>
+    for (T1, T2, T3)
+{
     fn can_cast_from(state: &State) -> bool {
         match state {
-            State::Tuple(tuple) => tuple.iter().all(T::can_cast_from),
+            State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            State::Tuple(source) => {
-                let mut dest = Vec::with_capacity(source.len());
-                for item in source.into_iter() {
-                    if let Some(item) = T::opt_cast_from(item) {
-                        dest.push(item);
-                    } else {
-                        return None;
-                    }
-                }
-
-                Some(Tuple::from(dest))
-            }
+            State::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
         }
     }
 }
 
-impl fmt::Display for State {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Map(map) => fmt::Display::fmt(map, f),
-            Self::Ref(tc_ref) => fmt::Display::fmt(tc_ref, f),
-            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
-            Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
+impl<T: TryCastFrom<State>> TryCastFrom<State> for Vec<T> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Tuple(source) => Self::opt_cast_from(source),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Tuple(tuple) => Vec::<T>::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Tuple(tuple) => Vec::<T>::opt_cast_from(tuple).map(Tuple::from),
+            _ => None,
         }
     }
 }
 
 impl TryCastFrom<State> for Id {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for IdRef {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Ref(tc_ref) => match &**tc_ref {
+                TCRef::Id(_) => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Ref(tc_ref) => match *tc_ref {
+                TCRef::Id(id_ref) => Some(id_ref),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for Link {
     fn can_cast_from(state: &State) -> bool {
         match state {
             State::Scalar(scalar) => Self::can_cast_from(scalar),
@@ -270,6 +421,17 @@ impl TryCastFrom<State> for Value {
                 .map(Tuple::from)
                 .map(Value::Tuple),
             _ => None,
+        }
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Map(map) => fmt::Display::fmt(map, f),
+            Self::Ref(tc_ref) => fmt::Display::fmt(tc_ref, f),
+            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
+            Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
         }
     }
 }
@@ -355,31 +517,16 @@ impl Visitor for StateVisitor {
                 if let Subject::Link(link) = &subject {
                     if link.host().is_none() {
                         if let Some(class) = StateType::from_path(link.path()) {
-                            return match class {
-                                StateType::Map => {
-                                    access
-                                        .next_value::<HashMap<Id, State>>()
-                                        .map_ok(Map::from)
-                                        .map_ok(State::Map)
-                                        .await
-                                }
-                                StateType::Ref(rt) => {
-                                    RefVisitor::visit_map_value(rt, &mut access)
-                                        .map_ok(State::from)
-                                        .await
-                                }
-                                StateType::Scalar(st) => {
-                                    ScalarVisitor::visit_map_value(st, &mut access)
-                                        .map_ok(State::Scalar)
-                                        .await
-                                }
-                                StateType::Tuple => {
-                                    access
-                                        .next_value::<Vec<State>>()
-                                        .map_ok(Tuple::from)
-                                        .map_ok(State::Tuple)
-                                        .await
-                                }
+                            let value: State = access.next_value().await?;
+                            return if value.matches::<(IdRef,)>() {
+                                let (value,) = value.opt_cast_into().unwrap();
+                                Ok(OpRef::Get((
+                                    Subject::Link(Link::from(class.path())),
+                                    Key::Ref(value),
+                                ))
+                                .into())
+                            } else {
+                                value.into_type(class).map_err(de::Error::custom)
                             };
                         }
                     }
@@ -455,4 +602,12 @@ impl<'en> IntoStream<'en> for State {
             Self::Tuple(tuple) => tuple.into_inner().into_stream(encoder),
         }
     }
+}
+
+fn cast_err<F: fmt::Display, T: fmt::Display>(to: T, from: &F) -> TCError {
+    TCError::bad_request(format!("cannot cast into {} from", to), from)
+}
+
+fn try_cast_err<F: fmt::Display, T: fmt::Display>(to: T) -> impl FnOnce(&F) -> TCError {
+    move |s| cast_err(to, s)
 }

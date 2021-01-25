@@ -9,7 +9,11 @@ pub mod txn;
 #[cfg(feature = "http")]
 pub mod http;
 
+pub use auth;
+pub use error;
+pub use generic;
 pub use kernel::*;
+pub use value;
 
 #[async_trait::async_trait]
 pub trait Server {

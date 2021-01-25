@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use destream::de::Error as DestreamError;
 use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
 use log::debug;
-use number_general::*;
 use safecast::{CastFrom, TryCastFrom};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
@@ -14,6 +13,8 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use generic::*;
 
 use super::Link;
+
+pub use number_general::*;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
 
