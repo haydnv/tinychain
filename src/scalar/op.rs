@@ -4,6 +4,7 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
+use log::debug;
 
 use generic::*;
 
@@ -26,6 +27,8 @@ impl Class for OpDefType {
 impl NativeClass for OpDefType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         if path.len() == 4 && &path[..3] == &PREFIX[..] {
+            log::debug!("OpDefType::from_path {}", TCPath::from(path));
+
             match path[3].as_str() {
                 "get" => Some(Self::Get),
                 "put" => Some(Self::Put),
@@ -100,6 +103,8 @@ impl OpDefVisitor {
 
         match class {
             ODT::Get => {
+                debug!("deserialize GET Op");
+
                 let op = map.next_value().await?;
                 Ok(OpDef::Get(op))
             }

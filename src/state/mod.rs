@@ -396,8 +396,7 @@ impl Visitor for StateVisitor {
                 };
             }
 
-            let key = Id::try_cast_from(key, |id| format!("invalid Id: {}", id))
-                .map_err(de::Error::custom)?;
+            let key = Id::from_str(&key).map_err(de::Error::custom)?;
 
             let mut map = HashMap::new();
             let value = access.next_value().await?;

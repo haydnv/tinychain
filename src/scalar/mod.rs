@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
@@ -311,7 +312,27 @@ impl de::Visitor for ScalarVisitor {
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        let key = if let Some(key) = access.next_key::<String>().await? {
+            key
+        } else {
+            return Ok(Scalar::Map(Map::default()));
+        };
+
+        if let Ok(link) = Link::from_str(&key) {
+            if link.host().is_none() {
+                if let Some(class) = ScalarType::from_path(link.path()) {
+                    return Self::visit_map_value(class, &mut access).await;
+                }
+            }
+
+            access.next_value::<()>().await?;
+            return Ok(Value::Link(link).into());
+        }
+
         let mut map = HashMap::new();
+        let key = Id::from_str(&key).map_err(de::Error::custom)?;
+        let value = access.next_value().await?;
+        map.insert(key, value);
 
         while let Some(key) = access.next_key().await? {
             let value = access.next_value().await?;
