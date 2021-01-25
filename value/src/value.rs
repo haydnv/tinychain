@@ -6,10 +6,11 @@ use async_trait::async_trait;
 use destream::de::Error as DestreamError;
 use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
 use log::debug;
-use safecast::{CastFrom, TryCastFrom};
+use safecast::{CastFrom, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
+use error::*;
 use generic::*;
 
 use super::Link;
@@ -231,6 +232,25 @@ impl Value {
             _ => false,
         }
     }
+
+    pub fn into_type(self, class: ValueType) -> TCResult<Self> {
+        use ValueType as VT;
+
+        match class {
+            VT::Link => self.try_cast_into(try_cast_err(VT::Link)).map(Self::Link),
+            VT::None => Ok(Self::None),
+            VT::Number(nt) => {
+                let n = Number::try_cast_from(self, try_cast_err(nt))?;
+                Ok(Self::Number(n.into_type(nt)))
+            }
+            VT::String => Ok(Value::String(self.to_string())),
+            VT::Tuple => match self {
+                Self::Tuple(tuple) => Ok(Self::Tuple(tuple)),
+                value => Ok(Self::Tuple(vec![value].into())),
+            },
+            VT::Value => Ok(self),
+        }
+    }
 }
 
 impl Default for Value {
@@ -321,6 +341,12 @@ impl<'en> IntoStream<'en> for Value {
             Self::String(s) => s.into_stream(encoder),
             Self::Tuple(t) => t.into_inner().into_stream(encoder),
         }
+    }
+}
+
+impl CastFrom<Value> for String {
+    fn cast_from(value: Value) -> String {
+        value.to_string()
     }
 }
 
@@ -798,4 +824,12 @@ impl destream::de::Visitor for ValueVisitor {
 
         Ok(Value::Tuple(value.into()))
     }
+}
+
+fn cast_err<F: fmt::Display, T: fmt::Display>(to: T, from: &F) -> TCError {
+    TCError::bad_request(format!("cannot cast into {} from", to), from)
+}
+
+fn try_cast_err<F: fmt::Display, T: fmt::Display>(to: T) -> impl FnOnce(&F) -> TCError {
+    move |s| cast_err(to, s)
 }

@@ -37,9 +37,9 @@ impl<T: Clone> DerefMut for Tuple<T> {
     }
 }
 
-impl<T: Clone> FromIterator<T> for Tuple<T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let inner = Vec::from_iter(iter);
+impl<T: Clone, F: Into<T>> FromIterator<F> for Tuple<T> {
+    fn from_iter<I: IntoIterator<Item = F>>(iter: I) -> Self {
+        let inner = Vec::from_iter(iter.into_iter().map(|f| f.into()));
         Tuple { inner }
     }
 }

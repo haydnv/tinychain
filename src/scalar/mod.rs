@@ -7,13 +7,16 @@ use destream::de::{self, Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
 use futures::TryFutureExt;
 use log::debug;
-use safecast::TryCastFrom;
+use safecast::{TryCastFrom, TryCastInto};
 
+use error::*;
 use generic::*;
 
 pub mod op;
+pub mod reference;
 
 pub use op::*;
+pub use reference::*;
 pub use value::*;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar"]);
@@ -22,6 +25,7 @@ const PREFIX: PathLabel = path_label(&["state", "scalar"]);
 pub enum ScalarType {
     Map,
     Op(OpDefType),
+    Ref(RefType),
     Tuple,
     Value(ValueType),
 }
@@ -38,6 +42,7 @@ impl NativeClass for ScalarType {
             match path[2].as_str() {
                 "map" if path.len() == 3 => Some(Self::Map),
                 "op" => OpDefType::from_path(path).map(Self::Op),
+                "ref" => RefType::from_path(path).map(Self::Ref),
                 "tuple" if path.len() == 3 => Some(Self::Tuple),
                 "value" => ValueType::from_path(path).map(Self::Value),
                 _ => None,
@@ -53,6 +58,7 @@ impl NativeClass for ScalarType {
         match self {
             Self::Map => prefix.append(label("map")),
             Self::Op(odt) => odt.path(),
+            Self::Ref(rt) => rt.path(),
             Self::Value(vt) => vt.path(),
             Self::Tuple => prefix.append(label("tuple")),
         }
@@ -64,6 +70,7 @@ impl fmt::Display for ScalarType {
         match self {
             Self::Map => f.write_str("Map<Scalar>"),
             Self::Op(odt) => fmt::Display::fmt(odt, f),
+            Self::Ref(rt) => fmt::Display::fmt(rt, f),
             Self::Value(vt) => fmt::Display::fmt(vt, f),
             Self::Tuple => f.write_str("Tuple<Scalar>"),
         }
@@ -74,6 +81,7 @@ impl fmt::Display for ScalarType {
 pub enum Scalar {
     Map(Map<Self>),
     Op(OpDef),
+    Ref(Box<TCRef>),
     Tuple(Tuple<Self>),
     Value(Value),
 }
@@ -84,6 +92,62 @@ impl Scalar {
             Self::Tuple(tuple) => tuple.is_empty(),
             Self::Value(value) => value.is_none(),
             _ => false,
+        }
+    }
+
+    pub fn into_type(self, class: ScalarType) -> TCResult<Self> {
+        use OpDefType as ODT;
+        use OpRefType as ORT;
+        use RefType as RT;
+        use ScalarType as ST;
+
+        match class {
+            ST::Map => self.try_cast_into(try_cast_err(ST::Map)).map(Self::Map),
+            ST::Op(odt) => match odt {
+                ODT::Get => self
+                    .try_cast_into(try_cast_err(ODT::Get))
+                    .map(OpDef::Get)
+                    .map(Self::Op),
+                ODT::Put => self
+                    .try_cast_into(try_cast_err(ODT::Put))
+                    .map(OpDef::Put)
+                    .map(Self::Op),
+                ODT::Post => self
+                    .try_cast_into(try_cast_err(ODT::Post))
+                    .map(OpDef::Post)
+                    .map(Self::Op),
+                ODT::Delete => self
+                    .try_cast_into(try_cast_err(ODT::Delete))
+                    .map(OpDef::Delete)
+                    .map(Self::Op),
+            },
+            ST::Ref(rt) => match rt {
+                RT::Id => self
+                    .try_cast_into(try_cast_err(RT::Id))
+                    .map(TCRef::Id)
+                    .map(Box::new)
+                    .map(Scalar::Ref),
+                RT::Op(ort) => {
+                    let op_ref = match ort {
+                        ORT::Get => self.try_cast_into(try_cast_err(ORT::Get)).map(OpRef::Get),
+                        ORT::Put => self.try_cast_into(try_cast_err(ORT::Put)).map(OpRef::Put),
+                        ORT::Post => self.try_cast_into(try_cast_err(ORT::Post)).map(OpRef::Post),
+                        ORT::Delete => self
+                            .try_cast_into(try_cast_err(ORT::Delete))
+                            .map(OpRef::Delete),
+                    }?;
+                    Ok(Scalar::Ref(Box::new(TCRef::Op(op_ref))))
+                }
+            },
+            ST::Value(vt) => {
+                let value = Value::try_cast_from(self, try_cast_err(vt))?;
+                value.into_type(vt).map(Scalar::Value)
+            }
+            ST::Tuple => match self {
+                Self::Map(map) => Ok(Self::Tuple(map.into_iter().map(|(_, v)| v).collect())),
+                Self::Tuple(tuple) => Ok(Self::Tuple(tuple)),
+                other => Ok(Self::Tuple(vec![other].into())),
+            },
         }
     }
 }
@@ -102,15 +166,44 @@ impl Instance for Scalar {
         match self {
             Self::Map(_) => ST::Map,
             Self::Op(op) => ST::Op(op.class()),
+            Self::Ref(tc_ref) => ST::Ref(tc_ref.class()),
             Self::Tuple(_) => ST::Tuple,
             Self::Value(value) => ST::Value(value.class()),
         }
     }
 }
 
+impl From<TCRef> for Scalar {
+    fn from(tc_ref: TCRef) -> Self {
+        Self::Ref(Box::new(tc_ref))
+    }
+}
+
 impl From<Value> for Scalar {
     fn from(value: Value) -> Scalar {
         Scalar::Value(value)
+    }
+}
+
+impl TryCastFrom<Scalar> for IdRef {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Ref(tc_ref) => match &**tc_ref {
+                TCRef::Id(_) => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Ref(tc_ref) => match *tc_ref {
+                TCRef::Id(id_ref) => Some(id_ref),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 }
 
@@ -146,10 +239,33 @@ impl TryCastFrom<Scalar> for Number {
     }
 }
 
-impl TryCastFrom<Scalar> for Map<Scalar> {
+impl<T: Clone + TryCastFrom<Scalar>> TryCastFrom<Scalar> for Map<T> {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
-            Scalar::Map(_) => true,
+            Scalar::Map(map) => HashMap::<Id, T>::can_cast_from(map),
+            Scalar::Tuple(tuple) => Vec::<(Id, T)>::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Map(map) => HashMap::<Id, T>::opt_cast_from(map).map(Map::from),
+            Scalar::Tuple(tuple) => {
+                if let Some(entries) = Vec::<(Id, T)>::opt_cast_from(tuple) {
+                    Some(entries.into_iter().collect())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
             Scalar::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
@@ -157,7 +273,6 @@ impl TryCastFrom<Scalar> for Map<Scalar> {
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
-            Scalar::Map(map) => Some(map),
             Scalar::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
         }
@@ -240,6 +355,24 @@ impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (
     }
 }
 
+impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>, T3: TryCastFrom<Scalar>> TryCastFrom<Scalar>
+    for (T1, T2, T3)
+{
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ScalarVisitor {
     value: value::ValueVisitor,
@@ -261,6 +394,12 @@ impl ScalarVisitor {
             ScalarType::Op(odt) => {
                 OpDefVisitor::visit_map_value(odt, access)
                     .map_ok(Scalar::Op)
+                    .await
+            }
+            ScalarType::Ref(rt) => {
+                RefVisitor::visit_map_value(rt, access)
+                    .map_ok(Box::new)
+                    .map_ok(Scalar::Ref)
                     .await
             }
             ScalarType::Tuple => {
@@ -401,6 +540,7 @@ impl<'en> ToStream<'en> for Scalar {
         match self {
             Scalar::Map(map) => map.to_stream(e),
             Scalar::Op(op_def) => op_def.to_stream(e),
+            Scalar::Ref(tc_ref) => tc_ref.to_stream(e),
             Scalar::Tuple(tuple) => tuple.to_stream(e),
             Scalar::Value(value) => value.to_stream(e),
         }
@@ -412,6 +552,7 @@ impl<'en> IntoStream<'en> for Scalar {
         match self {
             Scalar::Map(map) => map.into_inner().into_stream(e),
             Scalar::Op(op_def) => op_def.into_stream(e),
+            Scalar::Ref(tc_ref) => tc_ref.into_stream(e),
             Scalar::Tuple(tuple) => tuple.into_inner().into_stream(e),
             Scalar::Value(value) => value.into_stream(e),
         }
@@ -423,8 +564,17 @@ impl fmt::Display for Scalar {
         match self {
             Scalar::Map(map) => fmt::Display::fmt(map, f),
             Scalar::Op(op) => fmt::Display::fmt(op, f),
+            Scalar::Ref(tc_ref) => fmt::Display::fmt(tc_ref, f),
             Scalar::Tuple(tuple) => fmt::Display::fmt(tuple, f),
             Scalar::Value(value) => fmt::Display::fmt(value, f),
         }
     }
+}
+
+fn cast_err<F: fmt::Display, T: fmt::Display>(to: T, from: &F) -> TCError {
+    TCError::bad_request(format!("cannot cast into {} from", to), from)
+}
+
+fn try_cast_err<F: fmt::Display, T: fmt::Display>(to: T) -> impl FnOnce(&F) -> TCError {
+    move |s| cast_err(to, s)
 }

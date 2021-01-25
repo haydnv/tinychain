@@ -7,7 +7,7 @@ use futures::TryFutureExt;
 
 use generic::*;
 
-use crate::state::State;
+use super::Scalar;
 
 pub mod id;
 pub mod op;
@@ -63,7 +63,7 @@ impl fmt::Display for RefType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum TCRef {
     Id(IdRef),
     Op(OpRef),
@@ -106,7 +106,7 @@ impl RefVisitor {
         }
     }
 
-    pub fn visit_ref_value<E: de::Error>(subject: Subject, params: State) -> Result<TCRef, E> {
+    pub fn visit_ref_value<E: de::Error>(subject: Subject, params: Scalar) -> Result<TCRef, E> {
         if params.is_none() {
             match subject {
                 Subject::Link(link) => Err(de::Error::invalid_type(link, &"a Ref")),
