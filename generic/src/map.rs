@@ -3,6 +3,9 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
+use async_trait::async_trait;
+use destream::de::{Decoder, FromStream};
+
 use super::Id;
 
 #[derive(Clone)]
@@ -69,6 +72,14 @@ impl<T: Clone> FromIterator<(Id, T)> for Map<T> {
 impl<T: Clone> From<HashMap<Id, T>> for Map<T> {
     fn from(inner: HashMap<Id, T>) -> Self {
         Map { inner }
+    }
+}
+
+#[async_trait]
+impl<T: Clone + FromStream> FromStream for Map<T> {
+    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
+        let inner = HashMap::<Id, T>::from_stream(d).await?;
+        Ok(Self { inner })
     }
 }
 

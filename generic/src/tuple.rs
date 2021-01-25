@@ -2,6 +2,8 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
+use async_trait::async_trait;
+use destream::de::{Decoder, FromStream};
 use safecast::*;
 
 #[derive(Clone, Default, Eq, PartialEq)]
@@ -160,6 +162,14 @@ impl<F: Clone, T1: TryCastFrom<F>, T2: TryCastFrom<F>, T3: TryCastFrom<F>, T4: T
         } else {
             None
         }
+    }
+}
+
+#[async_trait]
+impl<T: Clone + FromStream> FromStream for Tuple<T> {
+    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
+        let inner = Vec::<T>::from_stream(d).await?;
+        Ok(Self { inner })
     }
 }
 
