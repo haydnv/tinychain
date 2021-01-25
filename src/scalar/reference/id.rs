@@ -6,11 +6,10 @@ use async_trait::async_trait;
 use destream::de;
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use safecast::TryCastFrom;
+use value::Value;
 
 use error::*;
 use generic::Id;
-
-use crate::Value;
 
 use super::RefInstance;
 

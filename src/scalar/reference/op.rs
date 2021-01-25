@@ -12,7 +12,7 @@ use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 use error::*;
 use generic::*;
 
-use crate::{Link, Scalar, TCRef, Value};
+use crate::scalar::{Link, Scalar, TCRef, Value};
 
 use super::{IdRef, RefInstance};
 

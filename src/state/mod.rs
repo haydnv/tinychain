@@ -11,7 +11,7 @@ use safecast::{Match, TryCastFrom};
 
 use generic::*;
 
-pub use scalar::*;
+pub use crate::scalar::*;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum StateType {
@@ -228,7 +228,7 @@ impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
 
 #[derive(Default)]
 struct StateVisitor {
-    scalar: scalar::ScalarVisitor,
+    scalar: ScalarVisitor,
 }
 
 #[async_trait]
@@ -315,7 +315,7 @@ impl Visitor for StateVisitor {
                                     .await
                             }
                             StateType::Scalar(st) => {
-                                scalar::ScalarVisitor::visit_map_value(st, &mut access)
+                                ScalarVisitor::visit_map_value(st, &mut access)
                                     .map_ok(State::Scalar)
                                     .await
                             }

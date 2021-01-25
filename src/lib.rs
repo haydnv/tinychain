@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 
 pub mod block;
 pub mod kernel;
+pub mod scalar;
 pub mod state;
 pub mod txn;
 

@@ -4,8 +4,8 @@ use error::*;
 use generic::*;
 use number_general::{Number, NumberInstance};
 use safecast::{Match, TryCastFrom, TryCastInto};
-use scalar::*;
 
+use crate::scalar::*;
 use crate::state::{State, StateType};
 use crate::txn::*;
 
