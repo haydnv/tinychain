@@ -7,11 +7,11 @@ use destream::de::{self, Decoder, FromStream, MapAccess, SeqAccess, Visitor};
 use destream::en::{Encoder, IntoStream, ToStream};
 use futures::TryFutureExt;
 use log::debug;
-use safecast::{Match, TryCastFrom};
+use safecast::TryCastFrom;
 
 use generic::*;
 
-use crate::scalar::{Link, Scalar, ScalarType, ScalarVisitor, Value};
+use crate::scalar::{Scalar, ScalarType, ScalarVisitor, Value};
 
 pub mod reference;
 
@@ -351,52 +351,49 @@ impl Visitor for StateVisitor {
         if let Some(key) = access.next_key::<String>().await? {
             log::debug!("deserialize: key is {}", key);
 
-            if let Ok(link) = Link::from_str(&key) {
-                if link.host().is_none() {
-                    if let Some(class) = StateType::from_path(link.path()) {
-                        return match class {
-                            StateType::Map => {
-                                access
-                                    .next_value::<HashMap<Id, State>>()
-                                    .map_ok(Map::from)
-                                    .map_ok(State::Map)
-                                    .await
-                            }
-                            StateType::Ref(rt) => {
-                                RefVisitor::visit_map_value(rt, &mut access)
-                                    .map_ok(State::from)
-                                    .await
-                            }
-                            StateType::Scalar(st) => {
-                                ScalarVisitor::visit_map_value(st, &mut access)
-                                    .map_ok(State::Scalar)
-                                    .await
-                            }
-                            StateType::Tuple => {
-                                access
-                                    .next_value::<Vec<State>>()
-                                    .map_ok(Tuple::from)
-                                    .map_ok(State::Tuple)
-                                    .await
-                            }
-                        };
+            if let Ok(subject) = Subject::from_str(&key) {
+                if let Subject::Link(link) = &subject {
+                    if link.host().is_none() {
+                        if let Some(class) = StateType::from_path(link.path()) {
+                            return match class {
+                                StateType::Map => {
+                                    access
+                                        .next_value::<HashMap<Id, State>>()
+                                        .map_ok(Map::from)
+                                        .map_ok(State::Map)
+                                        .await
+                                }
+                                StateType::Ref(rt) => {
+                                    RefVisitor::visit_map_value(rt, &mut access)
+                                        .map_ok(State::from)
+                                        .await
+                                }
+                                StateType::Scalar(st) => {
+                                    ScalarVisitor::visit_map_value(st, &mut access)
+                                        .map_ok(State::Scalar)
+                                        .await
+                                }
+                                StateType::Tuple => {
+                                    access
+                                        .next_value::<Vec<State>>()
+                                        .map_ok(Tuple::from)
+                                        .map_ok(State::Tuple)
+                                        .await
+                                }
+                            };
+                        }
+                    }
+                }
+
+                let params: State = access.next_value().await?;
+                return if params.is_none() {
+                    match subject {
+                        Subject::Link(link) => Ok(Value::Link(link).into()),
+                        Subject::Ref(id_ref) => Ok(State::from(id_ref)),
                     }
                 } else {
-                    let params: State = access.next_value().await?;
-                    log::debug!("key is a Link, value is {}", params);
-
-                    return if params.is_none() {
-                        Ok(Value::Link(link).into())
-                    } else if params.matches::<(Value, State)>() {
-                        unimplemented!()
-                    } else if params.matches::<(Value,)>() {
-                        unimplemented!()
-                    } else if let State::Map(_params) = params {
-                        unimplemented!()
-                    } else {
-                        Err(de::Error::invalid_type(params, &"a Link or OpRef"))
-                    };
-                }
+                    RefVisitor::visit_ref_value(subject, params).map(State::from)
+                };
             }
 
             let key = Id::try_cast_from(key, |id| format!("invalid Id: {}", id))
