@@ -82,6 +82,14 @@ impl State {
         }
     }
 
+    pub fn is_ref(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(Self::is_ref),
+            Self::Scalar(scalar) => scalar.is_ref(),
+            Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
+        }
+    }
+
     pub fn into_type(self, class: StateType) -> TCResult<Self> {
         match class {
             StateType::Scalar(class) => {
@@ -129,7 +137,13 @@ impl From<Scalar> for State {
 
 impl From<TCRef> for State {
     fn from(tc_ref: TCRef) -> Self {
-        Self::Scalar(tc_ref.into())
+        Box::new(tc_ref).into()
+    }
+}
+
+impl From<Box<TCRef>> for State {
+    fn from(tc_ref: Box<TCRef>) -> Self {
+        Self::Scalar(Scalar::Ref(tc_ref))
     }
 }
 

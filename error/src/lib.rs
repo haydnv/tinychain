@@ -127,6 +127,13 @@ impl TCError {
     pub fn message(&'_ self) -> &'_ str {
         &self.message
     }
+
+    pub fn consume<I: fmt::Display>(self, info: I) -> Self {
+        Self {
+            code: self.code,
+            message: format!("{}: {}", info, self.message),
+        }
+    }
 }
 
 impl std::error::Error for TCError {}

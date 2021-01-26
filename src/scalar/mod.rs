@@ -95,6 +95,15 @@ impl Scalar {
         }
     }
 
+    pub fn is_ref(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(Self::is_ref),
+            Self::Ref(_) => true,
+            Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
+            _ => false,
+        }
+    }
+
     pub fn into_type(self, class: ScalarType) -> TCResult<Self> {
         use OpDefType as ODT;
         use OpRefType as ORT;

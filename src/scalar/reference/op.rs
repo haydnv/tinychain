@@ -330,8 +330,8 @@ impl RefInstance for OpRef {
         }
     }
 
-    async fn resolve(self, txn: &Txn) -> TCResult<State> {
-        txn.resolve_op(self).await
+    async fn resolve(self, _txn: &Txn) -> TCResult<State> {
+        Err(TCError::not_implemented("OpRef::resolve"))
     }
 }
 

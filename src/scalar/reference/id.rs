@@ -39,7 +39,7 @@ impl RefInstance for IdRef {
     }
 
     async fn resolve(self, txn: &Txn) -> TCResult<State> {
-        txn.resolve(self.id())
+        txn.resolve_id(self.id()).map(Clone::clone)
     }
 }
 

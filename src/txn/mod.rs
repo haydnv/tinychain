@@ -1,15 +1,17 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::iter::FromIterator;
 use std::str::FromStr;
 
 use async_trait::async_trait;
+use futures::stream::{FuturesUnordered, StreamExt};
 use rand::Rng;
 use serde::de;
 
 use error::*;
 use generic::{Id, NetworkTime, PathSegment};
 
-use crate::scalar::OpRef;
+use crate::scalar::{RefInstance, Scalar};
 use crate::state::State;
 
 pub mod lock;
@@ -115,19 +117,67 @@ impl Txn {
     }
 
     pub async fn execute(&mut self, capture: Id) -> TCResult<State> {
+        while self.resolve_id(&capture)?.is_ref() {
+            let mut pending = Vec::with_capacity(self.state.len());
+            let mut unvisited = Vec::with_capacity(self.state.len());
+            unvisited.push(capture.clone());
+
+            while let Some(id) = unvisited.pop() {
+                let state = self
+                    .state
+                    .remove(&id)
+                    .ok_or_else(|| TCError::not_found(&id))?;
+                if let State::Scalar(Scalar::Ref(tc_ref)) = state {
+                    let mut deps = HashSet::new();
+                    tc_ref.requires(&mut deps);
+
+                    let mut ready = true;
+                    for dep_id in deps.into_iter() {
+                        if self.resolve_id(&dep_id)?.is_ref() {
+                            ready = false;
+                            unvisited.push(dep_id);
+                        }
+                    }
+
+                    if ready {
+                        pending.push(id);
+                    } else {
+                        self.state.insert(id, tc_ref.into());
+                    }
+                } else {
+                    self.state.insert(id, state);
+                }
+            }
+
+            if pending.is_empty() && self.resolve_id(&capture)?.is_ref() {
+                return Err(TCError::bad_request(
+                    "Cannot resolve all dependencies of",
+                    capture,
+                ));
+            }
+
+            let mut providers = FuturesUnordered::from_iter(
+                pending
+                    .into_iter()
+                    .map(|id| async { (id, Err(TCError::not_implemented("State::resolve"))) }),
+            );
+
+            while let Some((id, r)) = providers.next().await {
+                match r {
+                    Ok(state) => {
+                        self.state.insert(id, state);
+                    }
+                    Err(cause) => return Err(cause.consume(format!("Error resolving {}", id))),
+                }
+            }
+        }
+
         self.state
             .remove(&capture)
             .ok_or_else(|| TCError::not_found(capture))
     }
 
-    pub fn resolve(&self, id: &Id) -> TCResult<State> {
-        self.state
-            .get(id)
-            .cloned()
-            .ok_or_else(|| TCError::not_found(id))
-    }
-
-    pub async fn resolve_op(&self, _op_ref: OpRef) -> TCResult<State> {
-        Err(TCError::not_implemented("Txn::resolve_op"))
+    pub fn resolve_id(&'_ self, id: &Id) -> TCResult<&'_ State> {
+        self.state.get(id).ok_or_else(|| TCError::not_found(id))
     }
 }
