@@ -11,9 +11,8 @@ use uuid::Uuid;
 
 use error::*;
 use generic::PathSegment;
-
-use crate::transact::lock::{Mutable, TxnLock, TxnLockReadGuard};
-use crate::transact::{Transact, TxnId};
+use transact::lock::{Mutable, TxnLock, TxnLockReadGuard};
+use transact::{Transact, TxnId};
 
 use super::cache::Cache;
 use super::hostfs;

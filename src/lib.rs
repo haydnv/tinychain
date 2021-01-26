@@ -4,7 +4,6 @@ pub mod block;
 pub mod kernel;
 pub mod scalar;
 pub mod state;
-pub mod transact;
 
 #[cfg(feature = "http")]
 pub mod http;
@@ -13,7 +12,10 @@ pub use auth;
 pub use error;
 pub use generic;
 pub use kernel::*;
+pub use transact::{lock as txn_lock, TxnId};
 pub use value;
+
+pub type Txn = transact::Txn<state::State>;
 
 #[async_trait::async_trait]
 pub trait Server {

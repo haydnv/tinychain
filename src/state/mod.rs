@@ -10,9 +10,10 @@ use safecast::{Match, TryCastFrom, TryCastInto};
 
 use error::*;
 use generic::*;
+use transact;
 
 use crate::scalar::*;
-use crate::transact::{self, Txn};
+use crate::Txn;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum StateType {
@@ -118,7 +119,7 @@ impl transact::Refer for State {
         }
     }
 
-    async fn resolve(self, _txn: &Txn<State>) -> TCResult<Self> {
+    async fn resolve(self, _txn: &Txn) -> TCResult<Self> {
         Err(TCError::not_implemented("State::resolve"))
     }
 }

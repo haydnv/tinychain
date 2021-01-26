@@ -11,12 +11,13 @@ use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 
 use error::*;
 use generic::*;
+use transact;
 
 use crate::scalar::{Link, Scalar, Value};
+use crate::state::State;
+use crate::Txn;
 
 use super::{IdRef, TCRef};
-use crate::state::State;
-use crate::transact::{self, Txn};
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref", "op"]);
 
@@ -189,7 +190,7 @@ impl transact::Refer for Key {
         }
     }
 
-    async fn resolve(self, txn: &Txn<State>) -> TCResult<State> {
+    async fn resolve(self, txn: &Txn) -> TCResult<State> {
         match self {
             Self::Ref(id_ref) => id_ref.resolve(txn).await,
             Self::Value(value) => Ok(State::from(value)),
@@ -334,7 +335,7 @@ impl transact::Refer for OpRef {
         }
     }
 
-    async fn resolve(self, _txn: &Txn<State>) -> TCResult<State> {
+    async fn resolve(self, _txn: &Txn) -> TCResult<State> {
         Err(TCError::not_implemented("OpRef::resolve"))
     }
 }

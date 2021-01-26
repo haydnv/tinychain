@@ -3,15 +3,13 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 
 use error::*;
 use generic::PathSegment;
 use hostfs;
-
-use crate::transact::lock::{Mutate, TxnLockReadGuard, TxnLockWriteGuard};
-use crate::transact::TxnId;
+use transact::lock::{Mutate, TxnLockReadGuard, TxnLockWriteGuard};
+use transact::TxnId;
 
 mod cache;
 mod dir;
@@ -166,20 +164,12 @@ impl<B: BlockData> DerefMut for BlockOwnedMut<B> {
 }
 
 pub trait BlockData:
-    Clone + TryFrom<Bytes, Error = error::TCError> + Into<Bytes> + Send + fmt::Display
+    Clone
+    + Mutate<Pending = Self>
+    + TryFrom<Bytes, Error = error::TCError>
+    + Into<Bytes>
+    + Send
+    + fmt::Display
 {
     fn size(&self) -> usize;
-}
-
-#[async_trait]
-impl<B: BlockData> Mutate for B {
-    type Pending = Self;
-
-    fn diverge(&self, _txn_id: &TxnId) -> Self {
-        self.clone()
-    }
-
-    async fn converge(&mut self, other: Self) {
-        *self = other;
-    }
 }

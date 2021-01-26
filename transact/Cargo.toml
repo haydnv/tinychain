@@ -1,0 +1,21 @@
+[package]
+name = "transact"
+version = "0.1.0"
+authors = ["haydnv"]
+edition = "2018"
+description = "A Tinychain transaction"
+license = "Apache-2.0"
+repository = "http://github.com/haydnv/tinychain.git"
+
+keywords = ["tinychain", "transaction", "executor"]
+categories = ["concurrency", "data structures"]
+
+[dependencies]
+async-trait = "0.1"
+futures = "0.3"
+env_logger = "0.8"
+error = { path = "../error" }
+generic = { path = "../generic" }
+log = { version = "0.4", features = [] }
+rand = "0.7"
+serde = { version = "1.0", features = []}

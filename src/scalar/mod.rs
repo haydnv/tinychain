@@ -11,9 +11,10 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use error::*;
 use generic::*;
+use transact;
 
 use crate::state::State;
-use crate::transact::{self, Txn};
+use crate::Txn;
 
 pub mod op;
 pub mod reference;
@@ -206,7 +207,7 @@ impl transact::Refer for Scalar {
         }
     }
 
-    async fn resolve(self, _txn: &Txn<State>) -> TCResult<State> {
+    async fn resolve(self, _txn: &Txn) -> TCResult<State> {
         Err(TCError::not_implemented("Scalar::resolve"))
     }
 }

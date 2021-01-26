@@ -7,9 +7,10 @@ use futures::TryFutureExt;
 
 use error::*;
 use generic::*;
+use transact;
 
 use crate::state::State;
-use crate::transact::{self, Txn};
+use crate::Txn;
 
 use super::Scalar;
 
@@ -91,7 +92,7 @@ impl transact::Refer for TCRef {
         }
     }
 
-    async fn resolve(self, txn: &Txn<State>) -> TCResult<State> {
+    async fn resolve(self, txn: &Txn) -> TCResult<State> {
         match self {
             Self::Id(id_ref) => id_ref.resolve(txn).await,
             Self::Op(op_ref) => op_ref.resolve(txn).await,

@@ -8,13 +8,13 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response};
 use log::debug;
 use serde::de::DeserializeOwned;
+use transact::TxnId;
 
 use error::*;
 use generic::{NetworkTime, TCPathBuf};
 
 use crate::kernel::Kernel;
 use crate::state::State;
-use crate::transact::TxnId;
 
 const CONTENT_TYPE: &str = "application/json";
 

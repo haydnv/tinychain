@@ -10,9 +10,10 @@ use value::Value;
 
 use error::*;
 use generic::Id;
+use transact;
 
 use crate::state::State;
-use crate::transact::{self, Txn};
+use crate::Txn;
 
 const EMPTY_SLICE: &[usize] = &[];
 
@@ -39,7 +40,7 @@ impl transact::Refer for IdRef {
         deps.insert(self.to.clone());
     }
 
-    async fn resolve(self, txn: &Txn<State>) -> TCResult<State> {
+    async fn resolve(self, txn: &Txn) -> TCResult<State> {
         txn.resolve_id(self.id()).map(Clone::clone)
     }
 }
