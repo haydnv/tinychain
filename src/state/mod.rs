@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::str::FromStr;
 
@@ -12,6 +12,7 @@ use error::*;
 use generic::*;
 
 use crate::scalar::*;
+use crate::transact::{self, Txn};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum StateType {
@@ -82,14 +83,6 @@ impl State {
         }
     }
 
-    pub fn is_ref(&self) -> bool {
-        match self {
-            Self::Map(map) => map.values().any(Self::is_ref),
-            Self::Scalar(scalar) => scalar.is_ref(),
-            Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
-        }
-    }
-
     pub fn into_type(self, class: StateType) -> TCResult<Self> {
         match class {
             StateType::Scalar(class) => {
@@ -101,6 +94,41 @@ impl State {
                 format!("Cannot cast into {} from", other),
                 self,
             )),
+        }
+    }
+}
+
+#[async_trait]
+impl transact::Refer for State {
+    type State = Self;
+
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        match self {
+            Self::Map(map) => {
+                for state in map.values() {
+                    state.requires(deps);
+                }
+            }
+            Self::Scalar(scalar) => scalar.requires(deps),
+            Self::Tuple(tuple) => {
+                for state in tuple.iter() {
+                    state.requires(deps);
+                }
+            }
+        }
+    }
+
+    async fn resolve(self, _txn: &Txn<State>) -> TCResult<Self> {
+        Err(TCError::not_implemented("State::resolve"))
+    }
+}
+
+impl transact::State for State {
+    fn is_ref(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(Self::is_ref),
+            Self::Scalar(scalar) => scalar.is_ref(),
+            Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
         }
     }
 }

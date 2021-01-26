@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::str::FromStr;
 
@@ -11,6 +11,9 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use error::*;
 use generic::*;
+
+use crate::state::State;
+use crate::transact::{self, Txn};
 
 pub mod op;
 pub mod reference;
@@ -178,6 +181,43 @@ impl Instance for Scalar {
             Self::Ref(tc_ref) => ST::Ref(tc_ref.class()),
             Self::Tuple(_) => ST::Tuple,
             Self::Value(value) => ST::Value(value.class()),
+        }
+    }
+}
+
+#[async_trait]
+impl transact::Refer for Scalar {
+    type State = State;
+
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        match self {
+            Self::Map(map) => {
+                for scalar in map.values() {
+                    scalar.requires(deps);
+                }
+            }
+            Self::Ref(tc_ref) => tc_ref.requires(deps),
+            Self::Tuple(tuple) => {
+                for scalar in tuple.iter() {
+                    scalar.requires(deps);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn resolve(self, _txn: &Txn<State>) -> TCResult<State> {
+        Err(TCError::not_implemented("Scalar::resolve"))
+    }
+}
+
+impl transact::State for Scalar {
+    fn is_ref(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(transact::State::is_ref),
+            Self::Ref(_) => true,
+            Self::Tuple(tuple) => tuple.iter().any(transact::State::is_ref),
+            _ => false,
         }
     }
 }

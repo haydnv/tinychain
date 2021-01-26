@@ -4,7 +4,7 @@ use safecast::{Match, TryCastFrom};
 
 use crate::scalar::*;
 use crate::state::*;
-use crate::transact::*;
+use crate::transact::{Txn, TxnId};
 
 const CAPTURE: Label = label("capture");
 
@@ -40,10 +40,10 @@ impl Kernel {
                         }
 
                         let capture = data.last().unwrap().0.clone();
-                        let mut txn = Txn::new(data, txn_id);
+                        let mut txn = Txn::<State>::new(data, txn_id);
                         txn.execute(capture).await
                     } else {
-                        let mut txn = Txn::new(vec![(CAPTURE.into(), data)], txn_id);
+                        let mut txn = Txn::<State>::new(vec![(CAPTURE.into(), data)], txn_id);
                         txn.execute(CAPTURE.into()).await
                     }
                 }

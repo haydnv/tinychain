@@ -11,9 +11,8 @@ use value::Value;
 use error::*;
 use generic::Id;
 
-use super::RefInstance;
 use crate::state::State;
-use crate::transact::Txn;
+use crate::transact::{self, Txn};
 
 const EMPTY_SLICE: &[usize] = &[];
 
@@ -33,12 +32,14 @@ impl IdRef {
 }
 
 #[async_trait]
-impl RefInstance for IdRef {
+impl transact::Refer for IdRef {
+    type State = State;
+
     fn requires(&self, deps: &mut HashSet<Id>) {
         deps.insert(self.to.clone());
     }
 
-    async fn resolve(self, txn: &Txn) -> TCResult<State> {
+    async fn resolve(self, txn: &Txn<State>) -> TCResult<State> {
         txn.resolve_id(self.id()).map(Clone::clone)
     }
 }
