@@ -13,7 +13,7 @@ use generic::Id;
 
 use super::RefInstance;
 use crate::state::State;
-use crate::txn::Txn;
+use crate::transact::Txn;
 
 const EMPTY_SLICE: &[usize] = &[];
 

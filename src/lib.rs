@@ -4,7 +4,7 @@ pub mod block;
 pub mod kernel;
 pub mod scalar;
 pub mod state;
-pub mod txn;
+pub mod transact;
 
 #[cfg(feature = "http")]
 pub mod http;

@@ -144,7 +144,7 @@ async fn configure(
     data_dir: Arc<block::Dir>,
     workspace: Arc<block::Dir>,
 ) -> TCResult<gateway::Hosted> {
-    const RESERVED: [&str; 2] = ["/sbin", "/txn"];
+    const RESERVED: [&str; 2] = ["/sbin", "/transact"];
 
     let mut hosted = gateway::Hosted::new();
     for path in clusters {

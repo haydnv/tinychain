@@ -14,7 +14,7 @@ use generic::{NetworkTime, TCPathBuf};
 
 use crate::kernel::Kernel;
 use crate::state::State;
-use crate::txn::TxnId;
+use crate::transact::TxnId;
 
 const CONTENT_TYPE: &str = "application/json";
 

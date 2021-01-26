@@ -9,7 +9,7 @@ use error::*;
 use generic::*;
 
 use crate::state::State;
-use crate::txn::Txn;
+use crate::transact::Txn;
 
 use super::Scalar;
 

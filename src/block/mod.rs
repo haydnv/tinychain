@@ -10,8 +10,8 @@ use error::*;
 use generic::PathSegment;
 use hostfs;
 
-use crate::txn::lock::{Mutate, TxnLockReadGuard, TxnLockWriteGuard};
-use crate::txn::TxnId;
+use crate::transact::lock::{Mutate, TxnLockReadGuard, TxnLockWriteGuard};
+use crate::transact::TxnId;
 
 mod cache;
 mod dir;

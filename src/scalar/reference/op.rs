@@ -16,7 +16,7 @@ use crate::scalar::{Link, Scalar, Value};
 
 use super::{IdRef, RefInstance, TCRef};
 use crate::state::State;
-use crate::txn::Txn;
+use crate::transact::Txn;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref", "op"]);
 
