@@ -301,7 +301,9 @@ impl TryCastFrom<State> for Scalar {
             State::Map(map) => HashMap::<Id, Scalar>::opt_cast_from(map)
                 .map(Map::from)
                 .map(Scalar::Map),
+
             State::Scalar(scalar) => Some(scalar),
+
             State::Tuple(tuple) => Vec::<Scalar>::opt_cast_from(tuple)
                 .map(Tuple::from)
                 .map(Scalar::Tuple),
