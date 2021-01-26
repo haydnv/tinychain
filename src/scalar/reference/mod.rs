@@ -5,7 +5,11 @@ use async_trait::async_trait;
 use destream::{de, Decoder, Encoder, FromStream, IntoStream, ToStream};
 use futures::TryFutureExt;
 
+use error::*;
 use generic::*;
+
+use crate::state::State;
+use crate::txn::Txn;
 
 use super::Scalar;
 
@@ -17,8 +21,11 @@ pub use op::*;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref"]);
 
+#[async_trait]
 pub trait RefInstance {
     fn requires(&self, deps: &mut HashSet<Id>);
+
+    async fn resolve(self, txn: &Txn) -> TCResult<State>;
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -80,11 +87,19 @@ impl Instance for TCRef {
     }
 }
 
+#[async_trait]
 impl RefInstance for TCRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Id(id_ref) => id_ref.requires(deps),
             Self::Op(op_ref) => op_ref.requires(deps),
+        }
+    }
+
+    async fn resolve(self, txn: &Txn) -> TCResult<State> {
+        match self {
+            Self::Id(id_ref) => id_ref.resolve(txn).await,
+            Self::Op(op_ref) => op_ref.resolve(txn).await,
         }
     }
 }

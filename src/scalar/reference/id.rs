@@ -12,6 +12,8 @@ use error::*;
 use generic::Id;
 
 use super::RefInstance;
+use crate::state::State;
+use crate::txn::Txn;
 
 const EMPTY_SLICE: &[usize] = &[];
 
@@ -34,6 +36,10 @@ impl IdRef {
 impl RefInstance for IdRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         deps.insert(self.to.clone());
+    }
+
+    async fn resolve(self, txn: &Txn) -> TCResult<State> {
+        txn.resolve(self.id())
     }
 }
 

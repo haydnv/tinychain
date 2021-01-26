@@ -15,6 +15,8 @@ use generic::*;
 use crate::scalar::{Link, Scalar, Value};
 
 use super::{IdRef, RefInstance, TCRef};
+use crate::state::State;
+use crate::txn::Txn;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref", "op"]);
 
@@ -72,14 +74,6 @@ impl fmt::Display for OpRefType {
 pub enum Subject {
     Link(Link),
     Ref(IdRef),
-}
-
-impl RefInstance for Subject {
-    fn requires(&self, deps: &mut HashSet<Id>) {
-        if let Self::Ref(id_ref) = self {
-            deps.insert(id_ref.id().clone());
-        }
-    }
 }
 
 impl FromStr for Subject {
@@ -185,10 +179,18 @@ pub enum Key {
     Value(Value),
 }
 
+#[async_trait]
 impl RefInstance for Key {
     fn requires(&self, deps: &mut HashSet<Id>) {
         if let Self::Ref(id_ref) = self {
             deps.insert(id_ref.id().clone());
+        }
+    }
+
+    async fn resolve(self, txn: &Txn) -> TCResult<State> {
+        match self {
+            Self::Ref(id_ref) => id_ref.resolve(txn).await,
+            Self::Value(value) => Ok(State::from(value)),
         }
     }
 }
@@ -295,6 +297,7 @@ impl Instance for OpRef {
     }
 }
 
+#[async_trait]
 impl RefInstance for OpRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
@@ -325,6 +328,10 @@ impl RefInstance for OpRef {
                 }
             }
         }
+    }
+
+    async fn resolve(self, txn: &Txn) -> TCResult<State> {
+        txn.resolve_op(self).await
     }
 }
 

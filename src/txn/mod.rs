@@ -9,12 +9,10 @@ use serde::de;
 use error::*;
 use generic::{Id, NetworkTime, PathSegment};
 
+use crate::scalar::OpRef;
 use crate::state::State;
 
 pub mod lock;
-mod request;
-
-pub use request::Request;
 
 const INVALID_ID: &str = "Invalid transaction ID";
 
@@ -120,5 +118,16 @@ impl Txn {
         self.state
             .remove(&capture)
             .ok_or_else(|| TCError::not_found(capture))
+    }
+
+    pub fn resolve(&self, id: &Id) -> TCResult<State> {
+        self.state
+            .get(id)
+            .cloned()
+            .ok_or_else(|| TCError::not_found(id))
+    }
+
+    pub async fn resolve_op(&self, _op_ref: OpRef) -> TCResult<State> {
+        Err(TCError::not_implemented("Txn::resolve_op"))
     }
 }
