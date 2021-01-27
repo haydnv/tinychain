@@ -86,7 +86,7 @@ impl HTTPServer {
 }
 
 #[async_trait]
-impl super::Server for HTTPServer {
+impl crate::gateway::Server for HTTPServer {
     type Error = hyper::Error;
 
     async fn listen(self, addr: SocketAddr) -> Result<(), Self::Error> {

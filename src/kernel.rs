@@ -11,7 +11,7 @@ const CAPTURE: Label = label("capture");
 pub struct Kernel;
 
 impl Kernel {
-    pub async fn get(&self, _txn_id: TxnId, path: &[PathSegment], key: Value) -> TCResult<State> {
+    pub async fn get(&self, _txn: TxnId, path: &[PathSegment], key: Value) -> TCResult<State> {
         if let Some(class) = StateType::from_path(path) {
             State::Scalar(Scalar::Value(key)).into_type(class)
         } else {
