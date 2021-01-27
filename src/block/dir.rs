@@ -1,6 +1,5 @@
 use std::collections::hash_map::{Entry, HashMap};
 use std::collections::HashSet;
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::pin::Pin;
 use std::slice;
@@ -20,37 +19,40 @@ use super::file::File;
 use super::hostfs;
 use super::BlockData;
 
+pub trait FileEntry: Transact + fmt::Display + Clone + Send + Sync {}
+
 #[derive(Clone)]
-pub enum DirEntry {
-    Dir(Arc<Dir>),
+pub enum DirEntry<F: Clone + Send + Sync> {
+    Dir(Arc<Dir<F>>),
+    File(Arc<F>),
 }
 
-impl TryFrom<DirEntry> for Arc<Dir> {
-    type Error = TCError;
-
-    fn try_from(entry: DirEntry) -> TCResult<Arc<Dir>> {
-        match entry {
-            DirEntry::Dir(dir) => Ok(dir),
-        }
-    }
-}
-
-impl fmt::Display for DirEntry {
+impl<F: FileEntry> fmt::Display for DirEntry<F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             DirEntry::Dir(_) => write!(f, "(directory)"),
+            DirEntry::File(file) => fmt::Display::fmt(file, f),
         }
     }
 }
 
-#[derive(Clone, Default)]
-struct DirContents {
-    entries: HashMap<PathSegment, DirEntry>,
+#[derive(Clone)]
+struct DirContents<F: Clone + Send + Sync> {
+    entries: HashMap<PathSegment, DirEntry<F>>,
     deleted: HashSet<PathSegment>,
 }
 
+impl<F: Clone + Send + Sync> Default for DirContents<F> {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            deleted: HashSet::new(),
+        }
+    }
+}
+
 #[async_trait]
-impl Mutate for DirContents {
+impl<F: Clone + Send + Sync> Mutate for DirContents<F> {
     type Pending = Self;
 
     fn diverge(&self, _txn_id: &TxnId) -> Self::Pending {
@@ -65,13 +67,13 @@ impl Mutate for DirContents {
     }
 }
 
-pub struct Dir {
+pub struct Dir<F: Clone + Send + Sync> {
     cache: RwLock<hostfs::Dir>,
-    contents: TxnLock<DirContents>,
+    contents: TxnLock<DirContents<F>>,
 }
 
-impl Dir {
-    pub fn create<I: fmt::Display>(cache: RwLock<hostfs::Dir>, name: I) -> Arc<Dir> {
+impl<F: FileEntry> Dir<F> {
+    pub fn create<I: fmt::Display>(cache: RwLock<hostfs::Dir>, name: I) -> Arc<Self> {
         Arc::new(Dir {
             cache,
             contents: TxnLock::new(name.to_string(), DirContents::default()),
@@ -110,7 +112,7 @@ impl Dir {
         &'a self,
         txn_id: &'a TxnId,
         path: &'a [PathSegment],
-    ) -> Pin<Box<dyn Future<Output = TCResult<Option<Arc<Dir>>>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TCResult<Option<Arc<Self>>>> + 'a>> {
         Box::pin(async move {
             if path.is_empty() {
                 Err(TCError::bad_request(
@@ -121,6 +123,7 @@ impl Dir {
                 if let Some(entry) = self.contents.read(txn_id).await?.entries.get(&path[0]) {
                     match entry {
                         DirEntry::Dir(dir) => Ok(Some(dir.clone())),
+                        other => Err(TCError::bad_request("Expected Dir but found", other))
                     }
                 } else {
                     Ok(None)
@@ -133,24 +136,24 @@ impl Dir {
         })
     }
 
-    pub async fn get_entry<T: TryFrom<DirEntry, Error = TCError>>(
-        &self,
-        txn_id: &TxnId,
-        name: &PathSegment,
-    ) -> TCResult<Option<T>> {
-        if let Some(entry) = self.contents.read(txn_id).await?.entries.get(name) {
-            let entry: T = entry.clone().try_into()?;
-            Ok(Some(entry))
-        } else {
-            Ok(None)
-        }
-    }
+    // pub async fn get_entry<T: TryFrom<DirEntry<F>, Error = TCError>>(
+    //     &self,
+    //     txn_id: &TxnId,
+    //     name: &PathSegment,
+    // ) -> TCResult<Option<T>> {
+    //     if let Some(entry) = self.contents.read(txn_id).await?.entries.get(name) {
+    //         let entry: T = entry.clone().try_into()?;
+    //         Ok(Some(entry))
+    //     } else {
+    //         Ok(None)
+    //     }
+    // }
 
     pub fn create_dir<'a>(
         &'a self,
         txn_id: TxnId,
         path: &'a [PathSegment],
-    ) -> Pin<Box<dyn Future<Output = TCResult<Arc<Dir>>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TCResult<Arc<Self>>> + 'a>> {
         Box::pin(async move {
             if path.is_empty() {
                 Err(TCError::bad_request(
@@ -186,7 +189,7 @@ impl Dir {
         name: PathSegment,
     ) -> TCResult<Arc<File<T>>>
     where
-        Arc<File<T>>: Into<DirEntry>,
+        Arc<File<T>>: Into<DirEntry<F>>,
     {
         let mut contents = self.contents.write(txn_id).await?;
         match contents.entries.entry(name) {
@@ -207,7 +210,7 @@ impl Dir {
         &'a self,
         txn_id: &'a TxnId,
         path: &'a [PathSegment],
-    ) -> Pin<Box<dyn Future<Output = TCResult<Arc<Dir>>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TCResult<Arc<Self>>> + 'a>> {
         Box::pin(async move {
             if let Some(dir) = self.get_dir(txn_id, path).await? {
                 Ok(dir)
@@ -223,7 +226,7 @@ impl Dir {
 }
 
 #[async_trait]
-impl Transact for Dir {
+impl<F: FileEntry> Transact for Dir<F> {
     async fn commit(&self, txn_id: &TxnId) {
         self.contents.commit(txn_id).await
     }

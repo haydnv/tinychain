@@ -15,10 +15,10 @@ mod cache;
 mod dir;
 mod file;
 
+pub use dir::{Dir, DirEntry, FileEntry};
+pub use file::File;
+
 pub type BlockId = PathSegment;
-pub type Dir = dir::Dir;
-pub type DirEntry = dir::DirEntry;
-pub type File<B> = file::File<B>;
 
 pub struct Block<'a, B: BlockData> {
     file: &'a File<B>,
