@@ -9,6 +9,8 @@ use value::Value;
 use crate::state::State;
 use crate::Txn;
 
+mod state;
+
 pub type GetHandler<'a> =
     Box<dyn FnOnce(&Txn, Value) -> Pin<Box<dyn Future<Output = TCResult<State>> + 'a>> + 'a>;
 
