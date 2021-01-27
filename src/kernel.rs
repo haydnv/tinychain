@@ -2,16 +2,22 @@ use error::*;
 use generic::*;
 use safecast::{Match, TryCastFrom};
 
+use crate::gateway::Request;
 use crate::scalar::*;
 use crate::state::*;
-use crate::{Txn, TxnId};
+use crate::Txn;
 
 const CAPTURE: Label = label("capture");
 
 pub struct Kernel;
 
 impl Kernel {
-    pub async fn get(&self, _txn: TxnId, path: &[PathSegment], key: Value) -> TCResult<State> {
+    pub async fn get(
+        &self,
+        _request: Request,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<State> {
         if let Some(class) = StateType::from_path(path) {
             State::Scalar(Scalar::Value(key)).into_type(class)
         } else {
@@ -19,7 +25,12 @@ impl Kernel {
         }
     }
 
-    pub async fn post(&self, txn_id: TxnId, path: &[PathSegment], data: State) -> TCResult<State> {
+    pub async fn post(
+        &self,
+        request: Request,
+        path: &[PathSegment],
+        data: State,
+    ) -> TCResult<State> {
         if path.is_empty() {
             return Err(TCError::method_not_allowed(TCPath::from(path)));
         }
@@ -35,15 +46,16 @@ impl Kernel {
                                 s,
                             )
                         })?;
+
                         if data.is_empty() {
                             return Ok(State::Tuple(Tuple::default()));
                         }
 
                         let capture = data.last().unwrap().0.clone();
-                        let mut txn = Txn::new(data, txn_id);
+                        let mut txn = Txn::new(data, request.txn_id);
                         txn.execute(capture).await
                     } else {
-                        let mut txn = Txn::new(vec![(CAPTURE.into(), data)], txn_id);
+                        let mut txn = Txn::new(vec![(CAPTURE.into(), data)], request.txn_id);
                         txn.execute(CAPTURE.into()).await
                     }
                 }

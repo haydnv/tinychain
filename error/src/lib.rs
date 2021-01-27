@@ -120,6 +120,14 @@ impl TCError {
         }
     }
 
+    /// Error indicating that the request is badly-constructed or nonsensical.
+    pub fn unsupported<I: fmt::Display>(info: I) -> Self {
+        Self {
+            code: ErrorType::BadRequest,
+            message: info.to_string(),
+        }
+    }
+
     pub fn code(&self) -> ErrorType {
         self.code
     }

@@ -7,6 +7,7 @@ pub struct NetworkTime {
 }
 
 impl NetworkTime {
+    // TODO: replace system time with an explicit network time synchronization system.
     pub fn now() -> NetworkTime {
         NetworkTime::from_nanos(
             time::SystemTime::now()

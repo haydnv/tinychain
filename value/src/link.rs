@@ -155,6 +155,10 @@ pub struct LinkHost {
 }
 
 impl LinkHost {
+    pub fn new(protocol: LinkProtocol, address: LinkAddress, port: Option<u16>) -> Self {
+        Self { protocol, address, port }
+    }
+
     pub fn address(&'_ self) -> &'_ LinkAddress {
         &self.address
     }

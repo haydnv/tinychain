@@ -1,6 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signature as ECSignature};
 use rand::rngs::OsRng;
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use signature::{Signature, Signer, Verifier};
 
 use error::*;
-use generic::{path_label, PathLabel, TCPathBuf};
+use generic::{path_label, NetworkTime, PathLabel, TCPathBuf};
 use value::{Link, Value};
 
 pub type Scope = TCPathBuf;
@@ -16,6 +17,8 @@ pub type Scope = TCPathBuf;
 pub const SCOPE_WRITE: PathLabel = path_label(&["write"]);
 pub const SCOPE_READ: PathLabel = path_label(&["write", "read"]);
 pub const SCOPE_EXECUTE: PathLabel = path_label(&["write", "read", "execute"]);
+
+const NANO: u128 = 1_000_000_000;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Token {
@@ -27,6 +30,19 @@ pub struct Token {
 }
 
 impl Token {
+    pub fn new(iss: Link, iat: NetworkTime, ttl: Duration, actor_id: Value, scopes: Vec<Scope>) -> Self {
+        let iat = (iat.as_nanos() / NANO) as u64;
+        let exp = iat + (ttl.as_nanos() / NANO) as u64;
+
+        Self {
+            iss,
+            iat,
+            exp,
+            actor_id,
+            scopes,
+        }
+    }
+
     pub fn actor_id(&self) -> (Link, Value) {
         (self.iss.clone(), self.actor_id.clone())
     }

@@ -5,31 +5,32 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::{TryFutureExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response};
+use hyper::{Body, Response};
 use log::debug;
 use serde::de::DeserializeOwned;
 use transact::TxnId;
 
+use auth::Token;
 use error::*;
 use generic::{NetworkTime, TCPathBuf};
 
-use crate::kernel::Kernel;
+use crate::gateway::{Gateway, Request};
 use crate::state::State;
 
 const CONTENT_TYPE: &str = "application/json";
 
 pub struct HTTPServer {
-    kernel: Kernel,
+    gateway: Arc<Gateway>,
 }
 
 impl HTTPServer {
-    pub fn new(kernel: Kernel) -> Self {
-        Self { kernel }
+    pub fn new(gateway: Arc<Gateway>) -> Self {
+        Self { gateway }
     }
 
     async fn handle(
         self: Arc<Self>,
-        request: Request<Body>,
+        request: hyper::Request<Body>,
     ) -> Result<Response<Body>, hyper::Error> {
         match self.route(request).await {
             Ok(state) => match destream_json::encode(state) {
@@ -47,10 +48,10 @@ impl HTTPServer {
         }
     }
 
-    async fn route(&self, request: hyper::Request<Body>) -> TCResult<State> {
-        let path: TCPathBuf = request.uri().path().parse()?;
+    async fn route(&self, http_request: hyper::Request<Body>) -> TCResult<State> {
+        let path: TCPathBuf = http_request.uri().path().parse()?;
 
-        let mut params = request
+        let mut params = http_request
             .uri()
             .query()
             .map(|v| {
@@ -61,24 +62,36 @@ impl HTTPServer {
             })
             .unwrap_or_else(HashMap::new);
 
+        let token: Token = if let Some(header) = http_request.headers().get("Authorization") {
+            let token = header
+                .to_str()
+                .map_err(|e| TCError::bad_request("Unable to parse Authorization header", e))?;
+
+            self.gateway.authenticate(token).await?
+        } else {
+            self.gateway.issue_token()?
+        };
+
         let txn_id = if let Some(txn_id) = get_param(&mut params, "txn_id")? {
             txn_id
         } else {
             TxnId::new(NetworkTime::now())
         };
 
-        match request.method() {
+        let request = Request::new(token, txn_id);
+
+        match http_request.method() {
             &hyper::Method::GET => {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
-                self.kernel.get(txn_id, &path, key).await
+                self.gateway.get(request, path.into(), key).await
             }
             &hyper::Method::POST => {
-                let data = request.into_body().map_ok(|bytes| bytes.to_vec());
+                let data = http_request.into_body().map_ok(|bytes| bytes.to_vec());
                 let data = destream_json::try_decode(data)
                     .map_err(|e| TCError::bad_request("error deserializing POST data", e))
                     .await?;
 
-                self.kernel.post(txn_id, &path, data).await
+                self.gateway.post(request, path.into(), data).await
             }
             other => Err(TCError::method_not_allowed(other)),
         }
