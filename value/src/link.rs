@@ -321,6 +321,12 @@ impl Link {
     }
 }
 
+impl PartialEq<TCPathBuf> for Link {
+    fn eq(&self, other: &TCPathBuf) -> bool {
+        self.host.is_none() && &self.path == other
+    }
+}
+
 impl From<LinkHost> for Link {
     fn from(host: LinkHost) -> Link {
         Link {

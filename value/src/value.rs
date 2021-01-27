@@ -227,6 +227,7 @@ pub enum Value {
 impl Value {
     pub fn is_none(&self) -> bool {
         match self {
+            Self::Link(link) => link == &TCPathBuf::default(),
             Self::None => true,
             Self::Tuple(tuple) => tuple.is_empty(),
             _ => false,

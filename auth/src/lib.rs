@@ -90,8 +90,8 @@ impl Actor {
         let keypair = Keypair::from_bytes(
             &[self.private_key.to_bytes(), self.public_key.to_bytes()].concat(),
         )
-        .map_err(|_| {
-            TCError::unauthorized("Unable to construct ECDSA keypair for the given actor")
+        .map_err(|cause| {
+            TCError::unauthorized(format!("Unable to construct ECDSA keypair: {}", cause))
         })?;
 
         let header = base64::encode(serde_json::to_string_pretty(&TokenHeader::default()).unwrap());
