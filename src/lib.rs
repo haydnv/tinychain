@@ -1,6 +1,5 @@
 mod route;
 
-pub mod block;
 pub mod gateway;
 pub mod kernel;
 pub mod scalar;

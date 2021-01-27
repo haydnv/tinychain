@@ -123,7 +123,7 @@ impl<F: FileEntry> Dir<F> {
                 if let Some(entry) = self.contents.read(txn_id).await?.entries.get(&path[0]) {
                     match entry {
                         DirEntry::Dir(dir) => Ok(Some(dir.clone())),
-                        other => Err(TCError::bad_request("Expected Dir but found", other))
+                        other => Err(TCError::bad_request("Expected Dir but found", other)),
                     }
                 } else {
                     Ok(None)

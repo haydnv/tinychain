@@ -22,13 +22,11 @@ path = "src/main.rs"
 [dependencies]
 async-trait = "0.1"
 auth = { path = "auth" }
-bytes = "1.0"
 destream = "0.1"
 destream_json = { version = "0.1", optional = true }
 env_logger = "0.8"
 error = { path = "error" }
 futures = "0.3"
-futures-locks = "0.6"
 generic = { path = "generic" }
 hostfs = { path = "hostfs" }
 hyper = { version = "0.14", features = ["full"], optional = true }
@@ -42,7 +40,6 @@ value = { path = "value" }
 structopt = "0.3"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
 url = { version = "2.2", optional = true }
-uuid = { version = "0.8", features = ["serde", "v4"] }
 
 [features]
 default = ["http"]
