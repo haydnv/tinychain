@@ -1,4 +1,7 @@
 use async_trait::async_trait;
+use std::convert::TryFrom;
+
+use error::*;
 
 pub mod fs;
 mod id;
@@ -13,6 +16,15 @@ pub trait Transact {
     async fn finalize(&self, txn_id: &TxnId);
 }
 
-pub trait Transaction {
+#[async_trait]
+pub trait Transaction<E: fs::FileEntry>: Sized {
+    type Subcontext: Transaction<E>;
+
     fn id(&'_ self) -> &'_ TxnId;
+
+    async fn context<B: fs::BlockData>(&self) -> TCResult<fs::File<B>>
+    where
+        fs::File<B>: TryFrom<E>;
+
+    async fn subcontext(&self) -> TCResult<Self::Subcontext>;
 }
