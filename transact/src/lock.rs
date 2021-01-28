@@ -230,7 +230,12 @@ impl<T: Mutate> TxnLock<T> {
         let lock = &mut self.inner.lock().unwrap();
 
         if !lock.value_at.contains_key(txn_id)
-            && txn_id < lock.state.last_commit.as_ref().unwrap_or(&super::MIN_ID)
+            && txn_id
+                < lock
+                    .state
+                    .last_commit
+                    .as_ref()
+                    .unwrap_or(&super::id::MIN_ID)
         {
             // If the requested time is too old, just return an error.
             // We can't keep track of every historical version here.

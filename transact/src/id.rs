@@ -1,7 +1,6 @@
 use std::fmt;
 use std::str::FromStr;
 
-use async_trait::async_trait;
 use rand::Rng;
 use serde::de;
 
@@ -87,15 +86,4 @@ impl fmt::Display for TxnId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}-{}", self.timestamp, self.nonce)
     }
-}
-
-#[async_trait]
-pub trait Transact {
-    async fn commit(&self, txn_id: &TxnId);
-
-    async fn finalize(&self, txn_id: &TxnId);
-}
-
-pub trait Transaction {
-    fn id(&'_ self) -> &'_ TxnId;
 }
