@@ -58,12 +58,7 @@ impl<'a, B: BlockData> Deref for Block<'a, B> {
 
 impl<'a, B: BlockData> fmt::Display for Block<'a, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "block {} with size {}",
-            &self.block_id,
-            &self.lock.size()
-        )
+        write!(f, "block {}", &self.block_id)
     }
 }
 
@@ -164,12 +159,6 @@ impl<B: BlockData> DerefMut for BlockOwnedMut<B> {
 }
 
 pub trait BlockData:
-    Clone
-    + Mutate<Pending = Self>
-    + TryFrom<Bytes, Error = error::TCError>
-    + Into<Bytes>
-    + Send
-    + fmt::Display
+    Clone + Mutate<Pending = Self> + TryFrom<Bytes, Error = TCError> + Into<Bytes> + Send + fmt::Display
 {
-    fn size(&self) -> usize;
 }

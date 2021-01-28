@@ -555,7 +555,7 @@ impl FromStream for State {
 impl<'en> ToStream<'en> for State {
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
-            Self::Chain(chain) => chain.to_stream(encoder),
+            Self::Chain(_chain) => unimplemented!(),
             Self::Map(map) => map.to_stream(encoder),
             Self::Scalar(scalar) => scalar.to_stream(encoder),
             Self::Tuple(tuple) => tuple.to_stream(encoder),
@@ -566,7 +566,7 @@ impl<'en> ToStream<'en> for State {
 impl<'en> IntoStream<'en> for State {
     fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
-            Self::Chain(chain) => chain.into_stream(encoder),
+            Self::Chain(_chain) => unimplemented!(),
             Self::Map(map) => map.into_inner().into_stream(encoder),
             Self::Scalar(scalar) => scalar.into_stream(encoder),
             Self::Tuple(tuple) => tuple.into_inner().into_stream(encoder),

@@ -1,13 +1,29 @@
 use std::fmt;
 
-use destream::en::{Encoder, IntoStream, ToStream};
+use async_trait::async_trait;
 
+use error::*;
 use generic::*;
+
+use crate::state::scalar::OpRef;
+use crate::TxnId;
+
+mod block;
+pub mod sync;
+
+pub use block::ChainBlock;
 
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
+#[async_trait]
+pub trait ChainInstance {
+    async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()>;
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum ChainType {}
+pub enum ChainType {
+    Sync,
+}
 
 impl Class for ChainType {
     type Instance = Chain;
@@ -16,7 +32,10 @@ impl Class for ChainType {
 impl NativeClass for ChainType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         if path.len() == 3 && &path[0..2] == &PREFIX[..] {
-            unimplemented!()
+            match path[2].as_str() {
+                "sync" => Some(Self::Sync),
+                _ => None,
+            }
         } else {
             None
         }
@@ -34,25 +53,26 @@ impl fmt::Display for ChainType {
 }
 
 #[derive(Clone)]
-pub enum Chain {}
+pub enum Chain {
+    Sync(sync::SyncChain),
+}
 
 impl Instance for Chain {
     type Class = ChainType;
 
     fn class(&self) -> Self::Class {
-        unimplemented!()
+        match self {
+            Self::Sync(_) => ChainType::Sync,
+        }
     }
 }
 
-impl<'en> ToStream<'en> for Chain {
-    fn to_stream<E: Encoder<'en>>(&'en self, _e: E) -> Result<E::Ok, E::Error> {
-        unimplemented!()
-    }
-}
-
-impl<'en> IntoStream<'en> for Chain {
-    fn into_stream<E: Encoder<'en>>(self, _e: E) -> Result<E::Ok, E::Error> {
-        unimplemented!()
+#[async_trait]
+impl ChainInstance for Chain {
+    async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
+        match self {
+            Self::Sync(chain) => chain.append(txn_id, op_ref).await,
+        }
     }
 }
 
