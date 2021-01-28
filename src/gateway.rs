@@ -8,11 +8,11 @@ use auth::Token;
 use error::*;
 use futures::future::{try_join_all, Future, TryFutureExt};
 use generic::NetworkTime;
+use transact::TxnId;
 
 use crate::kernel::Kernel;
 use crate::state::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
-use crate::TxnId;
 
 const DEFAULT_TTL: Duration = Duration::from_secs(30);
 

@@ -11,10 +11,9 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use error::*;
 use generic::*;
-use transact;
 
 use crate::state::State;
-use crate::Txn;
+use crate::txn::Txn;
 
 pub mod op;
 pub mod reference;
@@ -187,9 +186,7 @@ impl Instance for Scalar {
 }
 
 #[async_trait]
-impl transact::Refer for Scalar {
-    type State = State;
-
+impl Refer for Scalar {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Map(map) => {
@@ -209,17 +206,6 @@ impl transact::Refer for Scalar {
 
     async fn resolve(self, _txn: &Txn) -> TCResult<State> {
         Err(TCError::not_implemented("Scalar::resolve"))
-    }
-}
-
-impl transact::State for Scalar {
-    fn is_ref(&self) -> bool {
-        match self {
-            Self::Map(map) => map.values().any(transact::State::is_ref),
-            Self::Ref(_) => true,
-            Self::Tuple(tuple) => tuple.iter().any(transact::State::is_ref),
-            _ => false,
-        }
     }
 }
 

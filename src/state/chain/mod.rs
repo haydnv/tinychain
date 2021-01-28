@@ -4,9 +4,9 @@ use async_trait::async_trait;
 
 use error::*;
 use generic::*;
+use transact::TxnId;
 
 use crate::state::scalar::OpRef;
-use crate::TxnId;
 
 mod block;
 pub mod sync;

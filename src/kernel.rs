@@ -5,7 +5,7 @@ use safecast::{Match, TryCastFrom};
 use crate::gateway::Request;
 use crate::state::scalar::*;
 use crate::state::*;
-use crate::Txn;
+use crate::txn::Txn;
 
 const CAPTURE: Label = label("capture");
 

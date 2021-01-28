@@ -8,11 +8,10 @@ use destream::en::{Encoder, IntoStream, ToStream};
 use generic::*;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
-use transact;
 
 use error::*;
 
-use crate::Txn;
+use crate::txn::Txn;
 
 pub mod chain;
 pub mod scalar;
@@ -97,6 +96,15 @@ impl State {
         }
     }
 
+    pub fn is_ref(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(Self::is_ref),
+            Self::Scalar(scalar) => scalar.is_ref(),
+            Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
+            _ => false,
+        }
+    }
+
     pub fn into_type(self, class: StateType) -> TCResult<Self> {
         match class {
             StateType::Scalar(class) => {
@@ -113,9 +121,7 @@ impl State {
 }
 
 #[async_trait]
-impl transact::Refer for State {
-    type State = Self;
-
+impl Refer for State {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Map(map) => {
@@ -135,17 +141,6 @@ impl transact::Refer for State {
 
     async fn resolve(self, _txn: &Txn) -> TCResult<Self> {
         Err(TCError::not_implemented("State::resolve"))
-    }
-}
-
-impl transact::State for State {
-    fn is_ref(&self) -> bool {
-        match self {
-            Self::Map(map) => map.values().any(Self::is_ref),
-            Self::Scalar(scalar) => scalar.is_ref(),
-            Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
-            _ => false,
-        }
     }
 }
 

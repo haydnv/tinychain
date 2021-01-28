@@ -10,10 +10,11 @@ use value::Value;
 
 use error::*;
 use generic::Id;
-use transact;
 
 use crate::state::State;
-use crate::Txn;
+use crate::txn::Txn;
+
+use super::Refer;
 
 const EMPTY_SLICE: &[usize] = &[];
 
@@ -33,9 +34,7 @@ impl IdRef {
 }
 
 #[async_trait]
-impl transact::Refer for IdRef {
-    type State = State;
-
+impl Refer for IdRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         deps.insert(self.to.clone());
     }

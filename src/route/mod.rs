@@ -7,7 +7,7 @@ use generic::PathSegment;
 use value::Value;
 
 use crate::state::State;
-use crate::Txn;
+use crate::txn::Txn;
 
 mod state;
 

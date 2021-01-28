@@ -7,10 +7,9 @@ use futures::TryFutureExt;
 
 use error::*;
 use generic::*;
-use transact;
 
 use crate::state::State;
-use crate::Txn;
+use crate::txn::Txn;
 
 use super::Scalar;
 
@@ -21,6 +20,13 @@ pub use id::*;
 pub use op::*;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref"]);
+
+#[async_trait]
+pub trait Refer {
+    fn requires(&self, deps: &mut HashSet<Id>);
+
+    async fn resolve(self, txn: &Txn) -> TCResult<State>;
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RefType {
@@ -82,9 +88,7 @@ impl Instance for TCRef {
 }
 
 #[async_trait]
-impl transact::Refer for TCRef {
-    type State = State;
-
+impl Refer for TCRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             Self::Id(id_ref) => id_ref.requires(deps),

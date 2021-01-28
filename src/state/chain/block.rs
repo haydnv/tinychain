@@ -7,9 +7,9 @@ use bytes::Bytes;
 use error::*;
 use fs::BlockData;
 use transact::lock::Mutate;
+use transact::TxnId;
 
 use crate::state::scalar::OpRef;
-use crate::TxnId;
 
 #[derive(Clone)]
 pub struct ChainBlock {

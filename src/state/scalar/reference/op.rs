@@ -11,13 +11,12 @@ use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 
 use error::*;
 use generic::*;
-use transact;
 
 use crate::state::scalar::{Link, Scalar, Value};
 use crate::state::State;
-use crate::Txn;
+use crate::txn::Txn;
 
-use super::{IdRef, TCRef};
+use super::{IdRef, Refer, TCRef};
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref", "op"]);
 
@@ -181,9 +180,7 @@ pub enum Key {
 }
 
 #[async_trait]
-impl transact::Refer for Key {
-    type State = State;
-
+impl Refer for Key {
     fn requires(&self, deps: &mut HashSet<Id>) {
         if let Self::Ref(id_ref) = self {
             deps.insert(id_ref.id().clone());
@@ -301,9 +298,7 @@ impl Instance for OpRef {
 }
 
 #[async_trait]
-impl transact::Refer for OpRef {
-    type State = State;
-
+impl Refer for OpRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
             OpRef::Get((_path, key)) => {

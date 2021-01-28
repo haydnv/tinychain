@@ -1,17 +1,12 @@
-use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::iter::FromIterator;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use futures::stream::{FuturesUnordered, StreamExt};
 use rand::Rng;
 use serde::de;
 
 use error::*;
-use generic::{Id, NetworkTime, PathSegment};
-
-use super::{Refer, State};
+use generic::{NetworkTime, PathSegment};
 
 const INVALID_ID: &str = "Invalid transaction ID";
 
@@ -19,13 +14,6 @@ pub const MIN_ID: TxnId = TxnId {
     timestamp: 0,
     nonce: 0,
 };
-
-#[async_trait]
-pub trait Transact {
-    async fn commit(&self, txn_id: &TxnId);
-
-    async fn finalize(&self, txn_id: &TxnId);
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct TxnId {
@@ -101,74 +89,13 @@ impl fmt::Display for TxnId {
     }
 }
 
-#[derive(Clone)]
-pub struct Txn<S> {
-    id: TxnId,
-    state: HashMap<Id, S>,
+#[async_trait]
+pub trait Transact {
+    async fn commit(&self, txn_id: &TxnId);
+
+    async fn finalize(&self, txn_id: &TxnId);
 }
 
-impl<S: Refer + State> Txn<S> {
-    pub fn new<I: IntoIterator<Item = (Id, S)>>(data: I, id: TxnId) -> Self {
-        let state = data.into_iter().collect();
-        Self { id, state }
-    }
-
-    pub async fn execute(&mut self, capture: Id) -> TCResult<S> {
-        while self.resolve_id(&capture)?.is_ref() {
-            let mut pending = Vec::with_capacity(self.state.len());
-            let mut unvisited = Vec::with_capacity(self.state.len());
-            unvisited.push(capture.clone());
-
-            while let Some(id) = unvisited.pop() {
-                let state = self.resolve_id(&capture)?;
-
-                if state.is_ref() {
-                    let mut deps = HashSet::new();
-                    state.requires(&mut deps);
-
-                    let mut ready = true;
-                    for dep_id in deps.into_iter() {
-                        if self.resolve_id(&dep_id)?.is_ref() {
-                            ready = false;
-                            unvisited.push(dep_id);
-                        }
-                    }
-
-                    if ready {
-                        pending.push(id);
-                    }
-                }
-            }
-
-            if pending.is_empty() && self.resolve_id(&capture)?.is_ref() {
-                return Err(TCError::bad_request(
-                    "Cannot resolve all dependencies of",
-                    capture,
-                ));
-            }
-
-            let mut providers = FuturesUnordered::from_iter(
-                pending
-                    .into_iter()
-                    .map(|id| async { (id, Err(TCError::not_implemented("State::resolve"))) }),
-            );
-
-            while let Some((id, r)) = providers.next().await {
-                match r {
-                    Ok(state) => {
-                        self.state.insert(id, state);
-                    }
-                    Err(cause) => return Err(cause.consume(format!("Error resolving {}", id))),
-                }
-            }
-        }
-
-        self.state
-            .remove(&capture)
-            .ok_or_else(|| TCError::not_found(capture))
-    }
-
-    pub fn resolve_id(&'_ self, id: &Id) -> TCResult<&'_ S> {
-        self.state.get(id).ok_or_else(|| TCError::not_found(id))
-    }
+pub trait Transaction {
+    fn id(&'_ self) -> &'_ TxnId;
 }

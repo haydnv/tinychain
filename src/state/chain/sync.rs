@@ -5,9 +5,9 @@ use async_trait::async_trait;
 use error::*;
 use fs::File;
 use generic::{label, Label};
+use transact::TxnId;
 
 use crate::state::scalar::OpRef;
-use crate::TxnId;
 
 use super::{ChainBlock, ChainInstance};
 
