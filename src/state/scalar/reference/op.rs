@@ -13,7 +13,7 @@ use error::*;
 use generic::*;
 use transact;
 
-use crate::scalar::{Link, Scalar, Value};
+use crate::state::scalar::{Link, Scalar, Value};
 use crate::state::State;
 use crate::Txn;
 

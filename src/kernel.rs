@@ -3,7 +3,7 @@ use generic::*;
 use safecast::{Match, TryCastFrom};
 
 use crate::gateway::Request;
-use crate::scalar::*;
+use crate::state::scalar::*;
 use crate::state::*;
 use crate::Txn;
 

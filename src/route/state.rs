@@ -3,7 +3,7 @@ use safecast::{TryCastFrom, TryCastInto};
 use error::*;
 use generic::PathSegment;
 
-use crate::scalar::Number;
+use crate::state::scalar::Number;
 use crate::state::State;
 
 use super::*;

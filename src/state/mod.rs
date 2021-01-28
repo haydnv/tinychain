@@ -5,15 +5,18 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream, MapAccess, SeqAccess, Visitor};
 use destream::en::{Encoder, IntoStream, ToStream};
+use generic::*;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
-
-use error::*;
-use generic::*;
 use transact;
 
-use crate::scalar::*;
+use error::*;
+
 use crate::Txn;
+
+pub mod scalar;
+
+pub use scalar::*;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum StateType {
