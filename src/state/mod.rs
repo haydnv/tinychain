@@ -14,12 +14,15 @@ use error::*;
 
 use crate::Txn;
 
+pub mod chain;
 pub mod scalar;
 
-pub use scalar::*;
+use chain::*;
+use scalar::*;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum StateType {
+    Chain(ChainType),
     Map,
     Scalar(ScalarType),
     Tuple,
@@ -42,8 +45,12 @@ impl NativeClass for StateType {
                     "tuple" => Some(Self::Tuple),
                     _ => None,
                 }
-            } else if path.len() > 2 && &path[1] == "scalar" {
-                ScalarType::from_path(path).map(Self::Scalar)
+            } else if path.len() > 2 {
+                match path[1].as_str() {
+                    "chain" => ChainType::from_path(path).map(Self::Chain),
+                    "scalar" => ScalarType::from_path(path).map(Self::Scalar),
+                    _ => None,
+                }
             } else {
                 None
             }
@@ -54,6 +61,7 @@ impl NativeClass for StateType {
 
     fn path(&self) -> TCPathBuf {
         match self {
+            Self::Chain(ct) => ct.path(),
             Self::Map => path_label(&["state", "map"]).into(),
             Self::Scalar(st) => st.path(),
             Self::Tuple => path_label(&["state", "tuple"]).into(),
@@ -64,6 +72,7 @@ impl NativeClass for StateType {
 impl fmt::Display for StateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Chain(ct) => fmt::Display::fmt(ct, f),
             Self::Map => f.write_str("Map<Id, State>"),
             Self::Scalar(st) => fmt::Display::fmt(st, f),
             Self::Tuple => f.write_str("Tuple<State>"),
@@ -73,6 +82,7 @@ impl fmt::Display for StateType {
 
 #[derive(Clone)]
 pub enum State {
+    Chain(Chain),
     Map(Map<Self>),
     Scalar(Scalar),
     Tuple(Tuple<Self>),
@@ -119,6 +129,7 @@ impl transact::Refer for State {
                     state.requires(deps);
                 }
             }
+            _ => {}
         }
     }
 
@@ -133,6 +144,7 @@ impl transact::State for State {
             Self::Map(map) => map.values().any(Self::is_ref),
             Self::Scalar(scalar) => scalar.is_ref(),
             Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
+            _ => false,
         }
     }
 }
@@ -148,6 +160,7 @@ impl Instance for State {
 
     fn class(&self) -> StateType {
         match self {
+            Self::Chain(chain) => StateType::Chain(chain.class()),
             Self::Map(_) => StateType::Map,
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
             Self::Tuple(_) => StateType::Tuple,
@@ -339,6 +352,7 @@ impl TryCastFrom<State> for Scalar {
             State::Map(map) => HashMap::<Id, Scalar>::can_cast_from(map),
             State::Scalar(_) => true,
             State::Tuple(tuple) => Vec::<Scalar>::can_cast_from(tuple),
+            _ => false,
         }
     }
 
@@ -353,6 +367,8 @@ impl TryCastFrom<State> for Scalar {
             State::Tuple(tuple) => Vec::<Scalar>::opt_cast_from(tuple)
                 .map(Tuple::from)
                 .map(Scalar::Tuple),
+
+            _ => None,
         }
     }
 }
@@ -360,19 +376,21 @@ impl TryCastFrom<State> for Scalar {
 impl TryCastFrom<State> for Value {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            State::Map(_) => false,
             State::Scalar(scalar) => Self::can_cast_from(scalar),
             State::Tuple(tuple) => tuple.iter().all(Self::can_cast_from),
+            _ => false,
         }
     }
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            State::Map(_) => None,
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
+
             State::Tuple(tuple) => Vec::<Value>::opt_cast_from(tuple)
                 .map(Tuple::from)
                 .map(Value::Tuple),
+
+            _ => None,
         }
     }
 }
@@ -380,6 +398,7 @@ impl TryCastFrom<State> for Value {
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Chain(chain) => fmt::Display::fmt(chain, f),
             Self::Map(map) => fmt::Display::fmt(map, f),
             Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
             Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
@@ -536,6 +555,7 @@ impl FromStream for State {
 impl<'en> ToStream<'en> for State {
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
+            Self::Chain(chain) => chain.to_stream(encoder),
             Self::Map(map) => map.to_stream(encoder),
             Self::Scalar(scalar) => scalar.to_stream(encoder),
             Self::Tuple(tuple) => tuple.to_stream(encoder),
@@ -546,6 +566,7 @@ impl<'en> ToStream<'en> for State {
 impl<'en> IntoStream<'en> for State {
     fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
+            Self::Chain(chain) => chain.into_stream(encoder),
             Self::Map(map) => map.into_inner().into_stream(encoder),
             Self::Scalar(scalar) => scalar.into_stream(encoder),
             Self::Tuple(tuple) => tuple.into_inner().into_stream(encoder),
