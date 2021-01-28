@@ -12,11 +12,15 @@ categories = ["concurrency", "data structures"]
 
 [dependencies]
 async-trait = "0.1"
+bytes = "1.0"
 destream = "0.1"
-futures = "0.3"
 env_logger = "0.8"
 error = { path = "../error" }
+futures = "0.3"
+futures-locks = "0.6"
 generic = { path = "../generic" }
+hostfs = { path = "hostfs" }
 log = { version = "0.4", features = [] }
 rand = "0.7"
 serde = { version = "1.0", features = []}
+uuid = { version = "0.8", features = ["v4"] }

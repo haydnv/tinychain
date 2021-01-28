@@ -8,8 +8,9 @@ use bytes::Bytes;
 use error::*;
 use generic::PathSegment;
 use hostfs;
-use transact::lock::{Mutate, TxnLockReadGuard, TxnLockWriteGuard};
-use transact::TxnId;
+
+use super::lock::*;
+use super::TxnId;
 
 mod cache;
 mod dir;

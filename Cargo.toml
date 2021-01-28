@@ -27,7 +27,6 @@ destream = "0.1"
 destream_json = { version = "0.1", optional = true }
 env_logger = "0.8"
 error = { path = "error" }
-fs = { path = "fs" }
 futures = "0.3"
 generic = { path = "generic" }
 hyper = { version = "0.14", features = ["full"], optional = true }

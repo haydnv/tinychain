@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use error::*;
-use fs::BlockData;
+use transact::fs::BlockData;
 use transact::lock::Mutate;
 use transact::TxnId;
 

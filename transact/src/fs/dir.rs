@@ -12,8 +12,9 @@ use uuid::Uuid;
 
 use error::*;
 use generic::{PathSegment, TCPath};
-use transact::lock::{Mutate, TxnLock};
-use transact::{Transact, TxnId};
+
+use crate::lock::*;
+use crate::{Transact, TxnId};
 
 use super::file::File;
 use super::hostfs;

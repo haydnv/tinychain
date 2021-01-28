@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use futures::future::join_all;
-use transact::lock::TxnLock;
-use transact::{Transact, TxnId};
+
+use crate::lock::TxnLock;
+use crate::{Transact, TxnId};
 
 use super::{BlockData, BlockId};
 

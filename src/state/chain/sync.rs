@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use error::*;
-use fs::File;
 use generic::{label, Label};
+use transact::fs::File;
 use transact::TxnId;
 
 use crate::state::scalar::OpRef;
