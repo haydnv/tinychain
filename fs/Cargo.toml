@@ -8,7 +8,7 @@ license = "Apache-2.0"
 repository = "http://github.com/haydnv/tinychain.git"
 
 keywords = ["tinychain", "transaction", "transactional", "filesystem"]
-categories = ["concurrency", "data structures"]
+categories = ["concurrency", "data structures", "filesystem"]
 
 [dependencies]
 async-trait = "0.1"
@@ -18,7 +18,7 @@ futures-locks = "0.6"
 env_logger = "0.8"
 error = { path = "../error" }
 generic = { path = "../generic" }
-hostfs = { path = "../hostfs"}
+hostfs = { path = "hostfs"}
 log = { version = "0.4", features = [] }
 transact = { path = "../transact"}
 uuid = { version = "0.8", features = ["serde", "v4"] }

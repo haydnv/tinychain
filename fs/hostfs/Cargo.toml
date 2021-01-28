@@ -3,9 +3,8 @@ name = "hostfs"
 version = "0.1.0"
 authors = ["haydnv"]
 edition = "2018"
-description = ""
+description = "Tinychain host filesystem interface. Unstable."
 license = "Apache-2.0"
-readme = "README.md"
 repository = "http://github.com/haydnv/tinychain.git"
 
 keywords = ["tinychain", "host", "fs"]
@@ -14,5 +13,5 @@ categories = ["filesystem"]
 [dependencies]
 bytes = "1.0"
 futures-locks = "0.6"
-error = { path = "../error" }
-generic = { path = "../generic" }
+error = { path = "../../error" }
+generic = { path = "../../generic" }
