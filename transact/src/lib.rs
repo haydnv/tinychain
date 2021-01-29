@@ -5,6 +5,7 @@ use destream::de::Decoder;
 use destream::en::Encoder;
 
 use error::*;
+use generic::Id;
 
 pub mod fs;
 mod id;
@@ -38,8 +39,6 @@ pub trait Transact {
 
 #[async_trait]
 pub trait Transaction<E: fs::FileEntry>: Sized {
-    type Subcontext: Transaction<E>;
-
     fn id(&'_ self) -> &'_ TxnId;
 
     async fn context<B: fs::BlockData>(&self) -> TCResult<fs::File<B>>
@@ -47,5 +46,5 @@ pub trait Transaction<E: fs::FileEntry>: Sized {
         E: From<fs::File<B>>,
         fs::File<B>: TryFrom<E>;
 
-    async fn subcontext(&self) -> TCResult<Self::Subcontext>;
+    async fn subcontext(&self, id: Id) -> TCResult<Self>;
 }

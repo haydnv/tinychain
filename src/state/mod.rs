@@ -139,7 +139,7 @@ impl Refer for State {
         }
     }
 
-    async fn resolve(self, _txn: &Txn) -> TCResult<Self> {
+    async fn resolve(self, _context: &Map<State>, _txn: &Txn) -> TCResult<Self> {
         Err(TCError::not_implemented("State::resolve"))
     }
 }

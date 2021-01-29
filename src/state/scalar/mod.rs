@@ -204,7 +204,7 @@ impl Refer for Scalar {
         }
     }
 
-    async fn resolve(self, _txn: &Txn) -> TCResult<State> {
+    async fn resolve(self, _context: &Map<State>, _txn: &Txn) -> TCResult<State> {
         Err(TCError::not_implemented("Scalar::resolve"))
     }
 }

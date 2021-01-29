@@ -25,7 +25,7 @@ const PREFIX: PathLabel = path_label(&["state", "scalar", "ref"]);
 pub trait Refer {
     fn requires(&self, deps: &mut HashSet<Id>);
 
-    async fn resolve(self, txn: &Txn) -> TCResult<State>;
+    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State>;
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -96,10 +96,10 @@ impl Refer for TCRef {
         }
     }
 
-    async fn resolve(self, txn: &Txn) -> TCResult<State> {
+    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
         match self {
-            Self::Id(id_ref) => id_ref.resolve(txn).await,
-            Self::Op(op_ref) => op_ref.resolve(txn).await,
+            Self::Id(id_ref) => id_ref.resolve(context, txn).await,
+            Self::Op(op_ref) => op_ref.resolve(context, txn).await,
         }
     }
 }

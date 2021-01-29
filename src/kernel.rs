@@ -52,11 +52,13 @@ impl Kernel {
                         }
 
                         let capture = data.last().unwrap().0.clone();
-                        let mut txn = Txn::new(data, request.txn_id);
-                        txn.execute(capture).await
+                        let txn = Txn::new(request);
+                        let executor = Executor::new(&txn, data);
+                        executor.capture(capture).await
                     } else {
-                        let mut txn = Txn::new(vec![(CAPTURE.into(), data)], request.txn_id);
-                        txn.execute(CAPTURE.into()).await
+                        let txn = Txn::new(request);
+                        let executor = Executor::new(&txn, vec![(CAPTURE.into(), data)]);
+                        executor.capture(CAPTURE.into()).await
                     }
                 }
                 "hypothetical" => Err(TCError::not_implemented("hypothetical queries")),

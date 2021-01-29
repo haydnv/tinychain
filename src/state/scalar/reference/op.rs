@@ -187,9 +187,9 @@ impl Refer for Key {
         }
     }
 
-    async fn resolve(self, txn: &Txn) -> TCResult<State> {
+    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
         match self {
-            Self::Ref(id_ref) => id_ref.resolve(txn).await,
+            Self::Ref(id_ref) => id_ref.resolve(context, txn).await,
             Self::Value(value) => Ok(State::from(value)),
         }
     }
@@ -330,7 +330,7 @@ impl Refer for OpRef {
         }
     }
 
-    async fn resolve(self, _txn: &Txn) -> TCResult<State> {
+    async fn resolve(self, _context: &Map<State>, _txn: &Txn) -> TCResult<State> {
         Err(TCError::not_implemented("OpRef::resolve"))
     }
 }

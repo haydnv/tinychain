@@ -9,10 +9,11 @@ use value::Value;
 use crate::state::State;
 use crate::txn::Txn;
 
+mod op_def;
 mod state;
 
-pub type GetHandler<'a> =
-    Box<dyn FnOnce(&Txn, Value) -> Pin<Box<dyn Future<Output = TCResult<State>> + 'a>> + 'a>;
+pub type GetFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + 'a>>;
+pub type GetHandler<'a> = Box<dyn FnOnce(&'a Txn, Value) -> GetFuture + 'a>;
 
 pub trait Handler<'a> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
