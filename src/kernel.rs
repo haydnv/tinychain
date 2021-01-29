@@ -2,16 +2,21 @@ use error::*;
 use generic::*;
 use safecast::{Match, TryCastFrom};
 
-use crate::gateway::Request;
 use crate::state::scalar::*;
 use crate::state::*;
-use crate::txn::Txn;
+use crate::txn::*;
 
 const CAPTURE: Label = label("capture");
 
-pub struct Kernel;
+pub struct Kernel {
+    txn_server: TxnServer,
+}
 
 impl Kernel {
+    pub fn new(txn_server: TxnServer) -> Self {
+        Self { txn_server }
+    }
+
     pub async fn get(
         &self,
         _request: Request,
@@ -52,11 +57,11 @@ impl Kernel {
                         }
 
                         let capture = data.last().unwrap().0.clone();
-                        let txn = Txn::new(request);
+                        let txn = self.txn_server.new_txn(request).await?;
                         let executor = Executor::new(&txn, data);
                         executor.capture(capture).await
                     } else {
-                        let txn = Txn::new(request);
+                        let txn = self.txn_server.new_txn(request).await?;
                         let executor = Executor::new(&txn, vec![(CAPTURE.into(), data)]);
                         executor.capture(CAPTURE.into()).await
                     }

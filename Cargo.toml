@@ -28,6 +28,7 @@ destream_json = { version = "0.1", optional = true }
 env_logger = "0.8"
 error = { path = "error" }
 futures = "0.3"
+futures-locks = "0.6"
 generic = { path = "generic" }
 hyper = { version = "0.14", features = ["full"], optional = true }
 log = { version = "0.4", features = ["release_max_level_warn"] }

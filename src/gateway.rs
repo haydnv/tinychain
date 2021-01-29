@@ -8,11 +8,11 @@ use auth::Token;
 use error::*;
 use futures::future::{try_join_all, Future, TryFutureExt};
 use generic::NetworkTime;
-use transact::TxnId;
 
 use crate::kernel::Kernel;
 use crate::state::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
+use crate::txn::*;
 
 const DEFAULT_TTL: Duration = Duration::from_secs(30);
 
@@ -21,17 +21,6 @@ pub trait Server {
     type Error: std::error::Error;
 
     async fn listen(self, addr: SocketAddr) -> Result<(), Self::Error>;
-}
-
-pub struct Request {
-    pub auth: Token,
-    pub txn_id: TxnId,
-}
-
-impl Request {
-    pub fn new(auth: Token, txn_id: TxnId) -> Self {
-        Self { auth, txn_id }
-    }
 }
 
 pub struct Gateway {

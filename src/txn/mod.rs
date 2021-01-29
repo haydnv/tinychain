@@ -4,13 +4,36 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use auth::Token;
 use error::*;
 use generic::Id;
 use transact::fs::{self, File};
-use transact::{Transact, Transaction, TxnId};
+pub use transact::{Transact, Transaction, TxnId};
 
-use crate::gateway::Request;
 use crate::state::chain::ChainBlock;
+
+mod server;
+
+pub use server::*;
+
+pub struct Request {
+    pub auth: Token,
+    pub txn_id: TxnId,
+}
+
+impl Request {
+    pub fn new(auth: Token, txn_id: TxnId) -> Self {
+        Self { auth, txn_id }
+    }
+
+    pub fn contains(&self, other: &Self) -> bool {
+        if self.txn_id == other.txn_id {
+            self.auth.contains(&other.auth)
+        } else {
+            false
+        }
+    }
+}
 
 #[derive(Clone)]
 pub enum FileEntry {
@@ -68,9 +91,13 @@ pub struct Txn {
 }
 
 impl Txn {
-    pub fn new(request: Request) -> Self {
+    fn new(request: Request) -> Self {
         let inner = Arc::new(Inner { request });
         Self { inner }
+    }
+
+    pub fn request(&'_ self) -> &'_ Request {
+        &self.inner.request
     }
 }
 

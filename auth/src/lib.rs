@@ -47,6 +47,23 @@ impl Token {
         (self.iss.clone(), self.actor_id.clone())
     }
 
+    pub fn contains(&self, other: &Self) -> bool {
+        for other_scope in &other.scopes {
+            let mut valid = false;
+            for scope in &self.scopes {
+                if other_scope.starts_with(scope) {
+                    valid = true;
+                }
+            }
+
+            if !valid {
+                return false;
+            }
+        }
+
+        true
+    }
+
     pub fn validate<I: fmt::Display>(&self, scope: Scope, id: I) -> TCResult<()> {
         for authorized in &self.scopes {
             if scope.starts_with(&authorized) {
