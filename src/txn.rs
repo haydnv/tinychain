@@ -1,14 +1,65 @@
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
+use std::fmt;
 use std::iter::FromIterator;
 
+use async_trait::async_trait;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use error::*;
 use generic::Id;
-use transact::{Transaction, TxnId};
+use transact::fs::{self, BlockData, File};
+use transact::{Transact, Transaction, TxnId};
 
+use crate::state::chain::ChainBlock;
 use crate::state::scalar::reference::Refer;
 use crate::state::State;
+
+#[derive(Clone)]
+pub enum FileEntry {
+    Chain(File<ChainBlock>),
+}
+
+impl fs::FileEntry for FileEntry {}
+
+#[async_trait]
+impl Transact for FileEntry {
+    async fn commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::Chain(chain) => chain.commit(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Chain(chain) => chain.finalize(txn_id).await,
+        }
+    }
+}
+
+impl From<File<ChainBlock>> for FileEntry {
+    fn from(file: File<ChainBlock>) -> Self {
+        Self::Chain(file)
+    }
+}
+
+impl TryFrom<FileEntry> for File<ChainBlock> {
+    type Error = TCError;
+
+    fn try_from(entry: FileEntry) -> Result<Self, Self::Error> {
+        match entry {
+            FileEntry::Chain(chain) => Ok(chain),
+        }
+    }
+}
+
+impl fmt::Display for FileEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Chain(_) => f.write_str("(a Chain file)"),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Txn {
@@ -82,8 +133,42 @@ impl Txn {
     }
 }
 
-impl Transaction for Txn {
+#[async_trait]
+impl Transaction<FileEntry> for Txn {
+    type Subcontext = Subcontext;
+
     fn id(&self) -> &TxnId {
         &self.id
+    }
+
+    async fn context<B: BlockData>(&self) -> TCResult<File<B>> {
+        Err(TCError::unsupported(
+            "Transaction executor has no file context",
+        ))
+    }
+
+    async fn subcontext(&self) -> TCResult<Subcontext> {
+        unimplemented!()
+    }
+}
+
+pub struct Subcontext {
+    id: TxnId,
+}
+
+#[async_trait]
+impl Transaction<FileEntry> for Subcontext {
+    type Subcontext = Self;
+
+    fn id(&self) -> &TxnId {
+        &self.id
+    }
+
+    async fn context<B: BlockData>(&self) -> TCResult<File<B>> {
+        unimplemented!()
+    }
+
+    async fn subcontext(&self) -> TCResult<Self::Subcontext> {
+        unimplemented!()
     }
 }

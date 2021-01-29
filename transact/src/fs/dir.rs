@@ -188,15 +188,15 @@ impl<F: FileEntry> Dir<F> {
         &self,
         txn_id: TxnId,
         name: PathSegment,
-    ) -> TCResult<Arc<File<T>>>
+    ) -> TCResult<File<T>>
     where
-        Arc<File<T>>: Into<DirEntry<F>>,
+        File<T>: Into<DirEntry<F>>,
     {
         let mut contents = self.contents.write(txn_id).await?;
         match contents.entries.entry(name) {
             Entry::Vacant(entry) => {
                 let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
-                let file: Arc<File<T>> = File::create(entry.key().as_str(), fs_cache).await?;
+                let file: File<T> = File::create(entry.key().as_str(), fs_cache).await?;
                 entry.insert(file.clone().into());
                 Ok(file)
             }

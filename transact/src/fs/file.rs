@@ -22,7 +22,7 @@ use super::{Block, BlockData, BlockId, BlockOwned};
 const ERR_CORRUPT: &str = "Data corruption error detected! Please file a bug report.";
 const TXN_CACHE: &str = ".pending";
 
-pub struct File<T: BlockData> {
+struct Inner<T: BlockData> {
     dir: RwLock<hostfs::Dir>,
     pending: RwLock<hostfs::Dir>,
     listing: TxnLock<Mutable<HashSet<BlockId>>>,
@@ -30,8 +30,13 @@ pub struct File<T: BlockData> {
     mutated: TxnLock<Mutable<HashSet<BlockId>>>,
 }
 
+#[derive(Clone)]
+pub struct File<T: BlockData> {
+    inner: Arc<Inner<T>>,
+}
+
 impl<T: BlockData> File<T> {
-    pub async fn create(name: &str, dir: RwLock<hostfs::Dir>) -> TCResult<Arc<File<T>>> {
+    pub async fn create(name: &str, dir: RwLock<hostfs::Dir>) -> TCResult<File<T>> {
         let mut lock = dir.write().await;
         if !lock.is_empty() {
             return Err(TCError::bad_request(
@@ -40,13 +45,17 @@ impl<T: BlockData> File<T> {
             ));
         }
 
-        Ok(Arc::new(File {
+        let inner = Inner {
             dir,
             pending: lock.create_dir(TXN_CACHE.parse()?)?,
             listing: TxnLock::new(format!("File listing for {}", name), HashSet::new().into()),
             cache: RwLock::new(Cache::new()),
             mutated: TxnLock::new("File mutated contents".to_string(), HashSet::new().into()),
-        }))
+        };
+
+        Ok(File {
+            inner: Arc::new(inner),
+        })
     }
 
     pub async fn unique_id(&self, txn_id: &TxnId) -> TCResult<BlockId> {
@@ -60,14 +69,15 @@ impl<T: BlockData> File<T> {
     }
 
     async fn block_ids(&'_ self, txn_id: &'_ TxnId) -> TCResult<HashSet<BlockId>> {
-        self.listing
+        self.inner
+            .listing
             .read(txn_id)
             .await
             .map(|block_ids| block_ids.clone())
     }
 
     pub async fn mutate(&self, txn_id: TxnId, block_id: BlockId) -> TCResult<()> {
-        self.mutated.write(txn_id).await?.insert(block_id);
+        self.inner.mutated.write(txn_id).await?.insert(block_id);
         Ok(())
     }
 
@@ -81,7 +91,7 @@ impl<T: BlockData> File<T> {
             return Err(TCError::bad_request("This name is reserved", block_id));
         }
 
-        let mut listing = self.listing.write(txn_id).await?;
+        let mut listing = self.inner.listing.write(txn_id).await?;
         if listing.contains(&block_id) {
             return Err(TCError::bad_request(
                 "There is already a block called",
@@ -90,7 +100,13 @@ impl<T: BlockData> File<T> {
         }
         listing.insert(block_id.clone());
 
-        let txn_lock = self.cache.write().await.insert(block_id.clone(), data);
+        let txn_lock = self
+            .inner
+            .cache
+            .write()
+            .await
+            .insert(block_id.clone(), data);
+
         let lock = txn_lock.read(&txn_id).await?;
         Ok(BlockOwned::new(self, block_id, lock))
     }
@@ -119,22 +135,24 @@ impl<T: BlockData> File<T> {
         txn_id: &TxnId,
         block_id: &BlockId,
     ) -> TCResult<TxnLockReadGuard<T>> {
-        if let Some(block) = self.cache.read().await.get(block_id) {
+        if let Some(block) = self.inner.cache.read().await.get(block_id) {
             block.read(txn_id).await
-        } else if self.listing.read(txn_id).await?.contains(block_id) {
-            let txn_dir = self.pending.read().await.get_dir(&txn_id.into())?;
+        } else if self.inner.listing.read(txn_id).await?.contains(block_id) {
+            let txn_dir = self.inner.pending.read().await.get_dir(&txn_id.into())?;
             let block = if let Some(txn_dir) = txn_dir {
                 if let Some(block) = txn_dir.read().await.get_block(block_id)? {
                     block
                 } else {
-                    self.dir
+                    self.inner
+                        .dir
                         .read()
                         .await
                         .get_block(&block_id)?
                         .ok_or_else(|| TCError::internal(ERR_CORRUPT))?
                 }
             } else {
-                self.dir
+                self.inner
+                    .dir
                     .read()
                     .await
                     .get_block(&block_id)?
@@ -142,7 +160,13 @@ impl<T: BlockData> File<T> {
             };
 
             let block: T = block.read().await.deref().clone().try_into()?;
-            let txn_lock = self.cache.write().await.insert(block_id.clone(), block);
+            let txn_lock = self
+                .inner
+                .cache
+                .write()
+                .await
+                .insert(block_id.clone(), block);
+
             txn_lock.read(txn_id).await
         } else {
             Err(TCError::not_found(block_id))
@@ -150,29 +174,32 @@ impl<T: BlockData> File<T> {
     }
 
     pub async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
-        Ok(self.listing.read(txn_id).await?.is_empty())
+        let listing = self.inner.listing.read(txn_id).await?;
+        Ok(listing.is_empty())
     }
 }
 
 #[async_trait]
 impl<T: BlockData> Transact for File<T> {
     async fn commit(&self, txn_id: &TxnId) {
-        let new_listing = self.listing.read(txn_id).await.unwrap();
-        let old_listing = self.listing.canonical().value();
+        let this = &self.inner;
 
-        let mut dir = self.dir.write().await;
+        let new_listing = this.listing.read(txn_id).await.unwrap();
+        let old_listing = this.listing.canonical().value();
+
+        let mut dir = this.dir.write().await;
         for block_id in old_listing.difference(&new_listing) {
             dir.delete_block(block_id).unwrap();
         }
 
-        self.listing.commit(txn_id).await;
+        this.listing.commit(txn_id).await;
 
-        let mutated: Vec<BlockId> = self.mutated.write(*txn_id).await.unwrap().drain().collect();
-        self.mutated.commit(txn_id).await;
+        let mutated: Vec<BlockId> = this.mutated.write(*txn_id).await.unwrap().drain().collect();
+        this.mutated.commit(txn_id).await;
 
-        let cache = self.cache.read().await;
+        let cache = this.cache.read().await;
         debug!("File::commit! cache has {} blocks", cache.len());
-        let mut pending = self.pending.write().await;
+        let mut pending = this.pending.write().await;
         if mutated.is_empty() {
             cache.commit(txn_id).await;
             return;
@@ -209,12 +236,9 @@ impl<T: BlockData> Transact for File<T> {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.pending
-            .write()
-            .await
-            .delete_dir(&txn_id.into())
-            .unwrap();
+        let mut pending = self.inner.pending.write().await;
+        pending.delete_dir(&txn_id.into()).unwrap();
 
-        self.listing.finalize(txn_id).await;
+        self.inner.listing.finalize(txn_id).await;
     }
 }
