@@ -82,7 +82,8 @@ impl fmt::Display for FileEntry {
 }
 
 struct Inner {
-    request: Request,
+    request: Arc<Request>,
+    dir: Arc<fs::Dir<FileEntry>>,
 }
 
 #[derive(Clone)]
@@ -91,8 +92,9 @@ pub struct Txn {
 }
 
 impl Txn {
-    fn new(request: Request) -> Self {
-        let inner = Arc::new(Inner { request });
+    fn new(dir: Arc<fs::Dir<FileEntry>>, request: Request) -> Self {
+        let request = Arc::new(request);
+        let inner = Arc::new(Inner { request, dir });
         Self { inner }
     }
 
@@ -111,7 +113,14 @@ impl Transaction<FileEntry> for Txn {
         unimplemented!()
     }
 
-    async fn subcontext(&self, _id: Id) -> TCResult<Self> {
-        unimplemented!()
+    async fn subcontext(&self, id: Id) -> TCResult<Self> {
+        let inner = Inner {
+            request: self.inner.request.clone(),
+            dir: self.inner.dir.create_dir(*self.id(), &[id.clone()]).await?,
+        };
+
+        Ok(Txn {
+            inner: Arc::new(inner),
+        })
     }
 }

@@ -47,7 +47,7 @@ impl<T: BlockData> File<T> {
 
         let inner = Inner {
             dir,
-            pending: lock.create_dir(TXN_CACHE.parse()?)?,
+            pending: lock.create_dir(TXN_CACHE.parse()?).await?,
             listing: TxnLock::new(format!("File listing for {}", name), HashSet::new().into()),
             cache: RwLock::new(Cache::new()),
             mutated: TxnLock::new("File mutated contents".to_string(), HashSet::new().into()),
@@ -138,7 +138,7 @@ impl<T: BlockData> File<T> {
         if let Some(block) = self.inner.cache.read().await.get(block_id) {
             block.read(txn_id).await
         } else if self.inner.listing.read(txn_id).await?.contains(block_id) {
-            let txn_dir = self.inner.pending.read().await.get_dir(&txn_id.into())?;
+            let txn_dir = self.inner.pending.read().await.get_dir(&txn_id.to_id())?;
             let block = if let Some(txn_dir) = txn_dir {
                 if let Some(block) = txn_dir.read().await.get_block(block_id)? {
                     block
@@ -205,7 +205,7 @@ impl<T: BlockData> Transact for File<T> {
             return;
         }
 
-        let txn_dir = pending.create_or_get_dir(&txn_id.into()).unwrap();
+        let txn_dir = pending.create_or_get_dir(&txn_id.to_id()).await.unwrap();
 
         let copy_ops = mutated
             .into_iter()
@@ -237,7 +237,7 @@ impl<T: BlockData> Transact for File<T> {
 
     async fn finalize(&self, txn_id: &TxnId) {
         let mut pending = self.inner.pending.write().await;
-        pending.delete_dir(&txn_id.into()).unwrap();
+        pending.delete_dir(&txn_id.to_id()).unwrap();
 
         self.inner.listing.finalize(txn_id).await;
     }

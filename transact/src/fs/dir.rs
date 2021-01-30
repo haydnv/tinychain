@@ -113,7 +113,7 @@ impl<F: FileEntry> Dir<F> {
         &'a self,
         txn_id: &'a TxnId,
         path: &'a [PathSegment],
-    ) -> Pin<Box<dyn Future<Output = TCResult<Option<Arc<Self>>>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TCResult<Option<Arc<Self>>>> + Send + 'a>> {
         Box::pin(async move {
             if path.is_empty() {
                 Err(TCError::bad_request(
@@ -137,24 +137,11 @@ impl<F: FileEntry> Dir<F> {
         })
     }
 
-    // pub async fn get_entry<T: TryFrom<DirEntry<F>, Error = TCError>>(
-    //     &self,
-    //     txn_id: &TxnId,
-    //     name: &PathSegment,
-    // ) -> TCResult<Option<T>> {
-    //     if let Some(entry) = self.contents.read(txn_id).await?.entries.get(name) {
-    //         let entry: T = entry.clone().try_into()?;
-    //         Ok(Some(entry))
-    //     } else {
-    //         Ok(None)
-    //     }
-    // }
-
     pub fn create_dir<'a>(
         &'a self,
         txn_id: TxnId,
         path: &'a [PathSegment],
-    ) -> Pin<Box<dyn Future<Output = TCResult<Arc<Self>>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TCResult<Arc<Self>>> + Send + 'a>> {
         Box::pin(async move {
             if path.is_empty() {
                 Err(TCError::bad_request(
@@ -165,7 +152,7 @@ impl<F: FileEntry> Dir<F> {
                 let mut contents = self.contents.write(txn_id).await?;
                 match contents.entries.entry(path[0].clone()) {
                     Entry::Vacant(entry) => {
-                        let fs_dir = self.cache.write().await.create_dir(path[0].clone())?;
+                        let fs_dir = self.cache.write().await.create_dir(path[0].clone()).await?;
                         let new_dir = Dir::create(fs_dir, &path[0]);
                         entry.insert(DirEntry::Dir(new_dir.clone()));
                         Ok(new_dir)
@@ -184,19 +171,19 @@ impl<F: FileEntry> Dir<F> {
         })
     }
 
-    pub async fn create_file<T: BlockData>(
+    pub async fn create_file<B: BlockData>(
         &self,
         txn_id: TxnId,
         name: PathSegment,
-    ) -> TCResult<File<T>>
+    ) -> TCResult<File<B>>
     where
-        File<T>: Into<DirEntry<F>>,
+        File<B>: Into<DirEntry<F>>,
     {
         let mut contents = self.contents.write(txn_id).await?;
         match contents.entries.entry(name) {
             Entry::Vacant(entry) => {
-                let fs_cache = self.cache.write().await.create_dir(entry.key().clone())?;
-                let file: File<T> = File::create(entry.key().as_str(), fs_cache).await?;
+                let fs_cache = self.cache.write().await.create_dir(entry.key().clone()).await?;
+                let file: File<B> = File::create(entry.key().as_str(), fs_cache).await?;
                 entry.insert(file.clone().into());
                 Ok(file)
             }
@@ -211,7 +198,7 @@ impl<F: FileEntry> Dir<F> {
         &'a self,
         txn_id: &'a TxnId,
         path: &'a [PathSegment],
-    ) -> Pin<Box<dyn Future<Output = TCResult<Arc<Self>>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TCResult<Arc<Self>>> + Send + 'a>> {
         Box::pin(async move {
             if let Some(dir) = self.get_dir(txn_id, path).await? {
                 Ok(dir)

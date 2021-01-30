@@ -18,6 +18,7 @@ mod file;
 
 pub use dir::{Dir, DirEntry, FileEntry};
 pub use file::File;
+pub use hostfs::{mount, Dir as HostDir};
 
 pub type BlockId = PathSegment;
 

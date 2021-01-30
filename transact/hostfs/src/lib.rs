@@ -6,6 +6,6 @@ mod dir;
 
 pub use dir::Dir;
 
-pub fn mount(mount_point: PathBuf) -> RwLock<Dir> {
+pub async fn mount(mount_point: PathBuf) -> RwLock<Dir> {
     RwLock::new(Dir::new(mount_point))
 }

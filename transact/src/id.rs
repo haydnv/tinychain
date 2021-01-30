@@ -5,7 +5,7 @@ use rand::Rng;
 use serde::de;
 
 use error::*;
-use generic::{NetworkTime, PathSegment};
+use generic::{Id, NetworkTime};
 
 const INVALID_ID: &str = "Invalid transaction ID";
 
@@ -26,6 +26,10 @@ impl TxnId {
             timestamp: time.as_nanos(),
             nonce: rand::thread_rng().gen(),
         }
+    }
+
+    pub fn to_id(&self) -> Id {
+        self.to_string().parse().unwrap()
     }
 }
 
@@ -73,12 +77,6 @@ impl<'de> de::Deserialize<'de> for TxnId {
     {
         let s = String::deserialize(d)?;
         Self::from_str(&s).map_err(de::Error::custom)
-    }
-}
-
-impl From<&'_ TxnId> for PathSegment {
-    fn from(txn_id: &'_ TxnId) -> Self {
-        txn_id.to_string().parse().unwrap()
     }
 }
 

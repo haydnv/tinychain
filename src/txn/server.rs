@@ -1,19 +1,27 @@
 use std::collections::hash_map::{Entry, HashMap};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use futures_locks::RwLock;
 
 use error::*;
+use transact::fs;
 
-use super::{Request, Txn, TxnId};
+use super::{FileEntry, Request, Txn, TxnId};
 
 pub struct TxnServer {
     active: RwLock<HashMap<TxnId, Txn>>,
+    workspace: Arc<fs::Dir<FileEntry>>,
 }
 
 impl TxnServer {
-    pub fn new() -> Self {
+    pub async fn new(workspace: PathBuf) -> Self {
+        let workspace = fs::mount(workspace).await;
+        let workspace = fs::Dir::create(workspace, "txn");
+
         Self {
             active: RwLock::new(HashMap::new()),
+            workspace,
         }
     }
 
@@ -30,7 +38,11 @@ impl TxnServer {
                 }
             }
             Entry::Vacant(entry) => {
-                let txn = Txn::new(request);
+                let txn_dir = self
+                    .workspace
+                    .create_dir(request.txn_id, &[request.txn_id.to_id()])
+                    .await?;
+                let txn = Txn::new(txn_dir, request);
                 entry.insert(txn.clone());
                 Ok(txn)
             }

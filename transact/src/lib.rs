@@ -1,5 +1,3 @@
-use std::convert::TryFrom;
-
 use async_trait::async_trait;
 use destream::en;
 
@@ -30,10 +28,7 @@ pub trait Transact {
 pub trait Transaction<E: fs::FileEntry>: Sized {
     fn id(&'_ self) -> &'_ TxnId;
 
-    async fn context<B: fs::BlockData>(&self) -> TCResult<fs::File<B>>
-    where
-        E: From<fs::File<B>>,
-        fs::File<B>: TryFrom<E>;
+    async fn context<B: fs::BlockData>(&self) -> TCResult<fs::File<B>>;
 
     async fn subcontext(&self, id: Id) -> TCResult<Self>;
 }

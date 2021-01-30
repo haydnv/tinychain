@@ -85,7 +85,7 @@ impl Dir {
         Ok(())
     }
 
-    pub fn create_dir(&mut self, name: PathSegment) -> TCResult<RwLock<Dir>> {
+    pub async fn create_dir(&mut self, name: PathSegment) -> TCResult<RwLock<Dir>> {
         match self.contents.entry(name) {
             Entry::Occupied(entry) => Err(TCError::bad_request(
                 "The filesystem already has an entry at",
@@ -100,11 +100,11 @@ impl Dir {
         }
     }
 
-    pub fn create_or_get_dir(&mut self, name: &PathSegment) -> TCResult<RwLock<Dir>> {
+    pub async fn create_or_get_dir(&mut self, name: &PathSegment) -> TCResult<RwLock<Dir>> {
         match self.get_dir(name) {
             Ok(Some(dir)) => Ok(dir),
             Err(cause) => Err(cause),
-            Ok(None) => self.create_dir(name.clone()),
+            Ok(None) => self.create_dir(name.clone()).await,
         }
     }
 

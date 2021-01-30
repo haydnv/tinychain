@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::path::PathBuf;
 
 use structopt::StructOpt;
 
@@ -14,6 +15,9 @@ struct Config {
 
     #[structopt(long = "log_level", default_value = "warn")]
     pub log_level: String,
+
+    #[structopt(long = "workspace", default_value = "/tmp/tc/tmp")]
+    pub workspace: PathBuf,
 }
 
 #[tokio::main]
@@ -29,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(feature = "http")]
     gateway_config.insert(value::LinkProtocol::HTTP, config.http_port);
 
-    let txn_server = tinychain::txn::TxnServer::new();
+    let txn_server = tinychain::txn::TxnServer::new(config.workspace).await;
     let kernel = tinychain::Kernel::new(txn_server);
     let gateway = tinychain::gateway::Gateway::new(kernel, config.address, gateway_config);
 
