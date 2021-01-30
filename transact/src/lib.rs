@@ -32,5 +32,5 @@ pub trait Transaction<E: fs::FileEntry>: Sized {
 
     async fn context(&'_ self) -> &'_ Arc<fs::Dir<E>>;
 
-    async fn subcontext(&self, id: Id) -> TCResult<Self>;
+    async fn subcontext(self, id: Id) -> TCResult<Self>;
 }

@@ -4,12 +4,13 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use generic::*;
+use futures::{stream, StreamExt, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
-use transact::IntoView;
+use transact::{IntoView, Transaction};
 
 use error::*;
+use generic::*;
 
 use crate::txn::{FileEntry, Txn};
 
@@ -574,23 +575,29 @@ impl<'en> en::IntoStream<'en> for StateView {
         match self.state {
             State::Chain(_) => unimplemented!(),
             State::Map(map) => {
-                use en::EncodeMap;
+                let txn = self.txn.clone();
+                let map = stream::iter(map.into_iter())
+                    .then(move |(id, state)| {
+                        txn.clone()
+                            .subcontext(id.clone())
+                            .map_ok(|txn| (id, state.into_view(txn)))
+                    })
+                    .map_err(en::Error::custom);
 
-                let mut map_encoder = encoder.encode_map(Some(map.len()))?;
-                for (id, state) in map.into_iter() {
-                    map_encoder.encode_entry(id, state.into_view(self.txn.clone()))?;
-                }
-                map_encoder.end()
+                encoder.encode_map_stream(map)
             }
             State::Scalar(scalar) => scalar.into_stream(encoder),
             State::Tuple(tuple) => {
-                use en::EncodeSeq;
+                let txn = self.txn.clone();
+                let map = stream::iter(tuple.into_iter().enumerate())
+                    .then(move |(i, state)| {
+                        txn.clone()
+                            .subcontext(i.into())
+                            .map_ok(|txn| state.into_view(txn))
+                    })
+                    .map_err(en::Error::custom);
 
-                let mut seq_encoder = encoder.encode_seq(Some(tuple.len()))?;
-                for state in tuple.into_iter() {
-                    seq_encoder.encode_element(state.into_view(self.txn.clone()))?;
-                }
-                seq_encoder.end()
+                encoder.encode_seq_stream(map)
             }
         }
     }
