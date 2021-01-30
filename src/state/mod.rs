@@ -3,15 +3,15 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::de::{self, Decoder, FromStream, MapAccess, SeqAccess, Visitor};
-use destream::en::{Encoder, IntoStream, ToStream};
+use destream::{de, en};
 use generic::*;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
+use transact::IntoView;
 
 use error::*;
 
-use crate::txn::Txn;
+use crate::txn::{FileEntry, Txn};
 
 pub mod chain;
 pub mod scalar;
@@ -160,6 +160,15 @@ impl Instance for State {
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
             Self::Tuple(_) => StateType::Tuple,
         }
+    }
+}
+
+impl<'en> IntoView<'en, FileEntry> for State {
+    type Txn = Txn;
+    type View = StateView;
+
+    fn into_view(self, txn: Txn) -> StateView {
+        StateView { state: self, txn }
     }
 }
 
@@ -401,13 +410,12 @@ impl fmt::Display for State {
     }
 }
 
-#[derive(Default)]
 struct StateVisitor {
     scalar: ScalarVisitor,
 }
 
 #[async_trait]
-impl Visitor for StateVisitor {
+impl<'a> de::Visitor for StateVisitor {
     type Value = State;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -474,7 +482,7 @@ impl Visitor for StateVisitor {
         self.scalar.visit_none().map(State::Scalar)
     }
 
-    async fn visit_map<A: MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         if let Some(key) = access.next_key::<String>().await? {
             log::debug!("deserialize: key is {}", key);
 
@@ -525,7 +533,7 @@ impl Visitor for StateVisitor {
         }
     }
 
-    async fn visit_seq<A: SeqAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+    async fn visit_seq<A: de::SeqAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         let mut seq = if let Some(len) = access.size_hint() {
             Vec::with_capacity(len)
         } else {
@@ -541,31 +549,10 @@ impl Visitor for StateVisitor {
 }
 
 #[async_trait]
-impl FromStream for State {
-    async fn from_stream<D: Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_any(StateVisitor::default()).await
-    }
-}
-
-impl<'en> ToStream<'en> for State {
-    fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        match self {
-            Self::Chain(_chain) => unimplemented!(),
-            Self::Map(map) => map.to_stream(encoder),
-            Self::Scalar(scalar) => scalar.to_stream(encoder),
-            Self::Tuple(tuple) => tuple.to_stream(encoder),
-        }
-    }
-}
-
-impl<'en> IntoStream<'en> for State {
-    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        match self {
-            Self::Chain(_chain) => unimplemented!(),
-            Self::Map(map) => map.into_inner().into_stream(encoder),
-            Self::Scalar(scalar) => scalar.into_stream(encoder),
-            Self::Tuple(tuple) => tuple.into_inner().into_stream(encoder),
-        }
+impl de::FromStream for State {
+    async fn from_stream<D: de::Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
+        let scalar = ScalarVisitor::default();
+        decoder.decode_any(StateVisitor { scalar }).await
     }
 }
 
@@ -575,4 +562,36 @@ fn cast_err<F: fmt::Display, T: fmt::Display>(to: T, from: &F) -> TCError {
 
 fn try_cast_err<F: fmt::Display, T: fmt::Display>(to: T) -> impl FnOnce(&F) -> TCError {
     move |s| cast_err(to, s)
+}
+
+pub struct StateView {
+    state: State,
+    txn: Txn,
+}
+
+impl<'en> en::IntoStream<'en> for StateView {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        match self.state {
+            State::Chain(_) => unimplemented!(),
+            State::Map(map) => {
+                use en::EncodeMap;
+
+                let mut map_encoder = encoder.encode_map(Some(map.len()))?;
+                for (id, state) in map.into_iter() {
+                    map_encoder.encode_entry(id, state.into_view(self.txn.clone()))?;
+                }
+                map_encoder.end()
+            }
+            State::Scalar(scalar) => scalar.into_stream(encoder),
+            State::Tuple(tuple) => {
+                use en::EncodeSeq;
+
+                let mut seq_encoder = encoder.encode_seq(Some(tuple.len()))?;
+                for state in tuple.into_iter() {
+                    seq_encoder.encode_element(state.into_view(self.txn.clone()))?;
+                }
+                seq_encoder.end()
+            }
+        }
+    }
 }

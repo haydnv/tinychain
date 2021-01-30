@@ -71,17 +71,21 @@ impl Gateway {
         }
     }
 
-    pub async fn get(&self, request: Request, subject: Link, key: Value) -> TCResult<State> {
+    pub async fn new_txn(&self, request: Request) -> TCResult<Txn> {
+        self.kernel.new_txn(request).await
+    }
+
+    pub async fn get(&self, txn: &Txn, subject: Link, key: Value) -> TCResult<State> {
         if subject.host().is_none() {
-            self.kernel.get(request, subject.path(), key).await
+            self.kernel.get(txn, subject.path(), key).await
         } else {
             Err(TCError::not_implemented("remote GET"))
         }
     }
 
-    pub async fn post(&self, request: Request, subject: Link, params: State) -> TCResult<State> {
+    pub async fn post(&self, txn: &Txn, subject: Link, params: State) -> TCResult<State> {
         if subject.host().is_none() {
-            self.kernel.post(request, subject.path(), params).await
+            self.kernel.post(txn, subject.path(), params).await
         } else {
             Err(TCError::not_implemented("remote GET"))
         }

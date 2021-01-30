@@ -3,11 +3,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use destream::de::FromStream;
 use futures::{TryFutureExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response};
 use log::debug;
 use serde::de::DeserializeOwned;
+use transact::IntoView;
 
 use auth::Token;
 use error::*;
@@ -18,6 +20,8 @@ use crate::state::State;
 use crate::txn::*;
 
 const CONTENT_TYPE: &str = "application/json";
+
+type GetParams = HashMap<String, String>;
 
 pub struct HTTPServer {
     gateway: Arc<Gateway>,
@@ -32,8 +36,13 @@ impl HTTPServer {
         self: Arc<Self>,
         request: hyper::Request<Body>,
     ) -> Result<Response<Body>, hyper::Error> {
-        match self.route(request).await {
-            Ok(state) => match destream_json::encode(state) {
+        let (params, txn) = match self.process_headers(&request).await {
+            Ok((params, txn)) => (params, txn),
+            Err(cause) => return Ok(transform_error(cause)),
+        };
+
+        match self.route(&txn, params, request).await {
+            Ok(state) => match destream_json::encode(state.into_view(txn)) {
                 Ok(response) => {
                     let mut response = Response::new(Body::wrap_stream(response));
                     response
@@ -48,9 +57,10 @@ impl HTTPServer {
         }
     }
 
-    async fn route(&self, http_request: hyper::Request<Body>) -> TCResult<State> {
-        let path: TCPathBuf = http_request.uri().path().parse()?;
-
+    async fn process_headers(
+        &self,
+        http_request: &hyper::Request<Body>,
+    ) -> TCResult<(GetParams, Txn)> {
         let mut params = http_request
             .uri()
             .query()
@@ -79,19 +89,34 @@ impl HTTPServer {
         };
 
         let request = Request::new(token, txn_id);
+        let txn = self.gateway.new_txn(request).await?;
+        Ok((params, txn))
+    }
+
+    async fn route(
+        &self,
+        txn: &Txn,
+        mut params: GetParams,
+        http_request: hyper::Request<Body>,
+    ) -> TCResult<State> {
+        let path: TCPathBuf = http_request.uri().path().parse()?;
 
         match http_request.method() {
             &hyper::Method::GET => {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
-                self.gateway.get(request, path.into(), key).await
+                self.gateway.get(txn, path.into(), key).await
             }
             &hyper::Method::POST => {
-                let data = http_request.into_body().map_ok(|bytes| bytes.to_vec());
-                let data = destream_json::try_decode(data)
+                let data = http_request
+                    .into_body()
+                    .map_ok(|bytes| bytes.to_vec())
+                    .map_err(destream::de::Error::custom);
+                let mut decoder = destream_json::de::Decoder::from(data);
+                let data = State::from_stream(&mut decoder)
                     .map_err(|e| TCError::bad_request("error deserializing POST data", e))
                     .await?;
 
-                self.gateway.post(request, path.into(), data).await
+                self.gateway.post(txn, path.into(), data).await
             }
             other => Err(TCError::method_not_allowed(other)),
         }

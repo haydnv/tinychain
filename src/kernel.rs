@@ -17,12 +17,11 @@ impl Kernel {
         Self { txn_server }
     }
 
-    pub async fn get(
-        &self,
-        _request: Request,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<State> {
+    pub async fn new_txn(&self, request: Request) -> TCResult<Txn> {
+        self.txn_server.new_txn(request).await
+    }
+
+    pub async fn get(&self, _txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if let Some(class) = StateType::from_path(path) {
             State::Scalar(Scalar::Value(key)).into_type(class)
         } else {
@@ -30,12 +29,7 @@ impl Kernel {
         }
     }
 
-    pub async fn post(
-        &self,
-        request: Request,
-        path: &[PathSegment],
-        data: State,
-    ) -> TCResult<State> {
+    pub async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
         if path.is_empty() {
             return Err(TCError::method_not_allowed(TCPath::from(path)));
         }
@@ -57,11 +51,9 @@ impl Kernel {
                         }
 
                         let capture = data.last().unwrap().0.clone();
-                        let txn = self.txn_server.new_txn(request).await?;
                         let executor = Executor::new(&txn, data);
                         executor.capture(capture).await
                     } else {
-                        let txn = self.txn_server.new_txn(request).await?;
                         let executor = Executor::new(&txn, vec![(CAPTURE.into(), data)]);
                         executor.capture(CAPTURE.into()).await
                     }

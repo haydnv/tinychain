@@ -1,8 +1,7 @@
-use async_trait::async_trait;
 use std::convert::TryFrom;
 
-use destream::de::Decoder;
-use destream::en::Encoder;
+use async_trait::async_trait;
+use destream::en;
 
 use error::*;
 use generic::Id;
@@ -13,21 +12,11 @@ pub mod lock;
 
 pub use id::TxnId;
 
-#[async_trait]
-pub trait FromStream: Sized {
-    async fn from_stream<F: fs::FileEntry, T: Transaction<F>, D: Decoder>(
-        txn: T,
-        decoder: D,
-    ) -> Result<Self, D::Error>;
-}
+pub trait IntoView<'en, F: fs::FileEntry> {
+    type Txn: Transaction<F>;
+    type View: en::IntoStream<'en> + Sized;
 
-#[async_trait]
-pub trait IntoStream<'en>: Sized {
-    async fn into_stream<F: fs::FileEntry, T: Transaction<F>, E: Encoder<'en>>(
-        self,
-        txn: T,
-        encoder: E,
-    ) -> Result<E::Ok, E::Error>;
+    fn into_view(self, txn: Self::Txn) -> Self::View;
 }
 
 #[async_trait]
