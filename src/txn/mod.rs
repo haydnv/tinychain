@@ -109,8 +109,8 @@ impl Transaction<FileEntry> for Txn {
         &self.inner.request.txn_id
     }
 
-    async fn context<B: fs::BlockData>(&self) -> TCResult<File<B>> {
-        unimplemented!()
+    async fn context(&'_ self) -> &'_ Arc<fs::Dir<FileEntry>> {
+        &self.inner.dir
     }
 
     async fn subcontext(&self, id: Id) -> TCResult<Self> {
