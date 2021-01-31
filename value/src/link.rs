@@ -156,7 +156,11 @@ pub struct LinkHost {
 
 impl LinkHost {
     pub fn new(protocol: LinkProtocol, address: LinkAddress, port: Option<u16>) -> Self {
-        Self { protocol, address, port }
+        Self {
+            protocol,
+            address,
+            port,
+        }
     }
 
     pub fn address(&'_ self) -> &'_ LinkAddress {
@@ -458,8 +462,10 @@ impl Serialize for Link {
 
 #[async_trait]
 impl FromStream for Link {
-    async fn from_stream<D: Decoder>(decoder: &mut D) -> Result<Link, D::Error> {
-        let m = HashMap::<String, HashMap<Id, Value>>::from_stream(decoder).await?;
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(context: (), decoder: &mut D) -> Result<Link, D::Error> {
+        let m = HashMap::<String, HashMap<Id, Value>>::from_stream(context, decoder).await?;
 
         if m.len() != 1 {
             Err(de::Error::custom(format!(

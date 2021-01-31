@@ -166,9 +166,14 @@ impl<F: Clone, T1: TryCastFrom<F>, T2: TryCastFrom<F>, T3: TryCastFrom<F>, T4: T
 }
 
 #[async_trait]
-impl<T: Clone + FromStream> FromStream for Tuple<T> {
-    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
-        let inner = Vec::<T>::from_stream(d).await?;
+impl<T: Clone + FromStream> FromStream for Tuple<T>
+where
+    T::Context: Copy,
+{
+    type Context = T::Context;
+
+    async fn from_stream<D: Decoder>(context: Self::Context, d: &mut D) -> Result<Self, D::Error> {
+        let inner = Vec::<T>::from_stream(context, d).await?;
         Ok(Self { inner })
     }
 }

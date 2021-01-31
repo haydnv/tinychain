@@ -100,9 +100,14 @@ where
 }
 
 #[async_trait]
-impl<T: Clone + FromStream> FromStream for Map<T> {
-    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
-        let inner = HashMap::<Id, T>::from_stream(d).await?;
+impl<T: Clone + FromStream<Context = ()>> FromStream for Map<T>
+where
+    T::Context: Copy,
+{
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(context: (), d: &mut D) -> Result<Self, D::Error> {
+        let inner = HashMap::<Id, T>::from_stream(context, d).await?;
         Ok(Self { inner })
     }
 }

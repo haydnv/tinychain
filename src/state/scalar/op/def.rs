@@ -105,19 +105,19 @@ impl OpDefVisitor {
             ODT::Get => {
                 debug!("deserialize GET Op");
 
-                let op = map.next_value().await?;
+                let op = map.next_value(()).await?;
                 Ok(OpDef::Get(op))
             }
             ODT::Put => {
-                let op = map.next_value().await?;
+                let op = map.next_value(()).await?;
                 Ok(OpDef::Put(op))
             }
             ODT::Post => {
-                let op = map.next_value().await?;
+                let op = map.next_value(()).await?;
                 Ok(OpDef::Post(op))
             }
             ODT::Delete => {
-                let op = map.next_value().await?;
+                let op = map.next_value(()).await?;
                 Ok(OpDef::Delete(op))
             }
         }
@@ -128,14 +128,14 @@ impl OpDefVisitor {
 impl Visitor for OpDefVisitor {
     type Value = OpDef;
 
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("an Op definition")
+    fn expecting() -> &'static str {
+        "an Op definition"
     }
 
     async fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let err = || A::Error::custom("Expected an Op definition type, e.g. \"/state/op/get\"");
 
-        let class = map.next_key::<String>().await?.ok_or_else(err)?;
+        let class = map.next_key::<String>(()).await?.ok_or_else(err)?;
         let class = TCPathBuf::from_str(&class).map_err(A::Error::custom)?;
         let class = OpDefType::from_path(&class).ok_or_else(err)?;
 
@@ -145,7 +145,9 @@ impl Visitor for OpDefVisitor {
 
 #[async_trait]
 impl FromStream for OpDef {
-    async fn from_stream<D: Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
         decoder.decode_map(OpDefVisitor).await
     }
 }

@@ -113,10 +113,14 @@ impl Transaction<FileEntry> for Txn {
         &self.inner.dir
     }
 
-    async fn subcontext(self, id: Id) -> TCResult<Self> {
+    async fn subcontext(&self, id: &Id) -> TCResult<Self> {
         let inner = Inner {
             request: self.inner.request.clone(),
-            dir: self.inner.dir.create_dir(*self.id(), &[id]).await?,
+            dir: self
+                .inner
+                .dir
+                .create_dir(*self.id(), std::slice::from_ref(id))
+                .await?,
         };
 
         Ok(Txn {

@@ -90,8 +90,10 @@ impl FromStr for Subject {
 
 #[async_trait]
 impl FromStream for Subject {
-    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
-        let subject = String::from_stream(d).await?;
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(context: (), d: &mut D) -> Result<Self, D::Error> {
+        let subject = String::from_stream(context, d).await?;
         Subject::from_str(&subject).map_err(de::Error::custom)
     }
 }
@@ -231,8 +233,10 @@ impl TryCastFrom<Scalar> for Key {
 
 #[async_trait]
 impl FromStream for Key {
-    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
-        match Scalar::from_stream(d).await? {
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(context: (), d: &mut D) -> Result<Self, D::Error> {
+        match Scalar::from_stream(context, d).await? {
             Scalar::Value(value) => Ok(Self::Value(value)),
             Scalar::Ref(tc_ref) => match *tc_ref {
                 TCRef::Id(id_ref) => Ok(Self::Ref(id_ref)),
@@ -345,10 +349,10 @@ impl OpRefVisitor {
         use OpRefType as ORT;
 
         match class {
-            ORT::Get => access.next_value().map_ok(OpRef::Get).await,
-            ORT::Put => access.next_value().map_ok(OpRef::Put).await,
-            ORT::Post => access.next_value().map_ok(OpRef::Post).await,
-            ORT::Delete => access.next_value().map_ok(OpRef::Delete).await,
+            ORT::Get => access.next_value(()).map_ok(OpRef::Get).await,
+            ORT::Put => access.next_value(()).map_ok(OpRef::Put).await,
+            ORT::Post => access.next_value(()).map_ok(OpRef::Post).await,
+            ORT::Delete => access.next_value(()).map_ok(OpRef::Delete).await,
         }
     }
 
@@ -372,13 +376,13 @@ impl OpRefVisitor {
 impl de::Visitor for OpRefVisitor {
     type Value = OpRef;
 
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("an OpRef, e.g. {\"$subject\": [\"key\"]}")
+    fn expecting() -> &'static str {
+        "an OpRef, e.g. {\"$subject\": [\"key\"]}"
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         let subject = access
-            .next_key::<Subject>()
+            .next_key::<Subject>(())
             .await?
             .ok_or_else(|| de::Error::custom("expected OpRef, found empty map"))?;
 
@@ -390,14 +394,16 @@ impl de::Visitor for OpRefVisitor {
             }
         }
 
-        let params = access.next_value().await?;
+        let params = access.next_value(()).await?;
         Self::visit_ref_value(subject, params)
     }
 }
 
 #[async_trait]
 impl FromStream for OpRef {
-    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(_: (), d: &mut D) -> Result<Self, D::Error> {
         d.decode_map(OpRefVisitor).await
     }
 }

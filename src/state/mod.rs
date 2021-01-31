@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::{stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{stream, StreamExt, TryFutureExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 use transact::{IntoView, Transaction};
@@ -412,6 +412,7 @@ impl fmt::Display for State {
 }
 
 struct StateVisitor {
+    txn: Txn,
     scalar: ScalarVisitor,
 }
 
@@ -419,8 +420,8 @@ struct StateVisitor {
 impl<'a> de::Visitor for StateVisitor {
     type Value = State;
 
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Tinychain State, e.g. 1 or [2] or \"three\" or {\"/state/scalar/value/number/complex\": [3.14, -1.414]")
+    fn expecting() -> &'static str {
+        "a State, e.g. 1 or [2] or \"three\" or {\"/state/scalar/value/number/complex\": [3.14, -1.414]"
     }
 
     fn visit_bool<E: de::Error>(self, b: bool) -> Result<Self::Value, E> {
@@ -484,14 +485,14 @@ impl<'a> de::Visitor for StateVisitor {
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        if let Some(key) = access.next_key::<String>().await? {
+        if let Some(key) = access.next_key::<String>(()).await? {
             log::debug!("deserialize: key is {}", key);
 
             if let Ok(subject) = Subject::from_str(&key) {
                 if let Subject::Link(link) = &subject {
                     if link.host().is_none() {
                         if let Some(class) = StateType::from_path(link.path()) {
-                            let value: State = access.next_value().await?;
+                            let value: State = access.next_value(self.txn).await?;
                             return if value.matches::<(IdRef,)>() {
                                 let (value,) = value.opt_cast_into().unwrap();
                                 Ok(OpRef::Get((
@@ -506,7 +507,7 @@ impl<'a> de::Visitor for StateVisitor {
                     }
                 }
 
-                let params: Scalar = access.next_value().await?;
+                let params: Scalar = access.next_value(()).await?;
                 return if params.is_none() {
                     match subject {
                         Subject::Link(link) => Ok(Value::Link(link).into()),
@@ -518,13 +519,16 @@ impl<'a> de::Visitor for StateVisitor {
             }
 
             let key = Id::from_str(&key).map_err(de::Error::custom)?;
+            let txn = self.txn.subcontext(&key).map_err(de::Error::custom).await?;
 
             let mut map = HashMap::new();
-            let value = access.next_value().await?;
+            let value = access.next_value(txn).await?;
             map.insert(key, value);
 
-            while let Some(key) = access.next_key().await? {
-                let value = access.next_value().await?;
+            while let Some(key) = access.next_key::<Id>(()).await? {
+                let txn = self.txn.subcontext(&key).map_err(de::Error::custom).await?;
+
+                let value = access.next_value(txn).await?;
                 map.insert(key, value);
             }
 
@@ -541,8 +545,20 @@ impl<'a> de::Visitor for StateVisitor {
             Vec::new()
         };
 
-        while let Some(next) = access.next_element().await? {
-            seq.push(next);
+        let mut i = 0usize;
+        loop {
+            let txn = self
+                .txn
+                .subcontext(&i.into())
+                .map_err(de::Error::custom)
+                .await?;
+
+            if let Some(next) = access.next_element(txn).await? {
+                seq.push(next);
+                i += 1;
+            } else {
+                break;
+            }
         }
 
         Ok(State::Tuple(seq.into()))
@@ -551,9 +567,11 @@ impl<'a> de::Visitor for StateVisitor {
 
 #[async_trait]
 impl de::FromStream for State {
-    async fn from_stream<D: de::Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
         let scalar = ScalarVisitor::default();
-        decoder.decode_any(StateVisitor { scalar }).await
+        decoder.decode_any(StateVisitor { txn, scalar }).await
     }
 }
 
@@ -577,25 +595,17 @@ impl<'en> en::IntoStream<'en> for StateView {
             State::Map(map) => {
                 let txn = self.txn.clone();
                 let map = stream::iter(map.into_iter())
-                    .then(move |(id, state)| {
-                        txn.clone()
-                            .subcontext(id.clone())
-                            .map_ok(|txn| (id, state.into_view(txn)))
-                    })
-                    .map_err(en::Error::custom);
+                    .map(move |(id, state)| (id, state.into_view(txn.clone())))
+                    .map(Ok);
 
                 encoder.encode_map_stream(map)
             }
             State::Scalar(scalar) => scalar.into_stream(encoder),
             State::Tuple(tuple) => {
                 let txn = self.txn.clone();
-                let map = stream::iter(tuple.into_iter().enumerate())
-                    .then(move |(i, state)| {
-                        txn.clone()
-                            .subcontext(i.into())
-                            .map_ok(|txn| state.into_view(txn))
-                    })
-                    .map_err(en::Error::custom);
+                let map = stream::iter(tuple.into_iter())
+                    .map(move |state| state.into_view(txn.clone()))
+                    .map(Ok);
 
                 encoder.encode_seq_stream(map)
             }
