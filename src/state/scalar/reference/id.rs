@@ -103,8 +103,10 @@ impl fmt::Display for IdRef {
 
 #[async_trait]
 impl de::FromStream for IdRef {
-    async fn from_stream<D: de::Decoder>(d: &mut D) -> Result<Self, D::Error> {
-        let id_ref = String::from_stream(d).await?;
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(context: (), d: &mut D) -> Result<Self, D::Error> {
+        let id_ref = String::from_stream(context, d).await?;
         id_ref.parse().map_err(de::Error::custom)
     }
 }

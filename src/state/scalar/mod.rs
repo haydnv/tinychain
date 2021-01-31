@@ -422,7 +422,7 @@ impl ScalarVisitor {
         match class {
             ScalarType::Map => {
                 access
-                    .next_value::<HashMap<Id, Scalar>>()
+                    .next_value::<HashMap<Id, Scalar>>(())
                     .map_ok(Map::from)
                     .map_ok(Scalar::Map)
                     .await
@@ -440,7 +440,7 @@ impl ScalarVisitor {
             }
             ScalarType::Tuple => {
                 access
-                    .next_value::<Vec<Scalar>>()
+                    .next_value::<Vec<Scalar>>(())
                     .map_ok(Tuple::from)
                     .map_ok(Scalar::Tuple)
                     .await
@@ -458,8 +458,8 @@ impl ScalarVisitor {
 impl de::Visitor for ScalarVisitor {
     type Value = Scalar;
 
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Tinychain Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"id\", \"$state\"]\"}")
+    fn expecting() -> &'static str {
+        "a Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"id\", \"$state\"]\"}"
     }
 
     fn visit_i8<E: de::Error>(self, value: i8) -> Result<Self::Value, E> {
@@ -519,7 +519,7 @@ impl de::Visitor for ScalarVisitor {
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        let key = if let Some(key) = access.next_key::<String>().await? {
+        let key = if let Some(key) = access.next_key::<String>(()).await? {
             key
         } else {
             return Ok(Scalar::Map(Map::default()));
@@ -532,17 +532,17 @@ impl de::Visitor for ScalarVisitor {
                 }
             }
 
-            access.next_value::<()>().await?;
+            access.next_value::<()>(()).await?;
             return Ok(Value::Link(link).into());
         }
 
         let mut map = HashMap::new();
         let key = Id::from_str(&key).map_err(de::Error::custom)?;
-        let value = access.next_value().await?;
+        let value = access.next_value(()).await?;
         map.insert(key, value);
 
-        while let Some(key) = access.next_key().await? {
-            let value = access.next_value().await?;
+        while let Some(key) = access.next_key(()).await? {
+            let value = access.next_value(()).await?;
             map.insert(key, value);
         }
 
@@ -556,7 +556,7 @@ impl de::Visitor for ScalarVisitor {
             vec![]
         };
 
-        while let Some(value) = access.next_element().await? {
+        while let Some(value) = access.next_element(()).await? {
             items.push(value)
         }
 
@@ -566,7 +566,9 @@ impl de::Visitor for ScalarVisitor {
 
 #[async_trait]
 impl FromStream for Scalar {
-    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(_: (), d: &mut D) -> Result<Self, D::Error> {
         d.decode_any(ScalarVisitor::default()).await
     }
 }

@@ -87,7 +87,9 @@ impl From<u64> for Id {
 
 #[async_trait]
 impl FromStream for Id {
-    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(_context: (), d: &mut D) -> Result<Self, D::Error> {
         d.decode_any(IdVisitor).await
     }
 }
@@ -98,8 +100,8 @@ struct IdVisitor;
 impl de::Visitor for IdVisitor {
     type Value = Id;
 
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Tinychain Id like {\"foo\": []}")
+    fn expecting() -> &'static str {
+        "a Tinychain Id like {\"foo\": []}"
     }
 
     fn visit_string<E: de::Error>(self, s: String) -> Result<Self::Value, E> {
@@ -107,8 +109,8 @@ impl de::Visitor for IdVisitor {
     }
 
     async fn visit_map<M: de::MapAccess>(self, mut access: M) -> Result<Self::Value, M::Error> {
-        if let Some(key) = access.next_key::<String>().await? {
-            let value: [u8; 0] = access.next_value().await?;
+        if let Some(key) = access.next_key::<String>(()).await? {
+            let value: [u8; 0] = access.next_value(()).await?;
             if value.is_empty() {
                 Id::from_str(&key).map_err(de::Error::custom)
             } else {
@@ -385,8 +387,10 @@ impl Serialize for TCPathBuf {
 
 #[async_trait]
 impl FromStream for TCPathBuf {
-    async fn from_stream<D: Decoder>(decoder: &mut D) -> Result<TCPathBuf, D::Error> {
-        let s = String::from_stream(decoder).await?;
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(context: (), decoder: &mut D) -> Result<TCPathBuf, D::Error> {
+        let s = String::from_stream(context, decoder).await?;
         s.parse().map_err(de::Error::custom)
     }
 }

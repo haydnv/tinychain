@@ -112,7 +112,7 @@ impl RefVisitor {
         access: &mut A,
     ) -> Result<TCRef, A::Error> {
         match class {
-            RefType::Id => access.next_value().map_ok(TCRef::Id).await,
+            RefType::Id => access.next_value(()).map_ok(TCRef::Id).await,
             RefType::Op(ort) => {
                 OpRefVisitor::visit_map_value(ort, access)
                     .map_ok(TCRef::Op)
@@ -137,13 +137,13 @@ impl RefVisitor {
 impl de::Visitor for RefVisitor {
     type Value = TCRef;
 
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Ref, like {\"$subject\": []} or {\"/path/to/op\": [\"key\"]")
+    fn expecting() -> &'static str {
+        "a Ref, like {\"$subject\": []} or {\"/path/to/op\": [\"key\"]"
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         let subject = access
-            .next_key::<Subject>()
+            .next_key::<Subject>(())
             .await?
             .ok_or_else(|| de::Error::custom("expected a Ref or Link, found empty map"))?;
 
@@ -155,14 +155,16 @@ impl de::Visitor for RefVisitor {
             }
         }
 
-        let params = access.next_value().await?;
+        let params = access.next_value(()).await?;
         Self::visit_ref_value(subject, params)
     }
 }
 
 #[async_trait]
 impl FromStream for TCRef {
-    async fn from_stream<D: Decoder>(d: &mut D) -> Result<Self, <D as Decoder>::Error> {
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(_: (), d: &mut D) -> Result<Self, <D as Decoder>::Error> {
         d.decode_map(RefVisitor).await
     }
 }

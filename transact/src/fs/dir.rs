@@ -182,7 +182,12 @@ impl<F: FileEntry> Dir<F> {
         let mut contents = self.contents.write(txn_id).await?;
         match contents.entries.entry(name) {
             Entry::Vacant(entry) => {
-                let fs_cache = self.cache.write().await.create_dir(entry.key().clone()).await?;
+                let fs_cache = self
+                    .cache
+                    .write()
+                    .await
+                    .create_dir(entry.key().clone())
+                    .await?;
                 let file: File<B> = File::create(entry.key().as_str(), fs_cache).await?;
                 entry.insert(file.clone().into());
                 Ok(file)

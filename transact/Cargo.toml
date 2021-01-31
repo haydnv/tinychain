@@ -13,7 +13,7 @@ categories = ["concurrency", "data structures"]
 [dependencies]
 async-trait = "0.1"
 bytes = "1.0"
-destream = "0.1"
+destream = "0.2"
 env_logger = "0.8"
 error = { path = "../error" }
 futures = "0.3"

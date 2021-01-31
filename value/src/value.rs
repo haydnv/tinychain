@@ -17,6 +17,7 @@ use super::Link;
 
 pub use number_general::*;
 
+const EXPECTING: &'static str = "a Tinychain value, e.g. 1 or \"two\" or [3]";
 const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -302,7 +303,9 @@ impl Serialize for Value {
 
 #[async_trait]
 impl FromStream for Value {
-    async fn from_stream<D: Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(_context: (), decoder: &mut D) -> Result<Self, D::Error> {
         decoder.decode_any(ValueVisitor).await
     }
 }
@@ -534,10 +537,6 @@ impl fmt::Display for Value {
 pub struct ValueVisitor;
 
 impl ValueVisitor {
-    fn expect(f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Tinychain value, e.g. 1 or \"two\" or [3]")
-    }
-
     fn visit_number<E, N>(self, n: N) -> Result<Value, E>
     where
         Number: CastFrom<N>,
@@ -587,27 +586,27 @@ impl ValueVisitor {
 
         return match class {
             VT::Link => {
-                let link = map.next_value().await?;
+                let link = map.next_value(()).await?;
                 Ok(Value::Link(link))
             }
             VT::None => {
-                let _ = map.next_value::<()>().await?;
+                let _ = map.next_value::<()>(()).await?;
                 Ok(Value::None)
             }
             VT::Number(nt) => {
-                let n = map.next_value::<Number>().await?;
+                let n = map.next_value::<Number>(()).await?;
                 Ok(Value::Number(n.into_type(nt)))
             }
             VT::String => {
-                let s = map.next_value().await?;
+                let s = map.next_value(()).await?;
                 Ok(Value::String(s))
             }
             VT::Tuple => {
-                let t = map.next_value::<Vec<Value>>().await?;
+                let t = map.next_value::<Vec<Value>>(()).await?;
                 Ok(Value::Tuple(t.into()))
             }
             VT::Value => {
-                let v = map.next_value().await?;
+                let v = map.next_value(()).await?;
                 Ok(v)
             }
         };
@@ -618,7 +617,7 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     type Value = Value;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        Self::expect(f)
+        f.write_str(EXPECTING)
     }
 
     fn visit_bool<E: SerdeError>(self, b: bool) -> Result<Self::Value, E> {
@@ -705,21 +704,20 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
                     }
                 }
 
-                if let Some(key) = map.next_key::<String>()? {
-                    Err(A::Error::custom(format!(
-                        "the end of the map specifying this Value by type, not a second key \"{}\"",
-                        key
-                    )))
-                } else {
+                let value = map.next_value::<Vec<Value>>()?;
+                if value.is_empty() {
                     Ok(Value::Link(link))
+                } else {
+                    Err(A::Error::invalid_length(value.len(), &"an empty list"))
                 }
             } else {
-                Err(A::Error::custom(format!("expected a Link, found {}", key)))
+                Err(A::Error::custom(format!(
+                    "expected a Link but found {}",
+                    key
+                )))
             }
         } else {
-            Err(A::Error::custom(format!(
-                "expected a Link, found an empty map"
-            )))
+            Err(A::Error::custom("expected a Link but found an empty map"))
         }
     }
 }
@@ -728,8 +726,8 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
 impl destream::de::Visitor for ValueVisitor {
     type Value = Value;
 
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        Self::expect(f)
+    fn expecting() -> &'static str {
+        EXPECTING
     }
 
     fn visit_bool<E: DestreamError>(self, b: bool) -> Result<Self::Value, E> {
@@ -795,7 +793,7 @@ impl destream::de::Visitor for ValueVisitor {
     async fn visit_map<A: destream::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
         use ValueType as VT;
 
-        if let Some(key) = map.next_key::<String>().await? {
+        if let Some(key) = map.next_key::<String>(()).await? {
             if let Ok(link) = Link::from_str(&key) {
                 if link.host().is_none() {
                     if let Some(class) = VT::from_path(link.path()) {
@@ -803,12 +801,17 @@ impl destream::de::Visitor for ValueVisitor {
                     }
                 }
 
-                Ok(Value::Link(link))
+                let value = map.next_value::<Vec<Value>>(()).await?;
+                if value.is_empty() {
+                    Ok(Value::Link(link))
+                } else {
+                    Err(A::Error::invalid_length(value.len(), "empty sequence"))
+                }
             } else {
-                Err(DestreamError::invalid_value(key, &"a Link"))
+                Err(DestreamError::invalid_value(key, "a Link"))
             }
         } else {
-            Err(DestreamError::invalid_value("empty map", &"a Link"))
+            Err(DestreamError::invalid_value("empty map", "a Link"))
         }
     }
 
@@ -819,7 +822,7 @@ impl destream::de::Visitor for ValueVisitor {
             Vec::new()
         };
 
-        while let Some(element) = seq.next_element().await? {
+        while let Some(element) = seq.next_element(()).await? {
             value.push(element)
         }
 

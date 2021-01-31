@@ -112,7 +112,7 @@ impl HTTPServer {
                     .map_ok(|bytes| bytes.to_vec())
                     .map_err(destream::de::Error::custom);
                 let mut decoder = destream_json::de::Decoder::from(data);
-                let data = State::from_stream(&mut decoder)
+                let data = State::from_stream(txn.clone(), &mut decoder)
                     .map_err(|e| TCError::bad_request("error deserializing POST data", e))
                     .await?;
 
