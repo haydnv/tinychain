@@ -12,6 +12,7 @@ use transact::{IntoView, Transaction};
 use error::*;
 use generic::*;
 
+use crate::object::{Object, ObjectType};
 use crate::txn::{FileEntry, Txn};
 
 pub mod chain;
@@ -20,10 +21,11 @@ pub mod scalar;
 use chain::*;
 use scalar::*;
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum StateType {
     Chain(ChainType),
     Map,
+    Object(ObjectType),
     Scalar(ScalarType),
     Tuple,
 }
@@ -63,6 +65,7 @@ impl NativeClass for StateType {
         match self {
             Self::Chain(ct) => ct.path(),
             Self::Map => path_label(&["state", "map"]).into(),
+            Self::Object(ot) => ot.path(),
             Self::Scalar(st) => st.path(),
             Self::Tuple => path_label(&["state", "tuple"]).into(),
         }
@@ -74,6 +77,7 @@ impl fmt::Display for StateType {
         match self {
             Self::Chain(ct) => fmt::Display::fmt(ct, f),
             Self::Map => f.write_str("Map<Id, State>"),
+            Self::Object(ot) => fmt::Display::fmt(ot, f),
             Self::Scalar(st) => fmt::Display::fmt(st, f),
             Self::Tuple => f.write_str("Tuple<State>"),
         }
@@ -84,6 +88,7 @@ impl fmt::Display for StateType {
 pub enum State {
     Chain(Chain),
     Map(Map<Self>),
+    Object(Object),
     Scalar(Scalar),
     Tuple(Tuple<Self>),
 }
@@ -158,6 +163,7 @@ impl Instance for State {
         match self {
             Self::Chain(chain) => StateType::Chain(chain.class()),
             Self::Map(_) => StateType::Map,
+            Self::Object(_) => unimplemented!(),
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
             Self::Tuple(_) => StateType::Tuple,
         }
@@ -405,6 +411,7 @@ impl fmt::Display for State {
         match self {
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
             Self::Map(map) => fmt::Display::fmt(map, f),
+            Self::Object(object) => fmt::Display::fmt(object, f),
             Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
             Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
         }
@@ -498,6 +505,9 @@ impl<'a> de::Visitor for StateVisitor {
                                 .await
                         }
                         StateType::Map => access.next_value(self.txn).await,
+                        StateType::Object(_ot) => {
+                            unimplemented!()
+                        }
                         StateType::Scalar(st) => {
                             ScalarVisitor::visit_map_value(st, access)
                                 .map_ok(State::Scalar)
@@ -594,6 +604,7 @@ impl<'en> en::IntoStream<'en> for StateView {
 
                 encoder.encode_map_stream(map)
             }
+            State::Object(_) => unimplemented!(),
             State::Scalar(scalar) => scalar.into_stream(encoder),
             State::Tuple(tuple) => {
                 let txn = self.txn.clone();

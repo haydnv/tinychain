@@ -9,6 +9,7 @@ mod route;
 
 pub mod gateway;
 pub mod kernel;
+pub mod object;
 pub mod state;
 pub mod txn;
 
