@@ -5,7 +5,6 @@ authors = ["haydnv"]
 edition = "2018"
 description = "Generic data types used internally by Tinychain. Unstable."
 license = "Apache-2.0"
-readme = "README.md"
 repository = "http://github.com/haydnv/tinychain.git"
 
 categories = ["data structures"]
