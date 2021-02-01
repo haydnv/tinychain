@@ -344,7 +344,7 @@ pub struct OpRefVisitor;
 impl OpRefVisitor {
     pub async fn visit_map_value<A: de::MapAccess>(
         class: OpRefType,
-        access: &mut A,
+        mut access: A,
     ) -> Result<OpRef, A::Error> {
         use OpRefType as ORT;
 
@@ -389,7 +389,7 @@ impl de::Visitor for OpRefVisitor {
         if let Subject::Link(link) = &subject {
             if link.host().is_none() {
                 if let Some(class) = OpRefType::from_path(link.path()) {
-                    return Self::visit_map_value(class, &mut access).await;
+                    return Self::visit_map_value(class, access).await;
                 }
             }
         }

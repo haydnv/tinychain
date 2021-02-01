@@ -97,7 +97,7 @@ pub struct OpDefVisitor;
 impl OpDefVisitor {
     pub async fn visit_map_value<A: MapAccess>(
         class: OpDefType,
-        map: &mut A,
+        mut map: A,
     ) -> Result<OpDef, A::Error> {
         use OpDefType as ODT;
 
@@ -139,7 +139,7 @@ impl Visitor for OpDefVisitor {
         let class = TCPathBuf::from_str(&class).map_err(A::Error::custom)?;
         let class = OpDefType::from_path(&class).ok_or_else(err)?;
 
-        Self::visit_map_value(class, &mut map).await
+        Self::visit_map_value(class, map).await
     }
 }
 

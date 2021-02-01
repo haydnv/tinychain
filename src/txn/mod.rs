@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use auth::Token;
 use error::*;
 use generic::Id;
-use transact::fs::{self, File};
+use transact::fs::{self, DirEntry, File};
 pub use transact::{Transact, Transaction, TxnId};
 
 use crate::state::chain::ChainBlock;
@@ -70,6 +70,12 @@ impl TryFrom<FileEntry> for File<ChainBlock> {
         match entry {
             FileEntry::Chain(chain) => Ok(chain),
         }
+    }
+}
+
+impl From<FileEntry> for fs::DirEntry<FileEntry> {
+    fn from(file: FileEntry) -> Self {
+        DirEntry::File(file)
     }
 }
 

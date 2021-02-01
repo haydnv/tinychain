@@ -25,7 +25,16 @@ pub trait FileEntry: Transact + fmt::Display + Clone + Send + Sync {}
 #[derive(Clone)]
 pub enum DirEntry<F: Clone + Send + Sync> {
     Dir(Arc<Dir<F>>),
-    File(Arc<F>),
+    File(F),
+}
+
+impl<B: BlockData, F: FileEntry> From<File<B>> for DirEntry<F>
+where
+    F: From<File<B>>,
+{
+    fn from(file: File<B>) -> Self {
+        Self::File(file.into())
+    }
 }
 
 impl<F: FileEntry> fmt::Display for DirEntry<F> {

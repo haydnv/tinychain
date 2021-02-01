@@ -580,7 +580,7 @@ impl ValueVisitor {
 
     pub async fn visit_map_value_async<A: destream::MapAccess>(
         class: ValueType,
-        map: &mut A,
+        mut map: A,
     ) -> Result<Value, A::Error> {
         use ValueType as VT;
 
@@ -797,7 +797,7 @@ impl destream::de::Visitor for ValueVisitor {
             if let Ok(link) = Link::from_str(&key) {
                 if link.host().is_none() {
                     if let Some(class) = VT::from_path(link.path()) {
-                        return Self::visit_map_value_async(class, &mut map).await;
+                        return Self::visit_map_value_async(class, map).await;
                     }
                 }
 

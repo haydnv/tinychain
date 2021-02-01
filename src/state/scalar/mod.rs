@@ -417,7 +417,7 @@ pub struct ScalarVisitor {
 impl ScalarVisitor {
     pub async fn visit_map_value<A: de::MapAccess>(
         class: ScalarType,
-        access: &mut A,
+        mut access: A,
     ) -> Result<Scalar, A::Error> {
         match class {
             ScalarType::Map => {
@@ -450,6 +450,20 @@ impl ScalarVisitor {
                     .map_ok(Scalar::Value)
                     .await
             }
+        }
+    }
+
+    pub fn visit_subject<E: de::Error>(subject: Subject, params: Scalar) -> Result<Scalar, E> {
+        if params.is_none() {
+            match subject {
+                Subject::Ref(id) => Ok(Scalar::Ref(Box::new(TCRef::Id(id)))),
+                Subject::Link(link) => Ok(Scalar::Value(Value::Link(link))),
+            }
+        } else {
+            OpRefVisitor::visit_ref_value(subject, params)
+                .map(TCRef::Op)
+                .map(Box::new)
+                .map(Scalar::Ref)
         }
     }
 }
@@ -525,15 +539,15 @@ impl de::Visitor for ScalarVisitor {
             return Ok(Scalar::Map(Map::default()));
         };
 
-        if let Ok(link) = Link::from_str(&key) {
-            if link.host().is_none() {
-                if let Some(class) = ScalarType::from_path(link.path()) {
-                    return Self::visit_map_value(class, &mut access).await;
-                }
+        if let Ok(path) = TCPathBuf::from_str(&key) {
+            if let Some(class) = ScalarType::from_path(&path) {
+                return Self::visit_map_value(class, access).await;
             }
+        }
 
-            access.next_value::<()>(()).await?;
-            return Ok(Value::Link(link).into());
+        if let Ok(subject) = Subject::from_str(&key) {
+            let params = access.next_value(()).await?;
+            return Self::visit_subject(subject, params);
         }
 
         let mut map = HashMap::new();

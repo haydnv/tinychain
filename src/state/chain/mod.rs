@@ -1,8 +1,9 @@
 use std::fmt;
 
 use async_trait::async_trait;
-use destream::{en, Encoder};
+use destream::{de, en};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::TryFutureExt;
 use transact::Transaction;
 
 use error::*;
@@ -108,6 +109,15 @@ impl ChainInstance for Chain {
     }
 }
 
+#[async_trait]
+impl de::FromStream for Chain {
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_map(ChainVisitor { txn }).await
+    }
+}
+
 impl<'en> IntoView<'en, FileEntry> for Chain {
     type Txn = Txn;
     type View = ChainView;
@@ -129,12 +139,55 @@ pub struct ChainView {
 }
 
 impl<'en> en::IntoStream<'en> for ChainView {
-    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         let blocks = self
             .chain
             .block_stream(*self.txn.id())
             .map_err(en::Error::custom);
 
         encoder.encode_seq_stream(blocks)
+    }
+}
+
+pub struct ChainVisitor {
+    txn: Txn,
+}
+
+impl ChainVisitor {
+    pub async fn visit_map_value<A: de::MapAccess>(
+        self,
+        class: ChainType,
+        mut access: A,
+    ) -> Result<Chain, A::Error> {
+        match class {
+            ChainType::Sync => access.next_value(self.txn).map_ok(Chain::Sync).await,
+        }
+    }
+}
+
+impl From<Txn> for ChainVisitor {
+    fn from(txn: Txn) -> Self {
+        Self { txn }
+    }
+}
+
+#[async_trait]
+impl de::Visitor for ChainVisitor {
+    type Value = Chain;
+
+    fn expecting() -> &'static str {
+        "a Chain"
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        if let Some(key) = access.next_key::<TCPathBuf>(()).await? {
+            if let Some(class) = ChainType::from_path(&key) {
+                self.visit_map_value(class, access).await
+            } else {
+                Err(de::Error::invalid_value(key, "a Chain classpath"))
+            }
+        } else {
+            Err(de::Error::invalid_length(0, "a Chain"))
+        }
     }
 }

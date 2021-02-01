@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::{stream, StreamExt, TryFutureExt};
 use log::debug;
-use safecast::{Match, TryCastFrom, TryCastInto};
+use safecast::TryCastFrom;
 use transact::{IntoView, Transaction};
 
 use error::*;
@@ -488,48 +488,42 @@ impl<'a> de::Visitor for StateVisitor {
         if let Some(key) = access.next_key::<String>(()).await? {
             log::debug!("deserialize: key is {}", key);
 
-            if let Ok(subject) = Subject::from_str(&key) {
-                if let Subject::Link(link) = &subject {
-                    if link.host().is_none() {
-                        if let Some(class) = StateType::from_path(link.path()) {
-                            let value: State = access.next_value(self.txn).await?;
-                            return if value.matches::<(IdRef,)>() {
-                                let (value,) = value.opt_cast_into().unwrap();
-                                Ok(OpRef::Get((
-                                    Subject::Link(Link::from(class.path())),
-                                    Key::Ref(value),
-                                ))
-                                .into())
-                            } else {
-                                value.into_type(class).map_err(de::Error::custom)
-                            };
+            if let Ok(path) = TCPathBuf::from_str(&key) {
+                if let Some(class) = StateType::from_path(&path) {
+                    return match class {
+                        StateType::Chain(ct) => {
+                            ChainVisitor::from(self.txn)
+                                .visit_map_value(ct, access)
+                                .map_ok(State::Chain)
+                                .await
                         }
-                    }
+                        StateType::Map => access.next_value(self.txn).await,
+                        StateType::Scalar(st) => {
+                            ScalarVisitor::visit_map_value(st, access)
+                                .map_ok(State::Scalar)
+                                .await
+                        }
+                        StateType::Tuple => access.next_value(self.txn).await,
+                    };
                 }
-
-                let params: Scalar = access.next_value(()).await?;
-                return if params.is_none() {
-                    match subject {
-                        Subject::Link(link) => Ok(Value::Link(link).into()),
-                        Subject::Ref(id_ref) => Ok(State::from(TCRef::Id(id_ref))),
-                    }
-                } else {
-                    RefVisitor::visit_ref_value(subject, params).map(State::from)
-                };
             }
 
-            let key = Id::from_str(&key).map_err(de::Error::custom)?;
-            let txn = self.txn.subcontext(&key).map_err(de::Error::custom).await?;
+            if let Ok(subject) = Subject::from_str(&key) {
+                let params = access.next_value(()).await?;
+                return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
+            }
 
             let mut map = HashMap::new();
+
+            let id = Id::from_str(&key).map_err(de::Error::custom)?;
+            let txn = self.txn.subcontext(&id).map_err(de::Error::custom).await?;
             let value = access.next_value(txn).await?;
-            map.insert(key, value);
+            map.insert(id, value);
 
-            while let Some(key) = access.next_key::<Id>(()).await? {
-                let txn = self.txn.subcontext(&key).map_err(de::Error::custom).await?;
-
-                let value = access.next_value(txn).await?;
-                map.insert(key, value);
+            while let Some(id) = access.next_key(()).await? {
+                let txn = self.txn.subcontext(&id).map_err(de::Error::custom).await?;
+                let state = access.next_value(txn).await?;
+                map.insert(id, state);
             }
 
             Ok(State::Map(map.into()))
