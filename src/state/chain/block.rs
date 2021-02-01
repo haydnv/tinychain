@@ -3,7 +3,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::{de, en, Decoder, Encoder};
+use destream::{de, en};
 use futures::TryFutureExt;
 
 use error::*;
@@ -44,7 +44,7 @@ impl BlockData for ChainBlock {}
 impl de::FromStream for ChainBlock {
     type Context = ();
 
-    async fn from_stream<D: Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
+    async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
         de::FromStream::from_stream(context, decoder)
             .map_ok(|(hash, contents)| Self { hash, contents })
             .await
@@ -52,9 +52,9 @@ impl de::FromStream for ChainBlock {
 }
 
 impl<'en> en::IntoStream<'en> for ChainBlock {
-    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         let hash = base64::encode(self.hash);
-        (hash, self.contents).into_stream(encoder)
+        en::IntoStream::into_stream((hash, self.contents), encoder)
     }
 }
 

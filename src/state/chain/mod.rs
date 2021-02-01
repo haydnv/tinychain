@@ -1,12 +1,17 @@
 use std::fmt;
 
 use async_trait::async_trait;
+use destream::{en, Encoder};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use transact::Transaction;
 
 use error::*;
 use generic::*;
-use transact::TxnId;
+use transact::fs::{BlockOwned, File};
+use transact::{IntoView, TxnId};
 
 use crate::state::scalar::OpRef;
+use crate::txn::{FileEntry, Txn};
 
 mod block;
 pub mod sync;
@@ -17,7 +22,22 @@ const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
 #[async_trait]
 pub trait ChainInstance {
+    fn file(&'_ self) -> &'_ File<ChainBlock>;
+
+    fn len(&self) -> u64;
+
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()>;
+
+    fn block_stream(
+        &self,
+        txn_id: TxnId,
+    ) -> Box<dyn Stream<Item = TCResult<BlockOwned<ChainBlock>>> + Send + Unpin> {
+        let file = self.file().clone();
+        let blocks = stream::iter(0..self.len())
+            .then(move |block_id| Box::pin(file.clone().get_block_owned(txn_id, block_id.into())));
+
+        Box::new(blocks)
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -69,6 +89,18 @@ impl Instance for Chain {
 
 #[async_trait]
 impl ChainInstance for Chain {
+    fn file(&'_ self) -> &'_ File<ChainBlock> {
+        match self {
+            Self::Sync(chain) => chain.file(),
+        }
+    }
+
+    fn len(&self) -> u64 {
+        match self {
+            Self::Sync(chain) => chain.len(),
+        }
+    }
+
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
         match self {
             Self::Sync(chain) => chain.append(txn_id, op_ref).await,
@@ -76,8 +108,33 @@ impl ChainInstance for Chain {
     }
 }
 
+impl<'en> IntoView<'en, FileEntry> for Chain {
+    type Txn = Txn;
+    type View = ChainView;
+
+    fn into_view(self, txn: Self::Txn) -> Self::View {
+        ChainView { txn, chain: self }
+    }
+}
+
 impl fmt::Display for Chain {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         unimplemented!()
+    }
+}
+
+pub struct ChainView {
+    txn: Txn,
+    chain: Chain,
+}
+
+impl<'en> en::IntoStream<'en> for ChainView {
+    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let blocks = self
+            .chain
+            .block_stream(*self.txn.id())
+            .map_err(en::Error::custom);
+
+        encoder.encode_seq_stream(blocks)
     }
 }

@@ -591,7 +591,7 @@ pub struct StateView {
 impl<'en> en::IntoStream<'en> for StateView {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self.state {
-            State::Chain(_) => unimplemented!(),
+            State::Chain(chain) => chain.into_view(self.txn).into_stream(encoder),
             State::Map(map) => {
                 let txn = self.txn.clone();
                 let map = stream::iter(map.into_iter())

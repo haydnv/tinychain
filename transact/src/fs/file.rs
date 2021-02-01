@@ -82,7 +82,7 @@ impl<T: BlockData> File<T> {
     }
 
     pub async fn create_block(
-        self: Arc<Self>,
+        self,
         txn_id: TxnId,
         block_id: BlockId,
         data: T,
@@ -122,7 +122,7 @@ impl<T: BlockData> File<T> {
     }
 
     pub async fn get_block_owned(
-        self: Arc<Self>,
+        self,
         txn_id: TxnId,
         block_id: BlockId,
     ) -> TCResult<BlockOwned<T>> {

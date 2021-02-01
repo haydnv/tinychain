@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 
 use error::*;
@@ -15,11 +13,19 @@ const BLOCK_ID: Label = label("0");
 
 #[derive(Clone)]
 pub struct SyncChain {
-    file: Arc<File<ChainBlock>>,
+    file: File<ChainBlock>,
 }
 
 #[async_trait]
 impl ChainInstance for SyncChain {
+    fn file(&'_ self) -> &'_ File<ChainBlock> {
+        &self.file
+    }
+
+    fn len(&self) -> u64 {
+        1
+    }
+
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
         let block = self.file.get_block(txn_id, BLOCK_ID.into()).await?;
         let mut block = block.upgrade().await?;

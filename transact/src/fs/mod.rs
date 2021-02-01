@@ -1,9 +1,9 @@
 use std::convert::TryFrom;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
 use bytes::Bytes;
+use destream::en;
 
 use error::*;
 use generic::PathSegment;
@@ -95,13 +95,13 @@ impl<'a, B: BlockData> DerefMut for BlockMut<'a, B> {
 }
 
 pub struct BlockOwned<B: BlockData> {
-    file: Arc<File<B>>,
+    file: File<B>,
     block_id: BlockId,
     lock: TxnLockReadGuard<B>,
 }
 
 impl<B: BlockData> BlockOwned<B> {
-    pub fn new(file: Arc<File<B>>, block_id: BlockId, lock: TxnLockReadGuard<B>) -> BlockOwned<B> {
+    pub fn new(file: File<B>, block_id: BlockId, lock: TxnLockReadGuard<B>) -> BlockOwned<B> {
         BlockOwned {
             file,
             block_id,
@@ -130,8 +130,14 @@ impl<B: BlockData> Deref for BlockOwned<B> {
     }
 }
 
+impl<'en, B: BlockData + en::IntoStream<'en>> en::IntoStream<'en> for BlockOwned<B> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream(self.deref().clone(), encoder)
+    }
+}
+
 pub struct BlockOwnedMut<B: BlockData> {
-    file: Arc<File<B>>,
+    file: File<B>,
     block_id: BlockId,
     lock: TxnLockWriteGuard<B>,
 }
