@@ -3,6 +3,8 @@ use std::fmt;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use destream::{de, en, Decoder, Encoder};
+use futures::TryFutureExt;
 
 use error::*;
 use transact::fs::BlockData;
@@ -13,7 +15,6 @@ use crate::state::scalar::OpRef;
 
 #[derive(Clone)]
 pub struct ChainBlock {
-    order: u64,
     hash: Bytes,
     contents: Vec<OpRef>,
 }
@@ -39,6 +40,24 @@ impl Mutate for ChainBlock {
 
 impl BlockData for ChainBlock {}
 
+#[async_trait]
+impl de::FromStream for ChainBlock {
+    type Context = ();
+
+    async fn from_stream<D: Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
+        de::FromStream::from_stream(context, decoder)
+            .map_ok(|(hash, contents)| Self { hash, contents })
+            .await
+    }
+}
+
+impl<'en> en::IntoStream<'en> for ChainBlock {
+    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let hash = base64::encode(self.hash);
+        (hash, self.contents).into_stream(encoder)
+    }
+}
+
 impl TryFrom<Bytes> for ChainBlock {
     type Error = TCError;
 
@@ -55,6 +74,6 @@ impl From<ChainBlock> for Bytes {
 
 impl fmt::Display for ChainBlock {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ChainBlock {}", self.order)
+        f.write_str("(chain block)")
     }
 }
