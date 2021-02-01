@@ -6,7 +6,7 @@ use error::*;
 use generic::{label, Label};
 use transact::fs::File;
 
-use crate::state::scalar::OpRef;
+use crate::scalar::OpRef;
 use crate::txn::{Transaction, Txn, TxnId};
 
 use super::{ChainBlock, ChainInstance};

@@ -11,7 +11,7 @@ use transact::fs::BlockData;
 use transact::lock::Mutate;
 use transact::TxnId;
 
-use crate::state::scalar::OpRef;
+use crate::scalar::OpRef;
 
 #[derive(Clone)]
 pub struct ChainBlock {

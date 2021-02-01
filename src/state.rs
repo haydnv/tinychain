@@ -12,14 +12,10 @@ use transact::{IntoView, Transaction};
 use error::*;
 use generic::*;
 
+use crate::chain::*;
 use crate::object::{Object, ObjectType};
+use crate::scalar::*;
 use crate::txn::{FileEntry, Txn};
-
-pub mod chain;
-pub mod scalar;
-
-use chain::*;
-use scalar::*;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum StateType {

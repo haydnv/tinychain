@@ -7,9 +7,11 @@ pub use kernel::*;
 
 mod route;
 
+pub mod chain;
 pub mod gateway;
 pub mod kernel;
 pub mod object;
+pub mod scalar;
 pub mod state;
 pub mod txn;
 

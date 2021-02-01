@@ -10,7 +10,7 @@ use futures::future::{try_join_all, Future, TryFutureExt};
 use generic::NetworkTime;
 
 use crate::kernel::Kernel;
-use crate::state::scalar::{Link, LinkHost, LinkProtocol, Value};
+use crate::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
 use crate::txn::*;
 

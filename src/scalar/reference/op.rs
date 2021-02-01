@@ -12,7 +12,7 @@ use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 use error::*;
 use generic::*;
 
-use crate::state::scalar::{Link, Scalar, Value};
+use crate::scalar::{Link, Scalar, Value};
 use crate::state::State;
 use crate::txn::Txn;
 

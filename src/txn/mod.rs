@@ -10,7 +10,7 @@ use generic::Id;
 use transact::fs::{self, DirEntry, File};
 pub use transact::{Transact, Transaction, TxnId};
 
-use crate::state::chain::ChainBlock;
+use crate::chain::ChainBlock;
 
 mod server;
 

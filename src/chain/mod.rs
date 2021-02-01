@@ -11,7 +11,7 @@ use generic::*;
 use transact::fs::{BlockOwned, File};
 use transact::{IntoView, TxnId};
 
-use crate::state::scalar::OpRef;
+use crate::scalar::OpRef;
 use crate::txn::{FileEntry, Txn};
 
 mod block;

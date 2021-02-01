@@ -2,7 +2,7 @@ use std::fmt;
 
 use generic::{path_label, Map, PathLabel, PathSegment, TCPathBuf};
 
-use crate::state::scalar::*;
+use crate::scalar::*;
 use crate::state::State;
 
 use super::InstanceExt;

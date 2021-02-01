@@ -6,7 +6,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use error::*;
 use generic::{Id, Map};
 
-use crate::state::scalar::reference::Refer;
+use crate::scalar::reference::Refer;
 use crate::state::State;
 use crate::txn::Txn;
 

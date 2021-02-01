@@ -8,7 +8,7 @@ use log::debug;
 
 use generic::*;
 
-use crate::state::Scalar;
+use crate::scalar::Scalar;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "op"]);
 

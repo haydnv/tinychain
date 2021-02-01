@@ -2,7 +2,7 @@ use error::*;
 use generic::*;
 use safecast::{Match, TryCastFrom};
 
-use crate::state::scalar::*;
+use crate::scalar::*;
 use crate::state::*;
 use crate::txn::*;
 

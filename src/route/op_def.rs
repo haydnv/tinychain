@@ -4,8 +4,8 @@ use futures::future;
 
 use generic::PathSegment;
 
-use crate::state::scalar::op::*;
-use crate::state::scalar::{Scalar, Value};
+use crate::scalar::op::*;
+use crate::scalar::{Scalar, Value};
 use crate::state::State;
 use crate::txn::*;
 
