@@ -610,7 +610,7 @@ impl<'en> en::IntoStream<'en> for StateView {
 
                 encoder.encode_map_stream(map)
             }
-            State::Object(_) => unimplemented!(),
+            State::Object(object) => object.into_view(self.txn).into_stream(encoder),
             State::Scalar(scalar) => scalar.into_stream(encoder),
             State::Tuple(tuple) => {
                 let txn = self.txn.clone();

@@ -1,7 +1,12 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
+use destream::{en, EncodeMap};
+
+use transact::IntoView;
+
 use crate::state::State;
+use crate::txn::{FileEntry, Txn};
 
 use super::{InstanceClass, Object};
 
@@ -40,6 +45,26 @@ impl<T: generic::Instance> generic::Instance for InstanceExt<T> {
     }
 }
 
+impl<'en, T: generic::Instance + en::IntoStream<'en> + 'en> en::IntoStream<'en> for InstanceExt<T> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let mut map = encoder.encode_map(Some(1))?;
+        map.encode_entry(self.class.extends().to_string(), self.parent)?;
+        map.end()
+    }
+}
+
+impl<'en> IntoView<'en, FileEntry> for InstanceExt<State> {
+    type Txn = Txn;
+    type View = InstanceView;
+
+    fn into_view(self, txn: Txn) -> InstanceView {
+        InstanceView {
+            instance: self,
+            txn,
+        }
+    }
+}
+
 impl<T: generic::Instance> From<InstanceExt<T>> for State
 where
     State: From<T>,
@@ -55,5 +80,23 @@ where
 impl<T: generic::Instance> fmt::Display for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} Object", generic::Instance::class(self))
+    }
+}
+
+pub struct InstanceView {
+    instance: InstanceExt<State>,
+    txn: Txn,
+}
+
+impl<'en> en::IntoStream<'en> for InstanceView {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let mut map = encoder.encode_map(Some(1))?;
+
+        map.encode_entry(
+            self.instance.class.extends().to_string(),
+            self.instance.parent.into_view(self.txn),
+        )?;
+
+        map.end()
     }
 }

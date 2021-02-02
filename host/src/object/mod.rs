@@ -1,12 +1,14 @@
 use std::fmt;
 
 use async_trait::async_trait;
-use destream::de;
+use destream::{de, en, EncodeMap};
 use futures::TryFutureExt;
 
-use generic::{PathSegment, TCPathBuf};
+use generic::{NativeClass, PathSegment, TCPathBuf};
+use transact::IntoView;
 
 use crate::state::State;
+use crate::txn::{FileEntry, Txn};
 
 mod class;
 mod instance;
@@ -14,6 +16,7 @@ mod instance;
 pub use class::*;
 pub use instance::*;
 
+const ERR_DECODE_INSTANCE: &str = "Instance does not support direct decoding; use an OpRef instead";
 const PREFIX: generic::PathLabel = generic::path_label(&["state", "object"]);
 
 #[derive(Clone, Eq, PartialEq)]
@@ -26,7 +29,7 @@ impl generic::Class for ObjectType {
     type Instance = Object;
 }
 
-impl generic::NativeClass for ObjectType {
+impl NativeClass for ObjectType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         if path.len() == 3 && &path[..2] == &PREFIX[..] {
             match path[2].as_str() {
@@ -84,6 +87,15 @@ impl de::FromStream for Object {
     }
 }
 
+impl<'en> IntoView<'en, FileEntry> for Object {
+    type Txn = Txn;
+    type View = ObjectView;
+
+    fn into_view(self, txn: Txn) -> ObjectView {
+        ObjectView { object: self, txn }
+    }
+}
+
 #[async_trait]
 impl fmt::Display for Object {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -91,6 +103,27 @@ impl fmt::Display for Object {
             Self::Class(ict) => fmt::Display::fmt(ict, f),
             Self::Instance(ic) => fmt::Display::fmt(ic, f),
         }
+    }
+}
+
+pub struct ObjectView {
+    object: Object,
+    txn: Txn,
+}
+
+impl<'en> en::IntoStream<'en> for ObjectView {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let mut map = encoder.encode_map(Some(1))?;
+
+        match self.object {
+            Object::Class(class) => map.encode_entry(ObjectType::Class.path().to_string(), class),
+            Object::Instance(instance) => map.encode_entry(
+                ObjectType::Instance.path().to_string(),
+                instance.into_view(self.txn),
+            ),
+        }?;
+
+        map.end()
     }
 }
 
@@ -110,10 +143,10 @@ impl de::Visitor for ObjectVisitor {
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
 
-        if let Some(class) = <ObjectType as generic::NativeClass>::from_path(&key) {
+        if let Some(class) = ObjectType::from_path(&key) {
             match class {
                 ObjectType::Class => access.next_value(()).map_ok(Object::Class).await,
-                ObjectType::Instance => unimplemented!(),
+                ObjectType::Instance => Err(de::Error::custom(ERR_DECODE_INSTANCE)),
             }
         } else {
             Err(de::Error::invalid_value(key, Self::expecting()))
