@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::fmt;
 
 use async_trait::async_trait;
-use destream::de;
+use destream::{de, en};
 
-use generic::{path_label, Id, Map, PathLabel, PathSegment, TCPathBuf};
+use generic::{path_label, Id, Map, PathLabel, TCPathBuf};
 
 use crate::scalar::*;
 use crate::state::State;
@@ -51,6 +51,20 @@ impl de::FromStream for InstanceClass {
 
     async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
         decoder.decode_map(InstanceClassVisitor).await
+    }
+}
+
+impl<'en> en::IntoStream<'en> for InstanceClass {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        if let Some(class) = self.extends {
+            use en::EncodeMap;
+
+            let mut map = encoder.encode_map(Some(1))?;
+            map.encode_entry(class.to_string(), self.proto.into_inner())?;
+            map.end()
+        } else {
+            self.proto.into_inner().into_stream(encoder)
+        }
     }
 }
 

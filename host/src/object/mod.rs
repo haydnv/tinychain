@@ -69,8 +69,8 @@ impl generic::Instance for Object {
 
     fn class(&self) -> ObjectType {
         match self {
-            Self::Class(ic) => ObjectType::Class,
-            Self::Instance(i) => ObjectType::Instance,
+            Self::Class(_) => ObjectType::Class,
+            Self::Instance(_) => ObjectType::Instance,
         }
     }
 }

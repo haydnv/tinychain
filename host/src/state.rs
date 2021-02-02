@@ -159,7 +159,7 @@ impl Instance for State {
         match self {
             Self::Chain(chain) => StateType::Chain(chain.class()),
             Self::Map(_) => StateType::Map,
-            Self::Object(object) => object.class(),
+            Self::Object(object) => StateType::Object(object.class()),
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
             Self::Tuple(_) => StateType::Tuple,
         }
