@@ -6,12 +6,13 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
-use futures::TryFutureExt;
+use futures::{try_join, TryFutureExt};
 use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 
 use error::*;
 use generic::*;
 
+use crate::route::Public;
 use crate::scalar::{Link, Scalar, Value};
 use crate::state::State;
 use crate::txn::Txn;
@@ -74,6 +75,14 @@ impl fmt::Display for OpRefType {
 pub enum Subject {
     Link(Link),
     Ref(IdRef),
+}
+
+impl Subject {
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        if let Self::Ref(id_ref) = self {
+            id_ref.requires(deps);
+        }
+    }
 }
 
 impl FromStr for Subject {
@@ -187,18 +196,23 @@ pub enum Key {
     Value(Value),
 }
 
-#[async_trait]
-impl Refer for Key {
+impl Key {
     fn requires(&self, deps: &mut HashSet<Id>) {
         if let Self::Ref(id_ref) = self {
             deps.insert(id_ref.id().clone());
         }
     }
 
-    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
+    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<Value> {
         match self {
-            Self::Ref(id_ref) => id_ref.resolve(context, txn).await,
-            Self::Value(value) => Ok(State::from(value)),
+            Self::Ref(id_ref) => match id_ref.resolve(context, txn).await? {
+                State::Scalar(Scalar::Value(value)) => Ok(value),
+                other => Err(TCError::bad_request(
+                    "GET Op key must be a Value, not",
+                    other,
+                )),
+            },
+            Self::Value(value) => Ok(value),
         }
     }
 }
@@ -311,37 +325,42 @@ impl Instance for OpRef {
 impl Refer for OpRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
-            OpRef::Get((_path, key)) => {
-                if let Key::Ref(id_ref) = key {
-                    deps.insert(id_ref.id().clone());
+            Self::Get((subject, key)) => {
+                subject.requires(deps);
+                key.requires(deps);
+            }
+            Self::Put((subject, key, value)) => {
+                subject.requires(deps);
+                key.requires(deps);
+                value.requires(deps);
+            }
+            Self::Post((subject, params)) => {
+                subject.requires(deps);
+                for param in params.values() {
+                    param.requires(deps);
                 }
             }
-            OpRef::Put((_path, key, value)) => {
-                if let Key::Ref(id_ref) = key {
-                    deps.insert(id_ref.id().clone());
-                }
-
-                if let Scalar::Ref(tc_ref) = value {
-                    tc_ref.requires(deps);
-                }
-            }
-            OpRef::Post((_path, params)) => {
-                for provider in params.values() {
-                    if let Scalar::Ref(tc_ref) = provider {
-                        tc_ref.requires(deps);
-                    }
-                }
-            }
-            OpRef::Delete((_path, key)) => {
-                if let Key::Ref(id_ref) = key {
-                    deps.insert(id_ref.id().clone());
-                }
+            Self::Delete((subject, key)) => {
+                subject.requires(deps);
+                key.requires(deps);
             }
         }
     }
 
-    async fn resolve(self, _context: &Map<State>, _txn: &Txn) -> TCResult<State> {
-        Err(TCError::not_implemented("OpRef::resolve"))
+    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
+        match self {
+            Self::Get((subject, key)) => match subject {
+                Subject::Link(_link) => Err(TCError::not_implemented("OpRef::resolve Link")),
+                Subject::Ref(id_ref) => {
+                    let subject = id_ref.resolve(context, txn);
+                    let key = key.resolve(context, txn);
+                    let (subject, key) = try_join!(subject, key)?;
+
+                    subject.get(txn, &[], key).await
+                }
+            },
+            _ => Err(TCError::not_implemented("OpRef::resolve")),
+        }
     }
 }
 
