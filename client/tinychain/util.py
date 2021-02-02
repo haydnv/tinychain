@@ -33,7 +33,7 @@ class Context(object):
             raise ValueError(f"Context has no such value: {name}")
 
     def __json__(self):
-        return [[to_json(name), to_json(spec)] for (name, spec) in self.form.items()]
+        return to_json(list(self.form.items()))
 
     def __setattr__(self, name, value):
         if name in object.__getattribute__(self, "form"):

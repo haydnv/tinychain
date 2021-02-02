@@ -64,7 +64,7 @@ class IdRef(Ref):
             raise ValueError(f"Ref name cannot start with '$': {self.name}")
 
     def __json__(self):
-        return to_json({f"${self.spec}": []})
+        return to_json({str(self): []})
 
     def __str__(self):
         return f"${self.spec}"
@@ -110,14 +110,17 @@ class Op(Scalar):
     PATH = Scalar.PATH + "/op"
 
     def __init__(self, spec):
-        if not inspect.isfunction(spec):
+        if isinstance(spec, Ref) or inspect.isfunction(spec):
+            Scalar.__init__(self, spec)
+        else:
             raise ValueError("Op spec must be a callable function")
-
-        Scalar.__init__(self, spec)
 
 
 class GetOp(Op):
     PATH = Op.PATH + "/get"
+
+    def __call__(self, key=None):
+        return OpRef.Get(IdRef(self), key)
 
     def __form__(self):
         args = []
