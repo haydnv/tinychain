@@ -10,7 +10,6 @@ use safecast::{CastFrom, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-use error::*;
 use generic::*;
 
 use super::Link;
@@ -235,22 +234,25 @@ impl Value {
         }
     }
 
-    pub fn into_type(self, class: ValueType) -> TCResult<Self> {
+    pub fn into_type(self, class: ValueType) -> Option<Self> {
+        if self.class() == class {
+            return Some(self);
+        }
+
         use ValueType as VT;
 
         match class {
-            VT::Link => self.try_cast_into(try_cast_err(VT::Link)).map(Self::Link),
-            VT::None => Ok(Self::None),
-            VT::Number(nt) => {
-                let n = Number::try_cast_from(self, try_cast_err(nt))?;
-                Ok(Self::Number(n.into_type(nt)))
-            }
-            VT::String => Ok(Value::String(self.to_string())),
+            VT::Link => self.opt_cast_into().map(Self::Link),
+            VT::None => Some(Self::None),
+            VT::Number(nt) => Number::opt_cast_from(self)
+                .map(|n| n.into_type(nt))
+                .map(Self::Number),
+            VT::String => Some(Value::String(self.to_string())),
             VT::Tuple => match self {
-                Self::Tuple(tuple) => Ok(Self::Tuple(tuple)),
-                value => Ok(Self::Tuple(vec![value].into())),
+                Self::Tuple(tuple) => Some(Self::Tuple(tuple)),
+                _ => None,
             },
-            VT::Value => Ok(self),
+            VT::Value => Some(self),
         }
     }
 }
@@ -828,12 +830,4 @@ impl destream::de::Visitor for ValueVisitor {
 
         Ok(Value::Tuple(value.into()))
     }
-}
-
-fn cast_err<F: fmt::Display, T: fmt::Display>(to: T, from: &F) -> TCError {
-    TCError::bad_request(format!("cannot cast into {} from", to), from)
-}
-
-fn try_cast_err<F: fmt::Display, T: fmt::Display>(to: T) -> impl FnOnce(&F) -> TCError {
-    move |s| cast_err(to, s)
 }

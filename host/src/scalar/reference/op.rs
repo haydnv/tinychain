@@ -437,7 +437,7 @@ impl<'en> IntoStream<'en> for OpRef {
         let mut map = e.encode_map(Some(1))?;
 
         match self {
-            OpRef::Get((path, key)) => map.encode_entry(path.to_string(), key)?,
+            OpRef::Get((path, key)) => map.encode_entry(path.to_string(), (key,))?,
             OpRef::Put((path, key, value)) => map.encode_entry(path.to_string(), (key, value))?,
             OpRef::Post((path, data)) => map.encode_entry(path.to_string(), data.into_inner())?,
             OpRef::Delete((path, key)) => {

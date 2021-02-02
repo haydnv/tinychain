@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::iter::FromIterator;
 use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::{de, en};
+use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use log::debug;
 use safecast::TryCastFrom;
@@ -107,17 +109,19 @@ impl State {
         }
     }
 
-    pub fn into_type(self, class: StateType) -> TCResult<Self> {
+    pub fn into_type(self, class: StateType) -> Option<Self> {
+        if self.class() == class {
+            return Some(self);
+        }
+
         match class {
             StateType::Scalar(class) => {
                 debug!("cast into {} from {}", class, self);
-                let scalar = Scalar::try_cast_from(self, try_cast_err(class))?;
-                scalar.into_type(class).map(Self::Scalar)
+                Scalar::opt_cast_from(self)
+                    .and_then(|scalar| scalar.into_type(class))
+                    .map(Self::Scalar)
             }
-            other => Err(TCError::bad_request(
-                format!("Cannot cast into {} from", other),
-                self,
-            )),
+            _ => None,
         }
     }
 }
@@ -141,8 +145,28 @@ impl Refer for State {
         }
     }
 
-    async fn resolve(self, _context: &Map<State>, _txn: &Txn) -> TCResult<Self> {
-        Err(TCError::not_implemented("State::resolve"))
+    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<Self> {
+        match self {
+            Self::Map(map) => {
+                let resolved = try_join_all(
+                    map.into_iter()
+                        .map(|(id, state)| state.resolve(context, txn).map_ok(|s| (id, s))),
+                )
+                .await?;
+
+                let map = HashMap::from_iter(resolved);
+                Ok(State::Map(map.into()))
+            }
+            Self::Scalar(scalar) => scalar.resolve(context, txn).await,
+            Self::Tuple(tuple) => {
+                let resolved =
+                    try_join_all(tuple.into_iter().map(|state| state.resolve(context, txn)))
+                        .await?;
+
+                Ok(State::Tuple(resolved.into()))
+            }
+            other => Ok(other),
+        }
     }
 }
 
@@ -595,14 +619,6 @@ impl de::FromStream for State {
         let scalar = ScalarVisitor::default();
         decoder.decode_any(StateVisitor { txn, scalar }).await
     }
-}
-
-fn cast_err<F: fmt::Display, T: fmt::Display>(to: T, from: &F) -> TCError {
-    TCError::bad_request(format!("cannot cast into {} from", to), from)
-}
-
-fn try_cast_err<F: fmt::Display, T: fmt::Display>(to: T) -> impl FnOnce(&F) -> TCError {
-    move |s| cast_err(to, s)
 }
 
 pub struct StateView {

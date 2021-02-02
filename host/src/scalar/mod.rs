@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::iter::FromIterator;
 use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
+use futures::future::{try_join_all, TryFutureExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
@@ -106,58 +108,52 @@ impl Scalar {
         }
     }
 
-    pub fn into_type(self, class: ScalarType) -> TCResult<Self> {
+    pub fn into_type(self, class: ScalarType) -> Option<Self> {
+        if self.class() == class {
+            return Some(self);
+        }
+
         use OpDefType as ODT;
         use OpRefType as ORT;
         use RefType as RT;
         use ScalarType as ST;
 
         match class {
-            ST::Map => self.try_cast_into(try_cast_err(ST::Map)).map(Self::Map),
+            ST::Map => self.opt_cast_into().map(Self::Map),
             ST::Op(odt) => match odt {
-                ODT::Get => self
-                    .try_cast_into(try_cast_err(ODT::Get))
-                    .map(OpDef::Get)
-                    .map(Self::Op),
-                ODT::Put => self
-                    .try_cast_into(try_cast_err(ODT::Put))
-                    .map(OpDef::Put)
-                    .map(Self::Op),
-                ODT::Post => self
-                    .try_cast_into(try_cast_err(ODT::Post))
-                    .map(OpDef::Post)
-                    .map(Self::Op),
-                ODT::Delete => self
-                    .try_cast_into(try_cast_err(ODT::Delete))
-                    .map(OpDef::Delete)
-                    .map(Self::Op),
+                ODT::Get => self.opt_cast_into().map(OpDef::Get).map(Self::Op),
+
+                ODT::Put => self.opt_cast_into().map(OpDef::Put).map(Self::Op),
+
+                ODT::Post => self.opt_cast_into().map(OpDef::Post).map(Self::Op),
+
+                ODT::Delete => self.opt_cast_into().map(OpDef::Delete).map(Self::Op),
             },
             ST::Ref(rt) => match rt {
                 RT::Id => self
-                    .try_cast_into(try_cast_err(RT::Id))
+                    .opt_cast_into()
                     .map(TCRef::Id)
                     .map(Box::new)
                     .map(Scalar::Ref),
+
                 RT::Op(ort) => {
                     let op_ref = match ort {
-                        ORT::Get => self.try_cast_into(try_cast_err(ORT::Get)).map(OpRef::Get),
-                        ORT::Put => self.try_cast_into(try_cast_err(ORT::Put)).map(OpRef::Put),
-                        ORT::Post => self.try_cast_into(try_cast_err(ORT::Post)).map(OpRef::Post),
-                        ORT::Delete => self
-                            .try_cast_into(try_cast_err(ORT::Delete))
-                            .map(OpRef::Delete),
-                    }?;
-                    Ok(Scalar::Ref(Box::new(TCRef::Op(op_ref))))
+                        ORT::Get => self.opt_cast_into().map(OpRef::Get),
+                        ORT::Put => self.opt_cast_into().map(OpRef::Put),
+                        ORT::Post => self.opt_cast_into().map(OpRef::Post),
+                        ORT::Delete => self.opt_cast_into().map(OpRef::Delete),
+                    };
+
+                    op_ref.map(TCRef::Op).map(Self::from)
                 }
             },
-            ST::Value(vt) => {
-                let value = Value::try_cast_from(self, try_cast_err(vt))?;
-                value.into_type(vt).map(Scalar::Value)
-            }
+            ST::Value(vt) => Value::opt_cast_from(self)
+                .and_then(|value| value.into_type(vt))
+                .map(Scalar::Value),
             ST::Tuple => match self {
-                Self::Map(map) => Ok(Self::Tuple(map.into_iter().map(|(_, v)| v).collect())),
-                Self::Tuple(tuple) => Ok(Self::Tuple(tuple)),
-                other => Ok(Self::Tuple(vec![other].into())),
+                Self::Map(map) => Some(Self::Tuple(map.into_iter().map(|(_, v)| v).collect())),
+                Self::Tuple(tuple) => Some(Self::Tuple(tuple)),
+                _ => None,
             },
         }
     }
@@ -203,8 +199,25 @@ impl Refer for Scalar {
         }
     }
 
-    async fn resolve(self, _context: &Map<State>, _txn: &Txn) -> TCResult<State> {
-        Err(TCError::not_implemented("Scalar::resolve"))
+    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
+        match self {
+            Self::Map(map) => {
+                let resolved =
+                    try_join_all(map.into_iter().map(|(id, scalar)| {
+                        scalar.resolve(context, txn).map_ok(|state| (id, state))
+                    }))
+                    .await?;
+                Ok(State::Map(Map::from_iter(resolved)))
+            }
+            Self::Ref(tc_ref) => tc_ref.resolve(context, txn).await,
+            Self::Tuple(tuple) => {
+                let resolved =
+                    try_join_all(tuple.into_iter().map(|scalar| scalar.resolve(context, txn)))
+                        .await?;
+                Ok(State::Tuple(resolved.into()))
+            }
+            other => Ok(State::Scalar(other)),
+        }
     }
 }
 
@@ -420,13 +433,8 @@ impl ScalarVisitor {
     ) -> Result<Scalar, A::Error> {
         let scalar = access.next_value::<Scalar>(()).await?;
 
-        if scalar.class() == class {
+        if let Some(scalar) = scalar.clone().into_type(class) {
             return Ok(scalar);
-        } else if let ScalarType::Value(ValueType::Tuple) = class {
-            if scalar.matches::<Vec<Value>>() {
-                let tuple: Vec<Value> = scalar.opt_cast_into().unwrap();
-                return Ok(Value::Tuple(tuple.into()).into());
-            }
         }
 
         let subject = Link::from(class.path()).into();
@@ -619,12 +627,4 @@ impl fmt::Display for Scalar {
             Scalar::Value(value) => fmt::Display::fmt(value, f),
         }
     }
-}
-
-fn cast_err<F: fmt::Display, T: fmt::Display>(to: T, from: &F) -> TCError {
-    TCError::bad_request(format!("cannot cast into {} from", to), from)
-}
-
-fn try_cast_err<F: fmt::Display, T: fmt::Display>(to: T) -> impl FnOnce(&F) -> TCError {
-    move |s| cast_err(to, s)
 }

@@ -23,7 +23,10 @@ impl Kernel {
 
     pub async fn get(&self, _txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if let Some(class) = StateType::from_path(path) {
-            State::Scalar(Scalar::Value(key)).into_type(class)
+            let err = format!("Cannot cast into {} from {}", class, key);
+            State::Scalar(Scalar::Value(key))
+                .into_type(class)
+                .ok_or_else(|| TCError::unsupported(err))
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }

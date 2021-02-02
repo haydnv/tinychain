@@ -1,6 +1,6 @@
-use std::collections::HashSet;
-use std::iter::FromIterator;
+use std::collections::{HashMap, HashSet};
 
+use futures::future::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use error::*;
@@ -57,20 +57,25 @@ impl<'a> Executor<'a> {
                 ));
             }
 
-            let mut providers = FuturesUnordered::from_iter(
-                pending
-                    .into_iter()
-                    .map(|id| async { (id, Err(TCError::not_implemented("State::resolve"))) }),
-            );
+            let mut resolved = HashMap::with_capacity(pending.len());
+            {
+                let mut providers = FuturesUnordered::new();
+                for id in pending.into_iter() {
+                    let state = self.resolve_id(&id)?.clone();
+                    providers.push(state.resolve(&self.state, self.txn).map(|r| (id, r)));
+                }
 
-            while let Some((id, r)) = providers.next().await {
-                match r {
-                    Ok(state) => {
-                        self.state.insert(id, state);
+                while let Some((id, r)) = providers.next().await {
+                    match r {
+                        Ok(state) => {
+                            resolved.insert(id, state);
+                        }
+                        Err(cause) => return Err(cause.consume(format!("Error resolving {}", id))),
                     }
-                    Err(cause) => return Err(cause.consume(format!("Error resolving {}", id))),
                 }
             }
+
+            self.state.extend(resolved);
         }
 
         self.state
