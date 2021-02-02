@@ -1,6 +1,6 @@
 import inspect
 
-from .util import Context, form_of, to_json
+from .util import *
 
 
 # Base types (should not be initialized directly)
@@ -17,6 +17,20 @@ class State(object):
 
     def __json__(self):
         return {self.PATH: [to_json(self.spec)]}
+
+    def __ref__(self, name=None):
+        if isinstance(self.spec, Ref):
+            if name is None:
+                return self
+            else:
+                raise ValueError(f"Cannot rename {self}")
+        elif name is None:
+            raise ValueError(f"Reference to {self} requires a name")
+        else:
+            return type(self)(IdRef(name))
+
+    def get(self, path="/", key=None):
+        return MethodRef.Get(self, path)(key)
 
 
 class Scalar(State):
@@ -35,8 +49,25 @@ class Ref(Scalar):
 class IdRef(Ref):
     PATH = Ref.PATH + "/id"
 
+    def __init__(self, subject):
+        if isinstance(subject, Ref):
+            self.spec = subject.spec
+        elif isinstance(subject, State) and isinstance(subject.spec, Ref):
+            self.spec = subject.spec.spec
+        elif hasattr(subject, "__ref__"):
+            raise ValueError(
+                f"Ref to {subject} needs a name (hint: try calling ref(spec, 'name')")
+        else:
+            self.spec = subject
+
+        if str(self.spec).startswith("$"):
+            raise ValueError(f"Ref name cannot start with '$': {self.name}")
+
     def __json__(self):
         return to_json({f"${self.spec}": []})
+
+    def __str__(self):
+        return f"${self.spec}"
 
 
 class OpRef(Ref):
@@ -58,14 +89,6 @@ class GetOpRef(OpRef):
 OpRef.Get = GetOpRef
 
 
-# Scalar tuple
-
-class Tuple(Scalar):
-    PATH = Scalar.PATH + "/tuple"
-
-
-# Object types
-
 class Map(Scalar):
     PATH = Scalar.PATH + "/map"
 
@@ -75,6 +98,10 @@ class Map(Scalar):
             json[name] = to_json(self.spec[name])
 
         return json
+
+
+class Tuple(Scalar):
+    PATH = Scalar.PATH + "/tuple"
 
 
 # Op types
@@ -211,6 +238,12 @@ class Number(Value):
     def __json__(self):
         return to_json(self.spec)
 
+    def __mul__(self, other):
+        return self.mul(other)
+
+    def mul(self, other):
+        return Number(self.get("/mul", other))
+
 
 class Bool(Number):
     PATH = Number.PATH + "/bool"
@@ -293,5 +326,182 @@ class Link(Value):
         return {str(self): []}
 
     def __str__(self):
-        return self.spec
+        return str(self.spec)
+
+
+# User-defined class & instance types
+
+class Class(State):
+    PATH = State.PATH + "/class"
+
+    def __init__(self, spec):
+        instance_class = self
+
+        if not inspect.isclass(spec):
+            raise ValueError("expected a class definition")
+
+        class Instance(spec):
+            def __init__(self, instance_spec):
+                super().__init__(instance_spec)
+
+                for name, method in inspect.getmembers(self):
+                    if name.startswith('_'):
+                        continue
+
+                    if isinstance(method, MethodStub):
+                        if isinstance(self.spec, Ref):
+                            setattr(self, name, ref(method(self), name))
+                        else:
+                            setattr(self, name, ref(method(ref(self, "self")), name))
+
+        self.spec = Instance
+
+    def __call__(self, spec):
+        return self.spec(spec)
+
+    def __getattr__(self, name):
+        return getattr(self.spec, name)
+
+    def __json__(self):
+        mro = self.spec.mro()
+        if len(mro) < 3:
+            raise ValueError("Tinychain Class must extend a native class (e.g. tc.State)")
+
+        parent = mro[2]
+        extends = parent.PATH
+        proto = {}
+        parent_members = set(name for name, _ in inspect.getmembers(parent))
+        subject = self.spec(IdRef("self"))
+
+        for name, method in inspect.getmembers(self.spec):
+            if name.startswith('_') or name in parent_members:
+                continue
+
+            if isinstance(method, MethodStub):
+                method = method(subject)
+                proto[name] = to_json(method)
+            else:
+                raise ValueError(f"{name} is not a Method")
+
+        return to_json({Class.PATH: {extends: proto}})
+
+
+class AttrRef(Ref):
+    def __init__(self, subject, path):
+        self.subject = IdRef(subject)
+        self.path = Link(path)
+
+    def __json__(self):
+        return {str(self): []}
+
+    def __str__(self):
+        if str(self.path) == "/":
+            return str(self.subject)
+        else:
+            return f"{self.subject}{self.path}"
+
+
+# Method definition & call utilities
+
+class Method(Op):
+    def __init__(self, subject, spec):
+        Op.__init__(self, spec)
+        self.subject = subject
+
+
+class GetMethod(Method):
+    PATH = Op.Get.PATH
+
+    def __init__(self, subject, spec):
+        Method.__init__(self, subject, spec)
+
+    def __form__(self):
+        args = []
+        context = Context()
+
+        params = list(inspect.signature(self.spec).parameters.items())
+        if params:
+            if len(params) > 3:
+                raise ValueError("GET Method takes only one value parameter")
+
+            if params:
+                first_annotation = params[0][1].annotation
+                if first_annotation in {inspect.Parameter.empty, type(self.subject)}:
+                    args.append(self.subject)
+                else:
+                    raise ValueError("The first argument to Method.Get is an instance of"
+                                     + f"{self.subject.__class__}, not {first_annotation}")
+
+            if len(params) > 1:
+                second_annotation = params[1][1].annotation
+                if second_annotation == inspect.Parameter.empty or second_annotation == Context:
+                    args.append(context)
+                else:
+                    raise ValueError("The second argument to Method.Get is a transaction"
+                                     + f"Context, not {second_annotation}")
+
+            if len(params) == 3:
+                key_name, param = params[2]
+                if param.annotation == inspect.Parameter.empty:
+                    args.append(Ref(key_name))
+                elif issubclass(param.annotation, Value):
+                    args.append(param.annotation(Ref(key_name)))
+                else:
+                    raise ValueError("GET Method key must be a Tinychain Value")
+
+        result = self.spec(*args) # populate the Context
+        if isinstance(result, State) or isinstance(result, Ref):
+            context._value = result
+        else:
+            raise ValueError(f"Op return value must be a Tinychain state, not {result}")
+
+        return context
+
+    def __json__(self):
+        params = list(inspect.signature(self.spec).parameters.items())
+        key_name = params[2][0] if len(params) == 3 else "key"
+        return {self.PATH: [key_name, to_json(form_of(self))]}
+
+    def __ref__(self, name):
+        return MethodRef.Get(self.subject, f"/{name}")
+
+
+Method.Get = GetMethod
+
+
+class MethodCall(Ref):
+    PATH = OpRef.PATH
+
+
+class GetCall(MethodCall):
+    PATH = OpRef.Get.PATH
+
+    def __init__(self, method, key=None):
+        self.method = method
+        self.key = key
+
+    def __json__(self):
+        return {str(self.method): [to_json(self.key)]}
+
+
+MethodCall.Get = GetCall
+
+
+class MethodRef:
+    def __init__(self, *args, **kwargs):
+        raise RuntimeError("Cannot instantiate MethodRef directly; try Method.<access method>")
+
+    class Get(AttrRef):
+        def __call__(self, key=None):
+            return MethodCall.Get(self, key)
+
+
+
+class MethodStub(object):
+    def __init__(self, dtype, method):
+        self.dtype = dtype
+        self.method = method
+
+    def __call__(self, subject):
+        return self.dtype(subject, self.method)
 

@@ -49,6 +49,13 @@ def form_of(op):
         raise ValueError(f"{op} has no Context")
 
 
+def ref(subject, name=None):
+    if hasattr(subject, "__ref__"):
+        return subject.__ref__(name)
+    else:
+        raise ValueError(f"{subject} does not support named references")
+
+
 def to_json(obj):
     if inspect.isclass(obj) and hasattr(obj, "PATH"):
         return {obj.PATH: []}
