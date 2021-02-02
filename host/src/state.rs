@@ -419,6 +419,43 @@ struct StateVisitor {
     scalar: ScalarVisitor,
 }
 
+impl StateVisitor {
+    async fn visit_map_value<A: de::MapAccess>(
+        &self,
+        class: StateType,
+        access: &mut A,
+    ) -> Result<State, A::Error> {
+        match class {
+            StateType::Chain(ct) => {
+                ChainVisitor::from(self.txn.clone())
+                    .visit_map_value(ct, access)
+                    .map_ok(State::Chain)
+                    .await
+            }
+            StateType::Map => access.next_value(self.txn.clone()).await,
+            StateType::Object(ot) => match ot {
+                ObjectType::Class => {
+                    access
+                        .next_value(())
+                        .map_ok(Object::Class)
+                        .map_ok(State::Object)
+                        .await
+                }
+                ObjectType::Instance => {
+                    let op_ref = access.next_value(()).map_ok(TCRef::Op).await?;
+                    Ok(State::Scalar(Scalar::Ref(op_ref.into())))
+                }
+            },
+            StateType::Scalar(st) => {
+                ScalarVisitor::visit_map_value(st, access)
+                    .map_ok(State::Scalar)
+                    .await
+            }
+            StateType::Tuple => access.next_value(self.txn.clone()).await,
+        }
+    }
+}
+
 #[async_trait]
 impl<'a> de::Visitor for StateVisitor {
     type Value = State;
@@ -493,34 +530,9 @@ impl<'a> de::Visitor for StateVisitor {
 
             if let Ok(path) = TCPathBuf::from_str(&key) {
                 if let Some(class) = StateType::from_path(&path) {
-                    return match class {
-                        StateType::Chain(ct) => {
-                            ChainVisitor::from(self.txn)
-                                .visit_map_value(ct, access)
-                                .map_ok(State::Chain)
-                                .await
-                        }
-                        StateType::Map => access.next_value(self.txn).await,
-                        StateType::Object(ot) => match ot {
-                            ObjectType::Class => {
-                                access
-                                    .next_value(())
-                                    .map_ok(Object::Class)
-                                    .map_ok(State::Object)
-                                    .await
-                            }
-                            ObjectType::Instance => {
-                                let op_ref = access.next_value(()).map_ok(TCRef::Op).await?;
-                                Ok(State::Scalar(Scalar::Ref(op_ref.into())))
-                            }
-                        },
-                        StateType::Scalar(st) => {
-                            ScalarVisitor::visit_map_value(st, access)
-                                .map_ok(State::Scalar)
-                                .await
-                        }
-                        StateType::Tuple => access.next_value(self.txn).await,
-                    };
+                    if let Ok(state) = self.visit_map_value(class, &mut access).await {
+                        return Ok(state);
+                    }
                 }
             }
 

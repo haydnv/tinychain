@@ -157,7 +157,7 @@ impl ChainVisitor {
     pub async fn visit_map_value<A: de::MapAccess>(
         self,
         class: ChainType,
-        mut access: A,
+        access: &mut A,
     ) -> Result<Chain, A::Error> {
         match class {
             ChainType::Sync => access.next_value(self.txn).map_ok(Chain::Sync).await,
@@ -182,7 +182,7 @@ impl de::Visitor for ChainVisitor {
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         if let Some(key) = access.next_key::<TCPathBuf>(()).await? {
             if let Some(class) = ChainType::from_path(&key) {
-                self.visit_map_value(class, access).await
+                self.visit_map_value(class, &mut access).await
             } else {
                 Err(de::Error::invalid_value(key, "a Chain classpath"))
             }

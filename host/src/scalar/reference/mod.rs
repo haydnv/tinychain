@@ -109,7 +109,7 @@ pub struct RefVisitor;
 impl RefVisitor {
     pub async fn visit_map_value<A: de::MapAccess>(
         class: RefType,
-        mut access: A,
+        access: &mut A,
     ) -> Result<TCRef, A::Error> {
         match class {
             RefType::Id => access.next_value(()).map_ok(TCRef::Id).await,
@@ -150,7 +150,7 @@ impl de::Visitor for RefVisitor {
         if let Subject::Link(link) = &subject {
             if link.host().is_none() {
                 if let Some(class) = RefType::from_path(link.path()) {
-                    return Self::visit_map_value(class, access).await;
+                    return Self::visit_map_value(class, &mut access).await;
                 }
             }
         }

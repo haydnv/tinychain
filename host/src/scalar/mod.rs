@@ -5,9 +5,8 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
-use futures::TryFutureExt;
 use log::debug;
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::{Match, TryCastFrom, TryCastInto};
 
 use error::*;
 use generic::*;
@@ -417,40 +416,37 @@ pub struct ScalarVisitor {
 impl ScalarVisitor {
     pub async fn visit_map_value<A: de::MapAccess>(
         class: ScalarType,
-        mut access: A,
+        access: &mut A,
     ) -> Result<Scalar, A::Error> {
-        match class {
-            ScalarType::Map => {
-                access
-                    .next_value::<HashMap<Id, Scalar>>(())
-                    .map_ok(Map::from)
-                    .map_ok(Scalar::Map)
-                    .await
-            }
-            ScalarType::Op(odt) => {
-                OpDefVisitor::visit_map_value(odt, access)
-                    .map_ok(Scalar::Op)
-                    .await
-            }
-            ScalarType::Ref(rt) => {
-                RefVisitor::visit_map_value(rt, access)
-                    .map_ok(Box::new)
-                    .map_ok(Scalar::Ref)
-                    .await
-            }
-            ScalarType::Tuple => {
-                access
-                    .next_value::<Vec<Scalar>>(())
-                    .map_ok(Tuple::from)
-                    .map_ok(Scalar::Tuple)
-                    .await
-            }
-            ScalarType::Value(vt) => {
-                ValueVisitor::visit_map_value_async(vt, access)
-                    .map_ok(Scalar::Value)
-                    .await
+        let scalar = access.next_value::<Scalar>(()).await?;
+
+        if scalar.class() == class {
+            return Ok(scalar);
+        } else if let ScalarType::Value(ValueType::Tuple) = class {
+            if scalar.matches::<Vec<Value>>() {
+                let tuple: Vec<Value> = scalar.opt_cast_into().unwrap();
+                return Ok(Value::Tuple(tuple.into()).into());
             }
         }
+
+        let subject = Link::from(class.path()).into();
+        let op_ref = if scalar.matches::<(Key, Scalar)>() {
+            let (key, value) = scalar.opt_cast_into().unwrap();
+            OpRef::Put((subject, key, value))
+        } else if scalar.matches::<(Key,)>() {
+            let (key,) = scalar.opt_cast_into().unwrap();
+            OpRef::Get((subject, key))
+        } else if scalar.matches::<Map<Scalar>>() {
+            let params = scalar.opt_cast_into().unwrap();
+            OpRef::Post((subject, params))
+        } else {
+            return Err(de::Error::invalid_type(
+                scalar,
+                format!("an Op with subject {}", subject),
+            ));
+        };
+
+        Ok(TCRef::Op(op_ref).into())
     }
 
     pub fn visit_subject<E: de::Error>(subject: Subject, params: Scalar) -> Result<Scalar, E> {
@@ -541,7 +537,9 @@ impl de::Visitor for ScalarVisitor {
 
         if let Ok(path) = TCPathBuf::from_str(&key) {
             if let Some(class) = ScalarType::from_path(&path) {
-                return Self::visit_map_value(class, access).await;
+                if let Ok(scalar) = Self::visit_map_value(class, &mut access).await {
+                    return Ok(scalar);
+                }
             }
         }
 
