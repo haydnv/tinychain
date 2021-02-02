@@ -9,7 +9,7 @@ use crate::scalar::{Scalar, Value};
 use crate::state::State;
 use crate::txn::*;
 
-use super::*;
+use crate::route::*;
 
 struct OpHandler<'a> {
     op_def: &'a OpDef,

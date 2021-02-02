@@ -2,16 +2,16 @@ use std::fmt;
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use futures::Future;
-
 use error::*;
+use futures::Future;
 use generic::{PathSegment, TCPath};
 use value::Value;
 
 use crate::state::State;
 use crate::txn::Txn;
 
-mod op_def;
+mod chain;
+mod scalar;
 mod state;
 
 pub type GetFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
