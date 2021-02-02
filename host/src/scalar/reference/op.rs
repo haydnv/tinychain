@@ -166,6 +166,12 @@ impl TryCastFrom<Scalar> for Subject {
     }
 }
 
+impl From<Link> for Subject {
+    fn from(link: Link) -> Subject {
+        Subject::Link(link)
+    }
+}
+
 impl fmt::Display for Subject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

@@ -159,7 +159,7 @@ impl Instance for State {
         match self {
             Self::Chain(chain) => StateType::Chain(chain.class()),
             Self::Map(_) => StateType::Map,
-            Self::Object(_) => unimplemented!(),
+            Self::Object(object) => object.class(),
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
             Self::Tuple(_) => StateType::Tuple,
         }
@@ -502,14 +502,17 @@ impl<'a> de::Visitor for StateVisitor {
                         }
                         StateType::Map => access.next_value(self.txn).await,
                         StateType::Object(ot) => match ot {
-                            ObjectType::Class(_) => {
+                            ObjectType::Class => {
                                 access
                                     .next_value(())
                                     .map_ok(Object::Class)
                                     .map_ok(State::Object)
                                     .await
                             }
-                            _ => unimplemented!(),
+                            ObjectType::Instance => {
+                                let op_ref = access.next_value(()).map_ok(TCRef::Op).await?;
+                                Ok(State::Scalar(Scalar::Ref(op_ref.into())))
+                            }
                         },
                         StateType::Scalar(st) => {
                             ScalarVisitor::visit_map_value(st, access)

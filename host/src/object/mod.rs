@@ -18,8 +18,8 @@ const PREFIX: generic::PathLabel = generic::path_label(&["state", "object"]);
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum ObjectType {
-    Class(InstanceClassType),
-    Instance(InstanceClass),
+    Class,
+    Instance,
 }
 
 impl generic::Class for ObjectType {
@@ -30,8 +30,8 @@ impl generic::NativeClass for ObjectType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         if path.len() == 3 && &path[..2] == &PREFIX[..] {
             match path[2].as_str() {
-                "class" => Some(Self::Class(InstanceClassType)),
-                "instance" => Some(Self::Instance(InstanceClass::default())),
+                "class" => Some(Self::Class),
+                "instance" => Some(Self::Instance),
                 _ => None,
             }
         } else {
@@ -41,8 +41,8 @@ impl generic::NativeClass for ObjectType {
 
     fn path(&self) -> TCPathBuf {
         let suffix = match self {
-            Self::Class(_) => "class",
-            Self::Instance(_) => "instance",
+            Self::Class => "class",
+            Self::Instance => "instance",
         };
 
         TCPathBuf::from(PREFIX).append(generic::label(suffix))
@@ -52,8 +52,8 @@ impl generic::NativeClass for ObjectType {
 impl fmt::Display for ObjectType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Class(ict) => fmt::Display::fmt(ict, f),
-            Self::Instance(ic) => fmt::Display::fmt(ic, f),
+            Self::Class => f.write_str("user-defined Class"),
+            Self::Instance => f.write_str("user-defined Instance"),
         }
     }
 }
@@ -69,8 +69,8 @@ impl generic::Instance for Object {
 
     fn class(&self) -> ObjectType {
         match self {
-            Self::Class(ic) => ObjectType::Class(ic.class()),
-            Self::Instance(i) => ObjectType::Instance(i.class()),
+            Self::Class(ic) => ObjectType::Class,
+            Self::Instance(i) => ObjectType::Instance,
         }
     }
 }
@@ -112,8 +112,8 @@ impl de::Visitor for ObjectVisitor {
 
         if let Some(class) = <ObjectType as generic::NativeClass>::from_path(&key) {
             match class {
-                ObjectType::Class(_) => access.next_value(()).map_ok(Object::Class).await,
-                ObjectType::Instance(_) => unimplemented!(),
+                ObjectType::Class => access.next_value(()).map_ok(Object::Class).await,
+                ObjectType::Instance => unimplemented!(),
             }
         } else {
             Err(de::Error::invalid_value(key, Self::expecting()))

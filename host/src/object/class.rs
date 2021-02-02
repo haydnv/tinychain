@@ -9,36 +9,9 @@ use generic::{path_label, Id, Map, PathLabel, PathSegment, TCPathBuf};
 use crate::scalar::*;
 use crate::state::State;
 
-use super::InstanceExt;
+use super::{InstanceExt, ObjectType};
 
 const PATH: PathLabel = path_label(&["state", "class"]);
-
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub struct InstanceClassType;
-
-impl generic::Class for InstanceClassType {
-    type Instance = InstanceClass;
-}
-
-impl generic::NativeClass for InstanceClassType {
-    fn from_path(path: &[PathSegment]) -> Option<Self> {
-        if path == &PATH[..] {
-            Some(Self)
-        } else {
-            None
-        }
-    }
-
-    fn path(&self) -> TCPathBuf {
-        PATH.into()
-    }
-}
-
-impl fmt::Display for InstanceClassType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "user-defined Class")
-    }
-}
 
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct InstanceClass {
@@ -65,10 +38,10 @@ impl generic::Class for InstanceClass {
 }
 
 impl generic::Instance for InstanceClass {
-    type Class = InstanceClassType;
+    type Class = ObjectType;
 
-    fn class(&self) -> InstanceClassType {
-        InstanceClassType
+    fn class(&self) -> ObjectType {
+        ObjectType::Class
     }
 }
 
