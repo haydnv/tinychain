@@ -8,9 +8,13 @@ use auth::Token;
 use error::*;
 use generic::Id;
 use transact::fs::{self, DirEntry, File};
+
 pub use transact::{Transact, Transaction, TxnId};
 
 use crate::chain::ChainBlock;
+use crate::gateway::Gateway;
+use crate::scalar::{Link, Value};
+use crate::state::State;
 
 mod server;
 
@@ -88,8 +92,9 @@ impl fmt::Display for FileEntry {
 }
 
 struct Inner {
-    request: Arc<Request>,
     dir: Arc<fs::Dir<FileEntry>>,
+    gateway: Arc<Gateway>,
+    request: Arc<Request>,
 }
 
 #[derive(Clone)]
@@ -98,14 +103,22 @@ pub struct Txn {
 }
 
 impl Txn {
-    fn new(dir: Arc<fs::Dir<FileEntry>>, request: Request) -> Self {
+    fn new(gateway: Arc<Gateway>, dir: Arc<fs::Dir<FileEntry>>, request: Request) -> Self {
         let request = Arc::new(request);
-        let inner = Arc::new(Inner { request, dir });
+        let inner = Arc::new(Inner {
+            dir,
+            gateway,
+            request,
+        });
         Self { inner }
     }
 
     pub fn request(&'_ self) -> &'_ Request {
         &self.inner.request
+    }
+
+    pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
+        self.inner.gateway.get(self, link, key).await
     }
 }
 
@@ -121,6 +134,7 @@ impl Transaction<FileEntry> for Txn {
 
     async fn subcontext(&self, id: &Id) -> TCResult<Self> {
         let inner = Inner {
+            gateway: self.inner.gateway.clone(),
             request: self.inner.request.clone(),
             dir: self
                 .inner

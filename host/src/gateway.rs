@@ -25,6 +25,7 @@ pub trait Server {
 
 pub struct Gateway {
     kernel: Kernel,
+    txn_server: TxnServer,
     addr: IpAddr,
     config: HashMap<LinkProtocol, u16>,
 }
@@ -54,11 +55,17 @@ impl Gateway {
         ))
     }
 
-    pub fn new(kernel: Kernel, addr: IpAddr, config: HashMap<LinkProtocol, u16>) -> Arc<Self> {
+    pub fn new(
+        kernel: Kernel,
+        txn_server: TxnServer,
+        addr: IpAddr,
+        config: HashMap<LinkProtocol, u16>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             kernel,
             addr,
             config,
+            txn_server,
         })
     }
 
@@ -71,8 +78,9 @@ impl Gateway {
         }
     }
 
-    pub async fn new_txn(&self, request: Request) -> TCResult<Txn> {
-        self.kernel.new_txn(request).await
+    pub async fn new_txn(self: &Arc<Self>, request: Request) -> TCResult<Txn> {
+        let this = self.clone();
+        self.txn_server.new_txn(this, request).await
     }
 
     pub async fn get(&self, txn: &Txn, subject: Link, key: Value) -> TCResult<State> {

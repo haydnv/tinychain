@@ -8,19 +8,9 @@ use crate::txn::*;
 
 const CAPTURE: Label = label("capture");
 
-pub struct Kernel {
-    txn_server: TxnServer,
-}
+pub struct Kernel;
 
 impl Kernel {
-    pub fn new(txn_server: TxnServer) -> Self {
-        Self { txn_server }
-    }
-
-    pub async fn new_txn(&self, request: Request) -> TCResult<Txn> {
-        self.txn_server.new_txn(request).await
-    }
-
     pub async fn get(&self, _txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if let Some(class) = StateType::from_path(path) {
             let err = format!("Cannot cast into {} from {}", class, key);

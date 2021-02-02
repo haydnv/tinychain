@@ -7,6 +7,8 @@ use futures_locks::RwLock;
 use error::*;
 use transact::fs;
 
+use crate::gateway::Gateway;
+
 use super::{FileEntry, Request, Txn, TxnId};
 
 pub struct TxnServer {
@@ -25,7 +27,7 @@ impl TxnServer {
         }
     }
 
-    pub async fn new_txn(&self, request: Request) -> TCResult<Txn> {
+    pub async fn new_txn(&self, gateway: Arc<Gateway>, request: Request) -> TCResult<Txn> {
         let mut active = self.active.write().await;
 
         match active.entry(request.txn_id) {
@@ -42,7 +44,8 @@ impl TxnServer {
                     .workspace
                     .create_dir(request.txn_id, &[request.txn_id.to_id()])
                     .await?;
-                let txn = Txn::new(txn_dir, request);
+
+                let txn = Txn::new(gateway, txn_dir, request);
                 entry.insert(txn.clone());
                 Ok(txn)
             }

@@ -34,8 +34,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     gateway_config.insert(value::LinkProtocol::HTTP, config.http_port);
 
     let txn_server = tinychain::txn::TxnServer::new(config.workspace).await;
-    let kernel = tinychain::Kernel::new(txn_server);
-    let gateway = tinychain::gateway::Gateway::new(kernel, config.address, gateway_config);
+    let kernel = tinychain::Kernel;
+    let gateway =
+        tinychain::gateway::Gateway::new(kernel, txn_server, config.address, gateway_config);
 
     if let Err(cause) = gateway.listen().await {
         log::error!("Server error: {}", cause);

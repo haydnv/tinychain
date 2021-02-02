@@ -350,7 +350,10 @@ impl Refer for OpRef {
     async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
         match self {
             Self::Get((subject, key)) => match subject {
-                Subject::Link(_link) => Err(TCError::not_implemented("OpRef::resolve Link")),
+                Subject::Link(link) => {
+                    let key = key.resolve(context, txn).await?;
+                    txn.get(link, key).await
+                }
                 Subject::Ref(id_ref) => {
                     let subject = id_ref.resolve(context, txn);
                     let key = key.resolve(context, txn);
