@@ -11,8 +11,9 @@ def cast_i64(cxt, n):
 
 class ValueTests(InstanceTest):
     def testCastI64(self):
-        print(tc.to_json(cast_i64))
-        print(self.host.resolve(cast_i64))
+        expected = tc.to_json(cast_i64)
+        actual = self.host.resolve(cast_i64)
+        self.assertEqual(expected, actual)
 
 
 if __name__ == "__main__":
