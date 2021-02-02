@@ -501,9 +501,16 @@ impl<'a> de::Visitor for StateVisitor {
                                 .await
                         }
                         StateType::Map => access.next_value(self.txn).await,
-                        StateType::Object(_ot) => {
-                            unimplemented!()
-                        }
+                        StateType::Object(ot) => match ot {
+                            ObjectType::Class(_) => {
+                                access
+                                    .next_value(())
+                                    .map_ok(Object::Class)
+                                    .map_ok(State::Object)
+                                    .await
+                            }
+                            _ => unimplemented!(),
+                        },
                         StateType::Scalar(st) => {
                             ScalarVisitor::visit_map_value(st, access)
                                 .map_ok(State::Scalar)

@@ -1,6 +1,10 @@
+use std::collections::HashMap;
 use std::fmt;
 
-use generic::{path_label, Map, PathLabel, PathSegment, TCPathBuf};
+use async_trait::async_trait;
+use destream::de;
+
+use generic::{path_label, Id, Map, PathLabel, PathSegment, TCPathBuf};
 
 use crate::scalar::*;
 use crate::state::State;
@@ -68,6 +72,15 @@ impl generic::Instance for InstanceClass {
     }
 }
 
+#[async_trait]
+impl de::FromStream for InstanceClass {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_map(InstanceClassVisitor).await
+    }
+}
+
 impl From<InstanceClass> for Link {
     fn from(ic: InstanceClass) -> Link {
         if let Some(link) = ic.extends {
@@ -84,6 +97,53 @@ impl fmt::Display for InstanceClass {
             write!(f, "class {}", link)
         } else {
             f.write_str("generic Object type")
+        }
+    }
+}
+
+struct InstanceClassVisitor;
+
+#[async_trait]
+impl de::Visitor for InstanceClassVisitor {
+    type Value = InstanceClass;
+
+    fn expecting() -> &'static str {
+        "a user-defined Class"
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<InstanceClass, A::Error> {
+        if let Some(key) = access.next_key::<String>(()).await? {
+            if let Ok(extends) = key.parse() {
+                let proto = access.next_value(()).await?;
+                return Ok(InstanceClass {
+                    extends: Some(extends),
+                    proto,
+                });
+            }
+
+            let mut proto = if let Some(len) = access.size_hint() {
+                HashMap::with_capacity(len)
+            } else {
+                HashMap::new()
+            };
+
+            let id: Id = key.parse().map_err(de::Error::custom)?;
+            proto.insert(id, access.next_value(()).await?);
+
+            while let Some(id) = access.next_key(()).await? {
+                let value = access.next_value(()).await?;
+                proto.insert(id, value);
+            }
+
+            Ok(InstanceClass {
+                extends: None,
+                proto: proto.into(),
+            })
+        } else {
+            Ok(InstanceClass {
+                extends: None,
+                proto: Map::default(),
+            })
         }
     }
 }

@@ -1,5 +1,9 @@
 use std::fmt;
 
+use async_trait::async_trait;
+use destream::de;
+use futures::TryFutureExt;
+
 use generic::{PathSegment, TCPathBuf};
 
 use crate::state::State;
@@ -71,11 +75,48 @@ impl generic::Instance for Object {
     }
 }
 
+#[async_trait]
+impl de::FromStream for Object {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_map(ObjectVisitor).await
+    }
+}
+
+#[async_trait]
 impl fmt::Display for Object {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Class(ict) => fmt::Display::fmt(ict, f),
             Self::Instance(ic) => fmt::Display::fmt(ic, f),
+        }
+    }
+}
+
+struct ObjectVisitor;
+
+#[async_trait]
+impl de::Visitor for ObjectVisitor {
+    type Value = Object;
+
+    fn expecting() -> &'static str {
+        "a user-defined Class or Instance"
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Object, A::Error> {
+        let key = access
+            .next_key::<TCPathBuf>(())
+            .await?
+            .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
+
+        if let Some(class) = <ObjectType as generic::NativeClass>::from_path(&key) {
+            match class {
+                ObjectType::Class(_) => access.next_value(()).map_ok(Object::Class).await,
+                ObjectType::Instance(_) => unimplemented!(),
+            }
+        } else {
+            Err(de::Error::invalid_value(key, Self::expecting()))
         }
     }
 }
