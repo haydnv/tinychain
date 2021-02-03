@@ -26,33 +26,17 @@ class State(object):
         else:
             return type(self)(IdRef(name))
 
-    def get(self, path="/", key=None):
-        return MethodRef.Get(self, path)(key)
-
-    def put(self, path, key, value):
-        return MethodRef.Put(self, path)(key, value)
-
-    def post(self, path="/", **params):
-        return MethodRef.Post(self, path)(**params)
-
-    def delete(self, path="/", key=None):
-        return MethodRef.Delete(self, path)(key)
-
 
 class Scalar(State):
     PATH = State.PATH + "/scalar"
 
     def __init__(self, spec):
         State.__init__(self, spec)
-        self.__lock__ = True
 
     def __json__(self):
         return to_json({self.PATH: spec(self)})
 
     def __setattr__(self, attr, value):
-        if locked(self):
-            raise RuntimeError("a Scalar is immutable at runtime")
-
         State.__setattr__(self, attr, value)
 
 
@@ -105,6 +89,10 @@ class GetOpRef(OpRef):
 class PutOpRef(OpRef):
     PATH = OpRef.PATH + "/put"
 
+    def __init__(self, link, key, value):
+        link = Link(link)
+        OpRef.__init__(self, (link, key, value))
+
     def __json__(self):
         subject, key, value = spec(self)
         return {str(subject): [to_json(key), to_json(value)]}
@@ -113,6 +101,10 @@ class PutOpRef(OpRef):
 class PostOpRef(OpRef):
     PATH = OpRef.PATH + "/post"
 
+    def __init__(self, link, **params):
+        link = Link(link)
+        OpRef.__init__(self, (link, params))
+
     def __json__(self):
         subject, params = spec(self)
         return {str(subject): to_json(params)}
@@ -120,6 +112,14 @@ class PostOpRef(OpRef):
 
 class DeleteOpRef(OpRef):
     PATH = OpRef.PATH + "/delete"
+
+    def __init__(self, link, key=None):
+        link = Link(link)
+        OpRef.__init__(self, (link, key))
+
+    def __json__(self):
+        (link, key) = spec(self)
+        return to_json({str(link): [key]})
 
 
 OpRef.Get = GetOpRef
@@ -288,11 +288,6 @@ class Nil(Value):
 class Number(Value):
     PATH = Value.PATH + "/number"
 
-    def __init__(self, spec):
-        self.add = MethodRef.Get(spec, "/add")
-
-        Value.__init__(self, spec)
-
     def __json__(self):
         return to_json(spec(self))
 
@@ -301,6 +296,12 @@ class Number(Value):
 
     def __mul__(self, other):
         return self.mul(other)
+
+    def add(self, other):
+        raise NotImplementedError
+
+    def mul(self, other):
+        raise NotImplementedError
 
 
 class Bool(Number):
@@ -385,210 +386,4 @@ class Link(Value):
 
     def __str__(self):
         return str(spec(self))
-
-
-# User-defined class & instance types
-
-class Class(State):
-    PATH = State.PATH + "/class"
-
-    def __init__(self, spec):
-        if not inspect.isclass(spec):
-            raise ValueError("Class spec must be a class definition")
-
-        class Instance(spec):
-            PATH = spec.PATH
-
-            def __init__(self, instance_spec):
-                self.__spec__ = instance_spec
-
-                raise NotImplementedError
-
-            def __getattr__(self, name):
-                form = self.__form__()
-                if name in form:
-                    return ref(form[name], name)
-
-        self.__spec__ = Instance
-
-    def __call__(self, instance_spec):
-        return spec(self)(instance_spec)
-
-    def __getattr__(self, name):
-        return getattr(spec(self), name)
-
-    def __json__(self):
-        extends = spec(self).PATH
-        proto = form_of(self(IdRef("self")))
-
-        return {Class.PATH: to_json({extends: proto})}
-
-
-class AttrRef(Ref):
-    def __init__(self, subject, path):
-        self.subject = IdRef(subject)
-        self.path = Link(path)
-
-    def __json__(self):
-        return {str(self): []}
-
-    def __str__(self):
-        if str(self.path) == "/":
-            return str(self.subject)
-        else:
-            return f"{self.subject}{self.path}"
-
-
-# Method definition & call utilities
-
-class Method(Op):
-    def __init__(self, subject, spec):
-        self.subject = subject
-        Op.__init__(self, spec)
-
-
-class GetMethod(Method):
-    PATH = Op.Get.PATH
-
-    def __init__(self, subject, spec):
-        Method.__init__(self, subject, spec)
-
-    def __form__(self):
-        args = []
-        context = Context()
-
-        params = list(inspect.signature(spec(self)).parameters.items())
-        if params:
-            if len(params) > 3:
-                raise ValueError("GET Method takes only one value parameter")
-
-            if params:
-                first_annotation = params[0][1].annotation
-                if first_annotation in {inspect.Parameter.empty, type(self.subject)}:
-                    args.append(self.subject)
-                else:
-                    raise ValueError("The first argument to Method.Get is an instance of"
-                                     + f"{self.subject.__class__}, not {first_annotation}")
-
-            if len(params) > 1:
-                second_annotation = params[1][1].annotation
-                if second_annotation == inspect.Parameter.empty or second_annotation == Context:
-                    args.append(context)
-                else:
-                    raise ValueError("The second argument to Method.Get is a transaction"
-                                     + f"Context, not {second_annotation}")
-
-            if len(params) == 3:
-                key_name, param = params[2]
-                if param.annotation == inspect.Parameter.empty:
-                    args.append(Ref(key_name))
-                elif issubclass(param.annotation, Value):
-                    args.append(param.annotation(Ref(key_name)))
-                else:
-                    raise ValueError("GET Method key must be a Tinychain Value")
-
-        result = spec(self)(*args) # populate the Context
-        if isinstance(result, State) or isinstance(result, Ref):
-            context._value = result
-        else:
-            raise ValueError(f"Op return value must be a Tinychain state, not {result}")
-
-        return context
-
-    def __json__(self):
-        params = list(inspect.signature(spec(self)).parameters.items())
-        key_name = params[2][0] if len(params) == 3 else "key"
-        return {self.PATH: [key_name, to_json(form_of(self))]}
-
-    def __ref__(self, name):
-        return MethodRef.Get(self.subject, f"/{name}")
-
-
-Method.Get = GetMethod
-
-
-class MethodCall(Ref):
-    PATH = OpRef.PATH
-
-
-class GetCall(MethodCall):
-    PATH = OpRef.Get.PATH
-
-    def __init__(self, method, key=None):
-        self.method = method
-        self.key = key
-
-    def __json__(self):
-        return {str(self.method): [to_json(self.key)]}
-
-
-class PutCall(MethodCall):
-    PATH = OpRef.Put.PATH
-
-    def __init__(self, method, key, value):
-        self.method = method
-        self.key = key
-        self.value = value
-
-    def __json__(self):
-        return {str(self.method): to_json([self.key, self.value])}
-
-
-class PostCall(MethodCall):
-    PATH = OpRef.Post.PATH
-
-    def __init__(self, method, **params):
-        self.method = method
-        self.params = params
-
-    def __json__(self):
-        return {str(self.method): to_json(self.params)}
-
-
-class DeleteCall(MethodCall):
-    PATH = OpRef.Delete.PATH
-
-    def __init__(self, method, key=None):
-        self.method = method
-        self.key = key
-
-    def __json__(self):
-        return {self.PATH: to_json([self.method.subject, self.method.path, self.key])}
-
-
-MethodCall.Get = GetCall
-MethodCall.Put = PutCall
-MethodCall.Post = PostCall
-MethodCall.Delete = DeleteCall
-
-
-class MethodRef:
-    def __init__(self, *args, **kwargs):
-        raise RuntimeError("Cannot instantiate MethodRef directly; try Method.<access method>")
-
-    class Get(AttrRef):
-        def __call__(self, key=None):
-            return MethodCall.Get(self, key)
-
-    class Post(AttrRef):
-        def __call__(self, **params):
-            return MethodCall.Post(self, **params)
-
-    class Put(AttrRef):
-        def __call__(self, key, value):
-            return MethodCall.Put(self, key, value)
-
-    class Delete(AttrRef):
-        def __call__(self, key=None):
-            return MethodCall.Delete(self, key)
-
-
-
-class MethodStub(object):
-    def __init__(self, dtype, method):
-        self.dtype = dtype
-        self.method = method
-
-    def __call__(self, subject):
-        return self.dtype(subject, self.method)
 

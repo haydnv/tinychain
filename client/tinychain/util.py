@@ -49,13 +49,6 @@ def form_of(op):
         raise ValueError(f"{op} has no Context")
 
 
-def locked(subject):
-    if hasattr(subject, "__lock__"):
-        return subject.__lock__
-    else:
-        return False
-
-
 def ref(subject, name=None):
     if hasattr(subject, "__ref__"):
         return subject.__ref__(name)
