@@ -63,6 +63,10 @@ def ref(subject, name=None):
         raise ValueError(f"{subject} does not support named references")
 
 
+def spec(subject):
+    if hasattr(subject, "__spec__"):
+        return subject.__spec__
+
 def to_json(obj):
     if inspect.isclass(obj) and hasattr(obj, "PATH"):
         return {obj.PATH: []}

@@ -8,21 +8,19 @@ from .util import *
 class State(object):
     PATH = "/state"
 
-    def __init__(self, spec):
-        if isinstance(spec, self.__class__):
-            self.spec = spec.spec
+    def __init__(self, state_spec):
+        if isinstance(state_spec, self.__class__):
+            self.__spec__ = spec(state_spec)
         else:
-            self.spec = spec
+            self.__spec__ = state_spec
 
     def __json__(self):
-        return {self.PATH: [to_json(self.spec)]}
+        return {self.PATH: [to_json(spec(self))]}
 
     def __ref__(self, name=None):
-        if isinstance(self.spec, Ref):
+        if isinstance(spec(self), Ref):
             if name is None:
                 return self
-            else:
-                raise ValueError(f"Cannot rename {self}")
         elif name is None:
             raise ValueError(f"Reference to {self} requires a name")
         else:
@@ -49,7 +47,7 @@ class Scalar(State):
         self.__lock__ = True
 
     def __json__(self):
-        return to_json({self.PATH: self.spec})
+        return to_json({self.PATH: spec(self)})
 
     def __setattr__(self, attr, value):
         if locked(self):
@@ -69,23 +67,23 @@ class IdRef(Ref):
 
     def __init__(self, subject):
         if isinstance(subject, Ref):
-            self.spec = subject.spec
-        elif isinstance(subject, State) and isinstance(subject.spec, Ref):
-            self.spec = subject.spec.spec
+            self.__spec__ = spec(subject)
+        elif isinstance(subject, State) and isinstance(spec(subject), Ref):
+            self.__spec__ = spec(spec(subject))
         elif hasattr(subject, "__ref__"):
             raise ValueError(
                 f"Ref to {subject} needs a name (hint: try calling ref(spec, 'name')")
         else:
-            self.spec = subject
+            self.__spec__ = subject
 
-        if str(self.spec).startswith("$"):
+        if str(spec(self)).startswith("$"):
             raise ValueError(f"Ref name cannot start with '$': {self.name}")
 
     def __json__(self):
         return to_json({str(self): []})
 
     def __str__(self):
-        return f"${self.spec}"
+        return f"${spec(self)}"
 
 
 class OpRef(Ref):
@@ -100,7 +98,7 @@ class GetOpRef(OpRef):
         OpRef.__init__(self, (link, key))
 
     def __json__(self):
-        (link, key) = self.spec
+        (link, key) = spec(self)
         return to_json({str(link): [key]})
 
 
@@ -108,7 +106,7 @@ class PutOpRef(OpRef):
     PATH = OpRef.PATH + "/put"
 
     def __json__(self):
-        subject, key, value = self.spec
+        subject, key, value = spec(self)
         return {str(subject): [to_json(key), to_json(value)]}
 
 
@@ -116,7 +114,7 @@ class PostOpRef(OpRef):
     PATH = OpRef.PATH + "/post"
 
     def __json__(self):
-        subject, params = self.spec
+        subject, params = spec(self)
         return {str(subject): to_json(params)}
 
 
@@ -130,19 +128,28 @@ OpRef.Post = PostOpRef
 OpRef.Delete = PostOpRef
 
 
-class Map(Scalar):
-    PATH = Scalar.PATH + "/map"
+class After(Ref):
+    PATH = Ref.PATH + "/after"
 
-    def __json__(self):
-        json = {}
-        for name in self.spec:
-            json[name] = to_json(self.spec[name])
-
-        return json
+    def __init__(self, when, then):
+        Ref.__init__(self, (when, then))
 
 
-class Tuple(Scalar):
-    PATH = Scalar.PATH + "/tuple"
+class If(Ref):
+    PATH = Ref.PATH + "/if"
+
+    def __init__(self, cond, then, or_else):
+        Ref.__init__(self, (cond, then, or_else))
+
+
+# Compound types
+
+class Map(State):
+    PATH = State.PATH + "/map"
+
+
+class Tuple(State):
+    PATH = State.PATH + "/tuple"
 
 
 # Op types
@@ -167,7 +174,7 @@ class GetOp(Op):
         args = []
         context = Context()
 
-        params = list(inspect.signature(self.spec).parameters.items())
+        params = list(inspect.signature(spec(self)).parameters.items())
         if params:
             first_annotation = params[0][1].annotation
             if first_annotation == inspect.Parameter.empty or first_annotation == Context:
@@ -190,7 +197,7 @@ class GetOp(Op):
         if len(params) > 2:
             raise ValueError("GET Op takes two optional parameters, a Context and a Value")
 
-        result = self.spec(*args) # populate the Context
+        result = spec(self)(*args) # populate the Context
         if isinstance(result, State):
             context._result = result
         else:
@@ -199,7 +206,7 @@ class GetOp(Op):
         return context
 
     def __json__(self):
-        params = list(inspect.signature(self.spec).parameters.items())
+        params = list(inspect.signature(spec(self)).parameters.items())
         if len(params) > 2:
             raise ValueError(f"GET Op takes two optional parameters, a Context and a Value")
         elif len(params) == 2:
@@ -222,13 +229,15 @@ class PostOp(Op):
     PATH = Op.PATH + "/post"
 
     def __form__(self):
-        if not inspect.isfunction(self.spec):
-            return to_json(self.spec)
+        form = spec(self)
+
+        if not inspect.isfunction(form):
+            return to_json(form)
 
         args = []
         context = Context()
 
-        params = list(inspect.signature(self.spec).parameters.items())
+        params = list(inspect.signature(form).parameters.items())
         if params:
             first_annotation = params[0][1].annotation
             if first_annotation == inspect.Parameter.empty or first_annotation == Context:
@@ -244,7 +253,7 @@ class PostOp(Op):
                 else:
                     args.append(param.annotation(IdRef(name)))
 
-        result = self.spec(*args) # populate the Context
+        result = spec(self)(*args) # populate the Context
         if isinstance(result, _State) or isinstance(result, Ref):
             context._result = result
         else:
@@ -279,14 +288,19 @@ class Nil(Value):
 class Number(Value):
     PATH = Value.PATH + "/number"
 
+    def __init__(self, spec):
+        self.add = MethodRef.Get(spec, "/add")
+
+        Value.__init__(self, spec)
+
     def __json__(self):
-        return to_json(self.spec)
+        return to_json(spec(self))
+
+    def __add__(self, other):
+        return self.add(other)
 
     def __mul__(self, other):
         return self.mul(other)
-
-    def mul(self, other):
-        return Number(self.get("/mul", other))
 
 
 class Bool(Number):
@@ -297,7 +311,7 @@ class Complex(Number):
     PATH = Number.PATH + "/complex"
 
     def __json__(self):
-        return to_json({self.PATH: self.spec})
+        return to_json({self.PATH: spec(self)})
 
 
 class C32(Complex):
@@ -360,7 +374,7 @@ class String(Value):
     PATH = Value.PATH + "/string"
 
     def __json__(self):
-        return str(self.spec)
+        return str(spec(self))
 
 
 class Link(Value):
@@ -370,7 +384,7 @@ class Link(Value):
         return {str(self): []}
 
     def __str__(self):
-        return str(self.spec)
+        return str(spec(self))
 
 
 # User-defined class & instance types
@@ -379,60 +393,35 @@ class Class(State):
     PATH = State.PATH + "/class"
 
     def __init__(self, spec):
-        instance_class = self
-
         if not inspect.isclass(spec):
-            raise ValueError("expected a class definition")
+            raise ValueError("Class spec must be a class definition")
 
         class Instance(spec):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
+            PATH = spec.PATH
 
-                for name, method in inspect.getmembers(self):
-                    if name.startswith('_'):
-                        continue
+            def __init__(self, instance_spec):
+                self.__spec__ = instance_spec
 
-                    if isinstance(method, MethodStub):
-                        setattr(self, name, ref(method(ref(self, "self")), name))
+                raise NotImplementedError
 
-                self.__lock__ = True
+            def __getattr__(self, name):
+                form = self.__form__()
+                if name in form:
+                    return ref(form[name], name)
 
-            def __setattr__(self, attr, value):
-                if locked(self):
-                    raise RuntimeError("Instance is immutable at runtime")
+        self.__spec__ = Instance
 
-                super().__setattr__(attr, value)
-
-        self.spec = Instance
-
-    def __call__(self, *args, **kwargs):
-        return self.spec(*args, **kwargs)
+    def __call__(self, instance_spec):
+        return spec(self)(instance_spec)
 
     def __getattr__(self, name):
-        return getattr(self.spec, name)
+        return getattr(spec(self), name)
 
     def __json__(self):
-        mro = self.spec.mro()
-        if len(mro) < 3:
-            raise ValueError("Tinychain Class must extend a native class (e.g. tc.State)")
+        extends = spec(self).PATH
+        proto = form_of(self(IdRef("self")))
 
-        parent = mro[2]
-        extends = parent.PATH
-        proto = {}
-        parent_members = set(name for name, _ in inspect.getmembers(parent))
-        subject = self.spec(IdRef("self"))
-
-        for name, method in inspect.getmembers(self.spec):
-            if name.startswith('_') or name in parent_members:
-                continue
-
-            if isinstance(method, MethodStub):
-                method = method(subject)
-                proto[name] = to_json(method)
-            else:
-                raise ValueError(f"{name} is not a Method")
-
-        return to_json({Class.PATH: {extends: proto}})
+        return {Class.PATH: to_json({extends: proto})}
 
 
 class AttrRef(Ref):
@@ -454,8 +443,8 @@ class AttrRef(Ref):
 
 class Method(Op):
     def __init__(self, subject, spec):
-        Op.__init__(self, spec)
         self.subject = subject
+        Op.__init__(self, spec)
 
 
 class GetMethod(Method):
@@ -468,7 +457,7 @@ class GetMethod(Method):
         args = []
         context = Context()
 
-        params = list(inspect.signature(self.spec).parameters.items())
+        params = list(inspect.signature(spec(self)).parameters.items())
         if params:
             if len(params) > 3:
                 raise ValueError("GET Method takes only one value parameter")
@@ -498,7 +487,7 @@ class GetMethod(Method):
                 else:
                     raise ValueError("GET Method key must be a Tinychain Value")
 
-        result = self.spec(*args) # populate the Context
+        result = spec(self)(*args) # populate the Context
         if isinstance(result, State) or isinstance(result, Ref):
             context._value = result
         else:
@@ -507,7 +496,7 @@ class GetMethod(Method):
         return context
 
     def __json__(self):
-        params = list(inspect.signature(self.spec).parameters.items())
+        params = list(inspect.signature(spec(self)).parameters.items())
         key_name = params[2][0] if len(params) == 3 else "key"
         return {self.PATH: [key_name, to_json(form_of(self))]}
 
