@@ -32,6 +32,15 @@ class State(object):
     def get(self, path="/", key=None):
         return MethodRef.Get(self, path)(key)
 
+    def put(self, path, key, value):
+        return MethodRef.Put(self, path)(key, value)
+
+    def post(self, path="/", **params):
+        return MethodRef.Post(self, path)(**params)
+
+    def delete(self, path="/", key=None):
+        return MethodRef.Delete(self, path)(key)
+
 
 class Scalar(State):
     PATH = State.PATH + "/scalar"
@@ -86,7 +95,30 @@ class GetOpRef(OpRef):
         return to_json({str(link): [key]})
 
 
+class PutOpRef(OpRef):
+    PATH = OpRef.PATH + "/put"
+
+    def __json__(self):
+        subject, key, value = self.spec
+        return {str(subject): [to_json(key), to_json(value)]}
+
+
+class PostOpRef(OpRef):
+    PATH = OpRef.PATH + "/post"
+
+    def __json__(self):
+        subject, params = self.spec
+        return {str(subject): to_json(params)}
+
+
+class DeleteOpRef(OpRef):
+    PATH = OpRef.PATH + "/delete"
+
+
 OpRef.Get = GetOpRef
+OpRef.Put = PutOpRef
+OpRef.Post = PostOpRef
+OpRef.Delete = PostOpRef
 
 
 class Map(Scalar):
@@ -487,7 +519,44 @@ class GetCall(MethodCall):
         return {str(self.method): [to_json(self.key)]}
 
 
+class PutCall(MethodCall):
+    PATH = OpRef.Put.PATH
+
+    def __init__(self, method, key, value):
+        self.method = method
+        self.key = key
+        self.value = value
+
+    def __json__(self):
+        return {str(self.method): to_json([self.key, self.value])}
+
+
+class PostCall(MethodCall):
+    PATH = OpRef.Post.PATH
+
+    def __init__(self, method, **params):
+        self.method = method
+        self.params = params
+
+    def __json__(self):
+        return {str(self.method): to_json(self.params)}
+
+
+class DeleteCall(MethodCall):
+    PATH = OpRef.Delete.PATH
+
+    def __init__(self, method, key=None):
+        self.method = method
+        self.key = key
+
+    def __json__(self):
+        return {self.PATH: to_json([self.method.subject, self.method.path, self.key])}
+
+
 MethodCall.Get = GetCall
+MethodCall.Put = PutCall
+MethodCall.Post = PostCall
+MethodCall.Delete = DeleteCall
 
 
 class MethodRef:
@@ -497,6 +566,18 @@ class MethodRef:
     class Get(AttrRef):
         def __call__(self, key=None):
             return MethodCall.Get(self, key)
+
+    class Post(AttrRef):
+        def __call__(self, **params):
+            return MethodCall.Post(self, **params)
+
+    class Put(AttrRef):
+        def __call__(self, key, value):
+            return MethodCall.Put(self, key, value)
+
+    class Delete(AttrRef):
+        def __call__(self, key=None):
+            return MethodCall.Delete(self, key)
 
 
 
