@@ -10,10 +10,10 @@ def cast_i64(cxt, n):
 
 
 class ValueTests(InstanceTest):
-#    def testCastI64(self):
-#        expected = tc.to_json(cast_i64)
-#        actual = self.host.resolve(cast_i64)
-#        self.assertEqual(expected, actual)
+    def testCastI64(self):
+        expected = tc.to_json(cast_i64)
+        actual = self.host.resolve(cast_i64)
+        self.assertEqual(expected, actual)
 
     def testCall(self):
         cxt = tc.Context()

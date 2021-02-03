@@ -5,7 +5,6 @@ from .util import *
 
 # Base types (should not be initialized directly)
 
-
 class State(object):
     PATH = "/state"
 
@@ -45,8 +44,18 @@ class State(object):
 class Scalar(State):
     PATH = State.PATH + "/scalar"
 
+    def __init__(self, spec):
+        State.__init__(self, spec)
+        self.__lock__ = True
+
     def __json__(self):
         return to_json({self.PATH: self.spec})
+
+    def __setattr__(self, attr, value):
+        if locked(self):
+            raise RuntimeError("a Scalar is immutable at runtime")
+
+        State.__setattr__(self, attr, value)
 
 
 class Ref(Scalar):
@@ -376,23 +385,28 @@ class Class(State):
             raise ValueError("expected a class definition")
 
         class Instance(spec):
-            def __init__(self, instance_spec):
-                super().__init__(instance_spec)
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
 
                 for name, method in inspect.getmembers(self):
                     if name.startswith('_'):
                         continue
 
                     if isinstance(method, MethodStub):
-                        if isinstance(self.spec, Ref):
-                            setattr(self, name, ref(method(self), name))
-                        else:
-                            setattr(self, name, ref(method(ref(self, "self")), name))
+                        setattr(self, name, ref(method(ref(self, "self")), name))
+
+                self.__lock__ = True
+
+            def __setattr__(self, attr, value):
+                if locked(self):
+                    raise RuntimeError("Instance is immutable at runtime")
+
+                super().__setattr__(attr, value)
 
         self.spec = Instance
 
-    def __call__(self, spec):
-        return self.spec(spec)
+    def __call__(self, *args, **kwargs):
+        return self.spec(*args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self.spec, name)

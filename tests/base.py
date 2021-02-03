@@ -1,14 +1,9 @@
-import os
-import sys
 import unittest
 
 import tinychain as tc
 
 
-PATH = os.environ.get('TC_PATH')
-if not PATH:
-    sys.exit("Required environment variable not set: TC_PATH")
-
+PATH = "../host/target/debug/tinychain"
 PORT = 8702
 
 
