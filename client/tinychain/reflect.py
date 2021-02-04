@@ -1,6 +1,6 @@
 import inspect
 
-from .state import State, Value
+from .state import Scalar, State, Value
 from .util import *
 
 
@@ -24,17 +24,11 @@ class Instance(object):
                 continue
 
             if isinstance(attr, MethodStub):
-                sig = inspect.signature(attr.form)
-
-                if sig.return_annotation == inspect.Signature.empty:
-                    setattr(self.header, name, None)
-                else:
-                    setattr(self.header, name, sig.return_annotation(URI(name)))
-
+                setattr(self.header, name, MethodHeader(attr))
             elif isinstance(attr, State):
                 setattr(self.header, name, type(attr)(URI(f"self/{name}")))
             else:
-                setattr(self.header, name, attr)
+                raise AttributeError(f"invalid attribute {attr}")
 
         form = {}
         for name, attr in inspect.getmembers(self.subject):
@@ -42,11 +36,19 @@ class Instance(object):
                 continue
 
             if isinstance(attr, MethodStub):
-                form[name] = form_of(attr(self.header))
+                form[name] = to_json(attr(self.header))
             else:
                 form[name] = attr
 
         return form
+
+
+class MethodHeader(object):
+    def __init__(self, stub):
+        self.stub = stub
+
+    def __call__(self, *args, **kwargs):
+        raise NotImplementedError
 
 
 class MethodStub(object):
@@ -59,27 +61,48 @@ class MethodStub(object):
 
 
 class Method(object):
+    __ref__ = uri(Scalar) + "/op"
+
     def __init__(self, header, form):
         self.header = header
         self.form = form
 
+    def __json__(self):
+        return {str(uri(self)): to_json(form_of(self))}
+
 
 class GetMethod(Method):
+    __ref__ = uri(Method) + "/get"
+
     def __form__(self):
         sig = inspect.signature(self.form)
+
+        if num_args(sig) < 1 or num_args(sig) > 3:
+            raise ValueError("GET method takes 1-3 arguments: (self, context, key)")
+
         args = [self.header]
 
-        expect = [Context, Value]
-        args.extend(init_args(list(sig.parameters.items())[1:], expect))
+        cxt = Context()
+        if num_args(sig) > 1:
+            args.append(cxt)
 
-        return self.form(*args)
+        key_name = "key"
+        if num_args(sig) == 3:
+            key_name, param = sig.parameters[2]
+            if param.annotation in {inspect.Parameter.empty, Value}:
+                args.append(Value(URI(key_name)))
+            elif issubclass(param.annotation, Value):
+                args.append(param.annotation(URI(key_name)))
+
+        cxt._return = self.form(*args) # populate the Context
+        return (key_name, cxt)
 
 
 Method.Get = GetMethod
 
 
 def num_args(sig):
-    return len(inspect.signature(op).parameters)
+    return len(sig.parameters)
 
 def init_args(params, expect):
     args = []

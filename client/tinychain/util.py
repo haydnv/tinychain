@@ -69,7 +69,10 @@ class URI(object):
 
     def __str__(self):
         root = str(self.root)
-        root = root if root.startswith('/') or "://" in root else f"${root}"
+        if root.startswith('/') or root.startswith('$') or "://" in root:
+            pass
+        else:
+            root = f"${root}"
 
         if self.path:
             path = "/".join(self.path)
@@ -79,10 +82,14 @@ class URI(object):
 
 
 def uri(subject):
-    if isinstance(ref(subject), URI):
+    if isinstance(subject, URI):
+        return subject
+    elif isinstance(ref(subject), URI):
         return ref(subject)
-    elif type(subject) != subject:
+    elif subject != type(subject) and uri(type(subject)) is not None:
         return uri(type(subject))
+    else:
+        raise AttributeError(f"{subject} has no URI")
 
 
 def to_json(obj):

@@ -7,6 +7,7 @@ class State(object):
     __ref__ = URI("/state")
 
     def __init__(self, ref):
+        assert ref is not None
         self.__ref__ = ref
 
     def __json__(self):
@@ -44,7 +45,11 @@ class OpRef(Ref):
     __ref__ = uri(Ref) + "/op"
 
     def __init__(self, subject, args):
-        self.subject = uri(subject)
+        if isinstance(subject, State):
+            self.subject = uri(subject)
+        else:
+            self.subject = subject
+
         self.args = args
 
     def __json__(self):
