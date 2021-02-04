@@ -1,29 +1,37 @@
-import inspect
-
 from .util import *
 
 
-# Base types (should not be instantiated directly)
+# Base types (should not be instantiated directly
 
 class State(object):
     __uri__ = URI("/state")
 
-    def __init__(self, instance_uri=None):
-        if instance_uri is None:
-            self.__uri__ = uri(self.__class__)
-        else:
-            self.__uri__ = instance_uri
+    def __init__(self, spec=None, uri=None):
+        if spec:
+            self.__spec__ = spec
 
-    def init(self, form):
-        self.__form__ = lambda: form
-        return self
+        if uri:
+            self.__uri__ = uri
 
     def __json__(self):
-        return to_json({str(self.__class__): form_of(self)})
+        return to_json({str(uri(self)): form_of(self)})
 
+    def __ref__(self, uri):
+        copy = type(self)(spec=self.__spec__)
+        copy.__uri__ = uri
+        return copy
+
+
+# Scalar types
 
 class Scalar(State):
     __uri__ = uri(State) + "/scalar"
+
+    def __form__(self):
+        if hasattr(self, "__spec__"):
+            return self.__spec__
+        else:
+            return {str(uri(self)): []}
 
 
 # Op types
@@ -35,20 +43,8 @@ class Op(Scalar):
 class GetOp(Op):
     __uri__ = uri(Op) + "/get"
 
-    def init(self, form):
-        if not inspect.isfunction(form):
-            raise ValueError(f"Op form must be a callable function, not {form}")
-
-        args = []
-        context = Context()
-
-        params = list(inspect.signature(form).parameters.items())
-
-        raise NotImplementedError
-
 
 Op.Get = GetOp
-
 
 # Scalar value types
 
@@ -56,144 +52,104 @@ class Value(Scalar):
     __uri__ = uri(Scalar) + "/value"
 
 
+# Number types
+
 class Number(Value):
     __uri__ = uri(Value) + "/number"
 
     def __mul__(self, other):
-        subject = uri(self).append("mul")
-        return OpRef.Get(uri(self).append("mul"), other)
+        return self.mul(other)
+
+    def mul(self, other):
+        return Number(spec=[other], uri=uri(self).append("mul"))
 
 
-# Reference types
-
-class OpRef(object):
-    __uri__ = uri(Scalar) + "/ref/op"
-
-    def __init__(self, subject, args):
-        self.subject = subject
-        self.args = args
-
-    def __form__(self):
-        return to_json(self)
-
-    def __json__(self):
-        return to_json({str(self.subject): self.args})
-
-
-class GetOpRef(OpRef):
-    __uri__ = uri(OpRef) + "/get"
-
-    def __init__(self, subject, key=None):
-        OpRef.__init__(self, subject, (key,))
-
-
-OpRef.Get = GetOpRef
-
-
-# Types to support user-defined objects
-
-def get_method(form):
-    return MethodStub(Method.Get, form)
-
+# User-defined object types
 
 class Class(State):
     __uri__ = uri(State) + "/object/class"
 
-    def init(self, cls):
-        if not inspect.isclass(cls):
-            raise ValueError(f"Class requires a Python class definition (not {cls})")
+    def __init__(self, class_def):
+        class Instance(class_def):
+            pass
 
-        class Instance(cls):
-            def __form__(self):
-                mro = self.__class__.mro()
-                parent_members = (
-                    {name for name, _ in inspect.getmembers(mro[2])}
-                    if len(mro) > 2
-                    else set())
+        State.__init__(self, spec=Instance)
 
-                form = {}
-                for name, attr in inspect.getmembers(self):
-                    if name.startswith('_') or name in parent_members:
-                        continue
+    def __call__(self, spec=None, uri=None):
+        return self.__spec__(spec, uri)
 
-                    if isinstance(attr, MethodStub):
-                        form[name] = attr(self, name)
-                    else:
-                        form[name] = attr
+    def __form__(self):
+        mro = self.__spec__.mro()
+        parent_members = (
+            {name for name, _ in inspect.getmembers(mro[2])}
+            if len(mro) > 2 else set())
 
-                return form
+        form = {}
 
-        self.instance = Instance
+        for name, attr in inspect.getmembers(self.__spec__):
+            if name.startswith('_') or name in parent_members:
+                continue
 
-        return self
+            if isinstance(attr, MethodStub):
+                form[name] = attr(self(uri=URI("$self")))
+            else:
+                form[name] = attr
 
-    def __call__(self, uri=None):
-        if hasattr(self, "instance"):
-            return self.instance(uri)
-        else:
-            raise RuntimeError("Class is not initialized!")
-
-    def __json__(self):
-        extends = uri(self)
-        instance = self(URI("$self"))
-        return to_json({
-            str(uri(Class)): {
-                str(extends): form_of(instance)
-            }
-        })
-
-
-def classdef(cls):
-    return const(cls, Class)
+        return {str(uri(self.__spec__)): form}
 
 
 class Method(Op):
     pass
 
 
-class GetMethod(Method, Op.Get):
-    def init(self, subject, form):
+class GetMethod(Method):
+    __uri__ = uri(Op.Get)
+
+    def __form__(self):
+        (subject, form) = self.__spec__
+
         args = []
         context = Context()
 
         params = list(inspect.signature(form).parameters.items())
-
         assert params[0][0] == "self"
-        if len(params) > 3:
-            raise ValueError("a GET method takes no more than three parameters")
+        if len(params) < 1 or len(params) > 3:
+            raise ValueError("GET method takes 1-3 parameters")
 
-        args.append(subject)
+        first_annotation = params[0][1].annotation
+        if first_annotation in {inspect.Parameter.empty, type(subject)}:
+            args.append(subject)
+        else:
+            raise ValueError("The first argument to Method.Get is an instance of"
+                             + f"{subject.__class__}, not {first_annotation}")
 
-        if len(params) >= 2:
-            first_annotation = params[1][1].annotation
-            if first_annotation == inspect.Parameter.empty or first_annotation == Context:
+        if len(params) > 1:
+            second_annotation = params[1][1].annotation
+            if second_annotation == inspect.Parameter.empty or second_annotation == Context:
                 args.append(context)
             else:
-                raise ValueError(
-                    "The first argument to an Op definition is a transaction context "
-                     + f"(`tc.Context`), not {first_annotation}")
+                raise ValueError("The second argument to Method.Get is a transaction"
+                                 + f"Context, not {second_annotation}")
 
         if len(params) == 3:
-            key_name = params[1][0]
-            key_type = params[1][1].annotation
-            if key_type == inspect.Parameter.empty:
-                args.append(Value(URI(key_name)))
-            else:
-                args.append(key_type(URI(key_name)))
-
-        for name, param in params[1:]:
+            key_name, param = params[2]
             if param.annotation == inspect.Parameter.empty:
-                args.append(Ref(name))
+                args.append(Value(uri=URI(f"${key_name}")))
+            elif issubclass(param.annotation, Value):
+                args.append(param.annotation(uri=URI(f"${key_name}")))
             else:
-                args.append(param.annotation(Ref(name)))
+                raise ValueError("GET Method key must be a Tinychain Value")
 
-        context._result = form(*args)
+        result = form(*args) # populate the Context
+        if isinstance(result, State):
+            context._result = result
+        else:
+            raise ValueError(f"Op return value must be a Tinychain state, not {result}")
 
-        self.__form__ = lambda: context
+        return context
 
     def __json__(self):
         return to_json(form_of(self))
-
 
 Method.Get = GetMethod
 
@@ -203,15 +159,6 @@ class MethodStub(object):
         self.dtype = dtype
         self.form = form
 
-    def __call__(self, subject, name):
-        method = self.dtype(uri(subject).append(name))
-        method.init(subject, self.form)
-        return method
-
-
-# Convenience methods
-
-def const(value, dtype=Scalar):
-    c = dtype(uri(value)).init(value)
-    return c
+    def __call__(self, subject):
+        return self.dtype(spec=(subject, self.form))
 

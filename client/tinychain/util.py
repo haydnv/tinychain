@@ -49,6 +49,10 @@ def form_of(op):
         raise ValueError(f"{op} has no Context")
 
 
+def ref(subject, uri):
+    if hasattr(subject, "__ref__"):
+        return subject.__ref__(uri)
+
 class URI(object):
     def __init__(self, root, path=[]):
         assert root is not None
@@ -73,19 +77,17 @@ class URI(object):
 def uri(subject):
     if hasattr(subject, "__uri__"):
         return URI(subject.__uri__)
+    elif hasattr(subject, "__class__") and hasattr(subject.__class__, "__uri__"):
+        return URI(subject.__class__.__uri__)
 
 
 def to_json(obj):
-    if inspect.isclass(obj) and hasattr(obj, "PATH"):
-        return {obj.PATH: []}
-    elif hasattr(obj, "__json__"):
+    if hasattr(obj, "__json__"):
         return obj.__json__()
     elif isinstance(obj, list) or isinstance(obj, tuple):
         return [to_json(i) for i in obj]
     elif isinstance(obj, dict):
         return {to_json(k): to_json(v) for k, v in obj.items()}
-    elif obj is None:
-        return {"/state/value/none": [[]]}
     else:
         return obj
 
