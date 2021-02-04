@@ -3,243 +3,162 @@ import inspect
 from .util import *
 
 
-# Base types (should not be initialized directly)
+# Base types (should not be instantiated directly)
 
 class State(object):
-    PATH = "/state"
+    __uri__ = URI("/state")
 
-    def __init__(self, state_spec):
-        if isinstance(state_spec, self.__class__):
-            self.__spec__ = spec(state_spec)
+    def __init__(self, uri=None):
+        if uri is None:
+            self.__uri__ = uri(self.__class__)
         else:
-            self.__spec__ = state_spec
+            self.__uri__ = uri
+
+    def init(self, form):
+        self.__form__ = lambda: form
+        return self
 
     def __json__(self):
-        return {self.PATH: [to_json(spec(self))]}
-
-    def __ref__(self, name=None):
-        if isinstance(spec(self), Ref):
-            if name is None:
-                return self
-        elif name is None:
-            raise ValueError(f"Reference to {self} requires a name")
-        else:
-            return type(self)(IdRef(name))
+        return to_json({str(self.__class__): form_of(self)})
 
 
 class Scalar(State):
-    PATH = State.PATH + "/scalar"
-
-    def __init__(self, spec):
-        State.__init__(self, spec)
-
-    def __json__(self):
-        return to_json({self.PATH: spec(self)})
-
-    def __setattr__(self, attr, value):
-        State.__setattr__(self, attr, value)
-
-
-class Ref(Scalar):
-    PATH = Scalar.PATH + "/ref"
-
-
-# Reference types
-
-class IdRef(Ref):
-    PATH = Ref.PATH + "/id"
-
-    def __init__(self, subject):
-        if isinstance(subject, Ref):
-            self.__spec__ = spec(subject)
-        elif isinstance(subject, State) and isinstance(spec(subject), Ref):
-            self.__spec__ = spec(spec(subject))
-        elif hasattr(subject, "__ref__"):
-            raise ValueError(
-                f"Ref to {subject} needs a name (hint: try calling ref(spec, 'name')")
-        else:
-            self.__spec__ = subject
-
-        if str(spec(self)).startswith("$"):
-            raise ValueError(f"Ref name cannot start with '$': {self.name}")
-
-    def __json__(self):
-        return to_json({str(self): []})
-
-    def __str__(self):
-        return f"${spec(self)}"
-
-
-class OpRef(Ref):
-    PATH = Ref.PATH + "/op"
-
-
-class GetOpRef(OpRef):
-    PATH = OpRef.PATH + "/get"
-
-    def __init__(self, link, key=None):
-        link = Link(link)
-        OpRef.__init__(self, (link, key))
-
-    def __json__(self):
-        (link, key) = spec(self)
-        return to_json({str(link): [key]})
-
-
-class PutOpRef(OpRef):
-    PATH = OpRef.PATH + "/put"
-
-    def __init__(self, link, key, value):
-        link = Link(link)
-        OpRef.__init__(self, (link, key, value))
-
-    def __json__(self):
-        subject, key, value = spec(self)
-        return {str(subject): [to_json(key), to_json(value)]}
-
-
-class PostOpRef(OpRef):
-    PATH = OpRef.PATH + "/post"
-
-    def __init__(self, link, **params):
-        link = Link(link)
-        OpRef.__init__(self, (link, params))
-
-    def __json__(self):
-        subject, params = spec(self)
-        return {str(subject): to_json(params)}
-
-
-class DeleteOpRef(OpRef):
-    PATH = OpRef.PATH + "/delete"
-
-    def __init__(self, link, key=None):
-        link = Link(link)
-        OpRef.__init__(self, (link, key))
-
-    def __json__(self):
-        (link, key) = spec(self)
-        return to_json({str(link): [key]})
-
-
-OpRef.Get = GetOpRef
-OpRef.Put = PutOpRef
-OpRef.Post = PostOpRef
-OpRef.Delete = PostOpRef
-
-
-class After(Ref):
-    PATH = Ref.PATH + "/after"
-
-    def __init__(self, when, then):
-        Ref.__init__(self, (when, then))
-
-
-class If(Ref):
-    PATH = Ref.PATH + "/if"
-
-    def __init__(self, cond, then, or_else):
-        Ref.__init__(self, (cond, then, or_else))
-
-
-# Compound types
-
-class Map(State):
-    PATH = State.PATH + "/map"
-
-
-class Tuple(State):
-    PATH = State.PATH + "/tuple"
+    __uri__ = uri(State) + "/scalar"
 
 
 # Op types
 
 class Op(Scalar):
-    PATH = Scalar.PATH + "/op"
-
-    def __init__(self, spec):
-        if isinstance(spec, Ref) or inspect.isfunction(spec):
-            Scalar.__init__(self, spec)
-        else:
-            raise ValueError("Op spec must be a callable function")
+    __uri__ = uri(Scalar) + "/op"
 
 
 class GetOp(Op):
-    PATH = Op.PATH + "/get"
+    __uri__ = uri(Op) + "/get"
 
-    def __call__(self, key=None):
-        return OpRef.Get(IdRef(self), key)
-
-    def __form__(self):
-        args = []
-        context = Context()
-
-        params = list(inspect.signature(spec(self)).parameters.items())
-        if params:
-            first_annotation = params[0][1].annotation
-            if first_annotation == inspect.Parameter.empty or first_annotation == Context:
-                args.append(context)
-            else:
-                raise ValueError(
-                    "The first argument to an Op definition is a transaction context "
-                     + f"(`tc.Context`), not {first_annotation}")
-
-        if len(params) == 2:
-            key_name = params[1][0]
-            key_annotation = params[1][1].annotation
-            if key_annotation == inspect.Parameter.empty:
-                args.append(IdRef(key_name))
-            elif issubclass(key_annotation, Value):
-                args.append(key_annotation(IdRef(key_name)))
-            else:
-                raise ValueError(f"GET Op key ({key_name}) must be a Value")
-
-        if len(params) > 2:
-            raise ValueError("GET Op takes two optional parameters, a Context and a Value")
-
-        result = spec(self)(*args) # populate the Context
-        if isinstance(result, State):
-            context._result = result
-        else:
-            raise ValueError(f"Op return value must be a Tinychain state, not {result}")
-
-        return context
-
-    def __json__(self):
-        params = list(inspect.signature(spec(self)).parameters.items())
-        if len(params) > 2:
-            raise ValueError(f"GET Op takes two optional parameters, a Context and a Value")
-        elif len(params) == 2:
-            key_name = params[1][0]
-        else:
-            key_name = "key"
-
-        return to_json({self.PATH: [key_name, form_of(self)]})
-
-
-
-class PutOp(Op):
-    PATH = Op.PATH + "/put"
-
-    def __form__(self):
-        raise NotImplemented
-
-
-class PostOp(Op):
-    PATH = Op.PATH + "/post"
-
-    def __form__(self):
-        form = spec(self)
-
+    def init(self, form):
         if not inspect.isfunction(form):
-            return to_json(form)
+            raise ValueError(f"Op form must be a callable function, not {form}")
 
         args = []
         context = Context()
 
         params = list(inspect.signature(form).parameters.items())
-        if params:
-            first_annotation = params[0][1].annotation
+
+        raise NotImplementedError
+
+
+Op.Get = GetOp
+
+
+# Scalar value types
+
+class Value(Scalar):
+    __uri__ = uri(Scalar) + "/value"
+
+
+class Number(Value):
+    __uri__ = uri(Value) + "/number"
+
+    def __mul__(self, other):
+        subject = uri(self).append("mul")
+        return OpRef.Get(uri(self).append("mul"), other)
+
+
+# Reference types
+
+class OpRef(object):
+    __uri__ = uri(Scalar) + "/ref/op"
+
+    def __init__(self, subject, args):
+        self.subject = subject
+        self.args = args
+
+    def __form__(self):
+        return to_json(self)
+
+    def __json__(self):
+        return to_json({str(self.subject): self.args})
+
+
+class GetOpRef(OpRef):
+    __uri__ = uri(OpRef) + "/get"
+
+    def __init__(self, subject, key=None):
+        OpRef.__init__(self, subject, (key,))
+
+
+OpRef.Get = GetOpRef
+
+
+# Types to support user-defined objects
+
+def get_method(form):
+    return MethodStub(Method.Get, form)
+
+
+class Class(State):
+    __uri__ = uri(State) + "/object/class"
+
+    def __init__(self, cls):
+        if not inspect.isclass(cls):
+            raise ValueError(f"Class requires a Python class definition (not {cls})")
+
+        class Instance(cls):
+            def __form__(self):
+                mro = self.__class__.mro()
+                parent_members = (
+                    {name for name, _ in inspect.getmembers(mro[2])}
+                    if len(mro) > 2
+                    else set())
+
+                form = {}
+                for name, attr in inspect.getmembers(self):
+                    if name.startswith('_') or name in parent_members:
+                        continue
+
+                    if isinstance(attr, MethodStub):
+                        form[name] = attr(self, name)
+                    else:
+                        form[name] = attr
+
+                return form
+
+        self.instance = Instance
+
+        State.__init__(self, uri(cls))
+
+    def __call__(self, uri=None):
+        return self.instance(uri)
+
+    def __json__(self):
+        extends = uri(self)
+        instance = self(URI("$self"))
+        return to_json({
+            str(uri(Class)): {
+                str(extends): form_of(instance)
+            }
+        })
+
+
+class Method(Op):
+    pass
+
+
+class GetMethod(Method, Op.Get):
+    def init(self, subject, form):
+        args = []
+        context = Context()
+
+        params = list(inspect.signature(form).parameters.items())
+
+        assert params[0][0] == "self"
+        if len(params) > 3:
+            raise ValueError("a GET method takes no more than three parameters")
+
+        args.append(subject)
+
+        if len(params) >= 2:
+            first_annotation = params[1][1].annotation
             if first_annotation == inspect.Parameter.empty or first_annotation == Context:
                 args.append(context)
             else:
@@ -247,143 +166,45 @@ class PostOp(Op):
                     "The first argument to an Op definition is a transaction context "
                      + f"(`tc.Context`), not {first_annotation}")
 
-            for name, param in params[1:]:
-                if param.annotation == inspect.Parameter.empty:
-                    args.append(IdRef(name))
-                else:
-                    args.append(param.annotation(IdRef(name)))
+        if len(params) == 3:
+            key_name = params[1][0]
+            key_type = params[1][1].annotation
+            if key_type == inspect.Parameter.empty:
+                args.append(Value(URI(key_name)))
+            else:
+                args.append(key_type(URI(key_name)))
 
-        result = spec(self)(*args) # populate the Context
-        if isinstance(result, _State) or isinstance(result, Ref):
-            context._result = result
-        else:
-            raise ValueError(f"Op return value must be a Tinychain state, not {result}")
+        for name, param in params[1:]:
+            if param.annotation == inspect.Parameter.empty:
+                args.append(Ref(name))
+            else:
+                args.append(param.annotation(Ref(name)))
 
-        return context
+        context._result = form(*args)
 
-
-class DeleteOp(Op):
-    PATH = Op.PATH + "/delete"
-
-    def __form__(self):
-        raise NotImplemented
-
-
-Op.Get = GetOp
-Op.Put = PutOp
-Op.Post = PostOp
-Op.Delete = DeleteOp
-
-
-# Value types
-
-class Value(Scalar):
-    PATH = Scalar.PATH + "/value"
-
-
-class Nil(Value):
-    PATH = Value.PATH + "/none"
-
-
-class Number(Value):
-    PATH = Value.PATH + "/number"
+        self.__form__ = lambda: context
 
     def __json__(self):
-        return to_json(spec(self))
-
-    def __add__(self, other):
-        return self.add(other)
-
-    def __mul__(self, other):
-        return self.mul(other)
-
-    def add(self, other):
-        raise NotImplementedError
-
-    def mul(self, other):
-        raise NotImplementedError
+        return to_json(form_of(self))
 
 
-class Bool(Number):
-    PATH = Number.PATH + "/bool"
+Method.Get = GetMethod
 
 
-class Complex(Number):
-    PATH = Number.PATH + "/complex"
+class MethodStub(object):
+    def __init__(self, dtype, form):
+        self.dtype = dtype
+        self.form = form
 
-    def __json__(self):
-        return to_json({self.PATH: spec(self)})
-
-
-class C32(Complex):
-    PATH = Complex.PATH + "/32"
-
-
-class C64(Complex):
-    PATH = Complex.PATH + "/64"
+    def __call__(self, subject, name):
+        method = self.dtype(uri(subject).append(name))
+        method.init(subject, self.form)
+        return method
 
 
-class Float(Number):
-    PATH = Number.PATH + "/float"
+# Convenience methods
 
-
-class F32(Float):
-    PATH = Float.PATH + "/32"
-
-
-class F64(Float):
-    PATH = Float.PATH + "/64"
-
-
-class Int(Number):
-    PATH = Number.PATH + "/int"
-
-
-class I16(Int):
-    PATH = Int.PATH + "/16"
-
-
-class I32(Int):
-    PATH = Int.PATH + "/32"
-
-
-class I64(Int):
-    PATH = Int.PATH + "/64"
-
-
-class UInt(Number):
-    PATH = Number.PATH + "/uint"
-
-
-class U8(UInt):
-    PATH = UInt.PATH + "/64"
-
-
-class U16(UInt):
-    PATH = UInt.PATH + "/64"
-
-
-class U32(UInt):
-    PATH = UInt.PATH + "/64"
-
-
-class U64(UInt):
-    PATH = UInt.PATH + "/64"
-
-
-class String(Value):
-    PATH = Value.PATH + "/string"
-
-    def __json__(self):
-        return str(spec(self))
-
-
-class Link(Value):
-    PATH = Value.PATH + "/link"
-
-    def __json__(self):
-        return {str(self): []}
-
-    def __str__(self):
-        return str(spec(self))
+def const(value, dtype=Scalar):
+    c = dtype().init(value)
+    return c
 

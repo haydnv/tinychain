@@ -49,16 +49,31 @@ def form_of(op):
         raise ValueError(f"{op} has no Context")
 
 
-def ref(subject, name=None):
-    if hasattr(subject, "__ref__"):
-        return subject.__ref__(name)
-    else:
-        raise ValueError(f"{subject} does not support named references")
+class URI(object):
+    def __init__(self, root, path=[]):
+        assert root is not None
+
+        self.root = root
+        self.path = path
+
+    def append(self, name):
+        return URI(str(self), [name])
+
+    def __add__(self, other):
+        return URI(str(self) + other)
+
+    def __str__(self):
+        if not self.path:
+            return str(self.root)
+        else:
+            path = "/".join(self.path)
+            return f"{self.root}/{path}"
 
 
-def spec(subject):
-    if hasattr(subject, "__spec__"):
-        return subject.__spec__
+def uri(subject):
+    if hasattr(subject, "__uri__"):
+        return URI(subject.__uri__)
+
 
 def to_json(obj):
     if inspect.isclass(obj) and hasattr(obj, "PATH"):
