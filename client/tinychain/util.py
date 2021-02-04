@@ -28,7 +28,7 @@ class Context(object):
 
     def __getattr__(self, name):
         if name in object.__getattribute__(self, "form"):
-            return type(self.form[name])(URI(f"${name}"))
+            return ref(self.form[name], URI(f"${name}"))
         else:
             raise ValueError(f"Context has no such value: {name}")
 
@@ -49,9 +49,10 @@ def form_of(op):
         raise ValueError(f"{op} has no Context")
 
 
-def ref(subject, uri):
+def ref(subject):
     if hasattr(subject, "__ref__"):
-        return subject.__ref__(uri)
+        return subject.__ref__
+
 
 class URI(object):
     def __init__(self, root, path=[]):
@@ -67,18 +68,21 @@ class URI(object):
         return URI(str(self) + other)
 
     def __str__(self):
-        if not self.path:
-            return str(self.root)
-        else:
+        root = str(self.root)
+        root = root if root.startswith('/') or "://" in root else f"${root}"
+
+        if self.path:
             path = "/".join(self.path)
-            return f"{self.root}/{path}"
+            return f"{root}/{path}"
+        else:
+            return root
 
 
 def uri(subject):
-    if hasattr(subject, "__uri__"):
-        return URI(subject.__uri__)
-    elif hasattr(subject, "__class__") and hasattr(subject.__class__, "__uri__"):
-        return URI(subject.__class__.__uri__)
+    if isinstance(ref(subject), URI):
+        return ref(subject)
+    elif type(subject) != subject:
+        return uri(type(subject))
 
 
 def to_json(obj):

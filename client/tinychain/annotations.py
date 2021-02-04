@@ -1,4 +1,4 @@
-from .state import Method, MethodStub
+from .reflect import Method, MethodStub
 
 
 def get_method(method):
