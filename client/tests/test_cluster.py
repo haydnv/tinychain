@@ -4,7 +4,7 @@ import unittest
 
 class ExampleCluster(tc.Cluster):
     def configure(self):
-        self.rev = tc.sync_chain(tc.Number.get(0))
+        self.rev = tc.sync_chain(tc.Number.init(0))
 
     @tc.get_method
     def current(self) -> tc.Number:

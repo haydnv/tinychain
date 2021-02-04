@@ -12,10 +12,14 @@ class State(object):
 
     def __json__(self):
         return to_json(ref(self))
-
+    
     @classmethod
-    def get(cls, key=None):
-        return cls(OpRef.Get(uri(cls), key))
+    def init(cls, key=None):
+        if isinstance(ref(cls), URI):
+            return cls(OpRef.Get(uri(cls), key))
+        else:
+            return cls(OpRef.Get(cls, key))
+
 
 # Scalar types
 
@@ -29,11 +33,9 @@ class Value(Scalar):
     __ref__ = uri(Scalar) + "/value"
 
 
-# Numeric types
+class Nil(Value):
+    __ref__ = uri(Value) + "/none"
 
-
-class Number(Value):
-    __ref__ = uri(Value) + "/number"
 
 # Reference types
 
@@ -79,13 +81,7 @@ class Meta(type):
         return {uri(cls): form_of(cls)}
 
 
-class Method(Scalar):
-    __ref__ = uri(Scalar) + "/op"
+class Class(State):
+    __ref__ = uri(State) + "/object/class"
 
-
-class GetMethod(Method):
-    __ref__ = uri(Method) + "/get"
-
-
-Method.Get = GetMethod
 

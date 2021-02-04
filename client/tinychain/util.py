@@ -17,6 +17,7 @@ class Context(object):
 
     def __add__(self, other):
         concat = Context(self)
+
         if isinstance(other, self.__class__):
             for name, value in other.form.items():
                 setattr(concat, name, value)
@@ -27,8 +28,12 @@ class Context(object):
         return concat
 
     def __getattr__(self, name):
-        if name in object.__getattribute__(self, "form"):
-            return ref(self.form[name], URI(f"${name}"))
+        if name in self.form:
+            value = self.form[name]
+            if hasattr(value, "__ref__"):
+                return type(value)(URI(name))
+            else:
+                return value
         else:
             raise ValueError(f"Context has no such value: {name}")
 

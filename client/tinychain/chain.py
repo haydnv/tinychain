@@ -17,5 +17,5 @@ def sync_chain(initial_value):
         def subject(self, key=None) -> dtype:
             return dtype(OpRef.Get(uri(self).append("subject"), key))
 
-    return SyncChain.get(initial_value)
+    return SyncChain.init(initial_value)
 
