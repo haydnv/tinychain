@@ -2,7 +2,10 @@ import tinychain as tc
 import unittest
 
 
+@tc.class_def
 class ExampleCluster(tc.Cluster):
+    __ref__ = tc.URI("/app/example")
+
     def configure(self):
         self.rev = tc.sync_chain(tc.Number.init(0))
 
@@ -18,44 +21,14 @@ class ExampleCluster(tc.Cluster):
 class ClusterTests(unittest.TestCase):
     def testToJson(self):
         expected = {
-            "current": {
-                "/state/scalar/op/get": [
-                    "key",
-                    [
-                        [
-                            "_return",
-                            {
-                                "$self/rev/subject": [
-                                    None
-                                ]
-                            }
-                        ]
-                    ]
-                ]
-            },
-            "history": {
-                "/state/scalar/op/get": [
-                    "key",
-                    [
-                        [
-                            "_return",
-                            {
-                                "$self/rev": [
-                                    None
-                                ]
-                            }
-                        ]
-                    ]
-                ]
-            },
-            "rev": {
-                "/state/chain/sync": [
-                    {
-                        "/state/scalar/value/number": [
-                            0
-                        ]
-                    }
-                ]
+            '/app/example': {
+                'current': {'/state/scalar/op/get': ['key', [
+                    ['_return', {'$self/rev/subject': [None]}]
+                ]]},
+                'history': {'/state/scalar/op/get': ['key', [
+                    ['_return', {'$self/rev': [None]}]]
+                ]},
+                'rev': {'/state/chain/sync': [{'/state/scalar/value/number': [0]}]}
             }
         }
 

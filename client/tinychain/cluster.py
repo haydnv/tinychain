@@ -1,24 +1,19 @@
 import abc
-import json
-
-from . import reflect
 
 from .state import State
-from .util import *
+from .util import URI
 
 
-class MetaCluster(type):
-    def __json__(cls):
-        instance = cls()
-        instance.configure()
-        return to_json(form_of(reflect.Instance(instance)))
-
-    def __str__(cls):
-        return json.dumps(to_json(cls), indent=4)
-
-
-class Cluster(metaclass=MetaCluster):
+class Cluster(object):
     __uri__ = URI("/cluster")
+
+    def __init__(self, ref=None):
+        if ref is None:
+            self.__ref__ = ref(self.__class__)
+        else:
+            self.__ref__ = ref
+
+        self.configure()
 
     @abc.abstractmethod
     def configure(self):

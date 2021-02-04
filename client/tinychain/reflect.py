@@ -29,8 +29,13 @@ class Class(object):
             {name for name, _ in inspect.getmembers(mro[1])}
             if len(mro) > 1 else set())
 
+
+        class Header(self.cls):
+            pass
+
+        header = Header(URI("self"))
         instance = self.cls(URI("self"))
-        header = Header()
+
         for name, attr in inspect.getmembers(instance):
             if name.startswith('_') or name in parent_members:
                 continue
@@ -48,7 +53,7 @@ class Class(object):
                 continue
 
             if isinstance(attr, MethodStub):
-                form[name] = to_json(attr(instance))
+                form[name] = to_json(attr(header))
             else:
                 form[name] = attr
 
@@ -56,45 +61,6 @@ class Class(object):
 
     def __json__(self):
         return {str(uri(self.cls)): to_json(form_of(self))}
-
-
-class Header(object):
-    pass
-
-
-class Instance(object):
-    def __init__(self, subject):
-        self.subject = subject
-        self.header = Header()
-
-    def __form__(self):
-        mro = self.subject.__class__.mro()
-        parent_members = (
-            {name for name, _ in inspect.getmembers(mro[1])}
-            if len(mro) > 1 else set())
-
-        for name, attr in inspect.getmembers(self.subject):
-            if name.startswith('_') or name in parent_members:
-                continue
-
-            if isinstance(attr, MethodStub):
-                setattr(self.header, name, method_header(self.subject, name, attr))
-            elif isinstance(attr, State):
-                setattr(self.header, name, type(attr)(URI(f"self/{name}")))
-            else:
-                raise AttributeError(f"invalid attribute {attr}")
-
-        form = {}
-        for name, attr in inspect.getmembers(self.subject):
-            if name.startswith('_') or name in parent_members:
-                continue
-
-            if isinstance(attr, MethodStub):
-                form[name] = to_json(attr(self.header))
-            else:
-                form[name] = attr
-
-        return form
 
 
 def method_header(subject, name, stub):
