@@ -8,11 +8,11 @@ from .util import *
 class State(object):
     __uri__ = URI("/state")
 
-    def __init__(self, uri=None):
-        if uri is None:
+    def __init__(self, instance_uri=None):
+        if instance_uri is None:
             self.__uri__ = uri(self.__class__)
         else:
-            self.__uri__ = uri
+            self.__uri__ = instance_uri
 
     def init(self, form):
         self.__form__ = lambda: form
@@ -99,7 +99,7 @@ def get_method(form):
 class Class(State):
     __uri__ = uri(State) + "/object/class"
 
-    def __init__(self, cls):
+    def init(self, cls):
         if not inspect.isclass(cls):
             raise ValueError(f"Class requires a Python class definition (not {cls})")
 
@@ -125,10 +125,13 @@ class Class(State):
 
         self.instance = Instance
 
-        State.__init__(self, uri(cls))
+        return self
 
     def __call__(self, uri=None):
-        return self.instance(uri)
+        if hasattr(self, "instance"):
+            return self.instance(uri)
+        else:
+            raise RuntimeError("Class is not initialized!")
 
     def __json__(self):
         extends = uri(self)
@@ -138,6 +141,10 @@ class Class(State):
                 str(extends): form_of(instance)
             }
         })
+
+
+def classdef(cls):
+    return const(cls, Class)
 
 
 class Method(Op):
@@ -205,6 +212,6 @@ class MethodStub(object):
 # Convenience methods
 
 def const(value, dtype=Scalar):
-    c = dtype().init(value)
+    c = dtype(uri(value)).init(value)
     return c
 

@@ -2,7 +2,7 @@ import tinychain as tc
 import unittest
 
 
-@tc.Class
+@tc.classdef
 class Meter(tc.Number):
     @tc.get_method
     def feet(self):
@@ -27,11 +27,24 @@ class InstanceTests(unittest.TestCase):
     def testInstanceVariable(self):
         pass
 
-    def testMethod(self):
-        pass
-
     def testMethodFromForeignContext(self):
-        pass
+        expected = [
+            ['m', {'/state/object/class': {
+                '/state/scalar/value/number': {
+                    'feet': [
+                        ['_result', {'$self/mul': [3.28]}]
+                    ]
+                }
+            }}],
+            ['ft', {'$m': [2]}]
+        ]
+
+        cxt = tc.Context()
+        cxt.m = Meter
+        cxt.ft = tc.OpRef.Get(tc.uri(cxt.m), 2)
+
+        actual = tc.to_json(cxt)
+        self.assertEqual(expected, actual)
 
     def testInstanceVarInSelfContext(self):
         pass

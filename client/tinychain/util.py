@@ -28,7 +28,7 @@ class Context(object):
 
     def __getattr__(self, name):
         if name in object.__getattribute__(self, "form"):
-            return ref(self.form[name], name)
+            return type(self.form[name])(URI(f"${name}"))
         else:
             raise ValueError(f"Context has no such value: {name}")
 
