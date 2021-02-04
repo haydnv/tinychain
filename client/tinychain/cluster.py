@@ -3,11 +3,11 @@ import json
 
 from . import reflect
 
-from .state import State, Meta
+from .state import State
 from .util import *
 
 
-class MetaCluster(Meta):
+class MetaCluster(type):
     def __json__(cls):
         instance = cls()
         instance.configure()

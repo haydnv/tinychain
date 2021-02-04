@@ -71,16 +71,6 @@ OpRef.Get = GetOpRef
 # User-defined object types
 
 
-class Meta(type):
-    __ref__ = uri(State) + "/object/class"
-
-    def __form__(cls):
-        return reflect.Instance(cls())
-
-    def __json__(cls):
-        return {uri(cls): form_of(cls)}
-
-
 class Class(State):
     __ref__ = uri(State) + "/object/class"
 
