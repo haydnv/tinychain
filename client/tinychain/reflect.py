@@ -113,7 +113,7 @@ class GetMethod(Method):
         sig = inspect.signature(self.form)
 
         if num_args(sig) < 1 or num_args(sig) > 3:
-            raise ValueError("GET method takes 1-3 arguments: (self, context, key)")
+            raise ValueError("GET method takes 1-3 arguments: (self, cxt, key)")
 
         args = [self.header]
 
@@ -133,6 +133,41 @@ class GetMethod(Method):
         return (key_name, cxt)
 
 
+class PutMethod(Method):
+    __def__ = uri(Method) + "/get"
+
+    def __form__(self):
+        sig = inspect.signature(self.form)
+
+        if num_args(sig) not in [1, 2, 4]:
+            raise ValueError("POST method has one, two, or four arguments: "
+                + "(self, cxt, key, value)")
+
+        args = [self.header]
+
+        cxt = Context()
+        if num_args(sig) > 1:
+            args.append(cxt)
+
+        if num_args(sig) == 4:
+            name, param = sig.parameters[2]
+            dtype = (Value
+                if key_param.annotation == inspect.Parameter.empty
+                else key_param.annotation)
+
+            args.append(dtype(URI(name)))
+
+            name, param = sig.parameters[3]
+            dtype = (State
+                if param.annotation == inspect.Parameter.empty
+                else value_param.annotation)
+
+            args.append(dtype(URI(name)))
+
+        cxt._return = self.form(*args)
+        return cxt
+
+
 class PostMethod(Method):
     __def__ = uri(Method) + "/get"
 
@@ -140,7 +175,8 @@ class PostMethod(Method):
         sig = inspect.signature(self.form)
 
         if num_args(sig) == 0:
-            raise ValueError("POST method has at least one argment: (self, name1=val1, ...)")
+            raise ValueError("POST method has at least one argment: "
+                + "(self, cxt, name1=val1, ...)")
 
         args = [self.header]
         kwargs = {}
@@ -157,8 +193,37 @@ class PostMethod(Method):
         return cxt
 
 
+class DeleteMethod(Method):
+    __ref__ = uri(Method) + "/get"
+
+    def __form__(self):
+        sig = inspect.signature(self.form)
+
+        if num_args(sig) < 1 or num_args(sig) > 3:
+            raise ValueError("DELETE method takes 1-3 arguments: (self, cxt, key)")
+
+        args = [self.header]
+
+        cxt = Context()
+        if num_args(sig) > 1:
+            args.append(cxt)
+
+        key_name = "key"
+        if num_args(sig) == 3:
+            key_name, param = sig.parameters[2]
+            if param.annotation in {inspect.Parameter.empty, Value}:
+                args.append(Value(URI(key_name)))
+            elif issubclass(param.annotation, Value):
+                args.append(param.annotation(URI(key_name)))
+
+        cxt._return = self.form(*args) # populate the Context
+        return (key_name, cxt)
+
+
 Method.Get = GetMethod
+Method.Put = PutMethod
 Method.Post = PostMethod
+Method.Delete = DeleteMethod
 
 
 def num_args(sig):

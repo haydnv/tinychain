@@ -80,8 +80,27 @@ class PutOpRef(OpRef):
         OpRef.__init__(self, subject, (key, value))
 
 
+class PostOpRef(OpRef):
+    __ref__ = uri(OpRef) + "/post"
+
+    def __init__(self, subject, **kwargs):
+        OpRef.__init__(self, subject, kwargs)
+
+
+class DeleteOpRef(OpRef):
+    __ref__ = uri(OpRef) + "/delete"
+
+    def __init__(self, subject, key=None):
+        OpRef.__init__(self, subject, key)
+
+    def __json__(self):
+        return {str(uri(DeleteOpRef)): to_json([self.subject, self.args])}
+
+
 OpRef.Get = GetOpRef
 OpRef.Put = PutOpRef
+OpRef.Post = PostOpRef
+OpRef.Delete = DeleteOpRef
 
 
 # User-defined object types
