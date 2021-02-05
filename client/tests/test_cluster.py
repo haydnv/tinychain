@@ -17,17 +17,35 @@ class ExampleCluster(tc.Cluster):
     def history(self) -> tc.Chain:
         return tc.OpRef.Get(self.rev)
 
+    @tc.post_method
+    def bump(self, cxt, version: tc.Number):
+        return tc.If(
+            version > self.current(),
+            tc.OpRef.Put(self.rev, None, version),
+            tc.error.BadRequest("Version too old"))
+
 
 class ClusterTests(unittest.TestCase):
     def testToJson(self):
         expected = {
             '/app/example': {
-                'current': {'/state/scalar/op/get': ['key', [
-                    ['_return', {'$self/rev/subject': [None]}]
-                ]]},
-                'history': {'/state/scalar/op/get': ['key', [
-                    ['_return', {'$self/rev': [None]}]]
+                'bump': {'/state/scalar/op': [
+                    ['_return', {'/state/scalar/ref/if': [
+                        {'$version/gt': [{'$self/current': [None]}]},
+                        {'$self/rev': [None, {"$version": []}]},
+                        {"/error/bad_request": "Version too old"}
+                    ]}]
                 ]},
+                'current': {
+                    '/state/scalar/op/get': ['key', [
+                        ['_return', {'$self/rev/subject': [None]}]
+                    ]]
+                },
+                'history': {
+                    '/state/scalar/op/get': ['key', [
+                        ['_return', {'$self/rev': [None]}]
+                    ]]
+                },
                 'rev': {'/state/chain/sync': [{'/state/scalar/value/number': [0]}]}
             }
         }

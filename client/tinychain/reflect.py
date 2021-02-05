@@ -1,7 +1,9 @@
 import inspect
 
-from .state import Nil, OpRef, Scalar, State, Value
+from . import error
+from .state import OpRef, Scalar, State
 from .util import *
+from .value import Nil, Value
 
 
 class Class(object):
@@ -68,11 +70,18 @@ def method_header(subject, name, stub):
     if return_type == inspect.Signature.empty:
         return_type = Nil
 
+    method_uri = uri(subject).append(name)
+
     if stub.dtype == Method.Get:
         def get_header(key=None):
-            return return_type(OpRef.Get(uri(subject).append(name), key))
+            return return_type(OpRef.Get(method_uri, key))
 
         return get_header
+    elif stub.dtype == Method.Post:
+        def post_header(**kwargs):
+            return return_type(OpRef.Post(method_uri, kwargs))
+
+        return post_header
     else:
         raise error.MethodNotAllowed(f"Unrecognized method type: {stub.dtype}")
 
@@ -124,23 +133,34 @@ class GetMethod(Method):
         return (key_name, cxt)
 
 
+class PostMethod(Method):
+    __def__ = uri(Method) + "/get"
+
+    def __form__(self):
+        sig = inspect.signature(self.form)
+
+        if num_args(sig) == 0:
+            raise ValueError("POST method has at least one argment: (self, name1=val1, ...)")
+
+        args = [self.header]
+        kwargs = {}
+
+        cxt = Context()
+        if num_args(sig) > 1:
+            args.append(cxt)
+
+        for name, param in list(sig.parameters.items())[2:]:
+            dtype = State if param.annotation == inspect.Parameter.empty else param.annotation
+            kwargs[name] = dtype(URI(name))
+
+        cxt._return = self.form(*args, **kwargs)
+        return cxt
+
+
 Method.Get = GetMethod
+Method.Post = PostMethod
 
 
 def num_args(sig):
     return len(sig.parameters)
-
-def init_args(params, expect):
-    args = []
-
-    for param, dtype in zip(params, expect):
-        name, param = param
-        if param.annotation in {inspect.Parameter.empty, dtype}:
-            args.append(dtype(URI(name)))
-        elif issubclass(param.annotation, dtype):
-            args.append(param.annotation(URI(name)))
-        else:
-            raise ValueError(f"{op} arg {name} should be of type {dtype}, not {param.annotation}")
-
-    return args
 

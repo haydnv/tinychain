@@ -20,27 +20,35 @@ class State(object):
         else:
             return cls(OpRef.Get(cls, key))
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({ref(self)})"
+
 
 # Scalar types
 
 class Scalar(State):
     __ref__ = uri(State) + "/scalar"
 
-
-# Scalar value types
-
-class Value(Scalar):
-    __ref__ = uri(Scalar) + "/value"
-
-
-class Nil(Value):
-    __ref__ = uri(Value) + "/none"
+    def _get(self, name, dtype):
+        setattr(self, name, lambda key: dtype(OpRef.Get(uri(self).append(name), key)))
 
 
 # Reference types
 
 class Ref(object):
     __ref__ = uri(Scalar) + "/ref"
+
+
+class If(Ref):
+    __ref__ = uri(Ref) + "/if"
+
+    def __init__(self, cond, then, or_else):
+        self.cond = cond
+        self.then = then
+        self.or_else = or_else
+
+    def __json__(self):
+        return {str(uri(self)): to_json([self.cond, self.then, self.or_else])}
 
 
 class OpRef(Ref):
@@ -65,7 +73,15 @@ class GetOpRef(OpRef):
         OpRef.__init__(self, subject, (key,))
 
 
+class PutOpRef(OpRef):
+    __ref__ = uri(OpRef) + "/put"
+
+    def __init__(self, subject, key, value):
+        OpRef.__init__(self, subject, (key, value))
+
+
 OpRef.Get = GetOpRef
+OpRef.Put = PutOpRef
 
 
 # User-defined object types

@@ -1,32 +1,40 @@
+from .util import *
+
 
 class TinychainError(Exception):
-    PATH = "/error"
+    __ref__ = URI("/error")
+
+    def __init__(self, message):
+        self.message = message
+
+    def __json__(self):
+        return {str(uri(self)): self.message}
 
 
 class BadRequest(TinychainError):
-    PATH = TinychainError.PATH + "/bad_request"
+    __ref__ = uri(TinychainError) + "/bad_request"
 
 
 class Forbidden(TinychainError):
-    PATH = TinychainError.PATH + "/forbidden"
+    __ref__ = uri(TinychainError) + "/forbidden"
 
 
 class MethodNotAllowed(TinychainError):
-    PATH = TinychainError.PATH + "/method_not_allowed"
+    __ref__ = uri(TinychainError) + "/method_not_allowed"
 
 
 class NotFound(TinychainError):
-    PATH = TinychainError.PATH + "/not_found"
+    __ref__ = uri(TinychainError) + "/not_found"
 
 
 class NotImplemented(TinychainError):
-    PATH = TinychainError.PATH + "/not_implemented"
+    __ref__ = uri(TinychainError) + "/not_implemented"
 
 
 class Unauthorized(TinychainError):
-    PATH = TinychainError.PATH + "/unauthorized"
+    __ref__ = uri(TinychainError) + "/unauthorized"
 
 
 class UnknownError(TinychainError):
-    PATH = TinychainError.PATH + "/unknown"
+    __ref__ = uri(TinychainError) + "/unknown"
 
