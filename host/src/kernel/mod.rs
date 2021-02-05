@@ -2,21 +2,37 @@ use error::*;
 use generic::*;
 use safecast::{Match, TryCastFrom};
 
+use crate::cluster::Cluster;
+use crate::object::InstanceExt;
 use crate::scalar::*;
 use crate::state::*;
 use crate::txn::*;
 
+mod hosted;
+
+use hosted::Hosted;
+
 const CAPTURE: Label = label("capture");
 
-pub struct Kernel;
+pub struct Kernel {
+    hosted: Hosted,
+}
 
 impl Kernel {
+    pub fn new<I: IntoIterator<Item = InstanceExt<Cluster>>>(clusters: I) -> Self {
+        Self {
+            hosted: clusters.into_iter().collect(),
+        }
+    }
+
     pub async fn get(&self, _txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if let Some(class) = StateType::from_path(path) {
             let err = format!("Cannot cast into {} from {}", class, key);
             State::Scalar(Scalar::Value(key))
                 .into_type(class)
                 .ok_or_else(|| TCError::unsupported(err))
+        } else if let Some((_suffix, _cluster)) = self.hosted.get(path) {
+            Err(TCError::not_implemented("Kernel::get from Cluster"))
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -25,6 +41,10 @@ impl Kernel {
     pub async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
         if path.is_empty() {
             return Err(TCError::method_not_allowed(TCPath::from(path)));
+        }
+
+        if let Some((_suffix, _cluster)) = self.hosted.get(path) {
+            return Err(TCError::not_implemented("Kernel::post to Cluster"));
         }
 
         match path[0].as_str() {

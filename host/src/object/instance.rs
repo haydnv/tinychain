@@ -9,6 +9,7 @@ use crate::state::State;
 use crate::txn::{FileEntry, Txn};
 
 use super::{InstanceClass, Object};
+use std::ops::Deref;
 
 #[derive(Clone)]
 pub struct InstanceExt<T: generic::Instance> {
@@ -50,6 +51,14 @@ impl<'en, T: generic::Instance + en::IntoStream<'en> + 'en> en::IntoStream<'en> 
         let mut map = encoder.encode_map(Some(1))?;
         map.encode_entry(self.class.extends().to_string(), self.parent)?;
         map.end()
+    }
+}
+
+impl<T: generic::Instance> Deref for InstanceExt<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.parent
     }
 }
 

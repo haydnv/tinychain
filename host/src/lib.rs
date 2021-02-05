@@ -8,6 +8,7 @@ pub use kernel::*;
 mod route;
 
 pub mod chain;
+pub mod cluster;
 pub mod gateway;
 pub mod kernel;
 pub mod object;

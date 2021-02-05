@@ -26,6 +26,12 @@ pub const fn label(id: &'static str) -> Label {
     Label { id }
 }
 
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(self.id)
+    }
+}
+
 impl From<Label> for Id {
     fn from(l: Label) -> Id {
         Id {

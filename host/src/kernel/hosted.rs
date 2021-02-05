@@ -3,9 +3,12 @@ use std::iter::FromIterator;
 
 use log::{debug, info};
 
-use generic::{PathSegment, TCPath, TCPathBuf};
+use generic::{label, Label, PathSegment, TCPath, TCPathBuf};
 
 use crate::cluster::Cluster;
+use crate::object::InstanceExt;
+
+const RESERVED: [Label; 3] = [label("error"), label("state"), label("transact")];
 
 #[derive(Clone)]
 struct HostedNode {
@@ -14,7 +17,7 @@ struct HostedNode {
 
 pub struct Hosted {
     root: HostedNode,
-    hosted: HashMap<TCPathBuf, Cluster>,
+    hosted: HashMap<TCPathBuf, InstanceExt<Cluster>>,
 }
 
 impl Hosted {
@@ -27,7 +30,10 @@ impl Hosted {
         }
     }
 
-    pub fn get<'a>(&self, path: &'a [PathSegment]) -> Option<(&'a [PathSegment], Cluster)> {
+    pub fn get<'a>(
+        &self,
+        path: &'a [PathSegment],
+    ) -> Option<(&'a [PathSegment], InstanceExt<Cluster>)> {
         debug!("checking for hosted cluster {}", TCPath::from(path));
 
         let mut node = &self.root;
@@ -50,7 +56,17 @@ impl Hosted {
         }
     }
 
-    fn push(&mut self, cluster: Cluster) -> Option<Cluster> {
+    fn push(&mut self, cluster: InstanceExt<Cluster>) {
+        if cluster.path().is_empty() {
+            panic!("Cannot host a cluster at /");
+        } else {
+            for id in &RESERVED {
+                if &cluster.path()[0] == id {
+                    panic!("Cannot host a cluster at reserved path /{}", id);
+                }
+            }
+        }
+
         let mut node = &mut self.root;
         for segment in cluster.path().iter().cloned() {
             node = node.children.entry(segment).or_insert(HostedNode {
@@ -59,12 +75,12 @@ impl Hosted {
         }
 
         info!("Hosted {}", cluster);
-        self.hosted.insert(cluster.path().to_vec().into(), cluster)
+        self.hosted.insert(cluster.path().to_vec().into(), cluster);
     }
 }
 
-impl FromIterator<Cluster> for Hosted {
-    fn from_iter<I: IntoIterator<Item = Cluster>>(iter: I) -> Self {
+impl FromIterator<InstanceExt<Cluster>> for Hosted {
+    fn from_iter<I: IntoIterator<Item = InstanceExt<Cluster>>>(iter: I) -> Self {
         let mut hosted = Hosted::new();
 
         for cluster in iter.into_iter() {
