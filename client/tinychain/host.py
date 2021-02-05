@@ -1,4 +1,6 @@
 import json
+import os
+import pathlib
 import requests
 import subprocess
 import sys
@@ -6,7 +8,7 @@ import time
 import urllib.parse
 
 from .error import *
-from .util import to_json
+from .util import to_json, uri
 
 
 ENCODING = "utf-8"
@@ -18,7 +20,7 @@ class Host(object):
         return urllib.parse.urlencode({k: json.dumps(v) for k, v in params.items()})
 
     def __init__(self, address):
-        self._address = address
+        self.address = address
 
     def _handle(self, req):
         response = req()
@@ -45,7 +47,7 @@ class Host(object):
             raise UnknownError(f"HTTP error code {status}: {response}")
 
     def link(self, path):
-        return "http://{}{}".format(self._address, path)
+        return "http://{}{}".format(self.address, path)
 
     def get(self, path, key=None, auth=None):
         url = self.link(path)
@@ -94,13 +96,49 @@ class Local(Host):
     ADDRESS = "127.0.0.1"
     STARTUP_TIME = 1.0
 
-    def __init__(self, path, name, port, log_level="warn"):
+    def __init__(self, workspace, data_dir=None, clusters=[]):
+        if clusters and data_dir is None:
+            raise ValueError("Hosting a cluster requires specifying a data_dir")
+        else:
+            data_dir = pathlib.Path(data_dir)
+            if not data_dir.exists():
+                raise ValueError(f"{data_dir} does not exist")
+            if not data_dir.is_dir():
+                raise ValueError(f"{data_dir} is not a directory")
+
+        Host.__init__(self, self.ADDRESS)
+        self._process = None
+
+        for cluster in clusters:
+            cluster_path = uri(cluster).append(cluster.__version__)
+            full_path = pathlib.Path(str(data_dir) + str(cluster_path))
+
+            if not full_path.parent.exists():
+                os.makedirs(full_path.parent)
+
+            if full_path.exists():
+                with open(full_path) as f:
+                    try:
+                        if json.load(f) == to_json(cluster):
+                            continue
+                    except json.decoder.JSONDecodeError:
+                        pass
+
+                raise RuntimeError(f"There is already an entry at {cluster_path}")
+            else:
+                with open(full_path, 'w') as cluster_file:
+                    cluster_file.write(json.dumps(to_json(cluster), indent=4))
+
+        self.clusters = clusters
+        self.data_dir = data_dir
+        self.workspace = workspace
+
+    def start(self, path, port, log_level="warn"):
         if int(port) != port or port < 0:
             raise ValueError
 
         address = "{}:{}".format(__class__.ADDRESS, port)
         Host.__init__(self, address)
-
 
         args = [
             path,
@@ -111,21 +149,22 @@ class Local(Host):
         time.sleep(__class__.STARTUP_TIME)
 
         if self._process is None or self._process.poll() is not None:
-            raise RuntimeError(f"Tinychain process at {self._address} crashed on startup")
+            raise RuntimeError(f"Tinychain process at {self.address} crashed on startup")
         else:
-            print(f"new instance running at {self._address}")
+            print(f"new instance running at {self.address}")
 
     def terminate(self):
         if self._process.poll() != None:
             return
 
-        print(f"Terminating Tinychain host {self._address}")
+        print(f"Terminating Tinychain host {self.address}")
         self._process.terminate()
         self._process.wait()
-        print(f"Host {self._address} Terminated")
+        print(f"Host {self.address} Terminated")
 
     def __del__(self):
-        self.terminate()
+        if self._process:
+            self.terminate()
 
 
 def auth_header(token):
