@@ -1,3 +1,4 @@
+from . import reflect
 from .util import *
 
 
@@ -7,12 +8,16 @@ class State(object):
     __ref__ = URI("/state")
 
     def __init__(self, ref):
-        assert ref is not None
+        if ref is None:
+            raise ValueError("Null reference")
+
         self.__ref__ = ref
+
+        reflect.gen_headers(self)
 
     def __json__(self):
         return to_json(ref(self))
-    
+
     @classmethod
     def init(cls, key=None):
         if isinstance(ref(cls), URI):
@@ -28,9 +33,6 @@ class State(object):
 
 class Scalar(State):
     __ref__ = uri(State) + "/scalar"
-
-    def _get(self, name, dtype):
-        setattr(self, name, lambda key: dtype(OpRef.Get(uri(self).append(name), key)))
 
 
 # Reference types
@@ -104,7 +106,6 @@ OpRef.Delete = DeleteOpRef
 
 
 # User-defined object types
-
 
 class Class(State):
     __ref__ = uri(State) + "/object/class"

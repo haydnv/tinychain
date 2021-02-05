@@ -101,6 +101,10 @@ def uri(subject):
 
 
 def to_json(obj):
+    if inspect.isclass(obj):
+        if hasattr(type(obj), "__json__"):
+            return type(obj).__json__(obj)
+
     if hasattr(obj, "__json__"):
         return obj.__json__()
     elif isinstance(obj, list) or isinstance(obj, tuple):

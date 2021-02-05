@@ -2,8 +2,7 @@ import tinychain as tc
 import unittest
 
 
-@tc.class_def
-class ExampleCluster(tc.Cluster):
+class ExampleCluster(tc.Cluster, metaclass=tc.Meta):
     __ref__ = tc.URI("/app/example")
 
     def configure(self):

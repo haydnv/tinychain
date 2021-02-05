@@ -2,8 +2,7 @@ import tinychain as tc
 import unittest
 
 
-@tc.class_def
-class Meters(tc.Number):
+class Meters(tc.Number, metaclass=tc.Meta):
     @tc.get_method
     def feet(self) -> tc.Number:
         return self * 3.28

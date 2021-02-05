@@ -1,49 +1,39 @@
 import inspect
 
 from . import error
-from .state import OpRef, Scalar, State
+from .state import Class, OpRef, Scalar, State
 from .util import *
 from .value import Nil, Value
 
 
-class Class(object):
-    def __init__(self, cls):
-        class Instance(cls):
-            def __init__(self, ref):
-                cls.__init__(self, ref)
+def gen_headers(instance):
+    for name, attr in inspect.getmembers(instance):
+        if name.startswith('_'):
+            continue
 
-                for name, attr in inspect.getmembers(self):
-                    if name.startswith('_'):
-                        continue
+        if isinstance(attr, MethodStub):
+            setattr(instance, name, attr(instance, name))
 
-                    if isinstance(attr, MethodStub):
-                        setattr(self, name, method_header(self, name, attr))
 
-        self.cls = cls
-        self.instance = Instance
-
-    def __call__(self, ref):
-        return self.instance(ref)
-
-    def __form__(self):
-        mro = self.cls.mro()
+class Meta(type):
+    def __form__(cls):
+        mro = cls.mro()
         parent_members = (
             {name for name, _ in inspect.getmembers(mro[1])}
             if len(mro) > 1 else set())
 
-
-        class Header(self.cls):
+        class Header(cls):
             pass
 
         header = Header(URI("self"))
-        instance = self.cls(URI("self"))
+        instance = cls(URI("self"))
 
         for name, attr in inspect.getmembers(instance):
             if name.startswith('_') or name in parent_members:
                 continue
 
             if isinstance(attr, MethodStub):
-                setattr(header, name, method_header(instance, name, attr))
+                setattr(header, name, attr(instance, name))
             elif isinstance(attr, State):
                 setattr(header, name, type(attr)(URI(f"self/{name}")))
             else:
@@ -55,35 +45,14 @@ class Class(object):
                 continue
 
             if isinstance(attr, MethodStub):
-                form[name] = to_json(attr(header))
+                form[name] = to_json(attr(header, name))
             else:
                 form[name] = attr
 
         return form
 
-    def __json__(self):
-        return {str(uri(self.cls)): to_json(form_of(self))}
-
-
-def method_header(subject, name, stub):
-    return_type = inspect.signature(stub.form).return_annotation
-    if return_type == inspect.Signature.empty:
-        return_type = Nil
-
-    method_uri = uri(subject).append(name)
-
-    if stub.dtype == Method.Get:
-        def get_header(key=None):
-            return return_type(OpRef.Get(method_uri, key))
-
-        return get_header
-    elif stub.dtype == Method.Post:
-        def post_header(**kwargs):
-            return return_type(OpRef.Post(method_uri, kwargs))
-
-        return post_header
-    else:
-        raise error.MethodNotAllowed(f"Unrecognized method type: {stub.dtype}")
+    def __json__(cls):
+        return {str(uri(cls)): to_json(form_of(cls))}
 
 
 class MethodStub(object):
@@ -91,16 +60,17 @@ class MethodStub(object):
         self.dtype = dtype
         self.form = form
 
-    def __call__(self, header):
-        return self.dtype(header, self.form)
+    def __call__(self, header, name):
+        return self.dtype(header, self.form, name)
 
 
 class Method(object):
     __ref__ = uri(Scalar) + "/op"
 
-    def __init__(self, header, form):
+    def __init__(self, header, form, name):
         self.header = header
         self.form = form
+        self.name = name
 
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}
@@ -131,6 +101,11 @@ class GetMethod(Method):
 
         cxt._return = self.form(*args) # populate the Context
         return (key_name, cxt)
+
+    def __call__(self, key=None):
+        rtype = inspect.signature(self.form).return_annotation
+        rtype = State if rtype == inspect.Parameter.empty else rtype
+        return rtype(OpRef.Get(uri(self.header).append(self.name), key))
 
 
 class PutMethod(Method):
