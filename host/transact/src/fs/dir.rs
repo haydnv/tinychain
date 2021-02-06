@@ -175,6 +175,7 @@ impl<F: FileEntry> Dir<F> {
                 let dir = self
                     .get_or_create_dir(&txn_id, slice::from_ref(&path[0]))
                     .await?;
+
                 dir.create_dir(txn_id, &path[1..]).await
             }
         })

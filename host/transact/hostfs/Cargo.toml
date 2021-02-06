@@ -12,6 +12,8 @@ categories = ["filesystem"]
 
 [dependencies]
 bytes = "1.0"
+futures = "0.3"
 futures-locks = "0.6"
 error = { path = "../../error" }
 generic = { path = "../../generic" }
+tokio = { version = "1.2", features = ["fs"] }

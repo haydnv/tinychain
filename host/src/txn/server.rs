@@ -18,7 +18,7 @@ pub struct TxnServer {
 
 impl TxnServer {
     pub async fn new(workspace: PathBuf) -> Self {
-        let workspace = fs::mount(workspace).await;
+        let workspace = fs::mount(workspace).await.unwrap();
         let workspace = fs::Dir::create(workspace, "txn");
 
         Self {

@@ -38,7 +38,7 @@ serde_json = { version = "1.0", optional = true }
 transact = { path = "transact" }
 value = { path = "value" }
 structopt = "0.3"
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
+tokio = { version = "1.2", features = ["macros", "net", "rt-multi-thread", "time"] }
 url = { version = "2.2", optional = true }
 
 [features]

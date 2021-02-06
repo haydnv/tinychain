@@ -140,14 +140,15 @@ impl<T: BlockData> File<T> {
         } else if self.inner.listing.read(txn_id).await?.contains(block_id) {
             let txn_dir = self.inner.pending.read().await.get_dir(&txn_id.to_id())?;
             let block = if let Some(txn_dir) = txn_dir {
-                if let Some(block) = txn_dir.read().await.get_block(block_id)? {
+                if let Some(block) = txn_dir.read().await.get_block(block_id).await? {
                     block
                 } else {
                     self.inner
                         .dir
                         .read()
                         .await
-                        .get_block(&block_id)?
+                        .get_block(&block_id)
+                        .await?
                         .ok_or_else(|| TCError::internal(ERR_CORRUPT))?
                 }
             } else {
@@ -155,11 +156,12 @@ impl<T: BlockData> File<T> {
                     .dir
                     .read()
                     .await
-                    .get_block(&block_id)?
+                    .get_block(&block_id)
+                    .await?
                     .ok_or_else(|| TCError::internal(ERR_CORRUPT))?
             };
 
-            let block: T = block.read().await.deref().clone().try_into()?;
+            let block: T = block.try_into()?;
             let txn_lock = self
                 .inner
                 .cache
@@ -189,7 +191,7 @@ impl<T: BlockData> Transact for File<T> {
 
         let mut dir = this.dir.write().await;
         for block_id in old_listing.difference(&new_listing) {
-            dir.delete_block(block_id).unwrap();
+            dir.delete_block(block_id).await.unwrap();
         }
 
         this.listing.commit(txn_id).await;
@@ -199,12 +201,12 @@ impl<T: BlockData> Transact for File<T> {
 
         let cache = this.cache.read().await;
         debug!("File::commit! cache has {} blocks", cache.len());
-        let mut pending = this.pending.write().await;
         if mutated.is_empty() {
             cache.commit(txn_id).await;
             return;
         }
 
+        let mut pending = this.pending.write().await;
         let txn_dir = pending.create_or_get_dir(&txn_id.to_id()).await.unwrap();
 
         let copy_ops = mutated
@@ -220,24 +222,22 @@ impl<T: BlockData> Transact for File<T> {
                         data.len()
                     );
 
-                    dir_lock
-                        .await
-                        .create_or_get_block(block_id, data)
-                        .await
-                        .unwrap();
+                    dir_lock.await.create_block(block_id, data).await.unwrap();
                 }
             });
 
         join_all(copy_ops).await;
         cache.commit(txn_id).await;
         debug!("emptied cache");
-        dir.copy_all(txn_dir.write().await.deref_mut()).unwrap();
+        dir.copy_all(txn_dir.write().await.deref_mut())
+            .await
+            .unwrap();
         debug!("copied all blocks to main Dir");
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         let mut pending = self.inner.pending.write().await;
-        pending.delete_dir(&txn_id.to_id()).unwrap();
+        pending.delete_dir(&txn_id.to_id()).await.unwrap();
 
         self.inner.listing.finalize(txn_id).await;
     }

@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .data_dir
             .ok_or_else(|| TCError::internal("missing required option: --data_dir"))?;
 
-        let data_dir = fs::mount(data_dir).await;
+        let data_dir = fs::mount(data_dir).await?;
 
         for path in config.clusters {
             let dir_lock = data_dir.read().await;
