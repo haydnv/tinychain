@@ -19,7 +19,7 @@ pub struct TxnServer {
 impl TxnServer {
     pub async fn new(workspace: PathBuf) -> Self {
         let workspace = fs::mount(workspace).await.unwrap();
-        let workspace = fs::Dir::create(workspace, "txn");
+        let workspace = fs::Dir::load(workspace).await;
 
         Self {
             active: RwLock::new(HashMap::new()),

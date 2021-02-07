@@ -1,12 +1,17 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 
+use bytes::Bytes;
+use futures::Future;
+use futures_locks::RwLockReadGuard;
 use structopt::StructOpt;
 
 use error::TCError;
 use transact::fs;
 
+use generic::PathSegment;
 use tinychain::*;
 
 #[derive(Clone, StructOpt)]
@@ -40,15 +45,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
+        let txn_id = txn::TxnId::new(generic::NetworkTime::now());
+
         let data_dir = config
             .data_dir
             .ok_or_else(|| TCError::internal("missing required option: --data_dir"))?;
 
-        let data_dir = fs::mount(data_dir).await?;
+        let host_dir = fs::mount(data_dir).await?;
+        let data_dir = fs::Dir::load(host_dir.clone()).await;
+
+        let cluster_dir = host_dir
+            .read()
+            .await
+            .get_dir(&generic::label("cluster").into())?
+            .ok_or_else(|| TCError::not_found("/config"))?;
 
         for path in config.clusters {
-            let dir_lock = data_dir.read().await;
-            let cluster = cluster::Cluster::load(dir_lock, path.into()).await?;
+            let config = get_config(cluster_dir.read().await, &path).await?;
+            let cluster =
+                cluster::Cluster::load(txn_id, data_dir.clone(), path.into(), config).await?;
             clusters.push(cluster);
         }
     }
@@ -69,4 +84,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     Ok(())
+}
+
+fn get_config<'a>(
+    dir: RwLockReadGuard<fs::HostDir>,
+    path: &'a [PathSegment],
+) -> Pin<Box<dyn Future<Output = error::TCResult<Bytes>> + 'a>> {
+    Box::pin(async move {
+        if path.len() == 0 {
+            Err(TCError::bad_request("Invalid cluster config path", "/"))
+        } else if path.len() == 1 {
+            let file = dir
+                .get_file(&path[0])?
+                .ok_or_else(|| TCError::not_found(&path[0]))?;
+
+            for _block_id in file.read().await.block_ids() {
+                todo!()
+            }
+
+            unimplemented!()
+        } else {
+            let dir = dir
+                .get_dir(&path[0])?
+                .ok_or_else(|| TCError::not_found(&path[0]))?;
+
+            get_config(dir.read().await, &path[1..]).await
+        }
+    })
 }

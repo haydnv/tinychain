@@ -78,15 +78,32 @@ impl<F: Clone + Send + Sync> Mutate for DirContents<F> {
 }
 
 pub struct Dir<F: Clone + Send + Sync> {
-    cache: RwLock<hostfs::Dir>,
+    host_dir: RwLock<hostfs::Dir>,
     contents: TxnLock<DirContents<F>>,
 }
 
 impl<F: FileEntry> Dir<F> {
-    pub fn create<I: fmt::Display>(cache: RwLock<hostfs::Dir>, name: I) -> Arc<Self> {
-        Arc::new(Dir {
-            cache,
-            contents: TxnLock::new(name.to_string(), DirContents::default()),
+    pub fn load(host_dir: RwLock<hostfs::Dir>) -> Pin<Box<dyn Future<Output = Arc<Self>>>> {
+        Box::pin(async move {
+            let read_lock = host_dir.read().await;
+
+            let mut contents = DirContents::default();
+            for (name, entry) in read_lock.contents().iter() {
+                match entry {
+                    hostfs::DirEntry::Dir(dir) => {
+                        let dir = Self::load(dir.clone()).await;
+                        contents.entries.insert(name.clone(), DirEntry::Dir(dir));
+                    }
+                    hostfs::DirEntry::File(_file) => {
+                        unimplemented!()
+                    }
+                }
+            }
+
+            Arc::new(Dir {
+                host_dir,
+                contents: TxnLock::new("Transaction Dir", contents),
+            })
         })
     }
 
@@ -130,7 +147,8 @@ impl<F: FileEntry> Dir<F> {
                     TCPath::from(path),
                 ))
             } else if path.len() == 1 {
-                if let Some(entry) = self.contents.read(txn_id).await?.entries.get(&path[0]) {
+                let contents = self.contents.read(txn_id).await?;
+                if let Some(entry) = contents.entries.get(&path[0]) {
                     match entry {
                         DirEntry::Dir(dir) => Ok(Some(dir.clone())),
                         other => Err(TCError::bad_request("Expected Dir but found", other)),
@@ -160,11 +178,8 @@ impl<F: FileEntry> Dir<F> {
             } else if path.len() == 1 {
                 let mut contents = self.contents.write(txn_id).await?;
                 match contents.entries.entry(path[0].clone()) {
-                    Entry::Vacant(entry) => {
-                        let fs_dir = self.cache.write().await.create_dir(path[0].clone()).await?;
-                        let new_dir = Dir::create(fs_dir, &path[0]);
-                        entry.insert(DirEntry::Dir(new_dir.clone()));
-                        Ok(new_dir)
+                    Entry::Vacant(_entry) => {
+                        Err(TCError::not_implemented("transact::Dir::create_dir"))
                     }
                     _ => Err(TCError::bad_request(
                         "Tried to create a new Dir but there is already an entry at",
@@ -191,17 +206,7 @@ impl<F: FileEntry> Dir<F> {
     {
         let mut contents = self.contents.write(txn_id).await?;
         match contents.entries.entry(name) {
-            Entry::Vacant(entry) => {
-                let fs_cache = self
-                    .cache
-                    .write()
-                    .await
-                    .create_dir(entry.key().clone())
-                    .await?;
-                let file: File<B> = File::create(entry.key().as_str(), fs_cache).await?;
-                entry.insert(file.clone().into());
-                Ok(file)
-            }
+            Entry::Vacant(_entry) => Err(TCError::not_implemented("transact::Dir::create_file")),
             Entry::Occupied(entry) => Err(TCError::bad_request(
                 "Tried to create a new File but there is already an entry at",
                 entry.key(),
@@ -230,17 +235,11 @@ impl<F: FileEntry> Dir<F> {
 
 #[async_trait]
 impl<F: FileEntry> Transact for Dir<F> {
-    async fn commit(&self, txn_id: &TxnId) {
-        self.contents.commit(txn_id).await
+    async fn commit(&self, _txn_id: &TxnId) {
+        unimplemented!()
     }
 
-    async fn finalize(&self, txn_id: &TxnId) {
-        let contents = self.contents.read(txn_id).await.unwrap();
-        let mut cache = self.cache.write().await;
-        for name in contents.deleted.iter() {
-            cache.delete(name).unwrap();
-        }
-
-        self.contents.finalize(txn_id).await;
+    async fn finalize(&self, _txn_id: &TxnId) {
+        unimplemented!()
     }
 }

@@ -24,7 +24,7 @@ auth = { path = "auth" }
 base64 = "0.13"
 bytes = "1.0"
 destream = "0.3"
-destream_json = { version = "0.3", optional = true }
+destream_json = "0.3"
 env_logger = "0.8"
 error = { path = "error" }
 futures = "0.3"
@@ -33,7 +33,7 @@ generic = { path = "generic" }
 hyper = { version = "0.14", features = ["full"], optional = true }
 log = { version = "0.4", features = ["release_max_level_warn"] }
 safecast = "0.1"
-serde = { version = "1.0", features = []}
+serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", optional = true }
 transact = { path = "transact" }
 value = { path = "value" }
@@ -43,4 +43,4 @@ url = { version = "2.2", optional = true }
 
 [features]
 default = ["http"]
-http = ["hyper", "destream_json", "url", "serde_json"]
+http = ["hyper", "url", "serde_json"]
