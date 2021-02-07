@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use futures_locks::{RwLockReadGuard, RwLockWriteGuard};
 
@@ -8,9 +9,14 @@ use transact::TxnId;
 use super::block::*;
 use super::cache::CacheFile;
 
-pub struct File<B: BlockData> {
+struct Inner<B: BlockData> {
     file: CacheFile<B>,
     versions: HashMap<TxnId, CacheFile<B>>,
+}
+
+#[derive(Clone)]
+pub struct File<B: BlockData> {
+    inner: Arc<Inner<B>>,
 }
 
 impl<B: BlockData> File<B> {
