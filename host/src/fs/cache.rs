@@ -12,11 +12,11 @@ use futures_locks::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::fs;
 
 use error::*;
-use generic::{Id, PathSegment};
+use generic::PathSegment;
 
 use crate::chain::ChainBlock;
 
-use super::BlockData;
+use super::{BlockData, BlockId};
 
 pub struct CacheLock<T> {
     ref_count: Arc<std::sync::RwLock<usize>>,
@@ -57,31 +57,29 @@ impl<T> Drop for CacheLock<T> {
     }
 }
 
-pub struct CacheDir {
-    mount_point: PathBuf,
-    contents: HashMap<PathSegment, CacheDirEntry>,
-    cache: Cache,
-}
-
-enum CacheDirEntry {
-    Dir(Arc<CacheDirEntry>),
-    File(Arc<CacheFileEntry>),
-}
-
 pub struct CacheFile<B: BlockData> {
-    mount_point: PathBuf,
-    blocks: RwLock<HashMap<Id, Option<CacheLock<B>>>>,
     cache: Cache,
-}
-
-enum CacheFileEntry {
-    Chain(CacheFile<ChainBlock>),
+    mount_point: PathBuf,
+    blocks: HashMap<BlockId, Option<CacheLock<B>>>,
 }
 
 impl<B: BlockData> CacheFile<B> {
-    async fn create_block(&self, block_id: Id, value: B) -> TCResult<CacheLock<B>> {
-        let mut blocks = self.blocks.write().await;
-        match blocks.entry(block_id) {
+    fn new(cache: Cache, mount_point: PathBuf) -> Self {
+        Self {
+            cache,
+            mount_point,
+            blocks: HashMap::new(),
+        }
+    }
+}
+
+pub enum CacheFileEntry {
+    Chain(RwLock<CacheFile<ChainBlock>>),
+}
+
+impl<B: BlockData> CacheFile<B> {
+    pub async fn create_block(&mut self, block_id: BlockId, value: B) -> TCResult<CacheLock<B>> {
+        match self.blocks.entry(block_id) {
             Entry::Occupied(entry) => Err(TCError::bad_request(
                 "There is already a block at",
                 entry.key(),
@@ -98,20 +96,25 @@ impl<B: BlockData> CacheFile<B> {
         }
     }
 
-    async fn get_block(&self, block_id: &Id) -> TCResult<Option<CacheLock<B>>> {
-        {
-            let blocks = self.blocks.read().await;
+    pub async fn get_block(
+        file: &RwLock<Self>,
+        block_id: &BlockId,
+    ) -> TCResult<Option<CacheLock<B>>> {
+        let path = {
+            let this = file.read().await;
+            let path = fs_path(&this.mount_point, block_id);
+            this.cache.bump(&path).await;
 
-            if let Some(entry) = blocks.get(block_id) {
+            if let Some(entry) = this.blocks.get(block_id) {
                 if let Some(block) = entry {
                     return Ok(Some(block.clone()));
                 }
-            } else {
-                return Ok(None);
             }
-        }
 
-        let path = fs_path(&self.mount_point, block_id);
+            path
+        };
+
+        let mut this = file.write().await;
         let block = fs::read(&path)
             .map_ok(Bytes::from)
             .map_err(|e| io_err(e, &path))
@@ -119,9 +122,7 @@ impl<B: BlockData> CacheFile<B> {
 
         let block = CacheLock::new(block.try_into()?);
 
-        self.cache.bump(&path).await;
-        let mut blocks = self.blocks.write().await;
-        blocks.insert(block_id.clone(), Some(block.clone()));
+        this.blocks.insert(block_id.clone(), Some(block.clone()));
 
         Ok(Some(block))
     }
@@ -184,6 +185,72 @@ impl Cache {
 
         if lfu.size > self.inner.max_size {
             // TODO: evict
+        }
+    }
+}
+
+pub enum CacheDirEntry {
+    Dir(RwLock<CacheDir>),
+    File(CacheFileEntry),
+}
+
+impl From<RwLock<CacheFile<ChainBlock>>> for CacheDirEntry {
+    fn from(file: RwLock<CacheFile<ChainBlock>>) -> Self {
+        Self::File(CacheFileEntry::Chain(file))
+    }
+}
+
+pub struct CacheDir {
+    cache: Cache,
+    mount_point: PathBuf,
+    contents: HashMap<PathSegment, CacheDirEntry>,
+}
+
+impl CacheDir {
+    fn new(cache: Cache, mount_point: PathBuf) -> Self {
+        Self {
+            cache,
+            mount_point,
+            contents: HashMap::new(),
+        }
+    }
+
+    pub async fn create_file<B: BlockData>(
+        &mut self,
+        name: PathSegment,
+    ) -> TCResult<RwLock<CacheFile<B>>>
+    where
+        CacheDirEntry: From<RwLock<CacheFile<B>>>,
+    {
+        match self.contents.entry(name) {
+            Entry::Occupied(entry) => Err(TCError::bad_request(
+                "there is already a directory at",
+                entry.key(),
+            )),
+            Entry::Vacant(entry) => {
+                let file = CacheFile::<B>::new(
+                    self.cache.clone(),
+                    fs_path(&self.mount_point, entry.key()),
+                );
+                let file = RwLock::new(file);
+                entry.insert(file.clone().into());
+                Ok(file)
+            }
+        }
+    }
+
+    pub async fn create_dir(&mut self, name: PathSegment) -> TCResult<RwLock<Self>> {
+        match self.contents.entry(name) {
+            Entry::Occupied(entry) => Err(TCError::bad_request(
+                "there is already a directory at",
+                entry.key(),
+            )),
+            Entry::Vacant(entry) => {
+                let dir = Self::new(self.cache.clone(), fs_path(&self.mount_point, entry.key()));
+                let dir = RwLock::new(dir);
+                entry.insert(CacheDirEntry::Dir(dir.clone()));
+                Ok(dir)
+            }
         }
     }
 }
