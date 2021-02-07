@@ -8,10 +8,10 @@ mod dir;
 mod file;
 
 pub use block::*;
+pub use cache::Cache;
 pub use dir::*;
 pub use file::*;
 
-pub async fn mount(mount_point: PathBuf, cache_size: usize) -> TCResult<Dir> {
-    let cache = cache::Cache::load(mount_point, cache_size).await?;
-    Ok(Dir::load(cache.root()).await)
+pub async fn cache_init(mount_point: PathBuf, max_size: usize) -> TCResult<Cache> {
+    cache::Cache::load(mount_point, max_size).await
 }
