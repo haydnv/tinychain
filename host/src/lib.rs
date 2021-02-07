@@ -5,6 +5,8 @@ pub use auth;
 pub use error;
 pub use kernel::*;
 
+#[allow(dead_code)]
+mod fs;
 mod route;
 
 pub mod chain;
