@@ -1,19 +1,6 @@
-use std::convert::TryFrom;
-use std::mem;
-
-use bytes::Bytes;
-use error::TCError;
-
-use crate::chain::ChainBlock;
-
+mod block;
 mod cache;
+mod file;
 
-pub trait BlockData: TryFrom<Bytes, Error = TCError> {
-    fn size(&self) -> usize {
-        mem::size_of::<Self>()
-    }
-}
-
-pub trait File<B: BlockData> {}
-
-impl BlockData for ChainBlock {}
+pub use block::*;
+pub use file::*;
