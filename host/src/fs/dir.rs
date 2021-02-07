@@ -20,12 +20,18 @@ enum DirEntry {
     File(FileEntry),
 }
 
+pub struct DirView {
+    txn_id: TxnId,
+    cache: RwLock<CacheDir>,
+}
+
 pub struct Dir {
     cache: RwLock<CacheDir>,
     versions: HashMap<TxnId, DirView>,
 }
 
-pub struct DirView {
-    txn_id: TxnId,
-    cache: RwLock<CacheDir>,
+impl Dir {
+    pub async fn load(_cache: RwLock<CacheDir>) -> Self {
+        unimplemented!()
+    }
 }

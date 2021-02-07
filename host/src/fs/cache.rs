@@ -1,12 +1,16 @@
 use std::collections::hash_map::{Entry, HashMap};
+use std::collections::HashSet;
 use std::convert::TryInto;
 use std::fmt;
+use std::fs::Metadata;
 use std::hash::Hash;
 use std::io;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::Future;
 use futures::TryFutureExt;
 use futures_locks::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::fs;
@@ -17,6 +21,54 @@ use generic::PathSegment;
 use crate::chain::ChainBlock;
 
 use super::{BlockData, BlockId};
+
+enum TreeNodeEntry {
+    Dir(HashMap<PathSegment, TreeNode>),
+    File(HashSet<BlockId>),
+}
+
+struct TreeNode {
+    path: PathBuf,
+    entry: TreeNodeEntry,
+}
+
+impl TreeNode {
+    fn load(path: PathBuf) -> Pin<Box<dyn Future<Output = TCResult<Self>>>> {
+        Box::pin(async move {
+            let contents = dir_contents(&path).await?;
+
+            if contents.iter().all(|(_, meta)| meta.is_file()) {
+                let block_ids = contents
+                    .into_iter()
+                    .map(|(handle, _)| handle.file_name().to_str().unwrap().parse())
+                    .collect::<TCResult<HashSet<BlockId>>>()?;
+
+                Ok(TreeNode {
+                    path,
+                    entry: TreeNodeEntry::File(block_ids),
+                })
+            } else if contents.iter().all(|(_, meta)| meta.is_dir()) {
+                let mut dir = HashMap::new();
+                for (handle, _) in contents.into_iter() {
+                    let name = handle.file_name().to_str().unwrap().parse()?;
+                    let path = fs_path(&path, &name);
+                    let node = Self::load(path).await?;
+                    dir.insert(name, node);
+                }
+
+                Ok(TreeNode {
+                    path,
+                    entry: TreeNodeEntry::Dir(dir),
+                })
+            } else {
+                Err(TCError::internal(format!(
+                    "Data directory {:?} contains both blocks and subdirectories",
+                    path
+                )))
+            }
+        })
+    }
+}
 
 pub struct CacheLock<T> {
     ref_count: Arc<std::sync::RwLock<usize>>,
@@ -170,6 +222,12 @@ pub struct Cache {
 }
 
 impl Cache {
+    pub async fn load(mount_point: PathBuf, _max_size: usize) -> TCResult<Self> {
+        let _root = TreeNode::load(mount_point);
+
+        Err(TCError::not_implemented("Cache::load"))
+    }
+
     async fn bump(&self, path: &PathBuf) {
         let mut lfu = self.inner.lfu.write().await;
         lfu.bump(path);
@@ -186,6 +244,10 @@ impl Cache {
         if lfu.size > self.inner.max_size {
             // TODO: evict
         }
+    }
+
+    pub fn root(&self) -> RwLock<CacheDir> {
+        self.inner.root.clone()
     }
 }
 
@@ -253,6 +315,28 @@ impl CacheDir {
             }
         }
     }
+}
+
+async fn dir_contents(dir_path: &PathBuf) -> TCResult<Vec<(fs::DirEntry, Metadata)>> {
+    let mut contents = vec![];
+    let mut handles = fs::read_dir(dir_path)
+        .map_err(|e| io_err(e, dir_path))
+        .await?;
+
+    while let Some(handle) = handles
+        .next_entry()
+        .map_err(|e| io_err(e, dir_path))
+        .await?
+    {
+        let meta = handle
+            .metadata()
+            .map_err(|e| io_err(e, handle.path()))
+            .await?;
+
+        contents.push((handle, meta));
+    }
+
+    Ok(contents)
 }
 
 fn file_name(handle: &fs::DirEntry) -> TCResult<PathSegment> {
