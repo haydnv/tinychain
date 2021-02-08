@@ -1,15 +1,16 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::ops::Deref;
 
 use destream::{en, EncodeMap};
 
 use transact::IntoView;
 
+use crate::fs::DirView;
 use crate::state::State;
-use crate::txn::{FileEntry, Txn};
+use crate::txn::Txn;
 
 use super::{InstanceClass, Object};
-use std::ops::Deref;
 
 #[derive(Clone)]
 pub struct InstanceExt<T: generic::Instance> {
@@ -62,7 +63,7 @@ impl<T: generic::Instance> Deref for InstanceExt<T> {
     }
 }
 
-impl<'en> IntoView<'en, FileEntry> for InstanceExt<State> {
+impl<'en> IntoView<'en, DirView> for InstanceExt<State> {
     type Txn = Txn;
     type View = InstanceView;
 

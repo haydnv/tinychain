@@ -1,17 +1,16 @@
-use std::convert::TryFrom;
-use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures_locks::RwLock;
 
 use auth::Token;
 use error::*;
 use generic::Id;
-use transact::fs::{self, DirEntry, File};
+use transact::fs::Dir;
 
 pub use transact::{Transact, Transaction, TxnId};
 
-use crate::chain::ChainBlock;
+use crate::fs::DirView;
 use crate::gateway::Gateway;
 use crate::scalar::{Link, Value};
 use crate::state::State;
@@ -40,59 +39,8 @@ impl Request {
 }
 
 #[derive(Clone)]
-pub enum FileEntry {
-    Chain(File<ChainBlock>),
-}
-
-impl fs::FileEntry for FileEntry {}
-
-#[async_trait]
-impl Transact for FileEntry {
-    async fn commit(&self, txn_id: &TxnId) {
-        match self {
-            Self::Chain(chain) => chain.commit(txn_id).await,
-        }
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        match self {
-            Self::Chain(chain) => chain.finalize(txn_id).await,
-        }
-    }
-}
-
-impl From<File<ChainBlock>> for FileEntry {
-    fn from(file: File<ChainBlock>) -> Self {
-        Self::Chain(file)
-    }
-}
-
-impl TryFrom<FileEntry> for File<ChainBlock> {
-    type Error = TCError;
-
-    fn try_from(entry: FileEntry) -> Result<Self, Self::Error> {
-        match entry {
-            FileEntry::Chain(chain) => Ok(chain),
-        }
-    }
-}
-
-impl From<FileEntry> for fs::DirEntry<FileEntry> {
-    fn from(file: FileEntry) -> Self {
-        DirEntry::File(file)
-    }
-}
-
-impl fmt::Display for FileEntry {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Chain(_) => f.write_str("(a Chain file)"),
-        }
-    }
-}
-
 struct Inner {
-    dir: Arc<fs::Dir<FileEntry>>,
+    dir: RwLock<DirView>,
     gateway: Arc<Gateway>,
     request: Arc<Request>,
 }
@@ -103,7 +51,7 @@ pub struct Txn {
 }
 
 impl Txn {
-    fn new(gateway: Arc<Gateway>, dir: Arc<fs::Dir<FileEntry>>, request: Request) -> Self {
+    fn new(gateway: Arc<Gateway>, dir: RwLock<DirView>, request: Request) -> Self {
         let request = Arc::new(request);
         let inner = Arc::new(Inner {
             dir,
@@ -123,24 +71,22 @@ impl Txn {
 }
 
 #[async_trait]
-impl Transaction<FileEntry> for Txn {
-    fn id(&self) -> &TxnId {
+impl Transaction<DirView> for Txn {
+    fn id(&'_ self) -> &'_ TxnId {
         &self.inner.request.txn_id
     }
 
-    async fn context(&'_ self) -> &'_ Arc<fs::Dir<FileEntry>> {
+    fn context(&'_ self) -> &'_ RwLock<DirView> {
         &self.inner.dir
     }
 
-    async fn subcontext(&self, id: &Id) -> TCResult<Self> {
+    async fn subcontext(&self, id: Id) -> TCResult<Self> {
+        let mut dir = self.inner.dir.write().await;
+
         let inner = Inner {
             gateway: self.inner.gateway.clone(),
             request: self.inner.request.clone(),
-            dir: self
-                .inner
-                .dir
-                .create_dir(*self.id(), std::slice::from_ref(id))
-                .await?,
+            dir: dir.create_dir(id).await?,
         };
 
         Ok(Txn {

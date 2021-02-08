@@ -15,9 +15,10 @@ use error::*;
 use generic::*;
 
 use crate::chain::*;
+use crate::fs::DirView;
 use crate::object::{Object, ObjectType};
 use crate::scalar::*;
-use crate::txn::{FileEntry, Txn};
+use crate::txn::Txn;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum StateType {
@@ -190,7 +191,7 @@ impl Instance for State {
     }
 }
 
-impl<'en> IntoView<'en, FileEntry> for State {
+impl<'en> IntoView<'en, DirView> for State {
     type Txn = Txn;
     type View = StateView;
 
@@ -568,12 +569,20 @@ impl<'a> de::Visitor for StateVisitor {
             let mut map = HashMap::new();
 
             let id = Id::from_str(&key).map_err(de::Error::custom)?;
-            let txn = self.txn.subcontext(&id).map_err(de::Error::custom).await?;
+            let txn = self
+                .txn
+                .subcontext(id.clone())
+                .map_err(de::Error::custom)
+                .await?;
             let value = access.next_value(txn).await?;
             map.insert(id, value);
 
-            while let Some(id) = access.next_key(()).await? {
-                let txn = self.txn.subcontext(&id).map_err(de::Error::custom).await?;
+            while let Some(id) = access.next_key::<Id>(()).await? {
+                let txn = self
+                    .txn
+                    .subcontext(id.clone())
+                    .map_err(de::Error::custom)
+                    .await?;
                 let state = access.next_value(txn).await?;
                 map.insert(id, state);
             }
@@ -595,7 +604,7 @@ impl<'a> de::Visitor for StateVisitor {
         loop {
             let txn = self
                 .txn
-                .subcontext(&i.into())
+                .subcontext(i.into())
                 .map_err(de::Error::custom)
                 .await?;
 

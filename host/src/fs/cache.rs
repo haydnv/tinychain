@@ -14,11 +14,10 @@ use tokio::fs;
 
 use error::*;
 use generic::{label, Label, NativeClass, PathSegment, TCPathBuf};
+use transact::fs::{BlockData, BlockId};
 
 use crate::chain::ChainBlock;
 use crate::state::StateType;
-
-use super::{BlockData, BlockId};
 
 const CLASS: Label = label(".class");
 
@@ -61,7 +60,8 @@ impl<T> Drop for CacheLock<T> {
     }
 }
 
-pub struct CacheFile<B: BlockData> {
+#[derive(Clone)]
+pub struct CacheFile<B> {
     cache: Cache,
     mount_point: PathBuf,
     blocks: HashMap<BlockId, Option<CacheLock<B>>>,
@@ -84,7 +84,7 @@ impl<B: BlockData> CacheFile<B> {
         let mut blocks = HashMap::new();
 
         for (handle, meta) in contents.into_iter() {
-            let name = handle.file_name().to_str().unwrap().parse()?;
+            let name = file_name(&handle)?;
             let path = fs_path(&mount_point, &name);
 
             if !meta.is_file() {
@@ -319,7 +319,7 @@ impl CacheDir {
 
         if entries.iter().all(|(_, meta)| meta.is_dir()) {
             for (handle, _) in entries.into_iter() {
-                let name = handle.file_name().to_str().unwrap().parse()?;
+                let name = file_name(&handle)?;
                 let path = fs_path(&mount_point, &name);
                 let entry_contents = dir_contents(&path).await?;
                 if entry_contents.iter().all(|(_, meta)| meta.is_file()) {

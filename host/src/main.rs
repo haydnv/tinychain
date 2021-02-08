@@ -1,18 +1,35 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::Future;
-use futures_locks::RwLockReadGuard;
 use structopt::StructOpt;
 
 use error::TCError;
-use transact::fs;
 
 use generic::PathSegment;
 use tinychain::*;
+
+fn data_size(flag: &str) -> error::TCResult<usize> {
+    if flag.is_empty() {
+        return Err(error::TCError::bad_request("Invalid size specified", flag));
+    }
+
+    let msg = "Unable to parse value";
+    let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
+        .map_err(|_| error::TCError::bad_request(msg, flag))?;
+
+    if flag.ends_with('K') {
+        Ok(size * 1000)
+    } else if flag.ends_with('M') {
+        Ok(size * 1_000_000)
+    } else {
+        Err(error::TCError::bad_request(
+            "Unable to parse request_limit",
+            flag,
+        ))
+    }
+}
 
 #[derive(Clone, StructOpt)]
 struct Config {
@@ -21,6 +38,12 @@ struct Config {
 
     #[structopt(long = "log_level", default_value = "warn")]
     pub log_level: String,
+
+    #[structopt(long = "cache_size", default_value = "10M", parse(try_from_str = data_size))]
+    pub cache_size: usize,
+
+    #[structopt(long = "config")]
+    pub config: Option<PathBuf>,
 
     #[structopt(long = "data_dir")]
     pub data_dir: Option<PathBuf>,
@@ -45,25 +68,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
-        let txn_id = txn::TxnId::new(generic::NetworkTime::now());
-
         let data_dir = config
             .data_dir
             .ok_or_else(|| TCError::internal("missing required option: --data_dir"))?;
 
-        let host_dir = fs::mount(data_dir).await?;
-        let data_dir = fs::Dir::load(host_dir.clone()).await;
+        let data_dir = fs::Root::load(data_dir, config.cache_size).await?;
 
-        let cluster_dir = host_dir
-            .read()
-            .await
-            .get_dir(&generic::label("cluster").into())?
-            .ok_or_else(|| TCError::not_found("/config"))?;
+        let config_dir = config
+            .config
+            .ok_or_else(|| TCError::internal("missing required option --config"))?;
 
         for path in config.clusters {
-            let config = get_config(cluster_dir.read().await, &path).await?;
-            let cluster =
-                cluster::Cluster::load(txn_id, data_dir.clone(), path.into(), config).await?;
+            let config = get_config(&config_dir, &path).await?;
+            let cluster = cluster::Cluster::load(data_dir.clone(), path, config).await?;
+
             clusters.push(cluster);
         }
     }
@@ -74,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(feature = "http")]
     gateway_config.insert(value::LinkProtocol::HTTP, config.http_port);
 
-    let txn_server = tinychain::txn::TxnServer::new(config.workspace).await;
+    let txn_server = tinychain::txn::TxnServer::new(config.workspace, config.cache_size).await;
     let kernel = tinychain::Kernel::new(clusters);
     let gateway =
         tinychain::gateway::Gateway::new(kernel, txn_server, config.address, gateway_config);
@@ -86,29 +104,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-fn get_config<'a>(
-    dir: RwLockReadGuard<fs::HostDir>,
-    path: &'a [PathSegment],
-) -> Pin<Box<dyn Future<Output = error::TCResult<Bytes>> + 'a>> {
-    Box::pin(async move {
-        if path.len() == 0 {
-            Err(TCError::bad_request("Invalid cluster config path", "/"))
-        } else if path.len() == 1 {
-            let file = dir
-                .get_file(&path[0])?
-                .ok_or_else(|| TCError::not_found(&path[0]))?;
+async fn get_config<'a>(config_dir: &PathBuf, path: &'a [PathSegment]) -> error::TCResult<Bytes> {
+    let mut fs_path = config_dir.clone();
+    for id in path {
+        fs_path.push(id.to_string());
+    }
 
-            for _block_id in file.read().await.block_ids() {
-                todo!()
-            }
-
-            unimplemented!()
-        } else {
-            let dir = dir
-                .get_dir(&path[0])?
-                .ok_or_else(|| TCError::not_found(&path[0]))?;
-
-            get_config(dir.read().await, &path[1..]).await
-        }
-    })
+    match tokio::fs::read(fs_path).await {
+        Ok(config) => Ok(Bytes::from(config)),
+        Err(cause) => Err(error::TCError::internal(format!(
+            "could not read config file for {}: {}",
+            generic::TCPath::from(path),
+            cause
+        ))),
+    }
 }

@@ -1,19 +1,19 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use destream::en;
+use futures_locks::RwLock;
 
 use error::*;
 use generic::Id;
 
-pub mod fs;
 mod id;
+
+pub mod fs;
 pub mod lock;
 
 pub use id::TxnId;
 
-pub trait IntoView<'en, F: fs::FileEntry> {
-    type Txn: Transaction<F>;
+pub trait IntoView<'en, D: fs::Dir> {
+    type Txn: Transaction<D>;
     type View: en::IntoStream<'en> + Sized;
 
     fn into_view(self, txn: Self::Txn) -> Self::View;
@@ -27,10 +27,10 @@ pub trait Transact {
 }
 
 #[async_trait]
-pub trait Transaction<E: fs::FileEntry>: Sized {
+pub trait Transaction<D: fs::Dir>: Sized {
     fn id(&'_ self) -> &'_ TxnId;
 
-    async fn context(&'_ self) -> &'_ Arc<fs::Dir<E>>;
+    fn context(&'_ self) -> &'_ RwLock<D>;
 
-    async fn subcontext(&self, id: &Id) -> TCResult<Self>;
+    async fn subcontext(&self, id: Id) -> TCResult<Self>;
 }

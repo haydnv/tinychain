@@ -19,7 +19,6 @@ error = { path = "../error" }
 futures = "0.3"
 futures-locks = "0.6"
 generic = { path = "../generic" }
-hostfs = { path = "hostfs" }
 log = { version = "0.4", features = [] }
 rand = "0.7"
 serde = { version = "1.0", features = []}

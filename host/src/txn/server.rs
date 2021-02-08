@@ -5,21 +5,20 @@ use std::sync::Arc;
 use futures_locks::RwLock;
 
 use error::*;
-use transact::fs;
 
+use crate::fs::Root;
 use crate::gateway::Gateway;
 
-use super::{FileEntry, Request, Txn, TxnId};
+use super::{Request, Txn, TxnId};
 
 pub struct TxnServer {
     active: RwLock<HashMap<TxnId, Txn>>,
-    workspace: Arc<fs::Dir<FileEntry>>,
+    workspace: Root,
 }
 
 impl TxnServer {
-    pub async fn new(workspace: PathBuf) -> Self {
-        let workspace = fs::mount(workspace).await.unwrap();
-        let workspace = fs::Dir::load(workspace).await;
+    pub async fn new(workspace: PathBuf, cache_size: usize) -> Self {
+        let workspace = Root::load(workspace, cache_size).await.unwrap();
 
         Self {
             active: RwLock::new(HashMap::new()),
@@ -40,11 +39,7 @@ impl TxnServer {
                 }
             }
             Entry::Vacant(entry) => {
-                let txn_dir = self
-                    .workspace
-                    .create_dir(request.txn_id, &[request.txn_id.to_id()])
-                    .await?;
-
+                let txn_dir = self.workspace.version(*entry.key()).await?;
                 let txn = Txn::new(gateway, txn_dir, request);
                 entry.insert(txn.clone());
                 Ok(txn)

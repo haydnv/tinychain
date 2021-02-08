@@ -2,17 +2,16 @@ use std::fmt;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::TryFutureExt;
-use transact::Transaction;
+use futures_locks::RwLock;
 
 use error::*;
 use generic::*;
-use transact::fs::{BlockOwned, File};
 use transact::{IntoView, TxnId};
 
+use crate::fs::{DirView, FileView};
 use crate::scalar::OpRef;
-use crate::txn::{FileEntry, Txn};
+use crate::txn::Txn;
 
 mod block;
 pub mod sync;
@@ -23,22 +22,9 @@ const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
 #[async_trait]
 pub trait ChainInstance {
-    fn file(&'_ self) -> &'_ File<ChainBlock>;
-
-    fn len(&self) -> u64;
+    async fn file(&self, txn_id: &TxnId) -> TCResult<RwLock<FileView<ChainBlock>>>;
 
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()>;
-
-    fn block_stream(
-        &self,
-        txn_id: TxnId,
-    ) -> Box<dyn Stream<Item = TCResult<BlockOwned<ChainBlock>>> + Send + Unpin> {
-        let file = self.file().clone();
-        let blocks = stream::iter(0..self.len())
-            .then(move |block_id| Box::pin(file.clone().get_block_owned(txn_id, block_id.into())));
-
-        Box::new(blocks)
-    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -90,15 +76,9 @@ impl Instance for Chain {
 
 #[async_trait]
 impl ChainInstance for Chain {
-    fn file(&'_ self) -> &'_ File<ChainBlock> {
+    async fn file(&self, txn_id: &TxnId) -> TCResult<RwLock<FileView<ChainBlock>>> {
         match self {
-            Self::Sync(chain) => chain.file(),
-        }
-    }
-
-    fn len(&self) -> u64 {
-        match self {
-            Self::Sync(chain) => chain.len(),
+            Self::Sync(chain) => chain.file(txn_id).await,
         }
     }
 
@@ -118,7 +98,7 @@ impl de::FromStream for Chain {
     }
 }
 
-impl<'en> IntoView<'en, FileEntry> for Chain {
+impl<'en> IntoView<'en, DirView> for Chain {
     type Txn = Txn;
     type View = ChainView;
 
@@ -139,13 +119,8 @@ pub struct ChainView {
 }
 
 impl<'en> en::IntoStream<'en> for ChainView {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        let blocks = self
-            .chain
-            .block_stream(*self.txn.id())
-            .map_err(en::Error::custom);
-
-        encoder.encode_seq_stream(blocks)
+    fn into_stream<E: en::Encoder<'en>>(self, _encoder: E) -> Result<E::Ok, E::Error> {
+        unimplemented!()
     }
 }
 

@@ -6,11 +6,11 @@ pub use error;
 pub use kernel::*;
 
 #[allow(dead_code)]
-mod fs;
 mod route;
 
 pub mod chain;
 pub mod cluster;
+pub mod fs;
 pub mod gateway;
 pub mod kernel;
 pub mod object;
