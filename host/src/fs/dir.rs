@@ -101,6 +101,28 @@ impl Dir {
             }
         })
     }
+
+    pub fn find<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        path: &'a [PathSegment],
+    ) -> Pin<Box<dyn Future<Output = TCResult<Option<DirEntry>>> + 'a>> {
+        Box::pin(async move {
+            if path.is_empty() {
+                return Ok(None);
+            }
+
+            let entries = self.entries.read(txn_id).await?;
+            if path.len() == 1 {
+                Ok(entries.get(&path[0]).cloned())
+            } else {
+                match entries.get(&path[0]) {
+                    Some(DirEntry::Dir(dir)) => dir.find(txn_id, &path[1..]).await,
+                    _ => Ok(None),
+                }
+            }
+        })
+    }
 }
 
 #[async_trait]
