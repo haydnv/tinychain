@@ -128,12 +128,22 @@ impl fs::Dir for Dir {
         Ok(file)
     }
 
-    async fn get_dir(&self, _txn_id: &TxnId, _name: &PathSegment) -> TCResult<Option<Self>> {
-        unimplemented!()
+    async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>> {
+        let entries = self.entries.read(txn_id).await?;
+        match entries.get(&name) {
+            Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
+            Some(_) => Err(TCError::bad_request("not a dir", name)),
+            None => Ok(None),
+        }
     }
 
-    async fn get_file(&self, _txn_id: &TxnId, _name: &Id) -> TCResult<Option<Self::File>> {
-        unimplemented!()
+    async fn get_file(&self, txn_id: &TxnId, name: &Id) -> TCResult<Option<Self::File>> {
+        let entries = self.entries.read(txn_id).await?;
+        match entries.get(&name) {
+            Some(DirEntry::File(file)) => Ok(Some(file.clone())),
+            Some(_) => Err(TCError::bad_request("not a file", name)),
+            None => Ok(None),
+        }
     }
 }
 
