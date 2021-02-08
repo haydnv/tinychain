@@ -30,6 +30,12 @@ impl CacheBlock {
     }
 }
 
+impl From<CacheLock<ChainBlock>> for CacheBlock {
+    fn from(lock: CacheLock<ChainBlock>) -> CacheBlock {
+        Self::Chain(lock)
+    }
+}
+
 impl TryFrom<CacheBlock> for CacheLock<ChainBlock> {
     type Error = TCError;
 
@@ -53,11 +59,11 @@ impl<T> CacheLock<T> {
         }
     }
 
-    async fn read(&self) -> RwLockReadGuard<T> {
+    pub async fn read(&self) -> RwLockReadGuard<T> {
         self.lock.read().await
     }
 
-    async fn write(&self) -> RwLockWriteGuard<T> {
+    pub async fn write(&self) -> RwLockWriteGuard<T> {
         self.lock.write().await
     }
 }
@@ -156,7 +162,7 @@ impl Cache {
         inner.entries.insert(path, block.clone().into());
         inner.size += size;
         if inner.size > inner.max_size {
-            log::warn!("cacne overflowing but eviction is not yet implemented!");
+            log::warn!("cache overflowing but eviction is not yet implemented!");
         }
 
         Ok(block)

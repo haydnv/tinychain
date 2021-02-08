@@ -21,21 +21,30 @@ pub trait File: Sized {
 
     async fn create_block(
         &mut self,
-        name: Id,
+        name: BlockId,
+        txn_id: TxnId,
         initial_value: Self::Block,
     ) -> TCResult<BlockOwned<Self>>;
 
-    async fn get_block<'a>(&'a self, txn_id: &'a TxnId, name: &'a Id) -> TCResult<Block<'a, Self>>;
+    async fn get_block<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        name: &'a BlockId,
+    ) -> TCResult<Block<'a, Self>>;
 
     async fn get_block_mut<'a>(
         &'a self,
         txn_id: &'a TxnId,
-        name: &'a Id,
+        name: &'a BlockId,
     ) -> TCResult<BlockMut<'a, Self>>;
 
-    async fn get_block_owned(self, txn_id: TxnId, name: Id) -> TCResult<BlockOwned<Self>>;
+    async fn get_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<BlockOwned<Self>>;
 
-    async fn get_block_owned_mut(self, txn_id: TxnId, name: Id) -> TCResult<BlockOwnedMut<Self>>;
+    async fn get_block_owned_mut(
+        self,
+        txn_id: TxnId,
+        name: BlockId,
+    ) -> TCResult<BlockOwnedMut<Self>>;
 }
 
 #[async_trait]
@@ -45,7 +54,12 @@ pub trait Dir: Sized {
 
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self>;
 
-    async fn create_file(&self, txn_id: TxnId, name: Id, class: Self::Class) -> TCResult<Self::File>;
+    async fn create_file(
+        &self,
+        txn_id: TxnId,
+        name: Id,
+        class: Self::Class,
+    ) -> TCResult<Self::File>;
 
     async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>>;
 
