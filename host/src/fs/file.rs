@@ -1,9 +1,9 @@
 use std::collections::HashSet;
+use std::convert::TryFrom;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use futures_locks::RwLockReadGuard;
 
 use error::*;
 use generic::{label, Id, Label};
@@ -23,7 +23,7 @@ pub struct File<B> {
     phantom: PhantomData<B>,
 }
 
-impl<B> File<B> {
+impl<B: fs::BlockData> File<B> {
     fn _new(cache: Cache, path: PathBuf, listing: HashSet<fs::BlockId>) -> Self {
         let listing = TxnLock::new(format!("file listing at {:?}", &path), listing.into());
         let phantom = PhantomData;
@@ -58,10 +58,15 @@ impl<B> File<B> {
 
     async fn lock_block(
         &self,
-        _txn_id: &TxnId,
-        _block_id: &fs::BlockId,
-    ) -> TCResult<Option<RwLockReadGuard<B>>> {
-        Err(TCError::not_implemented("File::lock_block"))
+        txn_id: &TxnId,
+        block_id: &fs::BlockId,
+    ) -> TCResult<Option<CacheLock<B>>>
+    where
+        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+        CacheBlock: From<CacheLock<B>>,
+    {
+        let path = block_path(&self.path, txn_id, block_id);
+        self.cache.read(&path).await
     }
 }
 
@@ -69,6 +74,7 @@ impl<B> File<B> {
 impl<B: fs::BlockData + 'static> fs::File for File<B>
 where
     CacheBlock: From<CacheLock<B>>,
+    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
     type Block = B;
 
@@ -86,30 +92,50 @@ where
 
     async fn get_block<'a>(
         &'a self,
-        _txn_id: &'a TxnId,
-        _name: &'a fs::BlockId,
+        txn_id: &'a TxnId,
+        name: &'a fs::BlockId,
     ) -> TCResult<fs::Block<'a, Self>> {
-        unimplemented!()
+        if let Some(block) = self.lock_block(txn_id, name).await? {
+            let lock = block.read().await;
+            Ok(fs::Block::new(self, txn_id, name, lock))
+        } else {
+            Err(TCError::not_found(name))
+        }
     }
 
     async fn get_block_mut<'a>(
         &'a self,
-        _txn_id: &'a TxnId,
-        _name: &'a fs::BlockId,
+        txn_id: &'a TxnId,
+        name: &'a fs::BlockId,
     ) -> TCResult<fs::BlockMut<'a, Self>> {
-        unimplemented!()
+        if let Some(block) = self.lock_block(txn_id, name).await? {
+            let lock = block.write().await;
+            Ok(fs::BlockMut::new(self, txn_id, name, lock))
+        } else {
+            Err(TCError::not_found(name))
+        }
     }
 
-    async fn get_block_owned(self, _txn_id: TxnId, _name: Id) -> TCResult<fs::BlockOwned<Self>> {
-        unimplemented!()
+    async fn get_block_owned(self, txn_id: TxnId, name: Id) -> TCResult<fs::BlockOwned<Self>> {
+        if let Some(block) = self.lock_block(&txn_id, &name).await? {
+            let lock = block.read().await;
+            Ok(fs::BlockOwned::new(self, txn_id, name, lock))
+        } else {
+            Err(TCError::not_found(name))
+        }
     }
 
     async fn get_block_owned_mut(
         self,
-        _txn_id: TxnId,
-        _name: fs::BlockId,
+        txn_id: TxnId,
+        name: fs::BlockId,
     ) -> TCResult<fs::BlockOwnedMut<Self>> {
-        unimplemented!()
+        if let Some(block) = self.lock_block(&txn_id, &name).await? {
+            let lock = block.write().await;
+            Ok(fs::BlockOwnedMut::new(self, txn_id, name, lock))
+        } else {
+            Err(TCError::not_found(name))
+        }
     }
 }
 
