@@ -1,28 +1,25 @@
 use std::collections::hash_map::{Entry, HashMap};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures_locks::RwLock;
 
 use error::*;
 
-use crate::fs::Root;
+use crate::fs::{CacheDir, DirView};
 use crate::gateway::Gateway;
 
 use super::{Request, Txn, TxnId};
 
 pub struct TxnServer {
     active: RwLock<HashMap<TxnId, Txn>>,
-    workspace: Root,
+    workspace: RwLock<CacheDir>,
 }
 
 impl TxnServer {
-    pub async fn new(workspace: PathBuf, cache_size: usize) -> Self {
-        let workspace = Root::load(workspace, cache_size).await.unwrap();
-
+    pub async fn new(workspace: RwLock<CacheDir>) -> Self {
         Self {
             active: RwLock::new(HashMap::new()),
-            workspace,
+            workspace: workspace,
         }
     }
 
@@ -39,7 +36,9 @@ impl TxnServer {
                 }
             }
             Entry::Vacant(entry) => {
-                let txn_dir = self.workspace.version(*entry.key()).await?;
+                let mut workspace = self.workspace.write().await;
+                let txn_dir = workspace.create_dir(entry.key().to_id()).await?;
+                let txn_dir = RwLock::new(DirView::new(*entry.key(), txn_dir));
                 let txn = Txn::new(gateway, txn_dir, request);
                 entry.insert(txn.clone());
                 Ok(txn)

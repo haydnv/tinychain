@@ -5,7 +5,7 @@ use bytes::Bytes;
 use error::*;
 use generic::*;
 
-use crate::fs::Root;
+use crate::fs::Dir;
 use crate::object::InstanceExt;
 
 pub const PATH: Label = label("cluster");
@@ -29,7 +29,7 @@ pub struct Cluster {
 
 impl Cluster {
     pub async fn load(
-        _data_dir: Root,
+        _data_dir: Dir,
         _path: TCPathBuf,
         _config: Bytes,
     ) -> TCResult<InstanceExt<Self>> {

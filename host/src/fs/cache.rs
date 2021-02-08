@@ -21,6 +21,54 @@ use crate::state::StateType;
 
 const CLASS: Label = label(".class");
 
+struct Inner {
+    clients: RwLock<HashMap<PathBuf, RwLock<CacheDir>>>,
+    lfu: RwLock<LFU<PathBuf>>,
+    max_size: usize,
+}
+
+#[derive(Clone)]
+pub struct Cache {
+    inner: Arc<Inner>,
+}
+
+impl Cache {
+    pub fn new(max_size: usize) -> Self {
+        let inner = Inner {
+            clients: RwLock::new(HashMap::new()),
+            lfu: RwLock::new(LFU::new()),
+            max_size,
+        };
+
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+
+    pub async fn register(&self, path: PathBuf, dir: RwLock<CacheDir>) {
+        let mut clients = self.inner.clients.write().await;
+        clients.insert(path, dir);
+    }
+
+    async fn bump(&self, path: &PathBuf) {
+        let mut lfu = self.inner.lfu.write().await;
+        lfu.bump(path);
+    }
+
+    async fn evict(&mut self) {
+        // TODO
+    }
+
+    async fn insert(&self, path: PathBuf, size: usize) {
+        let mut lfu = self.inner.lfu.write().await;
+        lfu.insert(path, size);
+
+        if lfu.size > self.inner.max_size {
+            // TODO: evict
+        }
+    }
+}
+
 pub struct CacheLock<T> {
     ref_count: Arc<std::sync::RwLock<usize>>,
     lock: RwLock<T>,
@@ -94,7 +142,6 @@ impl<B: BlockData> CacheFile<B> {
                 )));
             }
 
-            cache.register(path, meta.len() as usize).await;
             blocks.insert(name, None);
         }
 
@@ -148,8 +195,9 @@ impl<B: BlockData> CacheFile<B> {
                 entry.key(),
             )),
             Entry::Vacant(entry) => {
+                let size = value.clone().into().len();
                 self.cache
-                    .insert(fs_path(&self.mount_point, entry.key()), value.size())
+                    .insert(fs_path(&self.mount_point, entry.key()), size)
                     .await;
 
                 let lock = CacheLock::new(value);
@@ -219,68 +267,9 @@ impl<T: Clone + Eq + Hash> LFU<T> {
     }
 
     fn insert(&mut self, id: T, size: usize) {
-        if self.entries.contains_key(&id) {
-            self.bump(&id);
-        } else {
-            self.entries.insert(id.clone(), self.priority.len());
-            self.priority.push(id);
-            self.size += size;
-        }
-    }
-}
-
-struct Inner {
-    contents: RwLock<HashMap<PathSegment, CacheDirEntry>>,
-    lfu: RwLock<LFU<PathBuf>>,
-    max_size: usize,
-}
-
-#[derive(Clone)]
-pub struct Cache {
-    inner: Arc<Inner>,
-}
-
-impl Cache {
-    async fn register(&self, path: PathBuf, size: usize) {
-        let mut lfu = self.inner.lfu.write().await;
-        lfu.insert(path, size)
-    }
-
-    pub async fn load(mount_point: PathBuf, max_size: usize) -> TCResult<Self> {
-        let inner = Inner {
-            contents: RwLock::new(HashMap::new()),
-            lfu: RwLock::new(LFU::new()),
-            max_size,
-        };
-
-        let cache = Cache {
-            inner: Arc::new(inner),
-        };
-
-        let contents = dir_contents(&mount_point).await?;
-        let root = CacheDir::load(cache.clone(), mount_point, contents).await?;
-        let mut contents = cache.inner.contents.write().await;
-        contents.extend(root.contents.into_iter());
-
-        Ok(cache)
-    }
-
-    async fn bump(&self, path: &PathBuf) {
-        let mut lfu = self.inner.lfu.write().await;
-        lfu.bump(path);
-    }
-
-    async fn evict(&mut self) {
-        // TODO
-    }
-
-    async fn insert(&self, path: PathBuf, size: usize) {
-        let mut lfu = self.inner.lfu.write().await;
-        lfu.insert(path, size);
-
-        if lfu.size > self.inner.max_size {
-            // TODO: evict
-        }
+        self.entries.insert(id.clone(), self.priority.len());
+        self.priority.push(id.clone());
+        self.size += size;
     }
 }
 
@@ -310,7 +299,12 @@ impl CacheDir {
         }
     }
 
-    async fn load(
+    pub async fn load(cache: Cache, mount_point: PathBuf) -> TCResult<Self> {
+        let entries = dir_contents(&mount_point).await?;
+        Self::_load(cache, mount_point, entries).await
+    }
+
+    async fn _load(
         cache: Cache,
         mount_point: PathBuf,
         entries: Vec<(fs::DirEntry, Metadata)>,
@@ -380,7 +374,6 @@ impl CacheDir {
         }
     }
 }
-
 async fn dir_contents(dir_path: &PathBuf) -> TCResult<Vec<(fs::DirEntry, Metadata)>> {
     let mut contents = vec![];
     let mut handles = fs::read_dir(dir_path)

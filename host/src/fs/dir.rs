@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_locks::RwLock;
@@ -57,6 +58,12 @@ pub struct DirView {
     version: RwLock<CacheDir>,
 }
 
+impl DirView {
+    pub fn new(txn_id: TxnId, version: RwLock<CacheDir>) -> Self {
+        Self { txn_id, version }
+    }
+}
+
 #[async_trait]
 impl transact::fs::Dir for DirView {
     type Entry = DirEntry;
@@ -84,13 +91,25 @@ impl transact::fs::Dir for DirView {
     }
 }
 
-pub struct Dir {
+struct Inner {
     cache: RwLock<CacheDir>,
-    versions: HashMap<TxnId, DirView>,
+    versions: HashMap<TxnId, RwLock<DirView>>,
+}
+
+#[derive(Clone)]
+pub struct Dir {
+    inner: Arc<Inner>,
 }
 
 impl Dir {
-    pub async fn load(_cache: RwLock<CacheDir>) -> Self {
-        unimplemented!()
+    pub fn new(cache: RwLock<CacheDir>) -> Self {
+        let inner = Inner {
+            cache,
+            versions: HashMap::new(),
+        };
+
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 }

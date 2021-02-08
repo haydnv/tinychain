@@ -3,6 +3,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 
 use bytes::Bytes;
+use futures::TryFutureExt;
 use structopt::StructOpt;
 
 use error::TCError;
@@ -42,8 +43,8 @@ struct Config {
     #[structopt(long = "cache_size", default_value = "10M", parse(try_from_str = data_size))]
     pub cache_size: usize,
 
-    #[structopt(long = "config")]
-    pub config: Option<PathBuf>,
+    #[structopt(long = "config", default_value = "config")]
+    pub config: PathBuf,
 
     #[structopt(long = "data_dir")]
     pub data_dir: Option<PathBuf>,
@@ -66,20 +67,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(config.log_level))
         .init();
 
+    let cache = fs::Cache::new(config.cache_size);
+
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
         let data_dir = config
             .data_dir
             .ok_or_else(|| TCError::internal("missing required option: --data_dir"))?;
 
-        let data_dir = fs::Root::load(data_dir, config.cache_size).await?;
-
-        let config_dir = config
-            .config
-            .ok_or_else(|| TCError::internal("missing required option --config"))?;
+        let data_dir = fs::load(cache.clone(), data_dir)
+            .map_ok(fs::Dir::new)
+            .await?;
 
         for path in config.clusters {
-            let config = get_config(&config_dir, &path).await?;
+            let config = get_config(&config.config, &path).await?;
             let cluster = cluster::Cluster::load(data_dir.clone(), path, config).await?;
 
             clusters.push(cluster);
@@ -92,7 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(feature = "http")]
     gateway_config.insert(value::LinkProtocol::HTTP, config.http_port);
 
-    let txn_server = tinychain::txn::TxnServer::new(config.workspace, config.cache_size).await;
+    let workspace = fs::load(cache, config.workspace).await?;
+    let txn_server = tinychain::txn::TxnServer::new(workspace).await;
     let kernel = tinychain::Kernel::new(clusters);
     let gateway =
         tinychain::gateway::Gateway::new(kernel, txn_server, config.address, gateway_config);
@@ -110,12 +112,11 @@ async fn get_config<'a>(config_dir: &PathBuf, path: &'a [PathSegment]) -> error:
         fs_path.push(id.to_string());
     }
 
-    match tokio::fs::read(fs_path).await {
+    match tokio::fs::read(&fs_path).await {
         Ok(config) => Ok(Bytes::from(config)),
         Err(cause) => Err(error::TCError::internal(format!(
-            "could not read config file for {}: {}",
-            generic::TCPath::from(path),
-            cause
+            "could not read config file at {:?}: {}",
+            fs_path, cause
         ))),
     }
 }

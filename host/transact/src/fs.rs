@@ -1,6 +1,5 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::mem;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
@@ -223,8 +222,4 @@ impl<F: File> DerefMut for BlockOwnedMut<F> {
 
 pub trait BlockData:
     Clone + TryFrom<Bytes, Error = TCError> + Into<Bytes> + Send + Sync + fmt::Display
-{
-    fn size(&self) -> usize {
-        mem::size_of::<Self>()
-    }
-}
+{}
