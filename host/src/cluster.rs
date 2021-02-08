@@ -146,9 +146,10 @@ async fn from_stream<D: Decoder>(
                     file.try_into().map_err(de::Error::custom)?
                 } else {
                     let file = dir
-                        .create_file(txn_id, id.clone())
+                        .create_file(txn_id, id.clone(), StateType::Chain(ct))
                         .map_err(de::Error::custom)
                         .await?;
+
                     file.try_into().map_err(de::Error::custom)?
                 };
 

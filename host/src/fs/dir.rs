@@ -13,12 +13,22 @@ use transact::lock::{Mutable, TxnLock};
 use transact::TxnId;
 
 use crate::chain::ChainBlock;
+use crate::state::StateType;
 
 use super::{dir_contents, file_name, fs_path, Cache, DirContents, File};
 
 #[derive(Clone)]
 pub enum FileEntry {
     Chain(File<ChainBlock>),
+}
+
+impl FileEntry {
+    fn new(cache: Cache, path: PathBuf, class: StateType) -> TCResult<Self> {
+        match class {
+            StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path))),
+            other => Err(TCError::bad_request("cannot create file for", other)),
+        }
+    }
 }
 
 impl TryFrom<FileEntry> for File<ChainBlock> {
@@ -40,10 +50,20 @@ pub enum DirEntry {
 #[derive(Clone)]
 pub struct Dir {
     cache: Cache,
+    path: PathBuf,
     entries: TxnLock<Mutable<HashMap<PathSegment, DirEntry>>>,
 }
 
 impl Dir {
+    fn new(cache: Cache, path: PathBuf, entries: HashMap<PathSegment, DirEntry>) -> Self {
+        let entries = TxnLock::new(format!("directory at {:?}", path), entries.into());
+        Self {
+            cache,
+            path,
+            entries,
+        }
+    }
+
     fn load(
         cache: Cache,
         path: PathBuf,
@@ -72,10 +92,7 @@ impl Dir {
                     }
                 }
 
-                Ok(Dir {
-                    cache,
-                    entries: TxnLock::new(format!("directory at {:?}", &path), entries.into()),
-                })
+                Ok(Self::new(cache, path, entries))
             } else {
                 Err(TCError::internal(format!(
                     "directory at {:?} contains both blocks and subdirectories",
@@ -88,14 +105,27 @@ impl Dir {
 
 #[async_trait]
 impl fs::Dir for Dir {
+    type Class = StateType;
     type File = FileEntry;
 
-    async fn create_dir(&self, _txn_id: TxnId, _name: PathSegment) -> TCResult<Self> {
-        unimplemented!()
+    async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
+        let path = fs_path(&self.path, &name);
+        let dir = Dir::new(self.cache.clone(), path, HashMap::new());
+
+        let mut entries = self.entries.write(txn_id).await?;
+        entries.insert(name, DirEntry::Dir(dir.clone()));
+
+        Ok(dir)
     }
 
-    async fn create_file(&self, _txn_id: TxnId, _name: Id) -> TCResult<Self::File> {
-        unimplemented!()
+    async fn create_file(&self, txn_id: TxnId, name: Id, class: StateType) -> TCResult<Self::File> {
+        let path = fs_path(&self.path, &name);
+        let file = FileEntry::new(self.cache.clone(), path, class)?;
+
+        let mut entries = self.entries.write(txn_id).await?;
+        entries.insert(name, DirEntry::File(file.clone()));
+
+        Ok(file)
     }
 
     async fn get_dir(&self, _txn_id: &TxnId, _name: &PathSegment) -> TCResult<Option<Self>> {

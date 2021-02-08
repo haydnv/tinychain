@@ -40,11 +40,12 @@ pub trait File: Sized {
 
 #[async_trait]
 pub trait Dir: Sized {
+    type Class;
     type File;
 
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self>;
 
-    async fn create_file(&self, txn_id: TxnId, name: Id) -> TCResult<Self::File>;
+    async fn create_file(&self, txn_id: TxnId, name: Id, class: Self::Class) -> TCResult<Self::File>;
 
     async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>>;
 

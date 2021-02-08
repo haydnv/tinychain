@@ -23,26 +23,35 @@ pub struct File<B> {
 }
 
 impl<B> File<B> {
+    fn _new(cache: Cache, path: PathBuf, listing: HashSet<fs::BlockId>) -> Self {
+        let listing = TxnLock::new(format!("file listing at {:?}", &path), listing.into());
+        let mutated = TxnLock::new(
+            format!("mutation listing at {:?}", &path),
+            HashSet::new().into(),
+        );
+        let phantom = PhantomData;
+
+        Self {
+            cache,
+            path,
+            listing,
+            mutated,
+            phantom,
+        }
+    }
+
+    pub fn new(cache: Cache, path: PathBuf) -> Self {
+        Self::_new(cache, path, HashSet::new())
+    }
+
     pub async fn load(cache: Cache, path: PathBuf, contents: DirContents) -> TCResult<Self> {
         if contents.iter().all(|(_, meta)| meta.is_file()) {
             let listing = contents
                 .into_iter()
                 .map(|(handle, _)| file_name(&handle))
                 .collect::<TCResult<HashSet<fs::BlockId>>>()?;
-            let listing = TxnLock::new(format!("file listing at {:?}", &path), listing.into());
-            let mutated = TxnLock::new(
-                format!("mutation listing at {:?}", &path),
-                HashSet::new().into(),
-            );
-            let phantom = PhantomData;
 
-            Ok(Self {
-                cache,
-                path,
-                listing,
-                mutated,
-                phantom,
-            })
+            Ok(Self::_new(cache, path, listing))
         } else {
             Err(TCError::internal(format!(
                 "directory at {:?} contains both blocks and subdirectories",
