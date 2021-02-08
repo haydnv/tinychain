@@ -143,7 +143,7 @@ where
 #[async_trait]
 impl<B: fs::BlockData> Transact for File<B> {
     async fn commit(&self, txn_id: &TxnId) {
-        let listing = self.listing.write(*txn_id).await.unwrap();
+        let listing = self.listing.read(txn_id).await.unwrap();
         join_all(
             listing
                 .iter()

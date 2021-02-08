@@ -4,13 +4,13 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use futures::Future;
+use futures::future::{join_all, Future};
 
 use error::*;
 use generic::{Id, PathSegment};
-use transact::fs;
 use transact::lock::{Mutable, TxnLock};
 use transact::TxnId;
+use transact::{fs, Transact};
 
 use crate::chain::ChainBlock;
 use crate::state::StateType;
@@ -144,6 +144,39 @@ impl fs::Dir for Dir {
             Some(_) => Err(TCError::bad_request("not a file", name)),
             None => Ok(None),
         }
+    }
+}
+
+#[async_trait]
+impl Transact for Dir {
+    async fn commit(&self, txn_id: &TxnId) {
+        {
+            let entries = self.entries.read(&txn_id).await.unwrap();
+            join_all(entries.values().map(|entry| match entry {
+                DirEntry::Dir(dir) => dir.commit(txn_id),
+                DirEntry::File(file) => match file {
+                    FileEntry::Chain(file) => file.commit(txn_id),
+                },
+            }))
+            .await;
+        }
+
+        self.entries.commit(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        {
+            let entries = self.entries.read(&txn_id).await.unwrap();
+            join_all(entries.values().map(|entry| match entry {
+                DirEntry::Dir(dir) => dir.finalize(txn_id),
+                DirEntry::File(file) => match file {
+                    FileEntry::Chain(file) => file.finalize(txn_id),
+                },
+            }))
+            .await;
+        }
+
+        self.entries.finalize(txn_id).await
     }
 }
 

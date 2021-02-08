@@ -343,11 +343,11 @@ impl<T: Mutate> Transact for TxnLock<T> {
                 "TxnLock::commit {} getting read lock at {}...",
                 &self.name, txn_id
             );
-            self.read(txn_id).await.unwrap(); // make sure there's no active write lock
+            self.read(&txn_id).await.unwrap(); // make sure there's no active write lock
             let lock = &mut self.inner.lock().unwrap();
             assert!(lock.state.reserved.is_none());
             if let Some(last_commit) = &lock.state.last_commit {
-                assert!(last_commit < txn_id);
+                assert!(last_commit < &txn_id);
             }
 
             debug!("got inner lock for {}: {}", &self.name, txn_id);
@@ -355,7 +355,7 @@ impl<T: Mutate> Transact for TxnLock<T> {
             debug!("freed write lock reservation {} at {}", &self.name, txn_id);
 
             debug!("updating value of {}", &self.name);
-            let new_value = if let Some(cell) = lock.value_at.get(txn_id) {
+            let new_value = if let Some(cell) = lock.value_at.get(&txn_id) {
                 let pending: &<T as Mutate>::Pending = unsafe { &*cell.get() };
                 Some(pending.clone())
             } else {
