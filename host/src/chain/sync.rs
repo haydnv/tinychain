@@ -1,44 +1,50 @@
 use async_trait::async_trait;
 use destream::de;
-use futures::TryFutureExt;
-use futures_locks::RwLock;
 
 use error::*;
-use generic::{label, Label};
-use transact::fs::{Dir, File};
+use generic::{label, Instance, Label};
+use transact::fs::File;
+use transact::lock::TxnLock;
+use transact::TxnId;
 
-use crate::fs::{FileView, InstanceFile};
+use crate::fs;
 use crate::scalar::OpRef;
-use crate::txn::{Transaction, Txn, TxnId};
+use crate::state::State;
+use crate::txn::Txn;
 
-use super::{ChainBlock, ChainInstance};
+use super::{ChainBlock, ChainInstance, Subject};
 
-const FILE_ID: Label = label("sync_chain");
 const BLOCK_ID: Label = label("0");
 
 #[derive(Clone)]
 pub struct SyncChain {
-    file: InstanceFile<ChainBlock>,
+    subject: Subject,
+    file: fs::File<ChainBlock>,
 }
 
 impl SyncChain {
-    pub async fn load(file: InstanceFile<ChainBlock>) -> TCResult<Self> {
+    pub async fn load(subject: State, file: fs::File<ChainBlock>) -> TCResult<Self> {
         // TODO: validate file
-        Ok(Self { file })
+
+        let subject_class = subject.class();
+        let subject = if let State::Scalar(subject) = subject {
+            Subject::Scalar(TxnLock::new("sync chain subject", subject.into()))
+        } else {
+            return Err(TCError::bad_request(
+                "Chain does not support the given subject",
+                subject_class,
+            ));
+        };
+
+        Ok(Self { subject, file })
     }
 }
 
 #[async_trait]
 impl ChainInstance for SyncChain {
-    async fn file(&self, txn_id: &TxnId) -> TCResult<RwLock<FileView<ChainBlock>>> {
-        self.file.version(txn_id).await
-    }
-
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
-        let file = self.file.version(txn_id).await?;
-        let lock = file.read().await;
         let block_id = BLOCK_ID.into();
-        let block = lock.get_block(&block_id).await?;
+        let block = self.file.get_block(txn_id, &block_id).await?;
         let mut block = block.upgrade().await?;
         block.append(op_ref);
         Ok(())
@@ -49,21 +55,7 @@ impl ChainInstance for SyncChain {
 impl de::FromStream for SyncChain {
     type Context = Txn;
 
-    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        let [block]: [ChainBlock; 1] = de::FromStream::from_stream((), decoder).await?;
-
-        let mut dir = txn.context().write().await;
-        let file: RwLock<FileView<ChainBlock>> = dir
-            .create_file(FILE_ID.into())
-            .map_err(de::Error::custom)
-            .await?;
-
-        file.write()
-            .await
-            .create_block(BLOCK_ID.into(), block)
-            .map_err(de::Error::custom)
-            .await?;
-
-        Ok(Self { file: file.into() })
+    async fn from_stream<D: de::Decoder>(_txn: Txn, _decoder: &mut D) -> Result<Self, D::Error> {
+        unimplemented!()
     }
 }

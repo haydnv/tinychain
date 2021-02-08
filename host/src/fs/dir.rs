@@ -1,128 +1,101 @@
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
-use std::fmt;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::pin::Pin;
 
 use async_trait::async_trait;
-use futures_locks::RwLock;
+use futures::Future;
 
-use error::{TCError, TCResult};
+use error::*;
 use generic::{Id, PathSegment};
-use transact::fs::{BlockData, File};
-use transact::TxnId;
+use transact::fs;
+use transact::lock::{Mutable, TxnLock};
 
 use crate::chain::ChainBlock;
 
-use super::cache::CacheDir;
-use super::{FileView, InstanceFile};
+use super::{dir_contents, file_name, fs_path, Cache, DirContents, File};
 
 #[derive(Clone)]
 pub enum FileEntry {
-    Chain(FileView<ChainBlock>),
+    Chain(File<ChainBlock>),
 }
 
 #[derive(Clone)]
 pub enum DirEntry {
-    Dir(RwLock<DirView>),
+    Dir(Dir),
     File(FileEntry),
-}
-
-impl TryFrom<DirEntry> for FileView<ChainBlock> {
-    type Error = TCError;
-
-    fn try_from(dir: DirEntry) -> TCResult<FileView<ChainBlock>> {
-        match dir {
-            DirEntry::File(file) => match file {
-                FileEntry::Chain(chain) => Ok(chain),
-            },
-            other => Err(TCError::bad_request(
-                "expected a Chain file but found",
-                other,
-            )),
-        }
-    }
-}
-
-impl fmt::Display for DirEntry {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Dir(_) => f.write_str("a transaction-scoped directory"),
-            Self::File(file) => match file {
-                FileEntry::Chain(_) => f.write_str("a transaction-scoped chain file"),
-            },
-        }
-    }
-}
-
-pub struct DirView {
-    txn_id: TxnId,
-    version: RwLock<CacheDir>,
-}
-
-impl DirView {
-    pub fn new(txn_id: TxnId, version: RwLock<CacheDir>) -> Self {
-        Self { txn_id, version }
-    }
-}
-
-#[async_trait]
-impl transact::fs::Dir for DirView {
-    type Entry = DirEntry;
-
-    async fn create_dir(&mut self, _name: PathSegment) -> TCResult<RwLock<Self>> {
-        unimplemented!()
-    }
-
-    async fn create_file<F: transact::fs::File>(&mut self, _name: Id) -> TCResult<RwLock<F>>
-    where
-        Self::Entry: TryInto<F>,
-    {
-        unimplemented!()
-    }
-
-    async fn get_dir(&self, _name: &PathSegment) -> TCResult<Option<RwLock<Self>>> {
-        unimplemented!()
-    }
-
-    async fn get_file<F: transact::fs::File>(&self, _name: &Id) -> TCResult<Option<RwLock<F>>>
-    where
-        Self::Entry: TryInto<F>,
-    {
-        unimplemented!()
-    }
-}
-
-struct Inner {
-    cache: RwLock<CacheDir>,
-    versions: HashMap<TxnId, RwLock<DirView>>,
 }
 
 #[derive(Clone)]
 pub struct Dir {
-    inner: Arc<Inner>,
+    cache: Cache,
+    entries: TxnLock<Mutable<HashMap<PathSegment, DirEntry>>>,
 }
 
 impl Dir {
-    pub fn new(cache: RwLock<CacheDir>) -> Self {
-        let inner = Inner {
-            cache,
-            versions: HashMap::new(),
-        };
+    fn load(
+        cache: Cache,
+        path: PathBuf,
+        contents: DirContents,
+    ) -> Pin<Box<dyn Future<Output = TCResult<Self>>>> {
+        Box::pin(async move {
+            if contents.iter().all(|(_, meta)| meta.is_dir()) {
+                let mut entries = HashMap::new();
 
-        Self {
-            inner: Arc::new(inner),
-        }
+                for (handle, _) in contents.into_iter() {
+                    let name = file_name(&handle)?;
+                    let path = fs_path(&path, &name);
+                    let contents = dir_contents(&path).await?;
+                    if contents.iter().all(|(_, meta)| meta.is_file()) {
+                        // TODO: support other file types
+                        let file = File::load(cache.clone(), path, contents).await?;
+                        entries.insert(name, DirEntry::File(FileEntry::Chain(file)));
+                    } else if contents.iter().all(|(_, meta)| meta.is_dir()) {
+                        let dir = Dir::load(cache.clone(), path, contents).await?;
+                        entries.insert(name, DirEntry::Dir(dir));
+                    } else {
+                        return Err(TCError::internal(format!(
+                            "directory at {:?} contains both blocks and subdirectories",
+                            path
+                        )));
+                    }
+                }
+
+                Ok(Dir {
+                    cache,
+                    entries: TxnLock::new(format!("directory at {:?}", &path), entries.into()),
+                })
+            } else {
+                Err(TCError::internal(format!(
+                    "directory at {:?} contains both blocks and subdirectories",
+                    path
+                )))
+            }
+        })
+    }
+}
+
+#[async_trait]
+impl fs::Dir for Dir {
+    type File = FileEntry;
+
+    async fn create_dir(&self, _name: PathSegment) -> TCResult<Self> {
+        unimplemented!()
     }
 
-    pub async fn copy_file<B: BlockData, F: File<Block = B>>(
-        &self,
-        _name: Id,
-        _source: &F,
-    ) -> TCResult<InstanceFile<B>> {
-        Err(TCError::not_implemented("Dir::copy_file"))
+    async fn create_file(&self, _name: Id) -> TCResult<Self::File> {
+        unimplemented!()
     }
 
-    pub async fn get_file<B: BlockData>(&self, _name: &Id) -> TCResult<Option<InstanceFile<B>>> {
-        Err(TCError::not_implemented("Dir::get_file"))
+    async fn get_dir(&self, _name: &PathSegment) -> TCResult<Option<Self>> {
+        unimplemented!()
     }
+
+    async fn get_file(&self, _name: &Id) -> TCResult<Option<Self::File>> {
+        unimplemented!()
+    }
+}
+
+pub async fn load(cache: Cache, mount_point: PathBuf) -> TCResult<Dir> {
+    let contents = dir_contents(&mount_point).await?;
+    Dir::load(cache, mount_point, contents).await
 }

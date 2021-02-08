@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 
@@ -6,15 +6,17 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::en;
 use futures::Future;
-use futures_locks::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use futures_locks::{RwLockReadGuard, RwLockWriteGuard};
 
 use error::*;
 use generic::{Id, PathSegment};
 
+use super::TxnId;
+
 pub type BlockId = PathSegment;
 
 #[async_trait]
-pub trait File: Clone {
+pub trait File: Sized {
     type Block: BlockData;
 
     async fn create_block(
@@ -23,34 +25,35 @@ pub trait File: Clone {
         initial_value: Self::Block,
     ) -> TCResult<BlockOwned<Self>>;
 
-    async fn get_block<'a>(&'a self, name: &'a Id) -> TCResult<Block<'a, Self>>;
+    async fn get_block<'a>(&'a self, txn_id: &'a TxnId, name: &'a Id) -> TCResult<Block<'a, Self>>;
 
-    async fn get_block_mut<'a>(&'a self, name: &'a Id) -> TCResult<BlockMut<'a, Self>>;
+    async fn get_block_mut<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        name: &'a Id,
+    ) -> TCResult<BlockMut<'a, Self>>;
 
-    async fn get_block_owned(self, name: Id) -> TCResult<BlockOwned<Self>>;
+    async fn get_block_owned(self, txn_id: TxnId, name: Id) -> TCResult<BlockOwned<Self>>;
 
-    async fn get_block_owned_mut(self, name: Id) -> TCResult<BlockOwnedMut<Self>>;
+    async fn get_block_owned_mut(self, txn_id: TxnId, name: Id) -> TCResult<BlockOwnedMut<Self>>;
 }
 
 #[async_trait]
-pub trait Dir {
-    type Entry;
+pub trait Dir: Sized {
+    type File;
 
-    async fn create_dir(&mut self, name: PathSegment) -> TCResult<RwLock<Self>>;
+    async fn create_dir(&self, name: PathSegment) -> TCResult<Self>;
 
-    async fn create_file<F: File>(&mut self, name: Id) -> TCResult<RwLock<F>>
-    where
-        Self::Entry: TryInto<F>;
+    async fn create_file(&self, name: Id) -> TCResult<Self::File>;
 
-    async fn get_dir(&self, name: &PathSegment) -> TCResult<Option<RwLock<Self>>>;
+    async fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self>>;
 
-    async fn get_file<F: File>(&self, name: &Id) -> TCResult<Option<RwLock<F>>>
-    where
-        Self::Entry: TryInto<F>;
+    async fn get_file(&self, name: &Id) -> TCResult<Option<Self::File>>;
 }
 
 pub struct Block<'a, F: File> {
     file: &'a F,
+    txn_id: &'a TxnId,
     block_id: &'a BlockId,
     lock: RwLockReadGuard<F::Block>,
 }
@@ -58,11 +61,13 @@ pub struct Block<'a, F: File> {
 impl<'a, F: File> Block<'a, F> {
     pub fn new(
         file: &'a F,
+        txn_id: &'a TxnId,
         block_id: &'a BlockId,
         lock: RwLockReadGuard<F::Block>,
     ) -> Block<'a, F> {
         Block {
             file,
+            txn_id,
             block_id,
             lock,
         }
@@ -75,7 +80,7 @@ impl<'a, F: File> Block<'a, F> {
     }
 
     fn _upgrade(self) -> impl Future<Output = TCResult<BlockMut<'a, F>>> {
-        self.file.get_block_mut(self.block_id)
+        self.file.get_block_mut(self.txn_id, self.block_id)
         // self dropped here
     }
 }
@@ -96,14 +101,21 @@ impl<'a, F: File> fmt::Display for Block<'a, F> {
 
 pub struct BlockMut<'a, F: File> {
     file: &'a F,
+    txn_id: &'a TxnId,
     block_id: &'a BlockId,
     lock: RwLockWriteGuard<F::Block>,
 }
 
 impl<'a, F: File> BlockMut<'a, F> {
-    pub fn new(file: &'a F, block_id: &'a BlockId, lock: RwLockWriteGuard<F::Block>) -> Self {
+    pub fn new(
+        file: &'a F,
+        txn_id: &'a TxnId,
+        block_id: &'a BlockId,
+        lock: RwLockWriteGuard<F::Block>,
+    ) -> Self {
         Self {
             file,
+            txn_id,
             block_id,
             lock,
         }
@@ -116,7 +128,7 @@ impl<'a, F: File> BlockMut<'a, F> {
     }
 
     fn _downgrade(self) -> impl Future<Output = TCResult<Block<'a, F>>> {
-        self.file.get_block(self.block_id)
+        self.file.get_block(self.txn_id, self.block_id)
         // self dropped here
     }
 }
@@ -137,14 +149,21 @@ impl<'a, F: File> DerefMut for BlockMut<'a, F> {
 
 pub struct BlockOwned<F: File> {
     file: F,
+    txn_id: TxnId,
     block_id: BlockId,
     lock: RwLockReadGuard<F::Block>,
 }
 
 impl<F: File + 'static> BlockOwned<F> {
-    pub fn new(file: F, block_id: BlockId, lock: RwLockReadGuard<F::Block>) -> BlockOwned<F> {
+    pub fn new(
+        file: F,
+        txn_id: TxnId,
+        block_id: BlockId,
+        lock: RwLockReadGuard<F::Block>,
+    ) -> BlockOwned<F> {
         BlockOwned {
             file,
+            txn_id,
             block_id,
             lock,
         }
@@ -157,7 +176,7 @@ impl<F: File + 'static> BlockOwned<F> {
     }
 
     fn _upgrade(self) -> impl Future<Output = TCResult<BlockOwnedMut<F>>> {
-        self.file.get_block_owned_mut(self.block_id)
+        self.file.get_block_owned_mut(self.txn_id, self.block_id)
         // self dropped here
     }
 }
@@ -181,14 +200,21 @@ where
 
 pub struct BlockOwnedMut<F: File> {
     file: F,
+    txn_id: TxnId,
     block_id: BlockId,
     lock: RwLockWriteGuard<F::Block>,
 }
 
 impl<F: File + 'static> BlockOwnedMut<F> {
-    pub fn new(file: F, block_id: BlockId, lock: RwLockWriteGuard<F::Block>) -> Self {
+    pub fn new(
+        file: F,
+        txn_id: TxnId,
+        block_id: BlockId,
+        lock: RwLockWriteGuard<F::Block>,
+    ) -> Self {
         Self {
             file,
+            txn_id,
             block_id,
             lock,
         }
@@ -201,7 +227,7 @@ impl<F: File + 'static> BlockOwnedMut<F> {
     }
 
     fn _downgrade(self) -> impl Future<Output = TCResult<BlockOwned<F>>> {
-        self.file.get_block_owned(self.block_id)
+        self.file.get_block_owned(self.txn_id, self.block_id)
         // self dropped here
     }
 }
@@ -222,4 +248,5 @@ impl<F: File> DerefMut for BlockOwnedMut<F> {
 
 pub trait BlockData:
     Clone + TryFrom<Bytes, Error = TCError> + Into<Bytes> + Send + Sync + fmt::Display
-{}
+{
+}

@@ -9,7 +9,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response};
 use log::debug;
 use serde::de::DeserializeOwned;
-use transact::IntoView;
+use transact::{IntoView, TxnId};
 
 use auth::Token;
 use error::*;

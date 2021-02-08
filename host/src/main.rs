@@ -2,7 +2,6 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use futures::TryFutureExt;
 use structopt::StructOpt;
 
 use error::TCError;
@@ -98,9 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .data_dir
             .ok_or_else(|| TCError::internal("missing required option: --data_dir"))?;
 
-        let data_dir = fs::load(cache.clone(), data_dir)
-            .map_ok(fs::Dir::new)
-            .await?;
+        let data_dir = fs::load(cache.clone(), data_dir).await?;
 
         for path in config.clusters {
             let txn_id = TxnId::new(Gateway::time());

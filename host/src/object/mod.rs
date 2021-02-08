@@ -7,7 +7,7 @@ use futures::TryFutureExt;
 use generic::{NativeClass, PathSegment, TCPathBuf};
 use transact::IntoView;
 
-use crate::fs::DirView;
+use crate::fs::Dir;
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -88,7 +88,7 @@ impl de::FromStream for Object {
     }
 }
 
-impl<'en> IntoView<'en, DirView> for Object {
+impl<'en> IntoView<'en, Dir> for Object {
     type Txn = Txn;
     type View = ObjectView;
 

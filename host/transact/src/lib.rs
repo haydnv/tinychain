@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use destream::en;
-use futures_locks::RwLock;
 
 use error::*;
 use generic::Id;
@@ -30,7 +29,7 @@ pub trait Transact {
 pub trait Transaction<D: fs::Dir>: Sized {
     fn id(&'_ self) -> &'_ TxnId;
 
-    fn context(&'_ self) -> &'_ RwLock<D>;
+    fn context(&'_ self) -> &'_ D;
 
     async fn subcontext(&self, id: Id) -> TCResult<Self>;
 }

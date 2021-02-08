@@ -15,7 +15,7 @@ use error::*;
 use generic::*;
 
 use crate::chain::*;
-use crate::fs::DirView;
+use crate::fs::Dir;
 use crate::object::{Object, ObjectType};
 use crate::scalar::*;
 use crate::txn::Txn;
@@ -191,7 +191,7 @@ impl Instance for State {
     }
 }
 
-impl<'en> IntoView<'en, DirView> for State {
+impl<'en> IntoView<'en, Dir> for State {
     type Txn = Txn;
     type View = StateView;
 
@@ -561,7 +561,7 @@ impl<'a> de::Visitor for StateVisitor {
                 }
             }
 
-            if let Ok(subject) = Subject::from_str(&key) {
+            if let Ok(subject) = reference::Subject::from_str(&key) {
                 let params = access.next_value(()).await?;
                 return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
             }

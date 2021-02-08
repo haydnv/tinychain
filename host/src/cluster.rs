@@ -3,19 +3,16 @@ use std::fmt;
 
 use destream::{de, Decoder, FromStream};
 use futures::{future, stream, TryFutureExt};
-use transact::Transaction;
 
 use error::*;
 use generic::*;
 
-use crate::chain::sync::SyncChain;
-use crate::chain::{Chain, ChainInstance};
-use crate::fs::Dir;
+use crate::chain::Chain;
+use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
-use std::ops::Deref;
 
 pub const PATH: Label = label("cluster");
 
@@ -39,7 +36,7 @@ pub struct Cluster {
 
 impl Cluster {
     pub async fn load(
-        data_dir: Dir,
+        data_dir: fs::Dir,
         txn: Txn,
         path: TCPathBuf,
         config: Vec<u8>,
@@ -70,12 +67,11 @@ impl fmt::Display for Cluster {
 }
 
 async fn from_stream<D: Decoder>(
-    dir: Dir,
+    _dir: fs::Dir,
     txn: Txn,
     path: TCPathBuf,
     mut decoder: D,
 ) -> Result<InstanceExt<Cluster>, D::Error> {
-    let txn_id = *txn.id();
     let state = State::from_stream(txn, &mut decoder).await?;
     let members = if let State::Map(members) = state {
         members
@@ -83,32 +79,13 @@ async fn from_stream<D: Decoder>(
         return Err(de::Error::invalid_value(state, "a Cluster definition"));
     };
 
-    let mut chains = HashMap::new();
+    let chains = HashMap::new();
     let mut proto = HashMap::new();
 
     for (id, state) in members.into_iter() {
         match state {
-            State::Chain(chain) => {
-                let file = if let Some(file) = dir.get_file(&id).map_err(de::Error::custom).await? {
-                    file
-                } else {
-                    let source = chain.file(&txn_id).map_err(de::Error::custom).await?;
-                    let source = source.read().await;
-                    dir.copy_file(id.clone(), source.deref())
-                        .map_err(de::Error::custom)
-                        .await?
-                };
-
-                let chain = match chain {
-                    Chain::Sync(_) => {
-                        SyncChain::load(file)
-                            .map_ok(Chain::Sync)
-                            .map_err(de::Error::custom)
-                            .await?
-                    }
-                };
-
-                chains.insert(id, chain);
+            State::Chain(_chain) => {
+                todo!();
             }
             State::Scalar(Scalar::Op(op)) => {
                 proto.insert(id, Scalar::Op(op));

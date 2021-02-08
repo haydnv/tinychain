@@ -3,14 +3,14 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
-use futures_locks::RwLock;
 
 use error::*;
 use generic::*;
+use transact::lock::{Mutable, TxnLock};
 use transact::{IntoView, TxnId};
 
-use crate::fs::{DirView, FileView};
-use crate::scalar::OpRef;
+use crate::fs::Dir;
+use crate::scalar::{OpRef, Scalar};
 use crate::txn::Txn;
 
 mod block;
@@ -20,10 +20,13 @@ pub use block::ChainBlock;
 
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
+#[derive(Clone)]
+pub enum Subject {
+    Scalar(TxnLock<Mutable<Scalar>>),
+}
+
 #[async_trait]
 pub trait ChainInstance {
-    async fn file(&self, txn_id: &TxnId) -> TCResult<RwLock<FileView<ChainBlock>>>;
-
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()>;
 }
 
@@ -76,12 +79,6 @@ impl Instance for Chain {
 
 #[async_trait]
 impl ChainInstance for Chain {
-    async fn file(&self, txn_id: &TxnId) -> TCResult<RwLock<FileView<ChainBlock>>> {
-        match self {
-            Self::Sync(chain) => chain.file(txn_id).await,
-        }
-    }
-
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
         match self {
             Self::Sync(chain) => chain.append(txn_id, op_ref).await,
@@ -98,7 +95,7 @@ impl de::FromStream for Chain {
     }
 }
 
-impl<'en> IntoView<'en, DirView> for Chain {
+impl<'en> IntoView<'en, Dir> for Chain {
     type Txn = Txn;
     type View = ChainView;
 

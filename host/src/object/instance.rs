@@ -6,7 +6,7 @@ use destream::{en, EncodeMap};
 
 use transact::IntoView;
 
-use crate::fs::DirView;
+use crate::fs::Dir;
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -63,7 +63,7 @@ impl<T: generic::Instance> Deref for InstanceExt<T> {
     }
 }
 
-impl<'en> IntoView<'en, DirView> for InstanceExt<State> {
+impl<'en> IntoView<'en, Dir> for InstanceExt<State> {
     type Txn = Txn;
     type View = InstanceView;
 

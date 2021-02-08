@@ -1,16 +1,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_locks::RwLock;
 
 use auth::Token;
 use error::*;
 use generic::Id;
 use transact::fs::Dir;
+use transact::{Transaction, TxnId};
 
-pub use transact::{Transact, Transaction, TxnId};
-
-use crate::fs::DirView;
+use crate::fs;
 use crate::gateway::Gateway;
 use crate::scalar::{Link, Value};
 use crate::state::State;
@@ -40,7 +38,7 @@ impl Request {
 
 #[derive(Clone)]
 struct Inner {
-    dir: RwLock<DirView>,
+    dir: fs::Dir,
     gateway: Arc<Gateway>,
     request: Arc<Request>,
 }
@@ -51,13 +49,14 @@ pub struct Txn {
 }
 
 impl Txn {
-    fn new(gateway: Arc<Gateway>, dir: RwLock<DirView>, request: Request) -> Self {
+    fn new(gateway: Arc<Gateway>, dir: fs::Dir, request: Request) -> Self {
         let request = Arc::new(request);
         let inner = Arc::new(Inner {
             dir,
             gateway,
             request,
         });
+
         Self { inner }
     }
 
@@ -71,22 +70,20 @@ impl Txn {
 }
 
 #[async_trait]
-impl Transaction<DirView> for Txn {
+impl Transaction<fs::Dir> for Txn {
     fn id(&'_ self) -> &'_ TxnId {
         &self.inner.request.txn_id
     }
 
-    fn context(&'_ self) -> &'_ RwLock<DirView> {
+    fn context(&'_ self) -> &'_ fs::Dir {
         &self.inner.dir
     }
 
     async fn subcontext(&self, id: Id) -> TCResult<Self> {
-        let mut dir = self.inner.dir.write().await;
-
         let inner = Inner {
             gateway: self.inner.gateway.clone(),
             request: self.inner.request.clone(),
-            dir: dir.create_dir(id).await?,
+            dir: self.inner.dir.create_dir(id).await?,
         };
 
         Ok(Txn {

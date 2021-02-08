@@ -38,8 +38,6 @@ impl Mutate for ChainBlock {
     }
 }
 
-impl BlockData for ChainBlock {}
-
 #[async_trait]
 impl de::FromStream for ChainBlock {
     type Context = ();
@@ -61,10 +59,12 @@ impl<'en> en::IntoStream<'en> for ChainBlock {
 impl TryFrom<Bytes> for ChainBlock {
     type Error = TCError;
 
-    fn try_from(_data: Bytes) -> TCResult<Self> {
+    fn try_from(_bytes: Bytes) -> TCResult<Self> {
         unimplemented!()
     }
 }
+
+impl BlockData for ChainBlock {}
 
 impl From<ChainBlock> for Bytes {
     fn from(_block: ChainBlock) -> Bytes {

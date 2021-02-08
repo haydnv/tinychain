@@ -5,7 +5,7 @@ use futures_locks::RwLock;
 
 use error::*;
 
-use crate::fs::{CacheDir, DirView};
+use crate::fs;
 use crate::gateway::Gateway;
 
 use super::{Request, Txn, TxnId};
@@ -13,11 +13,11 @@ use super::{Request, Txn, TxnId};
 #[derive(Clone)]
 pub struct TxnServer {
     active: RwLock<HashMap<TxnId, Txn>>,
-    workspace: RwLock<CacheDir>,
+    workspace: fs::Dir,
 }
 
 impl TxnServer {
-    pub async fn new(workspace: RwLock<CacheDir>) -> Self {
+    pub async fn new(workspace: fs::Dir) -> Self {
         let active = RwLock::new(HashMap::new());
         Self { active, workspace }
     }
@@ -35,10 +35,7 @@ impl TxnServer {
                 }
             }
             Entry::Vacant(entry) => {
-                let mut workspace = self.workspace.write().await;
-                let txn_dir = workspace.create_dir(entry.key().to_id()).await?;
-                let txn_dir = RwLock::new(DirView::new(*entry.key(), txn_dir));
-                let txn = Txn::new(gateway, txn_dir, request);
+                let txn = Txn::new(gateway, self.workspace.clone(), request);
                 entry.insert(txn.clone());
                 Ok(txn)
             }
