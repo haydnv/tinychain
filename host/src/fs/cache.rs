@@ -14,6 +14,7 @@ use transact::fs::BlockData;
 
 use super::io_err;
 use crate::chain::ChainBlock;
+use futures::TryFutureExt;
 
 #[derive(Clone)]
 pub enum CacheBlock {
@@ -21,12 +22,14 @@ pub enum CacheBlock {
 }
 
 impl CacheBlock {
-    async fn into_size(self) -> usize {
-        let bytes: Bytes = match self {
+    async fn into_bytes(self) -> Bytes {
+        match self {
             Self::Chain(block) => block.read().await.clone().into(),
-        };
+        }
+    }
 
-        bytes.len()
+    async fn into_size(self) -> usize {
+        self.into_bytes().await.len()
     }
 }
 
@@ -134,7 +137,8 @@ impl Cache {
         let lock = CacheLock::new(block);
         let cached = CacheBlock::from(lock.clone());
 
-        inner.lfu.insert(path.clone(), size);
+        inner.size += size;
+        inner.lfu.insert(path.clone());
         inner.entries.insert(path.clone(), cached);
         Ok(Some(lock))
     }
@@ -152,9 +156,11 @@ impl Cache {
 
         if let Some(old_block) = inner.entries.remove(&path) {
             let old_size = old_block.into_size().await;
-            inner.size -= old_size;
+            if old_size > inner.size {
+                inner.size -= old_size;
+            }
         } else {
-            inner.lfu.insert(path.clone(), size);
+            inner.lfu.insert(path.clone());
         }
 
         let block = CacheLock::new(block);
@@ -167,12 +173,35 @@ impl Cache {
 
         Ok(block)
     }
+
+    pub async fn remove(&self, path: PathBuf) {
+        let mut inner = self.inner.write().await;
+        if let Some(old_block) = inner.entries.remove(&path) {
+            let old_size = old_block.into_size().await;
+            if inner.size > old_size {
+                inner.size -= old_size;
+            }
+
+            inner.lfu.remove(&path);
+        }
+    }
+
+    pub async fn sync(&self, path: PathBuf) -> TCResult<()> {
+        let inner = self.inner.read().await;
+        if let Some(block) = inner.entries.get(&path) {
+            let as_bytes = block.clone().into_bytes().await;
+            fs::write(&path, as_bytes)
+                .map_err(|e| io_err(e, &path))
+                .await?;
+        }
+
+        Ok(())
+    }
 }
 
 struct LFU<T: Hash> {
     entries: HashMap<T, usize>,
     priority: Vec<T>,
-    size: usize,
 }
 
 impl<T: Clone + Eq + Hash> LFU<T> {
@@ -180,7 +209,6 @@ impl<T: Clone + Eq + Hash> LFU<T> {
         LFU {
             entries: HashMap::new(),
             priority: Vec::new(),
-            size: 0,
         }
     }
 
@@ -196,18 +224,16 @@ impl<T: Clone + Eq + Hash> LFU<T> {
         }
     }
 
-    fn insert(&mut self, id: T, size: usize) {
+    fn insert(&mut self, id: T) {
         assert!(!self.entries.contains_key(&id));
 
         self.entries.insert(id.clone(), self.priority.len());
         self.priority.push(id.clone());
-        self.size += size;
     }
 
-    fn remove(&mut self, id: &T, size: usize) {
+    fn remove(&mut self, id: &T) {
         if let Some(i) = self.entries.remove(id) {
             self.priority.remove(i);
-            self.size -= size;
         }
     }
 }

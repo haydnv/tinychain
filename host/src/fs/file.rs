@@ -4,12 +4,13 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use futures::future::join_all;
 
 use error::*;
 use generic::{label, Id, Label};
 use transact::fs;
 use transact::lock::{Mutable, TxnLock};
-use transact::TxnId;
+use transact::{Transact, TxnId};
 
 use super::{file_name, Cache, CacheBlock, CacheLock, DirContents};
 
@@ -139,10 +140,54 @@ where
     }
 }
 
+#[async_trait]
+impl<B: fs::BlockData> Transact for File<B> {
+    async fn commit(&self, txn_id: &TxnId) {
+        let listing = self.listing.write(*txn_id).await.unwrap();
+        join_all(
+            listing
+                .iter()
+                .map(|block_id| block_path(&self.path, txn_id, block_id))
+                .map(|path| self.cache.sync(path)),
+        )
+        .await;
+
+        tokio::fs::copy(version_path(&self.path, txn_id), &self.path)
+            .await
+            .unwrap();
+
+        self.listing.commit(txn_id).await;
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        let listing = self.listing.read(txn_id).await.unwrap();
+        join_all(
+            listing
+                .iter()
+                .map(|block_id| block_path(&self.path, txn_id, block_id))
+                .map(|path| self.cache.remove(path)),
+        )
+        .await;
+
+        tokio::fs::remove_dir(version_path(&self.path, txn_id))
+            .await
+            .unwrap();
+
+        self.listing.finalize(txn_id).await;
+    }
+}
+
+#[inline]
 fn block_path(file_path: &PathBuf, txn_id: &TxnId, block_id: &fs::BlockId) -> PathBuf {
+    let mut path = version_path(file_path, txn_id);
+    path.push(block_id.to_string());
+    path
+}
+
+#[inline]
+fn version_path(file_path: &PathBuf, txn_id: &TxnId) -> PathBuf {
     let mut path = file_path.clone();
     path.push(VERSION.to_string());
     path.push(txn_id.to_string());
-    path.push(block_id.to_string());
     path
 }
