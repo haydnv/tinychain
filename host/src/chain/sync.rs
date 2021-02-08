@@ -2,14 +2,12 @@ use async_trait::async_trait;
 use destream::de;
 
 use error::*;
-use generic::{label, Instance, Label};
+use generic::{label, Label};
 use transact::fs::File;
-use transact::lock::TxnLock;
 use transact::TxnId;
 
 use crate::fs;
-use crate::scalar::OpRef;
-use crate::state::State;
+use crate::scalar::{OpRef, Scalar};
 use crate::txn::Txn;
 
 use super::{ChainBlock, ChainInstance, Subject};
@@ -23,20 +21,8 @@ pub struct SyncChain {
 }
 
 impl SyncChain {
-    pub async fn load(subject: State, file: fs::File<ChainBlock>) -> TCResult<Self> {
-        // TODO: validate file
-
-        let subject_class = subject.class();
-        let subject = if let State::Scalar(subject) = subject {
-            Subject::Scalar(TxnLock::new("sync chain subject", subject.into()))
-        } else {
-            return Err(TCError::bad_request(
-                "Chain does not support the given subject",
-                subject_class,
-            ));
-        };
-
-        Ok(Self { subject, file })
+    pub async fn load(_file: fs::File<ChainBlock>, _schema: Scalar) -> TCResult<Self> {
+        unimplemented!()
     }
 }
 

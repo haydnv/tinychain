@@ -3,13 +3,13 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use structopt::StructOpt;
+use tokio::time::Duration;
 
 use error::TCError;
 
 use generic::PathSegment;
 use tinychain::gateway::Gateway;
 use tinychain::*;
-use tokio::time::Duration;
 use transact::TxnId;
 
 fn data_size(flag: &str) -> error::TCResult<usize> {
@@ -81,18 +81,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let workspace = fs::load(cache.clone(), config.workspace).await?;
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
 
-    let kernel = tinychain::Kernel::new(vec![]);
-    let gateway = tinychain::gateway::Gateway::new(
-        kernel,
-        txn_server.clone(),
-        config.address,
-        config.http_port,
-        config.request_ttl,
-    );
-
-    let token = gateway.issue_token();
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
+        let txn_id = TxnId::new(Gateway::time());
+
         let data_dir = config
             .data_dir
             .ok_or_else(|| TCError::internal("missing required option: --data_dir"))?;
@@ -100,14 +92,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let data_dir = fs::load(cache.clone(), data_dir).await?;
 
         for path in config.clusters {
-            let txn_id = TxnId::new(Gateway::time());
-            let request = txn::Request::new(token.clone(), txn_id);
-            let txn = gateway.new_txn(request).await?;
             let config = get_config(&config.config, &path).await?;
-            let cluster = cluster::Cluster::load(data_dir.clone(), txn, path, config).await?;
+            let cluster = cluster::Cluster::load(data_dir.clone(), txn_id, path, config).await?;
 
             clusters.push(cluster);
         }
+
+        // TODO: data_dir.commit()
     }
 
     let kernel = tinychain::Kernel::new(vec![]);

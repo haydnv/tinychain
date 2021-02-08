@@ -42,13 +42,13 @@ pub trait File: Sized {
 pub trait Dir: Sized {
     type File;
 
-    async fn create_dir(&self, name: PathSegment) -> TCResult<Self>;
+    async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self>;
 
-    async fn create_file(&self, name: Id) -> TCResult<Self::File>;
+    async fn create_file(&self, txn_id: TxnId, name: Id) -> TCResult<Self::File>;
 
-    async fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self>>;
+    async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>>;
 
-    async fn get_file(&self, name: &Id) -> TCResult<Option<Self::File>>;
+    async fn get_file(&self, txn_id: &TxnId, name: &Id) -> TCResult<Option<Self::File>>;
 }
 
 pub struct Block<'a, F: File> {

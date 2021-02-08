@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::pin::Pin;
 
@@ -9,6 +10,7 @@ use error::*;
 use generic::{Id, PathSegment};
 use transact::fs;
 use transact::lock::{Mutable, TxnLock};
+use transact::TxnId;
 
 use crate::chain::ChainBlock;
 
@@ -17,6 +19,16 @@ use super::{dir_contents, file_name, fs_path, Cache, DirContents, File};
 #[derive(Clone)]
 pub enum FileEntry {
     Chain(File<ChainBlock>),
+}
+
+impl TryFrom<FileEntry> for File<ChainBlock> {
+    type Error = TCError;
+
+    fn try_from(file: FileEntry) -> TCResult<File<ChainBlock>> {
+        match file {
+            FileEntry::Chain(file) => Ok(file),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -78,19 +90,19 @@ impl Dir {
 impl fs::Dir for Dir {
     type File = FileEntry;
 
-    async fn create_dir(&self, _name: PathSegment) -> TCResult<Self> {
+    async fn create_dir(&self, _txn_id: TxnId, _name: PathSegment) -> TCResult<Self> {
         unimplemented!()
     }
 
-    async fn create_file(&self, _name: Id) -> TCResult<Self::File> {
+    async fn create_file(&self, _txn_id: TxnId, _name: Id) -> TCResult<Self::File> {
         unimplemented!()
     }
 
-    async fn get_dir(&self, _name: &PathSegment) -> TCResult<Option<Self>> {
+    async fn get_dir(&self, _txn_id: &TxnId, _name: &PathSegment) -> TCResult<Option<Self>> {
         unimplemented!()
     }
 
-    async fn get_file(&self, _name: &Id) -> TCResult<Option<Self::File>> {
+    async fn get_file(&self, _txn_id: &TxnId, _name: &Id) -> TCResult<Option<Self::File>> {
         unimplemented!()
     }
 }

@@ -83,7 +83,11 @@ impl Transaction<fs::Dir> for Txn {
         let inner = Inner {
             gateway: self.inner.gateway.clone(),
             request: self.inner.request.clone(),
-            dir: self.inner.dir.create_dir(id).await?,
+            dir: self
+                .inner
+                .dir
+                .create_dir(self.inner.request.txn_id, id)
+                .await?,
         };
 
         Ok(Txn {
