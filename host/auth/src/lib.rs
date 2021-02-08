@@ -1,6 +1,5 @@
 use std::fmt;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signature as ECSignature};
@@ -30,7 +29,13 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(iss: Link, iat: NetworkTime, ttl: Duration, actor_id: Value, scopes: Vec<Scope>) -> Self {
+    pub fn new(
+        iss: Link,
+        iat: NetworkTime,
+        ttl: Duration,
+        actor_id: Value,
+        scopes: Vec<Scope>,
+    ) -> Self {
         let iat = (iat.as_nanos() / NANO) as u64;
         let exp = iat + (ttl.as_nanos() / NANO) as u64;
 
@@ -107,16 +112,16 @@ pub struct Actor {
 }
 
 impl Actor {
-    pub fn new(host: Link, id: Value) -> Arc<Actor> {
+    pub fn new(host: Link, id: Value) -> Actor {
         let mut rng = OsRng {};
         let keypair: Keypair = Keypair::generate(&mut rng);
 
-        Arc::new(Actor {
+        Actor {
             host,
             id,
             public_key: keypair.public,
             private_key: keypair.secret,
-        })
+        }
     }
 
     pub fn sign_token(&self, token: &Token) -> TCResult<String> {

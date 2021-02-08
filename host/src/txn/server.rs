@@ -10,6 +10,7 @@ use crate::gateway::Gateway;
 
 use super::{Request, Txn, TxnId};
 
+#[derive(Clone)]
 pub struct TxnServer {
     active: RwLock<HashMap<TxnId, Txn>>,
     workspace: RwLock<CacheDir>,
@@ -17,10 +18,8 @@ pub struct TxnServer {
 
 impl TxnServer {
     pub async fn new(workspace: RwLock<CacheDir>) -> Self {
-        Self {
-            active: RwLock::new(HashMap::new()),
-            workspace: workspace,
-        }
+        let active = RwLock::new(HashMap::new());
+        Self { active, workspace }
     }
 
     pub async fn new_txn(&self, gateway: Arc<Gateway>, request: Request) -> TCResult<Txn> {

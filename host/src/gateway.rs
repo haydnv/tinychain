@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -14,8 +13,6 @@ use crate::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
 use crate::txn::*;
 
-const DEFAULT_TTL: Duration = Duration::from_secs(30);
-
 #[async_trait::async_trait]
 pub trait Server {
     type Error: std::error::Error;
@@ -27,7 +24,8 @@ pub struct Gateway {
     kernel: Kernel,
     txn_server: TxnServer,
     addr: IpAddr,
-    config: HashMap<LinkProtocol, u16>,
+    http_port: u16,
+    request_ttl: Duration,
 }
 
 impl Gateway {
@@ -39,43 +37,35 @@ impl Gateway {
         Err(TCError::not_implemented("Gateway::authenticate"))
     }
 
-    pub fn issue_token(&self) -> TCResult<Token> {
-        let host = self.root().ok_or_else(|| {
-            TCError::unsupported(
-                "Cannot issue an auth token without a running server to authenticate it",
-            )
-        })?;
-
-        Ok(Token::new(
-            host,
-            Self::time(),
-            DEFAULT_TTL,
-            Value::None,
-            vec![],
-        ))
-    }
-
     pub fn new(
         kernel: Kernel,
         txn_server: TxnServer,
         addr: IpAddr,
-        config: HashMap<LinkProtocol, u16>,
+        http_port: u16,
+        request_ttl: Duration,
     ) -> Arc<Self> {
         Arc::new(Self {
             kernel,
             addr,
-            config,
             txn_server,
+            http_port,
+            request_ttl,
         })
     }
 
-    pub fn root(&self) -> Option<Link> {
-        if let Some(port) = self.config.get(&LinkProtocol::HTTP) {
-            let host = LinkHost::from((LinkProtocol::HTTP, self.addr.clone(), Some(*port)));
-            Some(host.into())
-        } else {
-            None
-        }
+    pub fn issue_token(&self) -> Token {
+        Token::new(
+            self.root(),
+            Self::time(),
+            self.request_ttl,
+            Value::None,
+            vec![],
+        )
+    }
+
+    pub fn root(&self) -> Link {
+        let host = LinkHost::from((LinkProtocol::HTTP, self.addr.clone(), Some(self.http_port)));
+        host.into()
     }
 
     pub async fn new_txn(self: &Arc<Self>, request: Request) -> TCResult<Txn> {
@@ -102,26 +92,17 @@ impl Gateway {
     pub fn listen(
         self: Arc<Self>,
     ) -> Pin<Box<impl Future<Output = Result<(), Box<dyn std::error::Error>>>>> {
-        #[allow(unused_mut)]
-        let mut servers = Vec::<
-            Box<dyn Future<Output = Result<(), Box<dyn std::error::Error>>> + Unpin>,
-        >::with_capacity(1);
-
-        #[cfg(feature = "http")]
-        {
-            servers.push(Box::new(self.http_listen()));
-        }
+        let servers = vec![self.http_listen()];
 
         Box::pin(try_join_all(servers).map_ok(|_| ()))
     }
 
-    #[cfg(feature = "http")]
     fn http_listen(
         self: Arc<Self>,
     ) -> std::pin::Pin<Box<impl futures::Future<Output = Result<(), Box<dyn std::error::Error>>>>>
     {
-        let port = self.config.get(&LinkProtocol::HTTP).unwrap();
-        let http_addr = (self.addr, *port).into();
+        let port = self.http_port;
+        let http_addr = (self.addr, port).into();
         let server = crate::http::HTTPServer::new(self);
         let listener = server.listen(http_addr).map_err(|e| {
             let e: Box<dyn std::error::Error> = Box::new(e);

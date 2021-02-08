@@ -20,12 +20,6 @@ use super::Value;
 
 const EMPTY_SLICE: [u8; 0] = [];
 
-impl From<PathLabel> for Link {
-    fn from(path: PathLabel) -> Self {
-        TCPathBuf::from(path).into()
-    }
-}
-
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
     DomainName(DomainName),
@@ -341,6 +335,12 @@ impl From<LinkHost> for Link {
             host: Some(host),
             path: TCPathBuf::default(),
         }
+    }
+}
+
+impl From<PathLabel> for Link {
+    fn from(path: PathLabel) -> Self {
+        TCPathBuf::from(path).into()
     }
 }
 

@@ -12,11 +12,9 @@ pub mod chain;
 pub mod cluster;
 pub mod fs;
 pub mod gateway;
+pub mod http;
 pub mod kernel;
 pub mod object;
 pub mod scalar;
 pub mod state;
 pub mod txn;
-
-#[cfg(feature = "http")]
-pub mod http;

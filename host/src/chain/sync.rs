@@ -21,6 +21,13 @@ pub struct SyncChain {
     file: InstanceFile<ChainBlock>,
 }
 
+impl SyncChain {
+    pub async fn load(file: InstanceFile<ChainBlock>) -> TCResult<Self> {
+        // TODO: validate file
+        Ok(Self { file })
+    }
+}
+
 #[async_trait]
 impl ChainInstance for SyncChain {
     async fn file(&self, txn_id: &TxnId) -> TCResult<RwLock<FileView<ChainBlock>>> {

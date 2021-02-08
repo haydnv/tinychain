@@ -8,12 +8,13 @@ use futures_locks::RwLock;
 
 use error::{TCError, TCResult};
 use generic::{Id, PathSegment};
+use transact::fs::{BlockData, File};
 use transact::TxnId;
 
 use crate::chain::ChainBlock;
 
 use super::cache::CacheDir;
-use super::FileView;
+use super::{FileView, InstanceFile};
 
 #[derive(Clone)]
 pub enum FileEntry {
@@ -111,5 +112,17 @@ impl Dir {
         Self {
             inner: Arc::new(inner),
         }
+    }
+
+    pub async fn copy_file<B: BlockData, F: File<Block = B>>(
+        &self,
+        _name: Id,
+        _source: &F,
+    ) -> TCResult<InstanceFile<B>> {
+        Err(TCError::not_implemented("Dir::copy_file"))
+    }
+
+    pub async fn get_file<B: BlockData>(&self, _name: &Id) -> TCResult<Option<InstanceFile<B>>> {
+        Err(TCError::not_implemented("Dir::get_file"))
     }
 }

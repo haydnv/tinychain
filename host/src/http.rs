@@ -79,7 +79,7 @@ impl HTTPServer {
 
             self.gateway.authenticate(token).await?
         } else {
-            self.gateway.issue_token()?
+            self.gateway.issue_token()
         };
 
         let txn_id = if let Some(txn_id) = get_param(&mut params, "txn_id")? {

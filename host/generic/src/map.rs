@@ -104,9 +104,9 @@ impl<T: Clone + FromStream<Context = ()>> FromStream for Map<T>
 where
     T::Context: Copy,
 {
-    type Context = ();
+    type Context = T::Context;
 
-    async fn from_stream<D: Decoder>(context: (), d: &mut D) -> Result<Self, D::Error> {
+    async fn from_stream<D: Decoder>(context: T::Context, d: &mut D) -> Result<Self, D::Error> {
         let inner = HashMap::<Id, T>::from_stream(context, d).await?;
         Ok(Self { inner })
     }

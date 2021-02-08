@@ -20,6 +20,10 @@ pub struct InstanceClass {
 }
 
 impl InstanceClass {
+    pub fn new(extends: Option<Link>, proto: Map<Scalar>) -> Self {
+        Self { extends, proto }
+    }
+
     pub fn extends(&self) -> Link {
         if let Some(link) = &self.extends {
             link.clone()

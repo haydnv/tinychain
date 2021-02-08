@@ -1,15 +1,17 @@
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 
-use bytes::Bytes;
 use futures::TryFutureExt;
 use structopt::StructOpt;
 
 use error::TCError;
 
 use generic::PathSegment;
+use tinychain::gateway::Gateway;
 use tinychain::*;
+use tokio::time::Duration;
+use transact::TxnId;
 
 fn data_size(flag: &str) -> error::TCResult<usize> {
     if flag.is_empty() {
@@ -32,6 +34,12 @@ fn data_size(flag: &str) -> error::TCResult<usize> {
     }
 }
 
+fn duration(flag: &str) -> error::TCResult<Duration> {
+    u64::from_str(flag)
+        .map(Duration::from_secs)
+        .map_err(|_| error::TCError::bad_request("Invalid duration", flag))
+}
+
 #[derive(Clone, StructOpt)]
 struct Config {
     #[structopt(long = "address", default_value = "127.0.0.1")]
@@ -39,6 +47,9 @@ struct Config {
 
     #[structopt(long = "log_level", default_value = "warn")]
     pub log_level: String,
+
+    #[structopt(long = "workspace", default_value = "/tmp/tc/tmp")]
+    pub workspace: PathBuf,
 
     #[structopt(long = "cache_size", default_value = "10M", parse(try_from_str = data_size))]
     pub cache_size: usize,
@@ -52,10 +63,9 @@ struct Config {
     #[structopt(long = "cluster")]
     pub clusters: Vec<generic::TCPathBuf>,
 
-    #[structopt(long = "workspace", default_value = "/tmp/tc/tmp")]
-    pub workspace: PathBuf,
+    #[structopt(long = "request_ttl", default_value = "30", parse(try_from_str = duration))]
+    pub request_ttl: Duration,
 
-    #[cfg(feature = "http")]
     #[structopt(long = "http_port", default_value = "8702")]
     pub http_port: u16,
 }
@@ -69,6 +79,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let cache = fs::Cache::new(config.cache_size);
 
+    let workspace = fs::load(cache.clone(), config.workspace).await?;
+    let txn_server = tinychain::txn::TxnServer::new(workspace).await;
+
+    let kernel = tinychain::Kernel::new(vec![]);
+    let gateway = tinychain::gateway::Gateway::new(
+        kernel,
+        txn_server.clone(),
+        config.address,
+        config.http_port,
+        config.request_ttl,
+    );
+
+    let token = gateway.issue_token();
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
         let data_dir = config
@@ -80,24 +103,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .await?;
 
         for path in config.clusters {
+            let txn_id = TxnId::new(Gateway::time());
+            let request = txn::Request::new(token.clone(), txn_id);
+            let txn = gateway.new_txn(request).await?;
             let config = get_config(&config.config, &path).await?;
-            let cluster = cluster::Cluster::load(data_dir.clone(), path, config).await?;
+            let cluster = cluster::Cluster::load(data_dir.clone(), txn, path, config).await?;
 
             clusters.push(cluster);
         }
     }
 
-    #[allow(unused_mut)]
-    let mut gateway_config = HashMap::new();
-
-    #[cfg(feature = "http")]
-    gateway_config.insert(value::LinkProtocol::HTTP, config.http_port);
-
-    let workspace = fs::load(cache, config.workspace).await?;
-    let txn_server = tinychain::txn::TxnServer::new(workspace).await;
-    let kernel = tinychain::Kernel::new(clusters);
-    let gateway =
-        tinychain::gateway::Gateway::new(kernel, txn_server, config.address, gateway_config);
+    let kernel = tinychain::Kernel::new(vec![]);
+    let gateway = tinychain::gateway::Gateway::new(
+        kernel,
+        txn_server,
+        config.address,
+        config.http_port,
+        config.request_ttl,
+    );
 
     if let Err(cause) = gateway.listen().await {
         log::error!("Server error: {}", cause);
@@ -106,14 +129,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-async fn get_config<'a>(config_dir: &PathBuf, path: &'a [PathSegment]) -> error::TCResult<Bytes> {
+async fn get_config(config_dir: &PathBuf, path: &[PathSegment]) -> error::TCResult<Vec<u8>> {
     let mut fs_path = config_dir.clone();
     for id in path {
         fs_path.push(id.to_string());
     }
 
     match tokio::fs::read(&fs_path).await {
-        Ok(config) => Ok(Bytes::from(config)),
+        Ok(config) => Ok(config),
         Err(cause) => Err(error::TCError::internal(format!(
             "could not read config file at {:?}: {}",
             fs_path, cause
