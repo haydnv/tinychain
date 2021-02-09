@@ -41,6 +41,13 @@ async fn dir_contents(dir_path: &PathBuf) -> TCResult<Vec<(fs::DirEntry, Metadat
     Ok(contents)
 }
 
+fn file_ext(path: &'_ PathBuf) -> TCResult<&'_ str> {
+    path.extension()
+        .ok_or_else(|| TCError::internal(format!("file {:?} has no extension", &path)))?
+        .to_str()
+        .ok_or_else(|| TCError::internal(format!("file at {:?} has an invalid extension", &path)))
+}
+
 fn file_name(handle: &fs::DirEntry) -> TCResult<PathSegment> {
     if let Some(name) = handle.file_name().to_str() {
         name.parse()

@@ -15,7 +15,7 @@ use transact::{fs, Transact};
 use crate::chain::ChainBlock;
 use crate::state::StateType;
 
-use super::{dir_contents, file_name, fs_path, Cache, DirContents, File};
+use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};
 
 #[derive(Clone)]
 pub enum FileEntry {
@@ -78,9 +78,20 @@ impl Dir {
                     let path = fs_path(&path, &name);
                     let contents = dir_contents(&path).await?;
                     if contents.iter().all(|(_, meta)| meta.is_file()) {
-                        // TODO: support other file types
-                        let file = File::load(cache.clone(), path, contents).await?;
-                        entries.insert(name, DirEntry::File(FileEntry::Chain(file)));
+                        let ext = file_ext(&path)?;
+
+                        match ext {
+                            "chain" => {
+                                let file = File::load(cache.clone(), path, contents).await?;
+                                entries.insert(name, DirEntry::File(FileEntry::Chain(file)));
+                            }
+                            other => {
+                                return Err(TCError::internal(format!(
+                                    "file at {:?} has invalid extension {}",
+                                    &path, other
+                                )))
+                            }
+                        }
                     } else if contents.iter().all(|(_, meta)| meta.is_dir()) {
                         let dir = Dir::load(cache.clone(), path, contents).await?;
                         entries.insert(name, DirEntry::Dir(dir));
