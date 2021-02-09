@@ -5,6 +5,7 @@ pub type TCResult<T> = Result<T, TCError>;
 /// The category of a `TCError`.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ErrorType {
+    BadGateway,
     BadRequest,
     Conflict,
     Forbidden,
@@ -25,6 +26,7 @@ impl fmt::Debug for ErrorType {
 impl fmt::Display for ErrorType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::BadGateway => f.write_str("bad gateway"),
             Self::BadRequest => f.write_str("bad request"),
             Self::Conflict => f.write_str("conflict"),
             Self::Forbidden => f.write_str("forbidden"),
@@ -45,6 +47,18 @@ pub struct TCError {
 }
 
 impl TCError {
+    pub fn new(code: ErrorType, message: String) -> Self {
+        Self { code, message }
+    }
+
+    /// Error indicating that the an upstream server send an invalid response.
+    pub fn bad_gateway<I: fmt::Display>(cause: I) -> Self {
+        Self {
+            code: ErrorType::BadRequest,
+            message: cause.to_string(),
+        }
+    }
+
     /// Error indicating that the request is badly-constructed or nonsensical.
     pub fn bad_request<M: fmt::Display, I: fmt::Display>(message: M, cause: I) -> Self {
         Self {

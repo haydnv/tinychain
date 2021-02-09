@@ -234,6 +234,10 @@ impl Value {
         }
     }
 
+    pub fn is_some(&self) -> bool {
+        !self.is_none()
+    }
+
     pub fn into_type(self, class: ValueType) -> Option<Self> {
         if self.class() == class {
             return Some(self);

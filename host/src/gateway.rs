@@ -3,17 +3,44 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
+
 use auth::Token;
 use error::*;
 use futures::future::{try_join_all, Future, TryFutureExt};
-use generic::NetworkTime;
+use generic::{Map, NetworkTime};
+use transact::TxnId;
 
 use crate::kernel::Kernel;
 use crate::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
 use crate::txn::*;
 
-#[async_trait::async_trait]
+#[async_trait]
+pub trait Client {
+    async fn get(&self, txn: Txn, link: Link, key: Value, auth: Option<String>) -> TCResult<State>;
+
+    async fn put(
+        &self,
+        txn_id: TxnId,
+        link: Link,
+        key: Value,
+        value: State,
+        auth: Option<String>,
+    ) -> TCResult<()>;
+
+    async fn post(
+        &self,
+        txn: Txn,
+        link: Link,
+        params: Map<State>,
+        auth: Option<String>,
+    ) -> TCResult<State>;
+
+    async fn delete(&self, txn: Txn, link: Link, key: Value, auth: Option<String>) -> TCResult<()>;
+}
+
+#[async_trait]
 pub trait Server {
     type Error: std::error::Error;
 
