@@ -6,7 +6,7 @@ use hyper::body::{Body, HttpBody};
 use hyper::client::HttpConnector;
 
 use error::*;
-use generic::{label, Map};
+use generic::label;
 use transact::{IntoView, Transaction};
 use value::{Link, Value};
 
@@ -86,13 +86,13 @@ impl crate::gateway::Client for Client {
         &self,
         txn: Txn,
         link: Link,
-        params: Map<State>,
+        params: State,
         auth: Option<String>,
     ) -> TCResult<State> {
         let req = req_builder("POST", link.to_string(), auth);
 
         let subcontext = txn.subcontext(label("_params").into()).await?;
-        let body = destream_json::encode(State::Map(params).into_view(subcontext))
+        let body = destream_json::encode(params.into_view(subcontext))
             .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
 
         let response = self

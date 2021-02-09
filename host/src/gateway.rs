@@ -8,8 +8,9 @@ use async_trait::async_trait;
 use auth::Token;
 use error::*;
 use futures::future::{try_join_all, Future, TryFutureExt};
-use generic::{Map, NetworkTime};
+use generic::NetworkTime;
 
+use crate::http;
 use crate::kernel::Kernel;
 use crate::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
@@ -32,7 +33,7 @@ pub trait Client {
         &self,
         txn: Txn,
         link: Link,
-        params: Map<State>,
+        params: State,
         auth: Option<String>,
     ) -> TCResult<State>;
 
@@ -52,6 +53,7 @@ pub struct Gateway {
     addr: IpAddr,
     http_port: u16,
     request_ttl: Duration,
+    client: http::Client,
 }
 
 impl Gateway {
@@ -76,6 +78,7 @@ impl Gateway {
             txn_server,
             http_port,
             request_ttl,
+            client: http::Client::new(),
         })
     }
 
@@ -103,7 +106,19 @@ impl Gateway {
         if subject.host().is_none() {
             self.kernel.get(txn, subject.path(), key).await
         } else {
-            Err(TCError::not_implemented("remote GET"))
+            // TODO: auth
+            self.client.get(txn.clone(), subject, key, None).await
+        }
+    }
+
+    pub async fn put(&self, txn: &Txn, subject: Link, key: Value, value: State) -> TCResult<()> {
+        if subject.host().is_none() {
+            self.kernel.put(txn, subject.path(), key, value).await
+        } else {
+            // TODO: auth
+            self.client
+                .put(txn.clone(), subject, key, value, None)
+                .await
         }
     }
 
@@ -111,7 +126,8 @@ impl Gateway {
         if subject.host().is_none() {
             self.kernel.post(txn, subject.path(), params).await
         } else {
-            Err(TCError::not_implemented("remote GET"))
+            // TODO: auth
+            self.client.post(txn.clone(), subject, params, None).await
         }
     }
 

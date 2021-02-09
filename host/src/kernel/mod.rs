@@ -38,6 +38,22 @@ impl Kernel {
         }
     }
 
+    pub async fn put(
+        &self,
+        _txn: &Txn,
+        path: &[PathSegment],
+        _key: Value,
+        _state: State,
+    ) -> TCResult<()> {
+        if let Some(class) = StateType::from_path(path) {
+            Err(TCError::method_not_allowed(class))
+        } else if let Some((_suffix, _cluster)) = self.hosted.get(path) {
+            Err(TCError::not_implemented("Kernel::get from Cluster"))
+        } else {
+            Err(TCError::not_found(TCPath::from(path)))
+        }
+    }
+
     pub async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
         if path.is_empty() {
             return Err(TCError::method_not_allowed(TCPath::from(path)));
