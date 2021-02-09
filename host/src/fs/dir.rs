@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::future::{join_all, Future, TryFutureExt};
 
 use error::*;
@@ -13,12 +14,16 @@ use transact::TxnId;
 use transact::{fs, Transact};
 
 use crate::chain::{self, ChainBlock};
+use crate::scalar::ScalarType;
 use crate::state::StateType;
 
 use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};
 
+pub const BIN_EXT: &str = "bin";
+
 #[derive(Clone)]
 pub enum FileEntry {
+    Bin(File<Bytes>),
     Chain(File<ChainBlock>),
 }
 
@@ -26,6 +31,10 @@ impl FileEntry {
     fn new(cache: Cache, path: PathBuf, class: StateType) -> TCResult<Self> {
         match class {
             StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, chain::EXT))),
+            StateType::Scalar(st) => match st {
+                ScalarType::Value(_) => Ok(Self::Bin(File::new(cache, path, BIN_EXT))),
+                other => Err(TCError::bad_request("cannot create file for", other)),
+            }
             other => Err(TCError::bad_request("cannot create file for", other)),
         }
     }
@@ -34,9 +43,21 @@ impl FileEntry {
 impl TryFrom<FileEntry> for File<ChainBlock> {
     type Error = TCError;
 
-    fn try_from(file: FileEntry) -> TCResult<File<ChainBlock>> {
+    fn try_from(file: FileEntry) -> TCResult<Self> {
         match file {
             FileEntry::Chain(file) => Ok(file),
+            _ => Err(TCError::unsupported("this is not a Chain file!")),
+        }
+    }
+}
+
+impl TryFrom<FileEntry> for File<Bytes> {
+    type Error = TCError;
+
+    fn try_from(file: FileEntry) -> TCResult<Self> {
+        match file {
+            FileEntry::Bin(file) => Ok(file),
+            _ => Err(TCError::unsupported("this is not a binary file!")),
         }
     }
 }
@@ -81,6 +102,10 @@ impl Dir {
                         let ext = file_ext(&path)?;
 
                         match ext {
+                            BIN_EXT => {
+                                let file = File::load(cache.clone(), path, contents).await?;
+                                entries.insert(name, DirEntry::File(FileEntry::Bin(file)));
+                            }
                             chain::EXT => {
                                 let file = File::load(cache.clone(), path, contents).await?;
                                 entries.insert(name, DirEntry::File(FileEntry::Chain(file)));
@@ -198,6 +223,7 @@ impl Transact for Dir {
             join_all(entries.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.commit(txn_id),
                 DirEntry::File(file) => match file {
+                    FileEntry::Bin(file) => file.commit(txn_id),
                     FileEntry::Chain(file) => file.commit(txn_id),
                 },
             }))
@@ -213,6 +239,7 @@ impl Transact for Dir {
             join_all(entries.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.finalize(txn_id),
                 DirEntry::File(file) => match file {
+                    FileEntry::Bin(file) => file.finalize(txn_id),
                     FileEntry::Chain(file) => file.finalize(txn_id),
                 },
             }))

@@ -24,10 +24,12 @@ pub trait Store: Send + Sync {
 pub trait File: Store + Sized {
     type Block: BlockData;
 
+    async fn block_exists(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool>;
+
     async fn create_block(
         &self,
-        name: BlockId,
         txn_id: TxnId,
+        name: BlockId,
         initial_value: Self::Block,
     ) -> TCResult<BlockOwned<Self>>;
 
@@ -78,7 +80,7 @@ pub trait Persist: Sized {
 
     fn schema(&'_ self) -> &'_ Self::Schema;
 
-    async fn load(schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
+    async fn load(schema: Self::Schema, store: Self::Store, txn_id: TxnId) -> TCResult<Self>;
 }
 
 pub struct Block<'a, F: File> {
@@ -276,7 +278,6 @@ impl<F: File> DerefMut for BlockOwnedMut<F> {
     }
 }
 
-pub trait BlockData:
-    Clone + TryFrom<Bytes, Error = TCError> + Into<Bytes> + Send + Sync + fmt::Display
-{
-}
+pub trait BlockData: Clone + TryFrom<Bytes> + Into<Bytes> + Send + Sync {}
+
+impl BlockData for Bytes {}

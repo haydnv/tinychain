@@ -1,14 +1,15 @@
 use std::fmt;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 
 use error::*;
 use generic::*;
 use safecast::CastFrom;
-use transact::lock::{Mutable, TxnLock};
 use transact::TxnId;
 use value::Value;
 
+use crate::fs;
 use crate::scalar::OpRef;
 
 mod block;
@@ -34,7 +35,7 @@ impl CastFrom<Value> for Schema {
 
 #[derive(Clone)]
 pub enum Subject {
-    Value(TxnLock<Mutable<Value>>),
+    Value(fs::File<Bytes>),
 }
 
 #[async_trait]

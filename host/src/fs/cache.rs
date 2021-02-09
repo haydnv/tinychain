@@ -18,12 +18,14 @@ use futures::TryFutureExt;
 
 #[derive(Clone)]
 pub enum CacheBlock {
+    Bin(CacheLock<Bytes>),
     Chain(CacheLock<ChainBlock>),
 }
 
 impl CacheBlock {
     async fn into_bytes(self) -> Bytes {
         match self {
+            Self::Bin(block) => (*block.read().await).clone(),
             Self::Chain(block) => block.read().await.clone().into(),
         }
     }
@@ -33,9 +35,26 @@ impl CacheBlock {
     }
 }
 
+impl From<CacheLock<Bytes>> for CacheBlock {
+    fn from(lock: CacheLock<Bytes>) -> CacheBlock {
+        Self::Bin(lock)
+    }
+}
+
 impl From<CacheLock<ChainBlock>> for CacheBlock {
     fn from(lock: CacheLock<ChainBlock>) -> CacheBlock {
         Self::Chain(lock)
+    }
+}
+
+impl TryFrom<CacheBlock> for CacheLock<Bytes> {
+    type Error = TCError;
+
+    fn try_from(block: CacheBlock) -> TCResult<Self> {
+        match block {
+            CacheBlock::Bin(block) => Ok(block),
+            _ => Err(TCError::unsupported("unexpected block type")),
+        }
     }
 }
 
@@ -45,6 +64,7 @@ impl TryFrom<CacheBlock> for CacheLock<ChainBlock> {
     fn try_from(block: CacheBlock) -> TCResult<Self> {
         match block {
             CacheBlock::Chain(block) => Ok(block),
+            _ => Err(TCError::unsupported("unexpected block type")),
         }
     }
 }
@@ -133,7 +153,7 @@ impl Cache {
         };
 
         let size = block.len();
-        let block = B::try_from(block)?;
+        let block = B::try_from(block).map_err(|_| TCError::internal("unable to decode block"))?;
         let lock = CacheLock::new(block);
         let cached = CacheBlock::from(lock.clone());
 

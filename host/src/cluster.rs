@@ -94,13 +94,13 @@ impl Cluster {
 
         let mut chains = HashMap::<Id, Chain>::new();
         for (id, (class, schema)) in chain_schema.into_iter() {
-            let file = dir.create_file(txn_id, id.clone(), class.into()).await?;
+            let dir = dir.create_dir(txn_id, id.clone()).await?;
             let chain = match class {
                 ChainType::Sync => {
                     let schema = schema
                         .try_cast_into(|v| TCError::bad_request("invalid Chain schema", v))?;
 
-                    SyncChain::load(schema, file.try_into()?)
+                    SyncChain::load(schema, dir, txn_id)
                         .map_ok(Chain::Sync)
                         .await?
                 }

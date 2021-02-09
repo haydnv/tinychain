@@ -13,6 +13,7 @@ use transact::lock::{Mutable, TxnLock};
 use transact::{Transact, TxnId};
 
 use super::{file_name, Cache, CacheBlock, CacheLock, DirContents};
+use transact::fs::BlockId;
 
 const VERSION: Label = label(".version");
 
@@ -90,10 +91,15 @@ where
 {
     type Block = B;
 
+    async fn block_exists(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool> {
+        let listing = self.listing.read(txn_id).await?;
+        Ok(listing.contains(name))
+    }
+
     async fn create_block(
         &self,
-        name: fs::BlockId,
         txn_id: TxnId,
+        name: fs::BlockId,
         initial_value: Self::Block,
     ) -> TCResult<fs::BlockOwned<Self>> {
         let path = block_path(&self.path, &txn_id, &name);
@@ -163,9 +169,12 @@ impl<B: fs::BlockData> Transact for File<B> {
         )
         .await;
 
-        tokio::fs::copy(version_path(&self.path, txn_id), &self.path)
-            .await
-            .unwrap();
+        if !listing.is_empty() {
+            log::debug!("commit file {:?} version {}", &self.path, txn_id);
+            tokio::fs::copy(version_path(&self.path, txn_id), &self.path)
+                .await
+                .unwrap();
+        }
 
         self.listing.commit(txn_id).await;
     }
