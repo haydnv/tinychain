@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures_locks::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use log::debug;
 use tokio::fs;
 
 use error::*;
@@ -77,7 +78,7 @@ pub struct CacheLock<T> {
 impl<T> CacheLock<T> {
     fn new(value: T) -> Self {
         Self {
-            ref_count: Arc::new(std::sync::RwLock::new(0)),
+            ref_count: Arc::new(std::sync::RwLock::new(1)),
             lock: RwLock::new(value),
         }
     }
@@ -139,18 +140,24 @@ impl Cache {
     {
         let mut inner = self.inner.write().await;
         if let Some(lock) = inner.entries.get(path) {
+            debug!("cache hit: {:?}", path);
             let lock = lock.clone().try_into()?;
             inner.lfu.bump(path);
             return Ok(Some(lock));
         } else {
-            log::info!("cache miss");
+            log::info!("cache miss: {:?}", path);
         }
 
         let block = match fs::read(path).await {
             Ok(block) => Bytes::from(block),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                debug!("no such block: {:?}", path);
+                return Ok(None);
+            }
             Err(err) => return Err(io_err(err, path)),
         };
+
+        debug!("cache insert: {:?}", path);
 
         let size = block.len();
         let block = B::try_from(block).map_err(|_| TCError::internal("unable to decode block"))?;
@@ -207,12 +214,25 @@ impl Cache {
     }
 
     pub async fn sync(&self, path: PathBuf) -> TCResult<()> {
+        debug!("sync block at {:?} with filesystem", &path);
+
         let inner = self.inner.read().await;
         if let Some(block) = inner.entries.get(&path) {
             let as_bytes = block.clone().into_bytes().await;
+
+            if let Some(parent) = path.parent() {
+                if !parent.exists() {
+                    tokio::fs::create_dir_all(parent)
+                        .map_err(|e| io_err(e, parent))
+                        .await?;
+                }
+            }
+
             fs::write(&path, as_bytes)
                 .map_err(|e| io_err(e, &path))
                 .await?;
+        } else {
+            log::warn!("no such block! {:?}", &path);
         }
 
         Ok(())

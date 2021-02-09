@@ -6,6 +6,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{join_all, Future, TryFutureExt};
+use log::{debug, warn};
 
 use error::*;
 use generic::{Id, PathSegment};
@@ -17,7 +18,7 @@ use crate::chain::{self, ChainBlock};
 use crate::scalar::ScalarType;
 use crate::state::StateType;
 
-use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};
+use super::{dir_contents, file_ext, file_name, fs_path, io_err, Cache, DirContents, File};
 
 pub const BIN_EXT: &str = "bin";
 
@@ -36,6 +37,26 @@ impl FileEntry {
                 other => Err(TCError::bad_request("cannot create file for", other)),
             },
             other => Err(TCError::bad_request("cannot create file for", other)),
+        }
+    }
+
+    async fn load(cache: Cache, path: PathBuf, contents: DirContents) -> TCResult<Self> {
+        let ext = file_ext(&path)
+            .ok_or_else(|| TCError::unsupported(format!("file at {:?} has no extension", &path)))?;
+
+        match ext {
+            BIN_EXT => {
+                let file = File::load(cache.clone(), path, contents).await?;
+                Ok(FileEntry::Bin(file))
+            }
+            chain::EXT => {
+                let file = File::load(cache.clone(), path, contents).await?;
+                Ok(FileEntry::Chain(file))
+            }
+            other => Err(TCError::internal(format!(
+                "file at {:?} has invalid extension {}",
+                &path, other
+            ))),
         }
     }
 }
@@ -96,27 +117,29 @@ impl Dir {
 
                 for (handle, _) in contents.into_iter() {
                     let name = file_name(&handle)?;
-                    let path = fs_path(&path, &name);
-                    let contents = dir_contents(&path).await?;
-                    if contents.iter().all(|(_, meta)| meta.is_file()) {
-                        let ext = file_ext(&path)?;
+                    let path = handle.path();
 
-                        match ext {
-                            BIN_EXT => {
-                                let file = File::load(cache.clone(), path, contents).await?;
-                                entries.insert(name, DirEntry::File(FileEntry::Bin(file)));
-                            }
-                            chain::EXT => {
-                                let file = File::load(cache.clone(), path, contents).await?;
-                                entries.insert(name, DirEntry::File(FileEntry::Chain(file)));
-                            }
-                            other => {
-                                return Err(TCError::internal(format!(
-                                    "file at {:?} has invalid extension {}",
-                                    &path, other
-                                )))
-                            }
+                    if name == super::VERSION {
+                        let path = handle.path();
+                        warn!("skipping old version file at {:?}", path);
+                        continue;
+                    } else if name.starts_with(".") {
+                        debug!("skip loading hidden file {:?}", path);
+                    }
+
+                    let contents = dir_contents(&path).await?;
+
+                    if is_empty(&contents) {
+                        if file_ext(&path).is_some() {
+                            let file = FileEntry::load(cache.clone(), path, contents).await?;
+                            entries.insert(name, DirEntry::File(file));
+                        } else {
+                            let dir = Dir::load(cache.clone(), path, contents).await?;
+                            entries.insert(name, DirEntry::Dir(dir));
                         }
+                    } else if contents.iter().all(|(_, meta)| meta.is_file()) {
+                        let file = FileEntry::load(cache.clone(), path, contents).await?;
+                        entries.insert(name, DirEntry::File(file));
                     } else if contents.iter().all(|(_, meta)| meta.is_dir()) {
                         let dir = Dir::load(cache.clone(), path, contents).await?;
                         entries.insert(name, DirEntry::Dir(dir));
@@ -218,6 +241,8 @@ impl fs::Dir for Dir {
 #[async_trait]
 impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) {
+        debug!("commit dir {:?} at {}", &self.path, txn_id);
+
         {
             let entries = self.entries.read(&txn_id).await.unwrap();
             join_all(entries.values().map(|entry| match entry {
@@ -253,4 +278,14 @@ impl Transact for Dir {
 pub async fn load(cache: Cache, mount_point: PathBuf) -> TCResult<Dir> {
     let contents = dir_contents(&mount_point).await?;
     Dir::load(cache, mount_point, contents).await
+}
+
+fn is_empty(contents: &DirContents) -> bool {
+    for (handle, _) in contents {
+        if !handle.file_name().to_str().unwrap().starts_with('.') {
+            return false;
+        }
+    }
+
+    true
 }

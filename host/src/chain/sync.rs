@@ -5,6 +5,7 @@ use bytes::Bytes;
 
 use error::*;
 use generic::{label, Instance, Label};
+use log::debug;
 use transact::fs::{Dir, File, Persist};
 use transact::TxnId;
 
@@ -54,14 +55,20 @@ impl Persist for SyncChain {
                         let file = dir
                             .create_file(txn_id, SUBJECT.into(), value.class().into())
                             .await?;
+
                         file.try_into()?
                     };
 
                 if !file.block_exists(&txn_id, &SUBJECT.into()).await? {
                     let as_bytes = serde_json::to_vec(value)
                         .map_err(|e| TCError::bad_request("unable to serialize value", e))?;
+
                     file.create_block(txn_id, SUBJECT.into(), Bytes::from(as_bytes))
                         .await?;
+
+                    debug!("sync chain wrote new subject");
+                } else {
+                    debug!("sync chain found existing subject");
                 }
 
                 Subject::Value(file)

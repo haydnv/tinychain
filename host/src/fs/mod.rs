@@ -7,7 +7,7 @@ use futures::TryFutureExt;
 use tokio::fs;
 
 use error::*;
-use generic::PathSegment;
+use generic::{label, Label, PathSegment};
 
 mod cache;
 mod dir;
@@ -16,6 +16,9 @@ mod file;
 pub use cache::*;
 pub use dir::*;
 pub use file::*;
+
+const COMMIT: Label = label(".commit");
+const VERSION: Label = label(".version");
 
 type DirContents = Vec<(fs::DirEntry, Metadata)>;
 
@@ -41,11 +44,9 @@ async fn dir_contents(dir_path: &PathBuf) -> TCResult<Vec<(fs::DirEntry, Metadat
     Ok(contents)
 }
 
-fn file_ext(path: &'_ PathBuf) -> TCResult<&'_ str> {
-    path.extension()
-        .ok_or_else(|| TCError::internal(format!("file {:?} has no extension", &path)))?
-        .to_str()
-        .ok_or_else(|| TCError::internal(format!("file at {:?} has an invalid extension", &path)))
+#[inline]
+fn file_ext(path: &'_ PathBuf) -> Option<&'_ str> {
+    path.extension().and_then(|ext| ext.to_str())
 }
 
 fn file_name(handle: &fs::DirEntry) -> TCResult<PathSegment> {
@@ -53,12 +54,14 @@ fn file_name(handle: &fs::DirEntry) -> TCResult<PathSegment> {
         let name = name.to_str().ok_or_else(|| {
             TCError::internal(format!("invalid file name at {:?}", handle.path()))
         })?;
+
         name.parse()
     } else {
         Err(TCError::internal("Cannot load file with no name!"))
     }
 }
 
+#[inline]
 fn fs_path(mount_point: &PathBuf, name: &PathSegment) -> PathBuf {
     let mut path = mount_point.clone();
     path.push(name.to_string());
@@ -68,6 +71,7 @@ fn fs_path(mount_point: &PathBuf, name: &PathSegment) -> PathBuf {
 fn io_err<I: fmt::Debug>(err: io::Error, info: I) -> TCError {
     match err.kind() {
         io::ErrorKind::NotFound => {
+            panic!("{:?}", info);
             TCError::unsupported(format!("There is no directory at {:?}", info))
         }
         io::ErrorKind::PermissionDenied => TCError::internal(format!(

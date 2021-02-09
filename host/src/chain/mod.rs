@@ -65,7 +65,11 @@ impl NativeClass for ChainType {
     }
 
     fn path(&self) -> TCPathBuf {
-        unimplemented!()
+        let suffix = match self {
+            Self::Sync => "sync",
+        };
+
+        TCPathBuf::from(PREFIX).append(label(suffix))
     }
 }
 
