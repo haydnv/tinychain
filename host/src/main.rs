@@ -7,13 +7,9 @@ use tokio::time::Duration;
 
 use error::TCError;
 
-use generic::PathSegment;
 use tinychain::gateway::Gateway;
 use tinychain::*;
-use transact::TxnId;
-
-#[cfg(test)]
-pub use tinychain::testutils;
+use transact::{Transact, TxnId};
 
 fn data_size(flag: &str) -> error::TCResult<usize> {
     if flag.is_empty() {
@@ -56,9 +52,6 @@ struct Config {
     #[structopt(long = "cache_size", default_value = "10M", parse(try_from_str = data_size))]
     pub cache_size: usize,
 
-    #[structopt(long = "config", default_value = "config")]
-    pub config: PathBuf,
-
     #[structopt(long = "data_dir")]
     pub data_dir: Option<PathBuf>,
 
@@ -84,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let workspace = fs::load(cache.clone(), config.workspace).await?;
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
 
-    let mut clusters = Vec::with_capacity(config.clusters.len());
+    let clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
         let txn_id = TxnId::new(Gateway::time());
 
@@ -94,17 +87,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let data_dir = fs::load(cache.clone(), data_dir).await?;
 
-        for path in config.clusters {
-            let config = get_config(&config.config, &path).await?;
-            let cluster = cluster::Cluster::load(data_dir.clone(), txn_id, path, config).await?;
-
-            clusters.push(cluster);
+        for _config_path in config.clusters {
+            unimplemented!("load cluster definition from config");
         }
 
-        // TODO: data_dir.commit()
+        data_dir.commit(&txn_id).await;
     }
 
-    let kernel = tinychain::Kernel::new(vec![]);
+    let kernel = tinychain::Kernel::new(clusters);
     let gateway = tinychain::gateway::Gateway::new(
         kernel,
         txn_server,
@@ -118,19 +108,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     Ok(())
-}
-
-async fn get_config(config_dir: &PathBuf, path: &[PathSegment]) -> error::TCResult<Vec<u8>> {
-    let mut fs_path = config_dir.clone();
-    for id in path {
-        fs_path.push(id.to_string());
-    }
-
-    match tokio::fs::read(&fs_path).await {
-        Ok(config) => Ok(config),
-        Err(cause) => Err(error::TCError::internal(format!(
-            "could not read config file at {:?}: {}",
-            fs_path, cause
-        ))),
-    }
 }

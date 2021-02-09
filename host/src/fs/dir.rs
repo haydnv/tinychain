@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use futures::future::{join_all, Future};
+use futures::future::{join_all, Future, TryFutureExt};
 
 use error::*;
 use generic::{Id, PathSegment};
@@ -122,6 +122,16 @@ impl Dir {
                 }
             }
         })
+    }
+}
+
+#[async_trait]
+impl fs::Store for Dir {
+    async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+        self.entries
+            .read(txn_id)
+            .map_ok(|entries| entries.is_empty())
+            .await
     }
 }
 

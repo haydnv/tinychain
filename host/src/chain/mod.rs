@@ -1,17 +1,13 @@
 use std::fmt;
 
 use async_trait::async_trait;
-use destream::{de, en};
-use futures::TryFutureExt;
 
 use error::*;
 use generic::*;
 use transact::lock::{Mutable, TxnLock};
-use transact::{IntoView, TxnId};
+use transact::TxnId;
 
-use crate::fs::Dir;
 use crate::scalar::{OpRef, Scalar};
-use crate::txn::Txn;
 
 mod block;
 pub mod sync;
@@ -86,80 +82,8 @@ impl ChainInstance for Chain {
     }
 }
 
-#[async_trait]
-impl de::FromStream for Chain {
-    type Context = Txn;
-
-    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_map(ChainVisitor { txn }).await
-    }
-}
-
-impl<'en> IntoView<'en, Dir> for Chain {
-    type Txn = Txn;
-    type View = ChainView;
-
-    fn into_view(self, txn: Self::Txn) -> Self::View {
-        ChainView { txn, chain: self }
-    }
-}
-
 impl fmt::Display for Chain {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         unimplemented!()
-    }
-}
-
-pub struct ChainView {
-    txn: Txn,
-    chain: Chain,
-}
-
-impl<'en> en::IntoStream<'en> for ChainView {
-    fn into_stream<E: en::Encoder<'en>>(self, _encoder: E) -> Result<E::Ok, E::Error> {
-        unimplemented!()
-    }
-}
-
-pub struct ChainVisitor {
-    txn: Txn,
-}
-
-impl ChainVisitor {
-    pub async fn visit_map_value<A: de::MapAccess>(
-        self,
-        class: ChainType,
-        access: &mut A,
-    ) -> Result<Chain, A::Error> {
-        match class {
-            ChainType::Sync => access.next_value(self.txn).map_ok(Chain::Sync).await,
-        }
-    }
-}
-
-impl From<Txn> for ChainVisitor {
-    fn from(txn: Txn) -> Self {
-        Self { txn }
-    }
-}
-
-#[async_trait]
-impl de::Visitor for ChainVisitor {
-    type Value = Chain;
-
-    fn expecting() -> &'static str {
-        "a Chain"
-    }
-
-    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        if let Some(key) = access.next_key::<TCPathBuf>(()).await? {
-            if let Some(class) = ChainType::from_path(&key) {
-                self.visit_map_value(class, &mut access).await
-            } else {
-                Err(de::Error::invalid_value(key, "a Chain classpath"))
-            }
-        } else {
-            Err(de::Error::invalid_length(0, "a Chain"))
-        }
     }
 }

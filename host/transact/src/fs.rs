@@ -16,11 +16,16 @@ use super::TxnId;
 pub type BlockId = PathSegment;
 
 #[async_trait]
-pub trait File: Sized {
+pub trait Store: Send + Sync {
+    async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool>;
+}
+
+#[async_trait]
+pub trait File: Store + Sized {
     type Block: BlockData;
 
     async fn create_block(
-        &mut self,
+        &self,
         name: BlockId,
         txn_id: TxnId,
         initial_value: Self::Block,
@@ -48,7 +53,7 @@ pub trait File: Sized {
 }
 
 #[async_trait]
-pub trait Dir: Sized {
+pub trait Dir: Store + Sized {
     type Class;
     type File;
 
@@ -64,6 +69,36 @@ pub trait Dir: Sized {
     async fn get_dir(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<Option<Self>>;
 
     async fn get_file(&self, txn_id: &TxnId, name: &Id) -> TCResult<Option<Self::File>>;
+}
+
+#[async_trait]
+pub trait Persist: Sized {
+    type Store: Store;
+    type Builder: Builder<Store = Self::Store>;
+
+    fn builder(store: Self::Store) -> Self::Builder;
+
+    async fn load(store: Self::Store) -> TCResult<Self>;
+
+    async fn load_or_build(txn_id: TxnId, builder: Self::Builder) -> TCResult<Self> {
+        if builder.store().is_empty(&txn_id).await? {
+            let store = builder.build(txn_id).await?;
+            Self::load(store).await
+        } else {
+            Self::load(builder.into_store()).await
+        }
+    }
+}
+
+#[async_trait]
+pub trait Builder: Send + Sync + Sized {
+    type Store: Store;
+
+    async fn build(self, txn_id: TxnId) -> TCResult<Self::Store>;
+
+    fn store(&'_ self) -> &'_ Self::Store;
+
+    fn into_store(self) -> Self::Store;
 }
 
 pub struct Block<'a, F: File> {

@@ -451,11 +451,8 @@ impl StateVisitor {
         access: &mut A,
     ) -> Result<State, A::Error> {
         match class {
-            StateType::Chain(ct) => {
-                ChainVisitor::from(self.txn.clone())
-                    .visit_map_value(ct, access)
-                    .map_ok(State::Chain)
-                    .await
+            StateType::Chain(_ct) => {
+                Err(de::Error::custom("decoding a Chain is not yet implemented"))
             }
             StateType::Map => access.next_value(self.txn.clone()).await,
             StateType::Object(ot) => match ot {
@@ -638,7 +635,9 @@ pub struct StateView {
 impl<'en> en::IntoStream<'en> for StateView {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self.state {
-            State::Chain(chain) => chain.into_view(self.txn).into_stream(encoder),
+            State::Chain(_chain) => {
+                Err(en::Error::custom("encoding a Chain is not yet implemented"))
+            }
             State::Map(map) => {
                 let txn = self.txn.clone();
                 let map = stream::iter(map.into_iter())

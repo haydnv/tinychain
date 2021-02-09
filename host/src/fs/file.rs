@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use futures::future::join_all;
+use futures::future::{join_all, TryFutureExt};
 
 use error::*;
 use generic::{label, Id, Label};
@@ -72,6 +72,16 @@ impl<B: fs::BlockData> File<B> {
 }
 
 #[async_trait]
+impl<B: Send + Sync> fs::Store for File<B> {
+    async fn is_empty(&self, txn_id: &TxnId) -> TCResult<bool> {
+        self.listing
+            .read(txn_id)
+            .map_ok(|listing| listing.is_empty())
+            .await
+    }
+}
+
+#[async_trait]
 impl<B: fs::BlockData + 'static> fs::File for File<B>
 where
     CacheBlock: From<CacheLock<B>>,
@@ -80,7 +90,7 @@ where
     type Block = B;
 
     async fn create_block(
-        &mut self,
+        &self,
         name: fs::BlockId,
         txn_id: TxnId,
         initial_value: Self::Block,
