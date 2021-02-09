@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::convert::TryFrom;
+use std::io;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
@@ -169,7 +170,14 @@ impl<B: fs::BlockData> Transact for File<B> {
         )
         .await;
 
-        if !listing.is_empty() {
+        if listing.is_empty() {
+            match tokio::fs::remove_dir(version_path(&self.path, txn_id)).await {
+                Ok(_) => {},
+                // if the cache is never flushed, there won't be any txn dir
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {},
+                Err(other) => panic!(other)
+            }
+        } else {
             log::debug!("commit file {:?} version {}", &self.path, txn_id);
             tokio::fs::copy(version_path(&self.path, txn_id), &self.path)
                 .await
