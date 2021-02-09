@@ -9,7 +9,6 @@ use auth::Token;
 use error::*;
 use futures::future::{try_join_all, Future, TryFutureExt};
 use generic::{Map, NetworkTime};
-use transact::TxnId;
 
 use crate::kernel::Kernel;
 use crate::scalar::{Link, LinkHost, LinkProtocol, Value};
@@ -22,7 +21,7 @@ pub trait Client {
 
     async fn put(
         &self,
-        txn_id: TxnId,
+        txn_id: Txn,
         link: Link,
         key: Value,
         value: State,
@@ -37,7 +36,7 @@ pub trait Client {
         auth: Option<String>,
     ) -> TCResult<State>;
 
-    async fn delete(&self, txn: Txn, link: Link, key: Value, auth: Option<String>) -> TCResult<()>;
+    async fn delete(&self, link: Link, key: Value, auth: Option<String>) -> TCResult<()>;
 }
 
 #[async_trait]
