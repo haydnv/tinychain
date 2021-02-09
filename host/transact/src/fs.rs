@@ -73,32 +73,12 @@ pub trait Dir: Store + Sized {
 
 #[async_trait]
 pub trait Persist: Sized {
+    type Schema;
     type Store: Store;
-    type Builder: Builder<Store = Self::Store>;
 
-    fn builder(store: Self::Store) -> Self::Builder;
+    fn schema(&'_ self) -> &'_ Self::Schema;
 
     async fn load(store: Self::Store) -> TCResult<Self>;
-
-    async fn load_or_build(txn_id: TxnId, builder: Self::Builder) -> TCResult<Self> {
-        if builder.store().is_empty(&txn_id).await? {
-            let store = builder.build(txn_id).await?;
-            Self::load(store).await
-        } else {
-            Self::load(builder.into_store()).await
-        }
-    }
-}
-
-#[async_trait]
-pub trait Builder: Send + Sync + Sized {
-    type Store: Store;
-
-    async fn build(self, txn_id: TxnId) -> TCResult<Self::Store>;
-
-    fn store(&'_ self) -> &'_ Self::Store;
-
-    fn into_store(self) -> Self::Store;
 }
 
 pub struct Block<'a, F: File> {

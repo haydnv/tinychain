@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -181,6 +182,17 @@ impl From<Link> for Subject {
     }
 }
 
+impl TryFrom<Subject> for TCPathBuf {
+    type Error = TCError;
+
+    fn try_from(subject: Subject) -> TCResult<Self> {
+        match subject {
+            Subject::Link(link) if link.host().is_none() => Ok(link.into_path()),
+            other => Err(TCError::bad_request("expected a Path but found", other)),
+        }
+    }
+}
+
 impl fmt::Display for Subject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -281,6 +293,17 @@ impl<'en> IntoStream<'en> for Key {
         match self {
             Key::Ref(id_ref) => id_ref.into_stream(e),
             Key::Value(value) => value.into_stream(e),
+        }
+    }
+}
+
+impl TryFrom<Key> for Value {
+    type Error = TCError;
+
+    fn try_from(key: Key) -> TCResult<Value> {
+        match key {
+            Key::Value(value) => Ok(value),
+            other => Err(TCError::bad_request("expected Value but found", other)),
         }
     }
 }

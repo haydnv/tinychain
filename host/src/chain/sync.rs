@@ -4,11 +4,10 @@ use error::*;
 use generic::{label, Label};
 use transact::fs;
 use transact::TxnId;
-use value::Value;
 
 use crate::scalar::OpRef;
 
-use super::{ChainBlock, ChainInstance, Subject};
+use super::{ChainBlock, ChainInstance, Schema, Subject};
 
 type File = crate::fs::File<ChainBlock>;
 
@@ -16,6 +15,7 @@ const BLOCK_ID: Label = label("0");
 
 #[derive(Clone)]
 pub struct SyncChain {
+    schema: Schema,
     subject: Subject,
     file: File,
 }
@@ -32,43 +32,14 @@ impl ChainInstance for SyncChain {
 
 #[async_trait]
 impl fs::Persist for SyncChain {
+    type Schema = Schema;
     type Store = File;
-    type Builder = Builder;
 
-    fn builder(_file: File) -> Self::Builder {
-        unimplemented!()
+    fn schema(&self) -> &'_ Schema {
+        &self.schema
     }
 
     async fn load(_file: File) -> TCResult<Self> {
         unimplemented!()
-    }
-}
-
-pub struct Builder {
-    store: File,
-    subject: Option<Value>,
-}
-
-impl Builder {
-    pub fn subject(mut self, value: Value) -> Self {
-        self.subject = Some(value);
-        self
-    }
-}
-
-#[async_trait]
-impl fs::Builder for Builder {
-    type Store = File;
-
-    async fn build(self, _txn_id: TxnId) -> TCResult<Self::Store> {
-        unimplemented!()
-    }
-
-    fn store(&self) -> &Self::Store {
-        unimplemented!()
-    }
-
-    fn into_store(self) -> Self::Store {
-        self.store
     }
 }

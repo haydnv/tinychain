@@ -32,6 +32,10 @@ impl InstanceClass {
         }
     }
 
+    pub fn into_inner(self) -> (Option<Link>, Map<Scalar>) {
+        (self.extends, self.proto)
+    }
+
     pub fn proto(&'_ self) -> &'_ Map<Scalar> {
         &self.proto
     }
@@ -105,6 +109,7 @@ impl de::Visitor for InstanceClassVisitor {
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<InstanceClass, A::Error> {
         if let Some(key) = access.next_key::<String>(()).await? {
             if let Ok(extends) = key.parse() {
+                log::debug!("Class extends {}", extends);
                 let proto = access.next_value(()).await?;
                 return Ok(InstanceClass {
                     extends: Some(extends),

@@ -6,19 +6,26 @@ use error::*;
 use generic::*;
 use transact::lock::{Mutable, TxnLock};
 use transact::TxnId;
+use value::Value;
 
-use crate::scalar::{OpRef, Scalar};
+use crate::scalar::OpRef;
 
 mod block;
-pub mod sync;
+mod sync;
 
 pub use block::ChainBlock;
+pub use sync::*;
 
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
 #[derive(Clone)]
+pub enum Schema {
+    Value(Value),
+}
+
+#[derive(Clone)]
 pub enum Subject {
-    Scalar(TxnLock<Mutable<Scalar>>),
+    Value(TxnLock<Mutable<Value>>),
 }
 
 #[async_trait]

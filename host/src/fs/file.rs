@@ -26,7 +26,7 @@ pub struct File<B> {
 
 impl<B: fs::BlockData> File<B> {
     fn _new(cache: Cache, path: PathBuf, listing: HashSet<fs::BlockId>) -> Self {
-        let listing = TxnLock::new(format!("file listing at {:?}", &path), listing.into());
+        let listing = TxnLock::new(listing.into());
         let phantom = PhantomData;
 
         Self {

@@ -69,6 +69,12 @@ impl NativeClass for ScalarType {
     }
 }
 
+impl From<ValueType> for ScalarType {
+    fn from(vt: ValueType) -> Self {
+        Self::Value(vt)
+    }
+}
+
 impl fmt::Display for ScalarType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

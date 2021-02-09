@@ -71,6 +71,18 @@ impl NativeClass for StateType {
     }
 }
 
+impl From<ChainType> for StateType {
+    fn from(ct: ChainType) -> Self {
+        Self::Chain(ct)
+    }
+}
+
+impl From<ValueType> for StateType {
+    fn from(vt: ValueType) -> Self {
+        Self::Scalar(vt.into())
+    }
+}
+
 impl fmt::Display for StateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

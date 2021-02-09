@@ -2,12 +2,15 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use destream::de::FromStream;
+use futures::{future, stream};
 use structopt::StructOpt;
 use tokio::time::Duration;
 
 use error::TCError;
 
 use tinychain::gateway::Gateway;
+use tinychain::object::InstanceClass;
 use tinychain::*;
 use transact::{Transact, TxnId};
 
@@ -56,7 +59,7 @@ struct Config {
     pub data_dir: Option<PathBuf>,
 
     #[structopt(long = "cluster")]
-    pub clusters: Vec<generic::TCPathBuf>,
+    pub clusters: Vec<PathBuf>,
 
     #[structopt(long = "request_ttl", default_value = "30", parse(try_from_str = duration))]
     pub request_ttl: Duration,
@@ -77,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let workspace = fs::load(cache.clone(), config.workspace).await?;
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
 
-    let clusters = Vec::with_capacity(config.clusters.len());
+    let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
         let txn_id = TxnId::new(Gateway::time());
 
@@ -87,8 +90,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let data_dir = fs::load(cache.clone(), data_dir).await?;
 
-        for _config_path in config.clusters {
-            unimplemented!("load cluster definition from config");
+        for path in config.clusters {
+            let config = tokio::fs::read(&path).await.unwrap();
+            let mut decoder =
+                destream_json::de::Decoder::from(stream::once(future::ready(Ok(config))));
+
+            let cluster = match InstanceClass::from_stream((), &mut decoder).await {
+                Ok(class) => cluster::Cluster::instantiate(class, &data_dir, txn_id).await?,
+                Err(cause) => panic!("error parsing cluster config {:?}: {}", path, cause),
+            };
+            clusters.push(cluster);
         }
 
         data_dir.commit(&txn_id).await;
