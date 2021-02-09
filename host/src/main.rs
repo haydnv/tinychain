@@ -96,9 +96,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 destream_json::de::Decoder::from(stream::once(future::ready(Ok(config))));
 
             let cluster = match InstanceClass::from_stream((), &mut decoder).await {
-                Ok(class) => cluster::Cluster::instantiate(class, &data_dir, txn_id).await?,
+                Ok(class) => cluster::Cluster::instantiate(class, data_dir.clone(), txn_id).await?,
                 Err(cause) => panic!("error parsing cluster config {:?}: {}", path, cause),
             };
+
             clusters.push(cluster);
         }
 

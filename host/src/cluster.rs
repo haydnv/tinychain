@@ -38,7 +38,7 @@ pub struct Cluster {
 impl Cluster {
     pub async fn instantiate(
         class: InstanceClass,
-        data_dir: &fs::Dir,
+        data_dir: fs::Dir,
         txn_id: TxnId,
     ) -> TCResult<InstanceExt<Cluster>> {
         let (path, proto) = class.into_inner();
@@ -83,7 +83,7 @@ impl Cluster {
         if let Some(_dir) = data_dir.find(&txn_id, &path).await? {
             unimplemented!("load a Cluster from an existing directory")
         } else {
-            let dir = create_dir(&data_dir, &path).await?;
+            let dir = create_dir(data_dir, txn_id, &path).await?;
 
             let mut chains = HashMap::<Id, Chain>::new();
             for (id, (class, _schema)) in chain_schema.into_iter() {
@@ -127,6 +127,11 @@ impl fmt::Display for Cluster {
     }
 }
 
-async fn create_dir(_data_dir: &fs::Dir, _path: &[PathSegment]) -> TCResult<fs::Dir> {
-    unimplemented!()
+async fn create_dir(data_dir: fs::Dir, txn_id: TxnId, path: &[PathSegment]) -> TCResult<fs::Dir> {
+    let mut dir = data_dir;
+    for name in path {
+        dir = dir.create_dir(txn_id, name.clone()).await?;
+    }
+
+    Ok(dir)
 }
