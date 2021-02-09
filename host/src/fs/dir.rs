@@ -34,7 +34,7 @@ impl FileEntry {
             StateType::Scalar(st) => match st {
                 ScalarType::Value(_) => Ok(Self::Bin(File::new(cache, path, BIN_EXT))),
                 other => Err(TCError::bad_request("cannot create file for", other)),
-            }
+            },
             other => Err(TCError::bad_request("cannot create file for", other)),
         }
     }

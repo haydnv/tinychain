@@ -5,7 +5,7 @@ use bytes::Bytes;
 
 use error::*;
 use generic::{label, Instance, Label};
-use transact::fs::{File, Dir, Persist};
+use transact::fs::{Dir, File, Persist};
 use transact::TxnId;
 
 use crate::fs;
@@ -47,16 +47,21 @@ impl Persist for SyncChain {
     async fn load(schema: Self::Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
         let subject = match &schema {
             Schema::Value(value) => {
-                let file: fs::File<Bytes> = if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
-                    file.try_into()?
-                } else {
-                    let file = dir.create_file(txn_id, SUBJECT.into(), value.class().into()).await?;
-                    file.try_into()?
-                };
+                let file: fs::File<Bytes> =
+                    if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
+                        file.try_into()?
+                    } else {
+                        let file = dir
+                            .create_file(txn_id, SUBJECT.into(), value.class().into())
+                            .await?;
+                        file.try_into()?
+                    };
 
                 if !file.block_exists(&txn_id, &SUBJECT.into()).await? {
-                    let as_bytes = serde_json::to_vec(value).map_err(|e| TCError::bad_request("unable to serialize value", e))?;
-                    file.create_block(txn_id, SUBJECT.into(), Bytes::from(as_bytes)).await?;
+                    let as_bytes = serde_json::to_vec(value)
+                        .map_err(|e| TCError::bad_request("unable to serialize value", e))?;
+                    file.create_block(txn_id, SUBJECT.into(), Bytes::from(as_bytes))
+                        .await?;
                 }
 
                 Subject::Value(file)
@@ -66,10 +71,16 @@ impl Persist for SyncChain {
         let file = if let Some(file) = dir.get_file(&txn_id, &CHAIN.into()).await? {
             file.try_into()?
         } else {
-            let file = dir.create_file(txn_id, CHAIN.into(), ChainType::Sync.into()).await?;
+            let file = dir
+                .create_file(txn_id, CHAIN.into(), ChainType::Sync.into())
+                .await?;
             file.try_into()?
         };
 
-        Ok(SyncChain { schema, subject, file })
+        Ok(SyncChain {
+            schema,
+            subject,
+            file,
+        })
     }
 }

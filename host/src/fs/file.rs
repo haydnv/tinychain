@@ -172,10 +172,10 @@ impl<B: fs::BlockData> Transact for File<B> {
 
         if listing.is_empty() {
             match tokio::fs::remove_dir(version_path(&self.path, txn_id)).await {
-                Ok(_) => {},
+                Ok(_) => {}
                 // if the cache is never flushed, there won't be any txn dir
-                Err(err) if err.kind() == io::ErrorKind::NotFound => {},
-                Err(other) => panic!(other)
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(other) => panic!(other),
             }
         } else {
             log::debug!("commit file {:?} version {}", &self.path, txn_id);
