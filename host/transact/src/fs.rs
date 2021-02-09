@@ -78,7 +78,7 @@ pub trait Persist: Sized {
 
     fn schema(&'_ self) -> &'_ Self::Schema;
 
-    async fn load(store: Self::Store) -> TCResult<Self>;
+    async fn load(schema: Self::Schema, store: Self::Store) -> TCResult<Self>;
 }
 
 pub struct Block<'a, F: File> {

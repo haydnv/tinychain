@@ -12,7 +12,7 @@ use transact::lock::{Mutable, TxnLock};
 use transact::TxnId;
 use transact::{fs, Transact};
 
-use crate::chain::ChainBlock;
+use crate::chain::{self, ChainBlock};
 use crate::state::StateType;
 
 use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};
@@ -25,7 +25,7 @@ pub enum FileEntry {
 impl FileEntry {
     fn new(cache: Cache, path: PathBuf, class: StateType) -> TCResult<Self> {
         match class {
-            StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path))),
+            StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, chain::EXT))),
             other => Err(TCError::bad_request("cannot create file for", other)),
         }
     }
@@ -81,7 +81,7 @@ impl Dir {
                         let ext = file_ext(&path)?;
 
                         match ext {
-                            "chain" => {
+                            chain::EXT => {
                                 let file = File::load(cache.clone(), path, contents).await?;
                                 entries.insert(name, DirEntry::File(FileEntry::Chain(file)));
                             }

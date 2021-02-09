@@ -4,6 +4,7 @@ use async_trait::async_trait;
 
 use error::*;
 use generic::*;
+use safecast::CastFrom;
 use transact::lock::{Mutable, TxnLock};
 use transact::TxnId;
 use value::Value;
@@ -18,9 +19,17 @@ pub use sync::*;
 
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
+pub const EXT: &str = "chain";
+
 #[derive(Clone)]
 pub enum Schema {
     Value(Value),
+}
+
+impl CastFrom<Value> for Schema {
+    fn cast_from(value: Value) -> Self {
+        Self::Value(value)
+    }
 }
 
 #[derive(Clone)]

@@ -39,7 +39,7 @@ impl fs::Persist for SyncChain {
         &self.schema
     }
 
-    async fn load(_file: File) -> TCResult<Self> {
+    async fn load(_schema: Self::Schema, _file: File) -> TCResult<Self> {
         unimplemented!()
     }
 }

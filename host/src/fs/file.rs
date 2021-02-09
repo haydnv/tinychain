@@ -37,7 +37,8 @@ impl<B: fs::BlockData> File<B> {
         }
     }
 
-    pub fn new(cache: Cache, path: PathBuf) -> Self {
+    pub fn new(cache: Cache, mut path: PathBuf, ext: &str) -> Self {
+        path.push(ext);
         Self::_new(cache, path, HashSet::new())
     }
 

@@ -6,6 +6,7 @@ use futures::TryFutureExt;
 
 use error::*;
 use generic::*;
+use safecast::TryCastInto;
 use transact::fs::{Dir, Persist};
 use transact::TxnId;
 use value::Value;
@@ -80,32 +81,40 @@ impl Cluster {
             }
         }
 
-        if let Some(_dir) = data_dir.find(&txn_id, &path).await? {
-            unimplemented!("load a Cluster from an existing directory")
-        } else {
-            let dir = create_dir(data_dir, txn_id, &path).await?;
-
-            let mut chains = HashMap::<Id, Chain>::new();
-            for (id, (class, _schema)) in chain_schema.into_iter() {
-                let file = dir.create_file(txn_id, id.clone(), class.into()).await?;
-                let chain = match class {
-                    ChainType::Sync => {
-                        SyncChain::load(file.try_into()?)
-                            .map_ok(Chain::Sync)
-                            .await?
-                    }
-                };
-
-                chains.insert(id, chain);
+        let dir = if let Some(dir) = data_dir.find(&txn_id, &path).await? {
+            match dir {
+                fs::DirEntry::Dir(dir) => dir,
+                _ => {
+                    return Err(TCError::bad_request("there is already a file at", &path));
+                }
             }
+        } else {
+            create_dir(data_dir, txn_id, &path).await?
+        };
 
-            let cluster = Cluster {
-                path: path.clone(),
-                chains: chains.into(),
+        let mut chains = HashMap::<Id, Chain>::new();
+        for (id, (class, schema)) in chain_schema.into_iter() {
+            let file = dir.create_file(txn_id, id.clone(), class.into()).await?;
+            let chain = match class {
+                ChainType::Sync => {
+                    let schema = schema
+                        .try_cast_into(|v| TCError::bad_request("invalid Chain schema", v))?;
+
+                    SyncChain::load(schema, file.try_into()?)
+                        .map_ok(Chain::Sync)
+                        .await?
+                }
             };
-            let class = InstanceClass::new(Some(path.into()), cluster_proto.into());
-            Ok(InstanceExt::new(cluster, class))
+
+            chains.insert(id, chain);
         }
+
+        let cluster = Cluster {
+            path: path.clone(),
+            chains: chains.into(),
+        };
+        let class = InstanceClass::new(Some(path.into()), cluster_proto.into());
+        Ok(InstanceExt::new(cluster, class))
     }
 
     pub fn path(&'_ self) -> &'_ [PathSegment] {

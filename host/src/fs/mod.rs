@@ -49,7 +49,10 @@ fn file_ext(path: &'_ PathBuf) -> TCResult<&'_ str> {
 }
 
 fn file_name(handle: &fs::DirEntry) -> TCResult<PathSegment> {
-    if let Some(name) = handle.file_name().to_str() {
+    if let Some(name) = handle.path().file_stem() {
+        let name = name.to_str().ok_or_else(|| {
+            TCError::internal(format!("invalid file name at {:?}", handle.path()))
+        })?;
         name.parse()
     } else {
         Err(TCError::internal("Cannot load file with no name!"))
