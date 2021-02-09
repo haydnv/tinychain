@@ -343,6 +343,7 @@ impl From<TCPathBuf> for PathBuf {
 impl FromStr for TCPathBuf {
     type Err = TCError;
 
+    #[inline]
     fn from_str(to: &str) -> TCResult<TCPathBuf> {
         if to == "/" {
             Ok(TCPathBuf { segments: vec![] })

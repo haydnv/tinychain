@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::{try_join, TryFutureExt};
-use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
+use safecast::{Match, TryCastFrom, TryCastInto};
 
 use error::*;
 use generic::*;
@@ -75,12 +75,12 @@ impl fmt::Display for OpRefType {
 #[derive(Clone, Eq, PartialEq)]
 pub enum Subject {
     Link(Link),
-    Ref(IdRef),
+    Ref(IdRef, TCPathBuf),
 }
 
 impl Subject {
     fn requires(&self, deps: &mut HashSet<Id>) {
-        if let Self::Ref(id_ref) = self {
+        if let Self::Ref(id_ref, _) = self {
             id_ref.requires(deps);
         }
     }
@@ -91,7 +91,14 @@ impl FromStr for Subject {
 
     fn from_str(s: &str) -> TCResult<Self> {
         if s.starts_with('$') {
-            IdRef::from_str(s).map(Self::Ref)
+            if let Some(i) = s.find('/') {
+                let id_ref = IdRef::from_str(&s[..i])?;
+                let path = TCPathBuf::from_str(&s[i..])?;
+                Ok(Self::Ref(id_ref, path))
+            } else {
+                let id_ref = IdRef::from_str(s)?;
+                Ok(Self::Ref(id_ref, TCPathBuf::default()))
+            }
         } else {
             Link::from_str(s).map(Self::Link)
         }
@@ -112,7 +119,8 @@ impl<'en> ToStream<'en> for Subject {
     fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Link(link) => link.to_stream(e),
-            Self::Ref(id_ref) => id_ref.to_stream(e),
+            Self::Ref(id_ref, path) if path.is_empty() => id_ref.to_stream(e),
+            Self::Ref(id_ref, path) => format!("{}{}", id_ref, path).into_stream(e),
         }
     }
 }
@@ -121,7 +129,8 @@ impl<'en> IntoStream<'en> for Subject {
     fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Link(link) => link.into_stream(e),
-            Self::Ref(id_ref) => id_ref.into_stream(e),
+            Self::Ref(id_ref, path) if path.is_empty() => id_ref.into_stream(e),
+            Self::Ref(id_ref, path) => format!("{}{}", id_ref, path).into_stream(e),
         }
     }
 }
@@ -140,7 +149,7 @@ impl TryCastFrom<Value> for Subject {
             Value::Link(link) => Some(Self::Link(link)),
             Value::String(s) => {
                 if let Ok(id_ref) = IdRef::from_str(&s) {
-                    Some(Self::Ref(id_ref))
+                    Some(Self::Ref(id_ref, TCPathBuf::default()))
                 } else if let Ok(link) = Link::from_str(&s) {
                     Some(Self::Link(link))
                 } else {
@@ -167,7 +176,7 @@ impl TryCastFrom<Scalar> for Subject {
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
             Scalar::Ref(tc_ref) => match *tc_ref {
-                TCRef::Id(id_ref) => Some(Self::Ref(id_ref)),
+                TCRef::Id(id_ref) => Some(Self::Ref(id_ref, TCPathBuf::default())),
                 _ => None,
             },
             Scalar::Value(value) => Self::opt_cast_from(value),
@@ -197,7 +206,8 @@ impl fmt::Display for Subject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Link(link) => fmt::Display::fmt(link, f),
-            Self::Ref(id_ref) => fmt::Display::fmt(id_ref, f),
+            Self::Ref(id_ref, path) if path.is_empty() => fmt::Display::fmt(id_ref, f),
+            Self::Ref(id_ref, path) => write!(f, "{}{}", id_ref, path),
         }
     }
 }
@@ -229,8 +239,8 @@ impl Key {
     }
 }
 
-impl CastFrom<Value> for Key {
-    fn cast_from(value: Value) -> Self {
+impl From<Value> for Key {
+    fn from(value: Value) -> Self {
         Self::Value(value)
     }
 }
@@ -377,15 +387,45 @@ impl Refer for OpRef {
                     let key = key.resolve(context, txn).await?;
                     txn.get(link, key).await
                 }
-                Subject::Ref(id_ref) => {
+                Subject::Ref(id_ref, path) => {
                     let subject = id_ref.resolve(context, txn);
                     let key = key.resolve(context, txn);
                     let (subject, key) = try_join!(subject, key)?;
 
-                    subject.get(txn, &[], key).await
+                    subject.get(txn, &path, key).await
                 }
             },
-            _ => Err(TCError::not_implemented("OpRef::resolve")),
+            Self::Put((subject, key, value)) => match subject {
+                Subject::Link(link) => {
+                    let key = key.resolve(context, txn).await?;
+                    let value = value.resolve(context, txn).await?;
+                    txn.put(link, key, value).map_ok(State::from).await
+                }
+                Subject::Ref(id_ref, path) => {
+                    let subject = id_ref.resolve(context, txn);
+                    let key = key.resolve(context, txn);
+                    let value = value.resolve(context, txn);
+                    let (subject, key, value) = try_join!(subject, key, value)?;
+
+                    subject
+                        .put(txn, &path, key, value)
+                        .map_ok(State::from)
+                        .await
+                }
+            },
+            Self::Post((subject, params)) => match subject {
+                Subject::Link(link) => {
+                    let params = Scalar::Map(params).resolve(context, txn).await?;
+                    txn.post(link, params).await
+                }
+                Subject::Ref(id_ref, path) => {
+                    let subject = id_ref.resolve(context, txn).await?;
+                    let params = Scalar::Map(params).resolve(context, txn).await?;
+                    let params = params.try_into()?;
+                    subject.post(txn, &path, params).await
+                }
+            },
+            _ => Err(TCError::not_implemented("OpRef::Delete")),
         }
     }
 }

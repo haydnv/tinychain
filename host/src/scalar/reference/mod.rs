@@ -7,6 +7,7 @@ use futures::TryFutureExt;
 
 use error::*;
 use generic::*;
+use value::Value;
 
 use crate::state::State;
 use crate::txn::Txn;
@@ -125,7 +126,11 @@ impl RefVisitor {
         if params.is_none() {
             match subject {
                 Subject::Link(link) => Err(de::Error::invalid_type(link, &"a Ref")),
-                Subject::Ref(id_ref) => Ok(TCRef::Id(id_ref)),
+                Subject::Ref(id_ref, path) if path.is_empty() => Ok(TCRef::Id(id_ref)),
+                Subject::Ref(id_ref, path) => Ok(TCRef::Op(OpRef::Get((
+                    Subject::Ref(id_ref, path),
+                    Value::default().into(),
+                )))),
             }
         } else {
             OpRefVisitor::visit_ref_value(subject, params).map(TCRef::Op)

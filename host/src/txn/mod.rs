@@ -67,6 +67,14 @@ impl Txn {
     pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
         self.inner.gateway.get(self, link, key).await
     }
+
+    pub async fn put(&self, link: Link, key: Value, value: State) -> TCResult<()> {
+        self.inner.gateway.put(self, link, key, value).await
+    }
+
+    pub async fn post(&self, link: Link, params: State) -> TCResult<State> {
+        self.inner.gateway.post(self, link, params).await
+    }
 }
 
 #[async_trait]

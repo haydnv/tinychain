@@ -466,7 +466,13 @@ impl ScalarVisitor {
     pub fn visit_subject<E: de::Error>(subject: Subject, params: Scalar) -> Result<Scalar, E> {
         if params.is_none() {
             match subject {
-                Subject::Ref(id) => Ok(Scalar::Ref(Box::new(TCRef::Id(id)))),
+                Subject::Ref(id, path) if path.is_empty() => {
+                    Ok(Scalar::Ref(Box::new(TCRef::Id(id))))
+                }
+                Subject::Ref(id, path) => Ok(Scalar::Ref(Box::new(TCRef::Op(OpRef::Get((
+                    Subject::Ref(id, path),
+                    Value::default().into(),
+                )))))),
                 Subject::Link(link) => Ok(Scalar::Value(Value::Link(link))),
             }
         } else {

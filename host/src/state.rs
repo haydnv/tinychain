@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::str::FromStr;
@@ -212,6 +213,12 @@ impl<'en> IntoView<'en, Dir> for State {
     }
 }
 
+impl From<()> for State {
+    fn from(_: ()) -> State {
+        State::Scalar(Scalar::Value(Value::None))
+    }
+}
+
 impl From<OpRef> for State {
     fn from(op_ref: OpRef) -> Self {
         TCRef::Op(op_ref).into()
@@ -239,6 +246,17 @@ impl From<Box<TCRef>> for State {
 impl From<Value> for State {
     fn from(value: Value) -> State {
         State::Scalar(value.into())
+    }
+}
+
+impl TryFrom<State> for Map<State> {
+    type Error = TCError;
+
+    fn try_from(state: State) -> TCResult<Map<State>> {
+        match state {
+            State::Map(map) => Ok(map),
+            other => Err(TCError::bad_request("expected Map but found", other)),
+        }
     }
 }
 

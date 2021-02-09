@@ -62,6 +62,7 @@ impl From<Id> for IdRef {
 impl FromStr for IdRef {
     type Err = TCError;
 
+    #[inline]
     fn from_str(to: &str) -> TCResult<IdRef> {
         if !to.starts_with('$') || to.len() < 2 {
             Err(TCError::bad_request("Invalid Ref", to))
