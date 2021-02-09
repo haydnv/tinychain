@@ -12,6 +12,9 @@ use tinychain::gateway::Gateway;
 use tinychain::*;
 use transact::TxnId;
 
+#[cfg(test)]
+pub use tinychain::testutils;
+
 fn data_size(flag: &str) -> error::TCResult<usize> {
     if flag.is_empty() {
         return Err(error::TCError::bad_request("Invalid size specified", flag));
