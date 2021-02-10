@@ -57,6 +57,7 @@ impl Request {
 }
 
 struct Resolver {
+    host: Link,
     txn: Txn,
 }
 
@@ -65,6 +66,10 @@ impl rjwt::Resolve for Resolver {
     type Host = Link;
     type ActorId = Value;
     type Claims = Vec<Scope>;
+
+    fn host(&self) -> Link {
+        self.host.clone()
+    }
 
     async fn resolve(&self, host: &Link, actor_id: &Value) -> Result<Actor, rjwt::Error> {
         let public_key = self
