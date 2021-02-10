@@ -372,6 +372,7 @@ impl From<(LinkHost, TCPathBuf)> for Link {
 impl TryCastFrom<Value> for Link {
     fn can_cast_from(value: &Value) -> bool {
         match value {
+            Value::Bytes(_) => false,
             Value::Link(_) => true,
             Value::None => true,
             Value::Number(n) => match n {
@@ -385,6 +386,7 @@ impl TryCastFrom<Value> for Link {
 
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
+            Value::Bytes(_) => None,
             Value::Link(l) => Some(l),
             Value::None => Some(TCPathBuf::default().into()),
             Value::Number(n) => match n {

@@ -3,6 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use destream::de::Error as DestreamError;
 use destream::{Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
 use log::debug;
@@ -21,6 +22,7 @@ const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ValueType {
+    Bytes,
     Link,
     None,
     Number(NumberType),
@@ -54,6 +56,7 @@ impl NativeClass for ValueType {
                 Some(Self::default())
             } else if path.len() == 4 {
                 match path[3].as_str() {
+                    "bytes" => Some(Self::Bytes),
                     "link" => Some(Self::Link),
                     "number" => Some(Self::Number(NT::Number)),
                     "none" => Some(Self::None),
@@ -109,6 +112,7 @@ impl NativeClass for ValueType {
         let prefix = TCPathBuf::from(PREFIX);
 
         match self {
+            Self::Bytes => prefix.append(label("bytes")),
             Self::Link => prefix.append(label("link")),
             Self::None => prefix.append(label("none")),
             Self::Number(nt) => {
@@ -190,6 +194,9 @@ impl Ord for ValueType {
             (Self::String, _) => Greater,
             (_, Self::String) => Less,
 
+            (Self::Bytes, _) => Greater,
+            (_, Self::Bytes) => Less,
+
             (Self::None, _) => Less,
             (_, Self::None) => Greater,
         }
@@ -205,6 +212,7 @@ impl PartialOrd for ValueType {
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Bytes => f.write_str("Bytes"),
             Self::Link => f.write_str("Link"),
             Self::None => f.write_str("None"),
             Self::Number(nt) => fmt::Display::fmt(nt, f),
@@ -217,6 +225,7 @@ impl fmt::Display for ValueType {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Value {
+    Bytes(Bytes),
     Link(Link),
     None,
     Number(Number),
@@ -246,6 +255,7 @@ impl Value {
         use ValueType as VT;
 
         match class {
+            VT::Bytes => self.opt_cast_into().map(Self::Bytes),
             VT::Link => self.opt_cast_into().map(Self::Link),
             VT::None => Some(Self::None),
             VT::Number(nt) => Number::opt_cast_from(self)
@@ -273,6 +283,7 @@ impl Instance for Value {
     fn class(&self) -> ValueType {
         use ValueType as VT;
         match self {
+            Self::Bytes(_) => VT::Bytes,
             Self::Link(_) => VT::Link,
             Self::None => VT::None,
             Self::Number(n) => VT::Number(n.class()),
@@ -291,6 +302,11 @@ impl<'de> Deserialize<'de> for Value {
 impl Serialize for Value {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
+            Self::Bytes(bytes) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(&self.class().path().to_string(), &base64::encode(&bytes))?;
+                map.end()
+            }
             Self::Link(link) => link.serialize(serializer),
             Self::None => serializer.serialize_unit(),
             Self::Number(n) => match n {
@@ -319,6 +335,7 @@ impl FromStream for Value {
 impl<'en> ToStream<'en> for Value {
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
+            Self::Bytes(bytes) => encoder.encode_bytes(bytes),
             Self::Link(link) => link.to_stream(encoder),
             Self::None => encoder.encode_unit(),
             Self::Number(n) => match n {
@@ -338,6 +355,7 @@ impl<'en> ToStream<'en> for Value {
 impl<'en> IntoStream<'en> for Value {
     fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
+            Self::Bytes(bytes) => encoder.encode_bytes(&bytes),
             Self::Link(link) => link.into_stream(encoder),
             Self::None => encoder.encode_unit(),
             Self::Number(n) => match n {
@@ -360,6 +378,24 @@ impl CastFrom<Value> for String {
     }
 }
 
+impl TryCastFrom<Value> for Bytes {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Bytes(_) => true,
+            Value::None => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Bytes> {
+        match value {
+            Value::Bytes(bytes) => Some(bytes),
+            Value::None => Some(Bytes::default()),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<Value> for Id {
     fn can_cast_from(value: &Value) -> bool {
         match value {
@@ -379,6 +415,7 @@ impl TryCastFrom<Value> for Id {
 impl TryCastFrom<Value> for Number {
     fn can_cast_from(value: &Value) -> bool {
         match value {
+            Value::Bytes(_) => false,
             Value::Link(_) => false,
             Value::None => true,
             Value::Number(_) => true,
@@ -394,6 +431,7 @@ impl TryCastFrom<Value> for Number {
 
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
+            Value::Bytes(_) => None,
             Value::Link(_) => None,
             Value::None => Some(false.into()),
             Value::Number(n) => Some(n),
@@ -523,6 +561,7 @@ impl<T: Clone + TryCastFrom<Value>> TryCastFrom<Value> for Tuple<T> {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Bytes(bytes) => write!(f, "({} bytes)", bytes.len()),
             Self::Link(link) => fmt::Display::fmt(link, f),
             Self::None => f.write_str("none"),
             Self::Number(n) => fmt::Display::fmt(n, f),
@@ -557,6 +596,13 @@ impl ValueVisitor {
         use ValueType as VT;
 
         return match class {
+            VT::Bytes => {
+                let encoded = map.next_value::<&str>()?;
+                base64::decode(encoded)
+                    .map(Bytes::from)
+                    .map(Value::Bytes)
+                    .map_err(serde::de::Error::custom)
+            }
             VT::Link => {
                 let link = map.next_value()?;
                 Ok(Value::Link(link))
@@ -591,6 +637,10 @@ impl ValueVisitor {
         use ValueType as VT;
 
         return match class {
+            VT::Bytes => {
+                let bytes = map.next_value(()).await?;
+                Ok(Value::Bytes(bytes))
+            }
             VT::Link => {
                 let link = map.next_value(()).await?;
                 Ok(Value::Link(link))
