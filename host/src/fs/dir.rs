@@ -18,7 +18,7 @@ use crate::chain::{self, ChainBlock};
 use crate::scalar::ScalarType;
 use crate::state::StateType;
 
-use super::{dir_contents, file_ext, file_name, fs_path, io_err, Cache, DirContents, File};
+use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};
 
 pub const BIN_EXT: &str = "bin";
 

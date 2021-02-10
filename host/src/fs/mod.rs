@@ -17,7 +17,6 @@ pub use cache::*;
 pub use dir::*;
 pub use file::*;
 
-const COMMIT: Label = label(".commit");
 const VERSION: Label = label(".version");
 
 type DirContents = Vec<(fs::DirEntry, Metadata)>;
@@ -71,7 +70,6 @@ fn fs_path(mount_point: &PathBuf, name: &PathSegment) -> PathBuf {
 fn io_err<I: fmt::Debug>(err: io::Error, info: I) -> TCError {
     match err.kind() {
         io::ErrorKind::NotFound => {
-            panic!("{:?}", info);
             TCError::unsupported(format!("There is no directory at {:?}", info))
         }
         io::ErrorKind::PermissionDenied => TCError::internal(format!(

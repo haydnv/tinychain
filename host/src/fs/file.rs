@@ -8,7 +8,7 @@ use futures::future::{join_all, try_join_all, TryFutureExt};
 use log::debug;
 
 use error::*;
-use generic::{label, Id, Label};
+use generic::Id;
 use transact::fs;
 use transact::lock::{Mutable, TxnLock};
 use transact::{Transact, TxnId};
