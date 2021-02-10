@@ -11,7 +11,6 @@ use log::debug;
 use serde::de::DeserializeOwned;
 use transact::{IntoView, TxnId};
 
-use auth::Token;
 use error::*;
 use generic::{NetworkTime, TCPathBuf};
 

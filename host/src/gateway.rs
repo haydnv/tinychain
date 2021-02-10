@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use auth::Token;
 use error::*;
 use futures::future::{try_join_all, Future, TryFutureExt};
 use generic::NetworkTime;
@@ -83,7 +82,7 @@ impl Gateway {
     }
 
     pub fn issue_token(&self) -> Token {
-        Token::new(
+        <Token as TokenExt>::new(
             self.root(),
             Self::time(),
             self.request_ttl,

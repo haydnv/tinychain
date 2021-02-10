@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use auth::Token;
 use error::*;
 use generic::Id;
 use transact::fs::Dir;
@@ -13,28 +12,11 @@ use crate::gateway::Gateway;
 use crate::scalar::{Link, Value};
 use crate::state::State;
 
+mod request;
 mod server;
 
+pub use request::*;
 pub use server::*;
-
-pub struct Request {
-    pub auth: Token,
-    pub txn_id: TxnId,
-}
-
-impl Request {
-    pub fn new(auth: Token, txn_id: TxnId) -> Self {
-        Self { auth, txn_id }
-    }
-
-    pub fn contains(&self, other: &Self) -> bool {
-        if self.txn_id == other.txn_id {
-            self.auth.contains(&other.auth)
-        } else {
-            false
-        }
-    }
-}
 
 #[derive(Clone)]
 struct Inner {

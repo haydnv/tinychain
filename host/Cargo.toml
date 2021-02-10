@@ -20,7 +20,6 @@ path = "src/main.rs"
 
 [dependencies]
 async-trait = "0.1"
-auth = { path = "auth" }
 base64 = "0.13"
 bytes = "1.0"
 destream = "0.3"
@@ -33,6 +32,7 @@ generic = { path = "generic" }
 http = "0.2"
 hyper = { version = "0.14", features = ["full"] }
 log = { version = "0.4", features = ["release_max_level_warn"] }
+rjwt = "0.2"
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }

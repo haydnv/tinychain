@@ -1,7 +1,6 @@
 pub use generic;
 pub use value;
 
-pub use auth;
 pub use error;
 pub use kernel::*;
 
