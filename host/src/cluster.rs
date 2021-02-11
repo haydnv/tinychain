@@ -7,6 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{self, join_all, try_join_all, TryFutureExt};
+use futures::join;
 use futures_locks::RwLock;
 use safecast::TryCastFrom;
 
@@ -249,7 +250,9 @@ impl Transact for Cluster {
             }
         }
 
-        join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
+        let chains = join_all(self.chains.values().map(|chain| chain.commit(txn_id)));
+        let mutated = self.mutated.commit(txn_id);
+        join!(chains, mutated);
 
         let confirmed = *txn_id;
         self.confirmed
