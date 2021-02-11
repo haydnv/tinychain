@@ -105,7 +105,7 @@ impl Gateway {
     pub async fn new_txn(self: &Arc<Self>, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
         let token = if let Some(token) = token {
             use rjwt::Resolve;
-            Resolver::new(self, &txn_id)
+            Resolver::new(self, &self.root().clone().into(), &txn_id)
                 .consume_and_sign(&self.actor, vec![], token, txn_id.time().into())
                 .map_err(TCError::unauthorized)
                 .await?
@@ -149,19 +149,27 @@ impl Gateway {
         }
     }
 
-    pub async fn put(&self, txn: &Txn, subject: Link, key: Value, value: State) -> TCResult<()> {
-        match subject.host() {
-            None => self.kernel.put(txn, subject.path(), key, value).await,
-            Some(host) if host == self.root() => {
-                self.kernel.put(txn, subject.path(), key, value).await
+    pub fn put<'a>(
+        &'a self,
+        txn: &'a Txn,
+        subject: Link,
+        key: Value,
+        value: State,
+    ) -> Pin<Box<dyn Future<Output = TCResult<()>> + Send + 'a>> {
+        Box::pin(async move {
+            match subject.host() {
+                None => self.kernel.put(txn, subject.path(), key, value).await,
+                Some(host) if host == self.root() => {
+                    self.kernel.put(txn, subject.path(), key, value).await
+                }
+                _ => {
+                    let auth = None; // TODO
+                    self.client
+                        .put(txn.clone(), subject, key, value, auth)
+                        .await
+                }
             }
-            _ => {
-                let auth = None; // TODO
-                self.client
-                    .put(txn.clone(), subject, key, value, auth)
-                    .await
-            }
-        }
+        })
     }
 
     pub async fn post(&self, txn: &Txn, subject: Link, params: State) -> TCResult<State> {

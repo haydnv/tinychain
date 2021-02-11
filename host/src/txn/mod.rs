@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -67,7 +68,7 @@ impl Txn {
 
             use rjwt::Resolve;
             let host = Link::from((self.inner.gateway.root().clone(), cluster_path));
-            let resolver = Resolver::new(&host, self.id());
+            let resolver = Resolver::new(&self.inner.gateway, &host, self.id());
             let (token, claims) = resolver
                 .consume_and_sign(actor, vec![SCOPE_ROOT.into()], token, txn_id.time().into())
                 .map_err(TCError::unauthorized)
@@ -86,10 +87,10 @@ impl Txn {
         }
     }
 
-    pub fn is_owner(&self, cluster_path: &TCPathBuf) -> bool {
+    pub fn is_owner(&self, cluster_path: TCPathBuf) -> bool {
         if let Some((host, owner_id)) = self.owner() {
             let cluster_link = Link::from((self.inner.gateway.root().clone(), cluster_path));
-            host == &cluster_link && owner_id == &TCPathBuf::default().into()
+            host == &cluster_link && owner_id == &Link::from(TCPathBuf::default()).into()
         } else {
             false
         }
@@ -114,18 +115,24 @@ impl Txn {
         self.request.claims.get(&host, actor_id)
     }
 
-    pub async fn mutate(&self, cluster: Cluster) {
+    pub async fn mutate(&self, cluster: Cluster) -> TCResult<()> {
         let mut mutated = self.inner.mutated.write().await;
         if mutated.contains(&cluster) {
-            return;
+            return Ok(());
         }
 
         if let Some((link, id)) = self.owner() {
-            let cluster_link = Link::from((self.inner.gateway.root(), cluster.path()));
-            self.put(link.clone(), id.clone(), cluster_link.into()).await?;
+            let cluster_link = Link::from((
+                self.inner.gateway.root().clone(),
+                TCPathBuf::from(cluster.path().to_vec()),
+            ));
+
+            self.put(link.clone(), id.clone(), Value::from(cluster_link).into())
+                .await?;
         }
 
         mutated.insert(cluster);
+        Ok(())
     }
 
     pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
@@ -176,6 +183,12 @@ impl Transact for Txn {
 
         let mutated = self.inner.mutated.write().await;
         join_all(mutated.iter().map(|cluster| cluster.finalize(txn_id))).await;
+    }
+}
+
+impl Hash for Txn {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.request.txn_id.hash(state)
     }
 }
 

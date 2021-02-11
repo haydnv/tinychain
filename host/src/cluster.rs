@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -6,14 +6,16 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::join_all;
-use futures::TryFutureExt;
+use futures::future::{self, join_all, try_join_all, TryFutureExt};
+use futures_locks::RwLock;
+use safecast::TryCastFrom;
 
 use error::*;
 use generic::*;
 use safecast::TryCastInto;
 use transact::fs::{Dir, Persist};
-use transact::{Transact, TxnId};
+use transact::lock::{Mutable, TxnLock};
+use transact::{Transact, Transaction, TxnId};
 
 use crate::chain::{Chain, ChainType, SyncChain};
 use crate::fs;
@@ -42,6 +44,9 @@ pub struct Cluster {
     actor: Arc<Actor>,
     path: TCPathBuf,
     chains: Map<Chain>,
+    mutated: TxnLock<Mutable<HashSet<Link>>>,
+    confirmed: RwLock<TxnId>,
+    owned: RwLock<BTreeMap<TxnId, Txn>>,
 }
 
 impl Cluster {
@@ -146,6 +151,9 @@ impl Cluster {
             actor: Arc::new(Actor::new(actor_id)),
             path: path.clone(),
             chains: chains.into(),
+            mutated: TxnLock::new(HashSet::new().into()),
+            confirmed: RwLock::new(txn_id),
+            owned: RwLock::new(BTreeMap::new()),
         };
 
         let class = InstanceClass::new(Some(path.into()), cluster_proto.into());
@@ -171,12 +179,13 @@ impl Public for Cluster {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if path.is_empty() && key.is_none() {
             let public_key = Bytes::from(self.actor.public_key().as_bytes().to_vec());
-            Ok(State::from(Value::from(public_key)))
+            return Ok(State::from(Value::from(public_key)));
         }
 
-        let txn = self.maybe_claim_txn(txn.clone()).await?;
+        nonempty_path(path)?;
 
         if let Some(chain) = self.chains.get(&path[0]) {
+            let txn = self.maybe_claim_txn(txn.clone()).await?;
             return chain.get(&txn, &path[1..], key).await;
         }
 
@@ -184,10 +193,18 @@ impl Public for Cluster {
     }
 
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
+        if path.is_empty() && key.is_none() {
+            let peer = Value::try_cast_from(value, |v| TCError::bad_request("expected a Link", v))?;
+            let peer = Link::try_cast_from(peer, |v| TCError::bad_request("expected a Link", v))?;
+            let mut mutated = self.mutated.write(*txn.id()).await?;
+            mutated.insert(peer);
+            return Ok(());
+        }
+
         nonempty_path(path)?;
-        let txn = self.maybe_claim_txn(txn.clone()).await?;
 
         if let Some(chain) = self.chains.get(&path[0]) {
+            let txn = self.maybe_claim_txn(txn.clone()).await?;
             return chain.put(&txn, &path[1..], key, value).await;
         }
 
@@ -195,10 +212,16 @@ impl Public for Cluster {
     }
 
     async fn post(&self, txn: &Txn, path: &[PathSegment], params: Map<State>) -> TCResult<State> {
+        if path.is_empty() && params.is_empty() {
+            // TODO: authorize request using a scope
+            txn.commit(txn.id()).await;
+            return Ok(State::default());
+        }
+
         nonempty_path(path)?;
-        let txn = self.maybe_claim_txn(txn.clone()).await?;
 
         if let Some(chain) = self.chains.get(&path[0]) {
+            let txn = self.maybe_claim_txn(txn.clone()).await?;
             return chain.post(&txn, &path[1..], params).await;
         }
 
@@ -209,7 +232,29 @@ impl Public for Cluster {
 #[async_trait]
 impl Transact for Cluster {
     async fn commit(&self, txn_id: &TxnId) {
+        {
+            let mut owned = self.owned.write().await;
+            if let Some(txn) = owned.remove(txn_id) {
+                let mut mutated = self.mutated.write(*txn_id).await.unwrap();
+                let mutated = mutated.drain();
+
+                // TODO: update Transact to allow returning a TCResult
+                try_join_all(
+                    mutated
+                        .into_iter()
+                        .map(|link| txn.post(link, Map::<State>::default().into())),
+                )
+                .await
+                .unwrap();
+            }
+        }
+
         join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
+
+        let confirmed = *txn_id;
+        self.confirmed
+            .with_write(move |mut id| future::ready(*id = confirmed))
+            .await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

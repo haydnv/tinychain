@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
 use std::str::FromStr;
@@ -250,6 +251,17 @@ impl From<TCRef> for Scalar {
 impl From<Value> for Scalar {
     fn from(value: Value) -> Scalar {
         Scalar::Value(value)
+    }
+}
+
+impl TryFrom<Scalar> for Value {
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> TCResult<Value> {
+        match scalar {
+            Scalar::Value(value) => Ok(value),
+            other => Err(TCError::bad_request("expected Value but found", other)),
+        }
     }
 }
 

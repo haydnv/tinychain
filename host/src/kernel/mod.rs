@@ -35,7 +35,7 @@ impl Kernel {
                 .into_type(class)
                 .ok_or_else(|| TCError::unsupported(err))
         } else if let Some((_suffix, cluster)) = self.hosted.get(path) {
-            txn.mutate((*cluster).clone()).await;
+            txn.mutate((*cluster).clone()).await?;
             cluster.get(txn, _suffix, key).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
@@ -54,7 +54,7 @@ impl Kernel {
         if let Some(class) = StateType::from_path(path) {
             Err(TCError::method_not_allowed(class))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
-            txn.mutate((*cluster).clone()).await;
+            txn.mutate((*cluster).clone()).await?;
             cluster.put(txn, suffix, key, state).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
@@ -68,7 +68,7 @@ impl Kernel {
             let params =
                 data.try_cast_into(|s| TCError::bad_request("POST params must be a map, not", s))?;
 
-            txn.mutate((*cluster).clone()).await;
+            txn.mutate((*cluster).clone()).await?;
             return cluster.post(txn, suffix, params).await;
         }
 

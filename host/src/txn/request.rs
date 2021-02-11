@@ -39,13 +39,18 @@ impl Request {
 }
 
 pub struct Resolver<'a> {
+    gateway: &'a Gateway,
     host: &'a Link,
     txn_id: &'a TxnId,
 }
 
 impl<'a> Resolver<'a> {
-    pub fn new(host: &'a Link, txn_id: &'a TxnId) -> Self {
-        Self { host, txn_id }
+    pub fn new(gateway: &'a Gateway, host: &'a Link, txn_id: &'a TxnId) -> Self {
+        Self {
+            gateway,
+            host,
+            txn_id,
+        }
     }
 }
 
