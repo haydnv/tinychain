@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::join_all;
+use futures::future::{join_all, TryFutureExt};
 use futures_locks::RwLock;
 use tokio::sync::mpsc;
 
@@ -60,9 +60,23 @@ impl Txn {
         }
     }
 
-    pub async fn claim(self, _actor: &Actor) -> TCResult<Self> {
+    pub async fn claim(self, actor: &Actor) -> TCResult<Self> {
         if self.owner().is_none() {
-            unimplemented!()
+            let token = self.request.token.clone();
+            let txn_id = self.request.txn_id;
+
+            use rjwt::Resolve;
+            let resolver = Resolver::new(&self.inner.gateway, self.id());
+            let (token, claims) = resolver
+                .consume_and_sign(actor, vec![SCOPE_ROOT.into()], token, txn_id.time().into())
+                .map_err(TCError::unauthorized)
+                .await?;
+
+            Ok(Self {
+                inner: self.inner.clone(),
+                dir: self.dir.clone(),
+                request: Arc::new(Request::new(txn_id, token, claims)),
+            })
         } else {
             Err(TCError::forbidden(
                 "tried to claim owned transaction",
