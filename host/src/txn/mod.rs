@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use error::*;
 use generic::Id;
 use transact::fs::Dir;
-use transact::{Transaction, TxnId};
+pub use transact::{Transaction, TxnId};
 
 use crate::fs;
 use crate::gateway::Gateway;

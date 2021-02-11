@@ -3,17 +3,18 @@ use std::time::*;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
-use generic::{NetworkTime, TCPathBuf};
+use generic::{path_label, NetworkTime, PathLabel, TCPathBuf};
 use transact::TxnId;
 
-use crate::scalar::{Link, Scalar, Value};
-use crate::state::State;
-
-use super::Txn;
+use crate::gateway::Gateway;
+use crate::scalar::{Link, Value};
 
 pub type Actor = rjwt::Actor<Value>;
+pub type Claims = rjwt::Claims<Value, Vec<Scope>>;
 pub type Scope = TCPathBuf;
 pub type Token = rjwt::Token<Value, Vec<Scope>>;
+
+pub const SCOPE_ROOT: PathLabel = path_label(&[]);
 
 pub trait TokenExt {
     fn new(
@@ -41,50 +42,59 @@ impl TokenExt for Token {
 }
 
 pub struct Request {
-    pub auth: Token,
+    pub token: Token,
+    pub claims: Claims,
     pub txn_id: TxnId,
 }
 
 impl Request {
-    pub fn new(auth: Token, txn_id: TxnId) -> Self {
-        Self { auth, txn_id }
+    pub fn new(txn_id: TxnId, token: Token, claims: Claims) -> Self {
+        Self {
+            token,
+            claims,
+            txn_id,
+        }
     }
 
-    pub fn contains(&self, _other: &Self) -> bool {
-        // TODO
-        true
+    pub fn token(&self) -> &Token {
+        &self.token
     }
 }
 
-struct Resolver {
-    host: Link,
-    txn: Txn,
+pub struct Resolver<'a> {
+    gateway: &'a Gateway,
+    txn_id: &'a TxnId,
+}
+
+impl<'a> Resolver<'a> {
+    pub fn new(gateway: &'a Gateway, txn_id: &'a TxnId) -> Self {
+        Self { gateway, txn_id }
+    }
 }
 
 #[async_trait]
-impl rjwt::Resolve for Resolver {
+impl<'a> rjwt::Resolve for Resolver<'a> {
     type Host = Link;
     type ActorId = Value;
     type Claims = Vec<Scope>;
 
     fn host(&self) -> Link {
-        self.host.clone()
+        self.gateway.root()
     }
 
     async fn resolve(&self, host: &Link, actor_id: &Value) -> Result<Actor, rjwt::Error> {
-        let public_key = self
-            .txn
-            .get(host.clone(), actor_id.clone())
+        let public_key: String = self
+            .gateway
+            .fetch(&self.txn_id, host, actor_id)
             .map_err(|e| rjwt::Error::new(rjwt::ErrorKind::Fetch, e))
             .await?;
 
-        if let State::Scalar(Scalar::Value(Value::Bytes(public_key))) = public_key {
-            Actor::with_public_key(actor_id.clone(), &public_key)
-        } else {
-            Err(rjwt::Error::new(
-                rjwt::ErrorKind::Fetch,
-                format!("invalid public key for {}: {}", actor_id, public_key),
-            ))
-        }
+        let public_key = base64::decode(&public_key).map_err(|e| {
+            rjwt::Error::new(
+                rjwt::ErrorKind::Format,
+                format!("invalid public key {} for {}: {}", &public_key, actor_id, e),
+            )
+        })?;
+        Actor::with_public_key(actor_id.clone(), &public_key)
     }
 }

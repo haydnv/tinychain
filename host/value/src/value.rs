@@ -372,6 +372,12 @@ impl<'en> IntoStream<'en> for Value {
     }
 }
 
+impl From<Link> for Value {
+    fn from(link: Link) -> Value {
+        Value::Link(link)
+    }
+}
+
 impl CastFrom<Value> for String {
     fn cast_from(value: Value) -> String {
         value.to_string()

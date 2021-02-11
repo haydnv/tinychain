@@ -71,14 +71,20 @@ impl HTTPServer {
             })
             .unwrap_or_else(HashMap::new);
 
-        let token: Token = if let Some(header) = http_request.headers().get("Authorization") {
-            let token = header
-                .to_str()
-                .map_err(|e| TCError::bad_request("Unable to parse Authorization header", e))?;
+        let token = if let Some(header) = http_request.headers().get("Authorization") {
+            let token = header.to_str().map_err(|e| {
+                TCError::unauthorized(format!("Unable to parse Authorization header: {}", e))
+            })?;
 
-            self.gateway.authenticate(token).await?
+            if token.starts_with("Bearer:") {
+                Some(token[7..].trim().to_string())
+            } else {
+                return Err(TCError::unauthorized(
+                    "Unable to parse Authorization header",
+                ));
+            }
         } else {
-            self.gateway.issue_token()
+            None
         };
 
         let txn_id = if let Some(txn_id) = get_param(&mut params, "txn_id")? {
@@ -87,8 +93,7 @@ impl HTTPServer {
             TxnId::new(NetworkTime::now())
         };
 
-        let request = Request::new(token, txn_id);
-        let txn = self.gateway.new_txn(request).await?;
+        let txn = self.gateway.new_txn(txn_id, token).await?;
         Ok((params, txn))
     }
 

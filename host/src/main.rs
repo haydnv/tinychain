@@ -107,13 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     let kernel = tinychain::Kernel::new(clusters);
-    let gateway = tinychain::gateway::Gateway::new(
-        kernel,
-        txn_server,
-        config.address,
-        config.http_port,
-        config.request_ttl,
-    );
+    let gateway =
+        tinychain::gateway::Gateway::new(kernel, txn_server, config.address, config.http_port);
 
     if let Err(cause) = gateway.listen().await {
         log::error!("Server error: {}", cause);

@@ -16,7 +16,7 @@ pub const MIN_ID: TxnId = TxnId {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct TxnId {
-    timestamp: u128, // nanoseconds since Unix epoch
+    timestamp: u64, // nanoseconds since Unix epoch
     nonce: u16,
 }
 
@@ -26,6 +26,10 @@ impl TxnId {
             timestamp: time.as_nanos(),
             nonce: rand::thread_rng().gen(),
         }
+    }
+
+    pub fn time(&self) -> NetworkTime {
+        NetworkTime::from_nanos(self.timestamp)
     }
 
     pub fn to_id(&self) -> Id {

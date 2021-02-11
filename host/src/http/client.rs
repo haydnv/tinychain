@@ -4,10 +4,11 @@ use async_trait::async_trait;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use hyper::body::{Body, HttpBody};
 use hyper::client::HttpConnector;
+use serde::de::DeserializeOwned;
 
 use error::*;
 use generic::label;
-use transact::{IntoView, Transaction};
+use transact::{IntoView, Transaction, TxnId};
 use value::{Link, Value};
 
 use crate::state::State;
@@ -32,8 +33,45 @@ impl Client {
 
 #[async_trait]
 impl crate::gateway::Client for Client {
+    async fn fetch<T: DeserializeOwned>(
+        &self,
+        txn_id: &TxnId,
+        link: &Link,
+        key: &Value,
+    ) -> TCResult<T> {
+        let uri = uri(txn_id, link, key)?;
+        let req = req_builder("GET", uri, None);
+
+        let response = self
+            .client
+            .request(req.body(Body::empty()).unwrap())
+            .map_err(|e| TCError::bad_gateway(e))
+            .await?;
+
+        if response.status().is_success() {
+            let mut response = response.into_body();
+            let mut body = Vec::new();
+            while let Some(chunk) = response
+                .try_next()
+                .map_err(|e| {
+                    TCError::bad_request(format!("error decoding response from {}", link), e)
+                })
+                .await?
+            {
+                body.extend_from_slice(&chunk);
+            }
+
+            serde_json::from_slice(&body).map_err(|e| {
+                TCError::bad_request(format!("error decoding response from {}", link), e)
+            })
+        } else {
+            let err = transform_error(link, response).await;
+            Err(err)
+        }
+    }
+
     async fn get(&self, txn: Txn, link: Link, key: Value, auth: Option<String>) -> TCResult<State> {
-        let uri = uri(&link, key)?;
+        let uri = uri(txn.id(), &link, &key)?;
         let req = req_builder("GET", uri, auth);
 
         let response = self
@@ -49,7 +87,7 @@ impl crate::gateway::Client for Client {
                 })
                 .await
         } else {
-            let err = transform_error(link, response).await;
+            let err = transform_error(&link, response).await;
             Err(err)
         }
     }
@@ -62,7 +100,7 @@ impl crate::gateway::Client for Client {
         value: State,
         auth: Option<String>,
     ) -> TCResult<()> {
-        let uri = uri(&link, key)?;
+        let uri = uri(txn.id(), &link, &key)?;
         let req = req_builder("PUT", uri, auth);
 
         let body = destream_json::encode(value.into_view(txn))
@@ -77,7 +115,7 @@ impl crate::gateway::Client for Client {
         if response.status().is_success() {
             Ok(())
         } else {
-            let err = transform_error(link, response).await;
+            let err = transform_error(&link, response).await;
             Err(err)
         }
     }
@@ -108,13 +146,19 @@ impl crate::gateway::Client for Client {
                 })
                 .await
         } else {
-            let err = transform_error(link, response).await;
+            let err = transform_error(&link, response).await;
             Err(err)
         }
     }
 
-    async fn delete(&self, link: Link, key: Value, auth: Option<String>) -> TCResult<()> {
-        let uri = uri(&link, key)?;
+    async fn delete(
+        &self,
+        txn_id: TxnId,
+        link: Link,
+        key: Value,
+        auth: Option<String>,
+    ) -> TCResult<()> {
+        let uri = uri(&txn_id, &link, &key)?;
         let req = req_builder("GET", uri, auth);
 
         let response = self
@@ -126,20 +170,20 @@ impl crate::gateway::Client for Client {
         if response.status().is_success() {
             Ok(())
         } else {
-            let err = transform_error(link, response).await;
+            let err = transform_error(&link, response).await;
             Err(err)
         }
     }
 }
 
-fn uri(link: &Link, key: Value) -> TCResult<String> {
+fn uri(txn_id: &TxnId, link: &Link, key: &Value) -> TCResult<String> {
     if key.is_none() {
-        Ok(link.to_string())
+        Ok(format!("{}?txn_id={}", link, txn_id))
     } else {
         let key_json = serde_json::to_string(&key)
             .map_err(|_| TCError::bad_request("unable to encode key", key))?;
 
-        Ok(format!("{}?key={}", link, key_json))
+        Ok(format!("{}?txn_id={}&key={}", link, txn_id, key_json))
     }
 }
 
@@ -153,7 +197,7 @@ fn req_builder(method: &str, uri: String, auth: Option<String>) -> http::request
     }
 }
 
-async fn transform_error(source: Link, response: hyper::Response<Body>) -> TCError {
+async fn transform_error(source: &Link, response: hyper::Response<Body>) -> TCError {
     const MAX_ERR_SIZE: usize = 5000;
 
     let status = response.status();
