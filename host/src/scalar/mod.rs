@@ -142,6 +142,13 @@ impl Scalar {
                     .map(Box::new)
                     .map(Scalar::Ref),
 
+                RT::If => self
+                    .opt_cast_into()
+                    .map(Box::new)
+                    .map(TCRef::If)
+                    .map(Box::new)
+                    .map(Scalar::Ref),
+
                 RT::Op(ort) => {
                     let op_ref = match ort {
                         ORT::Get => self.opt_cast_into().map(OpRef::Get),
@@ -236,6 +243,22 @@ impl From<TCRef> for Scalar {
 impl From<Value> for Scalar {
     fn from(value: Value) -> Scalar {
         Scalar::Value(value)
+    }
+}
+
+impl TryCastFrom<Scalar> for TCRef {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Ref(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Ref(tc_ref) => Some(*tc_ref),
+            _ => None,
+        }
     }
 }
 
