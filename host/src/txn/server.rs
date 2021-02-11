@@ -82,7 +82,7 @@ impl TxnServer {
                         .map_err(TCError::unauthorized)
                         .await?
                 } else {
-                    let token: Token = <Token as TokenExt>::new(
+                    let token: Token = Token::new(
                         gateway.root().clone().into(),
                         txn_id.time().into(),
                         Duration::from_secs(DEFAULT_TTL),

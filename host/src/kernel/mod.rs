@@ -1,6 +1,6 @@
 use error::*;
 use generic::*;
-use safecast::{Match, TryCastFrom};
+use safecast::{Match, TryCastFrom, TryCastInto};
 
 use crate::cluster::Cluster;
 use crate::object::InstanceExt;
@@ -10,6 +10,7 @@ use crate::txn::*;
 
 mod hosted;
 
+use crate::route::Public;
 use hosted::Hosted;
 
 const CAPTURE: Label = label("capture");
@@ -33,7 +34,7 @@ impl Kernel {
                 .ok_or_else(|| TCError::unsupported(err))
         } else if let Some((_suffix, cluster)) = self.hosted.get(path) {
             txn.mutate((*cluster).clone()).await;
-            Err(TCError::not_implemented("Kernel::get from Cluster"))
+            cluster.get(txn, _suffix, key).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -41,15 +42,16 @@ impl Kernel {
 
     pub async fn put(
         &self,
-        _txn: &Txn,
+        txn: &Txn,
         path: &[PathSegment],
-        _key: Value,
-        _state: State,
+        key: Value,
+        state: State,
     ) -> TCResult<()> {
         if let Some(class) = StateType::from_path(path) {
             Err(TCError::method_not_allowed(class))
-        } else if let Some((_suffix, _cluster)) = self.hosted.get(path) {
-            Err(TCError::not_implemented("Kernel::get from Cluster"))
+        } else if let Some((suffix, cluster)) = self.hosted.get(path) {
+            txn.mutate((*cluster).clone()).await;
+            cluster.put(txn, suffix, key, state).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -60,8 +62,12 @@ impl Kernel {
             return Err(TCError::method_not_allowed(TCPath::from(path)));
         }
 
-        if let Some((_suffix, _cluster)) = self.hosted.get(path) {
-            return Err(TCError::not_implemented("Kernel::post to Cluster"));
+        if let Some((suffix, cluster)) = self.hosted.get(path) {
+            let params =
+                data.try_cast_into(|s| TCError::bad_request("POST params must be a map, not", s))?;
+
+            txn.mutate((*cluster).clone()).await;
+            return cluster.post(txn, suffix, params).await;
         }
 
         match path[0].as_str() {

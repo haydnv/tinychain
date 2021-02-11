@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::join_all;
@@ -12,12 +13,14 @@ use generic::*;
 use safecast::TryCastInto;
 use transact::fs::{Dir, Persist};
 use transact::{Transact, TxnId};
-use value::Value;
 
 use crate::chain::{Chain, ChainType, SyncChain};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
-use crate::scalar::{OpRef, Scalar, TCRef};
+use crate::route::Public;
+use crate::scalar::{Link, OpRef, Scalar, TCRef, Value};
+use crate::state::State;
+use crate::txn::{Actor, Txn};
 
 pub const PATH: Label = label("cluster");
 
@@ -35,8 +38,19 @@ impl fmt::Display for ClusterType {
 
 #[derive(Clone)]
 pub struct Cluster {
+    actor: Arc<Actor>,
     path: TCPathBuf,
     chains: Map<Chain>,
+}
+
+impl Cluster {
+    async fn maybe_claim_txn(&self, txn: Txn) -> TCResult<Txn> {
+        if txn.owner().is_none() {
+            txn.claim(&self.actor).await
+        } else {
+            Ok(txn)
+        }
+    }
 }
 
 impl Eq for Cluster {}
@@ -126,7 +140,9 @@ impl Cluster {
             chains.insert(id, chain);
         }
 
+        let actor_id = Value::from(Link::from(path.clone()));
         let cluster = Cluster {
+            actor: Arc::new(Actor::new(actor_id)),
             path: path.clone(),
             chains: chains.into(),
         };
@@ -146,6 +162,42 @@ impl Instance for Cluster {
 
     fn class(&self) -> Self::Class {
         ClusterType
+    }
+}
+
+#[async_trait]
+impl Public for Cluster {
+    async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
+        nonempty_path(path)?;
+        let txn = self.maybe_claim_txn(txn.clone()).await?;
+
+        if let Some(chain) = self.chains.get(&path[0]) {
+            return chain.get(&txn, &path[1..], key).await;
+        }
+
+        not_found(path)
+    }
+
+    async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
+        nonempty_path(path)?;
+        let txn = self.maybe_claim_txn(txn.clone()).await?;
+
+        if let Some(chain) = self.chains.get(&path[0]) {
+            return chain.put(&txn, &path[1..], key, value).await;
+        }
+
+        not_found(path)
+    }
+
+    async fn post(&self, txn: &Txn, path: &[PathSegment], params: Map<State>) -> TCResult<State> {
+        nonempty_path(path)?;
+        let txn = self.maybe_claim_txn(txn.clone()).await?;
+
+        if let Some(chain) = self.chains.get(&path[0]) {
+            return chain.post(&txn, &path[1..], params).await;
+        }
+
+        not_found(path)
     }
 }
 
@@ -173,4 +225,16 @@ async fn create_dir(data_dir: fs::Dir, txn_id: TxnId, path: &[PathSegment]) -> T
     }
 
     Ok(dir)
+}
+
+fn nonempty_path(path: &[PathSegment]) -> TCResult<()> {
+    if path.is_empty() {
+        Err(TCError::method_not_allowed(TCPath::from(path)))
+    } else {
+        Ok(())
+    }
+}
+
+fn not_found<T>(path: &[PathSegment]) -> TCResult<T> {
+    Err(TCError::not_found(TCPath::from(path)))
 }

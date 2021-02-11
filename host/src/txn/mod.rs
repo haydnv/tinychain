@@ -26,7 +26,6 @@ pub use server::*;
 #[derive(Clone)]
 struct Inner {
     gateway: Arc<Gateway>,
-    request: Arc<Request>,
     mutated: RwLock<HashSet<Cluster>>,
     txn_server: mpsc::UnboundedSender<TxnId>,
 }
@@ -34,6 +33,7 @@ struct Inner {
 #[derive(Clone)]
 pub struct Txn {
     inner: Arc<Inner>,
+    request: Arc<Request>,
     dir: fs::Dir,
 }
 
@@ -49,16 +49,54 @@ impl Txn {
 
         let inner = Arc::new(Inner {
             gateway,
-            request,
             mutated,
             txn_server,
         });
 
-        Self { inner, dir }
+        Self {
+            inner,
+            request,
+            dir,
+        }
+    }
+
+    pub async fn claim(self, _actor: &Actor) -> TCResult<Self> {
+        if self.owner().is_none() {
+            unimplemented!()
+        } else {
+            Err(TCError::forbidden(
+                "tried to claim owned transaction",
+                self.id(),
+            ))
+        }
+    }
+
+    pub fn is_owner(&self, actor_id: &Value) -> bool {
+        if let Some((host, owner_id)) = self.owner() {
+            let this_host = Link::from(self.inner.gateway.root().clone());
+            host == &this_host && owner_id == actor_id
+        } else {
+            false
+        }
+    }
+
+    pub fn owner(&self) -> Option<(&Link, &Value)> {
+        for (host, actor, scopes) in self.request.claims.iter() {
+            if scopes.contains(&SCOPE_ROOT.into()) {
+                return Some((host, actor));
+            }
+        }
+
+        None
     }
 
     pub fn request(&'_ self) -> &'_ Request {
-        &self.inner.request
+        &self.request
+    }
+
+    pub fn scopes(&'_ self, actor_id: &Value) -> Option<&Vec<Scope>> {
+        let host = Link::from(self.inner.gateway.root().clone());
+        self.request.claims.get(&host, actor_id)
     }
 
     pub async fn mutate(&self, cluster: Cluster) {
@@ -82,7 +120,7 @@ impl Txn {
 #[async_trait]
 impl Transaction<fs::Dir> for Txn {
     fn id(&'_ self) -> &'_ TxnId {
-        &self.inner.request.txn_id
+        &self.request.txn_id
     }
 
     fn context(&'_ self) -> &'_ fs::Dir {
@@ -90,10 +128,11 @@ impl Transaction<fs::Dir> for Txn {
     }
 
     async fn subcontext(&self, id: Id) -> TCResult<Self> {
-        let dir = self.dir.create_dir(self.inner.request.txn_id, id).await?;
+        let dir = self.dir.create_dir(self.request.txn_id, id).await?;
 
         Ok(Txn {
             inner: self.inner.clone(),
+            request: self.request.clone(),
             dir,
         })
     }
@@ -120,10 +159,7 @@ impl Drop for Txn {
     fn drop(&mut self) {
         // There will still be one reference in TxnServer when all others are dropped, plus this one
         if Arc::strong_count(&self.inner) == 2 {
-            self.inner
-                .txn_server
-                .send(self.inner.request.txn_id)
-                .unwrap();
+            self.inner.txn_server.send(self.request.txn_id).unwrap();
         }
     }
 }

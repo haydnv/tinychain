@@ -1,45 +1,18 @@
-use std::time::*;
-
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
-use generic::{path_label, NetworkTime, PathLabel, TCPathBuf};
+use generic::{path_label, PathLabel, TCPathBuf};
 use transact::TxnId;
 
 use crate::gateway::Gateway;
 use crate::scalar::{Link, Value};
 
 pub type Actor = rjwt::Actor<Value>;
-pub type Claims = rjwt::Claims<Value, Vec<Scope>>;
+pub type Claims = rjwt::Claims<Link, Value, Vec<Scope>>;
 pub type Scope = TCPathBuf;
-pub type Token = rjwt::Token<Value, Vec<Scope>>;
+pub type Token = rjwt::Token<Link, Value, Vec<Scope>>;
 
 pub const SCOPE_ROOT: PathLabel = path_label(&[]);
-
-pub trait TokenExt {
-    fn new(
-        host: Link,
-        time: NetworkTime,
-        ttl: Duration,
-        actor_id: Value,
-        scopes: Vec<Scope>,
-    ) -> Token;
-}
-
-impl TokenExt for Token {
-    fn new(
-        host: Link,
-        time: NetworkTime,
-        ttl: Duration,
-        actor_id: Value,
-        scopes: Vec<Scope>,
-    ) -> Token {
-        let host = host.to_string();
-        let time = UNIX_EPOCH + Duration::from_nanos(time.as_nanos() as u64);
-
-        Token::new(host, time, ttl, actor_id, scopes)
-    }
-}
 
 pub struct Request {
     pub token: Token,
@@ -54,6 +27,10 @@ impl Request {
             claims,
             txn_id,
         }
+    }
+
+    pub fn scopes(&self) -> &Claims {
+        &self.claims
     }
 
     pub fn token(&self) -> &Token {
