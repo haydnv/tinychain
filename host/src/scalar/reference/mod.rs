@@ -15,13 +15,13 @@ use crate::txn::Txn;
 use super::Scalar;
 
 mod r#if;
-use r#if::IfRef;
 
 pub mod id;
 pub mod op;
 
 pub use id::*;
 pub use op::*;
+pub use r#if::IfRef;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref"]);
 
