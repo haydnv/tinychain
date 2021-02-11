@@ -136,6 +136,13 @@ impl Scalar {
                 ODT::Delete => self.opt_cast_into().map(OpDef::Delete).map(Self::Op),
             },
             ST::Ref(rt) => match rt {
+                RT::After => self
+                    .opt_cast_into()
+                    .map(Box::new)
+                    .map(TCRef::After)
+                    .map(Box::new)
+                    .map(Scalar::Ref),
+
                 RT::Id => self
                     .opt_cast_into()
                     .map(TCRef::Id)

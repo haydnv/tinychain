@@ -14,11 +14,13 @@ use crate::txn::Txn;
 
 use super::Scalar;
 
+mod after;
 mod r#if;
 
 pub mod id;
 pub mod op;
 
+pub use after::After;
 pub use id::*;
 pub use op::*;
 pub use r#if::IfRef;
@@ -34,6 +36,7 @@ pub trait Refer {
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RefType {
+    After,
     Id,
     If,
     Op(OpRefType),
@@ -47,6 +50,7 @@ impl NativeClass for RefType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         if path.len() > 3 && &path[0..3] == &PREFIX[..] {
             match path[3].as_str() {
+                "after" if path.len() == 4 => Some(Self::After),
                 "id" if path.len() == 4 => Some(Self::Id),
                 "if" if path.len() == 4 => Some(Self::If),
                 "op" => OpRefType::from_path(path).map(RefType::Op),
@@ -59,6 +63,7 @@ impl NativeClass for RefType {
 
     fn path(&self) -> TCPathBuf {
         let suffix = match self {
+            Self::After => "after",
             Self::Id => "id",
             Self::If => "if",
             Self::Op(ort) => return ort.path(),
@@ -71,6 +76,7 @@ impl NativeClass for RefType {
 impl fmt::Display for RefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::After => f.write_str("After"),
             Self::Id => f.write_str("Id"),
             Self::If => f.write_str("If"),
             Self::Op(ort) => fmt::Display::fmt(ort, f),
@@ -80,6 +86,7 @@ impl fmt::Display for RefType {
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCRef {
+    After(Box<After>),
     Id(IdRef),
     If(Box<IfRef>),
     Op(OpRef),
@@ -90,6 +97,7 @@ impl Instance for TCRef {
 
     fn class(&self) -> Self::Class {
         match self {
+            Self::After(_) => RefType::After,
             Self::Id(_) => RefType::Id,
             Self::If(_) => RefType::If,
             Self::Op(op_ref) => RefType::Op(op_ref.class()),
@@ -101,6 +109,7 @@ impl Instance for TCRef {
 impl Refer for TCRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
+            Self::After(after) => after.requires(deps),
             Self::Id(id_ref) => id_ref.requires(deps),
             Self::If(if_ref) => if_ref.requires(deps),
             Self::Op(op_ref) => op_ref.requires(deps),
@@ -109,6 +118,7 @@ impl Refer for TCRef {
 
     async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
         match self {
+            Self::After(after) => after.resolve(context, txn).await,
             Self::Id(id_ref) => id_ref.resolve(context, txn).await,
             Self::If(if_ref) => if_ref.resolve(context, txn).await,
             Self::Op(op_ref) => op_ref.resolve(context, txn).await,
@@ -124,6 +134,7 @@ impl RefVisitor {
         access: &mut A,
     ) -> Result<TCRef, A::Error> {
         match class {
+            RefType::After => access.next_value(()).map_ok(TCRef::Id).await,
             RefType::Id => access.next_value(()).map_ok(TCRef::Id).await,
             RefType::If => {
                 access
@@ -195,6 +206,7 @@ impl FromStream for TCRef {
 impl<'en> ToStream<'en> for TCRef {
     fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
         match self {
+            Self::After(after) => after.to_stream(e),
             Self::Id(id_ref) => id_ref.to_stream(e),
             Self::If(if_ref) => if_ref.to_stream(e),
             Self::Op(op_ref) => op_ref.to_stream(e),
@@ -205,6 +217,7 @@ impl<'en> ToStream<'en> for TCRef {
 impl<'en> IntoStream<'en> for TCRef {
     fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
         match self {
+            Self::After(after) => after.into_stream(e),
             Self::Id(id_ref) => id_ref.into_stream(e),
             Self::If(if_ref) => if_ref.into_stream(e),
             Self::Op(op_ref) => op_ref.into_stream(e),
@@ -215,6 +228,7 @@ impl<'en> IntoStream<'en> for TCRef {
 impl fmt::Display for TCRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::After(after) => fmt::Display::fmt(after, f),
             Self::Id(id_ref) => fmt::Display::fmt(id_ref, f),
             Self::If(if_ref) => fmt::Display::fmt(if_ref, f),
             Self::Op(op_ref) => fmt::Display::fmt(op_ref, f),
