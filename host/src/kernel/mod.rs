@@ -27,6 +27,8 @@ impl Kernel {
     }
 
     pub async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
+        nonempty_path(path)?;
+
         if let Some(class) = StateType::from_path(path) {
             let err = format!("Cannot cast into {} from {}", class, key);
             State::Scalar(Scalar::Value(key))
@@ -47,6 +49,8 @@ impl Kernel {
         key: Value,
         state: State,
     ) -> TCResult<()> {
+        nonempty_path(path)?;
+
         if let Some(class) = StateType::from_path(path) {
             Err(TCError::method_not_allowed(class))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
@@ -58,9 +62,7 @@ impl Kernel {
     }
 
     pub async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
-        if path.is_empty() {
-            return Err(TCError::method_not_allowed(TCPath::from(path)));
-        }
+        nonempty_path(path)?;
 
         if let Some((suffix, cluster)) = self.hosted.get(path) {
             let params =
@@ -99,5 +101,14 @@ impl Kernel {
             },
             other => Err(TCError::not_found(other)),
         }
+    }
+}
+
+#[inline]
+fn nonempty_path(path: &[PathSegment]) -> TCResult<()> {
+    if path.is_empty() {
+        Err(TCError::method_not_allowed(TCPathBuf::default()))
+    } else {
+        Ok(())
     }
 }

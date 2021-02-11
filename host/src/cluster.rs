@@ -227,6 +227,7 @@ async fn create_dir(data_dir: fs::Dir, txn_id: TxnId, path: &[PathSegment]) -> T
     Ok(dir)
 }
 
+#[inline]
 fn nonempty_path(path: &[PathSegment]) -> TCResult<()> {
     if path.is_empty() {
         Err(TCError::method_not_allowed(TCPath::from(path)))
