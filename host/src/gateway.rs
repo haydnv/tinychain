@@ -7,15 +7,13 @@ use serde::de::DeserializeOwned;
 
 use error::*;
 use futures::future::{try_join_all, Future, TryFutureExt};
-use generic::{path_label, NetworkTime, PathLabel, TCPathBuf};
+use generic::NetworkTime;
 
 use crate::http;
 use crate::kernel::Kernel;
 use crate::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
 use crate::txn::*;
-
-const PATH: PathLabel = path_label(&["host", "gateway"]);
 
 #[async_trait]
 pub trait Client {
@@ -62,7 +60,6 @@ pub trait Server {
 }
 
 pub struct Gateway {
-    actor: Actor,
     kernel: Kernel,
     txn_server: TxnServer,
     addr: IpAddr,
@@ -77,13 +74,9 @@ impl Gateway {
     }
 
     pub fn new(kernel: Kernel, txn_server: TxnServer, addr: IpAddr, http_port: u16) -> Arc<Self> {
-        let actor_id = Value::from(Link::from(TCPathBuf::from(PATH)));
-        let actor = Actor::new(actor_id);
-
         let root = LinkHost::from((LinkProtocol::HTTP, addr.clone(), Some(http_port)));
 
         Arc::new(Self {
-            actor,
             kernel,
             addr,
             txn_server,
@@ -91,15 +84,6 @@ impl Gateway {
             root,
             client: http::Client::new(),
         })
-    }
-
-    fn sign_token(&self, txn: &Txn) -> TCResult<Option<String>> {
-        let signed = self
-            .actor
-            .sign_token(txn.request().token())
-            .map_err(TCError::internal)?;
-
-        Ok(Some(signed))
     }
 
     pub fn root(&self) -> &LinkHost {
@@ -124,7 +108,7 @@ impl Gateway {
             None => self.kernel.get(txn, subject.path(), key).await,
             Some(host) if host == self.root() => self.kernel.get(txn, subject.path(), key).await,
             _ => {
-                let auth = self.sign_token(txn)?;
+                let auth = None; // TODO
                 self.client.get(txn.clone(), subject, key, auth).await
             }
         }
@@ -137,7 +121,7 @@ impl Gateway {
                 self.kernel.put(txn, subject.path(), key, value).await
             }
             _ => {
-                let auth = self.sign_token(txn)?;
+                let auth = None; // TODO
                 self.client
                     .put(txn.clone(), subject, key, value, auth)
                     .await
@@ -152,7 +136,7 @@ impl Gateway {
                 self.kernel.post(txn, subject.path(), params).await
             }
             _ => {
-                let auth = self.sign_token(txn)?;
+                let auth = None; // TODO
                 self.client.post(txn.clone(), subject, params, auth).await
             }
         }
