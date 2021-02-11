@@ -1,3 +1,9 @@
+//! A generic tuple type
+//!
+//! Note that, from the perspective of a Tinychain user (say, a developer using the HTTP API via
+//! the Python client), this really is a tuple, in the sense that it is immutable, with a fixed
+//! length, and not iterable.
+
 use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
@@ -6,6 +12,7 @@ use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
 use safecast::*;
 
+/// A generic tuple type, based on [`Vec`]
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct Tuple<T: Clone> {
     inner: Vec<T>,

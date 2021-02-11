@@ -1,3 +1,5 @@
+//! Immutable values which always reside in memory
+
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt;
@@ -26,6 +28,7 @@ pub use value::*;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar"]);
 
+/// The [`Class`] of a [`Scalar`].
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ScalarType {
     Map,
@@ -88,6 +91,7 @@ impl fmt::Display for ScalarType {
     }
 }
 
+/// A scalar value, i.e. one which is always held in main memory and never split into blocks.
 #[derive(Clone, Eq, PartialEq)]
 pub enum Scalar {
     Map(Map<Self>),
@@ -98,6 +102,7 @@ pub enum Scalar {
 }
 
 impl Scalar {
+    /// Return true if self is an empty tuple, default link, or `Value::None`.
     pub fn is_none(&self) -> bool {
         match self {
             Self::Tuple(tuple) => tuple.is_empty(),
@@ -106,6 +111,7 @@ impl Scalar {
         }
     }
 
+    /// Return true if self is a reference type which needs to be resolved.
     pub fn is_ref(&self) -> bool {
         match self {
             Self::Map(map) => map.values().any(Self::is_ref),
@@ -115,6 +121,7 @@ impl Scalar {
         }
     }
 
+    /// Cast this `Scalar` into the specified [`ScalarType`], if possible.
     pub fn into_type(self, class: ScalarType) -> Option<Self> {
         if self.class() == class {
             return Some(self);

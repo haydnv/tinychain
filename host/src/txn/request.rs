@@ -1,3 +1,5 @@
+//! Authorization. INCOMPLETE AND UNSTABLE.
+
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
@@ -14,6 +16,7 @@ pub type Token = rjwt::Token<Link, Value, Vec<Scope>>;
 
 pub const SCOPE_ROOT: PathLabel = path_label(&[]);
 
+/// A `Txn`'s authorization.
 pub struct Request {
     pub token: String,
     pub claims: Claims,
@@ -21,6 +24,7 @@ pub struct Request {
 }
 
 impl Request {
+    /// Construct a new `Request`.
     pub fn new(txn_id: TxnId, token: String, claims: Claims) -> Self {
         Self {
             token,
@@ -29,15 +33,18 @@ impl Request {
         }
     }
 
+    /// Return this request's authorizations.
     pub fn scopes(&self) -> &Claims {
         &self.claims
     }
 
+    /// Return this request's JSON web token (cf. the [`rjwt`] crate)
     pub fn token(&self) -> &str {
         &self.token
     }
 }
 
+/// Struct responsible for resolving JWT auth identities (cf. the [`rjwt`] crate).
 pub struct Resolver<'a> {
     gateway: &'a Gateway,
     host: &'a Link,
@@ -45,6 +52,7 @@ pub struct Resolver<'a> {
 }
 
 impl<'a> Resolver<'a> {
+    /// Construct a new `Resolver`.
     pub fn new(gateway: &'a Gateway, host: &'a Link, txn_id: &'a TxnId) -> Self {
         Self {
             gateway,

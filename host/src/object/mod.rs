@@ -1,3 +1,5 @@
+//! User-defined object-orientation features.
+
 use std::fmt;
 
 use async_trait::async_trait;
@@ -20,6 +22,7 @@ pub use instance::*;
 const ERR_DECODE_INSTANCE: &str = "Instance does not support direct decoding; use an OpRef instead";
 const PREFIX: generic::PathLabel = generic::path_label(&["state", "object"]);
 
+/// The type of a user-defined [`Object`].
 #[derive(Clone, Eq, PartialEq)]
 pub enum ObjectType {
     Class,
@@ -62,6 +65,7 @@ impl fmt::Display for ObjectType {
     }
 }
 
+/// A user-defined [`InstanceClass`] or [`InstanceExt`].
 #[derive(Clone)]
 pub enum Object {
     Class(InstanceClass),

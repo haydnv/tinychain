@@ -1,3 +1,5 @@
+//! A scalar generic `Value` (such as a `Number` or `String`) which supports collation
+
 pub mod link;
 mod value;
 

@@ -1,3 +1,5 @@
+//! [`TxnId`]
+
 use std::fmt;
 use std::str::FromStr;
 
@@ -14,6 +16,7 @@ pub const MIN_ID: TxnId = TxnId {
     nonce: 0,
 };
 
+/// The unique ID of a transaction, used for identity and ordering.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct TxnId {
     timestamp: u64, // nanoseconds since Unix epoch
@@ -21,6 +24,7 @@ pub struct TxnId {
 }
 
 impl TxnId {
+    /// Construct a new `TxnId`.
     pub fn new(time: NetworkTime) -> TxnId {
         TxnId {
             timestamp: time.as_nanos(),
@@ -28,10 +32,12 @@ impl TxnId {
         }
     }
 
+    /// Return the timestamp of this `TxnId`.
     pub fn time(&self) -> NetworkTime {
         NetworkTime::from_nanos(self.timestamp)
     }
 
+    /// Convert this `TxnId` into an [`Id`].
     pub fn to_id(&self) -> Id {
         self.to_string().parse().unwrap()
     }

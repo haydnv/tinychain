@@ -1,3 +1,5 @@
+//! A Tinychain [`State`].
+
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -21,6 +23,7 @@ use crate::object::{Object, ObjectType};
 use crate::scalar::*;
 use crate::txn::Txn;
 
+/// The [`Class`] of a [`State`].
 #[derive(Clone, Eq, PartialEq)]
 pub enum StateType {
     Chain(ChainType),
@@ -96,6 +99,7 @@ impl fmt::Display for StateType {
     }
 }
 
+/// An addressable state with a discrete value per-transaction.
 #[derive(Clone)]
 pub enum State {
     Chain(Chain),
@@ -106,6 +110,7 @@ pub enum State {
 }
 
 impl State {
+    /// Return true if this `State` is an empty [`Tuple`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {
             Self::Scalar(scalar) => scalar.is_none(),
@@ -114,6 +119,7 @@ impl State {
         }
     }
 
+    /// Return true if this `State` is a reference that needs to be resolved.
     pub fn is_ref(&self) -> bool {
         match self {
             Self::Map(map) => map.values().any(Self::is_ref),
@@ -123,6 +129,7 @@ impl State {
         }
     }
 
+    /// Cast this `State` into the given [`StateType`], if possible.
     pub fn into_type(self, class: StateType) -> Option<Self> {
         if self.class() == class {
             return Some(self);

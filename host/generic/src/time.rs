@@ -1,3 +1,5 @@
+//! Time utilities for Tinychain. UNSTABLE.
+
 use std::ops;
 use std::time;
 use std::time::Duration;
@@ -7,8 +9,10 @@ pub struct NetworkTime {
     nanos: u64,
 }
 
+/// A Tinychain timestamp, used for absolute ordering of transactions.
 impl NetworkTime {
     // TODO: replace system time with an explicit network time synchronization system.
+    /// The current time.
     pub fn now() -> NetworkTime {
         NetworkTime::from_nanos(
             time::SystemTime::now()
@@ -18,10 +22,12 @@ impl NetworkTime {
         )
     }
 
+    /// This timestamp in nanoseconds since the Unix epoch.
     pub fn as_nanos(&self) -> u64 {
         self.nanos
     }
 
+    /// Constructs a new timestamp from a duration in nanoseconds since the Unix epoch.
     pub fn from_nanos(nanos: u64) -> NetworkTime {
         NetworkTime { nanos }
     }

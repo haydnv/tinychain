@@ -1,3 +1,5 @@
+//! Reference another [`State`] in the same [`Txn`] context.
+
 use std::collections::HashSet;
 use std::fmt;
 use std::str::FromStr;
@@ -18,6 +20,7 @@ use super::Refer;
 
 const EMPTY_SLICE: &[usize] = &[];
 
+/// A reference to the [`State`] at a given [`Id`] within the same transaction context.
 #[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct IdRef {
     to: Id,

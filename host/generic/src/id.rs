@@ -1,3 +1,5 @@
+//! A generic [`Id`]
+
 use std::fmt;
 use std::iter;
 use std::ops::Deref;
@@ -14,14 +16,16 @@ use serde::ser::{Serialize, Serializer};
 use error::*;
 
 const RESERVED_CHARS: [&str; 21] = [
-    "/", "..", "~", "$", "`", "^", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":",
-    "//", "@", "#",
+    "/", "..", "~", "$", "`", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":",
+    "@", "#", "(", ")"
 ];
 
+/// A static label which implements `Into<Id>`.
 pub struct Label {
     id: &'static str,
 }
 
+/// Return a [`Label`] with the given static `str`.
 pub const fn label(id: &'static str) -> Label {
     Label { id }
 }
@@ -40,16 +44,25 @@ impl From<Label> for Id {
     }
 }
 
+/// A generic Id
+///
+/// Id is widely used within the Tinychain host software to identify individual variables
+/// within a transaction context as well as files and directories.
+///
+/// An Id must be valid UTF8 and must not contain whitespace or any control character sequence like
+/// `{/, .., ~, $, \`, ^, &, |, =, {, }, <, >, ', ", ?, :, @, #}`.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Id {
     id: String,
 }
 
 impl Id {
+    /// Borrows the String underlying this Id.
     pub fn as_str(&self) -> &str {
         self.id.as_str()
     }
 
+    /// Return true if this ID begins with the specified string.
     pub fn starts_with(&self, prefix: &str) -> bool {
         self.id.starts_with(prefix)
     }
@@ -207,8 +220,10 @@ fn validate_id(id: &str) -> TCResult<()> {
     Ok(())
 }
 
+/// An alias for [`Id`] used for code clarity.
 pub type PathSegment = Id;
 
+/// A constant representing a [`TCPathBuf`].
 pub struct PathLabel {
     segments: &'static [&'static str],
 }
@@ -221,6 +236,7 @@ impl<Idx: std::slice::SliceIndex<[&'static str]>> std::ops::Index<Idx> for PathL
     }
 }
 
+/// Return a [`PathLabel`] with the given segments.
 pub const fn path_label(segments: &'static [&'static str]) -> PathLabel {
     PathLabel { segments }
 }
@@ -237,47 +253,42 @@ impl From<PathLabel> for TCPathBuf {
         Self { segments }
     }
 }
+
+/// A Tinychain path.
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct TCPathBuf {
     segments: Vec<PathSegment>,
 }
 
 impl TCPathBuf {
+    /// Return a mutable reference to the underlying vector.
     pub fn as_mut(&'_ mut self) -> &'_ mut Vec<PathSegment> {
         &mut self.segments
     }
 
+    /// Return a complete slice of the underlying vector.
     pub fn as_slice(&'_ self) -> &'_ [PathSegment] {
         &self.segments[..]
     }
 
+    /// Consumes `self` and returns its underlying vector.
     pub fn into_vec(self) -> Vec<PathSegment> {
         self.segments
     }
 
+    /// Appends `suffix` to this `TCPathBuf`.
     pub fn append<T: Into<PathSegment>>(mut self, suffix: T) -> Self {
         self.segments.push(suffix.into());
         self
     }
 
-    pub fn slice_from(self, index: usize) -> Self {
-        TCPathBuf {
-            segments: self.segments.into_iter().skip(index).collect(),
-        }
-    }
-
+    /// If this path begins with the specified prefix, returns the suffix following the prefix.
     pub fn suffix<'a>(&self, path: &'a [PathSegment]) -> Option<&'a [PathSegment]> {
         if path.starts_with(&self.segments) {
             Some(&path[self.segments.len()..])
         } else {
             None
         }
-    }
-
-    pub fn try_suffix<'a>(&self, path: &'a [PathSegment]) -> TCResult<&'a [PathSegment]> {
-        self.suffix(path).ok_or_else(|| {
-            TCError::internal(format!("{} routed through {}!", TCPath::from(path), self))
-        })
     }
 }
 
@@ -429,6 +440,7 @@ impl fmt::Display for TCPathBuf {
     }
 }
 
+/// A borrowed Tinychain path which implements [`fmt::Display`].
 pub struct TCPath<'a> {
     inner: &'a [PathSegment],
 }

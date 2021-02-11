@@ -1,3 +1,5 @@
+//! A transactional filesystem directory.
+
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::path::PathBuf;
@@ -22,6 +24,7 @@ use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File
 
 pub const BIN_EXT: &str = "bin";
 
+/// A file in a [`Dir`].
 #[derive(Clone)]
 pub enum FileEntry {
     Bin(File<Bytes>),
@@ -83,6 +86,7 @@ impl TryFrom<FileEntry> for File<Bytes> {
     }
 }
 
+/// An entry in a [`Dir`], either a [`FileEntry`] or sub-[`Dir`].
 #[derive(Clone)]
 pub enum DirEntry {
     Dir(Dir),
@@ -161,6 +165,7 @@ impl Dir {
         })
     }
 
+    /// Return the [`DirEntry`] at the given path if there is one, otherwise
     pub fn find<'a>(
         &'a self,
         txn_id: &'a TxnId,
@@ -196,8 +201,8 @@ impl fs::Store for Dir {
 
 #[async_trait]
 impl fs::Dir for Dir {
-    type Class = StateType;
     type File = FileEntry;
+    type FileClass = StateType;
 
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
         let path = fs_path(&self.path, &name);
@@ -275,6 +280,7 @@ impl Transact for Dir {
     }
 }
 
+/// Load a [`Dir`] from the given filesystem path.
 pub async fn load(cache: Cache, mount_point: PathBuf) -> TCResult<Dir> {
     let contents = dir_contents(&mount_point).await?;
     Dir::load(cache, mount_point, contents).await

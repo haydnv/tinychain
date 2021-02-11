@@ -1,3 +1,6 @@
+//! A [`Chain`] responsible for recovering a `State` from a failed transaction.
+//! INCOMPLETE AND UNSTABLE.
+
 use std::fmt;
 
 use async_trait::async_trait;
@@ -20,8 +23,10 @@ pub use sync::*;
 
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
+/// The file extension of a directory of [`ChainBlock`]s on disk.
 pub const EXT: &str = "chain";
 
+/// The schema of a [`Chain`], used when constructing a new `Chain` or loading a `Chain` from disk.
 #[derive(Clone)]
 pub enum Schema {
     Value(Value),
@@ -33,6 +38,7 @@ impl CastFrom<Value> for Schema {
     }
 }
 
+/// The state whose transactional integrity is protected by a [`Chain`].
 #[derive(Clone)]
 pub enum Subject {
     Value(fs::File<Bytes>),
@@ -53,11 +59,13 @@ impl Transact for Subject {
     }
 }
 
+/// Trait defining methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]
 pub trait ChainInstance {
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()>;
 }
 
+/// The type of a [`Chain`].
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ChainType {
     Sync,
@@ -94,6 +102,7 @@ impl fmt::Display for ChainType {
     }
 }
 
+/// A data structure responsible for maintaining the transactional integrity of its [`Subject`].
 #[derive(Clone)]
 pub enum Chain {
     Sync(sync::SyncChain),

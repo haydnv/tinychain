@@ -1,3 +1,5 @@
+//! Resolve a reference to an op.
+
 use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -22,6 +24,7 @@ use super::{IdRef, Refer, TCRef};
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref", "op"]);
 
+/// The [`Class`] of an [`OpRef`].
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpRefType {
     Get,
@@ -72,6 +75,7 @@ impl fmt::Display for OpRefType {
     }
 }
 
+/// The subject of an op.
 #[derive(Clone, Eq, PartialEq)]
 pub enum Subject {
     Link(Link),
@@ -212,6 +216,7 @@ impl fmt::Display for Subject {
     }
 }
 
+/// The key of a GET, PUT, or DELETE op.
 #[derive(Clone, Eq, PartialEq)]
 pub enum Key {
     Ref(IdRef),
@@ -327,11 +332,19 @@ impl fmt::Display for Key {
     }
 }
 
+/// The data defining a reference to a GET op.
 pub type GetRef = (Subject, Key);
+
+/// The data defining a reference to a PUT op.
 pub type PutRef = (Subject, Key, Scalar);
+
+/// The data defining a reference to a POST op.
 pub type PostRef = (Subject, Map<Scalar>);
+
+/// The data defining a reference to a DELETE op.
 pub type DeleteRef = (Subject, Key);
 
+/// A reference to an op.
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpRef {
     Get(GetRef),

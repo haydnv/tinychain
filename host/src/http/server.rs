@@ -22,6 +22,7 @@ const CONTENT_TYPE: &str = "application/json";
 
 type GetParams = HashMap<String, String>;
 
+/// Tinychain's HTTP server. Should only be used through a [`Gateway`].
 pub struct HTTPServer {
     gateway: Arc<Gateway>,
 }

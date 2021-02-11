@@ -1,3 +1,5 @@
+//! User-defined instance implementation.
+
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Deref;
@@ -12,6 +14,7 @@ use crate::txn::Txn;
 
 use super::{InstanceClass, Object};
 
+/// A user-defined instance, subclassing `T`.
 #[derive(Clone)]
 pub struct InstanceExt<T: generic::Instance> {
     parent: Box<T>,
@@ -19,6 +22,7 @@ pub struct InstanceExt<T: generic::Instance> {
 }
 
 impl<T: generic::Instance> InstanceExt<T> {
+    /// Construct a new instance of the given user-defined [`InstanceClass`].
     pub fn new(parent: T, class: InstanceClass) -> InstanceExt<T> {
         InstanceExt {
             parent: Box::new(parent),
@@ -26,6 +30,7 @@ impl<T: generic::Instance> InstanceExt<T> {
         }
     }
 
+    /// Convert the native type of this instance, if possible.
     pub fn try_into<E, O: generic::Instance + TryFrom<T, Error = E>>(
         self,
     ) -> Result<InstanceExt<O>, E> {

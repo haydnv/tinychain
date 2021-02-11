@@ -7,8 +7,8 @@ description = "A next-gen database + application server"
 license = "Apache-2.0"
 repository = "http://github.com/haydnv/tinychain.git"
 
-keywords = ["database", "host", "platform", "runtime", "environment"]
-categories = ["concurrency", "database implementations", "data structures", "web programming"]
+keywords = ["distributed", "transactional", "host", "platform", "runtime"]
+categories = ["concurrency", "data structures", "web programming"]
 
 [lib]
 name = "tinychain"

@@ -1,3 +1,5 @@
+//! A generic map whose keys are [`Id`]s
+
 use std::collections::HashMap;
 use std::fmt;
 use std::iter::FromIterator;
@@ -9,6 +11,7 @@ use safecast::{Match, TryCastFrom, TryCastInto};
 
 use super::{Id, Tuple};
 
+/// A generic map whose keys are [`Id`]s, based on [`HashMap`]
 #[derive(Clone)]
 pub struct Map<T: Clone> {
     inner: HashMap<Id, T>,

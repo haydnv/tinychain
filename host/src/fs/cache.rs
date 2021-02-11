@@ -1,3 +1,5 @@
+//! The filesystem cache, with LFU eviction. INCOMPLETE.
+
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::hash::Hash;
@@ -6,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::TryFutureExt;
 use futures_locks::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use log::debug;
 use tokio::fs;
@@ -13,10 +16,11 @@ use tokio::fs;
 use error::*;
 use transact::fs::BlockData;
 
-use super::io_err;
 use crate::chain::ChainBlock;
-use futures::TryFutureExt;
 
+use super::io_err;
+
+/// A [`CacheLock`] representing a single filesystem block.
 #[derive(Clone)]
 pub enum CacheBlock {
     Bin(CacheLock<Bytes>),
@@ -70,6 +74,7 @@ impl TryFrom<CacheBlock> for CacheLock<ChainBlock> {
     }
 }
 
+/// A filesystem cache lock.
 pub struct CacheLock<T> {
     ref_count: Arc<std::sync::RwLock<usize>>,
     lock: RwLock<T>,
@@ -83,10 +88,12 @@ impl<T> CacheLock<T> {
         }
     }
 
+    /// Lock this value immutably for reading.
     pub async fn read(&self) -> RwLockReadGuard<T> {
         self.lock.read().await
     }
 
+    /// Lock this value mutably and exclusively for writing.
     pub async fn write(&self) -> RwLockWriteGuard<T> {
         self.lock.write().await
     }
@@ -116,12 +123,14 @@ struct Inner {
     lfu: LFU<PathBuf>,
 }
 
+/// The filesystem cache.
 #[derive(Clone)]
 pub struct Cache {
     inner: RwLock<Inner>,
 }
 
 impl Cache {
+    /// Construct a new cache with the given size.
     pub fn new(max_size: usize) -> Self {
         Self {
             inner: RwLock::new(Inner {
@@ -133,6 +142,7 @@ impl Cache {
         }
     }
 
+    /// Read a block from the cache if possible, or else fetch it from the filesystem.
     pub async fn read<B: BlockData>(&self, path: &PathBuf) -> TCResult<Option<CacheLock<B>>>
     where
         CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
@@ -170,6 +180,7 @@ impl Cache {
         Ok(Some(lock))
     }
 
+    /// Update a block in the cache.
     pub async fn write<B: BlockData>(&self, path: PathBuf, block: B) -> TCResult<CacheLock<B>>
     where
         CacheBlock: From<CacheLock<B>>,
@@ -201,6 +212,7 @@ impl Cache {
         Ok(block)
     }
 
+    /// Remove a block from the cache.
     pub async fn remove(&self, path: PathBuf) {
         let mut inner = self.inner.write().await;
         if let Some(old_block) = inner.entries.remove(&path) {
@@ -213,6 +225,7 @@ impl Cache {
         }
     }
 
+    /// Synchronize a cached block with the filesystem.
     pub async fn sync(&self, path: PathBuf) -> TCResult<()> {
         debug!("sync block at {:?} with filesystem", &path);
 

@@ -1,3 +1,5 @@
+//! [`Gateway`] handles network traffic.
+
 use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -17,14 +19,17 @@ use crate::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
 use crate::txn::*;
 
+/// Configuration for [`Gateway`].
 pub struct Config {
     pub addr: IpAddr,
     pub http_port: u16,
     pub request_ttl: Duration,
 }
 
+/// A client used by [`Gateway`]
 #[async_trait]
 pub trait Client {
+    /// Read a simple value.
     async fn fetch<T: DeserializeOwned>(
         &self,
         txn_id: &TxnId,
@@ -32,8 +37,10 @@ pub trait Client {
         key: &Value,
     ) -> TCResult<T>;
 
+    /// Read a [`State`].
     async fn get(&self, txn: Txn, link: Link, key: Value, auth: Option<String>) -> TCResult<State>;
 
+    /// Set `key` = `value` within the state referred to by `link`.
     async fn put(
         &self,
         txn_id: Txn,
@@ -43,6 +50,7 @@ pub trait Client {
         auth: Option<String>,
     ) -> TCResult<()>;
 
+    /// Execute a remote POST op.
     async fn post(
         &self,
         txn: Txn,
@@ -51,6 +59,7 @@ pub trait Client {
         auth: Option<String>,
     ) -> TCResult<State>;
 
+    /// Delete `key` from the state referred to by `link`.
     async fn delete(
         &self,
         txn_id: TxnId,
@@ -60,13 +69,16 @@ pub trait Client {
     ) -> TCResult<()>;
 }
 
+/// A server used by [`Gateway`].
 #[async_trait]
 pub trait Server {
     type Error: std::error::Error;
 
+    /// Handle incoming requests.
     async fn listen(self, addr: SocketAddr) -> Result<(), Self::Error>;
 }
 
+/// Responsible for handling inbound and outbound traffic over the network.
 pub struct Gateway {
     config: Config,
     kernel: Kernel,
@@ -77,10 +89,12 @@ pub struct Gateway {
 }
 
 impl Gateway {
+    /// Return the current timestamp.
     pub fn time() -> NetworkTime {
         NetworkTime::now()
     }
 
+    /// Initialize a new `Gateway`
     pub fn new(config: Config, kernel: Kernel, txn_server: TxnServer) -> Arc<Self> {
         let root = LinkHost::from((
             LinkProtocol::HTTP,
@@ -98,10 +112,12 @@ impl Gateway {
         })
     }
 
+    /// Return the network address of this `Gateway`
     pub fn root(&self) -> &LinkHost {
         &self.root
     }
 
+    /// Authorize a transaction to execute on this host.
     pub async fn new_txn(self: &Arc<Self>, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
         let token = if let Some(token) = token {
             use rjwt::Resolve;
@@ -125,15 +141,17 @@ impl Gateway {
         self.txn_server.new_txn(self.clone(), txn_id, token).await
     }
 
+    /// Read a simple value.
     pub async fn fetch<T: DeserializeOwned>(
         &self,
         txn_id: &TxnId,
-        subject: &Link,
+        link: &Link,
         key: &Value,
     ) -> TCResult<T> {
-        self.client.fetch(txn_id, subject, key).await
+        self.client.fetch(txn_id, link, key).await
     }
 
+    /// Read the [`State`] `key` at `link`.
     pub async fn get(&self, txn: &Txn, subject: Link, key: Value) -> TCResult<State> {
         match subject.host() {
             None if subject.path().is_empty() && key.is_none() => {
@@ -149,42 +167,45 @@ impl Gateway {
         }
     }
 
+    /// Update the [`State`] `key` at `link` to `value`.
     pub fn put<'a>(
         &'a self,
         txn: &'a Txn,
-        subject: Link,
+        link: Link,
         key: Value,
         value: State,
     ) -> Pin<Box<dyn Future<Output = TCResult<()>> + Send + 'a>> {
         Box::pin(async move {
-            match subject.host() {
-                None => self.kernel.put(txn, subject.path(), key, value).await,
+            match link.host() {
+                None => self.kernel.put(txn, link.path(), key, value).await,
                 Some(host) if host == self.root() => {
-                    self.kernel.put(txn, subject.path(), key, value).await
+                    self.kernel.put(txn, link.path(), key, value).await
                 }
                 _ => {
                     let auth = None; // TODO
                     self.client
-                        .put(txn.clone(), subject, key, value, auth)
+                        .put(txn.clone(), link, key, value, auth)
                         .await
                 }
             }
         })
     }
 
-    pub async fn post(&self, txn: &Txn, subject: Link, params: State) -> TCResult<State> {
-        match subject.host() {
-            None => self.kernel.post(txn, subject.path(), params).await,
+    /// Execute the POST op at `subjcet` with the `params`
+    pub async fn post(&self, txn: &Txn, link: Link, params: State) -> TCResult<State> {
+        match link.host() {
+            None => self.kernel.post(txn, link.path(), params).await,
             Some(host) if host == self.root() => {
-                self.kernel.post(txn, subject.path(), params).await
+                self.kernel.post(txn, link.path(), params).await
             }
             _ => {
                 let auth = None; // TODO
-                self.client.post(txn.clone(), subject, params, auth).await
+                self.client.post(txn.clone(), link, params, auth).await
             }
         }
     }
 
+    /// Start this `Gateway`'s server
     pub fn listen(
         self: Arc<Self>,
     ) -> Pin<Box<impl Future<Output = Result<(), Box<dyn std::error::Error>>>>> {

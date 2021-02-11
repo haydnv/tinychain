@@ -1,3 +1,5 @@
+//! A [`ChainBlock`], the block type of a [`super::Chain`]
+
 use std::convert::TryFrom;
 use std::fmt;
 
@@ -13,6 +15,7 @@ use transact::TxnId;
 
 use crate::scalar::OpRef;
 
+/// A single filesystem block belonging to a [`super::Chain`].
 #[derive(Clone)]
 pub struct ChainBlock {
     hash: Bytes,

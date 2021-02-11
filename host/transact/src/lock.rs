@@ -1,3 +1,5 @@
+//! A [`TxnLock`] featuring transaction-specific versioning
+
 use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::ops::{Deref, DerefMut};
@@ -13,15 +15,20 @@ use error::*;
 
 use super::{Transact, TxnId};
 
+/// Define a way to manage transaction-specific versions of a state.
 #[async_trait]
 pub trait Mutate: Send {
+    /// The type of this state when pending a transaction commit.
     type Pending: Clone + Send;
 
+    /// Create a new transaction-specific version of this state.
     fn diverge(&self, txn_id: &TxnId) -> Self::Pending;
 
+    /// Canonicalize a transaction-specific version.
     async fn converge(&mut self, new_value: Self::Pending);
 }
 
+/// A generic impl of [`Mutate`], for convenience.
 pub struct Mutable<T: Clone + Send> {
     value: T,
 }
@@ -51,16 +58,14 @@ impl<T: Clone + Send> From<T> for Mutable<T> {
     }
 }
 
+/// An immutable read guard for a transactional state.
 pub struct TxnLockReadGuard<T: Mutate> {
     txn_id: TxnId,
     lock: TxnLock<T>,
 }
 
 impl<T: Mutate> TxnLockReadGuard<T> {
-    pub fn txn_id(&'_ self) -> &'_ TxnId {
-        &self.txn_id
-    }
-
+    /// Upgrade this read lock to a write lock.
     pub fn upgrade(self) -> TxnLockWriteFuture<T> {
         TxnLockWriteFuture {
             txn_id: self.txn_id,
@@ -106,12 +111,14 @@ impl<T: Mutate> Drop for TxnLockReadGuard<T> {
     }
 }
 
+/// An exclusive write lock for a transactional state.
 pub struct TxnLockWriteGuard<T: Mutate> {
     txn_id: TxnId,
     lock: TxnLock<T>,
 }
 
 impl<T: Mutate> TxnLockWriteGuard<T> {
+    /// Downgrade this write lock into a read lock;
     pub fn downgrade(self, txn_id: &'_ TxnId) -> TxnLockReadFuture<T> {
         if txn_id != &self.txn_id {
             panic!("Tried to downgrade into a different transaction!");
@@ -181,6 +188,7 @@ struct Inner<T: Mutate> {
     value_at: BTreeMap<TxnId, UnsafeCell<<T as Mutate>::Pending>>,
 }
 
+/// A lock which provides transaction-specific versions of the locked state.
 pub struct TxnLock<T: Mutate> {
     inner: Arc<Mutex<Inner<T>>>,
 }
@@ -194,6 +202,7 @@ impl<T: Mutate> Clone for TxnLock<T> {
 }
 
 impl<T: Mutate> TxnLock<T> {
+    /// Create a new lock.
     pub fn new(value: T) -> TxnLock<T> {
         let state = LockState {
             last_commit: None,
@@ -213,10 +222,7 @@ impl<T: Mutate> TxnLock<T> {
         }
     }
 
-    pub fn canonical(&'_ self) -> &'_ T {
-        unsafe { self.inner.lock().unwrap().value.get().as_ref().unwrap() }
-    }
-
+    /// Try to acquire a read lock synchronously.
     pub fn try_read(&self, txn_id: &TxnId) -> TCResult<Option<TxnLockReadGuard<T>>> {
         let lock = &mut self.inner.lock().unwrap();
 
@@ -255,6 +261,7 @@ impl<T: Mutate> TxnLock<T> {
         }
     }
 
+    /// Lock this state for reading at the given [`TxnId`].
     pub fn read<'a>(&self, txn_id: &'a TxnId) -> TxnLockReadFuture<'a, T> {
         TxnLockReadFuture {
             txn_id,
@@ -262,6 +269,7 @@ impl<T: Mutate> TxnLock<T> {
         }
     }
 
+    /// Try to acquire a write lock, synchronously.
     pub fn try_write(&self, txn_id: &TxnId) -> TCResult<Option<TxnLockWriteGuard<T>>> {
         let lock = &mut self.inner.lock().unwrap();
         let latest_reader = lock.state.readers.keys().max();
@@ -303,6 +311,7 @@ impl<T: Mutate> TxnLock<T> {
         }
     }
 
+    /// Lock this state for writing at the given [`TxnId`].
     pub fn write(&self, txn_id: TxnId) -> TxnLockWriteFuture<T> {
         TxnLockWriteFuture {
             txn_id,
@@ -361,6 +370,7 @@ impl<T: Mutate> Transact for TxnLock<T> {
     }
 }
 
+/// A read lock future.
 pub struct TxnLockReadFuture<'a, T: Mutate> {
     txn_id: &'a TxnId,
     lock: TxnLock<T>,
@@ -388,6 +398,7 @@ impl<'a, T: Mutate> Future for TxnLockReadFuture<'a, T> {
     }
 }
 
+/// A write lock future.
 pub struct TxnLockWriteFuture<T: Mutate> {
     txn_id: TxnId,
     lock: TxnLock<T>,

@@ -1,3 +1,5 @@
+//! User-defined class implementation.
+
 use std::collections::HashMap;
 use std::fmt;
 
@@ -13,6 +15,7 @@ use super::{InstanceExt, ObjectType};
 
 const PATH: PathLabel = path_label(&["state", "class"]);
 
+/// A user-defined class.
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct InstanceClass {
     extends: Option<Link>,
@@ -20,10 +23,12 @@ pub struct InstanceClass {
 }
 
 impl InstanceClass {
+    /// Construct a new subclass of the class at `extends` with the given instance data.
     pub fn new(extends: Option<Link>, proto: Map<Scalar>) -> Self {
         Self { extends, proto }
     }
 
+    /// Return the parent class of this class.
     pub fn extends(&self) -> Link {
         if let Some(link) = &self.extends {
             link.clone()
@@ -32,10 +37,12 @@ impl InstanceClass {
         }
     }
 
+    /// Consume this class and return its data.
     pub fn into_inner(self) -> (Option<Link>, Map<Scalar>) {
         (self.extends, self.proto)
     }
 
+    /// Return the instance data of this class.
     pub fn proto(&'_ self) -> &'_ Map<Scalar> {
         &self.proto
     }

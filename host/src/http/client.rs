@@ -16,11 +16,13 @@ use crate::txn::Txn;
 
 const IDLE_TIMEOUT: u64 = 30;
 
+/// A Tinychain HTTP client. Should only be used through a `Gateway`.
 pub struct Client {
     client: hyper::Client<HttpConnector, Body>,
 }
 
 impl Client {
+    /// Construct a new `Client`.
     pub fn new() -> Self {
         let client = hyper::Client::builder()
             .pool_idle_timeout(Duration::from_secs(IDLE_TIMEOUT))

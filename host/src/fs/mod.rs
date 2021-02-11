@@ -1,3 +1,5 @@
+//! The transactional filesystem interface. INCOMPLETE AND UNSTABLE.
+
 use std::fmt;
 use std::fs::Metadata;
 use std::io;

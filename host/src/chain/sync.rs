@@ -1,3 +1,7 @@
+//! A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
+//! event of a transaction failure.
+//! INCOMPLETE AND UNSTABLE.
+
 use std::convert::TryInto;
 
 use async_trait::async_trait;
@@ -13,13 +17,14 @@ use transact::{Transact, TxnId};
 use crate::fs;
 use crate::scalar::OpRef;
 
-use super::{ChainBlock, ChainInstance, Schema, Subject};
-use crate::chain::ChainType;
+use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject};
 
 const CHAIN: Label = label("chain");
 const SUBJECT: Label = label("subject");
 const BLOCK_ID: Label = label("0");
 
+/// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
+/// event of a transaction failure.
 #[derive(Clone)]
 pub struct SyncChain {
     schema: Schema,

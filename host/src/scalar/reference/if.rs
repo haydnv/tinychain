@@ -1,3 +1,5 @@
+//! Resolve a reference conditionally.
+
 use std::collections::HashSet;
 use std::fmt;
 
@@ -14,6 +16,7 @@ use crate::txn::Txn;
 
 use super::{Refer, TCRef};
 
+/// A conditional reference.
 #[derive(Clone, Eq, PartialEq)]
 pub struct IfRef {
     cond: TCRef,

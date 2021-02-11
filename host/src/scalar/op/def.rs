@@ -1,3 +1,5 @@
+//! User-defined [`OpDef`]s
+
 use std::fmt;
 use std::str::FromStr;
 
@@ -12,6 +14,7 @@ use crate::scalar::Scalar;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "op"]);
 
+/// The [`Class`] of a user-defined [`OpDef`].
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {
     Get,
@@ -66,11 +69,19 @@ impl fmt::Display for OpDefType {
     }
 }
 
+/// A GET handler.
 pub type GetOp = (Id, Vec<(Id, Scalar)>);
+
+/// A PUT handler.
 pub type PutOp = (Id, Id, Vec<(Id, Scalar)>);
+
+/// A POST handler.
 pub type PostOp = Vec<(Id, Scalar)>;
+
+/// A DELETE handler.
 pub type DeleteOp = (Id, Vec<(Id, Scalar)>);
 
+/// A user-defined operation.
 #[derive(Clone, Eq, PartialEq)]
 pub enum OpDef {
     Get(GetOp),

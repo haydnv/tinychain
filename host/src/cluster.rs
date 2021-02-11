@@ -1,3 +1,7 @@
+//! Maintains the consistency of the network by coordinating transaction commits.
+//!
+//! INCOMPLETE AND UNSTABLE.
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt;
@@ -26,8 +30,7 @@ use crate::scalar::{Link, OpRef, Scalar, TCRef, Value};
 use crate::state::State;
 use crate::txn::{Actor, Txn};
 
-pub const PATH: Label = label("cluster");
-
+/// The [`Class`] of a [`Cluster`].
 pub struct ClusterType;
 
 impl Class for ClusterType {
@@ -40,6 +43,7 @@ impl fmt::Display for ClusterType {
     }
 }
 
+/// The data structure responsible for Paxos synchronization per-transaction.
 #[derive(Clone)]
 pub struct Cluster {
     actor: Arc<Actor>,
@@ -75,6 +79,7 @@ impl Hash for Cluster {
 }
 
 impl Cluster {
+    /// Load a cluster from the filesystem, or instantiate a new one.
     pub async fn instantiate(
         class: InstanceClass,
         data_dir: fs::Dir,
@@ -84,6 +89,7 @@ impl Cluster {
         let path = path.ok_or_else(|| {
             TCError::unsupported("cluster config must specify the path of the cluster to host")
         })?;
+
         let path = path.into_path();
 
         let mut chain_schema = HashMap::new();

@@ -1,3 +1,5 @@
+//! Common Tinychain error types.
+
 use std::fmt;
 
 pub type TCResult<T> = Result<T, TCError>;
@@ -47,6 +49,7 @@ pub struct TCError {
 }
 
 impl TCError {
+    /// Returns a new error with the given code and message.
     pub fn new(code: ErrorType, message: String) -> Self {
         Self { code, message }
     }

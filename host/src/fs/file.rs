@@ -1,3 +1,5 @@
+//! A transactional file.
+
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
@@ -14,8 +16,8 @@ use transact::lock::{Mutable, TxnLock};
 use transact::{Transact, TxnId};
 
 use super::{file_name, Cache, CacheBlock, CacheLock, DirContents};
-use transact::fs::BlockId;
 
+/// A transactional file.
 #[derive(Clone)]
 pub struct File<B> {
     cache: Cache,
@@ -37,11 +39,13 @@ impl<B: fs::BlockData> File<B> {
         }
     }
 
+    /// Create a new [`File`] at the given path.
     pub fn new(cache: Cache, mut path: PathBuf, ext: &str) -> Self {
         path.set_extension(ext);
         Self::_new(cache, path, HashSet::new())
     }
 
+    /// Load a saved [`File`] from the given path.
     pub async fn load(cache: Cache, path: PathBuf, contents: DirContents) -> TCResult<Self> {
         if contents.iter().all(|(_, meta)| meta.is_file()) {
             let listing = contents
@@ -90,7 +94,7 @@ where
 {
     type Block = B;
 
-    async fn block_exists(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool> {
+    async fn block_exists(&self, txn_id: &TxnId, name: &fs::BlockId) -> TCResult<bool> {
         let listing = self.listing.read(txn_id).await?;
         Ok(listing.contains(name))
     }

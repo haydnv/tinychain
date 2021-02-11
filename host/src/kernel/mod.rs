@@ -1,31 +1,35 @@
+//! A host kernel, responsible for dispatching requests to the local host.
+
+use std::convert::TryInto;
+
 use error::*;
 use generic::*;
-use safecast::{Match, TryCastFrom, TryCastInto};
 
 use crate::cluster::Cluster;
 use crate::object::InstanceExt;
+use crate::route::Public;
 use crate::scalar::*;
 use crate::state::*;
 use crate::txn::*;
 
 mod hosted;
 
-use crate::route::Public;
 use hosted::Hosted;
 
-const CAPTURE: Label = label("capture");
-
+/// A host kernel, responsible for dispatching requests to the local host.
 pub struct Kernel {
     hosted: Hosted,
 }
 
 impl Kernel {
+    /// Construct a new `Kernel` to host the given [`Cluster`]s.
     pub fn new<I: IntoIterator<Item = InstanceExt<Cluster>>>(clusters: I) -> Self {
         Self {
             hosted: clusters.into_iter().collect(),
         }
     }
 
+    /// Route a GET request.
     pub async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         nonempty_path(path)?;
 
@@ -42,6 +46,7 @@ impl Kernel {
         }
     }
 
+    /// Route a PUT request.
     pub async fn put(
         &self,
         txn: &Txn,
@@ -61,13 +66,12 @@ impl Kernel {
         }
     }
 
+    /// Route a POST request.
     pub async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
         nonempty_path(path)?;
 
         if let Some((suffix, cluster)) = self.hosted.get(path) {
-            let params =
-                data.try_cast_into(|s| TCError::bad_request("POST params must be a map, not", s))?;
-
+            let params = data.try_into()?;
             txn.mutate((*cluster).clone()).await?;
             return cluster.post(txn, suffix, params).await;
         }
@@ -75,27 +79,7 @@ impl Kernel {
         match path[0].as_str() {
             "transact" if path.len() == 1 => Err(TCError::method_not_allowed(path[0].as_str())),
             "transact" if path.len() == 2 => match path[1].as_str() {
-                "execute" => {
-                    if data.matches::<Tuple<(Id, State)>>() {
-                        let data = Tuple::<(Id, State)>::try_cast_from(data, |s| {
-                            TCError::bad_request(
-                                "A transaction is a list of (Id, State) tuples, not",
-                                s,
-                            )
-                        })?;
-
-                        if data.is_empty() {
-                            return Ok(State::Tuple(Tuple::default()));
-                        }
-
-                        let capture = data.last().unwrap().0.clone();
-                        let executor = Executor::new(&txn, data);
-                        executor.capture(capture).await
-                    } else {
-                        let executor = Executor::new(&txn, vec![(CAPTURE.into(), data)]);
-                        executor.capture(CAPTURE.into()).await
-                    }
-                }
+                "execute" => Err(TCError::not_implemented("/transact/execute")),
                 "hypothetical" => Err(TCError::not_implemented("hypothetical queries")),
                 other => Err(TCError::not_found(other)),
             },

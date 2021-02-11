@@ -86,20 +86,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(config.log_level))
         .init();
 
-    let cache = fs::Cache::new(config.cache_size);
+    let (workspace, data_dir) = mount(config.workspace, config.data_dir, config.cache_size).await?;
 
-    let workspace = fs::load(cache.clone(), config.workspace).await?;
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
 
     let mut clusters = Vec::with_capacity(config.clusters.len());
     if !config.clusters.is_empty() {
         let txn_id = TxnId::new(Gateway::time());
 
-        let data_dir = config
-            .data_dir
-            .ok_or_else(|| TCError::internal("missing required option: --data_dir"))?;
-
-        let data_dir = fs::load(cache.clone(), data_dir).await?;
+        let data_dir = data_dir.ok_or_else(|| TCError::internal("the --data_dir option is required to host a Cluster"))?;
 
         for path in config.clusters {
             let config = tokio::fs::read(&path).await.unwrap();

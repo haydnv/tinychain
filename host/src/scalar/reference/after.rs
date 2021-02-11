@@ -1,3 +1,5 @@
+//! Delay resolving a [`TCRef`] until a given dependency is resolved.
+
 use std::collections::HashSet;
 use std::fmt;
 
@@ -14,6 +16,7 @@ use crate::txn::Txn;
 
 use super::{Refer, TCRef};
 
+/// Struct to delay resolving another reference(s) until some preliminary reference is resolved.
 #[derive(Clone, Eq, PartialEq)]
 pub struct After {
     when: TCRef,

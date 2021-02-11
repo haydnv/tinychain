@@ -1,3 +1,5 @@
+//! The HTTP interface for `Gateway`.
+
 mod client;
 mod server;
 

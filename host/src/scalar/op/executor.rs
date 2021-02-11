@@ -1,3 +1,5 @@
+//! An executor for am `OpDef`
+
 use std::collections::{HashMap, HashSet};
 
 use futures::future::FutureExt;
@@ -10,6 +12,7 @@ use crate::scalar::reference::Refer;
 use crate::state::State;
 use crate::txn::Txn;
 
+/// An `OpDef` executor.
 #[derive(Clone)]
 pub struct Executor<'a> {
     txn: &'a Txn,
@@ -17,12 +20,14 @@ pub struct Executor<'a> {
 }
 
 impl<'a> Executor<'a> {
+    /// Construct a new `Executor` with the given [`Txn`] context and initial state.
     pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(txn: &'a Txn, iter: I) -> Self {
         let state = iter.into_iter().map(|(id, s)| (id, s.into())).collect();
 
         Self { txn, state }
     }
 
+    /// Resolve the state of the variable `capture`, including any of its dependencies.
     pub async fn capture(mut self, capture: Id) -> TCResult<State> {
         while self.resolve_id(&capture)?.is_ref() {
             let mut pending = Vec::with_capacity(self.state.len());

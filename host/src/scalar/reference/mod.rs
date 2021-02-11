@@ -1,3 +1,5 @@
+/// Utilities to reference to a [`State`] within a [`Txn`], and resolve that [`TCRef`].
+
 use std::collections::HashSet;
 use std::fmt;
 
@@ -27,13 +29,17 @@ pub use r#if::IfRef;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref"]);
 
+/// Trait defining dependencies and a resolution method for a [`TCRef`].
 #[async_trait]
 pub trait Refer {
+    /// Add the dependency [`Id`]s of this reference to the given set.
     fn requires(&self, deps: &mut HashSet<Id>);
 
+    /// Resolve this reference with respect to the given context.
     async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State>;
 }
 
+/// The [`Class`] of a [`TCRef`].
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RefType {
     After,
@@ -84,6 +90,8 @@ impl fmt::Display for RefType {
     }
 }
 
+
+/// A reference to a `State`.
 #[derive(Clone, Eq, PartialEq)]
 pub enum TCRef {
     After(Box<After>),

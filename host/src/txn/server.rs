@@ -1,3 +1,5 @@
+//! A server to keep track of active transactions.
+
 use std::collections::hash_map::{Entry, HashMap};
 use std::sync::Arc;
 use std::thread;
@@ -14,6 +16,7 @@ use crate::gateway::Gateway;
 use super::request::*;
 use super::{Txn, TxnId};
 
+/// Server to keep track of the transactions currently active for this host.
 #[derive(Clone)]
 pub struct TxnServer {
     active: RwLock<HashMap<TxnId, Txn>>,
@@ -22,6 +25,7 @@ pub struct TxnServer {
 }
 
 impl TxnServer {
+    /// Construct a new `TxnServer`.
     pub async fn new(workspace: fs::Dir) -> Self {
         let (sender, mut receiver) = mpsc::unbounded_channel();
 
@@ -49,6 +53,7 @@ impl TxnServer {
         }
     }
 
+    /// Return the active `Txn` with the given [`TxnId`], or initiate a new [`Txn`].
     pub async fn new_txn(
         &self,
         gateway: Arc<Gateway>,

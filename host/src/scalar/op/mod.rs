@@ -1,3 +1,5 @@
+/// User-defined [`OpDef`]s.
+
 mod def;
 mod executor;
 

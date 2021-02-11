@@ -1,3 +1,5 @@
+//! The transaction context [`Txn`].
+
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -31,6 +33,7 @@ struct Inner {
     txn_server: mpsc::UnboundedSender<TxnId>,
 }
 
+/// A transaction context.
 #[derive(Clone)]
 pub struct Txn {
     inner: Arc<Inner>,
@@ -61,6 +64,7 @@ impl Txn {
         }
     }
 
+    /// Claim ownership of this transaction.
     pub async fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
         if self.owner().is_none() {
             let token = self.request.token.clone();
@@ -87,6 +91,7 @@ impl Txn {
         }
     }
 
+    /// Check if the cluster at the specified path on this host is the owner of the transaction.
     pub fn is_owner(&self, cluster_path: TCPathBuf) -> bool {
         if let Some((host, owner_id)) = self.owner() {
             let cluster_link = Link::from((self.inner.gateway.root().clone(), cluster_path));
@@ -96,6 +101,7 @@ impl Txn {
         }
     }
 
+    /// Return the owner of this transaction, if there is one.
     pub fn owner(&self) -> Option<(&Link, &Value)> {
         for (host, actor, scopes) in self.request.claims.iter() {
             if scopes.contains(&SCOPE_ROOT.into()) {
@@ -106,15 +112,18 @@ impl Txn {
         None
     }
 
+    /// Return the [`Request`] which initiated this transaction on this host.
     pub fn request(&'_ self) -> &'_ Request {
         &self.request
     }
 
+    /// Return the [`Scope`]s which the given user is authorized for on this transaction.
     pub fn scopes(&'_ self, actor_id: &Value) -> Option<&Vec<Scope>> {
         let host = Link::from(self.inner.gateway.root().clone());
         self.request.claims.get(&host, actor_id)
     }
 
+    /// Register the state of the given [`Cluster`] for synchronization with this transaction.
     pub async fn mutate(&self, cluster: Cluster) -> TCResult<()> {
         let mut mutated = self.inner.mutated.write().await;
         if mutated.contains(&cluster) {
@@ -135,14 +144,17 @@ impl Txn {
         Ok(())
     }
 
+    /// Resolve a GET op within this transaction context.
     pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
         self.inner.gateway.get(self, link, key).await
     }
 
+    /// Resolve a PUT op within this transaction context.
     pub async fn put(&self, link: Link, key: Value, value: State) -> TCResult<()> {
         self.inner.gateway.put(self, link, key, value).await
     }
 
+    /// Resolve a POST op within this transaction context.
     pub async fn post(&self, link: Link, params: State) -> TCResult<State> {
         self.inner.gateway.post(self, link, params).await
     }

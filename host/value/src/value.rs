@@ -1,3 +1,5 @@
+//! A generic [`Value`] which supports collation
+
 use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
