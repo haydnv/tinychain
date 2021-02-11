@@ -94,7 +94,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if !config.clusters.is_empty() {
         let txn_id = TxnId::new(Gateway::time());
 
-        let data_dir = data_dir.ok_or_else(|| TCError::internal("the --data_dir option is required to host a Cluster"))?;
+        let data_dir = data_dir.ok_or_else(|| {
+            TCError::internal("the --data_dir option is required to host a Cluster")
+        })?;
 
         for path in config.clusters {
             let config = tokio::fs::read(&path).await.unwrap();

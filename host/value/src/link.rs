@@ -423,12 +423,13 @@ impl FromStr for Link {
             });
         } else if !s.starts_with("http://") {
             return Err(TCError::bad_request("Unable to parse Link protocol", s));
-        } else if s.ends_with('/') {
-            return Err(TCError::bad_request(
-                "Link is not allowed to end with a '/'",
-                s,
-            ));
         }
+
+        let s = if s.ends_with('/') {
+            &s[..s.len() - 1]
+        } else {
+            s
+        };
 
         let segments: Vec<&str> = s.split('/').collect();
         if segments.is_empty() {

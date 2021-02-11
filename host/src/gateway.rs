@@ -38,35 +38,16 @@ pub trait Client {
     ) -> TCResult<T>;
 
     /// Read a [`State`].
-    async fn get(&self, txn: Txn, link: Link, key: Value, auth: Option<String>) -> TCResult<State>;
+    async fn get(&self, txn: Txn, link: Link, key: Value) -> TCResult<State>;
 
     /// Set `key` = `value` within the state referred to by `link`.
-    async fn put(
-        &self,
-        txn_id: Txn,
-        link: Link,
-        key: Value,
-        value: State,
-        auth: Option<String>,
-    ) -> TCResult<()>;
+    async fn put(&self, txn_id: Txn, link: Link, key: Value, value: State) -> TCResult<()>;
 
     /// Execute a remote POST op.
-    async fn post(
-        &self,
-        txn: Txn,
-        link: Link,
-        params: State,
-        auth: Option<String>,
-    ) -> TCResult<State>;
+    async fn post(&self, txn: Txn, link: Link, params: State) -> TCResult<State>;
 
     /// Delete `key` from the state referred to by `link`.
-    async fn delete(
-        &self,
-        txn_id: TxnId,
-        link: Link,
-        key: Value,
-        auth: Option<String>,
-    ) -> TCResult<()>;
+    async fn delete(&self, txn_id: &Txn, link: Link, key: Value) -> TCResult<()>;
 }
 
 /// A server used by [`Gateway`].
@@ -160,10 +141,7 @@ impl Gateway {
             }
             None => self.kernel.get(txn, subject.path(), key).await,
             Some(host) if host == self.root() => self.kernel.get(txn, subject.path(), key).await,
-            _ => {
-                let auth = None; // TODO
-                self.client.get(txn.clone(), subject, key, auth).await
-            }
+            _ => self.client.get(txn.clone(), subject, key).await,
         }
     }
 
@@ -181,12 +159,7 @@ impl Gateway {
                 Some(host) if host == self.root() => {
                     self.kernel.put(txn, link.path(), key, value).await
                 }
-                _ => {
-                    let auth = None; // TODO
-                    self.client
-                        .put(txn.clone(), link, key, value, auth)
-                        .await
-                }
+                _ => self.client.put(txn.clone(), link, key, value).await,
             }
         })
     }
@@ -195,13 +168,8 @@ impl Gateway {
     pub async fn post(&self, txn: &Txn, link: Link, params: State) -> TCResult<State> {
         match link.host() {
             None => self.kernel.post(txn, link.path(), params).await,
-            Some(host) if host == self.root() => {
-                self.kernel.post(txn, link.path(), params).await
-            }
-            _ => {
-                let auth = None; // TODO
-                self.client.post(txn.clone(), link, params, auth).await
-            }
+            Some(host) if host == self.root() => self.kernel.post(txn, link.path(), params).await,
+            _ => self.client.post(txn.clone(), link, params).await,
         }
     }
 

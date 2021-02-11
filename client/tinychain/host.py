@@ -99,7 +99,7 @@ class Local(Host):
     def __init__(self, workspace, data_dir=None, clusters=[]):
         if clusters and data_dir is None:
             raise ValueError("Hosting a cluster requires specifying a data_dir")
-        else:
+        elif data_dir:
             data_dir = pathlib.Path(data_dir)
             if not data_dir.exists():
                 raise ValueError(f"{data_dir} does not exist")
@@ -107,27 +107,8 @@ class Local(Host):
                 raise ValueError(f"{data_dir} is not a directory")
 
         Host.__init__(self, self.ADDRESS)
+
         self._process = None
-
-        for cluster in clusters:
-            cluster_path = uri(cluster).append(cluster.__version__)
-            full_path = pathlib.Path(str(data_dir) + str(cluster_path))
-
-            if not full_path.parent.exists():
-                os.makedirs(full_path.parent)
-
-            if full_path.exists():
-                with open(full_path) as f:
-                    try:
-                        if json.load(f) == to_json(cluster):
-                            continue
-                    except json.decoder.JSONDecodeError:
-                        pass
-
-                raise RuntimeError(f"There is already an entry at {cluster_path}")
-            else:
-                with open(full_path, 'w') as cluster_file:
-                    cluster_file.write(json.dumps(to_json(cluster), indent=4))
 
         self.clusters = clusters
         self.data_dir = data_dir
@@ -145,6 +126,12 @@ class Local(Host):
             f"--http_port={port}",
             f"--log_level={log_level}",
         ]
+
+        if self.data_dir:
+            args.append(f"--data_dir={self.data_dir}")
+
+        args.extend([f"--cluster={cluster}" for cluster in self.clusters])
+
         self._process = subprocess.Popen(args)
         time.sleep(__class__.STARTUP_TIME)
 

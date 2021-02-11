@@ -16,13 +16,15 @@ class ExampleCluster(tc.Cluster, metaclass=tc.Meta):
 
 class ClusterTests(unittest.TestCase):
     def testStartup(self):
+        cluster_config = "../config/example"
+        tc.write_cluster(ExampleCluster, cluster_config)
 
         host = tc.host.Local(
             workspace="/tmp/tc/tmp",
             data_dir="/tmp/tc/data",
-            clusters=[ExampleCluster])
+            clusters=[cluster_config])
 
-        host.start(TC_PATH, PORT)
+        host.start(TC_PATH, PORT, log_level="debug")
         print(host.get("/app/example/rev"))
 
 

@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use hyper::body::{Body, HttpBody};
 use hyper::client::HttpConnector;
+use log::debug;
 use serde::de::DeserializeOwned;
+use url::Url;
 
 use error::*;
 use generic::label;
@@ -41,7 +43,8 @@ impl crate::gateway::Client for Client {
         link: &Link,
         key: &Value,
     ) -> TCResult<T> {
-        let uri = uri(txn_id, link, key)?;
+        let uri = url(link, txn_id, key)?;
+        debug!("FETCH {}", uri);
         let req = req_builder("GET", uri, None);
 
         let response = self
@@ -72,9 +75,9 @@ impl crate::gateway::Client for Client {
         }
     }
 
-    async fn get(&self, txn: Txn, link: Link, key: Value, auth: Option<String>) -> TCResult<State> {
-        let uri = uri(txn.id(), &link, &key)?;
-        let req = req_builder("GET", uri, auth);
+    async fn get(&self, txn: Txn, link: Link, key: Value) -> TCResult<State> {
+        let uri = url(&link, txn.id(), &key)?;
+        let req = req_builder("GET", uri, Some(txn.request().token()));
 
         let response = self
             .client
@@ -94,16 +97,9 @@ impl crate::gateway::Client for Client {
         }
     }
 
-    async fn put(
-        &self,
-        txn: Txn,
-        link: Link,
-        key: Value,
-        value: State,
-        auth: Option<String>,
-    ) -> TCResult<()> {
-        let uri = uri(txn.id(), &link, &key)?;
-        let req = req_builder("PUT", uri, auth);
+    async fn put(&self, txn: Txn, link: Link, key: Value, value: State) -> TCResult<()> {
+        let uri = url(&link, txn.id(), &key)?;
+        let req = req_builder("PUT", uri, Some(txn.request().token()));
 
         let body = destream_json::encode(value.into_view(txn))
             .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
@@ -122,14 +118,10 @@ impl crate::gateway::Client for Client {
         }
     }
 
-    async fn post(
-        &self,
-        txn: Txn,
-        link: Link,
-        params: State,
-        auth: Option<String>,
-    ) -> TCResult<State> {
-        let req = req_builder("POST", link.to_string(), auth);
+    async fn post(&self, txn: Txn, link: Link, params: State) -> TCResult<State> {
+        let url =
+            Url::parse(&link.to_string()).map_err(|e| TCError::bad_request("invalid URL", e))?;
+        let req = req_builder("POST", url, Some(txn.request().token()));
 
         let subcontext = txn.subcontext(label("_params").into()).await?;
         let body = destream_json::encode(params.into_view(subcontext))
@@ -153,15 +145,9 @@ impl crate::gateway::Client for Client {
         }
     }
 
-    async fn delete(
-        &self,
-        txn_id: TxnId,
-        link: Link,
-        key: Value,
-        auth: Option<String>,
-    ) -> TCResult<()> {
-        let uri = uri(&txn_id, &link, &key)?;
-        let req = req_builder("GET", uri, auth);
+    async fn delete(&self, txn: &Txn, link: Link, key: Value) -> TCResult<()> {
+        let uri = url(&link, txn.id(), &key)?;
+        let req = req_builder("GET", uri, Some(txn.request().token()));
 
         let response = self
             .client
@@ -178,19 +164,26 @@ impl crate::gateway::Client for Client {
     }
 }
 
-fn uri(txn_id: &TxnId, link: &Link, key: &Value) -> TCResult<String> {
-    if key.is_none() {
-        Ok(format!("{}?txn_id={}", link, txn_id))
-    } else {
+fn url(link: &Link, txn_id: &TxnId, key: &Value) -> TCResult<Url> {
+    let mut url =
+        Url::parse(&link.to_string()).map_err(|e| TCError::bad_request("invalid URL", e))?;
+    url.query_pairs_mut()
+        .append_pair("txn_id", &txn_id.to_string());
+
+    if key.is_some() {
         let key_json = serde_json::to_string(&key)
             .map_err(|_| TCError::bad_request("unable to encode key", key))?;
 
-        Ok(format!("{}?txn_id={}&key={}", link, txn_id, key_json))
+        url.query_pairs_mut().append_pair("key", &key_json);
     }
+
+    Ok(url)
 }
 
-fn req_builder(method: &str, uri: String, auth: Option<String>) -> http::request::Builder {
-    let req = hyper::Request::builder().method(method).uri(uri);
+fn req_builder(method: &str, url: Url, auth: Option<&str>) -> http::request::Builder {
+    let req = hyper::Request::builder()
+        .method(method)
+        .uri(url.to_string());
 
     if let Some(token) = auth {
         req.header("Authorization: Bearer {}", token)

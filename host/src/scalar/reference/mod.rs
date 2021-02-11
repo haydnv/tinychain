@@ -1,5 +1,4 @@
 /// Utilities to reference to a [`State`] within a [`Txn`], and resolve that [`TCRef`].
-
 use std::collections::HashSet;
 use std::fmt;
 
@@ -89,7 +88,6 @@ impl fmt::Display for RefType {
         }
     }
 }
-
 
 /// A reference to a `State`.
 #[derive(Clone, Eq, PartialEq)]

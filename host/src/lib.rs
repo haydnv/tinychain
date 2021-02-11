@@ -35,7 +35,11 @@ pub mod state;
 pub mod txn;
 
 /// Initialize the transactional filesystem layer.
-pub async fn mount(workspace: PathBuf, data_dir: Option<PathBuf>, cache_size: usize) -> error::TCResult<(fs::Dir, Option<fs::Dir>)> {
+pub async fn mount(
+    workspace: PathBuf,
+    data_dir: Option<PathBuf>,
+    cache_size: usize,
+) -> error::TCResult<(fs::Dir, Option<fs::Dir>)> {
     let cache = fs::Cache::new(cache_size);
 
     let workspace = fs::load(cache.clone(), workspace).await?;
