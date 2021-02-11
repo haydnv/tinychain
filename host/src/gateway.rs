@@ -1,8 +1,10 @@
 use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use serde::de::DeserializeOwned;
 
 use error::*;
@@ -14,6 +16,12 @@ use crate::kernel::Kernel;
 use crate::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
 use crate::txn::*;
+
+pub struct Config {
+    pub addr: IpAddr,
+    pub http_port: u16,
+    pub request_ttl: Duration,
+}
 
 #[async_trait]
 pub trait Client {
@@ -60,12 +68,12 @@ pub trait Server {
 }
 
 pub struct Gateway {
+    config: Config,
     kernel: Kernel,
     txn_server: TxnServer,
-    addr: IpAddr,
-    http_port: u16,
     root: LinkHost,
     client: http::Client,
+    actor: Actor,
 }
 
 impl Gateway {
@@ -73,16 +81,20 @@ impl Gateway {
         NetworkTime::now()
     }
 
-    pub fn new(kernel: Kernel, txn_server: TxnServer, addr: IpAddr, http_port: u16) -> Arc<Self> {
-        let root = LinkHost::from((LinkProtocol::HTTP, addr.clone(), Some(http_port)));
+    pub fn new(config: Config, kernel: Kernel, txn_server: TxnServer) -> Arc<Self> {
+        let root = LinkHost::from((
+            LinkProtocol::HTTP,
+            config.addr.clone(),
+            Some(config.http_port),
+        ));
 
         Arc::new(Self {
+            config,
             kernel,
-            addr,
             txn_server,
-            http_port,
             root,
             client: http::Client::new(),
+            actor: Actor::new(Link::default().into()),
         })
     }
 
@@ -91,6 +103,25 @@ impl Gateway {
     }
 
     pub async fn new_txn(self: &Arc<Self>, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
+        let token = if let Some(token) = token {
+            use rjwt::Resolve;
+            Resolver::new(self, &txn_id)
+                .consume_and_sign(&self.actor, vec![], token, txn_id.time().into())
+                .map_err(TCError::unauthorized)
+                .await?
+        } else {
+            let token = Token::new(
+                self.root.clone().into(),
+                txn_id.time().into(),
+                self.config.request_ttl,
+                self.actor.id().clone(),
+                vec![],
+            );
+            let signed = self.actor.sign_token(&token).map_err(TCError::internal)?;
+            let claims = token.claims();
+            (signed, claims)
+        };
+
         self.txn_server.new_txn(self.clone(), txn_id, token).await
     }
 
@@ -105,6 +136,10 @@ impl Gateway {
 
     pub async fn get(&self, txn: &Txn, subject: Link, key: Value) -> TCResult<State> {
         match subject.host() {
+            None if subject.path().is_empty() => {
+                let public_key = Bytes::from(self.actor.public_key().as_bytes().to_vec());
+                Ok(State::from(Value::from(public_key)))
+            }
             None => self.kernel.get(txn, subject.path(), key).await,
             Some(host) if host == self.root() => self.kernel.get(txn, subject.path(), key).await,
             _ => {
@@ -154,8 +189,7 @@ impl Gateway {
         self: Arc<Self>,
     ) -> std::pin::Pin<Box<impl futures::Future<Output = Result<(), Box<dyn std::error::Error>>>>>
     {
-        let port = self.http_port;
-        let http_addr = (self.addr, port).into();
+        let http_addr = (self.config.addr, self.config.http_port).into();
         let server = crate::http::HTTPServer::new(self);
         let listener = server.listen(http_addr).map_err(|e| {
             let e: Box<dyn std::error::Error> = Box::new(e);

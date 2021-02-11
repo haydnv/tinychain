@@ -15,13 +15,13 @@ pub type Token = rjwt::Token<Link, Value, Vec<Scope>>;
 pub const SCOPE_ROOT: PathLabel = path_label(&[]);
 
 pub struct Request {
-    pub token: Token,
+    pub token: String,
     pub claims: Claims,
     pub txn_id: TxnId,
 }
 
 impl Request {
-    pub fn new(txn_id: TxnId, token: Token, claims: Claims) -> Self {
+    pub fn new(txn_id: TxnId, token: String, claims: Claims) -> Self {
         Self {
             token,
             claims,
@@ -33,7 +33,7 @@ impl Request {
         &self.claims
     }
 
-    pub fn token(&self) -> &Token {
+    pub fn token(&self) -> &str {
         &self.token
     }
 }

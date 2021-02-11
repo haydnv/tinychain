@@ -372,6 +372,12 @@ impl<'en> IntoStream<'en> for Value {
     }
 }
 
+impl From<Bytes> for Value {
+    fn from(bytes: Bytes) -> Value {
+        Value::Bytes(bytes)
+    }
+}
+
 impl From<Link> for Value {
     fn from(link: Link) -> Value {
         Value::Link(link)

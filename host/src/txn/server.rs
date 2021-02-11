@@ -1,25 +1,18 @@
 use std::collections::hash_map::{Entry, HashMap};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
-use futures::TryFutureExt;
 use futures_locks::RwLock;
 use tokio::sync::mpsc;
 
 use error::*;
-use generic::{path_label, PathLabel, TCPathBuf};
 use transact::Transact;
 
 use crate::fs;
 use crate::gateway::Gateway;
-use crate::scalar::Link;
 
 use super::request::*;
 use super::{Txn, TxnId};
-
-const DEFAULT_TTL: u64 = 30;
-const PATH: PathLabel = path_label(&["host", "txn"]);
 
 #[derive(Clone)]
 pub struct TxnServer {
@@ -60,11 +53,9 @@ impl TxnServer {
         &self,
         gateway: Arc<Gateway>,
         txn_id: TxnId,
-        token: Option<String>,
+        token: (String, Claims),
     ) -> TCResult<Txn> {
         let mut active = self.active.write().await;
-
-        let actor_id = Link::from(Self::txn_path(&txn_id)).into();
 
         match active.entry(txn_id) {
             Entry::Occupied(entry) => {
@@ -73,28 +64,7 @@ impl TxnServer {
                 Ok(txn.clone())
             }
             Entry::Vacant(entry) => {
-                use rjwt::Resolve;
-
-                let scopes: Vec<Scope> = vec![SCOPE_ROOT.into()];
-                let (token, claims) = if let Some(token) = token {
-                    Resolver::new(&gateway, &txn_id)
-                        .consume(actor_id, scopes, token, txn_id.time().into())
-                        .map_err(TCError::unauthorized)
-                        .await?
-                } else {
-                    let token: Token = Token::new(
-                        gateway.root().clone().into(),
-                        txn_id.time().into(),
-                        Duration::from_secs(DEFAULT_TTL),
-                        actor_id,
-                        scopes,
-                    );
-
-                    let claims = token.claims();
-                    (token, claims)
-                };
-
-                let request = Request::new(txn_id, token, claims);
+                let request = Request::new(txn_id, token.0, token.1);
                 let txn = Txn::new(
                     self.sender.clone(),
                     gateway,
@@ -105,9 +75,5 @@ impl TxnServer {
                 Ok(txn)
             }
         }
-    }
-
-    fn txn_path(txn_id: &TxnId) -> TCPathBuf {
-        TCPathBuf::from(PATH).append(txn_id.to_id())
     }
 }

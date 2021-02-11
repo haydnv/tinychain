@@ -68,9 +68,20 @@ struct Config {
     pub http_port: u16,
 }
 
+impl Config {
+    fn gateway(&self) -> gateway::Config {
+        gateway::Config {
+            addr: self.address,
+            http_port: self.http_port,
+            request_ttl: self.request_ttl,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = Config::from_args();
+    let gateway_config = config.gateway();
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(config.log_level))
         .init();
@@ -107,8 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     let kernel = tinychain::Kernel::new(clusters);
-    let gateway =
-        tinychain::gateway::Gateway::new(kernel, txn_server, config.address, config.http_port);
+    let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
     if let Err(cause) = gateway.listen().await {
         log::error!("Server error: {}", cause);
