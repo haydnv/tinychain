@@ -79,7 +79,7 @@ impl<'a> rjwt::Resolve for Resolver<'a> {
     type Claims = Vec<Scope>;
 
     fn host(&self) -> Link {
-        self.gateway.root()
+        self.gateway.root().clone().into()
     }
 
     async fn resolve(&self, host: &Link, actor_id: &Value) -> Result<Actor, rjwt::Error> {

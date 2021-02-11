@@ -25,13 +25,14 @@ impl Kernel {
         }
     }
 
-    pub async fn get(&self, _txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
+    pub async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if let Some(class) = StateType::from_path(path) {
             let err = format!("Cannot cast into {} from {}", class, key);
             State::Scalar(Scalar::Value(key))
                 .into_type(class)
                 .ok_or_else(|| TCError::unsupported(err))
-        } else if let Some((_suffix, _cluster)) = self.hosted.get(path) {
+        } else if let Some((_suffix, cluster)) = self.hosted.get(path) {
+            txn.mutate((*cluster).clone()).await;
             Err(TCError::not_implemented("Kernel::get from Cluster"))
         } else {
             Err(TCError::not_found(TCPath::from(path)))

@@ -6,7 +6,7 @@ use bytes::Bytes;
 use error::*;
 use generic::*;
 use safecast::CastFrom;
-use transact::TxnId;
+use transact::{Transact, TxnId};
 use value::Value;
 
 use crate::fs;
@@ -36,6 +36,21 @@ impl CastFrom<Value> for Schema {
 #[derive(Clone)]
 pub enum Subject {
     Value(fs::File<Bytes>),
+}
+
+#[async_trait]
+impl Transact for Subject {
+    async fn commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::Value(file) => file.commit(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Value(file) => file.finalize(txn_id).await,
+        }
+    }
 }
 
 #[async_trait]
@@ -99,6 +114,21 @@ impl ChainInstance for Chain {
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
         match self {
             Self::Sync(chain) => chain.append(txn_id, op_ref).await,
+        }
+    }
+}
+
+#[async_trait]
+impl Transact for Chain {
+    async fn commit(&self, txn_id: &TxnId) {
+        match self {
+            Self::Sync(chain) => chain.commit(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Sync(chain) => chain.finalize(txn_id).await,
         }
     }
 }

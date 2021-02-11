@@ -39,11 +39,11 @@ impl TxnServer {
             use futures::executor::block_on;
 
             while let Some(txn_id) = block_on(receiver.recv()) {
-                if let Some(_txn) = { block_on(active_clone.write()).remove(&txn_id) } {
+                let txn: Option<Txn> = { block_on(active_clone.write()).remove(&txn_id) };
+                if let Some(txn) = txn {
                     // TODO: implement delete
                     // block_on(workspace_clone.delete(txn_id, txn_id.to_path())).unwrap();
-                    // TODO: implement Txn::finalize
-                    // block_on(txn.finalize());
+                    block_on(txn.finalize(&txn_id));
                     block_on(workspace_clone.finalize(&txn_id));
                 }
             }
@@ -83,7 +83,7 @@ impl TxnServer {
                         .await?
                 } else {
                     let token: Token = <Token as TokenExt>::new(
-                        gateway.root().into(),
+                        gateway.root().clone().into(),
                         txn_id.time().into(),
                         Duration::from_secs(DEFAULT_TTL),
                         actor_id,

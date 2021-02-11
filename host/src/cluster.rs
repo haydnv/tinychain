@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
+use async_trait::async_trait;
+use futures::future::join_all;
 use futures::TryFutureExt;
 
 use error::*;
 use generic::*;
 use safecast::TryCastInto;
 use transact::fs::{Dir, Persist};
-use transact::TxnId;
+use transact::{Transact, TxnId};
 use value::Value;
 
 use crate::chain::{Chain, ChainType, SyncChain};
@@ -34,6 +37,20 @@ impl fmt::Display for ClusterType {
 pub struct Cluster {
     path: TCPathBuf,
     chains: Map<Chain>,
+}
+
+impl Eq for Cluster {}
+
+impl PartialEq for Cluster {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl Hash for Cluster {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state)
+    }
 }
 
 impl Cluster {
@@ -113,7 +130,9 @@ impl Cluster {
             path: path.clone(),
             chains: chains.into(),
         };
+
         let class = InstanceClass::new(Some(path.into()), cluster_proto.into());
+
         Ok(InstanceExt::new(cluster, class))
     }
 
@@ -127,6 +146,17 @@ impl Instance for Cluster {
 
     fn class(&self) -> Self::Class {
         ClusterType
+    }
+}
+
+#[async_trait]
+impl Transact for Cluster {
+    async fn commit(&self, txn_id: &TxnId) {
+        join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        join_all(self.chains.values().map(|chain| chain.finalize(txn_id))).await;
     }
 }
 

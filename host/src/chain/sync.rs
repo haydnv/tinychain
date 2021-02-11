@@ -2,12 +2,13 @@ use std::convert::TryInto;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::join;
 
 use error::*;
 use generic::{label, Instance, Label};
 use log::debug;
 use transact::fs::{Dir, File, Persist};
-use transact::TxnId;
+use transact::{Transact, TxnId};
 
 use crate::fs;
 use crate::scalar::OpRef;
@@ -89,5 +90,16 @@ impl Persist for SyncChain {
             subject,
             file,
         })
+    }
+}
+
+#[async_trait]
+impl Transact for SyncChain {
+    async fn commit(&self, txn_id: &TxnId) {
+        join!(self.subject.commit(txn_id), self.file.commit(txn_id));
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        join!(self.subject.finalize(txn_id), self.file.finalize(txn_id));
     }
 }

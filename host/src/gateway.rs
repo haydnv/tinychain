@@ -67,6 +67,7 @@ pub struct Gateway {
     txn_server: TxnServer,
     addr: IpAddr,
     http_port: u16,
+    root: LinkHost,
     client: http::Client,
 }
 
@@ -79,12 +80,15 @@ impl Gateway {
         let actor_id = Value::from(Link::from(TCPathBuf::from(PATH)));
         let actor = Actor::new(actor_id);
 
+        let root = LinkHost::from((LinkProtocol::HTTP, addr.clone(), Some(http_port)));
+
         Arc::new(Self {
             actor,
             kernel,
             addr,
             txn_server,
             http_port,
+            root,
             client: http::Client::new(),
         })
     }
@@ -94,12 +98,12 @@ impl Gateway {
             .actor
             .sign_token(txn.request().token())
             .map_err(TCError::internal)?;
+
         Ok(Some(signed))
     }
 
-    pub fn root(&self) -> Link {
-        let host = LinkHost::from((LinkProtocol::HTTP, self.addr.clone(), Some(self.http_port)));
-        host.into()
+    pub fn root(&self) -> &LinkHost {
+        &self.root
     }
 
     pub async fn new_txn(self: &Arc<Self>, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
@@ -116,31 +120,41 @@ impl Gateway {
     }
 
     pub async fn get(&self, txn: &Txn, subject: Link, key: Value) -> TCResult<State> {
-        if subject.host().is_none() {
-            self.kernel.get(txn, subject.path(), key).await
-        } else {
-            let auth = self.sign_token(txn)?;
-            self.client.get(txn.clone(), subject, key, auth).await
+        match subject.host() {
+            None => self.kernel.get(txn, subject.path(), key).await,
+            Some(host) if host == self.root() => self.kernel.get(txn, subject.path(), key).await,
+            _ => {
+                let auth = self.sign_token(txn)?;
+                self.client.get(txn.clone(), subject, key, auth).await
+            }
         }
     }
 
     pub async fn put(&self, txn: &Txn, subject: Link, key: Value, value: State) -> TCResult<()> {
-        if subject.host().is_none() {
-            self.kernel.put(txn, subject.path(), key, value).await
-        } else {
-            let auth = self.sign_token(txn)?;
-            self.client
-                .put(txn.clone(), subject, key, value, auth)
-                .await
+        match subject.host() {
+            None => self.kernel.put(txn, subject.path(), key, value).await,
+            Some(host) if host == self.root() => {
+                self.kernel.put(txn, subject.path(), key, value).await
+            }
+            _ => {
+                let auth = self.sign_token(txn)?;
+                self.client
+                    .put(txn.clone(), subject, key, value, auth)
+                    .await
+            }
         }
     }
 
     pub async fn post(&self, txn: &Txn, subject: Link, params: State) -> TCResult<State> {
-        if subject.host().is_none() {
-            self.kernel.post(txn, subject.path(), params).await
-        } else {
-            let auth = self.sign_token(txn)?;
-            self.client.post(txn.clone(), subject, params, auth).await
+        match subject.host() {
+            None => self.kernel.post(txn, subject.path(), params).await,
+            Some(host) if host == self.root() => {
+                self.kernel.post(txn, subject.path(), params).await
+            }
+            _ => {
+                let auth = self.sign_token(txn)?;
+                self.client.post(txn.clone(), subject, params, auth).await
+            }
         }
     }
 

@@ -1,13 +1,17 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::future::join_all;
+use futures_locks::RwLock;
 use tokio::sync::mpsc;
 
 use error::*;
 use generic::Id;
 use transact::fs::Dir;
-pub use transact::{Transaction, TxnId};
+pub use transact::{Transact, Transaction, TxnId};
 
+use crate::cluster::Cluster;
 use crate::fs;
 use crate::gateway::Gateway;
 use crate::scalar::{Link, Value};
@@ -23,6 +27,7 @@ pub use server::*;
 struct Inner {
     gateway: Arc<Gateway>,
     request: Arc<Request>,
+    mutated: RwLock<HashSet<Cluster>>,
     txn_server: mpsc::UnboundedSender<TxnId>,
 }
 
@@ -40,9 +45,12 @@ impl Txn {
         request: Request,
     ) -> Self {
         let request = Arc::new(request);
+        let mutated = RwLock::new(HashSet::new());
+
         let inner = Arc::new(Inner {
             gateway,
             request,
+            mutated,
             txn_server,
         });
 
@@ -51,6 +59,11 @@ impl Txn {
 
     pub fn request(&'_ self) -> &'_ Request {
         &self.inner.request
+    }
+
+    pub async fn mutate(&self, cluster: Cluster) {
+        let mut mutated = self.inner.mutated.write().await;
+        mutated.insert(cluster);
     }
 
     pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
@@ -83,6 +96,23 @@ impl Transaction<fs::Dir> for Txn {
             inner: self.inner.clone(),
             dir,
         })
+    }
+}
+
+#[async_trait]
+impl Transact for Txn {
+    async fn commit(&self, txn_id: &TxnId) {
+        assert_eq!(txn_id, self.id());
+
+        let mutated = self.inner.mutated.read().await;
+        join_all(mutated.iter().map(|cluster| cluster.commit(txn_id))).await;
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        assert_eq!(txn_id, self.id());
+
+        let mutated = self.inner.mutated.write().await;
+        join_all(mutated.iter().map(|cluster| cluster.finalize(txn_id))).await;
     }
 }
 
