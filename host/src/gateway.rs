@@ -136,7 +136,7 @@ impl Gateway {
 
     pub async fn get(&self, txn: &Txn, subject: Link, key: Value) -> TCResult<State> {
         match subject.host() {
-            None if subject.path().is_empty() => {
+            None if subject.path().is_empty() && key.is_none() => {
                 let public_key = Bytes::from(self.actor.public_key().as_bytes().to_vec());
                 Ok(State::from(Value::from(public_key)))
             }

@@ -39,13 +39,13 @@ impl Request {
 }
 
 pub struct Resolver<'a> {
-    gateway: &'a Gateway,
+    host: &'a Link,
     txn_id: &'a TxnId,
 }
 
 impl<'a> Resolver<'a> {
-    pub fn new(gateway: &'a Gateway, txn_id: &'a TxnId) -> Self {
-        Self { gateway, txn_id }
+    pub fn new(host: &'a Link, txn_id: &'a TxnId) -> Self {
+        Self { host, txn_id }
     }
 }
 
@@ -56,7 +56,7 @@ impl<'a> rjwt::Resolve for Resolver<'a> {
     type Claims = Vec<Scope>;
 
     fn host(&self) -> Link {
-        self.gateway.root().clone().into()
+        self.host.clone()
     }
 
     async fn resolve(&self, host: &Link, actor_id: &Value) -> Result<Actor, rjwt::Error> {

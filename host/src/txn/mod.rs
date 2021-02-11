@@ -7,7 +7,7 @@ use futures_locks::RwLock;
 use tokio::sync::mpsc;
 
 use error::*;
-use generic::Id;
+use generic::{Id, TCPathBuf};
 use transact::fs::Dir;
 pub use transact::{Transact, Transaction, TxnId};
 
@@ -60,13 +60,14 @@ impl Txn {
         }
     }
 
-    pub async fn claim(self, actor: &Actor) -> TCResult<Self> {
+    pub async fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
         if self.owner().is_none() {
             let token = self.request.token.clone();
             let txn_id = self.request.txn_id;
 
             use rjwt::Resolve;
-            let resolver = Resolver::new(&self.inner.gateway, self.id());
+            let host = Link::from((self.inner.gateway.root().clone(), cluster_path));
+            let resolver = Resolver::new(&host, self.id());
             let (token, claims) = resolver
                 .consume_and_sign(actor, vec![SCOPE_ROOT.into()], token, txn_id.time().into())
                 .map_err(TCError::unauthorized)
@@ -85,10 +86,10 @@ impl Txn {
         }
     }
 
-    pub fn is_owner(&self, actor_id: &Value) -> bool {
+    pub fn is_owner(&self, cluster_path: &TCPathBuf) -> bool {
         if let Some((host, owner_id)) = self.owner() {
-            let this_host = Link::from(self.inner.gateway.root().clone());
-            host == &this_host && owner_id == actor_id
+            let cluster_link = Link::from((self.inner.gateway.root().clone(), cluster_path));
+            host == &cluster_link && owner_id == &TCPathBuf::default().into()
         } else {
             false
         }
@@ -115,6 +116,15 @@ impl Txn {
 
     pub async fn mutate(&self, cluster: Cluster) {
         let mut mutated = self.inner.mutated.write().await;
+        if mutated.contains(&cluster) {
+            return;
+        }
+
+        if let Some((link, id)) = self.owner() {
+            let cluster_link = Link::from((self.inner.gateway.root(), cluster.path()));
+            self.put(link.clone(), id.clone(), cluster_link.into()).await?;
+        }
+
         mutated.insert(cluster);
     }
 

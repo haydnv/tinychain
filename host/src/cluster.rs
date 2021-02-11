@@ -5,6 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::future::join_all;
 use futures::TryFutureExt;
 
@@ -46,7 +47,7 @@ pub struct Cluster {
 impl Cluster {
     async fn maybe_claim_txn(&self, txn: Txn) -> TCResult<Txn> {
         if txn.owner().is_none() {
-            txn.claim(&self.actor).await
+            txn.claim(&self.actor, self.path.clone()).await
         } else {
             Ok(txn)
         }
@@ -140,7 +141,7 @@ impl Cluster {
             chains.insert(id, chain);
         }
 
-        let actor_id = Value::from(Link::from(path.clone()));
+        let actor_id = Value::from(Link::default());
         let cluster = Cluster {
             actor: Arc::new(Actor::new(actor_id)),
             path: path.clone(),
@@ -168,7 +169,11 @@ impl Instance for Cluster {
 #[async_trait]
 impl Public for Cluster {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
-        nonempty_path(path)?;
+        if path.is_empty() && key.is_none() {
+            let public_key = Bytes::from(self.actor.public_key().as_bytes().to_vec());
+            Ok(State::from(Value::from(public_key)))
+        }
+
         let txn = self.maybe_claim_txn(txn.clone()).await?;
 
         if let Some(chain) = self.chains.get(&path[0]) {
