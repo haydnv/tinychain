@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tokio::sync::mpsc;
 
 use error::*;
 use generic::Id;
@@ -20,26 +21,32 @@ pub use server::*;
 
 #[derive(Clone)]
 struct Inner {
-    dir: fs::Dir,
     gateway: Arc<Gateway>,
     request: Arc<Request>,
+    txn_server: mpsc::UnboundedSender<TxnId>,
 }
 
 #[derive(Clone)]
 pub struct Txn {
     inner: Arc<Inner>,
+    dir: fs::Dir,
 }
 
 impl Txn {
-    fn new(gateway: Arc<Gateway>, dir: fs::Dir, request: Request) -> Self {
+    fn new(
+        txn_server: mpsc::UnboundedSender<TxnId>,
+        gateway: Arc<Gateway>,
+        dir: fs::Dir,
+        request: Request,
+    ) -> Self {
         let request = Arc::new(request);
         let inner = Arc::new(Inner {
-            dir,
             gateway,
             request,
+            txn_server,
         });
 
-        Self { inner }
+        Self { inner, dir }
     }
 
     pub fn request(&'_ self) -> &'_ Request {
@@ -66,22 +73,27 @@ impl Transaction<fs::Dir> for Txn {
     }
 
     fn context(&'_ self) -> &'_ fs::Dir {
-        &self.inner.dir
+        &self.dir
     }
 
     async fn subcontext(&self, id: Id) -> TCResult<Self> {
-        let inner = Inner {
-            gateway: self.inner.gateway.clone(),
-            request: self.inner.request.clone(),
-            dir: self
-                .inner
-                .dir
-                .create_dir(self.inner.request.txn_id, id)
-                .await?,
-        };
+        let dir = self.dir.create_dir(self.inner.request.txn_id, id).await?;
 
         Ok(Txn {
-            inner: Arc::new(inner),
+            inner: self.inner.clone(),
+            dir,
         })
+    }
+}
+
+impl Drop for Txn {
+    fn drop(&mut self) {
+        // There will still be one reference in TxnServer when all others are dropped, plus this one
+        if Arc::strong_count(&self.inner) == 2 {
+            self.inner
+                .txn_server
+                .send(self.inner.request.txn_id)
+                .unwrap();
+        }
     }
 }
