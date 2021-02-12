@@ -17,9 +17,9 @@ destream = "0.3"
 env_logger = "0.8"
 error = { path = "../error" }
 futures = "0.3"
-futures-locks = "0.6"
 generic = { path = "../generic" }
 log = { version = "0.4", features = [] }
 rand = "0.7"
 serde = { version = "1.0", features = []}
+uplock = "0.1"
 uuid = { version = "0.8", features = ["v4"] }

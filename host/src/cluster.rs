@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{join_all, try_join_all, TryFutureExt};
 use futures::join;
-use futures_locks::RwLock;
 use safecast::TryCastFrom;
+use uplock::RwLock;
 
 use error::*;
 use generic::*;

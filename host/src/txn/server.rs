@@ -4,7 +4,7 @@ use std::collections::hash_map::{Entry, HashMap};
 use std::sync::Arc;
 
 use futures::join;
-use futures_locks::RwLock;
+use uplock::RwLock;
 
 use error::*;
 use transact::{Transact, Transaction};

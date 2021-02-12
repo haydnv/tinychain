@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::en;
 use futures::Future;
-use futures_locks::{RwLockReadGuard, RwLockWriteGuard};
+use uplock::{RwLockReadGuard, RwLockWriteGuard};
 
 use error::*;
 use generic::{Id, PathSegment};

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{join_all, TryFutureExt};
-use futures_locks::RwLock;
+use uplock::RwLock;
 
 use error::*;
 use generic::{Id, TCPathBuf};

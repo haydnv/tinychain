@@ -1,5 +1,6 @@
 # test data
 config
+tests/__pycache__
 
 # IDE metadata
 .idea

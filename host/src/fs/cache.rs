@@ -5,13 +5,12 @@ use std::convert::{TryFrom, TryInto};
 use std::hash::Hash;
 use std::io;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::TryFutureExt;
-use futures_locks::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use log::debug;
 use tokio::fs;
+use uplock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use error::*;
 use transact::fs::BlockData;
@@ -31,7 +30,7 @@ impl CacheBlock {
     async fn into_bytes(self) -> Bytes {
         match self {
             Self::Bin(block) => (*block.read().await).clone(),
-            Self::Chain(block) => block.read().await.clone().into(),
+            Self::Chain(block) => (*block.read().await).clone().into(),
         }
     }
 
@@ -76,14 +75,12 @@ impl TryFrom<CacheBlock> for CacheLock<ChainBlock> {
 
 /// A filesystem cache lock.
 pub struct CacheLock<T> {
-    ref_count: Arc<std::sync::RwLock<usize>>,
     lock: RwLock<T>,
 }
 
 impl<T> CacheLock<T> {
     fn new(value: T) -> Self {
         Self {
-            ref_count: Arc::new(std::sync::RwLock::new(1)),
             lock: RwLock::new(value),
         }
     }
@@ -101,18 +98,9 @@ impl<T> CacheLock<T> {
 
 impl<T> Clone for CacheLock<T> {
     fn clone(&self) -> Self {
-        *self.ref_count.write().unwrap() += 1;
-
         Self {
-            ref_count: self.ref_count.clone(),
             lock: self.lock.clone(),
         }
-    }
-}
-
-impl<T> Drop for CacheLock<T> {
-    fn drop(&mut self) {
-        *self.ref_count.write().unwrap() -= 1;
     }
 }
 
