@@ -10,6 +10,7 @@ use bytes::Bytes;
 use futures::TryFutureExt;
 use log::debug;
 use tokio::fs;
+use tokio::sync::mpsc;
 use uplock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use error::*;
@@ -34,8 +35,11 @@ impl CacheBlock {
         }
     }
 
-    async fn into_size(self) -> usize {
-        self.into_bytes().await.len()
+    fn ref_count(&self) -> usize {
+        match self {
+            Self::Bin(block) => block.ref_count(),
+            Self::Chain(block) => block.ref_count(),
+        }
     }
 }
 
@@ -94,6 +98,11 @@ impl<T> CacheLock<T> {
     pub async fn write(&self) -> RwLockWriteGuard<T> {
         self.lock.write().await
     }
+
+    /// Return the number of references to this cache entry.
+    pub fn ref_count(&self) -> usize {
+        self.lock.ref_count()
+    }
 }
 
 impl<T> Clone for CacheLock<T> {
@@ -104,11 +113,35 @@ impl<T> Clone for CacheLock<T> {
     }
 }
 
+struct Evict;
+
 struct Inner {
+    tx: mpsc::UnboundedSender<Evict>,
     size: usize,
     max_size: usize,
     entries: HashMap<PathBuf, CacheBlock>,
     lfu: LFU<PathBuf>,
+}
+
+impl Inner {
+    async fn remove(&mut self, path: &PathBuf) -> TCResult<()> {
+        if let Some(old_block) = self.entries.remove(path) {
+            let as_bytes = old_block.into_bytes().await;
+            let block_size = as_bytes.len();
+
+            fs::write(path, as_bytes)
+                .map_err(|e| io_err(e, &path))
+                .await?;
+
+            if self.size > block_size {
+                self.size -= block_size;
+            }
+
+            self.lfu.remove(&path);
+        }
+
+        Ok(())
+    }
 }
 
 /// The filesystem cache.
@@ -120,14 +153,20 @@ pub struct Cache {
 impl Cache {
     /// Construct a new cache with the given size.
     pub fn new(max_size: usize) -> Self {
-        Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        let cache = Self {
             inner: RwLock::new(Inner {
+                tx,
                 size: 0,
                 max_size,
                 entries: HashMap::new(),
                 lfu: LFU::new(),
             }),
-        }
+        };
+
+        spawn_cleanup_thread(cache.clone(), rx);
+        cache
     }
 
     /// Read a block from the cache if possible, or else fetch it from the filesystem.
@@ -181,7 +220,7 @@ impl Cache {
         let mut inner = self.inner.write().await;
 
         if let Some(old_block) = inner.entries.remove(&path) {
-            let old_size = old_block.into_size().await;
+            let old_size = old_block.into_bytes().await.len();
             if old_size > inner.size {
                 inner.size -= old_size;
             }
@@ -194,23 +233,16 @@ impl Cache {
         inner.entries.insert(path, block.clone().into());
         inner.size += size;
         if inner.size > inner.max_size {
-            log::warn!("cache overflowing but eviction is not yet implemented!");
+            inner.tx.send(Evict).map_err(TCError::internal)?;
         }
 
         Ok(block)
     }
 
     /// Remove a block from the cache.
-    pub async fn remove(&self, path: PathBuf) {
+    pub async fn remove(&self, path: PathBuf) -> TCResult<()> {
         let mut inner = self.inner.write().await;
-        if let Some(old_block) = inner.entries.remove(&path) {
-            let old_size = old_block.into_size().await;
-            if inner.size > old_size {
-                inner.size -= old_size;
-            }
-
-            inner.lfu.remove(&path);
-        }
+        inner.remove(&path).await
     }
 
     /// Synchronize a cached block with the filesystem.
@@ -271,4 +303,27 @@ impl<T: Clone + Eq + Hash> LFU<T> {
             self.priority.remove(i);
         }
     }
+}
+
+fn spawn_cleanup_thread(cache: Cache, mut rx: mpsc::UnboundedReceiver<Evict>) {
+    tokio::spawn(async move {
+        while rx.recv().await.is_some() {
+            let mut cache = cache.inner.write().await;
+            let mut priority = cache.lfu.priority.clone().into_iter();
+            while cache.size > cache.max_size {
+                if let Some(block_id) = priority.next() {
+                    let evict = {
+                        let block = cache.entries.get(&block_id).expect("cache internal");
+                        block.ref_count() == 1
+                    };
+
+                    if evict {
+                        cache.remove(&block_id).await.expect("cache block sync");
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+    });
 }
