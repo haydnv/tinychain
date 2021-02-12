@@ -88,8 +88,8 @@ impl HTTPServer {
             None
         };
 
-        let txn_id = if let Some(txn_id) = get_param(&mut params, "txn_id")? {
-            txn_id
+        let txn_id = if let Some(txn_id) = params.remove("txn_id") {
+            txn_id.parse()?
         } else {
             TxnId::new(NetworkTime::now())
         };
