@@ -1,3 +1,4 @@
+import time
 import tinychain as tc
 import unittest
 
@@ -25,7 +26,10 @@ class ClusterTests(unittest.TestCase):
             clusters=[cluster_config])
 
         host.start(TC_PATH, PORT, log_level="debug")
-        print(host.get("/app/example/rev"))
+
+        expected = 0
+        actual = host.get("/app/example/rev")
+        self.assertEqual(expected, actual)
 
 
 if __name__ == "__main__":
