@@ -111,16 +111,16 @@ impl HTTPServer {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
                 self.gateway.get(txn, path.into(), key).await
             }
+            &hyper::Method::PUT => {
+                let key = get_param(&mut params, "key")?.unwrap_or_default();
+                let value = destream_body(http_request.into_body(), txn.clone()).await?;
+                self.gateway
+                    .put(txn, path.into(), key, value)
+                    .map_ok(State::from)
+                    .await
+            }
             &hyper::Method::POST => {
-                let data = http_request
-                    .into_body()
-                    .map_ok(|bytes| bytes.to_vec())
-                    .map_err(destream::de::Error::custom);
-                let mut decoder = destream_json::de::Decoder::from(data);
-                let data = State::from_stream(txn.clone(), &mut decoder)
-                    .map_err(|e| TCError::bad_request("error deserializing POST data", e))
-                    .await?;
-
+                let data = destream_body(http_request.into_body(), txn.clone()).await?;
                 self.gateway.post(txn, path.into(), data).await
             }
             other => Err(TCError::method_not_allowed(other)),
@@ -148,6 +148,17 @@ impl crate::gateway::Server for HTTPServer {
 
         hyper::Server::bind(&addr).serve(new_service).await
     }
+}
+
+async fn destream_body(body: hyper::Body, txn: Txn) -> TCResult<State> {
+    let data = body
+        .map_ok(|bytes| bytes.to_vec())
+        .map_err(destream::de::Error::custom);
+
+    let mut decoder = destream_json::de::Decoder::from(data);
+    State::from_stream(txn, &mut decoder)
+        .map_err(|e| TCError::bad_request("error deserializing HTTP request body", e))
+        .await
 }
 
 fn get_param<T: DeserializeOwned>(
