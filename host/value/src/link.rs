@@ -1,6 +1,5 @@
 //! [`Link`] and its components
 
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter;
@@ -9,7 +8,7 @@ use std::str::FromStr;
 
 use addr::DomainName;
 use async_trait::async_trait;
-use destream::{de, Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
+use destream::{de, en};
 use number_general::Number;
 use safecast::{CastFrom, TryCastFrom};
 use serde::de::{Deserialize, Deserializer, Error};
@@ -19,8 +18,6 @@ use error::*;
 use generic::{Id, PathLabel, PathSegment, TCPathBuf};
 
 use super::Value;
-
-const EMPTY_SLICE: [u8; 0] = [];
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
@@ -466,48 +463,25 @@ impl Serialize for Link {
 }
 
 #[async_trait]
-impl FromStream for Link {
+impl de::FromStream for Link {
     type Context = ();
 
-    async fn from_stream<D: Decoder>(context: (), decoder: &mut D) -> Result<Link, D::Error> {
-        let m = HashMap::<String, HashMap<Id, Value>>::from_stream(context, decoder).await?;
-
-        if m.len() != 1 {
-            Err(de::Error::custom(format!(
-                "Expected Link, found Map: {}",
-                m.into_iter()
-                    .map(|(k, _)| k)
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            )))
-        } else {
-            let mut m: Vec<_> = m.into_iter().collect();
-            let (link, params) = m.pop().unwrap();
-            if !params.is_empty() {
-                Err(de::Error::custom(format!(
-                    "Expected Link but found Op with subject {}",
-                    link
-                )))
-            } else {
-                link.parse().map_err(de::Error::custom)
-            }
-        }
+    async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Link, D::Error> {
+        let s = String::from_stream(context, decoder).await?;
+        s.parse().map_err(|_| de::Error::invalid_value(s, "a Link"))
     }
 }
 
-impl<'en> ToStream<'en> for Link {
-    fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
-        let mut map = e.encode_map(Some(1))?;
-        map.encode_entry(self.to_string(), &EMPTY_SLICE)?;
-        map.end()
+impl<'en> en::ToStream<'en> for Link {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
+        use en::IntoStream;
+        self.to_string().into_stream(e)
     }
 }
 
-impl<'en> IntoStream<'en> for Link {
-    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
-        let mut map = e.encode_map(Some(1))?;
-        map.encode_entry(self.to_string(), &EMPTY_SLICE)?;
-        map.end()
+impl<'en> en::IntoStream<'en> for Link {
+    fn into_stream<E: en::Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
+        self.to_string().into_stream(e)
     }
 }
 

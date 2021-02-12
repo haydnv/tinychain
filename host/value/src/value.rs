@@ -19,6 +19,7 @@ use super::Link;
 
 pub use number_general::*;
 
+const EMPTY_SEQ: [u8; 0] = [];
 const EXPECTING: &'static str = "a Tinychain value, e.g. 1 or \"two\" or [3]";
 const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
 
@@ -309,7 +310,11 @@ impl Serialize for Value {
                 map.serialize_entry(&self.class().path().to_string(), &base64::encode(&bytes))?;
                 map.end()
             }
-            Self::Link(link) => link.serialize(serializer),
+            Self::Link(link) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(link, &EMPTY_SEQ)?;
+                map.end()
+            }
             Self::None => serializer.serialize_unit(),
             Self::Number(n) => match n {
                 Number::Complex(c) => {
@@ -338,7 +343,11 @@ impl<'en> ToStream<'en> for Value {
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Bytes(bytes) => encoder.encode_bytes(bytes),
-            Self::Link(link) => link.to_stream(encoder),
+            Self::Link(link) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_entry(link, &EMPTY_SEQ)?;
+                map.end()
+            }
             Self::None => encoder.encode_unit(),
             Self::Number(n) => match n {
                 Number::Complex(c) => {
@@ -358,7 +367,11 @@ impl<'en> IntoStream<'en> for Value {
     fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Bytes(bytes) => encoder.encode_bytes(&bytes),
-            Self::Link(link) => link.into_stream(encoder),
+            Self::Link(link) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_entry(link, &EMPTY_SEQ)?;
+                map.end()
+            }
             Self::None => encoder.encode_unit(),
             Self::Number(n) => match n {
                 Number::Complex(c) => {
@@ -577,7 +590,7 @@ impl fmt::Display for Value {
         match self {
             Self::Bytes(bytes) => write!(f, "({} bytes)", bytes.len()),
             Self::Link(link) => fmt::Display::fmt(link, f),
-            Self::None => f.write_str("none"),
+            Self::None => f.write_str("None"),
             Self::Number(n) => fmt::Display::fmt(n, f),
             Self::String(s) => f.write_str(s),
             Self::Tuple(t) => write!(
