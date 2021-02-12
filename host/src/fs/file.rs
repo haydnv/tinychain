@@ -214,9 +214,12 @@ impl<B: fs::BlockData> Transact for File<B> {
         )
         .await;
 
-        tokio::fs::remove_dir(version_path(&self.path, txn_id))
-            .await
-            .unwrap();
+        let version = version_path(&self.path, txn_id);
+        if version.exists() {
+            tokio::fs::remove_dir(version)
+                .await
+                .unwrap();
+        }
 
         self.listing.finalize(txn_id).await;
         debug!("finalized {:?} at {}", &self.path, txn_id);
