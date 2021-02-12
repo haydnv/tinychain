@@ -35,7 +35,7 @@ impl TxnServer {
         thread::spawn(move || {
             use tokio::runtime::Runtime;
 
-            let rt  = Runtime::new().unwrap();
+            let rt = Runtime::new().unwrap();
 
             while let Some(txn_id) = rt.block_on(receiver.recv()) {
                 let txn: Option<Txn> = { rt.block_on(active_clone.write()).remove(&txn_id) };

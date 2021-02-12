@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use log::debug;
 use serde::de::DeserializeOwned;
 
 use error::*;
@@ -133,15 +134,16 @@ impl Gateway {
     }
 
     /// Read the [`State`] `key` at `link`.
-    pub async fn get(&self, txn: &Txn, subject: Link, key: Value) -> TCResult<State> {
-        match subject.host() {
-            None if subject.path().is_empty() && key.is_none() => {
+    pub async fn get(&self, txn: &Txn, link: Link, key: Value) -> TCResult<State> {
+        debug!("GET {}: {}", link, key);
+        match link.host() {
+            None if link.path().is_empty() && key.is_none() => {
                 let public_key = Bytes::from(self.actor.public_key().as_bytes().to_vec());
                 Ok(State::from(Value::from(public_key)))
             }
-            None => self.kernel.get(txn, subject.path(), key).await,
-            Some(host) if host == self.root() => self.kernel.get(txn, subject.path(), key).await,
-            _ => self.client.get(txn.clone(), subject, key).await,
+            None => self.kernel.get(txn, link.path(), key).await,
+            Some(host) if host == self.root() => self.kernel.get(txn, link.path(), key).await,
+            _ => self.client.get(txn.clone(), link, key).await,
         }
     }
 
@@ -154,6 +156,8 @@ impl Gateway {
         value: State,
     ) -> Pin<Box<dyn Future<Output = TCResult<()>> + Send + 'a>> {
         Box::pin(async move {
+            debug!("PUT {}: {} <- {}", link, key, value);
+
             match link.host() {
                 None => self.kernel.put(txn, link.path(), key, value).await,
                 Some(host) if host == self.root() => {
@@ -166,6 +170,8 @@ impl Gateway {
 
     /// Execute the POST op at `subject` with the `params`
     pub async fn post(&self, txn: &Txn, link: Link, params: State) -> TCResult<State> {
+        debug!("POST {}({})", link, params);
+
         match link.host() {
             None => self.kernel.post(txn, link.path(), params).await,
             Some(host) if host == self.root() => self.kernel.post(txn, link.path(), params).await,

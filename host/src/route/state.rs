@@ -1,3 +1,5 @@
+use futures::future;
+
 use safecast::{TryCastFrom, TryCastInto};
 
 use error::*;
@@ -31,7 +33,9 @@ impl<'a> Handler<'a> for RootHandler<'a> {
 
                 Box::pin(handler)
             })),
-            _ => None,
+            other => Some(Box::new(move |_, _| {
+                Box::pin(future::ready(Ok(other.clone())))
+            })),
         }
     }
 }
@@ -39,7 +43,6 @@ impl<'a> Handler<'a> for RootHandler<'a> {
 impl Route for State {
     fn route<'a>(&'a self, path: &[PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         let child_handler = match self {
-            Self::Chain(chain) => chain.route(path),
             Self::Scalar(scalar) => scalar.route(path),
             _ => None,
         };

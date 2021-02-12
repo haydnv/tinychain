@@ -18,7 +18,7 @@ use transact::fs::BlockData;
 
 use crate::chain::ChainBlock;
 
-use super::io_err;
+use super::{create_parent, io_err};
 
 /// A [`CacheLock`] representing a single filesystem block.
 #[derive(Clone)]
@@ -233,13 +233,7 @@ impl Cache {
         if let Some(block) = inner.entries.get(&path) {
             let as_bytes = block.clone().into_bytes().await;
 
-            if let Some(parent) = path.parent() {
-                if !parent.exists() {
-                    tokio::fs::create_dir_all(parent)
-                        .map_err(|e| io_err(e, parent))
-                        .await?;
-                }
-            }
+            create_parent(&path).await?;
 
             fs::write(&path, as_bytes)
                 .map_err(|e| io_err(e, &path))

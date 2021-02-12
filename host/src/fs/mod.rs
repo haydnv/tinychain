@@ -23,6 +23,18 @@ const VERSION: Label = label(".version");
 
 type DirContents = Vec<(fs::DirEntry, Metadata)>;
 
+async fn create_parent(path: &PathBuf) -> TCResult<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            tokio::fs::create_dir_all(parent)
+                .map_err(|e| io_err(e, parent))
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
 async fn dir_contents(dir_path: &PathBuf) -> TCResult<Vec<(fs::DirEntry, Metadata)>> {
     let mut contents = vec![];
     let mut handles = fs::read_dir(dir_path)
@@ -69,10 +81,10 @@ fn fs_path(mount_point: &PathBuf, name: &PathSegment) -> PathBuf {
     path
 }
 
-fn io_err<I: fmt::Debug>(err: io::Error, info: I) -> TCError {
+fn io_err<I: fmt::Debug + Send>(err: io::Error, info: I) -> TCError {
     match err.kind() {
         io::ErrorKind::NotFound => {
-            TCError::unsupported(format!("There is no directory at {:?}", info))
+            TCError::internal(format!("host filesystem has no such entry {:?}", info))
         }
         io::ErrorKind::PermissionDenied => TCError::internal(format!(
             "Tinychain does not have permission to access the host filesystem: {:?}",

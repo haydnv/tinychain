@@ -2,12 +2,13 @@
 
 use std::collections::HashSet;
 use std::convert::TryFrom;
+use std::io;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all, TryFutureExt};
-use log::debug;
+use log::{debug, error};
 
 use error::*;
 use generic::Id;
@@ -15,7 +16,8 @@ use transact::fs;
 use transact::lock::{Mutable, TxnLock};
 use transact::{Transact, TxnId};
 
-use super::{file_name, Cache, CacheBlock, CacheLock, DirContents};
+use super::{file_name, fs_path, io_err, Cache, CacheBlock, CacheLock, DirContents};
+use crate::fs::create_parent;
 
 /// A transactional file.
 #[derive(Clone)]
@@ -26,7 +28,7 @@ pub struct File<B> {
     phantom: PhantomData<B>,
 }
 
-impl<B: fs::BlockData> File<B> {
+impl<B: fs::BlockData + 'static> File<B> {
     fn _new(cache: Cache, path: PathBuf, listing: HashSet<fs::BlockId>) -> Self {
         let listing = TxnLock::new(listing.into());
         let phantom = PhantomData;
@@ -71,7 +73,23 @@ impl<B: fs::BlockData> File<B> {
         CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
         CacheBlock: From<CacheLock<B>>,
     {
+        if !fs::File::block_exists(self, txn_id, block_id).await? {
+            return Err(TCError::not_found(block_id));
+        }
+
         let path = block_path(&self.path, txn_id, block_id);
+        if !path.exists() {
+            let source_path = fs_path(&self.path, block_id);
+            create_parent(&path).await?;
+
+            debug!("copy canonical block {:?} to {:?}", source_path, path);
+
+            tokio::fs::copy(&source_path, &path)
+                .map_err(|e| io_err(e, (&source_path, &path)))
+                .await?;
+        }
+
+        debug_assert!(path.exists());
         self.cache.read(&path).await
     }
 }
@@ -191,6 +209,7 @@ impl<B: fs::BlockData> Transact for File<B> {
 
             if !listing.is_empty() {
                 let version = version_path(&self.path, txn_id);
+                debug!("commit version directory {:?}", version);
 
                 if self.path.exists() {
                     tokio::fs::remove_dir_all(&self.path).await.unwrap();
@@ -205,7 +224,7 @@ impl<B: fs::BlockData> Transact for File<B> {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        let listing = self.listing.read(txn_id).await.unwrap();
+        let listing = self.listing.write(*txn_id).await.unwrap();
         join_all(
             listing
                 .iter()
@@ -216,9 +235,15 @@ impl<B: fs::BlockData> Transact for File<B> {
 
         let version = version_path(&self.path, txn_id);
         if version.exists() {
-            tokio::fs::remove_dir(version)
-                .await
-                .unwrap();
+            debug!("removing old version directory {:?}", version);
+            if let Err(cause) = tokio::fs::remove_dir_all(&version).await {
+                if cause.kind() != io::ErrorKind::NotFound {
+                    error!(
+                        "failed to remove old version directory {:?}: {}",
+                        version, cause
+                    );
+                }
+            }
         }
 
         self.listing.finalize(txn_id).await;

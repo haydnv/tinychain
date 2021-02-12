@@ -1,6 +1,8 @@
-//! A host kernel, responsible for dispatching requests to the local host.
+//! The host kernel, responsible for dispatching requests to the local host.
 
 use std::convert::TryInto;
+
+use log::debug;
 
 use error::*;
 use generic::*;
@@ -38,9 +40,16 @@ impl Kernel {
             State::Scalar(Scalar::Value(key))
                 .into_type(class)
                 .ok_or_else(|| TCError::unsupported(err))
-        } else if let Some((_suffix, cluster)) = self.hosted.get(path) {
+        } else if let Some((suffix, cluster)) = self.hosted.get(path) {
+            debug!(
+                "GET {}: {} from cluster {}",
+                TCPath::from(suffix),
+                key,
+                cluster
+            );
+
             txn.mutate((*cluster).clone()).await?;
-            cluster.get(txn, _suffix, key).await
+            cluster.get(txn, suffix, key).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }

@@ -10,7 +10,6 @@ use value::Value;
 use crate::state::State;
 use crate::txn::Txn;
 
-mod chain;
 mod scalar;
 mod state;
 

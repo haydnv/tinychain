@@ -9,7 +9,7 @@ use bytes::Bytes;
 use futures::join;
 
 use error::*;
-use generic::{label, Instance, Label};
+use generic::Instance;
 use log::debug;
 use transact::fs::{Dir, File, Persist};
 use transact::{Transact, TxnId};
@@ -17,11 +17,7 @@ use transact::{Transact, TxnId};
 use crate::fs;
 use crate::scalar::OpRef;
 
-use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject};
-
-const CHAIN: Label = label("chain");
-const SUBJECT: Label = label("subject");
-const BLOCK_ID: Label = label("0");
+use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, SUBJECT};
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
@@ -35,10 +31,14 @@ pub struct SyncChain {
 #[async_trait]
 impl ChainInstance for SyncChain {
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
-        let block_id = BLOCK_ID.into();
+        let block_id = SUBJECT.into();
         let mut block = fs::File::get_block_mut(&self.file, txn_id, &block_id).await?;
         block.append(op_ref);
         Ok(())
+    }
+
+    fn subject(&self) -> &Subject {
+        &self.subject
     }
 }
 
