@@ -2,7 +2,7 @@
 
 Tinychain is an all-in-one database + application server with support for tensors, tables, and blockchains.
 
-Tinychain is still in early alpha status and is not ready for production use.
+Tinychain is still in early alpha status and is not ready for production use. Many core features are only partially implemented, or not yet available in the public API.
 
 ## Getting started
 
@@ -27,7 +27,7 @@ Tinychain exposes a JSON API over HTTP, and treats a subset of JSON as a Turing-
         {"$meters/mul": 3.28},
         {"/error/bad_request": "Negative distance is not supported"}
     ]}
-]}
+]]}
 ```
 
 Obviously writing this by hand gets unwieldy very quickly, which is why a [Python client](https://github.com/haydnv/tinychain/tree/master/client) is provided. You can look in the [tests](https://github.com/haydnv/tinychain/tree/master/client/tests) directory for more detailed examples.
