@@ -15,21 +15,43 @@ class ExampleCluster(tc.Cluster, metaclass=tc.Meta):
         self.rev = tc.sync_chain(tc.Number.init(0))
 
 
+def start_host(name, port=PORT):
+    cluster_config = "../config/example"
+    tc.write_cluster(ExampleCluster, cluster_config)
+
+    host = tc.host.Local(
+        workspace="/tmp/tc/tmp/" + name,
+        data_dir="/tmp/tc/data/" + name,
+        clusters=[cluster_config],
+        force_create=True)
+
+    host.start(TC_PATH, PORT, log_level="debug")
+    return host
+
+
 class ClusterTests(unittest.TestCase):
     def testStartup(self):
-        cluster_config = "../config/example"
-        tc.write_cluster(ExampleCluster, cluster_config)
-
-        host = tc.host.Local(
-            workspace="/tmp/tc/tmp",
-            data_dir="/tmp/tc/data",
-            clusters=[cluster_config])
-
-        host.start(TC_PATH, PORT, log_level="debug")
+        host = start_host("test_startup")
 
         expected = 0
         actual = host.get("/app/example/rev")
         self.assertEqual(expected, actual)
+
+    def testUpdate(self):
+        host = start_host("test_update")
+
+        def expect(n):
+            actual = host.get("/app/example/rev")
+            self.assertEqual(n, actual)
+
+        expect(0)
+
+        host.put("/app/example/rev", None, 2)
+        expect(2)
+
+
+        host.put("/app/example/rev", None, 4)
+        expect(4)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::{self, join_all, try_join_all, TryFutureExt};
+use futures::future::{join_all, try_join_all, TryFutureExt};
 use futures::join;
 use futures_locks::RwLock;
 use safecast::TryCastFrom;
@@ -52,16 +52,6 @@ pub struct Cluster {
     mutated: TxnLock<Mutable<HashSet<Link>>>,
     confirmed: RwLock<TxnId>,
     owned: RwLock<BTreeMap<TxnId, Txn>>,
-}
-
-impl Cluster {
-    async fn maybe_claim_txn(&self, txn: Txn) -> TCResult<Txn> {
-        if txn.owner().is_none() {
-            txn.claim(&self.actor, self.path.clone()).await
-        } else {
-            Ok(txn)
-        }
-    }
 }
 
 impl Eq for Cluster {}
@@ -191,9 +181,17 @@ impl Public for Cluster {
 
         nonempty_path(path)?;
 
-        if let Some(chain) = self.chains.get(&path[0]) {
-            let txn = self.maybe_claim_txn(txn.clone()).await?;
-            return chain.get(&txn, &path[1..], key).await;
+        let chain = self
+            .chains
+            .get(&path[0])
+            .ok_or_else(|| TCError::not_found(&path[0]))?;
+
+        if txn.owner().is_none() {
+            let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
+            let state = chain.get(&txn, &path[1..], key).await?;
+
+            txn.commit(txn.id()).await;
+            return Ok(state);
         }
 
         not_found(path)
@@ -210,9 +208,17 @@ impl Public for Cluster {
 
         nonempty_path(path)?;
 
-        if let Some(chain) = self.chains.get(&path[0]) {
-            let txn = self.maybe_claim_txn(txn.clone()).await?;
-            return chain.put(&txn, &path[1..], key, value).await;
+        let chain = self
+            .chains
+            .get(&path[0])
+            .ok_or_else(|| TCError::not_found(&path[0]))?;
+
+        if txn.owner().is_none() {
+            let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
+            chain.put(&txn, &path[1..], key, value).await?;
+
+            txn.commit(txn.id()).await;
+            return Ok(());
         }
 
         not_found(path)
@@ -227,9 +233,17 @@ impl Public for Cluster {
 
         nonempty_path(path)?;
 
-        if let Some(chain) = self.chains.get(&path[0]) {
-            let txn = self.maybe_claim_txn(txn.clone()).await?;
-            return chain.post(&txn, &path[1..], params).await;
+        let chain = self
+            .chains
+            .get(&path[0])
+            .ok_or_else(|| TCError::not_found(&path[0]))?;
+
+        if txn.owner().is_none() {
+            let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
+            let state = chain.post(&txn, &path[1..], params).await?;
+
+            txn.commit(txn.id()).await;
+            return Ok(state);
         }
 
         not_found(path)
@@ -260,10 +274,8 @@ impl Transact for Cluster {
         let mutated = self.mutated.commit(txn_id);
         join!(chains, mutated);
 
-        let confirmed = *txn_id;
-        self.confirmed
-            .with_write(move |mut id| future::ready(*id = confirmed))
-            .await;
+        let mut confirmed = self.confirmed.write().await;
+        *confirmed = *txn_id;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

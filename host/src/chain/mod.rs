@@ -8,7 +8,8 @@ use bytes::Bytes;
 
 use error::*;
 use generic::*;
-use safecast::CastFrom;
+use log::debug;
+use safecast::{CastFrom, TryCastFrom};
 use transact::fs::File;
 use transact::{Transact, Transaction, TxnId};
 use value::Value;
@@ -60,6 +61,29 @@ impl Subject {
                     .map_err(|e| TCError::internal(format!("block corrupted! {}", e)))?;
 
                 Ok(value.into())
+            }
+        }
+    }
+
+    async fn put(&self, txn_id: &TxnId, key: Value, value: State) -> TCResult<()> {
+        match self {
+            Self::Value(file) => {
+                if key.is_some() {
+                    return Err(TCError::bad_request("Value has no such property", key));
+                }
+
+                let new_value = Value::try_cast_from(value, |v| {
+                    TCError::bad_request("cannot update a Value to", v)
+                })?;
+
+                let new_json = serde_json::to_string(&new_value)
+                    .map_err(|e| TCError::bad_request("error serializing Value", e))?;
+
+                let block_id = SUBJECT.into();
+                let mut block = file.get_block_mut(txn_id, &block_id).await?;
+                *block = Bytes::from(new_json);
+
+                Ok(())
             }
         }
     }
@@ -164,6 +188,12 @@ impl Public for Chain {
     }
 
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
+        debug!("Chain::PUT {}: {} <- {}", TCPath::from(path), key, value);
+
+        if path.is_empty() {
+            return self.subject().put(txn.id(), key, value).await;
+        }
+
         let subject = self.subject().at(txn.id()).await?;
         subject.put(txn, path, key, value).await
     }

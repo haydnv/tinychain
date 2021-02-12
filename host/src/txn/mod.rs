@@ -203,12 +203,3 @@ impl Hash for Txn {
         self.request.txn_id.hash(state)
     }
 }
-
-impl Drop for Txn {
-    fn drop(&mut self) {
-        // There will still be one reference in TxnServer when all others are dropped, plus this one
-        if Arc::strong_count(&self.inner) == 2 {
-            self.inner.txn_server.send(self.request.txn_id).unwrap();
-        }
-    }
-}

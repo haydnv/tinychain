@@ -96,15 +96,13 @@ class Local(Host):
     ADDRESS = "127.0.0.1"
     STARTUP_TIME = 1.0
 
-    def __init__(self, workspace, data_dir=None, clusters=[]):
+    def __init__(self, workspace, data_dir=None, clusters=[], force_create=False):
         if clusters and data_dir is None:
             raise ValueError("Hosting a cluster requires specifying a data_dir")
         elif data_dir:
-            data_dir = pathlib.Path(data_dir)
-            if not data_dir.exists():
-                raise ValueError(f"{data_dir} does not exist")
-            if not data_dir.is_dir():
-                raise ValueError(f"{data_dir} is not a directory")
+            maybe_create_dir(data_dir, force_create)
+
+        maybe_create_dir(workspace, force_create)
 
         Host.__init__(self, self.ADDRESS)
 
@@ -156,4 +154,14 @@ class Local(Host):
 
 def auth_header(token):
     return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def maybe_create_dir(path, force):
+    path = pathlib.Path(path)
+    if path.exists() and path.is_dir():
+        return
+    elif force:
+        os.makedirs(path)
+    else:
+        raise RuntimeError(f"no directory at {path}")
 
