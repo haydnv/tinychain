@@ -30,7 +30,7 @@ pub struct File<B> {
 
 impl<B: fs::BlockData + 'static> File<B> {
     fn _new(cache: Cache, path: PathBuf, listing: HashSet<fs::BlockId>) -> Self {
-        let listing = TxnLock::new(listing.into());
+        let listing = TxnLock::new(format!("File {:?}", &path), listing.into());
         let phantom = PhantomData;
 
         Self {
@@ -205,17 +205,23 @@ impl<B: fs::BlockData> Transact for File<B> {
                     .map(|path| self.cache.sync(path)),
             )
             .await
-            .unwrap();
+            .expect("commit file cache");
 
             if !listing.is_empty() {
                 let version = version_path(&self.path, txn_id);
                 debug!("commit version directory {:?}", version);
 
                 if self.path.exists() {
-                    tokio::fs::remove_dir_all(&self.path).await.unwrap();
+                    tokio::fs::remove_dir_all(&self.path)
+                        .await
+                        .expect("commit file");
                 }
 
-                tokio::fs::rename(version, &self.path).await.unwrap();
+                if version.exists() {
+                    tokio::fs::rename(version, &self.path)
+                        .await
+                        .expect("commit file version")
+                }
             }
         }
 

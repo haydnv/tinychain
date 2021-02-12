@@ -86,7 +86,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(config.log_level))
         .init();
 
-    let (workspace, data_dir) = mount(config.workspace, config.data_dir, config.cache_size).await?;
+    let (workspace, data_dir) =
+        mount(config.workspace.clone(), config.data_dir, config.cache_size).await?;
 
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
 
@@ -119,6 +120,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     if let Err(cause) = gateway.listen().await {
         log::error!("Server error: {}", cause);
+    }
+
+    if config.workspace.exists() {
+        use futures::TryFutureExt;
+        tokio::fs::remove_dir_all(config.workspace)
+            .map_err(|e| {
+                let err: Box<dyn std::error::Error + Send + Sync + 'static> = Box::new(e);
+                err
+            })
+            .await?
     }
 
     Ok(())

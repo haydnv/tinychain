@@ -2,6 +2,7 @@
 
 use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, VecDeque};
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -190,12 +191,14 @@ struct Inner<T: Mutate> {
 
 /// A lock which provides transaction-specific versions of the locked state.
 pub struct TxnLock<T: Mutate> {
+    name: String,
     inner: Arc<Mutex<Inner<T>>>,
 }
 
 impl<T: Mutate> Clone for TxnLock<T> {
     fn clone(&self) -> Self {
         TxnLock {
+            name: self.name.clone(),
             inner: self.inner.clone(),
         }
     }
@@ -203,7 +206,7 @@ impl<T: Mutate> Clone for TxnLock<T> {
 
 impl<T: Mutate> TxnLock<T> {
     /// Create a new lock.
-    pub fn new(value: T) -> TxnLock<T> {
+    pub fn new<I: fmt::Display>(name: I, value: T) -> TxnLock<T> {
         let state = LockState {
             last_commit: None,
             readers: BTreeMap::new(),
@@ -218,6 +221,7 @@ impl<T: Mutate> TxnLock<T> {
         };
 
         TxnLock {
+            name: name.to_string(),
             inner: Arc::new(Mutex::new(inner)),
         }
     }
@@ -239,7 +243,8 @@ impl<T: Mutate> TxnLock<T> {
             Err(TCError::conflict())
         } else if lock.state.reserved.is_some() && txn_id >= lock.state.reserved.as_ref().unwrap() {
             debug!(
-                "TxnLock is already reserved for writing at {}",
+                "TxnLock {} is already reserved for writing at {}",
+                &self.name,
                 lock.state.reserved.as_ref().unwrap()
             );
             // If a writer can mutate the locked value at the requested time, wait it out.
@@ -284,14 +289,14 @@ impl<T: Mutate> TxnLock<T> {
             Some(current_txn) if current_txn > txn_id => Err(TCError::conflict()),
             // If there's a writer in the past, wait for it to complete.
             Some(current_txn) if current_txn < txn_id => {
-                debug!("TxnLock::write at {} blocked on {}", txn_id, current_txn);
+                debug!("TxnLock {} at {} blocked on {}", &self.name, txn_id, current_txn);
                 Ok(None)
             }
             // If there's already a writer for the current transaction, wait for it to complete.
             Some(_) => {
                 debug!(
-                    "TxnLock::write at {} waiting on existing write lock",
-                    txn_id
+                    "TxnLock {} waiting on existing write lock",
+                    &self.name
                 );
                 Ok(None)
             }
@@ -363,8 +368,8 @@ impl<T: Mutate> Transact for TxnLock<T> {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        debug!("TxnLock::finalize {}", txn_id);
-        self.read(txn_id).await.unwrap(); // make sure there's no active write lock
+        debug!("TxnLock {} finalize {}", &self.name, txn_id);
+        self.write(*txn_id).await.unwrap(); // make sure there's no active write lock
         let lock = &mut self.inner.lock().unwrap();
         lock.value_at.remove(txn_id);
     }

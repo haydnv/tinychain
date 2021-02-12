@@ -182,10 +182,16 @@ impl Gateway {
     /// Start this `Gateway`'s server
     pub fn listen(
         self: Arc<Self>,
-    ) -> Pin<Box<impl Future<Output = Result<(), Box<dyn std::error::Error>>>>> {
-        let servers = vec![self.http_listen()];
+    ) -> Pin<Box<impl Future<Output = Result<(), Box<dyn std::error::Error>>> + 'static>> {
+        let servers = vec![self.clone().http_listen()];
+        let txn_server = self.txn_server.clone();
 
-        Box::pin(try_join_all(servers).map_ok(|_| ()))
+        Box::pin(try_join_all(servers).map_ok(|_| ()).and_then(move |_| {
+            txn_server.shutdown().map_err(|e| {
+                let err: Box<dyn std::error::Error> = Box::new(e);
+                err
+            })
+        }))
     }
 
     fn http_listen(

@@ -148,7 +148,10 @@ impl Cluster {
             actor: Arc::new(Actor::new(actor_id)),
             path: path.clone(),
             chains: chains.into(),
-            mutated: TxnLock::new(HashSet::new().into()),
+            mutated: TxnLock::new(
+                format!("Cluster {} mutated chains", &path),
+                HashSet::new().into(),
+            ),
             confirmed: RwLock::new(txn_id),
             owned: RwLock::new(BTreeMap::new()),
         };
@@ -190,7 +193,7 @@ impl Public for Cluster {
             let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
             let state = chain.get(&txn, &path[1..], key).await?;
 
-            txn.commit(txn.id()).await;
+            txn.commit().await;
             return Ok(state);
         }
 
@@ -217,7 +220,7 @@ impl Public for Cluster {
             let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
             chain.put(&txn, &path[1..], key, value).await?;
 
-            txn.commit(txn.id()).await;
+            txn.commit().await;
             return Ok(());
         }
 
@@ -227,7 +230,7 @@ impl Public for Cluster {
     async fn post(&self, txn: &Txn, path: &[PathSegment], params: Map<State>) -> TCResult<State> {
         if path.is_empty() && params.is_empty() {
             // TODO: authorize request using a scope
-            txn.commit(txn.id()).await;
+            txn.commit().await;
             return Ok(State::default());
         }
 
@@ -242,7 +245,7 @@ impl Public for Cluster {
             let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
             let state = chain.post(&txn, &path[1..], params).await?;
 
-            txn.commit(txn.id()).await;
+            txn.commit().await;
             return Ok(state);
         }
 

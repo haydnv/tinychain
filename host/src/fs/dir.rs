@@ -102,7 +102,7 @@ pub struct Dir {
 
 impl Dir {
     fn new(cache: Cache, path: PathBuf, entries: HashMap<PathSegment, DirEntry>) -> Self {
-        let entries = TxnLock::new(entries.into());
+        let entries = TxnLock::new(format!("Dir {:?}", &path), entries.into());
         Self {
             cache,
             path,

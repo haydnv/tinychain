@@ -3,7 +3,7 @@
 use std::collections::hash_map::{Entry, HashMap};
 use std::sync::Arc;
 
-use futures::join;
+use futures::TryFutureExt;
 use uplock::RwLock;
 
 use error::*;
@@ -55,6 +55,22 @@ impl TxnServer {
             }
         }
     }
+
+    pub async fn shutdown(self) -> TCResult<()> {
+        tokio::spawn(async move {
+            let result = loop {
+                if self.active.read().await.is_empty() {
+                    break TCResult::Ok(());
+                } else {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+            };
+
+            result
+        })
+        .map_err(|e| TCError::internal(format!("failed to schedule graceful shutdown: {}", e)))
+        .await?
+    }
 }
 
 fn spawn_cleanup_thread(workspace: fs::Dir, active: RwLock<HashMap<TxnId, Txn>>) {
@@ -86,6 +102,7 @@ async fn cleanup(workspace: &fs::Dir, active: &RwLock<HashMap<TxnId, Txn>>) {
     for txn in expired.into_iter() {
         // TODO: implement delete
         // workspace.delete(txn_id, txn_id.to_path()).await;
-        join!(txn.finalize(txn.id()), workspace.finalize(txn.id()));
+        workspace.finalize(txn.id()).await;
+        txn.finalize().await;
     }
 }

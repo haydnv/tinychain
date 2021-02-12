@@ -53,6 +53,20 @@ impl Txn {
         }
     }
 
+    /// Commit this transaction.
+    pub async fn commit(&self) {
+        let txn_id = self.id();
+        let mutated = self.inner.mutated.write().await;
+        join_all(mutated.iter().map(|cluster| cluster.commit(txn_id))).await;
+    }
+
+    /// Delete any temporary data owned by this transaction.
+    pub async fn finalize(self) {
+        let txn_id = self.id();
+        let mutated = self.inner.mutated.write().await;
+        join_all(mutated.iter().map(|cluster| cluster.finalize(txn_id))).await;
+    }
+
     /// Return the current number of strong references to this `Txn`.
     pub fn ref_count(&self) -> usize {
         Arc::strong_count(&self.inner)
@@ -172,23 +186,6 @@ impl Transaction<fs::Dir> for Txn {
             request: self.request.clone(),
             dir,
         })
-    }
-}
-
-#[async_trait]
-impl Transact for Txn {
-    async fn commit(&self, txn_id: &TxnId) {
-        assert_eq!(txn_id, self.id());
-
-        let mutated = self.inner.mutated.read().await;
-        join_all(mutated.iter().map(|cluster| cluster.commit(txn_id))).await;
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        assert_eq!(txn_id, self.id());
-
-        let mutated = self.inner.mutated.write().await;
-        join_all(mutated.iter().map(|cluster| cluster.finalize(txn_id))).await;
     }
 }
 

@@ -111,6 +111,7 @@ impl HTTPServer {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
                 self.gateway.get(txn, path.into(), key).await
             }
+
             &hyper::Method::PUT => {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
                 let value = destream_body(http_request.into_body(), txn.clone()).await?;
@@ -119,10 +120,12 @@ impl HTTPServer {
                     .map_ok(State::from)
                     .await
             }
+
             &hyper::Method::POST => {
                 let data = destream_body(http_request.into_body(), txn.clone()).await?;
                 self.gateway.post(txn, path.into(), data).await
             }
+
             other => Err(TCError::method_not_allowed(other)),
         }
     }
@@ -146,7 +149,10 @@ impl crate::gateway::Server for HTTPServer {
             }
         });
 
-        hyper::Server::bind(&addr).serve(new_service).await
+        hyper::Server::bind(&addr)
+            .serve(new_service)
+            .with_graceful_shutdown(shutdown_signal())
+            .await
     }
 }
 
@@ -195,4 +201,8 @@ fn transform_error(err: TCError) -> hyper::Response<Body> {
     };
 
     response
+}
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c().await.expect("SIGTERM handler")
 }
