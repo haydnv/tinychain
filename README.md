@@ -34,7 +34,7 @@ Obviously writing this by hand gets unwieldy very quickly, which is why a [Pytho
 
 ## Key features
 
- * **Synchronization**: Tinychain's distributed Paxos algorithm automatically enables cross-servide transactions across any set of services which support the Tinychain protocol (which, again, is basically just JSON).
+ * **Synchronization**: Tinychain's distributed Paxos algorithm automatically enables cross-service transactions within any set of services which support the Tinychain protocol (which, again, is basically just JSON).
 
 More documentation is coming soon.
 
