@@ -6,6 +6,7 @@ use log::debug;
 
 use error::*;
 use generic::*;
+use safecast::TryCastFrom;
 
 use crate::cluster::Cluster;
 use crate::object::InstanceExt;
@@ -50,6 +51,16 @@ impl Kernel {
 
             txn.mutate((*cluster).clone()).await?;
             cluster.get(txn, suffix, key).await
+        } else if &path[0] == "error" && path.len() == 2 {
+            let message = String::try_cast_from(key, |v| {
+                TCError::bad_request("cannot cast into error message string from", v)
+            })?;
+
+            if let Some(err_type) = error_type(&path[1]) {
+                Err(TCError::new(err_type, message))
+            } else {
+                Err(TCError::not_found(TCPath::from(path)))
+            }
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -103,5 +114,21 @@ fn nonempty_path(path: &[PathSegment]) -> TCResult<()> {
         Err(TCError::method_not_allowed(TCPathBuf::default()))
     } else {
         Ok(())
+    }
+}
+
+fn error_type(err_type: &Id) -> Option<ErrorType> {
+    match err_type.as_str() {
+        "bad_gateway" => Some(ErrorType::BadGateway),
+        "bad_request" => Some(ErrorType::BadRequest),
+        "conflict" => Some(ErrorType::Conflict),
+        "forbidden" => Some(ErrorType::Forbidden),
+        "internal" => Some(ErrorType::Internal),
+        "method_not_allowed" => Some(ErrorType::MethodNotAllowed),
+        "not_found" => Some(ErrorType::NotFound),
+        "not_implemented" => Some(ErrorType::NotImplemented),
+        "timeout" => Some(ErrorType::Timeout),
+        "unauthorized" => Some(ErrorType::Unauthorized),
+        _ => None,
     }
 }
