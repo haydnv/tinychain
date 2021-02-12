@@ -75,8 +75,8 @@ impl Txn {
     /// Claim ownership of this transaction.
     pub async fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
         if self.owner().is_none() {
-            let token = self.request.token.clone();
-            let txn_id = self.request.txn_id;
+            let token = self.request.token().to_string();
+            let txn_id = self.request.txn_id();
 
             use rjwt::Resolve;
             let host = Link::from((self.inner.gateway.root().clone(), cluster_path));
@@ -89,7 +89,7 @@ impl Txn {
             Ok(Self {
                 inner: self.inner.clone(),
                 dir: self.dir.clone(),
-                request: Arc::new(Request::new(txn_id, token, claims)),
+                request: Arc::new(Request::new(*txn_id, token, claims)),
             })
         } else {
             Err(TCError::forbidden(
@@ -111,7 +111,7 @@ impl Txn {
 
     /// Return the owner of this transaction, if there is one.
     pub fn owner(&self) -> Option<(&Link, &Value)> {
-        for (host, actor, scopes) in self.request.claims.iter() {
+        for (host, actor, scopes) in self.request.scopes().iter() {
             if scopes.contains(&SCOPE_ROOT.into()) {
                 return Some((host, actor));
             }
@@ -128,7 +128,7 @@ impl Txn {
     /// Return the [`Scope`]s which the given user is authorized for on this transaction.
     pub fn scopes(&'_ self, actor_id: &Value) -> Option<&Vec<Scope>> {
         let host = Link::from(self.inner.gateway.root().clone());
-        self.request.claims.get(&host, actor_id)
+        self.request.scopes().get(&host, actor_id)
     }
 
     /// Register the state of the given [`Cluster`] for synchronization with this transaction.
@@ -171,7 +171,7 @@ impl Txn {
 #[async_trait]
 impl Transaction<fs::Dir> for Txn {
     fn id(&'_ self) -> &'_ TxnId {
-        &self.request.txn_id
+        self.request.txn_id()
     }
 
     fn context(&'_ self) -> &'_ fs::Dir {
@@ -179,7 +179,7 @@ impl Transaction<fs::Dir> for Txn {
     }
 
     async fn subcontext(&self, id: Id) -> TCResult<Self> {
-        let dir = self.dir.create_dir(self.request.txn_id, id).await?;
+        let dir = self.dir.create_dir(*self.request.txn_id(), id).await?;
 
         Ok(Txn {
             inner: self.inner.clone(),
@@ -191,6 +191,6 @@ impl Transaction<fs::Dir> for Txn {
 
 impl Hash for Txn {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.request.txn_id.hash(state)
+        self.request.txn_id().hash(state)
     }
 }

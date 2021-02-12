@@ -1,8 +1,11 @@
 //! Time utilities for Tinychain. UNSTABLE.
 
+use std::convert::{TryFrom, TryInto};
 use std::ops;
 use std::time;
 use std::time::Duration;
+
+use error::*;
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct NetworkTime {
@@ -40,6 +43,21 @@ impl ops::Add<time::Duration> for NetworkTime {
         NetworkTime {
             nanos: self.nanos + other.as_nanos() as u64,
         }
+    }
+}
+
+impl TryFrom<time::SystemTime> for NetworkTime {
+    type Error = TCError;
+
+    fn try_from(st: time::SystemTime) -> TCResult<NetworkTime> {
+        let st = st
+            .duration_since(time::UNIX_EPOCH)
+            .map_err(|e| TCError::bad_request("invalid timestamp", e))?;
+        let nanos: u64 = st
+            .as_nanos()
+            .try_into()
+            .map_err(|e| TCError::bad_request("invalid timestamp", e))?;
+        Ok(NetworkTime::from_nanos(nanos))
     }
 }
 

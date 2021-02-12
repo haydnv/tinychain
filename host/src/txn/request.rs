@@ -1,8 +1,11 @@
 //! Authorization. INCOMPLETE AND UNSTABLE.
 
+use std::convert::TryInto;
+
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
+use error::*;
 use generic::{path_label, NetworkTime, PathLabel, TCPathBuf};
 use transact::TxnId;
 
@@ -18,9 +21,9 @@ pub const SCOPE_ROOT: PathLabel = path_label(&[]);
 
 /// A `Txn`'s authorization.
 pub struct Request {
-    pub token: String,
-    pub claims: Claims,
-    pub txn_id: TxnId,
+    token: String,
+    claims: Claims,
+    txn_id: TxnId,
 }
 
 impl Request {
@@ -33,9 +36,11 @@ impl Request {
         }
     }
 
-    pub fn expires(&self) -> NetworkTime {
-        // TODO
-        NetworkTime::from_nanos(u64::MAX)
+    pub fn expires(&self) -> TCResult<NetworkTime> {
+        self.claims
+            .expires()
+            .try_into()
+            .map_err(|e| TCError::bad_request("invalid auth token expiry", e))
     }
 
     /// Return this request's authorizations.
@@ -46,6 +51,10 @@ impl Request {
     /// Return this request's JSON web token (cf. the [`rjwt`] crate)
     pub fn token(&self) -> &str {
         &self.token
+    }
+
+    pub fn txn_id(&self) -> &TxnId {
+        &self.txn_id
     }
 }
 
@@ -90,6 +99,7 @@ impl<'a> rjwt::Resolve for Resolver<'a> {
                 format!("invalid public key {} for {}: {}", &public_key, actor_id, e),
             )
         })?;
+
         Actor::with_public_key(actor_id.clone(), &public_key)
     }
 }

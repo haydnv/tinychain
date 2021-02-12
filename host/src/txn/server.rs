@@ -86,11 +86,14 @@ fn spawn_cleanup_thread(workspace: fs::Dir, active: RwLock<HashMap<TxnId, Txn>>)
 
 async fn cleanup(workspace: &fs::Dir, active: &RwLock<HashMap<TxnId, Txn>>) {
     let expired = {
+        let now = Gateway::time();
         let mut txn_pool = active.write().await;
         let mut expired_ids = Vec::with_capacity(txn_pool.len());
         for (txn_id, txn) in txn_pool.iter() {
-            if txn.ref_count() == 1 && Gateway::time() > txn.request.expires() {
-                expired_ids.push(*txn_id);
+            match txn.request.expires() {
+                Ok(expiry) if now > expiry => expired_ids.push(*txn_id),
+                Err(_) => expired_ids.push(*txn_id),
+                _ => {}
             }
         }
 
