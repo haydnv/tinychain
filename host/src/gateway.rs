@@ -164,7 +164,7 @@ impl Gateway {
         })
     }
 
-    /// Execute the POST op at `subjcet` with the `params`
+    /// Execute the POST op at `subject` with the `params`
     pub async fn post(&self, txn: &Txn, link: Link, params: State) -> TCResult<State> {
         match link.host() {
             None => self.kernel.post(txn, link.path(), params).await,

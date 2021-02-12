@@ -33,15 +33,17 @@ impl TxnServer {
         let active_clone = active.clone();
         let workspace_clone = workspace.clone();
         thread::spawn(move || {
-            use futures::executor::block_on;
+            use tokio::runtime::Runtime;
 
-            while let Some(txn_id) = block_on(receiver.recv()) {
-                let txn: Option<Txn> = { block_on(active_clone.write()).remove(&txn_id) };
+            let rt  = Runtime::new().unwrap();
+
+            while let Some(txn_id) = rt.block_on(receiver.recv()) {
+                let txn: Option<Txn> = { rt.block_on(active_clone.write()).remove(&txn_id) };
                 if let Some(txn) = txn {
                     // TODO: implement delete
                     // block_on(workspace_clone.delete(txn_id, txn_id.to_path())).unwrap();
-                    block_on(txn.finalize(&txn_id));
-                    block_on(workspace_clone.finalize(&txn_id));
+                    rt.block_on(txn.finalize(&txn_id));
+                    rt.block_on(workspace_clone.finalize(&txn_id));
                 }
             }
         });
