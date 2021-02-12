@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
-use generic::{path_label, PathLabel, TCPathBuf};
+use generic::{path_label, NetworkTime, PathLabel, TCPathBuf};
 use transact::TxnId;
 
 use crate::gateway::Gateway;
@@ -31,6 +31,11 @@ impl Request {
             claims,
             txn_id,
         }
+    }
+
+    pub fn expires(&self) -> NetworkTime {
+        // TODO
+        NetworkTime::from_nanos(u64::MAX)
     }
 
     /// Return this request's authorizations.

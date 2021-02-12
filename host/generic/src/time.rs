@@ -4,7 +4,7 @@ use std::ops;
 use std::time;
 use std::time::Duration;
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct NetworkTime {
     nanos: u64,
 }

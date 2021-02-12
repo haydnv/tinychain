@@ -7,7 +7,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::{join_all, TryFutureExt};
 use futures_locks::RwLock;
-use tokio::sync::mpsc;
 
 use error::*;
 use generic::{Id, TCPathBuf};
@@ -30,7 +29,6 @@ pub use server::*;
 struct Inner {
     gateway: Arc<Gateway>,
     mutated: RwLock<HashSet<Cluster>>,
-    txn_server: mpsc::UnboundedSender<TxnId>,
 }
 
 /// A transaction context.
@@ -42,26 +40,22 @@ pub struct Txn {
 }
 
 impl Txn {
-    fn new(
-        txn_server: mpsc::UnboundedSender<TxnId>,
-        gateway: Arc<Gateway>,
-        dir: fs::Dir,
-        request: Request,
-    ) -> Self {
+    fn new(gateway: Arc<Gateway>, dir: fs::Dir, request: Request) -> Self {
         let request = Arc::new(request);
         let mutated = RwLock::new(HashSet::new());
 
-        let inner = Arc::new(Inner {
-            gateway,
-            mutated,
-            txn_server,
-        });
+        let inner = Arc::new(Inner { gateway, mutated });
 
         Self {
             inner,
             request,
             dir,
         }
+    }
+
+    /// Return the current number of strong references to this `Txn`.
+    pub fn ref_count(&self) -> usize {
+        Arc::strong_count(&self.inner)
     }
 
     /// Claim ownership of this transaction.

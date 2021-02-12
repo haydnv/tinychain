@@ -2,13 +2,12 @@
 
 use std::collections::hash_map::{Entry, HashMap};
 use std::sync::Arc;
-use std::thread;
 
+use futures::join;
 use futures_locks::RwLock;
-use tokio::sync::mpsc;
 
 use error::*;
-use transact::Transact;
+use transact::{Transact, Transaction};
 
 use crate::fs;
 use crate::gateway::Gateway;
@@ -20,39 +19,17 @@ use super::{Txn, TxnId};
 #[derive(Clone)]
 pub struct TxnServer {
     active: RwLock<HashMap<TxnId, Txn>>,
-    sender: mpsc::UnboundedSender<TxnId>,
     workspace: fs::Dir,
 }
 
 impl TxnServer {
     /// Construct a new `TxnServer`.
     pub async fn new(workspace: fs::Dir) -> Self {
-        let (sender, mut receiver) = mpsc::unbounded_channel();
-
         let active = RwLock::new(HashMap::new());
-        let active_clone = active.clone();
-        let workspace_clone = workspace.clone();
-        thread::spawn(move || {
-            use tokio::runtime::Runtime;
 
-            let rt = Runtime::new().unwrap();
+        spawn_cleanup_thread(workspace.clone(), active.clone());
 
-            while let Some(txn_id) = rt.block_on(receiver.recv()) {
-                let txn: Option<Txn> = { rt.block_on(active_clone.write()).remove(&txn_id) };
-                if let Some(txn) = txn {
-                    // TODO: implement delete
-                    // block_on(workspace_clone.delete(txn_id, txn_id.to_path())).unwrap();
-                    rt.block_on(txn.finalize(&txn_id));
-                    rt.block_on(workspace_clone.finalize(&txn_id));
-                }
-            }
-        });
-
-        Self {
-            active,
-            sender,
-            workspace,
-        }
+        Self { active, workspace }
     }
 
     /// Return the active `Txn` with the given [`TxnId`], or initiate a new [`Txn`].
@@ -72,15 +49,43 @@ impl TxnServer {
             }
             Entry::Vacant(entry) => {
                 let request = Request::new(txn_id, token.0, token.1);
-                let txn = Txn::new(
-                    self.sender.clone(),
-                    gateway,
-                    self.workspace.clone(),
-                    request,
-                );
+                let txn = Txn::new(gateway, self.workspace.clone(), request);
                 entry.insert(txn.clone());
                 Ok(txn)
             }
         }
+    }
+}
+
+fn spawn_cleanup_thread(workspace: fs::Dir, active: RwLock<HashMap<TxnId, Txn>>) {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+
+    tokio::spawn(async move {
+        loop {
+            interval.tick().await;
+            cleanup(&workspace, &active).await;
+        }
+    });
+}
+
+async fn cleanup(workspace: &fs::Dir, active: &RwLock<HashMap<TxnId, Txn>>) {
+    let expired = {
+        let mut txn_pool = active.write().await;
+        let mut expired_ids = Vec::with_capacity(txn_pool.len());
+        for (txn_id, txn) in txn_pool.iter() {
+            if txn.ref_count() == 1 && Gateway::time() > txn.request.expires() {
+                expired_ids.push(*txn_id);
+            }
+        }
+
+        expired_ids
+            .into_iter()
+            .map(move |txn_id| txn_pool.remove(&txn_id).unwrap())
+    };
+
+    for txn in expired.into_iter() {
+        // TODO: implement delete
+        // workspace.delete(txn_id, txn_id.to_path()).await;
+        join!(txn.finalize(txn.id()), workspace.finalize(txn.id()));
     }
 }
