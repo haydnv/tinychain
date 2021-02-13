@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use destream::de::FromStream;
-use futures::{TryFutureExt, TryStreamExt};
+use futures::{future, stream, StreamExt, TryFutureExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response};
 use log::debug;
@@ -44,7 +44,10 @@ impl HTTPServer {
         match self.route(&txn, params, request).await {
             Ok(state) => match destream_json::encode(state.into_view(txn)) {
                 Ok(response) => {
-                    let mut response = Response::new(Body::wrap_stream(response));
+                    let mut response = Response::new(Body::wrap_stream(
+                        response.chain(stream::once(future::ready(Ok(b"\n".to_vec())))),
+                    ));
+
                     response
                         .headers_mut()
                         .insert(hyper::header::CONTENT_TYPE, CONTENT_TYPE.parse().unwrap());
