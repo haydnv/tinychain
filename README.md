@@ -2,9 +2,9 @@
 
 Tinychain is an all-in-one database + application server with support for blockchains, graphs, tables, and tensors.
 
-Tinychain is still early alpha software and is not ready for production use. Many core features are only partially implemented, or not yet available in the public API.
+Tinychain is early alpha software and is not ready for production use. Many core features are only partially implemented, or not yet available in the public API.
 
-If a feature you need is not yet available, please consider contributing it yourself!
+If you need a feature which is not yet available, or even not yet planned, please [start a discussion](https://github.com/haydnv/tinychain/discussions)!
 
 ## Getting started
 
@@ -24,10 +24,10 @@ Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directo
 
 ## Key features
 
- * **Compliance**: Tinychain allows all your cloud services to be defined using a single runtime, so that your customer data never has to leave the platform which enforces access to it.
+ * **Compliance**: Tinychain allows general-purpose cloud services to be defined using a single runtime, so that your customer data never has to leave the platform which enforces access to it.
  * **Synchronization**: Tinychain's distributed Paxos algorithm automatically enables cross-service transactions within any set of services which support the Tinychain protocol.
  * **Concurrency**: Tinychain **Op**s are automatically executed concurrently, although a developer can use the **After** flow control to modify this behavior.
- * **Hardware acceleration**\*\*: The **Tensor** and **Graph** data types support hardware acceleration on CUDA and OpenCL backends, no extra code needed.
+ * **Hardware acceleration**\*\*: The **Tensor**\*\* and **Graph**\* data types support hardware acceleration on CUDA and OpenCL backends, no extra code needed.
  * **Object orientation**: The Python client allows defining a Tinychain service as a Python package, which can be then be distributed to other developers, who can use the same Python code to interact with your (hosted) service from their own, without writing any boilerplate integration code, or defining two different APIs for internal and external use.
  * **Portability**: A Tinychain service can run in any cloud environment, or be distributed across many clients, no Docker or Kubernetes required. A Tinychain developer can also choose make some or all of their service's functionality availble for a client to run on-premises, so that the client never has to give the service vendor access to their customer data.
 
@@ -36,7 +36,7 @@ Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directo
  * **Cluster**: a collection of **Chain**s and **Op**s responsible for managing consensus relative to other **Cluster**s on the network
  * **Chain**: A record of mutations applied to a **Collection**\*\* or **Value**
     * **SyncChain**: A **Chain** with one block, which contains the data necessary to recover from a transaction failure (e.g. if the host crashes)
-    * **BackupChain**\*: A **Chain** whose blocks are deleted once they reach a certain age
+    * **BackupChain**\*: A **Chain** whose blocks are deleted once they reach a certain age, and replaced with a copy of the **Chain**'s subject at that time
     * **BlockChain**\*: A **Chain** with a record of every mutation in the history of its **Collection**\*\* or **Value**
     * **CompliantChain**\*: A **Chain** which retains all history by default, but which allows purging all data owned by a given (anonymous) user ID, for compliance with legal requirements like [GDPR](https://en.wikipedia.org/wiki/General_Data_Protection_Regulation) and [CCPA](https://en.wikipedia.org/wiki/California_Consumer_Privacy_Act)
     * **ReduceChain**\*: A **Chain** which defines a reduce method to compress old blocks, useful for metrics (i.e. to reduce per-second statistics to per-minute, per-minute to per-hour, etc.)
@@ -44,7 +44,7 @@ Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directo
     * **BTree**\*\*: A [B-Tree](https://en.wikipedia.org/wiki/B-tree), used to index tabular data
     * **Table**\*\*: A database table, which supports one or more **BTree** indices
     * **Tensor**\*\*: An n-dimensional array of numbers which supports both sparse and dense representations, useful for machine learning applications
-    * **Graph**\*: A graph database which uses a sparse **Tensor** to compute relationships
+    * **Graph**\*: A graph database which uses a sparse **Tensor**\*\* to compute relationships between rows in its **Table**\*\*s
  * **Scalar**
     * **Value**: a generic value type such as a string or number which can be collated and stored in a **BTree**
     * **Ref**: a reference to another value which must be resolved as part of a [**Transaction**](#life-of-a-transaction)
@@ -92,7 +92,7 @@ Example:
             * `factory.com` sends a request to `shipping.com` to schedule a shipment to the user's address, and charge `retailer.com`
                 * `shipping.com` sends a request to `bank.com` to debit $5 from `retailer.com`'s account
 
-Requests at the same indentation level above are executed concurrently, after validating the incoming request's auth token. If any action fails, the transaction is not dropped, and the user receives an error response. Each participant must notify the transaction owner that it is a participant by forwarding the auth token. If all actions succeed, retailer.com (the transaction owner) commits the transaction by sending a commit message to each participant. After it receives an OK response from each participant, it commits its own state and sends an OK response to the user.
+Requests at the same indentation level above are executed concurrently, after validating the incoming request's auth token. If any action fails, the transaction is not dropped, and the user receives an error response. Each participant must notify the transaction owner that it is a participant by forwarding the auth token. If all actions succeed, `retailer.com` (the transaction owner) commits the transaction by sending a commit message to each participant. After it receives an OK response from each participant, it commits its own state and sends an OK response to the user. Acceptance by any service of a request with transaction ID X locks X forbids acceptance of any subsquent request with transaction id X, unless it is shares the same origin (the same end-user) and is therefore a dependent operation of the same transaction. Acceptance of a request with transaction ID X forbids acceptance of any request with a transaction ID < X.
 
 The concurrency control flow of this sequence of operations, starting from transaction number (X - 1) is:
 1. Client initiates transaction X
@@ -108,12 +108,12 @@ The concurrency control flow of this sequence of operations, starting from trans
 1. Transaction owner replies to the client
 
 This is effectively the classic [Paxos](https://en.wikipedia.org/wiki/Paxos_(computer_science)) algorithm, with two key differences:
- * For a cross-service transaction, 100% consensus is required before the transaction is committed (this differs from a transaction within a single service with multiple replicas\*, where a minmum 50% consensus is required, and non-compliant replicas are removed from the replica set)
- * The transaction owner is not a predetermined property of the network, but is simply the first host to claim ownership of the transaction (in this sense the Tinychain consensus protocol is "distributed" Paxos)
+ * For a cross-service transaction, 100% consensus is required before the transaction is committed (this differs from a transaction within a single service with multiple replicas\*, where a minimum 50% consensus is required, and non-compliant replicas are removed from the replica set)
+ * The "leader" is not a predetermined property of the network, but simply the first host to claim ownership of the transaction (in this sense the Tinychain consensus protocol is "distributed" Paxos)
 
 This functionality is implemented automatically for any service using the Tinychain host software.
 
-Note that this algorithm trusts each participant to be honest and correct in stating that it has committed the transaction, i.e. it is not a completely trustless protocol by default, but a formalization of an existing ad-hoc procedure. Applications like cryptocurrency which require completely trustless transactions should use Byzantine concurrency\* and a single replicated\* **Cluster**.
+*Important note*: this cross-service consensus algorithm trusts each service to a) recover from a crash without losing state, and b) communicate that it has committed a transaction honestly and correctly. In other words, it is not a new and trustless protocol, but a new formalization of an existing ad-hoc procedure. An application which requires completely trustless transactions, like a distributed cryptocurrency, should use a single replicated\* **Cluster**.
 
 \* Not yet implemented
 
