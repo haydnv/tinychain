@@ -106,6 +106,5 @@ async fn cleanup(workspace: &fs::Dir, active: &RwLock<HashMap<TxnId, Txn>>) {
         // TODO: implement delete
         // workspace.delete(txn_id, txn_id.to_path()).await;
         workspace.finalize(txn.id()).await;
-        txn.finalize().await;
     }
 }

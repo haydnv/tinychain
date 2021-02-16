@@ -2,7 +2,7 @@
 //!
 //! INCOMPLETE AND UNSTABLE.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -10,16 +10,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::{join_all, try_join_all, TryFutureExt};
-use futures::join;
-use safecast::TryCastFrom;
+use futures::future::{join_all, TryFutureExt};
 use uplock::RwLock;
 
 use error::*;
 use generic::*;
 use safecast::TryCastInto;
 use transact::fs::{Dir, Persist};
-use transact::lock::{Mutable, TxnLock};
 use transact::{Transact, Transaction, TxnId};
 
 use crate::chain::{Chain, ChainType, SyncChain};
@@ -29,6 +26,10 @@ use crate::route::Public;
 use crate::scalar::{Link, OpRef, Scalar, TCRef, Value};
 use crate::state::State;
 use crate::txn::{Actor, Txn};
+
+mod owner;
+
+use owner::Owner;
 
 /// The [`Class`] of a [`Cluster`].
 pub struct ClusterType;
@@ -49,9 +50,31 @@ pub struct Cluster {
     actor: Arc<Actor>,
     path: TCPathBuf,
     chains: Map<Chain>,
-    mutated: TxnLock<Mutable<HashSet<Link>>>,
     confirmed: RwLock<TxnId>,
-    owned: RwLock<BTreeMap<TxnId, Txn>>,
+    owned: RwLock<HashMap<TxnId, Owner>>,
+}
+
+impl Cluster {
+    async fn claim(&self, txn: &Txn) -> TCResult<Txn> {
+        let last_commit = self.confirmed.read().await;
+        if txn.id() <= &*last_commit {
+            return Err(TCError::unsupported(format!(
+                "cluster at {} cannot claim transaction {} because the last commit is at {}",
+                &self.path,
+                txn.id(),
+                &*last_commit
+            )));
+        }
+
+        let mut owned = self.owned.write().await;
+        if owned.contains_key(txn.id()) {
+            return Err(TCError::bad_request("received an unclaimed transaction, but there is a record of an owner for this transaction at cluster", &self.path));
+        }
+
+        let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
+        owned.insert(*txn.id(), Owner::new());
+        Ok(txn)
+    }
 }
 
 impl Eq for Cluster {}
@@ -148,12 +171,8 @@ impl Cluster {
             actor: Arc::new(Actor::new(actor_id)),
             path: path.clone(),
             chains: chains.into(),
-            mutated: TxnLock::new(
-                format!("Cluster {} mutated chains", &path),
-                HashSet::new().into(),
-            ),
             confirmed: RwLock::new(txn_id),
-            owned: RwLock::new(BTreeMap::new()),
+            owned: RwLock::new(HashMap::new()),
         };
 
         let class = InstanceClass::new(Some(path.into()), cluster_proto.into());
@@ -177,105 +196,154 @@ impl Instance for Cluster {
 #[async_trait]
 impl Public for Cluster {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
-        if path.is_empty() && key.is_none() {
-            let public_key = Bytes::from(self.actor.public_key().as_bytes().to_vec());
-            return Ok(State::from(Value::from(public_key)));
-        }
+        if path.is_empty() {
+            return if key.is_none() {
+                let public_key = Bytes::from(self.actor.public_key().as_bytes().to_vec());
+                Ok(State::from(Value::from(public_key)))
+            } else {
+                // TODO: auth
+                let key = key.try_cast_into(|v| TCError::bad_request("invalid Id", v))?;
+                let chain = self
+                    .chains
+                    .get(&key)
+                    .ok_or_else(|| TCError::not_found(key))?;
 
-        nonempty_path(path)?;
+                Ok(chain.clone().into())
+            };
+        }
 
         let chain = self
             .chains
             .get(&path[0])
             .ok_or_else(|| TCError::not_found(&path[0]))?;
 
-        if txn.owner().is_none() {
-            let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
+        if let Some(owner_link) = txn.owner() {
+            txn.put(
+                owner_link.clone(),
+                Value::default(),
+                Link::from(self.path.clone()).into(),
+            )
+            .await?;
+
+            chain.get(&txn, &path[1..], key).await
+        } else {
+            let txn = self.claim(txn).await?;
             let state = chain.get(&txn, &path[1..], key).await?;
 
-            txn.commit().await;
-            return Ok(state);
-        }
+            let owner = self
+                .owned
+                .write()
+                .await
+                .remove(&txn.id())
+                .expect("transaction owner");
 
-        not_found(path)
+            owner.commit(&txn).await?;
+            self.commit(txn.id()).await;
+
+            Ok(state)
+        }
     }
 
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
-        if path.is_empty() && key.is_none() {
-            let peer = Value::try_cast_from(value, |v| TCError::bad_request("expected a Link", v))?;
-            let peer = Link::try_cast_from(peer, |v| TCError::bad_request("expected a Link", v))?;
-            let mut mutated = self.mutated.write(*txn.id()).await?;
-            mutated.insert(peer);
-            return Ok(());
-        }
+        if path.is_empty() {
+            if key.is_some() {
+                return Err(TCError::unsupported("a Cluster itself is immutable"));
+            }
 
-        nonempty_path(path)?;
+            let owned = self.owned.read().await;
+            let owner = owned.get(txn.id()).ok_or_else(|| {
+                TCError::bad_request("cluster does not own transaction", txn.id())
+            })?;
+
+            let peer = value.try_cast_into(|s| TCError::bad_request("expected a Link, not", s))?;
+            return owner.mutate(peer).await;
+        }
 
         let chain = self
             .chains
             .get(&path[0])
             .ok_or_else(|| TCError::not_found(&path[0]))?;
 
-        if txn.owner().is_none() {
-            let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
+        if let Some(owner_link) = txn.owner() {
+            txn.put(
+                owner_link.clone(),
+                Value::default(),
+                Link::from(self.path.clone()).into(),
+            )
+            .await?;
+
+            chain.put(&txn, &path[1..], key, value).await
+        } else {
+            let txn = self.claim(txn).await?;
+
             chain.put(&txn, &path[1..], key, value).await?;
 
-            txn.commit().await;
-            return Ok(());
-        }
+            let owner = self
+                .owned
+                .write()
+                .await
+                .remove(&txn.id())
+                .expect("transaction owner");
 
-        not_found(path)
+            owner.commit(&txn).await?;
+            self.commit(txn.id()).await;
+
+            Ok(())
+        }
     }
 
     async fn post(&self, txn: &Txn, path: &[PathSegment], params: Map<State>) -> TCResult<State> {
-        if path.is_empty() && params.is_empty() {
+        if path.is_empty() {
             // TODO: authorize request using a scope
-            txn.commit().await;
+
+            if !params.is_empty() {
+                return Err(TCError::bad_request(
+                    "unrecognized commit parameters",
+                    params,
+                ));
+            }
+
+            self.commit(txn.id()).await;
             return Ok(State::default());
         }
-
-        nonempty_path(path)?;
 
         let chain = self
             .chains
             .get(&path[0])
             .ok_or_else(|| TCError::not_found(&path[0]))?;
 
-        if txn.owner().is_none() {
-            let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
+        if let Some(owner_link) = txn.owner() {
+            txn.put(
+                owner_link.clone(),
+                Value::default(),
+                Link::from(self.path.clone()).into(),
+            )
+            .await?;
+
+            chain.post(&txn, &path[1..], params).await
+        } else {
+            let txn = self.claim(txn).await?;
             let state = chain.post(&txn, &path[1..], params).await?;
 
-            txn.commit().await;
-            return Ok(state);
-        }
+            let owner = self
+                .owned
+                .write()
+                .await
+                .remove(&txn.id())
+                .expect("transaction owner");
 
-        not_found(path)
+            owner.commit(&txn).await?;
+            self.commit(txn.id()).await;
+
+            Ok(state)
+        }
     }
 }
 
 #[async_trait]
 impl Transact for Cluster {
     async fn commit(&self, txn_id: &TxnId) {
-        {
-            let mut owned = self.owned.write().await;
-            if let Some(txn) = owned.remove(txn_id) {
-                let mut mutated = self.mutated.write(*txn_id).await.unwrap();
-                let mutated = mutated.drain();
-
-                // TODO: update Transact to allow returning a TCResult
-                try_join_all(
-                    mutated
-                        .into_iter()
-                        .map(|link| txn.post(link, Map::<State>::default().into())),
-                )
-                .await
-                .unwrap();
-            }
-        }
-
-        let chains = join_all(self.chains.values().map(|chain| chain.commit(txn_id)));
-        let mutated = self.mutated.commit(txn_id);
-        join!(chains, mutated);
+        join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
 
         let mut confirmed = self.confirmed.write().await;
         *confirmed = *txn_id;
@@ -299,17 +367,4 @@ async fn create_dir(data_dir: fs::Dir, txn_id: TxnId, path: &[PathSegment]) -> T
     }
 
     Ok(dir)
-}
-
-#[inline]
-fn nonempty_path(path: &[PathSegment]) -> TCResult<()> {
-    if path.is_empty() {
-        Err(TCError::method_not_allowed(TCPath::from(path)))
-    } else {
-        Ok(())
-    }
-}
-
-fn not_found<T>(path: &[PathSegment]) -> TCResult<T> {
-    Err(TCError::not_found(TCPath::from(path)))
 }
