@@ -42,7 +42,7 @@ Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directo
     * **ReduceChain**\*: A **Chain** which defines a reduce method to compress old blocks, useful for metrics (i.e. to reduce per-second statistics to per-minute, per-minute to per-hour, etc.)
  * **Collection**\*\*
     * **BTree**\*\*: A [B-Tree](https://en.wikipedia.org/wiki/B-tree), used to index tabular data
-    * **Table**\*\*: A database table, which supports one or more **BTree** indices
+    * **Table**\*\*: A database table, which supports one or more **BTree**\*\* indices
     * **Tensor**\*\*: An n-dimensional array of numbers which supports both sparse and dense representations, useful for machine learning applications
     * **Graph**\*: A graph database which uses a sparse **Tensor**\*\* to compute relationships between rows in its **Table**\*\*s
  * **Scalar**

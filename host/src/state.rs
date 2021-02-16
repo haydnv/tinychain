@@ -226,6 +226,18 @@ impl From<()> for State {
     }
 }
 
+impl From<Chain> for State {
+    fn from(chain: Chain) -> Self {
+        Self::Chain(chain)
+    }
+}
+
+impl From<Link> for State {
+    fn from(link: Link) -> Self {
+        Scalar::from(link).into()
+    }
+}
+
 impl From<Map<State>> for State {
     fn from(map: Map<State>) -> State {
         State::Map(map)

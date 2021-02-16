@@ -1,19 +1,16 @@
 //! The transaction context [`Txn`].
 
-use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{join_all, TryFutureExt};
-use uplock::RwLock;
+use futures::future::TryFutureExt;
 
 use error::*;
 use generic::{Id, TCPathBuf};
 use transact::fs::Dir;
 pub use transact::{Transact, Transaction, TxnId};
 
-use crate::cluster::Cluster;
 use crate::fs;
 use crate::gateway::Gateway;
 use crate::scalar::{Link, Value};
@@ -28,7 +25,6 @@ pub use server::*;
 #[derive(Clone)]
 struct Inner {
     gateway: Arc<Gateway>,
-    mutated: RwLock<HashSet<Cluster>>,
 }
 
 /// A transaction context.
@@ -42,29 +38,13 @@ pub struct Txn {
 impl Txn {
     fn new(gateway: Arc<Gateway>, dir: fs::Dir, request: Request) -> Self {
         let request = Arc::new(request);
-        let mutated = RwLock::new(HashSet::new());
-
-        let inner = Arc::new(Inner { gateway, mutated });
+        let inner = Arc::new(Inner { gateway });
 
         Self {
             inner,
             request,
             dir,
         }
-    }
-
-    /// Commit this transaction.
-    pub async fn commit(&self) {
-        let txn_id = self.id();
-        let mutated = self.inner.mutated.write().await;
-        join_all(mutated.iter().map(|cluster| cluster.commit(txn_id))).await;
-    }
-
-    /// Delete any temporary data owned by this transaction.
-    pub async fn finalize(self) {
-        let txn_id = self.id();
-        let mutated = self.inner.mutated.write().await;
-        join_all(mutated.iter().map(|cluster| cluster.finalize(txn_id))).await;
     }
 
     /// Return the current number of strong references to this `Txn`.
@@ -74,6 +54,13 @@ impl Txn {
 
     /// Claim ownership of this transaction.
     pub async fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
+        if actor.id().is_some() {
+            return Err(TCError::bad_request(
+                "cluster ID must be None, not",
+                actor.id(),
+            ));
+        }
+
         if self.owner().is_none() {
             let token = self.request.token().to_string();
             let txn_id = self.request.txn_id();
@@ -101,19 +88,19 @@ impl Txn {
 
     /// Check if the cluster at the specified path on this host is the owner of the transaction.
     pub fn is_owner(&self, cluster_path: TCPathBuf) -> bool {
-        if let Some((host, owner_id)) = self.owner() {
+        if let Some(host) = self.owner() {
             let cluster_link = Link::from((self.inner.gateway.root().clone(), cluster_path));
-            host == &cluster_link && owner_id == &Link::from(TCPathBuf::default()).into()
+            host == &cluster_link
         } else {
             false
         }
     }
 
     /// Return the owner of this transaction, if there is one.
-    pub fn owner(&self) -> Option<(&Link, &Value)> {
-        for (host, actor, scopes) in self.request.scopes().iter() {
+    pub fn owner(&self) -> Option<&Link> {
+        for (host, _actor_id, scopes) in self.request.scopes().iter() {
             if scopes.contains(&SCOPE_ROOT.into()) {
-                return Some((host, actor));
+                return Some(host);
             }
         }
 
@@ -129,27 +116,6 @@ impl Txn {
     pub fn scopes(&'_ self, actor_id: &Value) -> Option<&Vec<Scope>> {
         let host = Link::from(self.inner.gateway.root().clone());
         self.request.scopes().get(&host, actor_id)
-    }
-
-    /// Register the state of the given [`Cluster`] for synchronization with this transaction.
-    pub async fn mutate(&self, cluster: Cluster) -> TCResult<()> {
-        let mut mutated = self.inner.mutated.write().await;
-        if mutated.contains(&cluster) {
-            return Ok(());
-        }
-
-        if let Some((link, id)) = self.owner() {
-            let cluster_link = Link::from((
-                self.inner.gateway.root().clone(),
-                TCPathBuf::from(cluster.path().to_vec()),
-            ));
-
-            self.put(link.clone(), id.clone(), Value::from(cluster_link).into())
-                .await?;
-        }
-
-        mutated.insert(cluster);
-        Ok(())
     }
 
     /// Resolve a GET op within this transaction context.

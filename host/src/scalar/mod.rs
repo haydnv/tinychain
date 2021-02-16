@@ -249,6 +249,12 @@ impl Refer for Scalar {
     }
 }
 
+impl From<Link> for Scalar {
+    fn from(link: Link) -> Self {
+        Value::from(link).into()
+    }
+}
+
 impl From<TCRef> for Scalar {
     fn from(tc_ref: TCRef) -> Self {
         Self::Ref(Box::new(tc_ref))
