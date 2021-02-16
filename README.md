@@ -28,14 +28,14 @@ Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directo
  * **Synchronization**: Tinychain's distributed Paxos algorithm automatically enables cross-service transactions within any set of services which support the Tinychain protocol.
  * **Concurrency**: Tinychain **Op**s are automatically executed concurrently, although a developer can use the **After** flow control to modify this behavior.
  * **Hardware acceleration**\*\*: The **Tensor**\*\* and **Graph**\* data types support hardware acceleration on CUDA and OpenCL backends, no extra code needed.
- * **Object orientation**: The Python client allows defining a Tinychain service as a Python package, which can be then be distributed to other developers, who can use the same Python code to interact with your (hosted) service from their own, without writing any boilerplate integration code, or defining two different APIs for internal and external use.
- * **Portability**: A Tinychain service can run in any cloud environment, or be distributed across many clients, no Docker or Kubernetes required. A Tinychain developer can also choose make some or all of their service's functionality availble for a client to run on-premises, so that the client never has to give the service vendor access to their customer data.
+ * **Object orientation**: The Python client\*\* allows defining a Tinychain service as a Python package, which can be then be distributed to other developers, who can use the same Python code to interact with your (hosted) service from their own, without writing any boilerplate integration code, or defining two different APIs for internal and external use.
+ * **Portability**: A Tinychain service can run in any cloud environment, or be distributed across many heterogenous clients, no Docker or Kubernetes required. A Tinychain developer can also choose make some or all of their service's functionality availble for a client to run on-premises, so that the client never has to give the service vendor access to their customer data.
 
 ## Data structures
 
  * **Cluster**: a collection of **Chain**s and **Op**s responsible for managing consensus relative to other **Cluster**s on the network
- * **Chain**: A record of mutations applied to a **Collection**\*\* or **Value**
-    * **SyncChain**: A **Chain** with one block, which contains the data necessary to recover from a transaction failure (e.g. if the host crashes)
+ * **Chain**: A record of mutations applied to a subject **Collection**\*\* or **Value**
+    * **SyncChain**: A **Chain** with one block, which contains the data necessary to recover from a transaction failure\* (e.g. if the host crashes)
     * **BackupChain**\*: A **Chain** whose blocks are deleted once they reach a certain age, and replaced with a copy of the **Chain**'s subject at that time
     * **BlockChain**\*: A **Chain** with a record of every mutation in the history of its **Collection**\*\* or **Value**
     * **CompliantChain**\*: A **Chain** which retains all history by default, but which allows purging all data owned by a given (anonymous) user ID, for compliance with legal requirements like [GDPR](https://en.wikipedia.org/wiki/General_Data_Protection_Regulation) and [CCPA](https://en.wikipedia.org/wiki/California_Consumer_Privacy_Act)
@@ -92,7 +92,7 @@ Example:
             * `factory.com` sends a request to `shipping.com` to schedule a shipment to the user's address, and charge `retailer.com`
                 * `shipping.com` sends a request to `bank.com` to debit $5 from `retailer.com`'s account
 
-Requests at the same indentation level above are executed concurrently, after validating the incoming request's auth token. If any action fails, the transaction is not dropped, and the user receives an error response. Each participant must notify the transaction owner that it is a participant by forwarding the auth token. If all actions succeed, `retailer.com` (the transaction owner) commits the transaction by sending a commit message to each participant. After it receives an OK response from each participant, it commits its own state and sends an OK response to the user. Acceptance by any service of a request with transaction ID X locks X forbids acceptance of any subsquent request with transaction id X, unless it is shares the same origin (the same end-user) and is therefore a dependent operation of the same transaction. Acceptance of a request with transaction ID X forbids acceptance of any request with a transaction ID < X.
+Requests at the same indentation level above are executed concurrently, after validating the incoming request's auth token. If any action fails, the transaction is not dropped, and the user receives an error response. Each participant must notify the transaction owner that it is a participant by forwarding the auth token. If all dependencies resolve succeessfully, `retailer.com` (the transaction owner) commits the transaction by sending a commit message to each participant. After it receives an OK response from each participant, it commits its own state and sends an OK response to the user. Acceptance by any service of a request with transaction ID X forbids acceptance of any subsquent request with transaction id X, unless it is shares the same origin (the same end-user) and is therefore a dependent operation of the same transaction. Acceptance of a request with transaction ID X forbids acceptance of any request with a transaction ID < X.
 
 The concurrency control flow of this sequence of operations, starting from transaction number (X - 1) is:
 1. Client initiates transaction X
@@ -113,7 +113,7 @@ This is effectively the classic [Paxos](https://en.wikipedia.org/wiki/Paxos_(com
 
 This functionality is implemented automatically for any service using the Tinychain host software.
 
-*Important note*: this cross-service consensus algorithm trusts each service to a) recover from a crash without losing state, and b) communicate that it has committed a transaction honestly and correctly. In other words, it is not a new and trustless protocol, but a new formalization of an existing ad-hoc procedure. An application which requires completely trustless transactions, like a distributed cryptocurrency, should use a single replicated\* **Cluster**.
+*Important note*: this cross-service consensus algorithm trusts each service to a) recover from a crash without losing state\*, and b) communicate that it has committed a transaction honestly and correctly. In other words, it is not a new and trustless protocol, but a new formalization of an existing ad-hoc procedure. An application which requires completely trustless transactions, like a distributed cryptocurrency, should use a single replicated\* **Cluster**.
 
 \* Not yet implemented
 
