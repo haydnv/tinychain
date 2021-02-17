@@ -5,6 +5,9 @@ from .util import *
 class Chain(State):
     __ref__ = uri(State) + "/chain"
 
+    def __json__(self):
+        return {str(uri(type(self))): [to_json(ref(self))]}
+
     def set(self, value):
         return OpRef.Put(uri(self).append("subject"), None, value)
 
@@ -12,16 +15,9 @@ class Chain(State):
         return OpRef.Get(uri(self).append("subject"), key)
 
 
-def sync_chain(initial_value):
-    if not isinstance(initial_value, Scalar):
-        raise ValueError(f"chain value must be a Scalar, not {initial_value}")
+class SyncChain(Chain):
+    __ref__ = uri(Chain) + "/sync"
 
-    dtype = type(initial_value)
-    class SyncChain(Chain):
-        __ref__ = uri(Chain) + "/sync"
 
-        def subject(self, key=None) -> dtype:
-            return dtype(OpRef.Get(uri(self).append("subject"), key))
-
-    return SyncChain.init(initial_value)
+Chain.Sync = SyncChain
 

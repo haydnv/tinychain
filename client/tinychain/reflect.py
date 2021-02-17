@@ -115,6 +115,9 @@ class GetMethod(Method):
 class PutMethod(Method):
     __def__ = uri(Method) + "/get"
 
+    def __call__(self, key, value):
+        return OpRef.Put(uri(self.header) + "/" + self.name, key, value)
+
     def __form__(self):
         sig = inspect.signature(self.form)
 
@@ -125,21 +128,24 @@ class PutMethod(Method):
         args = [self.header]
 
         cxt = Context()
+
+        parameters = list(sig.parameters.items())
+
         if num_args(sig) > 1:
             args.append(cxt)
 
-        if num_args(sig) == 4:
-            name, param = sig.parameters[2]
+        if len(parameters) == 4:
+            name, param = parameters[2]
             dtype = (Value
-                if key_param.annotation == inspect.Parameter.empty
-                else key_param.annotation)
+                if param.annotation == inspect.Parameter.empty
+                else param.annotation)
 
             args.append(dtype(URI(name)))
 
-            name, param = sig.parameters[3]
+            name, param = parameters[3]
             dtype = (State
                 if param.annotation == inspect.Parameter.empty
-                else value_param.annotation)
+                else param.annotation)
 
             args.append(dtype(URI(name)))
 
@@ -184,12 +190,15 @@ class DeleteMethod(Method):
         args = [self.header]
 
         cxt = Context()
-        if num_args(sig) > 1:
+
+        parameters = list(sig.parameters.items())
+
+        if len(parameters) > 1:
             args.append(cxt)
 
         key_name = "key"
-        if num_args(sig) == 3:
-            key_name, param = sig.parameters[2]
+        if len(parameters) == 3:
+            key_name, param = parameters[2]
             if param.annotation in {inspect.Parameter.empty, Value}:
                 args.append(Value(URI(key_name)))
             elif issubclass(param.annotation, Value):

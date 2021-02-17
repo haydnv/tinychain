@@ -6,7 +6,7 @@ class ExampleCluster(tc.Cluster, metaclass=tc.Meta):
     __ref__ = tc.URI("/app/example")
 
     def configure(self):
-        self.rev = tc.sync_chain(tc.Number.init(0))
+        self.rev = tc.Chain.Sync(tc.Number.init(0))
 
     @tc.get_method
     def current(self) -> tc.Number:
@@ -35,6 +35,7 @@ class DownstreamCluster(tc.Cluster, metaclass=tc.Meta):
 
 class ClusterTests(unittest.TestCase):
     def testToJson(self):
+        self.maxDiff = None
         expected = {
             '/app/example': {
                 'bump': {'/state/scalar/op': [

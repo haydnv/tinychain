@@ -28,6 +28,9 @@ class Number(Value):
     def __add__(self, other):
         return self.add(other)
 
+    def __div__(self, other):
+        return self.mul(other)
+
     def __gt__(self, other):
         return self.gt(other)
 
@@ -43,8 +46,20 @@ class Number(Value):
     def __mul__(self, other):
         return self.mul(other)
 
+    def __radd__(self, other):
+        return self.add(other)
+
+    def __rmul__(self, other):
+        return self.mul(other)
+
+    def __sub__(self, other):
+        return self.sub(other)
+
     def add(self, other):
         return _get_op("add", self, other)
+
+    def div(self, other):
+        return _get_op("div", self, other)
 
     def gt(self, other):
         return _get_op("gt", self, other, Bool)
@@ -60,6 +75,9 @@ class Number(Value):
 
     def mul(self, other):
         return _get_op("mul", self, other)
+
+    def sub(self, other):
+        return _get_op("sub", self, other)
 
 
 def _get_op(name, subject, key, dtype=Number):

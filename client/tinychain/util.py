@@ -33,7 +33,8 @@ class Context(object):
             if hasattr(value, "__ref__"):
                 return type(value)(URI(name))
             else:
-                return value
+                from .state import IdRef
+                return IdRef(name)
         else:
             raise ValueError(f"Context has no such value: {name}")
 
@@ -90,7 +91,9 @@ class URI(object):
 
 
 def uri(subject):
-    if isinstance(subject, URI):
+    if hasattr(subject, "__uri__"):
+        return subject.__uri__
+    elif isinstance(subject, URI):
         return subject
     elif isinstance(ref(subject), URI):
         return ref(subject)
