@@ -6,8 +6,6 @@ from .util import ref as get_ref, URI
 
 
 class Cluster(object):
-    __uri__ = URI("/cluster")
-
     @classmethod
     def __use__(cls):
         instance = cls()
