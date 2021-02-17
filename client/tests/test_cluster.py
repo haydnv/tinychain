@@ -24,6 +24,15 @@ class ExampleCluster(tc.Cluster, metaclass=tc.Meta):
             tc.error.BadRequest("Version too old"))
 
 
+class DownstreamCluster(tc.Cluster, metaclass=tc.Meta):
+    __ref__ = tc.URI("/app/downstream")
+
+    @tc.get_method
+    def example(self):
+        example = tc.use(ExampleCluster)
+        return example.current()
+
+
 class ClusterTests(unittest.TestCase):
     def testToJson(self):
         expected = {
@@ -50,6 +59,20 @@ class ClusterTests(unittest.TestCase):
         }
 
         actual = tc.to_json(ExampleCluster)
+        self.assertEqual(expected, actual)
+
+    def testDownstream(self):
+        expected = {
+            '/app/downstream': {
+                'example': {
+                    '/state/scalar/op/get': ['key', [
+                        ['_return', {'/app/example/current': [None]}]
+                    ]]
+                }
+            }
+        }
+
+        actual = tc.to_json(DownstreamCluster)
         self.assertEqual(expected, actual)
 
 

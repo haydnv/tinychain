@@ -100,6 +100,13 @@ def uri(subject):
         raise AttributeError(f"{subject} has no URI")
 
 
+def use(cls):
+    if hasattr(cls, "__use__"):
+        return cls.__use__()
+    else:
+        cls
+
+
 def to_json(obj):
     if inspect.isclass(obj):
         if hasattr(type(obj), "__json__"):
