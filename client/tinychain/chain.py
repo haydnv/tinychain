@@ -5,6 +5,12 @@ from .util import *
 class Chain(State):
     __ref__ = uri(State) + "/chain"
 
+    def set(self, value):
+        return OpRef.Put(uri(self).append("subject"), None, value)
+
+    def subject(self, key=None):
+        return OpRef.Get(uri(self).append("subject"), key)
+
 
 def sync_chain(initial_value):
     if not isinstance(initial_value, Scalar):
