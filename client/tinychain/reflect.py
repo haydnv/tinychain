@@ -12,7 +12,7 @@ def gen_headers(instance):
             continue
 
         if isinstance(attr, MethodStub):
-            setattr(instance, name, attr(instance, name))
+            setattr(instance, name, attr.method(instance, name))
 
 
 class Meta(type):
@@ -33,7 +33,7 @@ class Meta(type):
                 continue
 
             if isinstance(attr, MethodStub):
-                setattr(header, name, attr(instance, name))
+                setattr(header, name, attr.method(instance, name))
             elif isinstance(attr, State):
                 setattr(header, name, type(attr)(URI(f"self/{name}")))
             else:
@@ -45,7 +45,7 @@ class Meta(type):
                 continue
 
             if isinstance(attr, MethodStub):
-                form[name] = to_json(attr(header, name))
+                form[name] = to_json(attr.method(header, name))
             else:
                 form[name] = attr
 
@@ -60,7 +60,11 @@ class MethodStub(object):
         self.dtype = dtype
         self.form = form
 
-    def __call__(self, header, name):
+    def __call__(self, *args, **kwargs):
+        raise RuntimeError(
+            "cannot call a MethodStub; use tc.use(<class>) for callable method references")
+
+    def method(self, header, name):
         return self.dtype(header, self.form, name)
 
 
