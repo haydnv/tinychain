@@ -100,21 +100,22 @@ impl<T: Clone + Instance + Route> Route for InstanceExt<T> {
                 Scalar::Op(OpDef::Get(get_op)) => Some(Box::new(GetMethod {
                     subject: self.clone().into(),
                     method: get_op.clone(),
-                    path,
+                    path: &path[1..],
                 })),
                 Scalar::Op(OpDef::Put(put_op)) => Some(Box::new(PutMethod {
                     subject: self.clone().into(),
                     method: put_op.clone(),
-                    path,
+                    path: &path[1..],
                 })),
                 Scalar::Op(OpDef::Post(post_op)) => Some(Box::new(PostMethod {
                     subject: self.clone().into(),
                     method: post_op.clone(),
-                    path,
+                    path: &path[1..],
                 })),
                 other => other.route(&path[1..]),
             }
         } else {
+            debug!("{} not found in instance prototype, routing to parent", &path[0]);
             self.parent().route(path)
         }
     }
