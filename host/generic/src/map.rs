@@ -139,12 +139,12 @@ impl<T: Clone + fmt::Display> fmt::Display for Map<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{{{}}}",
+            "{{\n{}\n}}",
             self.inner
                 .iter()
-                .map(|(k, v)| format!("{}: {}", k, v))
+                .map(|(k, v)| format!("\t{}: {}", k, v))
                 .collect::<Vec<String>>()
-                .join(", ")
+                .join(",\n")
         )
     }
 }

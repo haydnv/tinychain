@@ -16,7 +16,7 @@ use error::*;
 use generic::*;
 
 use crate::route::Public;
-use crate::scalar::{Link, Scalar, Scope, Value};
+use crate::scalar::{Link, Scalar, Scope, Value, SELF};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -84,8 +84,9 @@ pub enum Subject {
 
 impl Subject {
     fn requires(&self, deps: &mut HashSet<Id>) {
-        if let Self::Ref(id_ref, _) = self {
-            id_ref.requires(deps);
+        match self {
+            Self::Ref(id_ref, _) if id_ref.id() != &SELF => id_ref.requires(deps),
+            _ => {}
         }
     }
 }

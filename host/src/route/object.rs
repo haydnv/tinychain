@@ -115,7 +115,10 @@ impl<T: Clone + Instance + Route> Route for InstanceExt<T> {
                 other => other.route(&path[1..]),
             }
         } else {
-            debug!("{} not found in instance prototype, routing to parent", &path[0]);
+            debug!(
+                "{} not found in instance prototype, routing to parent",
+                &path[0]
+            );
             self.parent().route(path)
         }
     }

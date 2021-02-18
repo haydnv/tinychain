@@ -727,10 +727,10 @@ pub struct Scope<T> {
 
 impl<T: Public> Scope<T> {
     pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(subject: T, data: I) -> Self {
-        Self {
-            subject,
-            data: data.into_iter().map(|(id, s)| (id, s.into())).collect(),
-        }
+        let data = data.into_iter().map(|(id, s)| (id, s.into())).collect();
+
+        debug!("new execution scope: {}", data);
+        Self { subject, data }
     }
 
     pub fn with_context<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
@@ -738,14 +738,14 @@ impl<T: Public> Scope<T> {
         context: Map<State>,
         data: I,
     ) -> Self {
-        Self {
-            subject,
-            data: context
-                .into_inner()
-                .into_iter()
-                .chain(data.into_iter().map(|(id, s)| (id, s.into())))
-                .collect(),
-        }
+        let data = context
+            .into_inner()
+            .into_iter()
+            .chain(data.into_iter().map(|(id, s)| (id, s.into())))
+            .collect();
+
+        debug!("new execution scope: {}", data);
+        Self { subject, data }
     }
 
     pub fn into_inner(self) -> Map<State> {
