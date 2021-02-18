@@ -85,7 +85,7 @@ impl<T: Clone + Instance + Public> Executor<T> {
 
             if pending.is_empty() && self.scope.resolve_id(&capture)?.is_ref() {
                 return Err(TCError::bad_request(
-                    "Cannot resolve all dependencies of",
+                    "cannot resolve all dependencies of",
                     capture,
                 ));
             }
@@ -104,7 +104,7 @@ impl<T: Clone + Instance + Public> Executor<T> {
                         Ok(state) => {
                             resolved.insert(id, state);
                         }
-                        Err(cause) => return Err(cause.consume(format!("Error resolving {}", id))),
+                        Err(cause) => return Err(cause.consume(format!("error resolving {}", id))),
                     }
                 }
             }

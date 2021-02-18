@@ -399,6 +399,12 @@ impl From<Link> for Value {
     }
 }
 
+impl From<Number> for Value {
+    fn from(n: Number) -> Value {
+        Value::Number(n)
+    }
+}
+
 impl CastFrom<Value> for String {
     fn cast_from(value: Value) -> String {
         value.to_string()
