@@ -15,7 +15,7 @@ use crate::scalar::Scalar;
 const PREFIX: PathLabel = path_label(&["state", "scalar", "op"]);
 
 /// The [`Class`] of a user-defined [`OpDef`].
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum OpDefType {
     Get,
     Put,
@@ -30,7 +30,7 @@ impl Class for OpDefType {
 impl NativeClass for OpDefType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         if path.len() == 4 && &path[..3] == &PREFIX[..] {
-            log::debug!("OpDefType::from_path {}", TCPath::from(path));
+            log::debug!("OpDefType::from_path {} (type {})", TCPath::from(path), &path[3]);
 
             match path[3].as_str() {
                 "get" => Some(Self::Get),

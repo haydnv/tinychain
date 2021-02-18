@@ -39,7 +39,7 @@ pub trait Refer {
 }
 
 /// The [`Class`] of a [`TCRef`].
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RefType {
     After,
     Id,

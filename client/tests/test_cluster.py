@@ -35,10 +35,9 @@ class DownstreamCluster(tc.Cluster, metaclass=tc.Meta):
 
 class ClusterTests(unittest.TestCase):
     def testToJson(self):
-        self.maxDiff = None
         expected = {
             '/app/example': {
-                'bump': {'/state/scalar/op': [
+                'bump': {'/state/scalar/op/post': [
                     ['_return', {'/state/scalar/ref/if': [
                         {'$version/gt': [{'$self/current': [None]}]},
                         {'$self/rev': [None, {"$version": []}]},

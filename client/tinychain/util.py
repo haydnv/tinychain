@@ -70,6 +70,30 @@ class URI(object):
     def append(self, name):
         return URI(str(self), [name])
 
+    def host(self):
+        if "://" not in self.root:
+            return None
+
+        start = self.root.index("://") + 3
+        end = self.root.index('/', start)
+        if end > start:
+            return self.root[start:end]
+        else:
+            return self.root[start:]
+
+    def path(self):
+        if "://" not in self.root:
+            return self.root
+
+        start = self.root.index("://")
+        start = self.root.index('/', start + 3)
+        return self.root[start:] + self.path
+
+    def protocol(self):
+        i = self.root.index("://")
+        if i > 0:
+            return self.root[:i]
+
     def __add__(self, other):
         return URI(str(self) + other)
 
@@ -97,7 +121,7 @@ def uri(subject):
         return subject
     elif isinstance(ref(subject), URI):
         return ref(subject)
-    elif uri(type(subject)) is not None:
+    elif hasattr(type(subject), "__ref__") or hasattr(type(subject), "__uri__"):
         return uri(type(subject))
     else:
         raise AttributeError(f"{subject} has no URI")

@@ -13,6 +13,7 @@ from tinychain.value import *
 def write_cluster(cluster, config_path):
     import json
     import pathlib
+
     config_path = pathlib.Path(config_path)
     if config_path.exists():
         with open(config_path) as f:
@@ -22,8 +23,13 @@ def write_cluster(cluster, config_path):
             except json.decoder.JSONDecodeError:
                 pass
 
-        raise RuntimeError(f"There is already an entry at {cluster_path}")
+        raise RuntimeError(f"There is already an entry at {config_path}")
     else:
+        import os
+
+        if not config_path.parent.exists():
+            os.makedirs(config_path.parent)
+
         with open(config_path, 'w') as cluster_file:
             cluster_file.write(json.dumps(to_json(cluster), indent=4))
 

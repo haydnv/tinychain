@@ -83,6 +83,11 @@ class Method(object):
 class GetMethod(Method):
     __ref__ = uri(Method) + "/get"
 
+    def __call__(self, key=None):
+        rtype = inspect.signature(self.form).return_annotation
+        rtype = State if rtype == inspect.Parameter.empty else rtype
+        return rtype(OpRef.Get(uri(self.header).append(self.name), key))
+
     def __form__(self):
         sig = inspect.signature(self.form)
 
@@ -106,14 +111,9 @@ class GetMethod(Method):
         cxt._return = self.form(*args) # populate the Context
         return (key_name, cxt)
 
-    def __call__(self, key=None):
-        rtype = inspect.signature(self.form).return_annotation
-        rtype = State if rtype == inspect.Parameter.empty else rtype
-        return rtype(OpRef.Get(uri(self.header).append(self.name), key))
-
 
 class PutMethod(Method):
-    __def__ = uri(Method) + "/get"
+    __ref__ = uri(Method) + "/put"
 
     def __call__(self, key, value):
         return OpRef.Put(uri(self.header) + "/" + self.name, key, value)
@@ -134,27 +134,29 @@ class PutMethod(Method):
         if num_args(sig) > 1:
             args.append(cxt)
 
+        key_name = "key"
+        value_name = "value"
         if len(parameters) == 4:
-            name, param = parameters[2]
+            key_name, param = parameters[2]
             dtype = (Value
                 if param.annotation == inspect.Parameter.empty
                 else param.annotation)
 
-            args.append(dtype(URI(name)))
+            args.append(dtype(URI(key_name)))
 
-            name, param = parameters[3]
+            value_name, param = parameters[3]
             dtype = (State
                 if param.annotation == inspect.Parameter.empty
                 else param.annotation)
 
-            args.append(dtype(URI(name)))
+            args.append(dtype(URI(value_name)))
 
         cxt._return = self.form(*args)
-        return cxt
+        return (key_name, value_name, cxt)
 
 
 class PostMethod(Method):
-    __def__ = uri(Method) + "/get"
+    __ref__ = uri(Method) + "/post"
 
     def __form__(self):
         sig = inspect.signature(self.form)
@@ -179,7 +181,7 @@ class PostMethod(Method):
 
 
 class DeleteMethod(Method):
-    __ref__ = uri(Method) + "/get"
+    __ref__ = uri(Method) + "/delete"
 
     def __form__(self):
         sig = inspect.signature(self.form)

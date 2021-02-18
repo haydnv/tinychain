@@ -97,16 +97,16 @@ class Local(Host):
     STARTUP_TIME = 1.0
 
     def __init__(self, workspace, data_dir=None, clusters=[], force_create=False):
+        Host.__init__(self, self.ADDRESS)
+        self._process = None
+
         if clusters and data_dir is None:
             raise ValueError("Hosting a cluster requires specifying a data_dir")
-        elif data_dir:
-            maybe_create_dir(data_dir, force_create)
 
         maybe_create_dir(workspace, force_create)
 
-        Host.__init__(self, self.ADDRESS)
-
-        self._process = None
+        if data_dir:
+            maybe_create_dir(data_dir, force_create)
 
         self.clusters = clusters
         self.data_dir = data_dir

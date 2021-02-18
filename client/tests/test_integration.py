@@ -40,40 +40,46 @@ class ClusterTests(unittest.TestCase):
         expected = {
             "/app/balance/left": {
                 "weigh": {
-                    "/state/scalar/op": [
-                        ["total", 20],
-                        ["update", {
+                    "/state/scalar/op/put": [
+                        "key",
+                        "weight",
+                        [
+                            ["total", 20],
+                            ["update", {
                                 "/state/scalar/ref/after": [
                                     {
                                         "/app/balance/right/weigh": [
                                             None,
-                                            {"$total/sub": [{"$weight": []}]},
+                                            {
+                                                "$total/sub": [
+                                                    {
+                                                        "$weight": []
+                                                    }
+                                                ]
+                                            }
                                         ]
                                     },
                                     {
                                         "$self/weight/subject": [
                                             None,
-                                            {"$weight": []}
+                                            {
+                                                "$weight": []
+                                            }
                                         ]
                                     }
                                 ]
-                            }
-                        ],
-                        [
-                            "_return",
-                            {
+                            }],
+                            ["_return", {
                                 "/state/scalar/ref/if": [
-                                    {
-                                        "$weight/eq": [
-                                            {"$self/weight/subject": [None]}
-                                        ]
-                                    },
+                                    {"$weight/eq": [
+                                        {
+                                            "$self/weight/subject": [None]
+                                        }
+                                    ]},
                                     None,
-                                    {
-                                        "$update": []
-                                    }
+                                    {"$update": []}
                                 ]
-                            }
+                            }]
                         ]
                     ]
                 },
@@ -82,7 +88,9 @@ class ClusterTests(unittest.TestCase):
                         {
                             "/state/chain/sync": [
                                 {
-                                    "/state/scalar/value/number": [0]
+                                    "/state/scalar/value/number": [
+                                        0
+                                    ]
                                 }
                             ]
                         }

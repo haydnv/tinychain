@@ -23,7 +23,7 @@ const EMPTY_SEQ: [u8; 0] = [];
 const EXPECTING: &'static str = "a Tinychain value, e.g. 1 or \"two\" or [3]";
 const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ValueType {
     Bytes,
     Link,

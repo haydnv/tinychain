@@ -29,7 +29,7 @@ pub use value::*;
 const PREFIX: PathLabel = path_label(&["state", "scalar"]);
 
 /// The [`Class`] of a [`Scalar`].
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScalarType {
     Map,
     Op(OpDefType),
@@ -123,6 +123,8 @@ impl Scalar {
 
     /// Cast this `Scalar` into the specified [`ScalarType`], if possible.
     pub fn into_type(self, class: ScalarType) -> Option<Self> {
+        debug!("cast into {} from {}: {}", class, self.class(), self);
+
         if self.class() == class {
             return Some(self);
         }
@@ -175,9 +177,11 @@ impl Scalar {
                     op_ref.map(TCRef::Op).map(Self::from)
                 }
             },
+
             ST::Value(vt) => Value::opt_cast_from(self)
                 .and_then(|value| value.into_type(vt))
                 .map(Scalar::Value),
+
             ST::Tuple => match self {
                 Self::Map(map) => Some(Self::Tuple(map.into_iter().map(|(_, v)| v).collect())),
                 Self::Tuple(tuple) => Some(Self::Tuple(tuple)),
@@ -264,6 +268,17 @@ impl From<TCRef> for Scalar {
 impl From<Value> for Scalar {
     fn from(value: Value) -> Scalar {
         Scalar::Value(value)
+    }
+}
+
+impl TryFrom<Scalar> for Map<Scalar> {
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> TCResult<Map<Scalar>> {
+        match scalar {
+            Scalar::Map(map) => Ok(map),
+            other => Err(TCError::bad_request("expected a Map but found", other))
+        }
     }
 }
 
@@ -492,10 +507,14 @@ impl ScalarVisitor {
         class: ScalarType,
         access: &mut A,
     ) -> Result<Scalar, A::Error> {
+        debug!("ScalarVisitor::visit_map_value {}", class);
         let scalar = access.next_value::<Scalar>(()).await?;
+        debug!("value {}", scalar);
 
         if let Some(scalar) = scalar.clone().into_type(class) {
             return Ok(scalar);
+        } else {
+            debug!("cannot cast into {} from {}", class, scalar);
         }
 
         let subject = Link::from(class.path()).into();
@@ -519,6 +538,7 @@ impl ScalarVisitor {
     }
 
     pub fn visit_subject<E: de::Error>(subject: Subject, params: Scalar) -> Result<Scalar, E> {
+        debug!("ScalarVisitor::visit_subject {} {}", subject, params);
         if params.is_none() {
             match subject {
                 Subject::Ref(id, path) if path.is_empty() => {
@@ -693,5 +713,24 @@ impl fmt::Display for Scalar {
             Scalar::Tuple(tuple) => fmt::Display::fmt(tuple, f),
             Scalar::Value(value) => fmt::Display::fmt(value, f),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::TryInto;
+
+    use futures::{future, stream};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_decode_op() {
+        let encoded = "{\"name\": {\"/state/scalar/op/get\": [[\"_return\", 1]]}}";
+        let encoded = stream::once(future::ready(encoded.as_bytes().to_vec()));
+        let decoded: Scalar = destream_json::decode((), encoded).await.unwrap();
+        let decoded: Map<Scalar> = decoded.try_into().unwrap();
+        let decoded = decoded.get(&label("name").into()).unwrap();
+        assert_eq!(decoded.class(), ScalarType::Op(OpDefType::Get))
     }
 }

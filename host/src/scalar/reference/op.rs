@@ -25,7 +25,7 @@ use super::{IdRef, Refer, TCRef};
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref", "op"]);
 
 /// The [`Class`] of an [`OpRef`].
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum OpRefType {
     Get,
     Put,
@@ -463,11 +463,11 @@ impl OpRefVisitor {
     pub fn visit_ref_value<E: de::Error>(subject: Subject, params: Scalar) -> Result<OpRef, E> {
         match params {
             Scalar::Map(params) => Ok(OpRef::Post((subject, params))),
-            Scalar::Tuple(params) if params.matches::<(Value, Scalar)>() => {
+            Scalar::Tuple(params) if params.matches::<(Key, Scalar)>() => {
                 let (key, value) = params.opt_cast_into().unwrap();
                 Ok(OpRef::Put((subject, key, value)))
             }
-            Scalar::Tuple(params) if params.matches::<(Value,)>() => {
+            Scalar::Tuple(params) if params.matches::<(Key,)>() => {
                 let (key,) = params.opt_cast_into().unwrap();
                 Ok(OpRef::Get((subject, key)))
             }

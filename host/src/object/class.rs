@@ -118,6 +118,7 @@ impl de::Visitor for InstanceClassVisitor {
             if let Ok(extends) = key.parse() {
                 log::debug!("Class extends {}", extends);
                 let proto = access.next_value(()).await?;
+                log::debug!("prototype is {}", proto);
                 return Ok(InstanceClass {
                     extends: Some(extends),
                     proto,
