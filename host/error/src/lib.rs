@@ -156,7 +156,7 @@ impl TCError {
     pub fn consume<I: fmt::Display>(self, info: I) -> Self {
         Self {
             code: self.code,
-            message: format!("{}: {}", self.message, info),
+            message: format!("{}: {}", info, self.message),
         }
     }
 }
