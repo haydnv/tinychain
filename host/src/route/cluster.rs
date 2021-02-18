@@ -1,17 +1,16 @@
 use bytes::Bytes;
-use futures::{future, Future};
+use futures::future;
 use safecast::TryCastInto;
 
 use error::*;
 use generic::Id;
 use transact::{Transact, Transaction};
 
+use crate::cluster::Cluster;
 use crate::route::*;
 use crate::scalar::{Link, Value};
 use crate::state::State;
 use crate::txn::Txn;
-
-use super::Cluster;
 
 pub struct ClusterHandler<'a> {
     cluster: &'a Cluster,
@@ -22,7 +21,7 @@ impl<'a> ClusterHandler<'a> {
         if key.is_some() {
             let key: Id = key.try_cast_into(|v| TCError::bad_request("invalid ID", v))?;
             self.cluster
-                .chains
+                .chains()
                 .get(&key)
                 .cloned()
                 .map(State::from)
@@ -34,11 +33,7 @@ impl<'a> ClusterHandler<'a> {
     }
 
     async fn handle_put(self, txn: Txn, peer: Link) -> TCResult<()> {
-        let owned = self.cluster.owned.read().await;
-        let owner = owned
-            .get(txn.id())
-            .ok_or_else(|| TCError::bad_request("cluster does not own transaction", txn.id()))?;
-
+        let owner = self.cluster.owner(txn.id()).await?;
         owner.mutate(peer).await
     }
 }
@@ -90,6 +85,22 @@ impl<'a> From<&'a Cluster> for ClusterHandler<'a> {
     }
 }
 
+impl Route for Cluster {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if path.is_empty() {
+            return Some(Box::new(ClusterHandler::from(self)));
+        } else if let Some(chain) = self.chains().get(&path[0]) {
+            if let Some(handler) = chain.route(&path[1..]) {
+                Some(Box::new(ChainHandler::new(self, handler)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+}
+
 pub struct ChainHandler<'a> {
     cluster: &'a Cluster,
     handler: Box<dyn Handler<'a> + 'a>,
@@ -99,38 +110,6 @@ impl<'a> ChainHandler<'a> {
     pub fn new(cluster: &'a Cluster, handler: Box<dyn Handler<'a> + 'a>) -> Self {
         Self { cluster, handler }
     }
-
-    async fn wrap_handler<R, Fut: Future<Output = TCResult<R>>, F: FnOnce(Txn) -> Fut>(
-        cluster: &'a Cluster,
-        txn: Txn,
-        handler: F,
-    ) -> TCResult<R> {
-        if let Some(owner_link) = txn.owner() {
-            txn.put(
-                owner_link.clone(),
-                Value::default(),
-                Link::from(cluster.path.clone()).into(),
-            )
-            .await?;
-
-            handler(txn).await
-        } else {
-            let txn = cluster.claim(&txn).await?;
-            let state = handler(txn.clone()).await?;
-
-            let owner = cluster
-                .owned
-                .write()
-                .await
-                .remove(&txn.id())
-                .expect("transaction owner");
-
-            owner.commit(&txn).await?;
-            cluster.commit(txn.id()).await;
-
-            Ok(state)
-        }
-    }
 }
 
 impl<'a> Handler<'a> for ChainHandler<'a> {
@@ -139,9 +118,7 @@ impl<'a> Handler<'a> for ChainHandler<'a> {
 
         self.handler.get().map(|get_handler| {
             let wrapped: GetHandler = Box::new(move |txn, key| {
-                Box::pin(Self::wrap_handler(cluster, txn.clone(), |txn| {
-                    get_handler(txn, key)
-                }))
+                Box::pin(cluster.wrap_handler(txn.clone(), |txn| get_handler(txn, key)))
             });
 
             wrapped
@@ -153,9 +130,7 @@ impl<'a> Handler<'a> for ChainHandler<'a> {
 
         self.handler.put().map(|put_handler| {
             let wrapped: PutHandler = Box::new(move |txn, key, value| {
-                Box::pin(Self::wrap_handler(cluster, txn.clone(), |txn| {
-                    put_handler(txn, key, value)
-                }))
+                Box::pin(cluster.wrap_handler(txn.clone(), |txn| put_handler(txn, key, value)))
             });
 
             wrapped
@@ -167,9 +142,7 @@ impl<'a> Handler<'a> for ChainHandler<'a> {
 
         self.handler.post().map(|post_handler| {
             let wrapped: PostHandler = Box::new(move |txn, params| {
-                Box::pin(Self::wrap_handler(cluster, txn.clone(), |txn| {
-                    post_handler(txn, params)
-                }))
+                Box::pin(cluster.wrap_handler(txn.clone(), |txn| post_handler(txn, params)))
             });
 
             wrapped

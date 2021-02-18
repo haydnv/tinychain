@@ -11,6 +11,7 @@ use crate::scalar::Link;
 use crate::state::State;
 use crate::txn::Txn;
 
+#[derive(Clone)]
 pub struct Owner {
     mutated: RwLock<HashSet<Link>>,
 }

@@ -9,7 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{join_all, TryFutureExt};
+use futures::future::{join_all, Future, TryFutureExt};
 use uplock::RwLock;
 
 use error::*;
@@ -21,11 +21,9 @@ use transact::{Transact, Transaction, TxnId};
 use crate::chain::{Chain, ChainType, SyncChain};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
-use crate::route::*;
 use crate::scalar::{Link, OpRef, Scalar, TCRef, Value};
 use crate::txn::{Actor, Txn};
 
-mod handlers;
 mod owner;
 
 use owner::Owner;
@@ -74,6 +72,49 @@ impl Cluster {
         owned.insert(*txn.id(), Owner::new());
         Ok(txn)
     }
+
+    pub async fn owner(&self, txn_id: &TxnId) -> TCResult<Owner> {
+        self.owned
+            .read()
+            .await
+            .get(txn_id)
+            .cloned()
+            .ok_or_else(|| TCError::bad_request("cluster does not own transaction", txn_id))
+    }
+
+    pub async fn wrap_handler<R, Fut: Future<Output = TCResult<R>>, F: FnOnce(Txn) -> Fut>(
+        &self,
+        txn: Txn,
+        handler: F,
+    ) -> TCResult<R> {
+        if let Some(owner_link) = txn.owner() {
+            // Notify the owner of participation
+            txn.put(
+                owner_link.clone(),
+                Value::default(),
+                Link::from(self.path.clone()).into(),
+            )
+            .await?;
+
+            handler(txn).await
+        } else {
+            // Claim and execute the transaction
+            let txn = self.claim(&txn).await?;
+            let state = handler(txn.clone()).await?;
+
+            let owner = self
+                .owned
+                .write()
+                .await
+                .remove(&txn.id())
+                .expect("transaction owner");
+
+            owner.commit(&txn).await?;
+            self.commit(txn.id()).await;
+
+            Ok(state)
+        }
+    }
 }
 
 impl Eq for Cluster {}
@@ -91,6 +132,10 @@ impl Hash for Cluster {
 }
 
 impl Cluster {
+    pub fn chains(&self) -> &Map<Chain> {
+        &self.chains
+    }
+
     pub fn public_key(&self) -> &[u8] {
         self.actor.public_key().as_bytes()
     }
@@ -193,22 +238,6 @@ impl Instance for Cluster {
 
     fn class(&self) -> Self::Class {
         ClusterType
-    }
-}
-
-impl Route for Cluster {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() {
-            return Some(Box::new(handlers::ClusterHandler::from(self)));
-        } else if let Some(chain) = self.chains.get(&path[0]) {
-            if let Some(handler) = chain.route(&path[1..]) {
-                Some(Box::new(handlers::ChainHandler::new(self, handler)))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
     }
 }
 
