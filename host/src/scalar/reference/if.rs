@@ -5,6 +5,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use destream::{de, en};
+use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use error::{TCError, TCResult};
@@ -34,6 +35,8 @@ impl Refer for IfRef {
     }
 
     async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
+        debug!("If::resolve {}", self);
+
         let cond = self.cond.resolve(context, txn).await?;
         if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = cond {
             if b.into() {

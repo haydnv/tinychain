@@ -8,13 +8,13 @@ use futures::TryFutureExt;
 
 use error::*;
 use generic::*;
-use value::Value;
+use log::debug;
 
 use crate::route::Public;
 use crate::state::State;
 use crate::txn::Txn;
 
-use super::{Scalar, Scope};
+use super::{Scalar, Scope, Value};
 
 mod after;
 mod r#if;
@@ -124,11 +124,17 @@ impl Refer for TCRef {
     }
 
     async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
+        debug!("TCRef::resolve {}", self);
+
         match self {
             Self::After(after) => after.resolve(context, txn).await,
             Self::Id(id_ref) => id_ref.resolve(context, txn).await,
             Self::If(if_ref) => if_ref.resolve(context, txn).await,
-            Self::Op(op_ref) => op_ref.resolve(context, txn).await,
+            Self::Op(op_ref) => {
+                debug!("TCRef::resolve {}", op_ref);
+
+                op_ref.resolve(context, txn).await
+            },
         }
     }
 }

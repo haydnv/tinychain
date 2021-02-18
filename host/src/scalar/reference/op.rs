@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::{try_join, TryFutureExt};
+use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use error::*;
@@ -232,6 +233,8 @@ impl Key {
     }
 
     async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<Value> {
+        debug!("Key::resolve {}", self);
+
         match self {
             Self::Ref(id_ref) => match id_ref.resolve(context, txn).await? {
                 State::Scalar(Scalar::Value(value)) => Ok(value),

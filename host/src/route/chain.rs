@@ -8,7 +8,15 @@ use crate::route::Public;
 
 impl Route for Chain {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        self.subject().route(path)
+        if path.is_empty() {
+            // TODO: chain methods
+            self.subject().route(path)
+        } else if path[0].as_str() == "subject" {
+            self.subject().route(&path[1..])
+        } else {
+            // TODO: chain methods
+            self.subject().route(path)
+        }
     }
 }
 

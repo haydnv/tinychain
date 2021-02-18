@@ -235,6 +235,8 @@ impl Refer for Scalar {
     }
 
     async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
+        debug!("Scalar::resolve {}", self);
+
         match self {
             Self::Map(map) => {
                 let resolved =
@@ -725,7 +727,7 @@ pub struct Scope<T> {
     data: Map<State>,
 }
 
-impl<T: Public> Scope<T> {
+impl<T: Instance + Public> Scope<T> {
     pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(subject: T, data: I) -> Self {
         let data = data.into_iter().map(|(id, s)| (id, s.into())).collect();
 
@@ -764,6 +766,13 @@ impl<T: Public> Scope<T> {
         key: Value,
     ) -> TCResult<State> {
         if subject == &SELF {
+            debug!(
+                "{} GET {}: {}",
+                self.subject.class(),
+                TCPath::from(path),
+                key
+            );
+
             self.subject.get(txn, path, key).await
         } else if let Some(subject) = self.data.get(subject) {
             subject.get(txn, path, key).await

@@ -7,6 +7,7 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::de;
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
+use log::debug;
 use safecast::TryCastFrom;
 use value::Value;
 
@@ -49,6 +50,8 @@ impl Refer for IdRef {
         context: &Scope<T>,
         _txn: &Txn,
     ) -> TCResult<State> {
+        debug!("IdRef::resolve {}", self);
+
         context.resolve_id(self.id()).map(State::clone)
     }
 }

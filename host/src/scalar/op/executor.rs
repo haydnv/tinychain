@@ -95,7 +95,6 @@ impl<T: Clone + Instance + Public> Executor<T> {
                 let mut providers = FuturesUnordered::new();
                 for id in pending.into_iter() {
                     let state = self.scope.resolve_id(&id)?.clone();
-                    debug!("{} resolved to {}", id, state);
                     providers.push(state.resolve(&self.scope, &self.txn).map(|r| (id, r)));
                 }
 

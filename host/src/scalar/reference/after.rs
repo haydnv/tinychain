@@ -5,6 +5,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use destream::{de, en};
+use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use error::TCResult;
@@ -32,6 +33,8 @@ impl Refer for After {
     }
 
     async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
+        debug!("After::resolve {}", self);
+
         self.when.resolve(context, txn).await?;
         Ok(self.then.into())
     }

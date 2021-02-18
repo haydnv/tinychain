@@ -168,6 +168,8 @@ impl Refer for State {
     }
 
     async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<Self> {
+        debug!("State::resolve {}", self);
+
         match self {
             Self::Map(map) => {
                 let resolved = try_join_all(
