@@ -44,6 +44,12 @@ impl From<Label> for Id {
     }
 }
 
+impl From<uuid::Uuid> for Id {
+    fn from(id: uuid::Uuid) -> Self {
+        Id { id: id.to_string() }
+    }
+}
+
 /// A generic Id
 ///
 /// Id is widely used within the Tinychain host software to identify individual variables

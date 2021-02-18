@@ -40,4 +40,5 @@ uplock = "0.1"
 value = { path = "value" }
 structopt = "0.3"
 tokio = { version = "1.2", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "time"] }
+uuid = "0.8"
 url = { version = "2.2" }

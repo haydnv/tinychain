@@ -134,7 +134,7 @@ impl Refer for TCRef {
                 debug!("TCRef::resolve {}", op_ref);
 
                 op_ref.resolve(context, txn).await
-            },
+            }
         }
     }
 }

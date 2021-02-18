@@ -5,20 +5,24 @@ use std::sync::Arc;
 
 use futures::TryFutureExt;
 use uplock::RwLock;
+use uuid::Uuid;
 
 use error::*;
-use transact::{Transact, Transaction};
+use generic::PathSegment;
+use transact::Transact;
 
 use crate::fs;
 use crate::gateway::Gateway;
 
 use super::request::*;
-use super::{Txn, TxnId};
+use super::{Active, Txn, TxnId};
+use std::convert::TryInto;
+use transact::fs::Dir;
 
 /// Server to keep track of the transactions currently active for this host.
 #[derive(Clone)]
 pub struct TxnServer {
-    active: RwLock<HashMap<TxnId, Txn>>,
+    active: RwLock<HashMap<TxnId, Arc<Active>>>,
     workspace: fs::Dir,
 }
 
@@ -39,18 +43,21 @@ impl TxnServer {
         txn_id: TxnId,
         token: (String, Claims),
     ) -> TCResult<Txn> {
+        let expires = token.1.expires().try_into()?;
+        let dir = self.txn_dir(&txn_id).await?;
+        let request = Request::new(txn_id, token.0, token.1);
         let mut active = self.active.write().await;
 
         match active.entry(txn_id) {
             Entry::Occupied(entry) => {
-                let txn = entry.get();
+                let active = entry.get();
                 // TODO: authorize access to this Txn
-                Ok(txn.clone())
+                Ok(Txn::new(active.clone(), gateway, dir, request))
             }
             Entry::Vacant(entry) => {
-                let request = Request::new(txn_id, token.0, token.1);
-                let txn = Txn::new(gateway, self.workspace.clone(), request);
-                entry.insert(txn.clone());
+                let active = Arc::new(Active::new(txn_id, expires));
+                let txn = Txn::new(active.clone(), gateway, self.workspace.clone(), request);
+                entry.insert(active);
                 Ok(txn)
             }
         }
@@ -71,9 +78,21 @@ impl TxnServer {
         .map_err(|e| TCError::internal(format!("failed to schedule graceful shutdown: {}", e)))
         .await?
     }
+
+    async fn txn_dir(&self, txn_id: &TxnId) -> TCResult<fs::Dir> {
+        let existing_ids = self.workspace.entry_ids(txn_id).await?;
+        let id = loop {
+            let id: PathSegment = Uuid::new_v4().into();
+            if !existing_ids.contains(&id) {
+                break id;
+            }
+        };
+
+        self.workspace.create_dir(*txn_id, id).await
+    }
 }
 
-fn spawn_cleanup_thread(workspace: fs::Dir, active: RwLock<HashMap<TxnId, Txn>>) {
+fn spawn_cleanup_thread(workspace: fs::Dir, active: RwLock<HashMap<TxnId, Arc<Active>>>) {
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
 
     tokio::spawn(async move {
@@ -84,16 +103,14 @@ fn spawn_cleanup_thread(workspace: fs::Dir, active: RwLock<HashMap<TxnId, Txn>>)
     });
 }
 
-async fn cleanup(workspace: &fs::Dir, active: &RwLock<HashMap<TxnId, Txn>>) {
+async fn cleanup(workspace: &fs::Dir, txn_pool: &RwLock<HashMap<TxnId, Arc<Active>>>) {
     let expired = {
         let now = Gateway::time();
-        let mut txn_pool = active.write().await;
+        let mut txn_pool = txn_pool.write().await;
         let mut expired_ids = Vec::with_capacity(txn_pool.len());
         for (txn_id, txn) in txn_pool.iter() {
-            match txn.request.expires() {
-                Ok(expiry) if now > expiry => expired_ids.push(*txn_id),
-                Err(_) => expired_ids.push(*txn_id),
-                _ => {}
+            if txn.expires() < &now {
+                expired_ids.push(*txn_id);
             }
         }
 

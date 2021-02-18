@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 
 use error::*;
-use generic::{Id, TCPathBuf};
+use generic::{Id, NetworkTime, TCPathBuf};
 use transact::fs::Dir;
 pub use transact::{Transact, Transaction, TxnId};
 
@@ -22,26 +22,41 @@ mod server;
 pub use request::*;
 pub use server::*;
 
-#[derive(Clone)]
-struct Inner {
-    gateway: Arc<Gateway>,
+struct Active {
+    txn_id: TxnId,
+    expires: NetworkTime,
+}
+
+impl Active {
+    fn new(txn_id: TxnId, expires: NetworkTime) -> Self {
+        Self { txn_id, expires }
+    }
+
+    fn expires(&self) -> &NetworkTime {
+        &self.expires
+    }
+
+    fn id(&self) -> &TxnId {
+        &self.txn_id
+    }
 }
 
 /// A transaction context.
 #[derive(Clone)]
 pub struct Txn {
-    inner: Arc<Inner>,
+    active: Arc<Active>,
+    gateway: Arc<Gateway>,
     request: Arc<Request>,
     dir: fs::Dir,
 }
 
 impl Txn {
-    fn new(gateway: Arc<Gateway>, dir: fs::Dir, request: Request) -> Self {
+    fn new(active: Arc<Active>, gateway: Arc<Gateway>, dir: fs::Dir, request: Request) -> Self {
         let request = Arc::new(request);
-        let inner = Arc::new(Inner { gateway });
 
         Self {
-            inner,
+            active,
+            gateway,
             request,
             dir,
         }
@@ -49,7 +64,7 @@ impl Txn {
 
     /// Return the current number of strong references to this `Txn`.
     pub fn ref_count(&self) -> usize {
-        Arc::strong_count(&self.inner)
+        Arc::strong_count(&self.active)
     }
 
     /// Claim ownership of this transaction.
@@ -66,15 +81,16 @@ impl Txn {
             let txn_id = self.request.txn_id();
 
             use rjwt::Resolve;
-            let host = Link::from((self.inner.gateway.root().clone(), cluster_path));
-            let resolver = Resolver::new(&self.inner.gateway, &host, self.id());
+            let host = Link::from((self.gateway.root().clone(), cluster_path));
+            let resolver = Resolver::new(&self.gateway, &host, self.id());
             let (token, claims) = resolver
                 .consume_and_sign(actor, vec![SCOPE_ROOT.into()], token, txn_id.time().into())
                 .map_err(TCError::unauthorized)
                 .await?;
 
             Ok(Self {
-                inner: self.inner.clone(),
+                active: self.active.clone(),
+                gateway: self.gateway.clone(),
                 dir: self.dir.clone(),
                 request: Arc::new(Request::new(*txn_id, token, claims)),
             })
@@ -89,7 +105,7 @@ impl Txn {
     /// Check if the cluster at the specified path on this host is the owner of the transaction.
     pub fn is_owner(&self, cluster_path: TCPathBuf) -> bool {
         if let Some(host) = self.owner() {
-            let cluster_link = Link::from((self.inner.gateway.root().clone(), cluster_path));
+            let cluster_link = Link::from((self.gateway.root().clone(), cluster_path));
             host == &cluster_link
         } else {
             false
@@ -114,23 +130,23 @@ impl Txn {
 
     /// Return the [`Scope`]s which the given user is authorized for on this transaction.
     pub fn scopes(&'_ self, actor_id: &Value) -> Option<&Vec<Scope>> {
-        let host = Link::from(self.inner.gateway.root().clone());
+        let host = Link::from(self.gateway.root().clone());
         self.request.scopes().get(&host, actor_id)
     }
 
     /// Resolve a GET op within this transaction context.
     pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
-        self.inner.gateway.get(self, link, key).await
+        self.gateway.get(self, link, key).await
     }
 
     /// Resolve a PUT op within this transaction context.
     pub async fn put(&self, link: Link, key: Value, value: State) -> TCResult<()> {
-        self.inner.gateway.put(self, link, key, value).await
+        self.gateway.put(self, link, key, value).await
     }
 
     /// Resolve a POST op within this transaction context.
     pub async fn post(&self, link: Link, params: State) -> TCResult<State> {
-        self.inner.gateway.post(self, link, params).await
+        self.gateway.post(self, link, params).await
     }
 }
 
@@ -148,7 +164,8 @@ impl Transaction<fs::Dir> for Txn {
         let dir = self.dir.create_dir(*self.request.txn_id(), id).await?;
 
         Ok(Txn {
-            inner: self.inner.clone(),
+            active: self.active.clone(),
+            gateway: self.gateway.clone(),
             request: self.request.clone(),
             dir,
         })

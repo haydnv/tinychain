@@ -1,6 +1,6 @@
 //! A transactional filesystem directory.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -186,6 +186,11 @@ impl Dir {
                 }
             }
         })
+    }
+
+    pub async fn entry_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<PathSegment>> {
+        let entries = self.entries.read(txn_id).await?;
+        Ok(entries.keys().cloned().collect())
     }
 }
 
