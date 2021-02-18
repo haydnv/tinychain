@@ -204,6 +204,7 @@ impl Cache {
         inner.size += size;
         inner.lfu.insert(path.clone());
         inner.entries.insert(path.clone(), cached);
+
         Ok(Some(lock))
     }
 

@@ -277,7 +277,7 @@ impl TryFrom<Scalar> for Map<Scalar> {
     fn try_from(scalar: Scalar) -> TCResult<Map<Scalar>> {
         match scalar {
             Scalar::Map(map) => Ok(map),
-            other => Err(TCError::bad_request("expected a Map but found", other))
+            other => Err(TCError::bad_request("expected a Map but found", other)),
         }
     }
 }

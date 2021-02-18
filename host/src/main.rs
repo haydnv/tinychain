@@ -100,7 +100,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         })?;
 
         for path in config.clusters {
-            let config = tokio::fs::read(&path).await.expect(&format!("read from {:?}", &path));
+            let config = tokio::fs::read(&path)
+                .await
+                .expect(&format!("read from {:?}", &path));
+
             let mut decoder =
                 destream_json::de::Decoder::from(stream::once(future::ready(Ok(config))));
 

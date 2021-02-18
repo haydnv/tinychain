@@ -30,7 +30,11 @@ impl Class for OpDefType {
 impl NativeClass for OpDefType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         if path.len() == 4 && &path[..3] == &PREFIX[..] {
-            log::debug!("OpDefType::from_path {} (type {})", TCPath::from(path), &path[3]);
+            log::debug!(
+                "OpDefType::from_path {} (type {})",
+                TCPath::from(path),
+                &path[3]
+            );
 
             match path[3].as_str() {
                 "get" => Some(Self::Get),

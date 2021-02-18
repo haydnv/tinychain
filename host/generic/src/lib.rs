@@ -35,7 +35,7 @@ pub trait NativeClass: Class {
 }
 
 /// A generic instance trait
-pub trait Instance {
+pub trait Instance: Send + Sync {
     /// The [`Class`] type of this instance
     type Class: Class;
 
