@@ -8,9 +8,10 @@ use destream::{de, en};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use error::TCResult;
-use generic::{Id, Map};
+use generic::{Id, Instance};
 
-use crate::scalar::Scalar;
+use crate::route::Public;
+use crate::scalar::{Scalar, Scope};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -30,8 +31,9 @@ impl Refer for After {
         self.then.requires(deps);
     }
 
-    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
-        self.when.resolve(context, txn).await
+    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
+        self.when.resolve(context, txn).await?;
+        Ok(self.then.into())
     }
 }
 

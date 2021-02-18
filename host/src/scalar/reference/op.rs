@@ -16,7 +16,7 @@ use error::*;
 use generic::*;
 
 use crate::route::Public;
-use crate::scalar::{Link, Scalar, Value};
+use crate::scalar::{Link, Scalar, Scope, Value};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -230,7 +230,7 @@ impl Key {
         }
     }
 
-    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<Value> {
+    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<Value> {
         match self {
             Self::Ref(id_ref) => match id_ref.resolve(context, txn).await? {
                 State::Scalar(Scalar::Value(value)) => Ok(value),
@@ -393,7 +393,7 @@ impl Refer for OpRef {
         }
     }
 
-    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
+    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
         match self {
             Self::Get((subject, key)) => match subject {
                 Subject::Link(link) => {
@@ -401,11 +401,8 @@ impl Refer for OpRef {
                     txn.get(link, key).await
                 }
                 Subject::Ref(id_ref, path) => {
-                    let subject = id_ref.resolve(context, txn);
-                    let key = key.resolve(context, txn);
-                    let (subject, key) = try_join!(subject, key)?;
-
-                    subject.get(txn, &path, key).await
+                    let key = key.resolve(context, txn).await?;
+                    context.resolve_get(txn, id_ref.id(), &path, key).await
                 }
             },
             Self::Put((subject, key, value)) => match subject {
@@ -415,13 +412,12 @@ impl Refer for OpRef {
                     txn.put(link, key, value).map_ok(State::from).await
                 }
                 Subject::Ref(id_ref, path) => {
-                    let subject = id_ref.resolve(context, txn);
                     let key = key.resolve(context, txn);
                     let value = value.resolve(context, txn);
-                    let (subject, key, value) = try_join!(subject, key, value)?;
+                    let (key, value) = try_join!(key, value)?;
 
-                    subject
-                        .put(txn, &path, key, value)
+                    context
+                        .resolve_put(txn, id_ref.id(), &path, key, value)
                         .map_ok(State::from)
                         .await
                 }
@@ -432,10 +428,10 @@ impl Refer for OpRef {
                     txn.post(link, params).await
                 }
                 Subject::Ref(id_ref, path) => {
-                    let subject = id_ref.resolve(context, txn).await?;
                     let params = Scalar::Map(params).resolve(context, txn).await?;
                     let params = params.try_into()?;
-                    subject.post(txn, &path, params).await
+
+                    context.resolve_post(txn, id_ref.id(), &path, params).await
                 }
             },
             _ => Err(TCError::not_implemented("OpRef::Delete")),

@@ -10,10 +10,11 @@ use error::*;
 use generic::*;
 use value::Value;
 
+use crate::route::Public;
 use crate::state::State;
 use crate::txn::Txn;
 
-use super::Scalar;
+use super::{Scalar, Scope};
 
 mod after;
 mod r#if;
@@ -35,7 +36,7 @@ pub trait Refer {
     fn requires(&self, deps: &mut HashSet<Id>);
 
     /// Resolve this reference with respect to the given context.
-    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State>;
+    async fn resolve<T: Public + Instance>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State>;
 }
 
 /// The [`Class`] of a [`TCRef`].
@@ -122,7 +123,7 @@ impl Refer for TCRef {
         }
     }
 
-    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
+    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
         match self {
             Self::After(after) => after.resolve(context, txn).await,
             Self::Id(id_ref) => id_ref.resolve(context, txn).await,

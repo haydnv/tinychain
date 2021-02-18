@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
+use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
 use async_trait::async_trait;
@@ -16,6 +17,7 @@ use safecast::{Match, TryCastFrom, TryCastInto};
 use error::*;
 use generic::*;
 
+use crate::route::Public;
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -27,6 +29,7 @@ pub use reference::*;
 pub use value::*;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar"]);
+pub const SELF: Label = label("self");
 
 /// The [`Class`] of a [`Scalar`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -231,7 +234,7 @@ impl Refer for Scalar {
         }
     }
 
-    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
+    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
         match self {
             Self::Map(map) => {
                 let resolved =
@@ -716,21 +719,103 @@ impl fmt::Display for Scalar {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::convert::TryInto;
+/// The execution scope of a [`Scalar`], such as an [`OpDef`] or [`TCRef`]
+pub struct Scope<T> {
+    subject: T,
+    data: Map<State>,
+}
 
-    use futures::{future, stream};
+impl<T: Public> Scope<T> {
+    pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(subject: T, data: I) -> Self {
+        Self {
+            subject,
+            data: data.into_iter().map(|(id, s)| (id, s.into())).collect(),
+        }
+    }
 
-    use super::*;
+    pub fn with_context<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
+        subject: T,
+        context: Map<State>,
+        data: I,
+    ) -> Self {
+        Self {
+            subject,
+            data: context
+                .into_inner()
+                .into_iter()
+                .chain(data.into_iter().map(|(id, s)| (id, s.into())))
+                .collect(),
+        }
+    }
 
-    #[tokio::test]
-    async fn test_decode_op() {
-        let encoded = "{\"name\": {\"/state/scalar/op/get\": [[\"_return\", 1]]}}";
-        let encoded = stream::once(future::ready(encoded.as_bytes().to_vec()));
-        let decoded: Scalar = destream_json::decode((), encoded).await.unwrap();
-        let decoded: Map<Scalar> = decoded.try_into().unwrap();
-        let decoded = decoded.get(&label("name").into()).unwrap();
-        assert_eq!(decoded.class(), ScalarType::Op(OpDefType::Get))
+    pub fn into_inner(self) -> Map<State> {
+        self.data
+    }
+
+    pub fn resolve_id(&self, id: &Id) -> TCResult<&State> {
+        self.data.get(id).ok_or_else(|| TCError::not_found(id))
+    }
+
+    pub async fn resolve_get(
+        &self,
+        txn: &Txn,
+        subject: &Id,
+        path: &[PathSegment],
+        key: Value,
+    ) -> TCResult<State> {
+        if subject == &SELF {
+            self.subject.get(txn, path, key).await
+        } else if let Some(subject) = self.data.get(subject) {
+            subject.get(txn, path, key).await
+        } else {
+            Err(TCError::not_found(subject))
+        }
+    }
+
+    pub async fn resolve_put(
+        &self,
+        txn: &Txn,
+        subject: &Id,
+        path: &[PathSegment],
+        key: Value,
+        value: State,
+    ) -> TCResult<()> {
+        if subject == &SELF {
+            self.subject.put(txn, path, key, value).await
+        } else if let Some(subject) = self.data.get(subject) {
+            subject.put(txn, path, key, value).await
+        } else {
+            Err(TCError::not_found(subject))
+        }
+    }
+
+    pub async fn resolve_post(
+        &self,
+        txn: &Txn,
+        subject: &Id,
+        path: &[PathSegment],
+        params: Map<State>,
+    ) -> TCResult<State> {
+        if subject == &SELF {
+            self.subject.post(txn, path, params).await
+        } else if let Some(subject) = self.data.get(subject) {
+            subject.post(txn, path, params).await
+        } else {
+            Err(TCError::not_found(subject))
+        }
+    }
+}
+
+impl<T> Deref for Scope<T> {
+    type Target = Map<State>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<T> DerefMut for Scope<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
     }
 }

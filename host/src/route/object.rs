@@ -12,46 +12,44 @@ use crate::txn::Txn;
 
 use super::{GetHandler, Handler, PostHandler, PutHandler, Route};
 
-struct GetMethod<'a> {
-    subject: State,
+struct GetMethod<'a, T: Instance> {
+    subject: InstanceExt<T>,
     method: GetOp,
     path: &'a [PathSegment],
 }
 
-impl<'a> GetMethod<'a> {
+impl<'a, T: Clone + Instance + Route + 'a> GetMethod<'a, T> {
     async fn call(self, txn: Txn, key: Value) -> TCResult<State> {
         let (key_name, op_def) = self.method;
 
-        let mut context = HashMap::with_capacity(2);
-        context.insert(SELF.into(), self.subject);
+        let mut context = HashMap::with_capacity(1);
         context.insert(key_name, key.into());
 
-        call_method(txn, self.path, context.into(), op_def).await
+        call_method(txn, self.subject, self.path, context.into(), op_def).await
     }
 }
 
-impl<'a> Handler<'a> for GetMethod<'a> {
+impl<'a, T: Clone + Instance + Route + 'a> Handler<'a> for GetMethod<'a, T> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(move |txn, key| Box::pin(self.call(txn, key))))
     }
 }
 
-struct PutMethod<'a> {
-    subject: State,
+struct PutMethod<'a, T: Instance> {
+    subject: InstanceExt<T>,
     method: PutOp,
     path: &'a [PathSegment],
 }
 
-impl<'a> PutMethod<'a> {
+impl<'a, T: Clone + Instance + Route + 'a> PutMethod<'a, T> {
     async fn call(self, txn: Txn, key: Value, value: State) -> TCResult<()> {
         let (key_name, value_name, op_def) = self.method;
 
-        let mut context = HashMap::with_capacity(3);
-        context.insert(SELF.into(), self.subject);
+        let mut context = HashMap::with_capacity(2);
         context.insert(key_name, key.into());
         context.insert(value_name, value);
 
-        let state = call_method(txn, self.path, context.into(), op_def).await?;
+        let state = call_method(txn, self.subject, self.path, context.into(), op_def).await?;
         if state.is_none() {
             Ok(())
         } else {
@@ -63,7 +61,7 @@ impl<'a> PutMethod<'a> {
     }
 }
 
-impl<'a> Handler<'a> for PutMethod<'a> {
+impl<'a, T: Clone + Instance + Route + 'a> Handler<'a> for PutMethod<'a, T> {
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         Some(Box::new(move |txn, key, value| {
             Box::pin(self.call(txn, key, value))
@@ -71,23 +69,19 @@ impl<'a> Handler<'a> for PutMethod<'a> {
     }
 }
 
-struct PostMethod<'a> {
-    subject: State,
+struct PostMethod<'a, T: Instance> {
+    subject: InstanceExt<T>,
     method: PostOp,
     path: &'a [PathSegment],
 }
 
-impl<'a> PostMethod<'a> {
+impl<'a, T: Clone + Instance + Route + 'a> PostMethod<'a, T> {
     async fn call(self, txn: Txn, params: Map<State>) -> TCResult<State> {
-        let mut context = HashMap::with_capacity(params.len() + 1);
-        context.insert(SELF.into(), self.subject);
-        context.extend(params);
-
-        call_method(txn, self.path, context.into(), self.method).await
+        call_method(txn, self.subject, self.path, params, self.method).await
     }
 }
 
-impl<'a> Handler<'a> for PostMethod<'a> {
+impl<'a, T: Clone + Instance + Route + 'a> Handler<'a> for PostMethod<'a, T> {
     fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
         Some(Box::new(move |txn, params| {
             Box::pin(self.call(txn, params))
@@ -95,10 +89,7 @@ impl<'a> Handler<'a> for PostMethod<'a> {
     }
 }
 
-impl<T: Instance + Route + Clone> Route for InstanceExt<T>
-where
-    State: From<T>,
-{
+impl<T: Clone + Instance + Route> Route for InstanceExt<T> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("InstanceExt::route {}", TCPath::from(path));
 
@@ -129,8 +120,9 @@ where
     }
 }
 
-async fn call_method(
+async fn call_method<T: Clone + Instance + Route>(
     txn: Txn,
+    subject: InstanceExt<T>,
     path: &[PathSegment],
     context: Map<State>,
     form: Vec<(Id, Scalar)>,
@@ -145,7 +137,7 @@ async fn call_method(
         return Ok(State::default());
     };
 
-    Executor::with_context(txn, context.into(), form)
+    Executor::with_context(txn, subject, context.into(), form)
         .capture(capture)
         .await
 }

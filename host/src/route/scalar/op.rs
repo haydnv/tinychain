@@ -33,7 +33,7 @@ impl<'a> Handler<'a> for OpHandler<'a> {
                     let capture = op_def.last().unwrap().0.clone();
                     let op_def =
                         iter::once((key_name, Scalar::Value(key))).chain(op_def.into_iter());
-                    let executor = Executor::new(txn, op_def);
+                    let executor = Executor::new(txn, State::default(), op_def);
                     let result: GetFuture<'a> = Box::pin(executor.capture(capture));
                     result
                 };

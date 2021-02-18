@@ -11,8 +11,10 @@ use safecast::TryCastFrom;
 use value::Value;
 
 use error::*;
-use generic::{Id, Map};
+use generic::{Id, Instance};
 
+use crate::route::Public;
+use crate::scalar::Scope;
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -42,11 +44,12 @@ impl Refer for IdRef {
         deps.insert(self.to.clone());
     }
 
-    async fn resolve(self, context: &Map<State>, _txn: &Txn) -> TCResult<State> {
-        context
-            .get(self.id())
-            .cloned()
-            .ok_or_else(|| TCError::not_found(self))
+    async fn resolve<T: Instance + Public>(
+        self,
+        context: &Scope<T>,
+        _txn: &Txn,
+    ) -> TCResult<State> {
+        context.resolve_id(self.id()).map(State::clone)
     }
 }
 

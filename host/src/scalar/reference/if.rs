@@ -8,9 +8,10 @@ use destream::{de, en};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use error::{TCError, TCResult};
-use generic::{Id, Map};
+use generic::{Id, Instance};
 
-use crate::scalar::{Number, Scalar, Value};
+use crate::route::Public;
+use crate::scalar::{Number, Scalar, Scope, Value};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -32,7 +33,7 @@ impl Refer for IfRef {
         self.or_else.requires(deps);
     }
 
-    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<State> {
+    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
         let cond = self.cond.resolve(context, txn).await?;
         if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = cond {
             if b.into() {

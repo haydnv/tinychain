@@ -1,4 +1,4 @@
-//! A Tinychain [`State`].
+//! A Tinychain [`State`]
 
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
@@ -20,6 +20,7 @@ use generic::*;
 use crate::chain::*;
 use crate::fs::Dir;
 use crate::object::{Object, ObjectType};
+use crate::route::Public;
 use crate::scalar::*;
 use crate::txn::Txn;
 
@@ -166,7 +167,7 @@ impl Refer for State {
         }
     }
 
-    async fn resolve(self, context: &Map<State>, txn: &Txn) -> TCResult<Self> {
+    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<Self> {
         match self {
             Self::Map(map) => {
                 let resolved = try_join_all(
