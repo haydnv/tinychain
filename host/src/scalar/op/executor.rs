@@ -6,11 +6,13 @@ use futures::future::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use error::*;
-use generic::{Id, Map};
+use generic::{label, Id, Label, Map};
 
 use crate::scalar::reference::Refer;
 use crate::state::State;
 use crate::txn::Txn;
+
+pub const SELF: Label = label("self");
 
 /// An `OpDef` executor.
 #[derive(Clone)]
@@ -23,6 +25,20 @@ impl Executor {
     /// Construct a new `Executor` with the given [`Txn`] context and initial state.
     pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(txn: Txn, iter: I) -> Self {
         let state = iter.into_iter().map(|(id, s)| (id, s.into())).collect();
+
+        Self { txn, state }
+    }
+
+    pub fn with_context<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
+        txn: Txn,
+        context: Map<State>,
+        iter: I,
+    ) -> Self {
+        let state = context
+            .into_inner()
+            .into_iter()
+            .chain(iter.into_iter().map(|(id, s)| (id, s.into())))
+            .collect();
 
         Self { txn, state }
     }

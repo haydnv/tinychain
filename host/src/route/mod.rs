@@ -12,6 +12,7 @@ use crate::txn::Txn;
 
 mod chain;
 mod cluster;
+mod object;
 mod scalar;
 mod state;
 

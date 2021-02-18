@@ -58,8 +58,7 @@ class InteractionTests(unittest.TestCase):
         actual = host.get("/app/balance/right/weight")
         self.assertEqual(expected, actual)
 
-    @unittest.skip
-    def testStartup(self):
+    def testUpdate(self):
         host = start_host("test_interaction", [Left, Right])
         host.put("/app/balance/right/weigh", None, 5)
         print(host.get("/app/balance/right/weight"))

@@ -6,11 +6,11 @@ use std::ops::Deref;
 
 use destream::{en, EncodeMap};
 
-use generic::PathSegment;
+use generic::Map;
 use transact::IntoView;
 
 use crate::fs::Dir;
-use crate::route::*;
+use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -30,6 +30,14 @@ impl<T: generic::Instance> InstanceExt<T> {
             parent: Box::new(parent),
             class,
         }
+    }
+
+    pub fn parent(&self) -> &T {
+        &self.parent
+    }
+
+    pub fn proto(&self) -> &Map<Scalar> {
+        self.class.proto()
     }
 
     /// Convert the native type of this instance, if possible.
@@ -67,18 +75,6 @@ impl<T: generic::Instance> Deref for InstanceExt<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.parent
-    }
-}
-
-impl<T: generic::Instance + Route> Route for InstanceExt<T> {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() {
-            None
-        } else if let Some(member) = self.class.proto().get(&path[0]) {
-            member.route(&path[1..])
-        } else {
-            self.parent.route(path)
-        }
     }
 }
 
