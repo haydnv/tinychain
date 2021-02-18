@@ -4,16 +4,13 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Deref;
 
-use async_trait::async_trait;
 use destream::{en, EncodeMap};
 
-use error::*;
-use generic::{Map, PathSegment, TCPath};
+use generic::PathSegment;
 use transact::IntoView;
 
 use crate::fs::Dir;
 use crate::route::*;
-use crate::scalar::Value;
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -74,7 +71,7 @@ impl<T: generic::Instance> Deref for InstanceExt<T> {
 }
 
 impl<T: generic::Instance + Route> Route for InstanceExt<T> {
-    fn route<'a>(&'a self, path: &[PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.is_empty() {
             None
         } else if let Some(member) = self.class.proto().get(&path[0]) {

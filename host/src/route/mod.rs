@@ -10,17 +10,18 @@ use value::Value;
 use crate::state::State;
 use crate::txn::Txn;
 
+mod chain;
 mod scalar;
 mod state;
 
 pub type GetFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
-pub type GetHandler<'a> = Box<dyn FnOnce(&'a Txn, Value) -> GetFuture + Send + 'a>;
+pub type GetHandler<'a> = Box<dyn FnOnce(Txn, Value) -> GetFuture<'a> + Send + 'a>;
 
 pub type PutFuture<'a> = Pin<Box<dyn Future<Output = TCResult<()>> + Send + 'a>>;
-pub type PutHandler<'a> = Box<dyn FnOnce(&'a Txn, Value, State) -> PutFuture + Send + 'a>;
+pub type PutHandler<'a> = Box<dyn FnOnce(Txn, Value, State) -> PutFuture<'a> + Send + 'a>;
 
 pub type PostFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
-pub type PostHandler<'a> = Box<dyn FnOnce(&'a Txn, Map<State>) -> PostFuture + Send + 'a>;
+pub type PostHandler<'a> = Box<dyn FnOnce(Txn, Map<State>) -> PostFuture<'a> + Send + 'a>;
 
 pub trait Handler<'a>: Send {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
@@ -37,7 +38,7 @@ pub trait Handler<'a>: Send {
 }
 
 pub trait Route: Send + Sync {
-    fn route<'a>(&'a self, path: &[PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>>;
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>>;
 }
 
 #[async_trait]
@@ -57,7 +58,7 @@ impl<T: Route + fmt::Display> Public for T {
             .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
 
         if let Some(get_handler) = handler.get() {
-            get_handler(txn, key).await
+            get_handler(txn.clone(), key).await
         } else {
             Err(TCError::method_not_allowed(format!(
                 "{} {}",
@@ -73,7 +74,7 @@ impl<T: Route + fmt::Display> Public for T {
             .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
 
         if let Some(put_handler) = handler.put() {
-            put_handler(txn, key, value).await
+            put_handler(txn.clone(), key, value).await
         } else {
             Err(TCError::method_not_allowed(format!(
                 "{} {}",
@@ -89,7 +90,7 @@ impl<T: Route + fmt::Display> Public for T {
             .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
 
         if let Some(post_handler) = handler.post() {
-            post_handler(txn, params).await
+            post_handler(txn.clone(), params).await
         } else {
             Err(TCError::method_not_allowed(format!(
                 "{} {}",

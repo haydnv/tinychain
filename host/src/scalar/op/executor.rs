@@ -14,14 +14,14 @@ use crate::txn::Txn;
 
 /// An `OpDef` executor.
 #[derive(Clone)]
-pub struct Executor<'a> {
-    txn: &'a Txn,
+pub struct Executor {
+    txn: Txn,
     state: Map<State>,
 }
 
-impl<'a> Executor<'a> {
+impl Executor {
     /// Construct a new `Executor` with the given [`Txn`] context and initial state.
-    pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(txn: &'a Txn, iter: I) -> Self {
+    pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(txn: Txn, iter: I) -> Self {
         let state = iter.into_iter().map(|(id, s)| (id, s.into())).collect();
 
         Self { txn, state }
@@ -67,7 +67,7 @@ impl<'a> Executor<'a> {
                 let mut providers = FuturesUnordered::new();
                 for id in pending.into_iter() {
                     let state = self.resolve_id(&id)?.clone();
-                    providers.push(state.resolve(&self.state, self.txn).map(|r| (id, r)));
+                    providers.push(state.resolve(&self.state, &self.txn).map(|r| (id, r)));
                 }
 
                 while let Some((id, r)) = providers.next().await {

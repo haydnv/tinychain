@@ -8,17 +8,14 @@ use bytes::Bytes;
 
 use error::*;
 use generic::*;
-use log::debug;
 use safecast::{CastFrom, TryCastFrom};
 use transact::fs::File;
-use transact::{Transact, Transaction, TxnId};
+use transact::{Transact, TxnId};
 use value::Value;
 
 use crate::fs;
-use crate::route::*;
 use crate::scalar::OpRef;
 use crate::state::State;
-use crate::txn::Txn;
 
 mod block;
 mod sync;
@@ -27,8 +24,8 @@ pub use block::ChainBlock;
 pub use sync::*;
 
 const CHAIN: Label = label("chain");
-const SUBJECT: Label = label("subject");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
+pub const SUBJECT: Label = label("subject");
 
 /// The file extension of a directory of [`ChainBlock`]s on disk.
 pub const EXT: &str = "chain";
@@ -52,7 +49,7 @@ pub enum Subject {
 }
 
 impl Subject {
-    async fn at(&self, txn_id: &TxnId) -> TCResult<State> {
+    pub async fn at(&self, txn_id: &TxnId) -> TCResult<State> {
         match self {
             Self::Value(file) => {
                 let block_id = SUBJECT.into();
@@ -65,7 +62,7 @@ impl Subject {
         }
     }
 
-    async fn put(&self, txn_id: &TxnId, key: Value, value: State) -> TCResult<()> {
+    pub async fn put(&self, txn_id: &TxnId, key: Value, value: State) -> TCResult<()> {
         match self {
             Self::Value(file) => {
                 if key.is_some() {
@@ -177,30 +174,6 @@ impl ChainInstance for Chain {
         match self {
             Self::Sync(chain) => chain.subject(),
         }
-    }
-}
-
-#[async_trait]
-impl Public for Chain {
-    async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
-        let subject = self.subject().at(txn.id()).await?;
-        subject.get(txn, path, key).await
-    }
-
-    async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
-        debug!("Chain::PUT {}: {} <- {}", TCPath::from(path), key, value);
-
-        if path.is_empty() {
-            return self.subject().put(txn.id(), key, value).await;
-        }
-
-        let subject = self.subject().at(txn.id()).await?;
-        subject.put(txn, path, key, value).await
-    }
-
-    async fn post(&self, txn: &Txn, path: &[PathSegment], params: Map<State>) -> TCResult<State> {
-        let subject = self.subject().at(txn.id()).await?;
-        subject.post(txn, path, params).await
     }
 }
 
