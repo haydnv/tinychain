@@ -23,21 +23,16 @@ pub use request::*;
 pub use server::*;
 
 struct Active {
-    txn_id: TxnId,
     expires: NetworkTime,
 }
 
 impl Active {
-    fn new(txn_id: TxnId, expires: NetworkTime) -> Self {
-        Self { txn_id, expires }
+    fn new(expires: NetworkTime) -> Self {
+        Self { expires }
     }
 
     fn expires(&self) -> &NetworkTime {
         &self.expires
-    }
-
-    fn id(&self) -> &TxnId {
-        &self.txn_id
     }
 }
 
