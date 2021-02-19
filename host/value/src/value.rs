@@ -387,6 +387,12 @@ impl<'en> IntoStream<'en> for Value {
     }
 }
 
+impl From<bool> for Value {
+    fn from(b: bool) -> Value {
+        Value::Number(Number::from(b))
+    }
+}
+
 impl From<Bytes> for Value {
     fn from(bytes: Bytes) -> Value {
         Value::Bytes(bytes)
