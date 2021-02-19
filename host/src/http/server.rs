@@ -75,7 +75,7 @@ impl HTTPServer {
             })
             .unwrap_or_else(HashMap::new);
 
-        let token = if let Some(header) = http_request.headers().get("Authorization") {
+        let token = if let Some(header) = http_request.headers().get(hyper::header::AUTHORIZATION) {
             let token = header.to_str().map_err(|e| {
                 TCError::unauthorized(format!("Unable to parse Authorization header: {}", e))
             })?;

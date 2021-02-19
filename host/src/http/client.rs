@@ -184,6 +184,7 @@ impl crate::gateway::Client for Client {
 fn url(link: &Link, txn_id: &TxnId, key: &Value) -> TCResult<Url> {
     let mut url =
         Url::parse(&link.to_string()).map_err(|e| TCError::bad_request("invalid URL", e))?;
+
     url.query_pairs_mut()
         .append_pair("txn_id", &txn_id.to_string());
 
@@ -203,7 +204,7 @@ fn req_builder(method: &str, url: Url, auth: Option<&str>) -> http::request::Bui
         .uri(url.to_string());
 
     if let Some(token) = auth {
-        req.header("Authorization: Bearer {}", token)
+        req.header(hyper::header::AUTHORIZATION, format!("Bearer {}", token))
     } else {
         req
     }
