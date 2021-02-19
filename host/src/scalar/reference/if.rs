@@ -30,14 +30,14 @@ pub struct IfRef {
 impl Refer for IfRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
         self.cond.requires(deps);
-        self.then.requires(deps);
-        self.or_else.requires(deps);
     }
 
     async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
         debug!("If::resolve {}", self);
 
         let cond = self.cond.resolve(context, txn).await?;
+        debug!("If condition is {}", cond);
+
         if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = cond {
             if b.into() {
                 Ok(self.then.into())
