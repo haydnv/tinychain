@@ -1,7 +1,9 @@
 //! The host kernel, responsible for dispatching requests to the local host.
 
 use std::convert::TryInto;
+use std::pin::Pin;
 
+use futures::Future;
 use log::debug;
 
 use error::*;
@@ -49,7 +51,10 @@ impl Kernel {
                 cluster
             );
 
-            cluster.get(txn, suffix, key).await
+            execute(txn, cluster, |txn, cluster| async move {
+                cluster.get(&txn, suffix, key).await
+            })
+            .await
         } else if &path[0] == "error" && path.len() == 2 {
             let message = String::try_cast_from(key, |v| {
                 TCError::bad_request("cannot cast into error message string from", v)
@@ -71,14 +76,17 @@ impl Kernel {
         txn: &Txn,
         path: &[PathSegment],
         key: Value,
-        state: State,
+        value: State,
     ) -> TCResult<()> {
         nonempty_path(path)?;
 
         if let Some(class) = StateType::from_path(path) {
             Err(TCError::method_not_allowed(class))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
-            cluster.put(txn, suffix, key, state).await
+            execute(txn, cluster, |txn, cluster| async move {
+                cluster.put(&txn, suffix, key, value).await
+            })
+            .await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -90,7 +98,10 @@ impl Kernel {
 
         if let Some((suffix, cluster)) = self.hosted.get(path) {
             let params = data.try_into()?;
-            return cluster.post(txn, suffix, params).await;
+            return execute(txn, cluster, |txn, cluster| async move {
+                cluster.post(&txn, suffix, params).await
+            })
+            .await;
         }
 
         match path[0].as_str() {
@@ -103,6 +114,42 @@ impl Kernel {
             other => Err(TCError::not_found(other)),
         }
     }
+}
+
+fn execute<
+    'a,
+    R: Send,
+    Fut: Future<Output = TCResult<R>> + Send,
+    F: FnOnce(Txn, &'a InstanceExt<Cluster>) -> Fut + Send + 'a,
+>(
+    txn: &'a Txn,
+    cluster: &'a InstanceExt<Cluster>,
+    handler: F,
+) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
+    Box::pin(async move {
+        if let Some(owner_link) = txn.owner() {
+            // Notify the owner of participation
+            txn.put(
+                owner_link.clone(),
+                Value::default(),
+                Link::from(TCPathBuf::from(cluster.path().to_vec())).into(),
+            )
+            .await?;
+
+            handler(txn.clone(), cluster).await
+        } else {
+            // Claim and execute the transaction
+            let txn = cluster.claim(&txn).await?;
+            let state = handler(txn.clone(), cluster).await?;
+
+            let owner = cluster.owner(txn.id()).await?;
+
+            owner.commit(&txn).await?;
+            cluster.commit(txn.id()).await;
+
+            Ok(state)
+        }
+    })
 }
 
 #[inline]

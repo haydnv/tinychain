@@ -33,7 +33,7 @@ impl Hosted {
     pub fn get<'a>(
         &self,
         path: &'a [PathSegment],
-    ) -> Option<(&'a [PathSegment], InstanceExt<Cluster>)> {
+    ) -> Option<(&'a [PathSegment], &InstanceExt<Cluster>)> {
         debug!("checking for hosted cluster {}", TCPath::from(path));
 
         let mut node = &self.root;
@@ -43,14 +43,14 @@ impl Hosted {
                 found_path = &path[..i + 1];
                 node = child;
             } else if let Some(cluster) = self.hosted.get(found_path) {
-                return Some((&path[found_path.len()..], cluster.clone()));
+                return Some((&path[found_path.len()..], cluster));
             } else {
                 return None;
             }
         }
 
         if let Some(cluster) = self.hosted.get(found_path) {
-            Some((&path[found_path.len()..], cluster.clone()))
+            Some((&path[found_path.len()..], cluster))
         } else {
             None
         }

@@ -8,6 +8,7 @@ use futures::future::TryFutureExt;
 
 use error::*;
 use generic::{Id, NetworkTime, TCPathBuf};
+use log::debug;
 use transact::fs::Dir;
 pub use transact::{Transact, Transaction, TxnId};
 
@@ -64,6 +65,8 @@ impl Txn {
 
     /// Claim ownership of this transaction.
     pub async fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
+        debug!("{} claims transaction {}", cluster_path, self.id());
+
         if actor.id().is_some() {
             return Err(TCError::bad_request(
                 "cluster ID must be None, not",

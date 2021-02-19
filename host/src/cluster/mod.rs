@@ -9,7 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{join_all, Future, TryFutureExt};
+use futures::future::{join_all, TryFutureExt};
 use uplock::RwLock;
 
 use error::*;
@@ -52,7 +52,7 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    async fn claim(&self, txn: &Txn) -> TCResult<Txn> {
+    pub async fn claim(&self, txn: &Txn) -> TCResult<Txn> {
         let last_commit = self.confirmed.read().await;
         if txn.id() <= &*last_commit {
             return Err(TCError::unsupported(format!(
@@ -80,40 +80,6 @@ impl Cluster {
             .get(txn_id)
             .cloned()
             .ok_or_else(|| TCError::bad_request("cluster does not own transaction", txn_id))
-    }
-
-    pub async fn wrap_handler<R, Fut: Future<Output = TCResult<R>>, F: FnOnce(Txn) -> Fut>(
-        &self,
-        txn: Txn,
-        handler: F,
-    ) -> TCResult<R> {
-        if let Some(owner_link) = txn.owner() {
-            // Notify the owner of participation
-            txn.put(
-                owner_link.clone(),
-                Value::default(),
-                Link::from(self.path.clone()).into(),
-            )
-            .await?;
-
-            handler(txn).await
-        } else {
-            // Claim and execute the transaction
-            let txn = self.claim(&txn).await?;
-            let state = handler(txn.clone()).await?;
-
-            let owner = self
-                .owned
-                .write()
-                .await
-                .remove(&txn.id())
-                .expect("transaction owner");
-
-            owner.commit(&txn).await?;
-            self.commit(txn.id()).await;
-
-            Ok(state)
-        }
     }
 }
 

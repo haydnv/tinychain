@@ -90,62 +90,9 @@ impl Route for Cluster {
         if path.is_empty() {
             return Some(Box::new(ClusterHandler::from(self)));
         } else if let Some(chain) = self.chains().get(&path[0]) {
-            if let Some(handler) = chain.route(&path[1..]) {
-                Some(Box::new(ChainHandler::new(self, handler)))
-            } else {
-                None
-            }
+            chain.route(&path[1..])
         } else {
             None
         }
-    }
-}
-
-pub struct ChainHandler<'a> {
-    cluster: &'a Cluster,
-    handler: Box<dyn Handler<'a> + 'a>,
-}
-
-impl<'a> ChainHandler<'a> {
-    pub fn new(cluster: &'a Cluster, handler: Box<dyn Handler<'a> + 'a>) -> Self {
-        Self { cluster, handler }
-    }
-}
-
-impl<'a> Handler<'a> for ChainHandler<'a> {
-    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
-        let cluster = self.cluster;
-
-        self.handler.get().map(|get_handler| {
-            let wrapped: GetHandler = Box::new(move |txn, key| {
-                Box::pin(cluster.wrap_handler(txn.clone(), |txn| get_handler(txn, key)))
-            });
-
-            wrapped
-        })
-    }
-
-    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
-        let cluster = self.cluster;
-
-        self.handler.put().map(|put_handler| {
-            let wrapped: PutHandler = Box::new(move |txn, key, value| {
-                Box::pin(cluster.wrap_handler(txn.clone(), |txn| put_handler(txn, key, value)))
-            });
-
-            wrapped
-        })
-    }
-
-    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
-        let cluster = self.cluster;
-
-        self.handler.post().map(|post_handler| {
-            let wrapped: PostHandler = Box::new(move |txn, params| {
-                Box::pin(cluster.wrap_handler(txn.clone(), |txn| post_handler(txn, params)))
-            });
-
-            wrapped
-        })
     }
 }
