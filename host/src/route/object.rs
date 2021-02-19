@@ -94,7 +94,7 @@ impl<T: Clone + Instance + Route> Route for InstanceExt<T> {
         debug!("InstanceExt::route {}", TCPath::from(path));
 
         if path.is_empty() {
-            None
+            self.parent().route(path)
         } else if let Some(member) = self.proto().get(&path[0]) {
             match member {
                 Scalar::Op(OpDef::Get(get_op)) => Some(Box::new(GetMethod {
