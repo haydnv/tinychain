@@ -83,6 +83,14 @@ impl Kernel {
         if let Some(class) = StateType::from_path(path) {
             Err(TCError::method_not_allowed(class))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
+            debug!(
+                "PUT {}: {} <- {} to cluster {}",
+                TCPath::from(suffix),
+                key,
+                value,
+                cluster
+            );
+
             execute(txn, cluster, |txn, cluster| async move {
                 cluster.put(&txn, suffix, key, value).await
             })
@@ -97,11 +105,24 @@ impl Kernel {
         nonempty_path(path)?;
 
         if let Some((suffix, cluster)) = self.hosted.get(path) {
-            let params = data.try_into()?;
-            return execute(txn, cluster, |txn, cluster| async move {
+            let params: Map<State> = data.try_into()?;
+
+            debug!(
+                "POST {}: {} to cluster {}",
+                TCPath::from(suffix),
+                params,
+                cluster
+            );
+
+            return if suffix.is_empty() && params.is_empty() {
+                // it's a "commit" instruction
                 cluster.post(&txn, suffix, params).await
-            })
-            .await;
+            } else {
+                execute(txn, cluster, |txn, cluster| async move {
+                    cluster.post(&txn, suffix, params).await
+                })
+                .await
+            };
         }
 
         match path[0].as_str() {

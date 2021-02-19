@@ -17,6 +17,7 @@ use crate::state::State;
 use crate::txn::Txn;
 
 const IDLE_TIMEOUT: u64 = 30;
+const ERR_NO_OWNER: &str = "an ownerless transaction may not make outgoing requests";
 
 /// A Tinychain HTTP client. Should only be used through a `Gateway`.
 pub struct Client {
@@ -76,6 +77,10 @@ impl crate::gateway::Client for Client {
     }
 
     async fn get(&self, txn: Txn, link: Link, key: Value) -> TCResult<State> {
+        if txn.owner().is_none() {
+            return Err(TCError::unsupported(ERR_NO_OWNER));
+        }
+
         let uri = url(&link, txn.id(), &key)?;
         let req = req_builder("GET", uri, Some(txn.request().token()));
 
@@ -98,6 +103,10 @@ impl crate::gateway::Client for Client {
     }
 
     async fn put(&self, txn: Txn, link: Link, key: Value, value: State) -> TCResult<()> {
+        if txn.owner().is_none() {
+            return Err(TCError::unsupported(ERR_NO_OWNER));
+        }
+
         let uri = url(&link, txn.id(), &key)?;
         let req = req_builder("PUT", uri, Some(txn.request().token()));
 
@@ -119,6 +128,10 @@ impl crate::gateway::Client for Client {
     }
 
     async fn post(&self, txn: Txn, link: Link, params: State) -> TCResult<State> {
+        if txn.owner().is_none() {
+            return Err(TCError::unsupported(ERR_NO_OWNER));
+        }
+
         let url =
             Url::parse(&link.to_string()).map_err(|e| TCError::bad_request("invalid URL", e))?;
         let req = req_builder("POST", url, Some(txn.request().token()));
@@ -146,6 +159,10 @@ impl crate::gateway::Client for Client {
     }
 
     async fn delete(&self, txn: &Txn, link: Link, key: Value) -> TCResult<()> {
+        if txn.owner().is_none() {
+            return Err(TCError::unsupported(ERR_NO_OWNER));
+        }
+
         let uri = url(&link, txn.id(), &key)?;
         let req = req_builder("GET", uri, Some(txn.request().token()));
 

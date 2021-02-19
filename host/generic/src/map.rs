@@ -137,6 +137,10 @@ impl<F: Clone, T: TryCastFrom<F>> TryCastFrom<Map<F>> for HashMap<Id, T> {
 
 impl<T: Clone + fmt::Display> fmt::Display for Map<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.is_empty() {
+            return f.write_str("{}");
+        }
+
         write!(
             f,
             "{{\n{}\n}}",
