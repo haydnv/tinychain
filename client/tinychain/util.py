@@ -64,35 +64,35 @@ class URI(object):
     def __init__(self, root, path=[]):
         assert root is not None
 
-        self.root = root
-        self.path = path
+        self._root = root
+        self._path = path
 
     def append(self, name):
         return URI(str(self), [name])
 
     def host(self):
-        if "://" not in self.root:
+        if "://" not in self._root:
             return None
 
-        start = self.root.index("://") + 3
-        end = self.root.index('/', start)
+        start = self._root.index("://") + 3
+        end = self._root.index('/', start)
         if end > start:
-            return self.root[start:end]
+            return self._root[start:end]
         else:
-            return self.root[start:]
+            return self._root[start:]
 
     def path(self):
-        if "://" not in self.root:
-            return self.root
+        if "://" not in self._root:
+            return self._root
 
-        start = self.root.index("://")
-        start = self.root.index('/', start + 3)
-        return self.root[start:] + self.path
+        start = self._root.index("://")
+        start = self._root.index('/', start + 3)
+        return self._root[start:] + self._path
 
     def protocol(self):
-        i = self.root.index("://")
+        i = self._root.index("://")
         if i > 0:
-            return self.root[:i]
+            return self._root[:i]
 
     def __add__(self, other):
         return URI(str(self) + other)
@@ -101,14 +101,14 @@ class URI(object):
         return {str(self): []}
 
     def __str__(self):
-        root = str(self.root)
+        root = str(self._root)
         if root.startswith('/') or root.startswith('$') or "://" in root:
             pass
         else:
             root = f"${root}"
 
-        if self.path:
-            path = "/".join(self.path)
+        if self._path:
+            path = "/".join(self._path)
             return f"{root}/{path}"
         else:
             return root
