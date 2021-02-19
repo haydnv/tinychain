@@ -128,13 +128,15 @@ fn execute<
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
         if let Some(owner_link) = txn.owner() {
-            // Notify the owner of participation
-            txn.put(
-                owner_link.clone(),
-                Value::default(),
-                Link::from(TCPathBuf::from(cluster.path().to_vec())).into(),
-            )
-            .await?;
+            if !txn.is_owner(cluster.path()) {
+                // Notify the owner of participation
+                txn.put(
+                    owner_link.clone(),
+                    Value::default(),
+                    Link::from(TCPathBuf::from(cluster.path().to_vec())).into(),
+                )
+                .await?;
+            }
 
             handler(txn.clone(), cluster).await
         } else {

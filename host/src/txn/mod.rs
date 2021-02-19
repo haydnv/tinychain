@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 
 use error::*;
-use generic::{Id, NetworkTime, TCPathBuf};
+use generic::{Id, NetworkTime, PathSegment, TCPathBuf};
 use log::debug;
 use transact::fs::Dir;
 pub use transact::{Transact, Transaction, TxnId};
@@ -101,10 +101,10 @@ impl Txn {
     }
 
     /// Check if the cluster at the specified path on this host is the owner of the transaction.
-    pub fn is_owner(&self, cluster_path: TCPathBuf) -> bool {
+    pub fn is_owner(&self, cluster_path: &[PathSegment]) -> bool {
         if let Some(host) = self.owner() {
-            let cluster_link = Link::from((self.gateway.root().clone(), cluster_path));
-            host == &cluster_link
+            host.host().as_ref().expect("txn owner hostname") == self.gateway.root()
+                && host.path().as_slice() == cluster_path
         } else {
             false
         }
