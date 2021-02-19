@@ -24,8 +24,8 @@ class Left(Balance):
         txn.total = CONSERVED
         txn.current = self.weight.subject()
         txn.update = tc.After(
-            right.weigh(None, txn.total - new_value),
-            self.weight.set(new_value))
+            self.weight.set(new_value),
+            right.weigh(None, txn.total - new_value))
 
         return tc.If(txn.current == new_value, None, txn.update)
 
@@ -40,8 +40,8 @@ class Right(Balance):
         txn.total = CONSERVED
         txn.current = self.weight.subject()
         txn.update = tc.After(
-            left.weigh(None, txn.total - new_value),
-            self.weight.set(new_value))
+            self.weight.set(new_value),
+            left.weigh(None, txn.total - new_value))
 
         return tc.If(txn.current == new_value, None, txn.update)
 
@@ -58,11 +58,11 @@ class InteractionTests(unittest.TestCase):
         actual = host.get("/app/balance/right/weight")
         self.assertEqual(expected, actual)
 
-    @unittest.skip
     def testUpdate(self):
         host = start_host("test_interaction", [Left, Right])
         host.put("/app/balance/right/weigh", None, 5)
-        print(host.get("/app/balance/right/weight"))
+        self.assertEqual(host.get("/app/balance/right/weight"), 5)
+        self.assertEqual(host.get("/app/balance/left/weight"), 15)
 
 
 if __name__ == "__main__":
