@@ -51,10 +51,15 @@ impl Kernel {
                 cluster
             );
 
-            execute(txn, cluster, |txn, cluster| async move {
+            if suffix.is_empty() && key.is_none() {
+                // it's a public key lookup
                 cluster.get(&txn, suffix, key).await
-            })
-            .await
+            } else {
+                execute(txn, cluster, |txn, cluster| async move {
+                    cluster.get(&txn, suffix, key).await
+                })
+                .await
+            }
         } else if &path[0] == "error" && path.len() == 2 {
             let message = String::try_cast_from(key, |v| {
                 TCError::bad_request("cannot cast into error message string from", v)
