@@ -132,9 +132,8 @@ impl crate::gateway::Client for Client {
             return Err(TCError::unsupported(ERR_NO_OWNER));
         }
 
-        let url =
-            Url::parse(&link.to_string()).map_err(|e| TCError::bad_request("invalid URL", e))?;
-        let req = req_builder("POST", url, Some(txn.request().token()));
+        let uri = url(&link, txn.id(), &Value::default())?;
+        let req = req_builder("POST", uri, Some(txn.request().token()));
 
         let subcontext = txn.subcontext(label("_params").into()).await?;
         let body = destream_json::encode(params.into_view(subcontext))
