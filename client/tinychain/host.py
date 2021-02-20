@@ -113,8 +113,8 @@ class Local(Host):
         self.workspace = workspace
 
     def start(self, path, port, log_level="warn"):
-        if int(port) != port or port < 0:
-            raise ValueError
+        if not int(port) or int(port) < 0:
+            raise ValueError(f"invalid port: {port}")
 
         address = "{}:{}".format(__class__.ADDRESS, port)
         Host.__init__(self, address)

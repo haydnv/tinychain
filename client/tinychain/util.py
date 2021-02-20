@@ -75,7 +75,10 @@ class URI(object):
             return None
 
         start = self._root.index("://") + 3
-        end = self._root.index('/', start)
+        end = (
+            self._root.index(':', start) if ':' in self._root[start:]
+            else self._root.index('/', start))
+
         if end > start:
             return self._root[start:end]
         else:
@@ -87,15 +90,30 @@ class URI(object):
 
         start = self._root.index("://")
         start = self._root.index('/', start + 3)
-        return self._root[start:] + self._path
+
+        if self._path:
+            return self._root[start:] + "/".join(self._path)
+        else:
+            return self._root[start:]
+
+    def port(self):
+        prefix = self.protocol() + "://" if self.protocol() else ""
+        prefix += self.host() if self.host() else ""
+        if prefix and self._root[len(prefix)] == ':':
+            end = self._root.index('/', len(prefix))
+            return int(self._root[len(prefix) + 1:end])
 
     def protocol(self):
-        i = self._root.index("://")
-        if i > 0:
-            return self._root[:i]
+        if "://" in self._root:
+            i = self._root.index("://")
+            if i > 0:
+                return self._root[:i]
 
     def __add__(self, other):
         return URI(str(self) + other)
+
+    def __radd__(self, other):
+        return URI(other) + str(self)
 
     def __json__(self):
         return {str(self): []}
