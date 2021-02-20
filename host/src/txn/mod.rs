@@ -121,6 +121,11 @@ impl Txn {
         None
     }
 
+    /// Return a link to the given path on this host.
+    pub fn link(&self, path: TCPathBuf) -> Link {
+        Link::from((self.gateway.root().clone(), path))
+    }
+
     /// Return the [`Request`] which initiated this transaction on this host.
     pub fn request(&'_ self) -> &'_ Request {
         &self.request

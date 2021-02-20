@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use futures::future::try_join_all;
+use log::debug;
 
 use uplock::RwLock;
 
@@ -33,11 +34,10 @@ impl Owner {
         let mut mutated = self.mutated.write().await;
         let mutated = mutated.drain();
 
-        try_join_all(
-            mutated
-                .into_iter()
-                .map(|link| txn.post(link, Map::<State>::default().into())),
-        )
+        try_join_all(mutated.into_iter().map(|link| {
+            debug!("sending commit message to dependency at {}", link);
+            txn.post(link, Map::<State>::default().into())
+        }))
         .await?;
 
         Ok(())

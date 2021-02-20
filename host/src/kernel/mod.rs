@@ -156,12 +156,9 @@ fn execute<
         if let Some(owner_link) = txn.owner() {
             if !txn.is_owner(cluster.path()) {
                 // Notify the owner of participation
-                txn.put(
-                    owner_link.clone(),
-                    Value::default(),
-                    Link::from(TCPathBuf::from(cluster.path().to_vec())).into(),
-                )
-                .await?;
+                let link = txn.link(cluster.path().to_vec().into());
+                txn.put(owner_link.clone(), Value::default(), link.into())
+                    .await?;
             }
 
             handler(txn.clone(), cluster).await
