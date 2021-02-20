@@ -77,15 +77,16 @@ impl HTTPServer {
 
         let token = if let Some(header) = http_request.headers().get(hyper::header::AUTHORIZATION) {
             let token = header.to_str().map_err(|e| {
-                TCError::unauthorized(format!("Unable to parse Authorization header: {}", e))
+                TCError::unauthorized(format!("unable to parse authorization header: {}", e))
             })?;
 
-            if token.starts_with("Bearer:") {
-                Some(token[7..].trim().to_string())
+            if token.starts_with("Bearer") {
+                Some(token[6..].trim().to_string())
             } else {
-                return Err(TCError::unauthorized(
-                    "Unable to parse Authorization header",
-                ));
+                return Err(TCError::unauthorized(format!(
+                    "unable to parse authorization header: {} (should start with \"Bearer\"",
+                    token
+                )));
             }
         } else {
             None
