@@ -10,6 +10,8 @@ If you need a feature which is not yet available, or even not yet planned, pleas
 
 The easiest way to get started is to download the latest release from GitHub here: https://github.com/haydnv/tinychain/releases
 
+Alternately, if you use the Rust programming language, you can also install Tinychain on any platform by running `cargo install tinychain`.
+
 Tinychain is currently only available for 64-bit Linux (you should be able to build from source on other architectures, but this has not been tested).
 
 Try this "Hello, World!" program:
