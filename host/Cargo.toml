@@ -37,7 +37,7 @@ structopt = "0.3"
 tc-error = "0.1"
 tc-transact = { path = "transact" }
 tc-value = { path = "value" }
-tcgeneric = { path = "generic" }
+tcgeneric = "0.1"
 tokio = { version = "1.2", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "time"] }
 uplock = "0.1"
 uuid = "0.8"
