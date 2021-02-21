@@ -1,8 +1,8 @@
 use safecast::TryCastInto;
 
 use tc_error::*;
-use tc_generic::PathSegment;
 use tc_value::{Number, NumberInstance, Value};
+use tcgeneric::PathSegment;
 
 use crate::route::{GetHandler, Handler, Route};
 

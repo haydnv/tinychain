@@ -12,7 +12,7 @@ use log::debug;
 use serde::de::DeserializeOwned;
 
 use tc_error::*;
-use tc_generic::{NetworkTime, TCPathBuf};
+use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::http;
 use crate::kernel::Kernel;

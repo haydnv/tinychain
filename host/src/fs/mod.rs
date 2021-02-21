@@ -9,7 +9,7 @@ use futures::TryFutureExt;
 use tokio::fs;
 
 use tc_error::*;
-use tc_generic::{label, Label, PathSegment};
+use tcgeneric::{label, Label, PathSegment};
 
 mod cache;
 mod dir;

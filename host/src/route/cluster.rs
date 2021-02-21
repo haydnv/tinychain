@@ -3,8 +3,8 @@ use futures::future;
 use safecast::TryCastInto;
 
 use tc_error::*;
-use tc_generic::Id;
 use tc_transact::{Transact, Transaction};
+use tcgeneric::Id;
 
 use crate::cluster::Cluster;
 use crate::route::*;

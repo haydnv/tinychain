@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use destream::en;
 
 use tc_error::*;
-use tc_generic::Id;
+use tcgeneric::Id;
 
 mod id;
 

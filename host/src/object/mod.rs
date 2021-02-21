@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use destream::{de, en, EncodeMap};
 use futures::TryFutureExt;
 
-use tc_generic::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 use tc_transact::IntoView;
+use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
 use crate::fs::Dir;
 use crate::state::State;
@@ -29,7 +29,7 @@ pub enum ObjectType {
     Instance,
 }
 
-impl tc_generic::Class for ObjectType {
+impl tcgeneric::Class for ObjectType {
     type Instance = Object;
 }
 
@@ -72,7 +72,7 @@ pub enum Object {
     Instance(InstanceExt<State>),
 }
 
-impl tc_generic::Instance for Object {
+impl tcgeneric::Instance for Object {
     type Class = ObjectType;
 
     fn class(&self) -> ObjectType {

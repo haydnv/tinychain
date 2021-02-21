@@ -9,10 +9,10 @@ use log::debug;
 use safecast::{CastFrom, TryCastFrom};
 
 use tc_error::*;
-use tc_generic::*;
 use tc_transact::fs::File;
 use tc_transact::{Transact, TxnId};
 use tc_value::Value;
+use tcgeneric::*;
 
 use crate::fs;
 use crate::scalar::OpRef;

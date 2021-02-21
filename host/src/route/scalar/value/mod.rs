@@ -1,4 +1,4 @@
-use tc_generic::{path_label, PathLabel, PathSegment};
+use tcgeneric::{path_label, PathLabel, PathSegment};
 
 use crate::route::{GetHandler, Handler, Route};
 use crate::scalar::Value;

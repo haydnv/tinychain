@@ -11,8 +11,8 @@ use log::debug;
 use serde::de::DeserializeOwned;
 
 use tc_error::*;
-use tc_generic::{NetworkTime, TCPathBuf};
 use tc_transact::{IntoView, TxnId};
+use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::gateway::Gateway;
 use crate::state::State;

@@ -8,7 +8,7 @@ use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use log::debug;
 
-use tc_generic::*;
+use tcgeneric::*;
 
 use crate::scalar::Scalar;
 

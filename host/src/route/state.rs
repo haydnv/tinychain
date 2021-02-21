@@ -3,7 +3,7 @@ use futures::future;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_generic::PathSegment;
+use tcgeneric::PathSegment;
 
 use crate::scalar::Number;
 use crate::state::State;

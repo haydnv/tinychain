@@ -9,7 +9,7 @@ use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::TCResult;
-use tc_generic::{Id, Instance};
+use tcgeneric::{Id, Instance};
 
 use crate::route::Public;
 use crate::scalar::{Scalar, Scope};

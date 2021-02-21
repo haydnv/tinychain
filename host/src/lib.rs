@@ -23,9 +23,9 @@ pub mod txn;
 
 pub use kernel::*;
 pub use tc_error;
-pub use tc_generic;
 pub use tc_transact;
 pub use tc_value;
+pub use tcgeneric;
 
 /// Initialize the transactional filesystem layer.
 pub async fn mount(

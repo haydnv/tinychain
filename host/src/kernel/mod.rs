@@ -8,7 +8,8 @@ use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_generic::*;
+use tc_transact::{Transact, Transaction};
+use tcgeneric::*;
 
 use crate::cluster::Cluster;
 use crate::object::InstanceExt;

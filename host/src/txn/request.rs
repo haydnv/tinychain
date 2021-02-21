@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use futures::TryFutureExt;
 
 use tc_error::*;
-use tc_generic::{path_label, NetworkTime, PathLabel, TCPathBuf};
 use tc_transact::TxnId;
+use tcgeneric::{path_label, NetworkTime, PathLabel, TCPathBuf};
 
 use crate::gateway::Gateway;
 use crate::scalar::{Link, Value};

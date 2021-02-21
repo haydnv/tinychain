@@ -8,7 +8,7 @@ use futures::TryFutureExt;
 use log::debug;
 
 use tc_error::*;
-use tc_generic::*;
+use tcgeneric::*;
 
 use crate::route::Public;
 use crate::state::State;

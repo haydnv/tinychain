@@ -6,8 +6,8 @@ use std::ops::Deref;
 
 use destream::{en, EncodeMap};
 
-use tc_generic::Map;
 use tc_transact::IntoView;
+use tcgeneric::Map;
 
 use crate::fs::Dir;
 use crate::scalar::Scalar;
@@ -18,12 +18,12 @@ use super::{InstanceClass, Object};
 
 /// A user-defined instance, subclassing `T`.
 #[derive(Clone)]
-pub struct InstanceExt<T: tc_generic::Instance> {
+pub struct InstanceExt<T: tcgeneric::Instance> {
     parent: Box<T>,
     class: InstanceClass,
 }
 
-impl<T: tc_generic::Instance> InstanceExt<T> {
+impl<T: tcgeneric::Instance> InstanceExt<T> {
     /// Construct a new instance of the given user-defined [`InstanceClass`].
     pub fn new(parent: T, class: InstanceClass) -> InstanceExt<T> {
         InstanceExt {
@@ -41,7 +41,7 @@ impl<T: tc_generic::Instance> InstanceExt<T> {
     }
 
     /// Convert the native type of this instance, if possible.
-    pub fn try_into<E, O: tc_generic::Instance + TryFrom<T, Error = E>>(
+    pub fn try_into<E, O: tcgeneric::Instance + TryFrom<T, Error = E>>(
         self,
     ) -> Result<InstanceExt<O>, E> {
         let class = self.class;
@@ -54,7 +54,7 @@ impl<T: tc_generic::Instance> InstanceExt<T> {
     }
 }
 
-impl<T: tc_generic::Instance> tc_generic::Instance for InstanceExt<T> {
+impl<T: tcgeneric::Instance> tcgeneric::Instance for InstanceExt<T> {
     type Class = InstanceClass;
 
     fn class(&self) -> Self::Class {
@@ -62,7 +62,7 @@ impl<T: tc_generic::Instance> tc_generic::Instance for InstanceExt<T> {
     }
 }
 
-impl<'en, T: tc_generic::Instance + en::IntoStream<'en> + 'en> en::IntoStream<'en>
+impl<'en, T: tcgeneric::Instance + en::IntoStream<'en> + 'en> en::IntoStream<'en>
     for InstanceExt<T>
 {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
@@ -72,7 +72,7 @@ impl<'en, T: tc_generic::Instance + en::IntoStream<'en> + 'en> en::IntoStream<'e
     }
 }
 
-impl<T: tc_generic::Instance> Deref for InstanceExt<T> {
+impl<T: tcgeneric::Instance> Deref for InstanceExt<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -92,7 +92,7 @@ impl<'en> IntoView<'en, Dir> for InstanceExt<State> {
     }
 }
 
-impl<T: tc_generic::Instance> From<InstanceExt<T>> for State
+impl<T: tcgeneric::Instance> From<InstanceExt<T>> for State
 where
     State: From<T>,
 {
@@ -104,9 +104,9 @@ where
     }
 }
 
-impl<T: tc_generic::Instance> fmt::Display for InstanceExt<T> {
+impl<T: tcgeneric::Instance> fmt::Display for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} Object", tc_generic::Instance::class(self))
+        write!(f, "{} Object", tcgeneric::Instance::class(self))
     }
 }
 

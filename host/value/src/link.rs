@@ -15,7 +15,7 @@ use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
 use tc_error::*;
-use tc_generic::{Id, PathLabel, PathSegment, TCPathBuf};
+use tcgeneric::{Id, PathLabel, PathSegment, TCPathBuf};
 
 use super::Value;
 

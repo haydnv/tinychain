@@ -1,5 +1,5 @@
 [package]
-name = "tc-generic"
+name = "tcgeneric"
 version = "0.1.0-alpha"
 authors = ["haydnv"]
 edition = "2018"

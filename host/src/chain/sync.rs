@@ -10,9 +10,9 @@ use futures::join;
 use log::debug;
 
 use tc_error::*;
-use tc_generic::Instance;
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{Transact, TxnId};
+use tcgeneric::Instance;
 
 use crate::fs;
 use crate::scalar::OpRef;

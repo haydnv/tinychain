@@ -11,10 +11,10 @@ use futures::future::{join_all, Future, TryFutureExt};
 use log::{debug, warn};
 
 use tc_error::*;
-use tc_generic::{Id, PathSegment};
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::TxnId;
 use tc_transact::{fs, Transact};
+use tcgeneric::{Id, PathSegment};
 
 use crate::chain::{self, ChainBlock};
 use crate::scalar::ScalarType;

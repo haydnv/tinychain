@@ -13,7 +13,7 @@ use safecast::{CastFrom, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-use tc_generic::*;
+use tcgeneric::*;
 
 use super::Link;
 

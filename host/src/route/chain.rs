@@ -1,5 +1,5 @@
-use tc_generic::PathSegment;
 use tc_transact::Transaction;
+use tcgeneric::PathSegment;
 
 use crate::chain::{Chain, ChainInstance, Subject};
 

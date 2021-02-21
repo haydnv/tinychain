@@ -8,9 +8,9 @@ use futures::future::TryFutureExt;
 use log::debug;
 
 use tc_error::*;
-use tc_generic::{Id, NetworkTime, PathSegment, TCPathBuf};
 use tc_transact::fs::Dir;
-pub use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::Transaction;
+use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf};
 
 use crate::fs;
 use crate::gateway::Gateway;
@@ -22,6 +22,7 @@ mod server;
 
 pub use request::*;
 pub use server::*;
+pub use tc_transact::TxnId;
 
 struct Active {
     expires: NetworkTime,

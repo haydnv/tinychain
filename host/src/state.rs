@@ -14,8 +14,8 @@ use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_generic::*;
 use tc_transact::{IntoView, Transaction};
+use tcgeneric::*;
 
 use crate::chain::*;
 use crate::fs::Dir;

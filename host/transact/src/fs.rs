@@ -11,7 +11,7 @@ use futures::Future;
 use uplock::{RwLockReadGuard, RwLockWriteGuard};
 
 use tc_error::*;
-use tc_generic::{Id, PathSegment};
+use tcgeneric::{Id, PathSegment};
 
 use super::TxnId;
 

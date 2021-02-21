@@ -7,7 +7,7 @@ use rand::Rng;
 use serde::de;
 
 use tc_error::*;
-use tc_generic::{Id, NetworkTime};
+use tcgeneric::{Id, NetworkTime};
 
 const INVALID_ID: &str = "Invalid transaction ID";
 

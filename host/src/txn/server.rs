@@ -8,9 +8,9 @@ use uplock::RwLock;
 use uuid::Uuid;
 
 use tc_error::*;
-use tc_generic::PathSegment;
 use tc_transact::fs::Dir;
 use tc_transact::Transact;
+use tcgeneric::PathSegment;
 
 use crate::fs;
 use crate::gateway::Gateway;

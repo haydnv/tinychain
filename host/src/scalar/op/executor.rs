@@ -7,7 +7,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use log::debug;
 
 use tc_error::*;
-use tc_generic::{Id, Instance, Map};
+use tcgeneric::{Id, Instance, Map};
 
 use crate::route::Public;
 use crate::scalar::{Refer, Scope};

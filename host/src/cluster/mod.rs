@@ -14,9 +14,9 @@ use safecast::TryCastInto;
 use uplock::RwLock;
 
 use tc_error::*;
-use tc_generic::*;
 use tc_transact::fs::{Dir, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
+use tcgeneric::*;
 
 use crate::chain::{Chain, ChainType, SyncChain};
 use crate::fs;

@@ -9,9 +9,9 @@ use serde::de::DeserializeOwned;
 use url::Url;
 
 use tc_error::*;
-use tc_generic::label;
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Link, Value};
+use tcgeneric::label;
 
 use crate::state::State;
 use crate::txn::Txn;

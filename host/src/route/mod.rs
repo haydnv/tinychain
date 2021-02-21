@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use futures::Future;
 
 use tc_error::*;
-use tc_generic::{Map, PathSegment, TCPath};
+use tcgeneric::{Map, PathSegment, TCPath};
 
 use crate::scalar::Value;
 use crate::state::State;

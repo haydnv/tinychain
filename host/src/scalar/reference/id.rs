@@ -11,7 +11,7 @@ use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_generic::{Id, Instance};
+use tcgeneric::{Id, Instance};
 
 use crate::route::Public;
 use crate::scalar::{Scope, Value};

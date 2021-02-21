@@ -14,7 +14,7 @@ use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_generic::*;
+use tcgeneric::*;
 
 use crate::route::Public;
 use crate::scalar::{Link, Scalar, Scope, Value, SELF};
