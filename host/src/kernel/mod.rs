@@ -51,15 +51,7 @@ impl Kernel {
                 cluster
             );
 
-            if suffix.is_empty() && key.is_none() {
-                // it's a public key lookup
-                cluster.get(&txn, suffix, key).await
-            } else {
-                execute(txn, cluster, |txn, cluster| async move {
-                    cluster.get(&txn, suffix, key).await
-                })
-                .await
-            }
+            cluster.get(&txn, suffix, key).await
         } else if &path[0] == "error" && path.len() == 2 {
             let message = String::try_cast_from(key, |v| {
                 TCError::bad_request("cannot cast into error message string from", v)
@@ -154,9 +146,10 @@ fn execute<
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
         if let Some(owner_link) = txn.owner() {
-            if !txn.is_owner(cluster.path()) {
-                // Notify the owner of participation
-                let link = txn.link(cluster.path().to_vec().into());
+            let link = txn.link(cluster.path().to_vec().into());
+            if txn.is_owner(cluster.path()) {
+                debug!("{} owns this transaction, no need to notify", link);
+            } else {
                 txn.put(owner_link.clone(), Value::default(), link.into())
                     .await?;
             }

@@ -24,7 +24,7 @@ Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directo
 
 ## Key features
 
- * **Compliance**: Tinychain allows general-purpose cloud services to be defined using a single runtime, so that your customer data never has to leave the platform which enforces access to it.
+ * **Compliance**: Tinychain is a single platform which runs cloud applications and the data services that support them, meaning your customer data never has to leave the platform which authorizes access to it
  * **Synchronization**: Tinychain's distributed Paxos algorithm automatically enables cross-service transactions within any set of services which support the Tinychain protocol.
  * **Concurrency**: Tinychain **Op**s are automatically executed concurrently, although a developer can use the **After** flow control to modify this behavior.
  * **Hardware acceleration**\*\*: The **Tensor**\*\* and **Graph**\* data types support hardware acceleration on CUDA and OpenCL backends, no extra code needed.
@@ -48,7 +48,7 @@ Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directo
  * **Scalar**
     * **Value**: a generic value type such as a string or number which can be collated and stored in a **BTree**
     * **Ref**: a reference to another value which must be resolved as part of a [**Transaction**](#life-of-a-transaction)
-    * **Op**: an user-defined operation on a Tinychain state
+    * **Op**: a user-defined executable function
 
 ## The Tinychain protocol
 
@@ -94,6 +94,8 @@ Example:
 
 Requests at the same indentation level above are executed concurrently, after validating the incoming request's auth token. If any action fails, the transaction is dropped, and the user receives an error response. Each participant must notify the transaction owner that it is a participant by forwarding the auth token. If all dependencies resolve succeessfully, `retailer.com` (the transaction owner) commits the transaction by sending a commit message to each participant. After it receives an OK response from each participant, it commits its own state and sends an OK response to the user. Acceptance by any service of a request with transaction ID X forbids acceptance of any subsquent request with transaction ID X, unless it is shares the same origin (the same end-user) and is therefore a dependent operation of the same transaction. Acceptance of a request with transaction ID X forbids acceptance of any request with a transaction ID < X.
 
+Note that this is only the case in a mutation (a write transaction). A read-only transaction does not need to perform any explicit synchronization with the transaction owner, only to lock the given transaction ID.
+
 The concurrency control flow of this sequence of operations, starting from transaction number (X - 1) is:
 1. Client initiates transaction X
 1. Service endpoint validates auth token
@@ -109,7 +111,7 @@ The concurrency control flow of this sequence of operations, starting from trans
 
 This is effectively the classic [Paxos](https://en.wikipedia.org/wiki/Paxos_(computer_science)) algorithm, with two key differences:
  * For a cross-service transaction, 100% consensus is required before the transaction is committed (this differs from a transaction within a single service with multiple replicas\*, where a minimum 50% consensus is required, and non-compliant replicas are removed from the replica set)
- * The "leader" is not a predetermined property of the network, but simply the first host to claim ownership of the transaction (in this sense the Tinychain consensus protocol is "distributed" Paxos)
+ * The "leader" is not a predetermined property of the network, but simply the first **Cluster** to claim ownership of the transaction (in this sense the Tinychain consensus protocol is "distributed" Paxos)
 
 This functionality is implemented automatically for any service using the Tinychain host software.
 

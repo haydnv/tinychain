@@ -25,15 +25,21 @@ pub use server::*;
 
 struct Active {
     expires: NetworkTime,
+    scope: Scope,
 }
 
 impl Active {
-    fn new(expires: NetworkTime) -> Self {
-        Self { expires }
+    fn new(txn_id: &TxnId, expires: NetworkTime) -> Self {
+        let scope = TCPathBuf::from(txn_id.to_id());
+        Self { expires, scope }
     }
 
     fn expires(&self) -> &NetworkTime {
         &self.expires
+    }
+
+    fn scope(&self) -> &Scope {
+        &self.scope
     }
 }
 
@@ -79,10 +85,15 @@ impl Txn {
             let txn_id = self.request.txn_id();
 
             use rjwt::Resolve;
-            let host = Link::from((self.gateway.root().clone(), cluster_path));
+            let host = self.gateway.link(cluster_path);
             let resolver = Resolver::new(&self.gateway, &host, self.id());
             let (token, claims) = resolver
-                .consume_and_sign(actor, vec![SCOPE_ROOT.into()], token, txn_id.time().into())
+                .consume_and_sign(
+                    actor,
+                    vec![self.active.scope().clone()],
+                    token,
+                    txn_id.time().into(),
+                )
                 .map_err(TCError::unauthorized)
                 .await?;
 
@@ -113,7 +124,7 @@ impl Txn {
     /// Return the owner of this transaction, if there is one.
     pub fn owner(&self) -> Option<&Link> {
         for (host, _actor_id, scopes) in self.request.scopes().iter() {
-            if scopes.contains(&SCOPE_ROOT.into()) {
+            if scopes.contains(self.active.scope()) {
                 return Some(host);
             }
         }
@@ -123,7 +134,7 @@ impl Txn {
 
     /// Return a link to the given path on this host.
     pub fn link(&self, path: TCPathBuf) -> Link {
-        Link::from((self.gateway.root().clone(), path))
+        self.gateway.link(path)
     }
 
     /// Return the [`Request`] which initiated this transaction on this host.

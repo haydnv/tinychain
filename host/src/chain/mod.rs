@@ -5,6 +5,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use log::debug;
 
 use error::*;
 use generic::*;
@@ -78,6 +79,10 @@ impl Subject {
 
                 let block_id = SUBJECT.into();
                 let mut block = file.get_block_mut(txn_id, &block_id).await?;
+                debug!(
+                    "set new Value of chain subject to {} ({}) at {}",
+                    new_value, new_json, txn_id
+                );
                 *block = Bytes::from(new_json);
 
                 Ok(())
@@ -89,6 +94,12 @@ impl Subject {
 #[async_trait]
 impl Transact for Subject {
     async fn commit(&self, txn_id: &TxnId) {
+        debug!(
+            "commit subject with value {} at {}",
+            self.at(txn_id).await.unwrap(),
+            txn_id
+        );
+
         match self {
             Self::Value(file) => file.commit(txn_id).await,
         }

@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 
 use error::*;
 use futures::future::{try_join_all, Future, TryFutureExt};
-use generic::NetworkTime;
+use generic::{NetworkTime, TCPathBuf};
 
 use crate::http;
 use crate::kernel::Kernel;
@@ -99,6 +99,11 @@ impl Gateway {
         &self.root
     }
 
+    /// Return a [`Link`] to the given path at this host.
+    pub fn link(&self, path: TCPathBuf) -> Link {
+        Link::from((self.root.clone(), path))
+    }
+
     /// Authorize a transaction to execute on this host.
     pub async fn new_txn(self: &Arc<Self>, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
         let token = if let Some(token) = token {
@@ -170,7 +175,7 @@ impl Gateway {
 
     /// Execute the POST op at `subject` with the `params`
     pub async fn post(&self, txn: &Txn, link: Link, params: State) -> TCResult<State> {
-        debug!("POST {}({})", link, params);
+        debug!("POST to {} with params {}", link, params);
 
         match link.host() {
             None => self.kernel.post(txn, link.path(), params).await,

@@ -328,7 +328,7 @@ impl<T: Mutate> TxnLock<T> {
 #[async_trait]
 impl<T: Mutate> Transact for TxnLock<T> {
     async fn commit(&self, txn_id: &TxnId) {
-        debug!("TxnLock::commit {}", txn_id);
+        debug!("TxnLock::commit {} at {}", self.name, txn_id);
 
         async {
             self.read(&txn_id).await.unwrap(); // make sure there's no active write lock

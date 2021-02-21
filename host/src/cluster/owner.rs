@@ -32,8 +32,12 @@ impl Owner {
 
     pub async fn commit(&self, txn: &Txn) -> TCResult<()> {
         let mut mutated = self.mutated.write().await;
-        let mutated = mutated.drain();
 
+        if mutated.is_empty() {
+            debug!("no dependencies to commit");
+        }
+
+        let mutated = mutated.drain();
         try_join_all(mutated.into_iter().map(|link| {
             debug!("sending commit message to dependency at {}", link);
             txn.post(link, Map::<State>::default().into())

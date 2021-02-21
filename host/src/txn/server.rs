@@ -51,11 +51,10 @@ impl TxnServer {
         match active.entry(txn_id) {
             Entry::Occupied(entry) => {
                 let active = entry.get();
-                // TODO: authorize access to this Txn
                 Ok(Txn::new(active.clone(), gateway, dir, request))
             }
             Entry::Vacant(entry) => {
-                let active = Arc::new(Active::new(expires));
+                let active = Arc::new(Active::new(&txn_id, expires));
                 let txn = Txn::new(active.clone(), gateway, self.workspace.clone(), request);
                 entry.insert(active);
                 Ok(txn)
