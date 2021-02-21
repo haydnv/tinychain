@@ -8,6 +8,6 @@ license = "Apache-2.0"
 repository = "http://github.com/haydnv/tinychain.git"
 
 keywords = ["tinychain", "error", "service", "mesh"]
-categories = ["data structures", "rust patterns"]
+categories = ["data-structures", "rust-patterns"]
 
 [dependencies]
