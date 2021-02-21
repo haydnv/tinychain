@@ -6,7 +6,6 @@ use std::iter;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
-use addr::DomainName;
 use async_trait::async_trait;
 use destream::{de, en};
 use number_general::Number;
@@ -21,7 +20,6 @@ use super::Value;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum LinkAddress {
-    DomainName(DomainName),
     IPv4(Ipv4Addr),
     IPv6(Ipv6Addr),
 }
@@ -30,7 +28,6 @@ impl Clone for LinkAddress {
     fn clone(&self) -> Self {
         use LinkAddress::*;
         match self {
-            DomainName(n) => DomainName(n.to_string().parse().unwrap()),
             IPv4(addr) => IPv4(*addr),
             IPv6(addr) => IPv6(*addr),
         }
@@ -42,7 +39,6 @@ impl fmt::Display for LinkAddress {
         use LinkAddress::*;
 
         match self {
-            DomainName(addr) => write!(f, "{}", addr),
             IPv4(addr) => write!(f, "{}", addr),
             IPv6(addr) => write!(f, "{}", addr),
         }
@@ -70,12 +66,6 @@ impl From<IpAddr> for LinkAddress {
             V4(addr) => IPv4(addr),
             V6(addr) => IPv6(addr),
         }
-    }
-}
-
-impl From<DomainName> for LinkAddress {
-    fn from(addr: DomainName) -> LinkAddress {
-        LinkAddress::DomainName(addr)
     }
 }
 
@@ -133,11 +123,6 @@ impl fmt::Display for LinkProtocol {
             }
         )
     }
-}
-
-fn is_ipv4(s: &str) -> bool {
-    let segments: Vec<&str> = s.split('.').collect();
-    segments.len() == 4 && !segments.iter().any(|s| s.parse::<u16>().is_err())
 }
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -220,6 +205,7 @@ impl FromStr for LinkHost {
                     let port: u16 = segments[1]
                         .parse()
                         .map_err(|e| TCError::bad_request("Unable to parse port number", e))?;
+
                     (segments[0], Some(port))
                 } else {
                     return Err(TCError::bad_request("Unable to parse network address", s));
@@ -228,21 +214,11 @@ impl FromStr for LinkHost {
                 (s, None)
             };
 
-            let address: LinkAddress = if is_ipv4(address) {
-                let address: Ipv4Addr = address
-                    .parse()
-                    .map_err(|e| TCError::bad_request("Unable to parse IPv4 address", e))?;
+            let address: Ipv4Addr = address
+                .parse()
+                .map_err(|e| TCError::bad_request("Unable to parse IPv4 address", e))?;
 
-                address.into()
-            } else {
-                let address: DomainName = address
-                    .parse()
-                    .map_err(|e| TCError::bad_request("Unable to parse domain name", e))?;
-
-                address.into()
-            };
-
-            (address, port)
+            (address.into(), port)
         };
 
         Ok(LinkHost {
