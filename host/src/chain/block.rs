@@ -23,6 +23,7 @@ pub struct ChainBlock {
 }
 
 impl ChainBlock {
+    /// Append an op to the contents of this `ChainBlock`.
     pub fn append(&mut self, op_ref: OpRef) {
         self.contents.push(op_ref);
     }

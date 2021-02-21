@@ -100,8 +100,10 @@ pub trait Persist: Sized {
     type Schema;
     type Store: Store;
 
+    /// Return the schema of this persistent state.
     fn schema(&'_ self) -> &'_ Self::Schema;
 
+    /// Load a saved state from persistent storage.
     async fn load(schema: Self::Schema, store: Self::Store, txn_id: TxnId) -> TCResult<Self>;
 }
 

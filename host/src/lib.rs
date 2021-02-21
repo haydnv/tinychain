@@ -4,7 +4,7 @@
 //!
 //! Tinychain is intended to be used as an executable binary (i.e., with `cargo install`) via its
 //! HTTP API. For usage instructions and more details, visit the repository page at
-//! [github.com/haydnv/tinychain](http://github.com/tinychain).
+//! [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain).
 
 use std::path::PathBuf;
 

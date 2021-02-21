@@ -7,7 +7,7 @@ use futures::TryFutureExt;
 
 use tc_error::*;
 use tc_transact::TxnId;
-use tcgeneric::{path_label, NetworkTime, PathLabel, TCPathBuf};
+use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::gateway::Gateway;
 use crate::scalar::{Link, Value};
@@ -16,8 +16,6 @@ pub type Actor = rjwt::Actor<Value>;
 pub type Claims = rjwt::Claims<Link, Value, Vec<Scope>>;
 pub type Scope = TCPathBuf;
 pub type Token = rjwt::Token<Link, Value, Vec<Scope>>;
-
-pub const SCOPE_ROOT: PathLabel = path_label(&[]);
 
 /// A `Txn`'s authorization.
 pub struct Request {

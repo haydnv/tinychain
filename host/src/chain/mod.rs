@@ -26,7 +26,7 @@ pub use sync::*;
 
 const CHAIN: Label = label("chain");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
-pub const SUBJECT: Label = label("subject");
+const SUBJECT: Label = label("subject");
 
 /// The file extension of a directory of [`ChainBlock`]s on disk.
 pub const EXT: &str = "chain";
@@ -50,6 +50,7 @@ pub enum Subject {
 }
 
 impl Subject {
+    /// Return the state of this subject as of the given [`TxnId`].
     pub async fn at(&self, txn_id: &TxnId) -> TCResult<State> {
         match self {
             Self::Value(file) => {
@@ -63,6 +64,7 @@ impl Subject {
         }
     }
 
+    /// Set the state of this `Subject` to `value` at the given [`TxnId`].
     pub async fn put(&self, txn_id: &TxnId, key: Value, value: State) -> TCResult<()> {
         match self {
             Self::Value(file) => {
@@ -115,8 +117,10 @@ impl Transact for Subject {
 /// Trait defining methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]
 pub trait ChainInstance {
+    /// Append the given [`OpRef`] to the latest block in this `Chain`.
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()>;
 
+    /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &Subject;
 }
 

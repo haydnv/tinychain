@@ -52,6 +52,7 @@ pub struct Cluster {
 }
 
 impl Cluster {
+    /// Claim ownership of the given [`Txn`].
     pub async fn claim(&self, txn: &Txn) -> TCResult<Txn> {
         let last_commit = self.confirmed.read().await;
         if txn.id() <= &*last_commit {
@@ -73,6 +74,7 @@ impl Cluster {
         Ok(txn)
     }
 
+    /// Return the [`Owner`] of the given transaction.
     pub async fn owner(&self, txn_id: &TxnId) -> TCResult<Owner> {
         self.owned
             .read()
@@ -98,10 +100,12 @@ impl Hash for Cluster {
 }
 
 impl Cluster {
+    /// Borrow the [`Chain`]s which make up the mutable state of this `Cluster`.
     pub fn chains(&self) -> &Map<Chain> {
         &self.chains
     }
 
+    /// Borrow the public key of this `Cluster`.
     pub fn public_key(&self) -> &[u8] {
         self.actor.public_key().as_bytes()
     }
@@ -194,6 +198,7 @@ impl Cluster {
         Ok(InstanceExt::new(cluster, class))
     }
 
+    /// Return the path of this cluster, relative to this host.
     pub fn path(&'_ self) -> &'_ [PathSegment] {
         &self.path
     }
