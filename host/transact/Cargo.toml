@@ -1,6 +1,6 @@
 [package]
 name = "tc-transact"
-version = "0.1.0-alpha"
+version = "0.1.0"
 authors = ["haydnv"]
 edition = "2018"
 description = "A Tinychain transaction. Unstable."
