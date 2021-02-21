@@ -2,7 +2,7 @@
 //!
 //! Variants include [`Value::Number`] and [`Value::String`].
 //!
-//! This library is part of Tinychain: http://github.com/haydnv/tinychain
+//! This library is part of Tinychain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
 pub mod link;
 mod value;

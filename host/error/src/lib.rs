@@ -1,6 +1,6 @@
 //! Provides common error types and associated convenience methods for Tinychain.
 //!
-//! This crate is a part of Tinychain: http://github.com/haydnv/tinychain
+//! This crate is a part of Tinychain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
 use std::fmt;
 

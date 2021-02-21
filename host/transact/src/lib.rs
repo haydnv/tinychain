@@ -1,6 +1,6 @@
 //! Provides traits and data structures to define a distributed transaction context.
 //!
-//! This library is part of Tinychain: http://github.com/haydnv/tinychain
+//! This library is part of Tinychain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
 use async_trait::async_trait;
 use destream::en;
