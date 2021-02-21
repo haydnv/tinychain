@@ -50,25 +50,25 @@ impl From<uuid::Uuid> for Id {
     }
 }
 
-/// A generic Id
+/// A generic `Id`
 ///
-/// Id is widely used within the Tinychain host software to identify individual variables
+/// `Id` is widely used within the Tinychain host software to identify individual variables
 /// within a transaction context as well as files and directories.
 ///
-/// An Id must be valid UTF8 and must not contain whitespace or any control character sequence like
-/// `{/, .., ~, $, \`, ^, &, |, =, {, }, <, >, ', ", ?, :, @, #}`.
+/// An `Id` must be valid UTF8 and must not contain whitespace or any control character sequence
+/// like `{/, .., ~, $, \, ^, &, |, =, {, }, <, >, ', ", ?, :, @, #}`.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Id {
     id: String,
 }
 
 impl Id {
-    /// Borrows the String underlying this Id.
+    /// Borrows the String underlying this `Id`.
     pub fn as_str(&self) -> &str {
         self.id.as_str()
     }
 
-    /// Return true if this ID begins with the specified string.
+    /// Return true if this `Id` begins with the specified string.
     pub fn starts_with(&self, prefix: &str) -> bool {
         self.id.starts_with(prefix)
     }
@@ -267,11 +267,6 @@ pub struct TCPathBuf {
 }
 
 impl TCPathBuf {
-    /// Return a mutable reference to the underlying vector.
-    pub fn as_mut(&'_ mut self) -> &'_ mut Vec<PathSegment> {
-        &mut self.segments
-    }
-
     /// Return a complete slice of the underlying vector.
     pub fn as_slice(&'_ self) -> &'_ [PathSegment] {
         &self.segments[..]
