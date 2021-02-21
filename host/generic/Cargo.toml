@@ -7,7 +7,7 @@ description = "Generic data types used internally by Tinychain. Unstable."
 license = "Apache-2.0"
 repository = "http://github.com/haydnv/tinychain.git"
 
-categories = ["data structures"]
+categories = ["data-structures"]
 
 [dependencies]
 async-trait = "0.1"
@@ -15,5 +15,5 @@ destream = "0.3"
 regex = "1.3"
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
-tc-error = { path = "../error" }
+tc-error = "0.1"
 uuid = "0.8"
