@@ -10,8 +10,8 @@ use destream::en;
 use futures::Future;
 use uplock::{RwLockReadGuard, RwLockWriteGuard};
 
-use error::*;
-use generic::{Id, PathSegment};
+use tc_error::*;
+use tc_generic::{Id, PathSegment};
 
 use super::TxnId;
 

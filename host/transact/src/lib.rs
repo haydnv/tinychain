@@ -1,10 +1,12 @@
-//! Traits and data structures to define a distributed transaction context
+//! Provides traits and data structures to define a distributed transaction context.
+//!
+//! This library is part of Tinychain: http://github.com/haydnv/tinychain
 
 use async_trait::async_trait;
 use destream::en;
 
-use error::*;
-use generic::Id;
+use tc_error::*;
+use tc_generic::Id;
 
 mod id;
 

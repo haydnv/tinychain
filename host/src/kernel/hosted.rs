@@ -3,7 +3,7 @@ use std::iter::FromIterator;
 
 use log::{debug, info};
 
-use generic::{label, Label, PathSegment, TCPath, TCPathBuf};
+use tc_generic::{label, Label, PathSegment, TCPath, TCPathBuf};
 
 use crate::cluster::Cluster;
 use crate::object::InstanceExt;

@@ -6,8 +6,8 @@ use futures::future::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::debug;
 
-use error::*;
-use generic::{Id, Instance, Map};
+use tc_error::*;
+use tc_generic::{Id, Instance, Map};
 
 use crate::route::Public;
 use crate::scalar::{Refer, Scope};

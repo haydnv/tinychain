@@ -10,11 +10,11 @@ use bytes::Bytes;
 use futures::future::{join_all, Future, TryFutureExt};
 use log::{debug, warn};
 
-use error::*;
-use generic::{Id, PathSegment};
-use transact::lock::{Mutable, TxnLock};
-use transact::TxnId;
-use transact::{fs, Transact};
+use tc_error::*;
+use tc_generic::{Id, PathSegment};
+use tc_transact::lock::{Mutable, TxnLock};
+use tc_transact::TxnId;
+use tc_transact::{fs, Transact};
 
 use crate::chain::{self, ChainBlock};
 use crate::scalar::ScalarType;

@@ -1,9 +1,9 @@
 [package]
-name = "value"
-version = "0.1.0"
+name = "tc-value"
+version = "0.1.0-alpha"
 authors = ["haydnv"]
 edition = "2018"
-description = "Tinychain's representation of a value which can be collated and stored"
+description = "Tinychain's representation of a value which can be collated and stored. Unstable."
 license = "Apache-2.0"
 repository = "http://github.com/haydnv/tinychain.git"
 
@@ -17,9 +17,9 @@ base64 = "0.13"
 bytes = "1.0"
 collate = "0.1"
 destream = "0.3"
-generic = { path = "../generic" }
 log = { version = "0.4", features = [] }
 number-general = "0.3"
-error = { path = "../error" }
 safecast = "0.1"
 serde = { version = "1.0", features = []}
+tc-error = { path = "../error" }
+tc-generic = { path = "../generic" }

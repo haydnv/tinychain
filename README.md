@@ -2,7 +2,7 @@
 
 Tinychain is an all-in-one database + application server with support for blockchains, graphs, tables, and tensors.
 
-Tinychain is early alpha software and is not ready for production use. Many core features are only partially implemented, or not yet available in the public API.
+Tinychain is early alpha software and is not ready for production use. Many core features are only partially implemented, or not yet available in the public API. The API may change without notice.
 
 If you need a feature which is not yet available, or even not yet planned, please [start a discussion](https://github.com/haydnv/tinychain/discussions)!
 
@@ -29,6 +29,7 @@ Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directo
  * **Concurrency**: Tinychain **Op**s are automatically executed concurrently, although a developer can use the **After** flow control to modify this behavior.
  * **Hardware acceleration**\*\*: The **Tensor**\*\* and **Graph**\* data types support hardware acceleration on CUDA and OpenCL backends, no extra code needed.
  * **Object orientation**: The Python client\*\* allows defining a Tinychain service as a Python package, which can be then be distributed to other developers, who can use the same Python code to interact with your (hosted) service from their own, without writing any boilerplate integration code, or defining two different APIs for internal and external use.
+ * **Service mesh**: the Tinychain runtime acts as a service mesh for your Tinychain services, allowing for cross-service debugging and analysis, among other features, no extra integration code needed.
  * **Portability**: A Tinychain service can run in any cloud environment, or be distributed across many heterogenous clients, no Docker or Kubernetes required. A Tinychain developer can also choose make some or all of their service's functionality availble for a client to run on-premises, so that the client never has to give the service vendor access to their customer data.
 
 ## Data structures

@@ -5,8 +5,8 @@ use log::debug;
 
 use uplock::RwLock;
 
-use error::*;
-use generic::Map;
+use tc_error::*;
+use tc_generic::Map;
 
 use crate::scalar::Link;
 use crate::state::State;

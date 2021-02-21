@@ -8,10 +8,10 @@ use log::debug;
 use serde::de::DeserializeOwned;
 use url::Url;
 
-use error::*;
-use generic::label;
-use transact::{IntoView, Transaction, TxnId};
-use value::{Link, Value};
+use tc_error::*;
+use tc_generic::label;
+use tc_transact::{IntoView, Transaction, TxnId};
+use tc_value::{Link, Value};
 
 use crate::state::State;
 use crate::txn::Txn;

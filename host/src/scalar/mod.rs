@@ -14,8 +14,8 @@ use futures::future::{try_join_all, TryFutureExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use error::*;
-use generic::*;
+use tc_error::*;
+use tc_generic::*;
 
 use crate::route::Public;
 use crate::state::State;
@@ -26,7 +26,7 @@ pub mod reference;
 
 pub use op::*;
 pub use reference::*;
-pub use value::*;
+pub use tc_value::*;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar"]);
 pub const SELF: Label = label("self");
@@ -504,7 +504,7 @@ impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>, T3: TryCastFrom<Scalar>> 
 
 #[derive(Default)]
 pub struct ScalarVisitor {
-    value: value::ValueVisitor,
+    value: tc_value::ValueVisitor,
 }
 
 impl ScalarVisitor {

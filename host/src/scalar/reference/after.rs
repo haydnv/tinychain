@@ -8,8 +8,8 @@ use destream::{de, en};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use error::TCResult;
-use generic::{Id, Instance};
+use tc_error::TCResult;
+use tc_generic::{Id, Instance};
 
 use crate::route::Public;
 use crate::scalar::{Scalar, Scope};

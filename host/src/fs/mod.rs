@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use futures::TryFutureExt;
 use tokio::fs;
 
-use error::*;
-use generic::{label, Label, PathSegment};
+use tc_error::*;
+use tc_generic::{label, Label, PathSegment};
 
 mod cache;
 mod dir;

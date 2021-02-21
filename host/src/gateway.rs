@@ -7,12 +7,12 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::future::{try_join_all, Future, TryFutureExt};
 use log::debug;
 use serde::de::DeserializeOwned;
 
-use error::*;
-use futures::future::{try_join_all, Future, TryFutureExt};
-use generic::{NetworkTime, TCPathBuf};
+use tc_error::*;
+use tc_generic::{NetworkTime, TCPathBuf};
 
 use crate::http;
 use crate::kernel::Kernel;

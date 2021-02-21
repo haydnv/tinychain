@@ -5,9 +5,9 @@ use std::convert::TryInto;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 
-use error::*;
-use generic::{path_label, NetworkTime, PathLabel, TCPathBuf};
-use transact::TxnId;
+use tc_error::*;
+use tc_generic::{path_label, NetworkTime, PathLabel, TCPathBuf};
+use tc_transact::TxnId;
 
 use crate::gateway::Gateway;
 use crate::scalar::{Link, Value};

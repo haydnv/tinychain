@@ -13,8 +13,8 @@ use futures::{try_join, TryFutureExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use error::*;
-use generic::*;
+use tc_error::*;
+use tc_generic::*;
 
 use crate::route::Public;
 use crate::scalar::{Link, Scalar, Scope, Value, SELF};

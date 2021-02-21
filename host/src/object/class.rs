@@ -6,7 +6,7 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en};
 
-use generic::{path_label, Id, Map, PathLabel, TCPathBuf};
+use tc_generic::{path_label, Id, Map, PathLabel, TCPathBuf};
 
 use crate::scalar::*;
 use crate::state::State;
@@ -48,11 +48,11 @@ impl InstanceClass {
     }
 }
 
-impl generic::Class for InstanceClass {
+impl tc_generic::Class for InstanceClass {
     type Instance = InstanceExt<State>;
 }
 
-impl generic::Instance for InstanceClass {
+impl tc_generic::Instance for InstanceClass {
     type Class = ObjectType;
 
     fn class(&self) -> ObjectType {

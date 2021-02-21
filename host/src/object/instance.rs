@@ -6,8 +6,8 @@ use std::ops::Deref;
 
 use destream::{en, EncodeMap};
 
-use generic::Map;
-use transact::IntoView;
+use tc_generic::Map;
+use tc_transact::IntoView;
 
 use crate::fs::Dir;
 use crate::scalar::Scalar;
@@ -18,12 +18,12 @@ use super::{InstanceClass, Object};
 
 /// A user-defined instance, subclassing `T`.
 #[derive(Clone)]
-pub struct InstanceExt<T: generic::Instance> {
+pub struct InstanceExt<T: tc_generic::Instance> {
     parent: Box<T>,
     class: InstanceClass,
 }
 
-impl<T: generic::Instance> InstanceExt<T> {
+impl<T: tc_generic::Instance> InstanceExt<T> {
     /// Construct a new instance of the given user-defined [`InstanceClass`].
     pub fn new(parent: T, class: InstanceClass) -> InstanceExt<T> {
         InstanceExt {
@@ -41,7 +41,7 @@ impl<T: generic::Instance> InstanceExt<T> {
     }
 
     /// Convert the native type of this instance, if possible.
-    pub fn try_into<E, O: generic::Instance + TryFrom<T, Error = E>>(
+    pub fn try_into<E, O: tc_generic::Instance + TryFrom<T, Error = E>>(
         self,
     ) -> Result<InstanceExt<O>, E> {
         let class = self.class;
@@ -54,7 +54,7 @@ impl<T: generic::Instance> InstanceExt<T> {
     }
 }
 
-impl<T: generic::Instance> generic::Instance for InstanceExt<T> {
+impl<T: tc_generic::Instance> tc_generic::Instance for InstanceExt<T> {
     type Class = InstanceClass;
 
     fn class(&self) -> Self::Class {
@@ -62,7 +62,9 @@ impl<T: generic::Instance> generic::Instance for InstanceExt<T> {
     }
 }
 
-impl<'en, T: generic::Instance + en::IntoStream<'en> + 'en> en::IntoStream<'en> for InstanceExt<T> {
+impl<'en, T: tc_generic::Instance + en::IntoStream<'en> + 'en> en::IntoStream<'en>
+    for InstanceExt<T>
+{
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         let mut map = encoder.encode_map(Some(1))?;
         map.encode_entry(self.class.extends().to_string(), self.parent)?;
@@ -70,7 +72,7 @@ impl<'en, T: generic::Instance + en::IntoStream<'en> + 'en> en::IntoStream<'en> 
     }
 }
 
-impl<T: generic::Instance> Deref for InstanceExt<T> {
+impl<T: tc_generic::Instance> Deref for InstanceExt<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -90,7 +92,7 @@ impl<'en> IntoView<'en, Dir> for InstanceExt<State> {
     }
 }
 
-impl<T: generic::Instance> From<InstanceExt<T>> for State
+impl<T: tc_generic::Instance> From<InstanceExt<T>> for State
 where
     State: From<T>,
 {
@@ -102,9 +104,9 @@ where
     }
 }
 
-impl<T: generic::Instance> fmt::Display for InstanceExt<T> {
+impl<T: tc_generic::Instance> fmt::Display for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} Object", generic::Instance::class(self))
+        write!(f, "{} Object", tc_generic::Instance::class(self))
     }
 }
 

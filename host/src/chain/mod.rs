@@ -1,4 +1,4 @@
-//! A [`Chain`] responsible for recovering a `State` from a failed transaction.
+//! A [`Chain`] responsible for recovering a [`State`] from a failed transaction.
 //! INCOMPLETE AND UNSTABLE.
 
 use std::fmt;
@@ -6,13 +6,13 @@ use std::fmt;
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::debug;
-
-use error::*;
-use generic::*;
 use safecast::{CastFrom, TryCastFrom};
-use transact::fs::File;
-use transact::{Transact, TxnId};
-use value::Value;
+
+use tc_error::*;
+use tc_generic::*;
+use tc_transact::fs::File;
+use tc_transact::{Transact, TxnId};
+use tc_value::Value;
 
 use crate::fs;
 use crate::scalar::OpRef;

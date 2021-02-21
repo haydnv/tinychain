@@ -7,38 +7,35 @@ use futures::{future, stream};
 use structopt::StructOpt;
 use tokio::time::Duration;
 
-use error::TCError;
+use tc_error::*;
+use tc_transact::{Transact, TxnId};
 
 use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
 use tinychain::*;
-use transact::{Transact, TxnId};
 
-fn data_size(flag: &str) -> error::TCResult<usize> {
+fn data_size(flag: &str) -> TCResult<usize> {
     if flag.is_empty() {
-        return Err(error::TCError::bad_request("Invalid size specified", flag));
+        return Err(TCError::bad_request("Invalid size specified", flag));
     }
 
     let msg = "Unable to parse value";
     let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
-        .map_err(|_| error::TCError::bad_request(msg, flag))?;
+        .map_err(|_| TCError::bad_request(msg, flag))?;
 
     if flag.ends_with('K') {
         Ok(size * 1000)
     } else if flag.ends_with('M') {
         Ok(size * 1_000_000)
     } else {
-        Err(error::TCError::bad_request(
-            "Unable to parse request_limit",
-            flag,
-        ))
+        Err(TCError::bad_request("Unable to parse request_limit", flag))
     }
 }
 
-fn duration(flag: &str) -> error::TCResult<Duration> {
+fn duration(flag: &str) -> TCResult<Duration> {
     u64::from_str(flag)
         .map(Duration::from_secs)
-        .map_err(|_| error::TCError::bad_request("Invalid duration", flag))
+        .map_err(|_| TCError::bad_request("Invalid duration", flag))
 }
 
 #[derive(Clone, StructOpt)]

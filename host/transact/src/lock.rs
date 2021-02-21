@@ -12,7 +12,7 @@ use futures::future::{self, Future};
 use futures::task::{Context, Poll, Waker};
 use log::debug;
 
-use error::*;
+use tc_error::*;
 
 use super::{Transact, TxnId};
 

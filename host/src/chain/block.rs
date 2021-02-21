@@ -8,10 +8,10 @@ use bytes::Bytes;
 use destream::{de, en};
 use futures::TryFutureExt;
 
-use error::*;
-use transact::fs::BlockData;
-use transact::lock::Mutate;
-use transact::TxnId;
+use tc_error::*;
+use tc_transact::fs::BlockData;
+use tc_transact::lock::Mutate;
+use tc_transact::TxnId;
 
 use crate::scalar::OpRef;
 

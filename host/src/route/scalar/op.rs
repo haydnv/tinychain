@@ -2,7 +2,7 @@ use std::iter;
 
 use futures::future;
 
-use generic::PathSegment;
+use tc_generic::PathSegment;
 
 use crate::scalar::op::*;
 use crate::scalar::{Scalar, Value};

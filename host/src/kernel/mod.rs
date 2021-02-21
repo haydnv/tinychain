@@ -5,10 +5,10 @@ use std::pin::Pin;
 
 use futures::Future;
 use log::debug;
-
-use error::*;
-use generic::*;
 use safecast::TryCastFrom;
+
+use tc_error::*;
+use tc_generic::*;
 
 use crate::cluster::Cluster;
 use crate::object::InstanceExt;

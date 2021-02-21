@@ -14,8 +14,8 @@ use safecast::{CastFrom, TryCastFrom};
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
-use error::*;
-use generic::{Id, PathLabel, PathSegment, TCPathBuf};
+use tc_error::*;
+use tc_generic::{Id, PathLabel, PathSegment, TCPathBuf};
 
 use super::Value;
 

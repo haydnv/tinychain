@@ -6,8 +6,8 @@ use std::str::FromStr;
 use rand::Rng;
 use serde::de;
 
-use error::*;
-use generic::{Id, NetworkTime};
+use tc_error::*;
+use tc_generic::{Id, NetworkTime};
 
 const INVALID_ID: &str = "Invalid transaction ID";
 

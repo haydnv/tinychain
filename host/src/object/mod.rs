@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use destream::{de, en, EncodeMap};
 use futures::TryFutureExt;
 
-use generic::{NativeClass, PathSegment, TCPathBuf};
-use transact::IntoView;
+use tc_generic::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
+use tc_transact::IntoView;
 
 use crate::fs::Dir;
 use crate::state::State;
@@ -20,7 +20,7 @@ pub use class::*;
 pub use instance::*;
 
 const ERR_DECODE_INSTANCE: &str = "Instance does not support direct decoding; use an OpRef instead";
-const PREFIX: generic::PathLabel = generic::path_label(&["state", "object"]);
+const PREFIX: PathLabel = path_label(&["state", "object"]);
 
 /// The type of a user-defined [`Object`].
 #[derive(Clone, Eq, PartialEq)]
@@ -29,7 +29,7 @@ pub enum ObjectType {
     Instance,
 }
 
-impl generic::Class for ObjectType {
+impl tc_generic::Class for ObjectType {
     type Instance = Object;
 }
 
@@ -52,7 +52,7 @@ impl NativeClass for ObjectType {
             Self::Instance => "instance",
         };
 
-        TCPathBuf::from(PREFIX).append(generic::label(suffix))
+        TCPathBuf::from(PREFIX).append(label(suffix))
     }
 }
 
@@ -72,7 +72,7 @@ pub enum Object {
     Instance(InstanceExt<State>),
 }
 
-impl generic::Instance for Object {
+impl tc_generic::Instance for Object {
     type Class = ObjectType;
 
     fn class(&self) -> ObjectType {

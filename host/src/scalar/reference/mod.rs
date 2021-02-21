@@ -5,10 +5,10 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, Decoder, Encoder, FromStream, IntoStream, ToStream};
 use futures::TryFutureExt;
-
-use error::*;
-use generic::*;
 use log::debug;
+
+use tc_error::*;
+use tc_generic::*;
 
 use crate::route::Public;
 use crate::state::State;

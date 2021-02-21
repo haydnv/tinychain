@@ -13,7 +13,7 @@ use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
-use error::*;
+use tc_error::*;
 
 const RESERVED_CHARS: [&str; 21] = [
     "/", "..", "~", "$", "`", "&", "|", "=", "^", "{", "}", "<", ">", "'", "\"", "?", ":", "@",

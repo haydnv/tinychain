@@ -5,7 +5,7 @@ use std::ops;
 use std::time;
 use std::time::Duration;
 
-use error::*;
+use tc_error::*;
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct NetworkTime {

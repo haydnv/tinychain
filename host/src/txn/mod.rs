@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
-
-use error::*;
-use generic::{Id, NetworkTime, PathSegment, TCPathBuf};
 use log::debug;
-use transact::fs::Dir;
-pub use transact::{Transact, Transaction, TxnId};
+
+use tc_error::*;
+use tc_generic::{Id, NetworkTime, PathSegment, TCPathBuf};
+use tc_transact::fs::Dir;
+pub use tc_transact::{Transact, Transaction, TxnId};
 
 use crate::fs;
 use crate::gateway::Gateway;

@@ -7,12 +7,12 @@ use std::convert::TryInto;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::join;
-
-use error::*;
-use generic::Instance;
 use log::debug;
-use transact::fs::{Dir, File, Persist};
-use transact::{Transact, TxnId};
+
+use tc_error::*;
+use tc_generic::Instance;
+use tc_transact::fs::{Dir, File, Persist};
+use tc_transact::{Transact, TxnId};
 
 use crate::fs;
 use crate::scalar::OpRef;

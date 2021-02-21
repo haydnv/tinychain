@@ -13,8 +13,8 @@ use tokio::fs;
 use tokio::sync::mpsc;
 use uplock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use error::*;
-use transact::fs::BlockData;
+use tc_error::*;
+use tc_transact::fs::BlockData;
 
 use crate::chain::ChainBlock;
 

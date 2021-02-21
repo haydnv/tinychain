@@ -1,6 +1,6 @@
 [package]
 name = "tinychain"
-version = "0.1.0"
+version = "0.1.3-alpha"
 authors = ["haydnv"]
 edition = "2018"
 description = "A next-gen database + application server"
@@ -25,9 +25,7 @@ bytes = "1.0"
 destream = "0.3"
 destream_json = "0.3"
 env_logger = "0.8"
-error = { path = "error" }
 futures = "0.3"
-generic = { path = "generic" }
 http = "0.2"
 hyper = { version = "0.14", features = ["full"] }
 log = { version = "0.4", features = ["release_max_level_warn"] }
@@ -35,10 +33,12 @@ rjwt = "0.4"
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
-transact = { path = "transact" }
-uplock = "0.1"
-value = { path = "value" }
 structopt = "0.3"
+tc-generic = { path = "generic" }
+tc-error = { path = "error" }
+tc-transact = { path = "transact" }
+tc-value = { path = "value" }
 tokio = { version = "1.2", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "time"] }
+uplock = "0.1"
 uuid = "0.8"
 url = { version = "2.2" }

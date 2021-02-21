@@ -10,11 +10,11 @@ use async_trait::async_trait;
 use futures::future::{join_all, try_join_all, TryFutureExt};
 use log::{debug, error};
 
-use error::*;
-use generic::Id;
-use transact::fs;
-use transact::lock::{Mutable, TxnLock};
-use transact::{Transact, TxnId};
+use tc_error::*;
+use tc_generic::Id;
+use tc_transact::fs;
+use tc_transact::lock::{Mutable, TxnLock};
+use tc_transact::{Transact, TxnId};
 
 use super::{file_name, fs_path, io_err, Cache, CacheBlock, CacheLock, DirContents};
 use crate::fs::create_parent;

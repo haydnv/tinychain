@@ -1,4 +1,4 @@
-use generic::PathSegment;
+use tc_generic::PathSegment;
 
 use crate::scalar::Scalar;
 

@@ -7,9 +7,10 @@ use futures::TryFutureExt;
 use uplock::RwLock;
 use uuid::Uuid;
 
-use error::*;
-use generic::PathSegment;
-use transact::Transact;
+use tc_error::*;
+use tc_generic::PathSegment;
+use tc_transact::fs::Dir;
+use tc_transact::Transact;
 
 use crate::fs;
 use crate::gateway::Gateway;
@@ -17,7 +18,6 @@ use crate::gateway::Gateway;
 use super::request::*;
 use super::{Active, Txn, TxnId};
 use std::convert::TryInto;
-use transact::fs::Dir;
 
 /// Server to keep track of the transactions currently active for this host.
 #[derive(Clone)]

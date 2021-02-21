@@ -9,10 +9,10 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response};
 use log::debug;
 use serde::de::DeserializeOwned;
-use transact::{IntoView, TxnId};
 
-use error::*;
-use generic::{NetworkTime, TCPathBuf};
+use tc_error::*;
+use tc_generic::{NetworkTime, TCPathBuf};
+use tc_transact::{IntoView, TxnId};
 
 use crate::gateway::Gateway;
 use crate::state::State;
@@ -189,8 +189,8 @@ fn get_param<T: DeserializeOwned>(
 fn transform_error(err: TCError) -> hyper::Response<Body> {
     let mut response = hyper::Response::new(Body::from(format!("{}\r\n", err.message())));
 
-    use error::ErrorType::*;
     use hyper::StatusCode;
+    use tc_error::ErrorType::*;
     *response.status_mut() = match err.code() {
         BadGateway => StatusCode::BAD_GATEWAY,
         BadRequest => StatusCode::BAD_REQUEST,

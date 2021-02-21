@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use log::debug;
 
-use error::*;
-use generic::{Id, Instance, Map, PathSegment, TCPath};
+use tc_error::*;
+use tc_generic::{Id, Instance, Map, PathSegment, TCPath};
 
 use crate::object::InstanceExt;
 use crate::scalar::*;

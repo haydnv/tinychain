@@ -2,11 +2,12 @@ use std::fmt;
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use error::*;
 use futures::Future;
-use generic::{Map, PathSegment, TCPath};
-use value::Value;
 
+use tc_error::*;
+use tc_generic::{Map, PathSegment, TCPath};
+
+use crate::scalar::Value;
 use crate::state::State;
 use crate::txn::Txn;
 

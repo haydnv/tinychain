@@ -2,9 +2,9 @@ use bytes::Bytes;
 use futures::future;
 use safecast::TryCastInto;
 
-use error::*;
-use generic::Id;
-use transact::{Transact, Transaction};
+use tc_error::*;
+use tc_generic::Id;
+use tc_transact::{Transact, Transaction};
 
 use crate::cluster::Cluster;
 use crate::route::*;

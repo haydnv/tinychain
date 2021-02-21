@@ -10,13 +10,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{join_all, TryFutureExt};
+use safecast::TryCastInto;
 use uplock::RwLock;
 
-use error::*;
-use generic::*;
-use safecast::TryCastInto;
-use transact::fs::{Dir, Persist};
-use transact::{Transact, Transaction, TxnId};
+use tc_error::*;
+use tc_generic::*;
+use tc_transact::fs::{Dir, Persist};
+use tc_transact::{Transact, Transaction, TxnId};
 
 use crate::chain::{Chain, ChainType, SyncChain};
 use crate::fs;

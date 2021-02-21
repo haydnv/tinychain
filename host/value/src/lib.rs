@@ -1,4 +1,8 @@
-//! A scalar generic `Value` (such as a `Number` or `String`) which supports collation
+//! Provides a generic scalar [`Value`] enum which supports collation.
+//!
+//! Variants include [`Value::Number`] and [`Value::String`].
+//!
+//! This library is part of Tinychain: http://github.com/haydnv/tinychain
 
 pub mod link;
 mod value;

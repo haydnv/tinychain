@@ -9,13 +9,12 @@ use destream::de;
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use log::debug;
 use safecast::TryCastFrom;
-use value::Value;
 
-use error::*;
-use generic::{Id, Instance};
+use tc_error::*;
+use tc_generic::{Id, Instance};
 
 use crate::route::Public;
-use crate::scalar::Scope;
+use crate::scalar::{Scope, Value};
 use crate::state::State;
 use crate::txn::Txn;
 

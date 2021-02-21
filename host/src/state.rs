@@ -12,10 +12,10 @@ use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use log::debug;
 use safecast::TryCastFrom;
-use transact::{IntoView, Transaction};
 
-use error::*;
-use generic::*;
+use tc_error::*;
+use tc_generic::*;
+use tc_transact::{IntoView, Transaction};
 
 use crate::chain::*;
 use crate::fs::Dir;

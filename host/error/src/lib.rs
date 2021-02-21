@@ -1,4 +1,4 @@
-//! Common Tinychain error types.
+//! Common error types and associated convenience methods
 
 use std::fmt;
 
