@@ -8,7 +8,7 @@ license = "Apache-2.0"
 repository = "http://github.com/haydnv/tinychain.git"
 
 keywords = ["distributed", "transactional", "host", "platform", "runtime"]
-categories = ["concurrency", "data structures", "web programming"]
+categories = ["concurrency", "data-structures", "web-programming"]
 
 [lib]
 name = "tinychain"
@@ -35,7 +35,7 @@ serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
 structopt = "0.3"
 tc-error = "0.1"
-tc-transact = { path = "transact" }
+tc-transact = "0.1"
 tc-value = { path = "value" }
 tcgeneric = "0.1"
 tokio = { version = "1.2", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "time"] }

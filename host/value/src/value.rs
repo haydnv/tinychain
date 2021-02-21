@@ -23,6 +23,7 @@ const EMPTY_SEQ: [u8; 0] = [];
 const EXPECTING: &'static str = "a Tinychain value, e.g. 1 or \"two\" or [3]";
 const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
 
+/// The class of a [`Value`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ValueType {
     Bytes,
@@ -226,6 +227,7 @@ impl fmt::Display for ValueType {
     }
 }
 
+/// A generic value enum
 #[derive(Clone, Eq, PartialEq)]
 pub enum Value {
     Bytes(Bytes),
@@ -617,6 +619,8 @@ impl fmt::Display for Value {
     }
 }
 
+/// A struct for deserializing a [`Value`] which implements [`destream::de::Visitor`]
+/// and [`serde::de::Visitor`].
 #[derive(Default)]
 pub struct ValueVisitor;
 

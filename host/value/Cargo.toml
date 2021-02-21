@@ -8,7 +8,7 @@ license = "Apache-2.0"
 repository = "http://github.com/haydnv/tinychain.git"
 
 keywords = ["tinychain"]
-categories = ["data structures"]
+categories = ["data-structures"]
 
 [dependencies]
 addr = "0.2"
