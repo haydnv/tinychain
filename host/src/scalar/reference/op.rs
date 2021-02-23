@@ -10,7 +10,6 @@ use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::{try_join, TryFutureExt};
-use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -218,135 +217,17 @@ impl fmt::Display for Subject {
     }
 }
 
-/// The key of a GET, PUT, or DELETE op.
-#[derive(Clone, Eq, PartialEq)]
-pub enum Key {
-    Ref(IdRef),
-    Value(Value),
-}
-
-impl Key {
-    fn requires(&self, deps: &mut HashSet<Id>) {
-        if let Self::Ref(id_ref) = self {
-            deps.insert(id_ref.id().clone());
-        }
-    }
-
-    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<Value> {
-        debug!("Key::resolve {}", self);
-
-        match self {
-            Self::Ref(id_ref) => match id_ref.resolve(context, txn).await? {
-                State::Scalar(Scalar::Value(value)) => Ok(value),
-                other => Err(TCError::bad_request(
-                    "GET Op key must be a Value, not",
-                    other,
-                )),
-            },
-            Self::Value(value) => Ok(value),
-        }
-    }
-}
-
-impl From<Value> for Key {
-    fn from(value: Value) -> Self {
-        Self::Value(value)
-    }
-}
-
-impl TryCastFrom<Scalar> for Key {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        match scalar {
-            Scalar::Ref(tc_ref) => match &**tc_ref {
-                TCRef::Id(_) => true,
-                _ => false,
-            },
-            other => Value::can_cast_from(other),
-        }
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        match scalar {
-            Scalar::Ref(tc_ref) => match *tc_ref {
-                TCRef::Id(id_ref) => Some(Self::Ref(id_ref)),
-                _ => None,
-            },
-            other => {
-                if let Some(value) = Value::opt_cast_from(other) {
-                    Some(Self::Value(value))
-                } else {
-                    None
-                }
-            }
-        }
-    }
-}
-
-#[async_trait]
-impl FromStream for Key {
-    type Context = ();
-
-    async fn from_stream<D: Decoder>(context: (), d: &mut D) -> Result<Self, D::Error> {
-        match Scalar::from_stream(context, d).await? {
-            Scalar::Value(value) => Ok(Self::Value(value)),
-            Scalar::Ref(tc_ref) => match *tc_ref {
-                TCRef::Id(id_ref) => Ok(Self::Ref(id_ref)),
-                other => Err(de::Error::invalid_type(other, &"IdRef")),
-            },
-            other => Err(de::Error::invalid_type(other, &"a Value or IdRef")),
-        }
-    }
-}
-
-impl<'en> ToStream<'en> for Key {
-    fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
-        match self {
-            Key::Ref(id_ref) => id_ref.to_stream(e),
-            Key::Value(value) => value.to_stream(e),
-        }
-    }
-}
-
-impl<'en> IntoStream<'en> for Key {
-    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
-        match self {
-            Key::Ref(id_ref) => id_ref.into_stream(e),
-            Key::Value(value) => value.into_stream(e),
-        }
-    }
-}
-
-impl TryFrom<Key> for Value {
-    type Error = TCError;
-
-    fn try_from(key: Key) -> TCResult<Value> {
-        match key {
-            Key::Value(value) => Ok(value),
-            other => Err(TCError::bad_request("expected Value but found", other)),
-        }
-    }
-}
-
-impl fmt::Display for Key {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Key::Ref(tc_ref) => write!(f, "{}", tc_ref),
-            Key::Value(value) => write!(f, "{}", value),
-        }
-    }
-}
-
 /// The data defining a reference to a GET op.
-pub type GetRef = (Subject, Key);
+pub type GetRef = (Subject, Scalar);
 
 /// The data defining a reference to a PUT op.
-pub type PutRef = (Subject, Key, Scalar);
+pub type PutRef = (Subject, Scalar, Scalar);
 
 /// The data defining a reference to a POST op.
 pub type PostRef = (Subject, Map<Scalar>);
 
 /// The data defining a reference to a DELETE op.
-pub type DeleteRef = (Subject, Key);
+pub type DeleteRef = (Subject, Scalar);
 
 /// A reference to an op.
 #[derive(Clone, Eq, PartialEq)]
@@ -402,18 +283,22 @@ impl Refer for OpRef {
             Self::Get((subject, key)) => match subject {
                 Subject::Link(link) => {
                     let key = key.resolve(context, txn).await?;
-                    txn.get(link, key).await
+                    txn.get(link, key.try_into()?).await
                 }
                 Subject::Ref(id_ref, path) => {
                     let key = key.resolve(context, txn).await?;
-                    context.resolve_get(txn, id_ref.id(), &path, key).await
+                    context
+                        .resolve_get(txn, id_ref.id(), &path, key.try_into()?)
+                        .await
                 }
             },
             Self::Put((subject, key, value)) => match subject {
                 Subject::Link(link) => {
                     let key = key.resolve(context, txn).await?;
                     let value = value.resolve(context, txn).await?;
-                    txn.put(link, key, value).map_ok(State::from).await
+                    txn.put(link, key.try_into()?, value)
+                        .map_ok(State::from)
+                        .await
                 }
                 Subject::Ref(id_ref, path) => {
                     let key = key.resolve(context, txn);
@@ -421,7 +306,7 @@ impl Refer for OpRef {
                     let (key, value) = try_join!(key, value)?;
 
                     context
-                        .resolve_put(txn, id_ref.id(), &path, key, value)
+                        .resolve_put(txn, id_ref.id(), &path, key.try_into()?, value)
                         .map_ok(State::from)
                         .await
                 }
@@ -463,11 +348,11 @@ impl OpRefVisitor {
     pub fn visit_ref_value<E: de::Error>(subject: Subject, params: Scalar) -> Result<OpRef, E> {
         match params {
             Scalar::Map(params) => Ok(OpRef::Post((subject, params))),
-            Scalar::Tuple(params) if params.matches::<(Key, Scalar)>() => {
+            Scalar::Tuple(params) if params.matches::<(Scalar, Scalar)>() => {
                 let (key, value) = params.opt_cast_into().unwrap();
                 Ok(OpRef::Put((subject, key, value)))
             }
-            Scalar::Tuple(params) if params.matches::<(Key,)>() => {
+            Scalar::Tuple(params) if params.matches::<(Scalar,)>() => {
                 let (key,) = params.opt_cast_into().unwrap();
                 Ok(OpRef::Get((subject, key)))
             }

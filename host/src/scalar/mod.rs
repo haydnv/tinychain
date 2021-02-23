@@ -523,10 +523,10 @@ impl ScalarVisitor {
         }
 
         let subject = Link::from(class.path()).into();
-        let op_ref = if scalar.matches::<(Key, Scalar)>() {
+        let op_ref = if scalar.matches::<(Scalar, Scalar)>() {
             let (key, value) = scalar.opt_cast_into().unwrap();
             OpRef::Put((subject, key, value))
-        } else if scalar.matches::<(Key,)>() {
+        } else if scalar.matches::<(Scalar,)>() {
             let (key,) = scalar.opt_cast_into().unwrap();
             OpRef::Get((subject, key))
         } else if scalar.matches::<Map<Scalar>>() {
