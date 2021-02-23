@@ -94,7 +94,7 @@ class Host(object):
 
 class Local(Host):
     ADDRESS = "127.0.0.1"
-    STARTUP_TIME = 1.0
+    STARTUP_TIME = 2.0
 
     def __init__(self, workspace, data_dir=None, clusters=[], force_create=False):
         Host.__init__(self, self.ADDRESS)

@@ -188,6 +188,13 @@ impl Dir {
         })
     }
 
+    pub async fn get_or_create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
+        match fs::Dir::get_dir(self, &txn_id, &name).await? {
+            Some(dir) => Ok(dir),
+            None => fs::Dir::create_dir(self, txn_id, name).await,
+        }
+    }
+
     pub async fn entry_ids(&self, txn_id: &TxnId) -> TCResult<HashSet<PathSegment>> {
         let entries = self.entries.read(txn_id).await?;
         Ok(entries.keys().cloned().collect())
@@ -210,10 +217,17 @@ impl fs::Dir for Dir {
     type FileClass = StateType;
 
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
+        let mut entries = self.entries.write(txn_id).await?;
+        if entries.contains_key(&name) {
+            return Err(TCError::bad_request(
+                "there is already a directory at {}",
+                &name,
+            ));
+        }
+
         let path = fs_path(&self.path, &name);
         let dir = Dir::new(self.cache.clone(), path, HashMap::new());
 
-        let mut entries = self.entries.write(txn_id).await?;
         entries.insert(name, DirEntry::Dir(dir.clone()));
 
         Ok(dir)

@@ -1,10 +1,11 @@
 use bytes::Bytes;
 use futures::future;
+use log::debug;
 use safecast::TryCastInto;
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
-use tcgeneric::Id;
+use tcgeneric::{Id, TCPath};
 
 use crate::cluster::Cluster;
 use crate::route::*;
@@ -18,6 +19,8 @@ pub struct ClusterHandler<'a> {
 
 impl<'a> ClusterHandler<'a> {
     fn handle_get(self, key: Value) -> TCResult<State> {
+        debug!("Cluster::get {}", key);
+
         if key.is_some() {
             let key: Id = key.try_cast_into(|v| TCError::bad_request("invalid ID", v))?;
             self.cluster
@@ -87,6 +90,8 @@ impl<'a> From<&'a Cluster> for ClusterHandler<'a> {
 
 impl Route for Cluster {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("Cluster::route {}", TCPath::from(path));
+
         if path.is_empty() {
             return Some(Box::new(ClusterHandler::from(self)));
         } else if let Some(chain) = self.chains().get(&path[0]) {

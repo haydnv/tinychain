@@ -74,7 +74,7 @@ impl<B: fs::BlockData + 'static> File<B> {
         CacheBlock: From<CacheLock<B>>,
     {
         if !fs::File::block_exists(self, txn_id, block_id).await? {
-            return Err(TCError::not_found(block_id));
+            return Err(TCError::not_found(format!("block {}", block_id)));
         }
 
         let path = block_path(&self.path, txn_id, block_id);
@@ -143,7 +143,7 @@ where
             let lock = block.read().await;
             Ok(fs::Block::new(self, txn_id, name, lock))
         } else {
-            Err(TCError::not_found(name))
+            Err(TCError::not_found(format!("block {}", name)))
         }
     }
 

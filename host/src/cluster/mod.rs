@@ -14,7 +14,7 @@ use safecast::TryCastInto;
 use uplock::RwLock;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Persist};
+use tc_transact::fs::Persist;
 use tc_transact::{Transact, Transaction, TxnId};
 use tcgeneric::*;
 
@@ -156,20 +156,11 @@ impl Cluster {
             }
         }
 
-        let dir = if let Some(dir) = data_dir.find(&txn_id, &path).await? {
-            match dir {
-                fs::DirEntry::Dir(dir) => dir,
-                _ => {
-                    return Err(TCError::bad_request("there is already a file at", &path));
-                }
-            }
-        } else {
-            create_dir(data_dir, txn_id, &path).await?
-        };
+        let dir = get_or_create_dir(data_dir, txn_id, &path).await?;
 
         let mut chains = HashMap::<Id, Chain>::new();
         for (id, (class, schema)) in chain_schema.into_iter() {
-            let dir = dir.create_dir(txn_id, id.clone()).await?;
+            let dir = dir.get_or_create_dir(txn_id, id.clone()).await?;
             let chain = match class {
                 ChainType::Sync => {
                     let schema = schema
@@ -232,10 +223,14 @@ impl fmt::Display for Cluster {
     }
 }
 
-async fn create_dir(data_dir: fs::Dir, txn_id: TxnId, path: &[PathSegment]) -> TCResult<fs::Dir> {
+async fn get_or_create_dir(
+    data_dir: fs::Dir,
+    txn_id: TxnId,
+    path: &[PathSegment],
+) -> TCResult<fs::Dir> {
     let mut dir = data_dir;
     for name in path {
-        dir = dir.create_dir(txn_id, name.clone()).await?;
+        dir = dir.get_or_create_dir(txn_id, name.clone()).await?;
     }
 
     Ok(dir)

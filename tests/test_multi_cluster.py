@@ -50,7 +50,7 @@ class InteractionTests(unittest.TestCase):
     def testStartup(self):
         expected = 10
 
-        host = start_host("test_interaction", [Left, Right])
+        host = start_host("test_multi_cluster_startup", [Left, Right])
 
         actual = host.get("/app/balance/left/weight")
         self.assertEqual(expected, actual)
@@ -59,7 +59,7 @@ class InteractionTests(unittest.TestCase):
         self.assertEqual(expected, actual)
 
     def testUpdate(self):
-        host = start_host("test_interaction", [Left, Right])
+        host = start_host("test_multi_cluster_update", [Left, Right])
         host.put("/app/balance/right/weigh", None, 5)
         self.assertEqual(host.get("/app/balance/right/weight"), 5)
         self.assertEqual(host.get("/app/balance/left/weight"), 15)

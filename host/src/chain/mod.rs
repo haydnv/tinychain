@@ -52,6 +52,8 @@ pub enum Subject {
 impl Subject {
     /// Return the state of this subject as of the given [`TxnId`].
     pub async fn at(&self, txn_id: &TxnId) -> TCResult<State> {
+        debug!("Subject::at {}", txn_id);
+
         match self {
             Self::Value(file) => {
                 let block_id = SUBJECT.into();

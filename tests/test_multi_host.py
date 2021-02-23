@@ -50,8 +50,8 @@ class InteractionTests(unittest.TestCase):
     def testUpdate(self):
         print(tc.uri(Right).port())
         assert tc.uri(Right).port() == 8703
-        left = start_host("test_interaction_left", [Left])
-        right = start_host("test_interaction_right", [Right])
+        left = start_host("test_multi_host_left", [Left])
+        right = start_host("test_multi_host_right", [Right])
 
         left.put("/app/balance/weigh", None, 5)
         print_lines(5)

@@ -4,14 +4,14 @@ import tinychain as tc
 from testutils import start_host
 
 
-QUANTITY = tc.Number(100)
+IN_STOCK = 100
 
 
 class Producer(tc.Cluster, metaclass=tc.Meta):
     __uri__ = tc.URI("/app/producer")
 
     def configure(self):
-        self.weight = tc.Chain.Sync(QUANTITY)
+        self.in_stock = tc.Chain.Sync(IN_STOCK)
 
     @tc.post_method
     def buy(self, txn, quantity: tc.Number):
@@ -20,11 +20,11 @@ class Producer(tc.Cluster, metaclass=tc.Meta):
         return tc.If(
             txn.new_inventory < 0,
             tc.error.BadRequest("requested quantity is unavailable"),
-            self.inventory() - quantity)
+            self.in_stock.set(txn.new_inventory))
 
     @tc.get_method
     def inventory(self) -> tc.Number:
-        return self.weight.subject()
+        return self.in_stock.subject()
 
 
 class Wholesaler(tc.Cluster, metaclass=tc.Meta):
@@ -46,11 +46,14 @@ class Retailer(tc.Cluster, metaclass=tc.Meta):
 
 
 class InteractionTests(unittest.TestCase):
-    def testStartup(self):
-        host = start_host("test_interaction", [Producer, Wholesaler, Retailer])
+    def testWorkflow(self):
+        host = start_host("test_yc_demo", [Producer, Wholesaler, Retailer])
 
-        actual = host.get("/app/producer")
-        self.assertEqual(QUANTITY, actual)
+        actual = host.get("/app/producer/inventory")
+        self.assertEqual(IN_STOCK, actual)
+
+#        host.post("/app/wholesaler/buy", 10)
+#        self.assertEqual(90, host.get("/app/producer/inventory"))
 
 
 if __name__ == "__main__":
