@@ -21,6 +21,7 @@ use crate::scalar::ScalarType;
 use crate::state::StateType;
 
 use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};
+use crate::fs::io_err;
 
 pub const BIN_EXT: &str = "bin";
 
@@ -266,6 +267,15 @@ impl fs::Dir for Dir {
 impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("commit dir {:?} at {}", &self.path, txn_id);
+
+        if !self.path.exists() {
+            tokio::fs::create_dir(&self.path)
+                .map_err(|e| io_err(e, &self.path))
+                .await
+                .expect("create filesystem dir");
+
+            debug!("created filesystem dir {:?}", &self.path);
+        }
 
         {
             let entries = self.entries.read(&txn_id).await.unwrap();

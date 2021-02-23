@@ -13,13 +13,6 @@ class ExampleCluster(tc.Cluster, metaclass=tc.Meta):
 
 
 class ClusterTests(unittest.TestCase):
-    def testStartup(self):
-        host = start_host("test_startup", [ExampleCluster])
-
-        expected = 0
-        actual = host.get("/app/example/rev")
-        self.assertEqual(expected, actual)
-
     def testUpdate(self):
         host = start_host("test_update", [ExampleCluster])
 
@@ -31,7 +24,6 @@ class ClusterTests(unittest.TestCase):
 
         host.put("/app/example/rev", None, 2)
         expect(2)
-
 
         host.put("/app/example/rev", None, 4)
         expect(4)

@@ -247,20 +247,20 @@ impl Cache {
     }
 
     /// Synchronize a cached block with the filesystem.
-    pub async fn sync(&self, path: PathBuf) -> TCResult<()> {
+    pub async fn sync(&self, path: &PathBuf) -> TCResult<()> {
         debug!("sync block at {:?} with filesystem", &path);
 
         let inner = self.inner.read().await;
-        if let Some(block) = inner.entries.get(&path) {
+        if let Some(block) = inner.entries.get(path) {
             let as_bytes = block.clone().into_bytes().await;
 
-            create_parent(&path).await?;
+            create_parent(path).await?;
 
-            fs::write(&path, as_bytes)
-                .map_err(|e| io_err(e, &path))
+            fs::write(path, as_bytes)
+                .map_err(|e| io_err(e, path))
                 .await?;
         } else {
-            log::warn!("no such block! {:?}", &path);
+            log::warn!("no such block! {:?}", path);
         }
 
         Ok(())

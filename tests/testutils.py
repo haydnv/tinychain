@@ -1,3 +1,5 @@
+import os
+import shutil
 import tinychain as tc
 
 
@@ -30,9 +32,13 @@ def start_host(name, clusters):
         tc.write_cluster(cluster, cluster_config, True)
         config.append(cluster_config)
 
+    data_dir = "/tmp/tc/tmp/" + name
+    if os.path.exists(data_dir):
+        shutil.rmtree(data_dir)
+
     host = tc.host.Local(
         workspace="/tmp/tc/tmp/" + name,
-        data_dir="/tmp/tc/data/" + name,
+        data_dir=data_dir,
         clusters=config,
         force_create=True)
 

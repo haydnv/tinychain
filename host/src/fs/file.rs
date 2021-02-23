@@ -7,7 +7,8 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, TryFutureExt};
+use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
+use futures::try_join;
 use log::{debug, error};
 
 use tc_error::*;
@@ -16,8 +17,7 @@ use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transact, TxnId};
 use tcgeneric::Id;
 
-use super::{file_name, fs_path, io_err, Cache, CacheBlock, CacheLock, DirContents};
-use crate::fs::create_parent;
+use super::{create_parent, file_name, fs_path, io_err, Cache, CacheBlock, CacheLock, DirContents};
 
 /// A transactional file.
 #[derive(Clone)]
@@ -25,18 +25,21 @@ pub struct File<B> {
     cache: Cache,
     path: PathBuf,
     listing: TxnLock<Mutable<HashSet<fs::BlockId>>>,
+    mutated: TxnLock<Mutable<HashSet<fs::BlockId>>>,
     phantom: PhantomData<B>,
 }
 
 impl<B: fs::BlockData + 'static> File<B> {
     fn _new(cache: Cache, path: PathBuf, listing: HashSet<fs::BlockId>) -> Self {
-        let listing = TxnLock::new(format!("File {:?}", &path), listing.into());
+        let listing = TxnLock::new(format!("File {:?} listing", &path), listing.into());
+        let mutated = TxnLock::new(format!("File {:?} mutated", &path), HashSet::new().into());
         let phantom = PhantomData;
 
         Self {
             cache,
             path,
             listing,
+            mutated,
             phantom,
         }
     }
@@ -80,9 +83,14 @@ impl<B: fs::BlockData + 'static> File<B> {
         let path = block_path(&self.path, txn_id, block_id);
         if !path.exists() {
             let source_path = fs_path(&self.path, block_id);
+            assert!(source_path.exists());
             create_parent(&path).await?;
 
-            debug!("copy canonical block {:?} to {:?}", source_path, path);
+            debug!(
+                "copy canonical block {:?} to {:?}",
+                source_path,
+                source_path.exists()
+            );
 
             tokio::fs::copy(&source_path, &path)
                 .map_err(|e| io_err(e, (&source_path, &path)))
@@ -126,9 +134,12 @@ where
         let path = block_path(&self.path, &txn_id, &name);
         debug!("create block at {:?}", &path);
 
-        let mut listing = self.listing.write(txn_id).await?;
+        let (mut listing, mut mutated) =
+            try_join!(self.listing.write(txn_id), self.mutated.write(txn_id))?;
+
         let lock = self.cache.write(path, initial_value).await?;
         listing.insert(name.clone());
+        mutated.insert(name.clone());
 
         let read_lock = lock.read().await;
         Ok(fs::BlockOwned::new(self.clone(), txn_id, name, read_lock))
@@ -153,7 +164,12 @@ where
         name: &'a fs::BlockId,
     ) -> TCResult<fs::BlockMut<'a, Self>> {
         if let Some(block) = self.get_block_lock(txn_id, name).await? {
-            let lock = block.write().await;
+            let (mut mutated, lock) =
+                try_join!(self.mutated.write(*txn_id), block.write().map(Ok))?;
+            if !mutated.contains(name) {
+                mutated.insert(name.clone());
+            }
+
             Ok(fs::BlockMut::new(self, txn_id, name, lock))
         } else {
             Err(TCError::not_found(name))
@@ -175,7 +191,11 @@ where
         name: fs::BlockId,
     ) -> TCResult<fs::BlockOwnedMut<Self>> {
         if let Some(block) = self.get_block_lock(&txn_id, &name).await? {
-            let lock = block.write().await;
+            let (mut mutated, lock) = try_join!(self.mutated.write(txn_id), block.write().map(Ok))?;
+            if !mutated.contains(&name) {
+                mutated.insert(name.clone());
+            }
+
             Ok(fs::BlockOwnedMut::new(self, txn_id, name, lock))
         } else {
             Err(TCError::not_found(name))
@@ -188,44 +208,35 @@ impl<B: fs::BlockData> Transact for File<B> {
     async fn commit(&self, txn_id: &TxnId) {
         debug!("commit file {:?} at {}", &self.path, txn_id);
 
-        // get a write lock to prevent any concurrent access to this file
+        if !self.path.exists() {
+            tokio::fs::create_dir(&self.path)
+                .await
+                .expect("create file dir");
+        }
+
         {
-            let listing = self.listing.write(*txn_id).await.unwrap();
-            debug!(
-                "file {:?} has {} blocks at {}",
-                &self.path,
-                listing.len(),
-                txn_id
-            );
+            let mut mutated = self.mutated.write(*txn_id).await.unwrap();
 
-            try_join_all(
-                listing
-                    .iter()
-                    .map(|block_id| block_path(&self.path, txn_id, block_id))
-                    .map(|path| self.cache.sync(path)),
-            )
-            .await
-            .expect("commit file cache");
+            let commit_blocks = mutated.drain().map(|block_id| async move {
+                let version = block_path(&self.path, txn_id, &block_id);
+                self.cache.sync(&version).await?;
+                assert!(version.exists());
 
-            if !listing.is_empty() {
-                let version = version_path(&self.path, txn_id);
-                debug!("commit version directory {:?}", version);
+                let dest = canonical(&self.path, &block_id);
+                debug_assert!(dest.parent().expect("file dir").exists());
 
-                if self.path.exists() {
-                    tokio::fs::remove_dir_all(&self.path)
-                        .await
-                        .expect("commit file");
-                }
+                tokio::fs::copy(version, dest)
+                    .map_err(move |e| io_err(e, block_path(&self.path, txn_id, &block_id)))
+                    .await
+            });
 
-                if version.exists() {
-                    tokio::fs::rename(version, &self.path)
-                        .await
-                        .expect("commit file version")
-                }
-            }
+            try_join_all(commit_blocks)
+                .await
+                .expect("commit block versions");
         }
 
         self.listing.commit(txn_id).await;
+        self.mutated.commit(txn_id).await;
         debug!("committed {:?} at {}", &self.path, txn_id);
     }
 
@@ -253,8 +264,16 @@ impl<B: fs::BlockData> Transact for File<B> {
         }
 
         self.listing.finalize(txn_id).await;
+        self.mutated.finalize(txn_id).await;
         debug!("finalized {:?} at {}", &self.path, txn_id);
     }
+}
+
+#[inline]
+fn canonical(file_path: &PathBuf, block_id: &fs::BlockId) -> PathBuf {
+    let mut path = file_path.clone();
+    path.push(block_id.to_string());
+    path
 }
 
 #[inline]
