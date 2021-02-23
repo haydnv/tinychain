@@ -8,7 +8,7 @@ class TinychainError(Exception):
         self.message = message
 
     def __json__(self):
-        return {str(uri(self)): self.message}
+        return {str(uri(self)): [str(self.message)]}
 
 
 class BadRequest(TinychainError):

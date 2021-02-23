@@ -158,6 +158,11 @@ class PutMethod(Method):
 class PostMethod(Method):
     __ref__ = uri(Method) + "/post"
 
+    def __call__(self, **params):
+        rtype = inspect.signature(self.form).return_annotation
+        rtype = State if rtype == inspect.Parameter.empty else rtype
+        return rtype(OpRef.Post(uri(self.header).append(self.name), **params))
+
     def __form__(self):
         sig = inspect.signature(self.form)
 

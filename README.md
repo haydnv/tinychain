@@ -26,6 +26,7 @@ Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directo
 
 ## Key features
 
+ * **Rapid prototyping**: set up a REST API for your service in just a few minutes and scale the application to your entire user base without rewriting
  * **Compliance**: Tinychain is a single platform which runs cloud applications and the data services that support them, meaning your customer data never has to leave the platform which authorizes access to it
  * **Synchronization**: Tinychain's distributed Paxos algorithm automatically enables cross-service transactions within any set of services which support the Tinychain protocol.
  * **Concurrency**: Tinychain **Op**s are automatically executed concurrently, although a developer can use the **After** flow control to modify this behavior.

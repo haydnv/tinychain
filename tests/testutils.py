@@ -27,7 +27,7 @@ def start_host(name, clusters):
 
         cluster_config += str(cluster_uri.path())
 
-        tc.write_cluster(cluster, cluster_config)
+        tc.write_cluster(cluster, cluster_config, True)
         config.append(cluster_config)
 
     host = tc.host.Local(

@@ -25,12 +25,12 @@ class Cluster(object):
         pass
 
 
-def write_cluster(cluster, config_path):
+def write_cluster(cluster, config_path, overwrite=False):
     import json
     import pathlib
 
     config_path = pathlib.Path(config_path)
-    if config_path.exists():
+    if config_path.exists() and not overwrite:
         with open(config_path) as f:
             try:
                 if json.load(f) == to_json(cluster):
