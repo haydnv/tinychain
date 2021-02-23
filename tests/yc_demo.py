@@ -15,12 +15,13 @@ class Producer(tc.Cluster, metaclass=tc.Meta):
 
     @tc.post_method
     def buy(self, txn, quantity: tc.Number):
-        txn.new_inventory = self.inventory() - quantity
+        txn.inventory = self.inventory()
+        txn.new_inventory = txn.inventory - quantity
 
         return tc.If(
-            quantity < self.inventory(),
+            quantity > self.inventory(),
             tc.error.BadRequest("requested quantity is unavailable"),
-            self.in_stock.set(self.inventory() - quantity))
+            self.in_stock.set(txn.new_inventory))
 
     @tc.get_method
     def inventory(self) -> tc.Number:
@@ -52,8 +53,8 @@ class InteractionTests(unittest.TestCase):
         actual = host.get("/app/producer/inventory")
         self.assertEqual(IN_STOCK, actual)
 
-#        host.post("/app/wholesaler/buy", {"quantity": 10})
-#        self.assertEqual(90, host.get("/app/producer/inventory"))
+        host.post("/app/wholesaler/buy", {"quantity": 10})
+        self.assertEqual(90, host.get("/app/producer/inventory"))
 
 
 if __name__ == "__main__":

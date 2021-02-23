@@ -74,6 +74,10 @@ impl Route for Number {
             "mul" => Box::new(Dual::from(move |other| *self * other)),
             "sub" => Box::new(Dual::from(move |other| *self - other)),
             "pow" => Box::new(Dual::from(move |other| self.pow(other))),
+            "gt" => Box::new(Dual::from(move |other| (*self > other).into())),
+            "gte" => Box::new(Dual::from(move |other| (*self >= other).into())),
+            "lt" => Box::new(Dual::from(move |other| (*self < other).into())),
+            "lte" => Box::new(Dual::from(move |other| (*self <= other).into())),
             _ => return None,
         };
 
