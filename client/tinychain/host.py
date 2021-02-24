@@ -138,18 +138,18 @@ class Local(Host):
         else:
             print(f"new instance running at {self.address}")
 
-    def terminate(self):
+    def stop(self):
         if self._process.poll() != None:
             return
 
-        print(f"Terminating Tinychain host {self.address}")
+        print(f"Shutting down Tinychain host {self.address}")
         self._process.terminate()
         self._process.wait()
-        print(f"Host {self.address} Terminated")
+        print(f"Host {self.address} shut down successfully")
 
     def __del__(self):
         if self._process:
-            self.terminate()
+            self.stop()
 
 
 def auth_header(token):
