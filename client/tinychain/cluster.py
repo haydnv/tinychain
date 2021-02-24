@@ -1,4 +1,4 @@
-from .annotations import post_method
+from .annotations import *
 from .reflect import gen_headers
 from .state import State
 from .util import ref as get_ref, URI, to_json
@@ -22,6 +22,11 @@ class Cluster(object):
     def configure(self):
         pass
 
+    @get_method
+    def authorize(self, txn, scope):
+        pass
+
+    @put_method
     def install(self):
         pass
 
