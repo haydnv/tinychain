@@ -82,34 +82,39 @@ impl Txn {
         }
 
         if self.owner().is_none() {
-            let token = self.request.token().to_string();
-            let txn_id = self.request.txn_id();
-
-            use rjwt::Resolve;
-            let host = self.gateway.link(cluster_path);
-            let resolver = Resolver::new(&self.gateway, &host, self.id());
-            let (token, claims) = resolver
-                .consume_and_sign(
-                    actor,
-                    vec![self.active.scope().clone()],
-                    token,
-                    txn_id.time().into(),
-                )
-                .map_err(TCError::unauthorized)
-                .await?;
-
-            Ok(Self {
-                active: self.active.clone(),
-                gateway: self.gateway.clone(),
-                dir: self.dir.clone(),
-                request: Arc::new(Request::new(*txn_id, token, claims)),
-            })
+            self.grant(actor, cluster_path, vec![self.active.scope().clone()])
+                .await
         } else {
             Err(TCError::forbidden(
                 "tried to claim owned transaction",
                 self.id(),
             ))
         }
+    }
+
+    pub async fn grant(
+        &self,
+        actor: &Actor,
+        cluster_path: TCPathBuf,
+        scopes: Vec<Scope>,
+    ) -> TCResult<Self> {
+        let token = self.request.token().to_string();
+        let txn_id = self.request.txn_id();
+
+        use rjwt::Resolve;
+        let host = self.gateway.link(cluster_path);
+        let resolver = Resolver::new(&self.gateway, &host, self.id());
+        let (token, claims) = resolver
+            .consume_and_sign(actor, scopes, token, txn_id.time().into())
+            .map_err(TCError::unauthorized)
+            .await?;
+
+        Ok(Self {
+            active: self.active.clone(),
+            gateway: self.gateway.clone(),
+            dir: self.dir.clone(),
+            request: Arc::new(Request::new(*txn_id, token, claims)),
+        })
     }
 
     /// Check if the cluster at the specified path on this host is the owner of the transaction.

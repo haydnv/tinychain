@@ -1,4 +1,4 @@
-//! The host kernel, responsible for dispatching requests to the local host.
+//! The host kernel, responsible for dispatching requests to the local host
 
 use std::convert::TryInto;
 use std::pin::Pin;
@@ -22,7 +22,7 @@ mod hosted;
 
 use hosted::Hosted;
 
-/// A host kernel, responsible for dispatching requests to the local host.
+/// The host kernel, responsible for dispatching requests to the local host
 pub struct Kernel {
     hosted: Hosted,
 }
