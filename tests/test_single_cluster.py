@@ -2,7 +2,7 @@ import time
 import tinychain as tc
 import unittest
 
-from testutils import start_host
+from testutils import PORT, TC_PATH, start_host
 
 
 class ExampleCluster(tc.Cluster, metaclass=tc.Meta):
@@ -26,6 +26,10 @@ class ClusterTests(unittest.TestCase):
         expect(2)
 
         host.put("/app/example/rev", None, 4)
+        expect(4)
+
+        host.stop()
+        host.start(TC_PATH, PORT)
         expect(4)
 
 
