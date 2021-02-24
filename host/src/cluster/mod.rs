@@ -2,7 +2,7 @@
 //!
 //! INCOMPLETE AND UNSTABLE.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -12,11 +12,13 @@ use futures::future::join_all;
 use uplock::RwLock;
 
 use tc_error::*;
+use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transact, Transaction};
 use tcgeneric::*;
 
 use crate::chain::Chain;
-use crate::txn::{Actor, Txn, TxnId};
+use crate::scalar::{Link, Value};
+use crate::txn::{Actor, Scope, Txn, TxnId};
 
 mod load;
 mod owner;
@@ -46,6 +48,7 @@ pub struct Cluster {
     chains: Map<Chain>,
     confirmed: RwLock<TxnId>,
     owned: RwLock<HashMap<TxnId, Owner>>,
+    installed: TxnLock<Mutable<HashMap<Link, HashSet<Scope>>>>,
 }
 
 impl Cluster {
@@ -69,6 +72,37 @@ impl Cluster {
         let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
         owned.insert(*txn.id(), Owner::new());
         Ok(txn)
+    }
+
+    /// Return `Unauthorized` if the request does not have the given `scope` from a trusted issuer.
+    pub async fn authorize(&self, txn: &Txn, scope: &Scope) -> TCResult<()> {
+        let installed = self.installed.read(txn.id()).await?;
+        for (issuer, scopes) in installed.iter() {
+            if scopes.contains(scope) {
+                if let Some(authorized) = txn.request().scopes().get(issuer, &Value::default()) {
+                    if authorized.contains(scope) {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        Err(TCError::unauthorized(format!(
+            "no trusted caller authorized the required scope \"{}\"",
+            scope
+        )))
+    }
+
+    /// Trust the `Cluster` at the given [`Link`] to issue the given auth [`Scope`]s.
+    pub async fn install(
+        &self,
+        txn_id: TxnId,
+        other: Link,
+        scopes: HashSet<Scope>,
+    ) -> TCResult<()> {
+        let mut installed = self.installed.write(txn_id).await?;
+        installed.insert(other, scopes);
+        Ok(())
     }
 
     /// Return the [`Owner`] of the given transaction.

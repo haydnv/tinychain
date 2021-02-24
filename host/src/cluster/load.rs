@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use futures::future::TryFutureExt;
@@ -8,6 +8,7 @@ use uplock::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::Persist;
+use tc_transact::lock::TxnLock;
 use tcgeneric::*;
 
 use crate::chain::{Chain, ChainType, SyncChain};
@@ -33,26 +34,20 @@ pub async fn instantiate(
 
     let mut chain_schema = HashMap::new();
     let mut cluster_proto = HashMap::new();
+
     for (id, scalar) in proto.into_iter() {
         match scalar {
             Scalar::Ref(tc_ref) => {
-                let (ct, schema) = if let TCRef::Op(OpRef::Get((path, schema))) = *tc_ref {
-                    let path: TCPathBuf = path.try_into()?;
-                    let schema: Value = schema.try_into()?;
+                if let TCRef::Op(OpRef::Get((subject, schema))) = *tc_ref {
+                    let classpath = TCPathBuf::try_from(subject)?;
+                    let ct = ChainType::from_path(&classpath)
+                        .ok_or_else(|| TCError::bad_request("not a Chain", classpath))?;
 
-                    if let Some(ct) = ChainType::from_path(&path) {
-                        (ct, schema)
-                    } else {
-                        return Err(TCError::bad_request(
-                            "Cluster requires its mutable data to be wrapped in a chain, not",
-                            path,
-                        ));
-                    }
+                    let schema: Value = schema.try_into()?;
+                    chain_schema.insert(id, (ct, schema));
                 } else {
                     return Err(TCError::bad_request("expected a Chain but found", tc_ref));
-                };
-
-                chain_schema.insert(id, (ct, schema));
+                }
             }
             Scalar::Op(op_def) => {
                 cluster_proto.insert(id, Scalar::Op(op_def));
@@ -92,6 +87,10 @@ pub async fn instantiate(
         chains: chains.into(),
         confirmed: RwLock::new(txn_id),
         owned: RwLock::new(HashMap::new()),
+        installed: TxnLock::new(
+            format!("Cluster {} installed deps", path),
+            HashMap::new().into(),
+        ),
     };
 
     let class = InstanceClass::new(Some(path.into()), cluster_proto.into());

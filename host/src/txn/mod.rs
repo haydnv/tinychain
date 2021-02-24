@@ -148,12 +148,6 @@ impl Txn {
         &self.request
     }
 
-    /// Return the [`Scope`]s which the given user is authorized for on this transaction.
-    pub fn scopes(&'_ self, actor_id: &Value) -> Option<&Vec<Scope>> {
-        let host = Link::from(self.gateway.root().clone());
-        self.request.scopes().get(&host, actor_id)
-    }
-
     /// Resolve a GET op within this transaction context.
     pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
         self.gateway.get(self, link, key).await
