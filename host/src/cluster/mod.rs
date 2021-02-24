@@ -91,8 +91,8 @@ impl PartialEq for Cluster {
 }
 
 impl Hash for Cluster {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.path.hash(state)
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        self.path.hash(h)
     }
 }
 
@@ -124,9 +124,10 @@ impl Instance for Cluster {
 #[async_trait]
 impl Transact for Cluster {
     async fn commit(&self, txn_id: &TxnId) {
+        let mut confirmed = self.confirmed.write().await;
+
         join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
 
-        let mut confirmed = self.confirmed.write().await;
         *confirmed = *txn_id;
     }
 
