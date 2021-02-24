@@ -79,9 +79,13 @@ impl Cluster {
         let installed = self.installed.read(txn.id()).await?;
         for (issuer, scopes) in installed.iter() {
             if scopes.contains(scope) {
-                if let Some(authorized) = txn.request().scopes().get(issuer, &Value::default()) {
-                    if authorized.contains(scope) {
-                        return Ok(());
+                if let Some(authorized_scopes) =
+                    txn.request().scopes().get(issuer, &Value::default())
+                {
+                    for authorized in authorized_scopes {
+                        if scope.starts_with(authorized) {
+                            return Ok(());
+                        }
                     }
                 }
             }

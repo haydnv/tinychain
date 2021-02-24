@@ -474,6 +474,22 @@ impl TryCastFrom<State> for Scalar {
     }
 }
 
+impl TryCastFrom<State> for TCPathBuf {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<State> for Value {
     fn can_cast_from(state: &State) -> bool {
         match state {

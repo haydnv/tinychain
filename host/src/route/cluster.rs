@@ -1,11 +1,11 @@
 use bytes::Bytes;
-use futures::future;
+use futures::{future, TryFutureExt};
 use log::debug;
-use safecast::TryCastInto;
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
-use tcgeneric::{Id, TCPath};
+use tcgeneric::{Id, TCPath, Tuple};
 
 use crate::cluster::Cluster;
 use crate::route::*;
@@ -88,14 +88,76 @@ impl<'a> From<&'a Cluster> for ClusterHandler<'a> {
     }
 }
 
+struct AuthorizeHandler<'a> {
+    cluster: &'a Cluster,
+}
+
+impl<'a> Handler<'a> for AuthorizeHandler<'a> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, scope| {
+            Box::pin(async move {
+                let scope = scope
+                    .try_cast_into(|v| TCError::bad_request("expected an auth scope, not", v))?;
+
+                self.cluster
+                    .authorize(&txn, &scope)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+}
+
+impl<'a> From<&'a Cluster> for AuthorizeHandler<'a> {
+    fn from(cluster: &'a Cluster) -> Self {
+        Self { cluster }
+    }
+}
+
+struct InstallHandler<'a> {
+    cluster: &'a Cluster,
+}
+
+impl<'a> Handler<'a> for InstallHandler<'a> {
+    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+        Some(Box::new(|txn, link, scopes| {
+            Box::pin(async move {
+                let link = link.try_cast_into(|v| {
+                    TCError::bad_request("install requires a Link to a Cluster, not", v)
+                })?;
+
+                let scopes = Tuple::try_cast_from(scopes, |v| {
+                    TCError::bad_request("expected a list of authorization scopes, not", v)
+                })?;
+
+                self.cluster
+                    .install(*txn.id(), link, scopes.into_iter().collect())
+                    .await
+            })
+        }))
+    }
+}
+
+impl<'a> From<&'a Cluster> for InstallHandler<'a> {
+    fn from(cluster: &'a Cluster) -> Self {
+        Self { cluster }
+    }
+}
+
 impl Route for Cluster {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Cluster::route {}", TCPath::from(path));
 
         if path.is_empty() {
-            return Some(Box::new(ClusterHandler::from(self)));
+            Some(Box::new(ClusterHandler::from(self)))
         } else if let Some(chain) = self.chains().get(&path[0]) {
             chain.route(&path[1..])
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "authorize" => Some(Box::new(AuthorizeHandler::from(self))),
+                "install" => Some(Box::new(InstallHandler::from(self))),
+                _ => None,
+            }
         } else {
             None
         }
