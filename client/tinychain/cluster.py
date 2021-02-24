@@ -1,5 +1,4 @@
-import abc
-
+from .annotations import post_method
 from .reflect import gen_headers
 from .state import State
 from .util import ref as get_ref, URI, to_json
@@ -14,14 +13,16 @@ class Cluster(object):
 
     def __init__(self, ref=None):
         if ref is None:
-            self.__ref__ = get_ref(self.__class__)
-        else:
-            self.__ref__ = ref
+            ref = get_ref(self.__class__)
+
+        self.__ref__ = ref
 
         self.configure()
 
-    @abc.abstractmethod
     def configure(self):
+        pass
+
+    def install(self):
         pass
 
 

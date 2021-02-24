@@ -56,6 +56,9 @@ class InteractionTests(unittest.TestCase):
         host.post("/app/wholesaler/buy", {"quantity": 10})
         self.assertEqual(90, host.get("/app/producer/inventory"))
 
+        host.post("/app/retailer/buy", {"quantity": 10})
+        self.assertEqual(80, host.get("/app/producer/inventory"))
+
 
 if __name__ == "__main__":
     unittest.main()
