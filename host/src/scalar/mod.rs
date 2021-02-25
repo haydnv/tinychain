@@ -234,7 +234,11 @@ impl Refer for Scalar {
         }
     }
 
-    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
+    async fn resolve<'a, T: Instance + Public>(
+        self,
+        context: &'a Scope<'a, T>,
+        txn: &'a Txn,
+    ) -> TCResult<State> {
         debug!("Scalar::resolve {}", self);
 
         match self {
@@ -447,6 +451,22 @@ impl TryCastFrom<Scalar> for Id {
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
             Scalar::Value(value) => Self::opt_cast_from(value),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Scalar> for OpRef {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Ref(tc_ref) => Self::can_cast_from(&**tc_ref),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Ref(tc_ref) => Self::opt_cast_from(*tc_ref),
             _ => None,
         }
     }
@@ -738,13 +758,13 @@ impl fmt::Display for Scalar {
 }
 
 /// The execution scope of a [`Scalar`], such as an [`OpDef`] or [`TCRef`]
-pub struct Scope<T> {
-    subject: T,
+pub struct Scope<'a, T> {
+    subject: &'a T,
     data: Map<State>,
 }
 
-impl<T: Instance + Public> Scope<T> {
-    pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(subject: T, data: I) -> Self {
+impl<'a, T: Instance + Public> Scope<'a, T> {
+    pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(subject: &'a T, data: I) -> Self {
         let data = data.into_iter().map(|(id, s)| (id, s.into())).collect();
 
         debug!("new execution scope: {}", data);
@@ -752,7 +772,7 @@ impl<T: Instance + Public> Scope<T> {
     }
 
     pub fn with_context<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
-        subject: T,
+        subject: &'a T,
         context: Map<State>,
         data: I,
     ) -> Self {
@@ -831,7 +851,7 @@ impl<T: Instance + Public> Scope<T> {
     }
 }
 
-impl<T> Deref for Scope<T> {
+impl<'a, T> Deref for Scope<'a, T> {
     type Target = Map<State>;
 
     fn deref(&self) -> &Self::Target {
@@ -839,7 +859,7 @@ impl<T> Deref for Scope<T> {
     }
 }
 
-impl<T> DerefMut for Scope<T> {
+impl<'a, T> DerefMut for Scope<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.data
     }

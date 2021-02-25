@@ -32,7 +32,11 @@ impl Refer for IfRef {
         self.cond.requires(deps);
     }
 
-    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
+    async fn resolve<'a, T: Instance + Public>(
+        self,
+        context: &'a Scope<'a, T>,
+        txn: &'a Txn,
+    ) -> TCResult<State> {
         debug!("If::resolve {}", self);
 
         let cond = self.cond.resolve(context, txn).await?;

@@ -5,7 +5,7 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
-use tcgeneric::{Id, TCPath, Tuple};
+use tcgeneric::{label, Id, TCPath, Tuple};
 
 use crate::cluster::Cluster;
 use crate::route::*;
@@ -144,6 +144,43 @@ impl<'a> From<&'a Cluster> for InstallHandler<'a> {
     }
 }
 
+struct GrantHandler<'a> {
+    cluster: &'a Cluster,
+}
+
+impl<'a> Handler<'a> for GrantHandler<'a> {
+    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let scope = params
+                    .remove(&label("scope").into())
+                    .ok_or_else(|| TCError::bad_request("missing required parameter", "scope"))?
+                    .try_cast_into(|s| TCError::bad_request("invalid auth scope", s))?;
+
+                let op = params
+                    .remove(&label("op").into())
+                    .ok_or_else(|| TCError::bad_request("missing required parameter", "op"))?
+                    .try_cast_into(|s| TCError::bad_request("grantee must be an OpRef, not", s))?;
+
+                let context = if let Some(context) = params.remove(&label("params").into()) {
+                    context
+                        .try_cast_into(|s| TCError::bad_request("params must be a Map, not", s))?
+                } else {
+                    Map::default()
+                };
+
+                self.cluster.grant(txn, scope, op, context).await
+            })
+        }))
+    }
+}
+
+impl<'a> From<&'a Cluster> for GrantHandler<'a> {
+    fn from(cluster: &'a Cluster) -> Self {
+        Self { cluster }
+    }
+}
+
 impl Route for Cluster {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Cluster::route {}", TCPath::from(path));
@@ -155,6 +192,7 @@ impl Route for Cluster {
         } else if path.len() == 1 {
             match path[0].as_str() {
                 "authorize" => Some(Box::new(AuthorizeHandler::from(self))),
+                "grant" => Some(Box::new(GrantHandler::from(self))),
                 "install" => Some(Box::new(InstallHandler::from(self))),
                 _ => None,
             }

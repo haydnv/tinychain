@@ -17,7 +17,8 @@ use tc_transact::{Transact, Transaction};
 use tcgeneric::*;
 
 use crate::chain::Chain;
-use crate::scalar::{Link, Value};
+use crate::scalar::{self, Link, OpRef, Refer, Value};
+use crate::state::State;
 use crate::txn::{Actor, Scope, Txn, TxnId};
 
 mod load;
@@ -41,7 +42,6 @@ impl fmt::Display for ClusterType {
 }
 
 /// The data structure responsible for Paxos synchronization per-transaction.
-#[derive(Clone)]
 pub struct Cluster {
     actor: Arc<Actor>,
     path: TCPathBuf,
@@ -95,6 +95,22 @@ impl Cluster {
             "no trusted caller authorized the required scope \"{}\"",
             scope
         )))
+    }
+
+    /// Grant the given `scope` to the `txn` and use it to resolve the given [`OpRef`].
+    pub async fn grant(
+        &self,
+        txn: Txn,
+        scope: Scope,
+        op: OpRef,
+        context: Map<State>,
+    ) -> TCResult<State> {
+        // TODO: require `SCOPE_EXECUTE` in order to grant a scope
+        let txn = txn
+            .grant(&self.actor, self.path.clone(), vec![scope])
+            .await?;
+
+        op.resolve(&scalar::Scope::new(self, context), &txn).await
     }
 
     /// Trust the `Cluster` at the given [`Link`] to issue the given auth [`Scope`]s.

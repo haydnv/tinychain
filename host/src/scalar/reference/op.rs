@@ -278,7 +278,11 @@ impl Refer for OpRef {
         }
     }
 
-    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
+    async fn resolve<'a, T: Instance + Public>(
+        self,
+        context: &'a Scope<'a, T>,
+        txn: &'a Txn,
+    ) -> TCResult<State> {
         match self {
             Self::Get((subject, key)) => match subject {
                 Subject::Link(link) => {

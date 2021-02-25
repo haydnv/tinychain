@@ -15,16 +15,16 @@ use crate::state::State;
 use crate::txn::Txn;
 
 /// An `OpDef` executor.
-pub struct Executor<T> {
+pub struct Executor<'a, T> {
     txn: Txn,
-    scope: Scope<T>,
+    scope: Scope<'a, T>,
 }
 
-impl<T: Clone + Instance + Public> Executor<T> {
+impl<'a, T: Instance + Public> Executor<'a, T> {
     /// Construct a new `Executor` with the given [`Txn`] context and initial state.
     pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
         txn: Txn,
-        subject: T,
+        subject: &'a T,
         data: I,
     ) -> Self {
         let scope = Scope::new(subject, data);
@@ -33,7 +33,7 @@ impl<T: Clone + Instance + Public> Executor<T> {
 
     pub fn with_context<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
         txn: Txn,
-        subject: T,
+        subject: &'a T,
         context: Map<State>,
         iter: I,
     ) -> Self {

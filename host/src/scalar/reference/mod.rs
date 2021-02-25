@@ -26,6 +26,7 @@ pub use after::After;
 pub use id::*;
 pub use op::*;
 pub use r#if::IfRef;
+use safecast::TryCastFrom;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref"]);
 
@@ -36,7 +37,11 @@ pub trait Refer {
     fn requires(&self, deps: &mut HashSet<Id>);
 
     /// Resolve this reference with respect to the given context.
-    async fn resolve<T: Public + Instance>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State>;
+    async fn resolve<'a, T: Public + Instance>(
+        self,
+        context: &'a Scope<'a, T>,
+        txn: &'a Txn,
+    ) -> TCResult<State>;
 }
 
 /// The [`Class`] of a [`TCRef`].
@@ -123,7 +128,11 @@ impl Refer for TCRef {
         }
     }
 
-    async fn resolve<T: Instance + Public>(self, context: &Scope<T>, txn: &Txn) -> TCResult<State> {
+    async fn resolve<'a, T: Instance + Public>(
+        self,
+        context: &'a Scope<'a, T>,
+        txn: &'a Txn,
+    ) -> TCResult<State> {
         debug!("TCRef::resolve {}", self);
 
         match self {
@@ -135,6 +144,22 @@ impl Refer for TCRef {
 
                 op_ref.resolve(context, txn).await
             }
+        }
+    }
+}
+
+impl TryCastFrom<TCRef> for OpRef {
+    fn can_cast_from(tc_ref: &TCRef) -> bool {
+        match tc_ref {
+            TCRef::Op(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(tc_ref: TCRef) -> Option<Self> {
+        match tc_ref {
+            TCRef::Op(op) => Some(op),
+            _ => None,
         }
     }
 }

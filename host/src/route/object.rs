@@ -13,12 +13,12 @@ use crate::txn::Txn;
 use super::{GetHandler, Handler, PostHandler, PutHandler, Route};
 
 struct GetMethod<'a, T: Instance> {
-    subject: InstanceExt<T>,
+    subject: &'a InstanceExt<T>,
     method: GetOp,
     path: &'a [PathSegment],
 }
 
-impl<'a, T: Clone + Instance + Route + 'a> GetMethod<'a, T> {
+impl<'a, T: Instance + Route + 'a> GetMethod<'a, T> {
     async fn call(self, txn: Txn, key: Value) -> TCResult<State> {
         let (key_name, op_def) = self.method;
 
@@ -29,19 +29,19 @@ impl<'a, T: Clone + Instance + Route + 'a> GetMethod<'a, T> {
     }
 }
 
-impl<'a, T: Clone + Instance + Route + 'a> Handler<'a> for GetMethod<'a, T> {
+impl<'a, T: Instance + Route + 'a> Handler<'a> for GetMethod<'a, T> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         Some(Box::new(move |txn, key| Box::pin(self.call(txn, key))))
     }
 }
 
 struct PutMethod<'a, T: Instance> {
-    subject: InstanceExt<T>,
+    subject: &'a InstanceExt<T>,
     method: PutOp,
     path: &'a [PathSegment],
 }
 
-impl<'a, T: Clone + Instance + Route + 'a> PutMethod<'a, T> {
+impl<'a, T: Instance + Route + 'a> PutMethod<'a, T> {
     async fn call(self, txn: Txn, key: Value, value: State) -> TCResult<()> {
         let (key_name, value_name, op_def) = self.method;
 
@@ -61,7 +61,7 @@ impl<'a, T: Clone + Instance + Route + 'a> PutMethod<'a, T> {
     }
 }
 
-impl<'a, T: Clone + Instance + Route + 'a> Handler<'a> for PutMethod<'a, T> {
+impl<'a, T: Instance + Route + 'a> Handler<'a> for PutMethod<'a, T> {
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         Some(Box::new(move |txn, key, value| {
             Box::pin(self.call(txn, key, value))
@@ -70,18 +70,18 @@ impl<'a, T: Clone + Instance + Route + 'a> Handler<'a> for PutMethod<'a, T> {
 }
 
 struct PostMethod<'a, T: Instance> {
-    subject: InstanceExt<T>,
+    subject: &'a InstanceExt<T>,
     method: PostOp,
     path: &'a [PathSegment],
 }
 
-impl<'a, T: Clone + Instance + Route + 'a> PostMethod<'a, T> {
+impl<'a, T: Instance + Route + 'a> PostMethod<'a, T> {
     async fn call(self, txn: Txn, params: Map<State>) -> TCResult<State> {
         call_method(txn, self.subject, self.path, params, self.method).await
     }
 }
 
-impl<'a, T: Clone + Instance + Route + 'a> Handler<'a> for PostMethod<'a, T> {
+impl<'a, T: Instance + Route + 'a> Handler<'a> for PostMethod<'a, T> {
     fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
         Some(Box::new(move |txn, params| {
             Box::pin(self.call(txn, params))
@@ -89,7 +89,7 @@ impl<'a, T: Clone + Instance + Route + 'a> Handler<'a> for PostMethod<'a, T> {
     }
 }
 
-impl<T: Clone + Instance + Route> Route for InstanceExt<T> {
+impl<T: Instance + Route> Route for InstanceExt<T> {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("InstanceExt::route {}", TCPath::from(path));
 
@@ -98,17 +98,17 @@ impl<T: Clone + Instance + Route> Route for InstanceExt<T> {
         } else if let Some(member) = self.proto().get(&path[0]) {
             match member {
                 Scalar::Op(OpDef::Get(get_op)) => Some(Box::new(GetMethod {
-                    subject: self.clone().into(),
+                    subject: self,
                     method: get_op.clone(),
                     path: &path[1..],
                 })),
                 Scalar::Op(OpDef::Put(put_op)) => Some(Box::new(PutMethod {
-                    subject: self.clone().into(),
+                    subject: self,
                     method: put_op.clone(),
                     path: &path[1..],
                 })),
                 Scalar::Op(OpDef::Post(post_op)) => Some(Box::new(PostMethod {
-                    subject: self.clone().into(),
+                    subject: self,
                     method: post_op.clone(),
                     path: &path[1..],
                 })),
@@ -124,9 +124,9 @@ impl<T: Clone + Instance + Route> Route for InstanceExt<T> {
     }
 }
 
-async fn call_method<T: Clone + Instance + Route>(
+async fn call_method<T: Instance + Route>(
     txn: Txn,
-    subject: InstanceExt<T>,
+    subject: &InstanceExt<T>,
     path: &[PathSegment],
     context: Map<State>,
     form: Vec<(Id, Scalar)>,

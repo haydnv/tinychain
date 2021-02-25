@@ -44,10 +44,10 @@ impl Refer for IdRef {
         deps.insert(self.to.clone());
     }
 
-    async fn resolve<T: Instance + Public>(
+    async fn resolve<'a, T: Instance + Public>(
         self,
-        context: &Scope<T>,
-        _txn: &Txn,
+        context: &'a Scope<'a, T>,
+        _txn: &'a Txn,
     ) -> TCResult<State> {
         debug!("IdRef::resolve {}", self);
 
