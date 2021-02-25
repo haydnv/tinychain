@@ -131,6 +131,14 @@ async fn call_method<T: Instance + Route>(
     context: Map<State>,
     form: Vec<(Id, Scalar)>,
 ) -> TCResult<State> {
+    debug!(
+        "call method with form {:?}",
+        form.iter()
+            .map(|(id, s)| format!("{}: {}", id, s))
+            .collect::<Vec<String>>()
+            .join("\n")
+    );
+
     if !path.is_empty() {
         return Err(TCError::not_found(TCPath::from(path)));
     }

@@ -10,7 +10,7 @@ class Balance(tc.Cluster, metaclass=tc.Meta):
     __ref__ = tc.URI("/app/balance")
 
     def configure(self):
-        self.weight = tc.Chain.Sync.init(tc.Number.init(0))
+        self.weight = tc.Chain.Sync(tc.Number.init(0))
 
 
 class Left(Balance):
@@ -37,6 +37,7 @@ class Right(Balance):
 
 class ClusterTests(unittest.TestCase):
     def testToJson(self):
+        self.maxDiff=None
         expected = {
             "/app/balance/left": {
                 "weigh": {
@@ -85,15 +86,7 @@ class ClusterTests(unittest.TestCase):
                 },
                 "weight": {
                     "/state/chain/sync": [
-                        {
-                            "/state/chain/sync": [
-                                {
-                                    "/state/scalar/value/number": [
-                                        0
-                                    ]
-                                }
-                            ]
-                        }
+                        {"/state/scalar/value/number": 0}
                     ]
                 }
             }

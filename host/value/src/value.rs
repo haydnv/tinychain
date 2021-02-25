@@ -538,6 +538,8 @@ impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>> TryCastFrom<Value> for (T1,
     }
 
     fn opt_cast_from(value: Value) -> Option<Self> {
+        debug!("cast from {} into {}?", value, std::any::type_name::<Self>());
+
         match value {
             Value::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
@@ -609,7 +611,7 @@ impl fmt::Display for Value {
             Self::String(s) => f.write_str(s),
             Self::Tuple(t) => write!(
                 f,
-                "[{}]",
+                "({})",
                 t.iter()
                     .map(|v| v.to_string())
                     .collect::<Vec<String>>()

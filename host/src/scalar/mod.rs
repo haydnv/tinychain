@@ -170,14 +170,32 @@ impl Scalar {
                     .map(Scalar::Ref),
 
                 RT::Op(ort) => {
-                    let op_ref = match ort {
-                        ORT::Get => self.opt_cast_into().map(OpRef::Get),
-                        ORT::Put => self.opt_cast_into().map(OpRef::Put),
-                        ORT::Post => self.opt_cast_into().map(OpRef::Post),
-                        ORT::Delete => self.opt_cast_into().map(OpRef::Delete),
-                    };
+                    if let Some(tuple) = Tuple::<Scalar>::opt_cast_from(self) {
+                        debug!("cast into {} from tuple {}", ort, tuple);
 
-                    op_ref.map(TCRef::Op).map(Self::from)
+                        let op_ref = match ort {
+                            ORT::Get => tuple.opt_cast_into().map(OpRef::Get),
+                            ORT::Put => tuple.opt_cast_into().map(OpRef::Put),
+                            ORT::Post => {
+                                debug!("subject is {} (a {})", &tuple[0], tuple[0].class());
+                                debug!(
+                                    "subject: {}",
+                                    Subject::opt_cast_from(tuple[0].clone()).unwrap()
+                                );
+                                debug!(
+                                    "params: {}",
+                                    Map::<State>::opt_cast_from(tuple[1].clone()).unwrap()
+                                );
+                                tuple.opt_cast_into().map(OpRef::Post)
+                            }
+                            ORT::Delete => tuple.opt_cast_into().map(OpRef::Delete),
+                        };
+
+                        op_ref.map(TCRef::Op).map(Self::from)
+                    } else {
+                        debug!("cannot cast into {} (not a tuple)", ort);
+                        None
+                    }
                 }
             },
 
@@ -248,6 +266,7 @@ impl Refer for Scalar {
                         scalar.resolve(context, txn).map_ok(|state| (id, state))
                     }))
                     .await?;
+
                 Ok(State::Map(Map::from_iter(resolved)))
             }
             Self::Ref(tc_ref) => tc_ref.resolve(context, txn).await,
@@ -255,6 +274,7 @@ impl Refer for Scalar {
                 let resolved =
                     try_join_all(tuple.into_iter().map(|scalar| scalar.resolve(context, txn)))
                         .await?;
+
                 Ok(State::Tuple(resolved.into()))
             }
             other => Ok(State::Scalar(other)),
@@ -396,6 +416,24 @@ impl<T: Clone + TryCastFrom<Scalar>> TryCastFrom<Scalar> for Map<T> {
     }
 }
 
+impl TryCastFrom<Scalar> for Tuple<Scalar> {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Tuple(_) => true,
+            Scalar::Value(Value::Tuple(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Tuple(tuple) => Some(tuple),
+            Scalar::Value(Value::Tuple(tuple)) => Some(tuple.into_iter().collect()),
+            _ => None,
+        }
+    }
+}
+
 impl<T: TryCastFrom<Scalar>> TryCastFrom<Scalar> for Vec<T> {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
@@ -460,6 +498,9 @@ impl TryCastFrom<Scalar> for OpRef {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
             Scalar::Ref(tc_ref) => Self::can_cast_from(&**tc_ref),
+            get_ref if GetRef::can_cast_from(get_ref) => true,
+            put_ref if PutRef::can_cast_from(put_ref) => true,
+            post_ref if PostRef::can_cast_from(post_ref) => true,
             _ => false,
         }
     }
@@ -467,6 +508,11 @@ impl TryCastFrom<Scalar> for OpRef {
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
             Scalar::Ref(tc_ref) => Self::opt_cast_from(*tc_ref),
+            get_ref if GetRef::can_cast_from(&get_ref) => get_ref.opt_cast_into().map(Self::Get),
+            put_ref if PutRef::can_cast_from(&put_ref) => put_ref.opt_cast_into().map(Self::Put),
+            post_ref if PostRef::can_cast_from(&post_ref) => {
+                post_ref.opt_cast_into().map(Self::Post)
+            }
             _ => None,
         }
     }
@@ -513,6 +559,12 @@ impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (
     }
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        debug!(
+            "cast from {} into {}?",
+            scalar,
+            std::any::type_name::<Self>()
+        );
+
         match scalar {
             Scalar::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,

@@ -34,7 +34,8 @@ class Wholesaler(tc.Cluster, metaclass=tc.Meta):
     @tc.post_method
     def buy(self, txn, quantity: tc.Number):
         producer = tc.use(Producer)
-        return producer.buy(quantity=quantity)
+
+        return self.grant(scope="buy", op=[("_return", producer.buy(quantity=quantity))])
 
 
 class Retailer(tc.Cluster, metaclass=tc.Meta):

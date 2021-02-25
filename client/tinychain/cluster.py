@@ -26,6 +26,10 @@ class Cluster(object):
     def authorize(self, txn, scope):
         pass
 
+    @post_method
+    def grant(self, txn, scope, op):
+        pass
+
     @put_method
     def install(self):
         pass

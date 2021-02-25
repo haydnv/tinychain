@@ -17,7 +17,7 @@ use tc_transact::{Transact, Transaction};
 use tcgeneric::*;
 
 use crate::chain::Chain;
-use crate::scalar::{self, Link, OpRef, Refer, Value};
+use crate::scalar::{Executor, Link, Value};
 use crate::state::State;
 use crate::txn::{Actor, Scope, Txn, TxnId};
 
@@ -41,7 +41,7 @@ impl fmt::Display for ClusterType {
     }
 }
 
-/// The data structure responsible for Paxos synchronization per-transaction.
+/// The data structure responsible for maintaining consensus per-transaction.
 pub struct Cluster {
     actor: Arc<Actor>,
     path: TCPathBuf,
@@ -98,19 +98,19 @@ impl Cluster {
     }
 
     /// Grant the given `scope` to the `txn` and use it to resolve the given [`OpRef`].
-    pub async fn grant(
-        &self,
-        txn: Txn,
-        scope: Scope,
-        op: OpRef,
-        context: Map<State>,
-    ) -> TCResult<State> {
+    pub async fn grant(&self, txn: Txn, scope: Scope, op: Tuple<(Id, State)>) -> TCResult<State> {
+        let capture = if let Some((id, _)) = op.last() {
+            id.clone()
+        } else {
+            return Ok(State::default());
+        };
+
         // TODO: require `SCOPE_EXECUTE` in order to grant a scope
         let txn = txn
             .grant(&self.actor, self.path.clone(), vec![scope])
             .await?;
 
-        op.resolve(&scalar::Scope::new(self, context), &txn).await
+        Executor::new(txn, self, op).capture(capture).await
     }
 
     /// Trust the `Cluster` at the given [`Link`] to issue the given auth [`Scope`]s.

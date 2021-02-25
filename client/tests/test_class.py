@@ -22,14 +22,15 @@ class ClassTests(unittest.TestCase):
         self.assertEqual(expected, actual)
 
     def testInContext(self):
+        self.maxDiff=None
         expected = [
-            ['M', {'/state/object/class': [
+            ['M', {'/state/object/class':
                 {'/state/scalar/value/number': {
                     'feet': {'/state/scalar/op/get': ['key', [
                         ['_return', {'$self/mul': [3.28]}]]]}
                     }
                 }
-            ]}],
+            }],
             ['m', {'$M': [2]}],
             ['ft', {'$m/feet': [None]}]
         ]

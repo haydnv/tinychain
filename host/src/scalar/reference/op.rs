@@ -287,7 +287,13 @@ impl Refer for OpRef {
             Self::Get((subject, key)) => match subject {
                 Subject::Link(link) => {
                     let key = key.resolve(context, txn).await?;
-                    txn.get(link, key.try_into()?).await
+                    txn.get(
+                        link,
+                        key.try_cast_into(|v| {
+                            TCError::bad_request("GET key must be a Value, not", v)
+                        })?,
+                    )
+                    .await
                 }
                 Subject::Ref(id_ref, path) => {
                     let key = key.resolve(context, txn).await?;

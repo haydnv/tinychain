@@ -29,7 +29,7 @@ class Meta(type):
         instance = cls(URI("self"))
 
         for name, attr in inspect.getmembers(instance):
-            if name.startswith('_') or name in parent_members:
+            if name.startswith('_'):
                 continue
 
             if isinstance(attr, MethodStub):

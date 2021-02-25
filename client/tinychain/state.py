@@ -81,10 +81,10 @@ class OpRef(Ref):
     __uri__ = uri(Ref) + "/op"
 
     def __init__(self, subject, args):
-        if isinstance(subject, State):
-            self.subject = uri(subject)
-        else:
+        if isinstance(subject, Ref):
             self.subject = subject
+        else:
+            self.subject = uri(subject)
 
         self.args = args
 
@@ -96,7 +96,10 @@ class GetOpRef(OpRef):
     __uri__ = uri(OpRef) + "/get"
 
     def __init__(self, subject, key=None):
-        OpRef.__init__(self, subject, (key,))
+        if str(uri(subject)).startswith("/state"):
+            OpRef.__init__(self, subject, key)
+        else:
+            OpRef.__init__(self, subject, (key,))
 
 
 class PutOpRef(OpRef):
