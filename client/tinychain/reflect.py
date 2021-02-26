@@ -1,7 +1,7 @@
 import inspect
 
 from . import error
-from .state import Class, OpRef, Scalar, State
+from .state import Op, Class, OpRef, Scalar, State
 from .util import *
 from .value import Nil, Value
 
@@ -69,7 +69,7 @@ class MethodStub(object):
 
 
 class Method(object):
-    __ref__ = uri(Scalar) + "/op"
+    __ref__ = uri(Op)
 
     def __init__(self, header, form, name):
         self.header = header
@@ -81,7 +81,7 @@ class Method(object):
 
 
 class GetMethod(Method):
-    __ref__ = uri(Method) + "/get"
+    __ref__ = uri(Op.Get)
 
     def __call__(self, key=None):
         rtype = inspect.signature(self.form).return_annotation
@@ -113,7 +113,7 @@ class GetMethod(Method):
 
 
 class PutMethod(Method):
-    __ref__ = uri(Method) + "/put"
+    __ref__ = uri(Op.Put)
 
     def __call__(self, key, value):
         return OpRef.Put(uri(self.header) + "/" + self.name, key, value)
@@ -156,7 +156,7 @@ class PutMethod(Method):
 
 
 class PostMethod(Method):
-    __ref__ = uri(Method) + "/post"
+    __ref__ = uri(Op.Post)
 
     def __call__(self, **params):
         rtype = inspect.signature(self.form).return_annotation
@@ -186,7 +186,7 @@ class PostMethod(Method):
 
 
 class DeleteMethod(Method):
-    __ref__ = uri(Method) + "/delete"
+    __ref__ = uri(Op.Delete)
 
     def __form__(self):
         sig = inspect.signature(self.form)

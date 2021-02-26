@@ -35,6 +35,33 @@ class Scalar(State):
     __ref__ = uri(State) + "/scalar"
 
 
+# User-defined Ops
+
+class Op(Scalar):
+    __ref__ = uri(Scalar) + "/op"
+
+
+class GetOp(Op):
+    __ref__ = uri(Op) + "/get"
+
+
+class PutOp(Op):
+    __ref__ = uri(Op) + "/put"
+
+
+class PostOp(Op):
+    __ref__ = uri(Op) + "/post"
+
+
+class DeleteOp(Op):
+    __ref__ = uri(Op) + "/delete"
+
+
+Op.Get = GetOp
+Op.Put = PutOp
+Op.Post = PostOp
+Op.Delete = DeleteOp
+
 # Reference types
 
 class Ref(object):
