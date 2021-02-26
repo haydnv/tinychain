@@ -114,6 +114,7 @@ impl State {
     /// Return true if this `State` is an empty [`Tuple`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {
+            Self::Map(map) => map.is_empty(),
             Self::Scalar(scalar) => scalar.is_none(),
             Self::Tuple(tuple) => tuple.is_empty(),
             _ => false,

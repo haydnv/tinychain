@@ -108,6 +108,7 @@ impl Scalar {
     /// Return true if self is an empty tuple, default link, or `Value::None`.
     pub fn is_none(&self) -> bool {
         match self {
+            Self::Map(map) => map.is_empty(),
             Self::Tuple(tuple) => tuple.is_empty(),
             Self::Value(value) => value.is_none(),
             _ => false,
