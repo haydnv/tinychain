@@ -1,13 +1,9 @@
 use std::iter;
 
-use futures::future;
-
 use tcgeneric::PathSegment;
 
 use crate::scalar::op::*;
-use crate::scalar::{Scalar, Value};
 use crate::state::State;
-use crate::txn::*;
 
 use crate::route::*;
 
@@ -17,34 +13,16 @@ struct OpHandler<'a> {
 
 impl<'a> Handler<'a> for OpHandler<'a> {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
-        let handle: GetHandler<'a> = match self.op_def {
-            OpDef::Get((_, op_def)) if op_def.is_empty() => {
-                let handle = |_: Txn, _: Value| {
-                    let result: GetFuture<'a> = Box::pin(future::ready(Ok(State::default())));
-                    result
-                };
-
-                Box::new(handle)
-            }
-            OpDef::Get(get_op) => {
-                let (key_name, op_def) = get_op.clone();
-
-                let handle = move |txn: Txn, key: Value| {
-                    let capture = op_def.last().unwrap().0.clone();
-                    let op_def =
-                        iter::once((key_name, Scalar::Value(key))).chain(op_def.into_iter());
-
-                    let executor = Executor::new(txn, self.op_def, op_def);
-                    let result: GetFuture = Box::pin(executor.capture(capture));
-                    result
-                };
-
-                Box::new(handle)
-            }
-            _ => unimplemented!(),
-        };
-
-        Some(handle)
+        if let OpDef::Get((key_name, op_def)) = self.op_def.clone() {
+            Some(Box::new(|txn, key| {
+                Box::pin(async move {
+                    let context = iter::once((key_name, State::from(key)));
+                    OpDef::call(op_def, txn, context).await
+                })
+            }))
+        } else {
+            None
+        }
     }
 }
 

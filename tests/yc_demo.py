@@ -17,11 +17,12 @@ class Producer(tc.Cluster, metaclass=tc.Meta):
     def buy(self, txn, quantity: tc.Number):
         txn.inventory = self.inventory()
         txn.new_inventory = txn.inventory - quantity
-
-        return tc.If(
+        txn.sale = tc.If(
             quantity > self.inventory(),
             tc.error.BadRequest("requested quantity is unavailable"),
             self.in_stock.set(txn.new_inventory))
+
+        return tc.After(self.authorize("buy"), txn.sale)
 
     @tc.get_method
     def inventory(self) -> tc.Number:
@@ -35,7 +36,11 @@ class Wholesaler(tc.Cluster, metaclass=tc.Meta):
     def buy(self, txn, quantity: tc.Number):
         producer = tc.use(Producer)
 
-        return self.grant(scope="buy", op=[("_return", producer.buy(quantity=quantity))])
+        return self.grant(
+            "buy",
+            {"/state/scalar/op/post": [("buy_result", producer.buy(quantity=quantity))]},
+            {"quantity": quantity},
+        )
 
 
 class Retailer(tc.Cluster, metaclass=tc.Meta):
@@ -53,6 +58,8 @@ class InteractionTests(unittest.TestCase):
 
         actual = host.get("/app/producer/inventory")
         self.assertEqual(IN_STOCK, actual)
+
+        host.put("/app/producer/install", "http://127.0.0.1:8702" + tc.uri(Wholesaler), ["buy"])
 
         host.post("/app/wholesaler/buy", {"quantity": 10})
         self.assertEqual(90, host.get("/app/producer/inventory"))

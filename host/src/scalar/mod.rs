@@ -322,6 +322,50 @@ impl TryFrom<Scalar> for Value {
     }
 }
 
+impl TryCastFrom<Scalar> for OpDef {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Op(_) => true,
+            Scalar::Tuple(tuple) => {
+                GetOp::can_cast_from(tuple)
+                    || PutOp::can_cast_from(tuple)
+                    || PostOp::can_cast_from(tuple)
+                    || DeleteOp::can_cast_from(tuple)
+            }
+            Scalar::Value(Value::Tuple(tuple)) => {
+                GetOp::can_cast_from(tuple)
+                    || PutOp::can_cast_from(tuple)
+                    || PostOp::can_cast_from(tuple)
+                    || DeleteOp::can_cast_from(tuple)
+            }
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Op(op_def) => Some(op_def),
+            Scalar::Tuple(tuple) => {
+                if PutOp::can_cast_from(&tuple) {
+                    tuple.opt_cast_into().map(Self::Put)
+                } else if GetOp::can_cast_from(&tuple) {
+                    tuple.opt_cast_into().map(Self::Get)
+                } else if PostOp::can_cast_from(&tuple) {
+                    tuple.opt_cast_into().map(Self::Post)
+                } else if DeleteOp::can_cast_from(&tuple) {
+                    tuple.opt_cast_into().map(Self::Delete)
+                } else {
+                    None
+                }
+            }
+            Scalar::Value(Value::Tuple(tuple)) => {
+                Scalar::Tuple(tuple.into_iter().collect()).opt_cast_into()
+            }
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<Scalar> for TCRef {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {

@@ -1,7 +1,7 @@
 from .annotations import *
 from .reflect import gen_headers
-from .state import State
-from .util import ref as get_ref, URI, to_json
+from .state import OpRef, State
+from .util import ref as get_ref, uri, URI, to_json
 
 
 class Cluster(object):
@@ -26,9 +26,16 @@ class Cluster(object):
     def authorize(self, txn, scope):
         pass
 
-    @post_method
-    def grant(self, txn, scope, op):
-        pass
+    def grant(self, scope, op, context={}):
+        params = {
+            "scope": scope,
+            "op": op,
+        }
+
+        if context:
+            params["context"] = context
+
+        return OpRef.Post(uri(self) + "/grant", **params)
 
     @put_method
     def install(self):

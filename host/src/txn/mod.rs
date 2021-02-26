@@ -1,6 +1,7 @@
 //! The transaction context [`Txn`].
 
 use std::hash::{Hash, Hasher};
+use std::iter::FromIterator;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -10,7 +11,7 @@ use log::debug;
 use tc_error::*;
 use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf};
+use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;
 use crate::gateway::Gateway;
@@ -104,6 +105,13 @@ impl Txn {
         use rjwt::Resolve;
         let host = self.gateway.link(cluster_path);
         let resolver = Resolver::new(&self.gateway, &host, self.id());
+
+        debug!(
+            "granting scopes {} to {}",
+            Tuple::<Scope>::from_iter(scopes.clone()),
+            host
+        );
+
         let (token, claims) = resolver
             .consume_and_sign(actor, scopes, token, txn_id.time().into())
             .map_err(TCError::unauthorized)

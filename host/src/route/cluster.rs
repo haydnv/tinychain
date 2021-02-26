@@ -162,7 +162,15 @@ impl<'a> Handler<'a> for GrantHandler<'a> {
                     .ok_or_else(|| TCError::bad_request("missing required parameter", "op"))?
                     .try_cast_into(|s| TCError::bad_request("grantee must be an OpRef, not", s))?;
 
-                self.cluster.grant(txn, scope, op).await
+                let context = if let Some(context) = params.remove(&label("context").into()) {
+                    context.try_cast_into(|v| {
+                        TCError::bad_request("expected a Map of parameters, not", v)
+                    })?
+                } else {
+                    Map::default()
+                };
+
+                self.cluster.grant(txn, scope, op, context).await
             })
         }))
     }

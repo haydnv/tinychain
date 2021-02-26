@@ -5,10 +5,12 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::iter::FromIterator;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::join_all;
+use log::{debug, info};
 use uplock::RwLock;
 
 use tc_error::*;
@@ -17,7 +19,7 @@ use tc_transact::{Transact, Transaction};
 use tcgeneric::*;
 
 use crate::chain::Chain;
-use crate::scalar::{Executor, Link, Value};
+use crate::scalar::{Link, OpDef};
 use crate::state::State;
 use crate::txn::{Actor, Scope, Txn, TxnId};
 
@@ -76,14 +78,23 @@ impl Cluster {
 
     /// Return `Unauthorized` if the request does not have the given `scope` from a trusted issuer.
     pub async fn authorize(&self, txn: &Txn, scope: &Scope) -> TCResult<()> {
+        debug!("authorize scope {}...", scope);
+
         let installed = self.installed.read(txn.id()).await?;
-        for (issuer, scopes) in installed.iter() {
-            if scopes.contains(scope) {
-                if let Some(authorized_scopes) =
-                    txn.request().scopes().get(issuer, &Value::default())
-                {
-                    for authorized in authorized_scopes {
-                        if scope.starts_with(authorized) {
+        debug!("{} authorized callers installed", installed.len());
+
+        for (host, actor_id, scopes) in txn.request().scopes().iter() {
+            debug!(
+                "token has scopes {} issued by {}: {}",
+                Tuple::<Scope>::from_iter(scopes.to_vec()),
+                host,
+                actor_id
+            );
+
+            if actor_id.is_none() {
+                if let Some(authorized) = installed.get(host) {
+                    if authorized.contains(scope) {
+                        if scopes.contains(scope) {
                             return Ok(());
                         }
                     }
@@ -98,19 +109,21 @@ impl Cluster {
     }
 
     /// Grant the given `scope` to the `txn` and use it to resolve the given [`OpRef`].
-    pub async fn grant(&self, txn: Txn, scope: Scope, op: Tuple<(Id, State)>) -> TCResult<State> {
-        let capture = if let Some((id, _)) = op.last() {
-            id.clone()
-        } else {
-            return Ok(State::default());
-        };
+    pub async fn grant(
+        &self,
+        txn: Txn,
+        scope: Scope,
+        op: OpDef,
+        context: Map<State>,
+    ) -> TCResult<State> {
+        debug!("Cluster received grant request for scope {}", scope);
 
         // TODO: require `SCOPE_EXECUTE` in order to grant a scope
         let txn = txn
             .grant(&self.actor, self.path.clone(), vec![scope])
             .await?;
 
-        Executor::new(txn, self, op).capture(capture).await
+        OpDef::call(op.into_def(), txn, context).await
     }
 
     /// Trust the `Cluster` at the given [`Link`] to issue the given auth [`Scope`]s.
@@ -120,6 +133,17 @@ impl Cluster {
         other: Link,
         scopes: HashSet<Scope>,
     ) -> TCResult<()> {
+        info!(
+            "{} will now trust {} to issue scopes [{}]",
+            self,
+            other,
+            scopes
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+
         let mut installed = self.installed.write(txn_id).await?;
         installed.insert(other, scopes);
         Ok(())
@@ -183,10 +207,14 @@ impl Transact for Cluster {
         join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
 
         *confirmed = *txn_id;
+
+        self.installed.commit(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         join_all(self.chains.values().map(|chain| chain.finalize(txn_id))).await;
+        self.owned.write().await.remove(txn_id);
+        self.installed.finalize(txn_id).await;
     }
 }
 

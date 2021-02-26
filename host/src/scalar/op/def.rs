@@ -8,9 +8,12 @@ use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use log::debug;
 
+use tc_error::*;
 use tcgeneric::*;
 
-use crate::scalar::Scalar;
+use crate::scalar::{Executor, Scalar};
+use crate::state::State;
+use crate::txn::Txn;
 
 const PREFIX: PathLabel = path_label(&["state", "scalar", "op"]);
 
@@ -103,6 +106,37 @@ impl Instance for OpDef {
             Self::Put(_) => OpDefType::Put,
             Self::Post(_) => OpDefType::Post,
             Self::Delete(_) => OpDefType::Delete,
+        }
+    }
+}
+
+impl OpDef {
+    pub async fn call<I: IntoIterator<Item = (Id, State)>>(
+        op_def: Vec<(Id, Scalar)>,
+        txn: Txn,
+        context: I,
+    ) -> TCResult<State> {
+        let capture = if let Some((id, _)) = op_def.last() {
+            id.clone()
+        } else {
+            return Ok(State::default());
+        };
+
+        let context = context
+            .into_iter()
+            .chain(op_def.into_iter().map(|(id, s)| (id, State::Scalar(s))));
+
+        Executor::new(txn, &State::default(), context)
+            .capture(capture)
+            .await
+    }
+
+    pub fn into_def(self) -> Vec<(Id, Scalar)> {
+        match self {
+            Self::Get((_, def)) => def,
+            Self::Put((_, _, def)) => def,
+            Self::Post(def) => def,
+            Self::Delete((_, def)) => def,
         }
     }
 }
