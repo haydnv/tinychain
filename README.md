@@ -61,7 +61,7 @@ Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directo
 Tinychain exposes a JSON API over HTTP, and treats a subset of JSON as a Turing-complete application language. For example, this is a function to convert meters into feet:
 
 ```json
-{"/state/scalar/op/get": ["meters", [
+{"/state/scalar/op/get": ["to_feet", [
     {"/state/scalar/ref/if": [
         {"$meters/gte": 0},
         {"$meters/mul": 3.28},
@@ -70,7 +70,18 @@ Tinychain exposes a JSON API over HTTP, and treats a subset of JSON as a Turing-
 ]]}
 ```
 
-Obviously writing this by hand gets unwieldy very quickly, which is why a [Python client](https://github.com/haydnv/tinychain/tree/master/client) is provided. You can look in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory for more detailed examples.
+Obviously writing this by hand gets unwieldy very quickly, which is why a [Python client](https://github.com/haydnv/tinychain/tree/master/client) is provided. Here's the same function defined using the Python client:
+
+```python
+@tc.get_op
+def to_feet(txn, meters: tc.Number) -> tc.Number:
+    return tc.If(
+        meters >= 0,
+        meters * 3.28,
+        tc.error.BadRequest("negative distance is not supported"))
+```
+
+You can look in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory for more detailed examples.
 
 ### Authentication
 
