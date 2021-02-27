@@ -20,20 +20,16 @@ TC_PATH = "/path/to/tinychain"  # <-- edit this!
 WORKSPACE = "/tmp/tc/workspace" # <-- optionally, edit this also
 ENDPOINT = "/transact/hypothetical"
 
-@tc.get_op
-def hello():
-    return tc.String("Hello, World!")
-
 if __name__ == "__main__":
    host = tc.host.Local(TC_PATH, WORKSPACE)
-   print(host.post(ENDPOINT, hello))
+   print(host.post(ENDPOINT, tc.String("Hello, World!")))
 ```
 
 ## Overview
 
 The Tinychain client provides a developer-friendly API to build Tinychain transactions (i.e., distributed compute graphs) using the familiar Python language, but without any of the associated restrictions on performance or locality. A Tinychain transaction can span any number of networked hosts and automatically takes advantage of the hosts' concurrent and parallel computing resources (like multiple cores and GPU acceleration) without any extra application code. A Tinychain service defined using the Python client can be packaged using familiar distribution mechanisms like [Pip](http://pypi.org/project/pip) so that other Tinychain developers can use it just like a regular Python developer would use a regular Python library. This can save your clients a lot of time and hassle when integrating your cloud API into their service.
 
-Every value in a Tinychain client app is either a `State`, representing a Tinychain state like a `Number` or a `Chain`, or a `Ref`, which tells a Tinychain transaction how to access or calculate a particular `State`. For example:
+Every value in a Tinychain service is either a `State`, representing a Tinychain state like a `Number` or a `Chain`, or a `Ref`, which tells a Tinychain transaction how to access or calculate a particular `State`. For example:
 
 ```python
 @tc.get_op
@@ -73,7 +69,7 @@ def num_rows(txn):
     return txn.table.count()
 ```
 
-This Op will always resolve to ZERO. This may seem counterintuitive at first, because you can obviously see the `table.insert` statement, but notice that the return value `table.count` does not actually depend on `table.insert`; `table.insert` is only intended to create a side-effect, so its result is unused. To handle situations like this, use the `After` flow control:
+This Op will *always* resolve to *zero*. This may seem counterintuitive at first, because you can obviously see the `table.insert` statement, but notice that the return value `table.count` does not actually depend on `table.insert`; `table.insert` is only intended to create a side-effect, so its result is unused. To handle situations like this, use the `After` flow control:
 
 ```python
 @tc.post_op
@@ -88,4 +84,59 @@ def num_rows(txn):
 ```
 
 Now, since the program explicitly indicates that `table.count` depends on a side-effect of `table.insert`, Tinychain won't execute `table.count` until after the call to `table.insert` has completed successfully.
+
+## Object orientation
+
+One of Tinychain's most powerful features is its object-oriented API. You can use this to define your own classes, which must inherit from exactly one class, which ultimately inherits from a native class. For example:
+
+```python
+class Car(tc.Map):
+    @tc.get_op
+    def display_name() -> tc.String:
+        return tc.String("car")
+
+class Sedan(Car):
+    @tc.get_op
+    def display_name() -> tc.String:
+        return tc.String("sedan")
+
+    @tc.get_op
+    def doors() -> tc.Number:
+        return tc.Number(4)
+```
+
+Note that Tinychain does not have any concept of member visibility, like a "public" or "private" method. This is because Tinychain objects are meant to be sent over the network and used by client code, making a "private" method meaningless (and deceptive to the developer implementing it). If you want to hide an implementation detail from the public API of your class, use a Python function outside your class definition.
+
+## Cluster: hosting your service
+
+Of course, in order for your service to actually be useful to users, you have to put it online! You can do this using the same object-oriented API that you used to build the service:
+
+```python
+TC_PATH = "/path/to/tinychain/binary" # <-- edit this
+
+# optionally, edit these also
+CONFIG_PATH = "~/config/my_service.json"
+WORKSPACE = "/tmp/tc/workspace"
+DATA_DIR = "/tmp/tc/data"
+
+# define the service
+class MyService(tc.Cluster):
+    __uri__ = "/app/myservice"
+
+    @tc.get_op
+    def hello():
+        return tc.String("Hello, World!)
+
+if __name__ == "__main__":
+    import requests
+
+    # write the definition to disk
+    tc.write_cluster(CONFIG_PATH)
+
+    # start a new Tinychain host to serve MyService
+    host = tc.host.Local(TC_PATH, WORKSPACE, DATA_DIR, [CONFIG_PATH], force_create=True)
+    assert requests.get("http://127.0.0.1:8702/app/myservice/hello") == "Hello, World!\n"
+```
+
+You can see more in-depth examples in the [tests](http://github.com/haydnv/tinychain/tree/master/tests) directory.
 
