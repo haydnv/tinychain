@@ -68,12 +68,12 @@ def num_rows(txn):
     key = [("user_id", tc.Number)]
     value = [("name", tc.String), ("email", tc.String)]
 
-    txn.table = tc.Table(key + value)
+    txn.table = tc.Table((key, value))
     txn.table.insert((123, "Bob", "bob.roberts@example.com"))
     return txn.table.count()
 ```
 
-The output of this function will always be ZERO. This may seem counterintuitive at first, because you can obviously see the `table.insert` statement, but notice that the return value `table.count` does not actually depend on `table.insert`; `table.insert` is only intended to create a side-effect, so its return value is unused. To handle situations like this, use the `After` flow control:
+This Op will always resolve to ZERO. This may seem counterintuitive at first, because you can obviously see the `table.insert` statement, but notice that the return value `table.count` does not actually depend on `table.insert`; `table.insert` is only intended to create a side-effect, so its result is unused. To handle situations like this, use the `After` flow control:
 
 ```python
 @tc.post_op
@@ -88,3 +88,4 @@ def num_rows(txn):
 ```
 
 Now, since the program explicitly indicates that `table.count` depends on a side-effect of `table.insert`, Tinychain won't execute `table.count` until after the call to `table.insert` has completed successfully.
+

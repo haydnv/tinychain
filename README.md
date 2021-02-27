@@ -8,11 +8,9 @@ If you need a feature which is not yet available, or even not yet planned, pleas
 
 ## Getting started
 
-The easiest way to get started is to download the latest release from GitHub here: https://github.com/haydnv/tinychain/releases
+The easiest way to get started is to download the latest release from GitHub here: https://github.com/haydnv/tinychain/releases. Binary releases are currently only available for 64-bit x86 Linux (you should be able to build from source on other architectures, but this has not been tested).
 
-Alternately, if you use the Rust programming language, you can also install Tinychain on any platform by running `cargo install tinychain`.
-
-Tinychain is currently only available for 64-bit Linux (you should be able to build from source on other architectures, but this has not been tested).
+If you use the Rust programming language, you can install Tinychain on any platform by running `cargo install tinychain`.
 
 Try this "Hello, World!" program:
 
@@ -22,17 +20,29 @@ $ ./tinychain &
 $ curl -G "http://localhost:8702/state/scalar/value/string" --data-urlencode 'key="Hello, world!"'
 ```
 
-Check the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory for more in-depth examples.
+You can find more in-depth examples in the [tests](https://github.com/haydnv/tinychain/tree/master/tests) directory.
 
 ## Key features
 
- * **Rapid prototyping**: set up a REST API for your service in just a few minutes and scale the application to your entire user base without rewriting
- * **Compliance**: Tinychain is a single platform which runs cloud applications and the data services that support them, meaning your customer data never has to leave the platform which authorizes access to it
+### Safety
+
  * **Synchronization**: Tinychain's distributed Paxos algorithm automatically enables cross-service transactions within any set of services which support the Tinychain protocol.
+ * **Hypothetical queries**: making changes to a production database is dangerous, particularly when the changes are inherently destructive (like dropping a column from a database table). Tinychain's hypothetical query feature mitigates this risk by allowing the developer to examine the state of their database *as if* a potentially-destructive change had been applied, without actually committing the change.
+ * **Data encapsulation**: Tinychain integrates the database layer with the application layer of a cloud service, meaning that data never has to leave the application that authorizes access to it. Also, because Tinychain is a self-contained cloud-native runtime, a Tinychain service can easily be deployed to a user to run on-premises, meaning that the user never has to grant the vendor access to their data.
+ * **Memory safety**: Around [70% of serious security bugs](https://www.zdnet.com/article/microsoft-70-percent-of-all-security-bugs-are-memory-safety-issues/) are memory-safety bugs. Tinychain is written in [Rust](http://www.rust-lang.org), which mitigates this risk by building memory safety into the language itself.
+
+### Performance
+
  * **Concurrency**: Tinychain **Op**s are automatically executed concurrently, although a developer can use the **After** flow control to modify this behavior.
- * **Hardware acceleration**\*\*: The **Tensor**\*\* and **Graph**\* data types support hardware acceleration on CUDA and OpenCL backends, no extra code needed.
- * **Object orientation**: The Python client\*\* allows defining a Tinychain service as a Python package, which can be then be distributed to other developers, who can use the same Python code to interact with your (hosted) service from their own, without writing any boilerplate integration code, or defining two different APIs for internal and external use.
- * **Service mesh**: the Tinychain runtime acts as a service mesh for your Tinychain services, allowing for cross-service debugging and analysis, among other features, no extra integration code needed.
+ * **Hardware acceleration**: The **Tensor** and **Graph** data types support hardware acceleration on CUDA and OpenCL backends, no extra code needed.
+ * **Native speed**: The Tinychain runtime itself is written in [Rust](http://www.rust-lang.org/), a systems programming language with native support for memory-safe multithreading and compute performance comparable to C. All user-defined Tinychain classes must extend a native class implemented in Rust so that basic operations will benefit from native speed.
+ * **Transactional filesystem cache**: Tinychain's transactional filesystem layer has a built-in memory cache with least-frequently used (LFU) eviction. Every **Chain** and **Collection** is built on top of this transactional filesystem, providing the benefits of in-memory speed for small collections and automatic filesystem cacheing for large collections. This means that, for example, you can write the same code to process a 1MB **Tensor** or a 1TB **Tensor**, without worrying about chunking the data to load it into memory.
+
+### Development velocity
+
+ * **Rapid prototyping**: Set up a REST API for your service in just a few minutes and scale the application to your entire user base without rewriting.
+ * **Object orientation**: The Python client allows defining a Tinychain service as a Python package, which can be then be distributed to other developers, who can use the same Python code to interact with your (hosted) service from their own, without writing any boilerplate integration code, or defining two different APIs for internal and external use.
+ * **Service mesh**: The Tinychain runtime acts as a service mesh for your Tinychain services, allowing for cross-service debugging and analysis, among other features, no extra integration code needed.
  * **Portability**: A Tinychain service can run in any cloud environment, or be distributed across many heterogenous clients, no Docker or Kubernetes required. A Tinychain developer can also choose make some or all of their service's functionality availble for a client to run on-premises, so that the client never has to give the service vendor access to their customer data.
 
 ## Data structures
