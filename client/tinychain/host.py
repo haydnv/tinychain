@@ -11,6 +11,7 @@ from .error import *
 from .util import to_json, uri
 
 
+DEFAULT_PORT = 8702
 ENCODING = "utf-8"
 
 
@@ -96,9 +97,20 @@ class Local(Host):
     ADDRESS = "127.0.0.1"
     STARTUP_TIME = 0.5
 
-    def __init__(self, workspace, data_dir=None, clusters=[], force_create=False):
-        Host.__init__(self, self.ADDRESS)
+    def __init__(self,
+            path,
+            workspace,
+            data_dir=None,
+            clusters=[],
+            port=DEFAULT_PORT,
+            log_level="warn",
+            force_create=False):
+
+        # set _process first so it's available to __del__ in case of an exception
         self._process = None
+
+        if not int(port) or int(port) < 0:
+            raise ValueError(f"invalid port: {port}")
 
         if clusters and data_dir is None:
             raise ValueError("Hosting a cluster requires specifying a data_dir")
@@ -108,15 +120,7 @@ class Local(Host):
         if data_dir:
             maybe_create_dir(data_dir, force_create)
 
-        self.clusters = clusters
-        self.data_dir = data_dir
-        self.workspace = workspace
-
-    def start(self, path, port, log_level="warn"):
-        if not int(port) or int(port) < 0:
-            raise ValueError(f"invalid port: {port}")
-
-        address = "{}:{}".format(__class__.ADDRESS, port)
+        address = "{}:{}".format(self.ADDRESS, port)
         Host.__init__(self, address)
 
         args = [
@@ -125,23 +129,20 @@ class Local(Host):
             f"--log_level={log_level}",
         ]
 
-        if self.data_dir:
-            args.append(f"--data_dir={self.data_dir}")
+        if data_dir:
+            args.append(f"--data_dir={data_dir}")
 
-        args.extend([f"--cluster={cluster}" for cluster in self.clusters])
+        args.extend([f"--cluster={cluster}" for cluster in clusters])
 
         self._process = subprocess.Popen(args)
-        time.sleep(__class__.STARTUP_TIME)
+        time.sleep(self.STARTUP_TIME)
 
         if self._process is None or self._process.poll() is not None:
             raise RuntimeError(f"Tinychain process at {self.address} crashed on startup")
         else:
-            print(f"new instance running at {self.address}")
+            print(f"new instance running at {self.address}: {workspace}")
 
     def stop(self):
-        if self._process.poll() != None:
-            return
-
         print(f"Shutting down Tinychain host {self.address}")
         self._process.terminate()
         self._process.wait()
