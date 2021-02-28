@@ -17,6 +17,7 @@ use crate::txn::Txn;
 use super::{Scalar, Scope, Value};
 
 mod after;
+mod case;
 mod r#if;
 
 pub mod id;
