@@ -79,6 +79,9 @@ class Method(object):
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}
 
+    def dtype(self):
+        return self.__class__.__name__
+
 
 class GetMethod(Method):
     __uri__ = uri(OpDef.Get)
@@ -93,7 +96,7 @@ class GetMethod(Method):
         parameters = list(sig.parameters.items())
 
         if len(parameters) < 1 or len(parameters) > 3:
-            raise ValueError("GET method takes 1-3 arguments: (self, cxt, key)")
+            raise ValueError(f"{self.dtype()} takes 1-3 arguments: (self, cxt, key)")
 
         args = [self.header]
 
@@ -104,7 +107,7 @@ class GetMethod(Method):
         key_name = "key"
         if len(parameters) == 3:
             key_name, param = parameters[2]
-            if param.annotation in {inspect.Parameter.empty, Value}:
+            if param.annotation == inspect.Parameter.empty:
                 args.append(Value(URI(key_name)))
             else:
                 args.append(param.annotation(URI(key_name)))
@@ -124,7 +127,7 @@ class PutMethod(Method):
         parameters = list(sig.parameters.items())
 
         if len(parameters) not in [1, 2, 4]:
-            raise ValueError("POST method has one, two, or four arguments: "
+            raise ValueError("{self.dtype()} has one, two, or four arguments: "
                 + "(self, cxt, key, value)")
 
         args = [self.header]
@@ -167,7 +170,7 @@ class PostMethod(Method):
         parameters = list(sig.parameters.items())
 
         if len(parameters) == 0:
-            raise ValueError("POST method has at least one argment: "
+            raise ValueError("{self.dtype()} has at least one argment: "
                 + "(self, cxt, name1=val1, ...)")
 
         args = [self.header]
@@ -189,28 +192,7 @@ class DeleteMethod(Method):
     __uri__ = uri(OpDef.Delete)
 
     def __form__(self):
-        sig = inspect.signature(self.form)
-        parameters = list(sig.parameters.items())
-
-        if len(parameters) < 1 or len(parameters) > 3:
-            raise ValueError("DELETE method takes 1-3 arguments: (self, cxt, key)")
-
-        args = [self.header]
-
-        cxt = Context()
-        if len(parameters) > 1:
-            args.append(cxt)
-
-        key_name = "key"
-        if len(parameters) == 3:
-            key_name, param = parameters[2]
-            if param.annotation in {inspect.Parameter.empty, Value}:
-                args.append(Value(URI(key_name)))
-            else:
-                args.append(param.annotation(URI(key_name)))
-
-        cxt._return = self.form(*args) # populate the Context
-        return (key_name, cxt)
+        return GetMethod.__form__(self)
 
 
 Method.Get = GetMethod
@@ -228,19 +210,19 @@ class Op(object):
     def __json__(self):
         return {str(uri(self)): to_json(form_of(self))}
 
+    def dtype(self):
+        return self.__class__.__name__
+
 
 class GetOp(Op):
     __uri__ = uri(OpDef.Get)
-
-    def __call__(self, key=None):
-        return OpRef.Get(uri(self), key)
 
     def __form__(self):
         sig = inspect.signature(self.form)
         parameters = list(sig.parameters.items())
 
         if len(parameters) < 1 or len(parameters) > 3:
-            raise ValueError("GET op takes 0-2 arguments: (cxt, key)")
+            raise ValueError(f"{self.dtype()} takes 0-2 arguments: (cxt, key)")
 
         args = []
 
@@ -263,5 +245,84 @@ class GetOp(Op):
         return OpDef.Get(URI(name))
 
 
+class PutOp(Op):
+    __uri__ = uri(OpDef.Put)
+
+    def __form__(self):
+        sig = inspect.signature(self.form)
+        parameters = list(sig.parameters.items())
+
+        if len(parameters) not in [1, 3]:
+            raise ValueError("{self.dtype()} has one or three arguments: (cxt, key, value)")
+
+        args = [self.header]
+
+        cxt = Context()
+        if len(parameters):
+            args.append(cxt)
+
+        key_name = "key"
+        value_name = "value"
+        if len(parameters) == 3:
+            key_name, param = parameters[1]
+            dtype = (Value
+                if param.annotation == inspect.Parameter.empty
+                else param.annotation)
+
+            args.append(dtype(URI(key_name)))
+
+            value_name, param = parameters[2]
+            dtype = (State
+                if param.annotation == inspect.Parameter.empty
+                else param.annotation)
+
+            args.append(dtype(URI(value_name)))
+
+        cxt._return = self.form(*args)
+        return (key_name, value_name, cxt)
+
+    def __ref__(self, name):
+        return OpDef.Put(URI(name))
+
+
+class PostOp(Op):
+    __uri__ = uri(OpDef.Post)
+
+    def __form__(self):
+        sig = inspect.signature(self.form)
+        parameters = list(sig.parameters.items())
+
+        args = []
+
+        cxt = Context()
+        if len(parameters) > 1:
+            args.append(cxt)
+
+        kwargs = {}
+        for name, param in parameters[1:]:
+            dtype = State if param.annotation == inspect.Parameter.empty else param.annotation
+            kwargs[name] = dtype(URI(name))
+
+        cxt._return = self.form(*args, **kwargs)
+        return cxt
+
+    def __ref__(self, name):
+        return OpDef.Post(URI(name))
+
+
+class DeleteOp(Op):
+    __uri__ = uri(OpDef.Delete)
+
+    def __form__(self):
+        return GetOp.__form__(self)
+
+
+    def __ref__(self, name):
+        return OpDef.Delete(URI(name))
+
+
 Op.Get = GetOp
+Op.Put = PutOp
+Op.Post = PostOp
+Op.Delete = DeleteOp
 

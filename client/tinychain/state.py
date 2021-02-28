@@ -125,6 +125,19 @@ class State(object):
         return Class(OpRef.get(uri(self) + "/class"))
 
 
+class Map(State):
+    __uri__ = uri(State) + "/map"
+
+    def __json__(self):
+        return to_json(form_of(self))
+
+class Tuple(State):
+    __uri__ = uri(State) + "/tuple"
+
+    def __json__(self):
+        return to_json(form_of(self))
+
+
 # Scalar types
 
 class Scalar(State):
@@ -132,6 +145,7 @@ class Scalar(State):
 
     def __json__(self):
         return to_json(form_of(self))
+
 
 # User-defined Ops
 

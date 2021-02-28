@@ -38,13 +38,13 @@ class Number(Value):
     def __gt__(self, other):
         return self.gt(other)
 
-    def __gte__(self, other):
+    def __ge__(self, other):
         return self.gte(other)
 
     def __lt__(self, other):
         return self.lt(other)
 
-    def __lte__(self, other):
+    def __le__(self, other):
         return self.lte(other)
 
     def __mul__(self, other):
