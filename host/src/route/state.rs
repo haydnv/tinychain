@@ -3,12 +3,14 @@ use futures::future;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tcgeneric::PathSegment;
+use tcgeneric::{path_label, Instance, NativeClass, PathLabel, PathSegment};
 
-use crate::scalar::Number;
+use crate::scalar::{Link, Number};
 use crate::state::State;
 
 use super::*;
+
+const CLASS: PathLabel = path_label(&["class"]);
 
 struct RootHandler<'a> {
     subject: &'a State,
@@ -42,6 +44,18 @@ impl<'a> Handler<'a> for RootHandler<'a> {
     }
 }
 
+struct ClassHandler<'a> {
+    subject: &'a State,
+}
+
+impl<'a> Handler<'a> for ClassHandler<'a> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|_txn, _key| {
+            Box::pin(async move { Ok(Link::from(self.subject.class().path()).into()) })
+        }))
+    }
+}
+
 impl Route for State {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         let child_handler = match self {
@@ -55,6 +69,8 @@ impl Route for State {
 
         if path.is_empty() {
             Some(Box::new(RootHandler { subject: self }))
+        } else if path == &CLASS[..] {
+            Some(Box::new(ClassHandler { subject: self }))
         } else {
             None
         }
