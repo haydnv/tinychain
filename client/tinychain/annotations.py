@@ -1,4 +1,8 @@
-from .reflect import Method, MethodStub
+from .reflect import Method, MethodStub, Op
+
+
+def get_op(op):
+    return Op.Get(op)
 
 
 def get_method(method):

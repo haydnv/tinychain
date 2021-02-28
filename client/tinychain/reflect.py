@@ -106,7 +106,7 @@ class GetMethod(Method):
             key_name, param = parameters[2]
             if param.annotation in {inspect.Parameter.empty, Value}:
                 args.append(Value(URI(key_name)))
-            elif issubclass(param.annotation, Value):
+            else:
                 args.append(param.annotation(URI(key_name)))
 
         cxt._return = self.form(*args) # populate the Context
@@ -206,7 +206,7 @@ class DeleteMethod(Method):
             key_name, param = parameters[2]
             if param.annotation in {inspect.Parameter.empty, Value}:
                 args.append(Value(URI(key_name)))
-            elif issubclass(param.annotation, Value):
+            else:
                 args.append(param.annotation(URI(key_name)))
 
         cxt._return = self.form(*args) # populate the Context
@@ -217,4 +217,51 @@ Method.Get = GetMethod
 Method.Put = PutMethod
 Method.Post = PostMethod
 Method.Delete = DeleteMethod
+
+
+class Op(object):
+    __uri__ = uri(OpDef)
+
+    def __init__(self, form):
+        self.form = form
+
+    def __json__(self):
+        return {str(uri(self)): to_json(form_of(self))}
+
+
+class GetOp(Op):
+    __uri__ = uri(OpDef.Get)
+
+    def __call__(self, key=None):
+        return OpRef.Get(uri(self), key)
+
+    def __form__(self):
+        sig = inspect.signature(self.form)
+        parameters = list(sig.parameters.items())
+
+        if len(parameters) < 1 or len(parameters) > 3:
+            raise ValueError("GET op takes 0-2 arguments: (cxt, key)")
+
+        args = []
+
+        cxt = Context()
+        if len(parameters):
+            args.append(cxt)
+
+        key_name = "key"
+        if len(parameters) == 2:
+            key_name, param = parameters[1]
+            if param.annotation in {inspect.Parameter.empty, Value}:
+                args.append(Value(URI(key_name)))
+            else:
+                args.append(param.annotation(URI(key_name)))
+
+        cxt._return = self.form(*args) # populate the Context
+        return (key_name, cxt)
+
+    def __ref__(self, name):
+        return OpDef.Get(URI(name))
+
+
+Op.Get = GetOp
 

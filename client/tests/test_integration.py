@@ -37,6 +37,7 @@ class Right(Balance):
 
 class ClusterTests(unittest.TestCase):
     def testToJson(self):
+        self.maxDiff = None
         expected = {
             'weigh': {'/state/scalar/op/put': ['key', 'weight', [
                 ['total', 20],
@@ -50,7 +51,7 @@ class ClusterTests(unittest.TestCase):
                     {'$update': []}
                 ]}]
             ]]},
-            'weight': {'/state/chain/sync': 0}
+            'weight': {'/state/chain/sync': [0]}
         }
 
         actual = tc.to_json(tc.form_of(Left))

@@ -34,7 +34,7 @@ class Context(object):
                 from .state import Class
                 return Class(URI(name))
             elif hasattr(value, "__ref__"):
-                return type(value)(URI(name))
+                return ref(value, name)
             else:
                 from .state import IdRef
                 return IdRef(name)

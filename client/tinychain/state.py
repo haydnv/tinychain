@@ -90,7 +90,7 @@ class DeleteOpRef(OpRef):
         OpRef.__init__(self, subject, key)
 
     def __json__(self):
-        return {str(uri(DeleteOpRef)): to_json([self.subject, self.args])}
+        return {str(uri(self)): to_json([self.subject, self.args])}
 
 
 OpRef.Get = GetOpRef
@@ -116,7 +116,7 @@ class State(object):
         return {str(uri(self)): [to_json(form_of(self))]}
 
     def __ref__(self, name):
-        return self.__class__(IdRef(name))
+        return self.__class__(URI(name))
 
     def __repr__(self):
         return f"{self.__class__.__name__}(form_of(self))"
@@ -142,17 +142,29 @@ class Op(Scalar):
 class GetOp(Op):
     __uri__ = uri(Op) + "/get"
 
+    def __call__(self, key=None):
+        return OpRef.Get(self, key)
+
 
 class PutOp(Op):
     __uri__ = uri(Op) + "/put"
+
+    def __call__(self, key=None, value=None):
+        return OpRef.Put(self, key, value)
 
 
 class PostOp(Op):
     __uri__ = uri(Op) + "/post"
 
+    def __call__(self, **params):
+        return OpRef.Post(self, **params)
+
 
 class DeleteOp(Op):
     __uri__ = uri(Op) + "/delete"
+
+    def __call__(self, key=None):
+        return OpRef.Delete(self, key)
 
 
 Op.Get = GetOp
