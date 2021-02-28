@@ -6,10 +6,10 @@ from testutils import PORT, TC_PATH, start_host
 
 
 class ExampleCluster(tc.Cluster, metaclass=tc.Meta):
-    __ref__ = tc.URI("/app/example")
+    __uri__ = tc.URI("/app/example")
 
     def configure(self):
-        self.rev = tc.Chain.Sync(tc.Number.init(0))
+        self.rev = tc.Chain.Sync(tc.Number(0))
 
 
 class ClusterTests(unittest.TestCase):

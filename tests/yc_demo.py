@@ -19,7 +19,7 @@ class Producer(tc.Cluster, metaclass=tc.Meta):
         txn.inventory = self.inventory()
         txn.new_inventory = txn.inventory - quantity
         txn.sale = tc.If(
-            quantity > self.inventory(),
+            quantity > txn.inventory,
             tc.error.BadRequest("requested quantity is unavailable"),
             self.in_stock.set(txn.new_inventory))
 

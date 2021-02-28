@@ -1,7 +1,7 @@
 from .annotations import *
 from .reflect import gen_headers
 from .state import OpRef, State
-from .util import ref as get_ref, uri, URI, to_json
+from .util import form_of, ref as get_ref, uri, URI, to_json
 
 
 class Cluster(object):
@@ -11,20 +11,15 @@ class Cluster(object):
         gen_headers(instance)
         return instance
 
-    def __init__(self, ref=None):
-        if ref is None:
-            ref = get_ref(self.__class__)
-
-        self.__ref__ = ref
-
+    def __init__(self, form=None):
+        self.__form__ = form if form else uri(self)
         self.configure()
 
     def configure(self):
         pass
 
-    @get_method
-    def authorize(self, txn, scope):
-        pass
+    def authorize(self, scope):
+        return OpRef.Get(uri(self) + "/authorize", scope)
 
     def grant(self, scope, op, context={}):
         params = {
@@ -46,13 +41,15 @@ def write_cluster(cluster, config_path, overwrite=False):
     import json
     import pathlib
 
+    config = {str(uri(cluster)): to_json(form_of(cluster))}
     config_path = pathlib.Path(config_path)
     if config_path.exists() and not overwrite:
         with open(config_path) as f:
             try:
-                if json.load(f) == to_json(cluster):
+                if json.load(f) == config:
                     return
-            except json.decoder.JSONDecodeError:
+            except json.decoder.JSONDecodeError as e:
+                print(f"warning: invalid JSON at {config_path}: {e}")
                 pass
 
         raise RuntimeError(f"There is already an entry at {config_path}")
@@ -63,5 +60,5 @@ def write_cluster(cluster, config_path, overwrite=False):
             os.makedirs(config_path.parent)
 
         with open(config_path, 'w') as cluster_file:
-            cluster_file.write(json.dumps(to_json(cluster), indent=4))
+            cluster_file.write(json.dumps(config, indent=4))
 

@@ -2,7 +2,7 @@ from .util import *
 
 
 class TinychainError(Exception):
-    __ref__ = URI("/error")
+    __uri__ = URI("/error")
 
     def __init__(self, message):
         self.message = message
@@ -12,29 +12,29 @@ class TinychainError(Exception):
 
 
 class BadRequest(TinychainError):
-    __ref__ = uri(TinychainError) + "/bad_request"
+    __uri__ = uri(TinychainError) + "/bad_request"
 
 
 class Forbidden(TinychainError):
-    __ref__ = uri(TinychainError) + "/forbidden"
+    __uri__ = uri(TinychainError) + "/forbidden"
 
 
 class MethodNotAllowed(TinychainError):
-    __ref__ = uri(TinychainError) + "/method_not_allowed"
+    __uri__ = uri(TinychainError) + "/method_not_allowed"
 
 
 class NotFound(TinychainError):
-    __ref__ = uri(TinychainError) + "/not_found"
+    __uri__ = uri(TinychainError) + "/not_found"
 
 
 class NotImplemented(TinychainError):
-    __ref__ = uri(TinychainError) + "/not_implemented"
+    __uri__ = uri(TinychainError) + "/not_implemented"
 
 
 class Unauthorized(TinychainError):
-    __ref__ = uri(TinychainError) + "/unauthorized"
+    __uri__ = uri(TinychainError) + "/unauthorized"
 
 
 class UnknownError(TinychainError):
-    __ref__ = uri(TinychainError) + "/unknown"
+    __uri__ = uri(TinychainError) + "/unknown"
 

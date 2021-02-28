@@ -30,7 +30,10 @@ class Context(object):
     def __getattr__(self, name):
         if name in self.form:
             value = self.form[name]
-            if hasattr(value, "__ref__"):
+            if isinstance(value, type):
+                from .state import Class
+                return Class(URI(name))
+            elif hasattr(value, "__ref__"):
                 return type(value)(URI(name))
             else:
                 from .state import IdRef
@@ -48,16 +51,21 @@ class Context(object):
             self.form[name] = value
 
 
-def form_of(op):
-    if hasattr(op, "__form__"):
-        return op.__form__()
+def form_of(state):
+    if hasattr(state, "__form__"):
+        if callable(state.__form__):
+            return state.__form__()
+        else:
+            return state.__form__
     else:
-        raise ValueError(f"{op} has no Context")
+        raise ValueError(f"{state} has no form")
 
 
-def ref(subject):
+def ref(subject, name):
     if hasattr(subject, "__ref__"):
-        return subject.__ref__
+        return subject.__ref__(name)
+    else:
+        return subject
 
 
 class URI(object):
@@ -137,9 +145,7 @@ def uri(subject):
         return subject.__uri__
     elif isinstance(subject, URI):
         return subject
-    elif isinstance(ref(subject), URI):
-        return ref(subject)
-    elif hasattr(type(subject), "__ref__") or hasattr(type(subject), "__uri__"):
+    elif hasattr(type(subject), "__uri__"):
         return uri(type(subject))
     else:
         raise AttributeError(f"{subject} has no URI")

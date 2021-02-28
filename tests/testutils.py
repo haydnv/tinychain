@@ -43,5 +43,6 @@ def start_host(name, clusters=[], overwrite=True):
         data_dir=data_dir,
         clusters=config,
         port=port,
+        log_level="debug",
         force_create=True)
 

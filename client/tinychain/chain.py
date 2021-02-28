@@ -3,10 +3,7 @@ from .util import *
 
 
 class Chain(State):
-    __ref__ = uri(State) + "/chain"
-
-    def __json__(self):
-        return {str(uri(type(self))): [to_json(ref(self))]}
+    __uri__ = uri(State) + "/chain"
 
     def set(self, value):
         return OpRef.Put(uri(self).append("subject"), None, value)
@@ -16,7 +13,7 @@ class Chain(State):
 
 
 class SyncChain(Chain):
-    __ref__ = uri(Chain) + "/sync"
+    __uri__ = uri(Chain) + "/sync"
 
 
 Chain.Sync = SyncChain

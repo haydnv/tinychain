@@ -1,29 +1,33 @@
 from .state import OpRef, Scalar
 from .util import uri
 
+
 # Scalar value types
 
 class Value(Scalar):
-    __ref__ = uri(Scalar) + "/value"
+    __uri__ = uri(Scalar) + "/value"
 
     def __eq__(self, other):
         return self.eq(other)
 
+    def __ne__(self, other):
+        return self.ne(other)
+
     def eq(self, other):
-        return _get_op("eq", self, other, Bool)
+        return _get_op("eq", self, other)
+
+    def ne(self, other):
+        return _get_op("ne", self, other)
 
 
 class Nil(Value):
-    __ref__ = uri(Value) + "/none"
+    __uri__ = uri(Value) + "/none"
 
 
 # Numeric types
 
 class Number(Value):
-    __ref__ = uri(Value) + "/number"
-
-    def __init__(self, ref):
-        Value.__init__(self, ref)
+    __uri__ = uri(Value) + "/number"
 
     def __add__(self, other):
         return self.add(other)
@@ -85,5 +89,5 @@ def _get_op(name, subject, key, dtype=Number):
 
 
 class Bool(Number):
-    __ref__ = uri(Number) + "/bool"
+    __uri__ = uri(Number) + "/bool"
 

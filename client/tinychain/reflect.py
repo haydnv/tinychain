@@ -1,7 +1,7 @@
 import inspect
 
 from . import error
-from .state import Op, Class, OpRef, Scalar, State
+from .state import Op as OpDef, Class, OpRef, Scalar, State
 from .util import *
 from .value import Nil, Value
 
@@ -52,7 +52,7 @@ class Meta(type):
         return form
 
     def __json__(cls):
-        return {str(uri(cls)): to_json(form_of(cls))}
+        return {str(uri(Class)): {str(uri(cls)): to_json(form_of(cls))}}
 
 
 class MethodStub(object):
@@ -69,7 +69,7 @@ class MethodStub(object):
 
 
 class Method(object):
-    __ref__ = uri(Op)
+    __uri__ = uri(OpDef)
 
     def __init__(self, header, form, name):
         self.header = header
@@ -81,7 +81,7 @@ class Method(object):
 
 
 class GetMethod(Method):
-    __ref__ = uri(Op.Get)
+    __uri__ = uri(OpDef.Get)
 
     def __call__(self, key=None):
         rtype = inspect.signature(self.form).return_annotation
@@ -90,19 +90,20 @@ class GetMethod(Method):
 
     def __form__(self):
         sig = inspect.signature(self.form)
+        parameters = list(sig.parameters.items())
 
-        if num_args(sig) < 1 or num_args(sig) > 3:
+        if len(parameters) < 1 or len(parameters) > 3:
             raise ValueError("GET method takes 1-3 arguments: (self, cxt, key)")
 
         args = [self.header]
 
         cxt = Context()
-        if num_args(sig) > 1:
+        if len(parameters) > 1:
             args.append(cxt)
 
         key_name = "key"
-        if num_args(sig) == 3:
-            key_name, param = sig.parameters[2]
+        if len(parameters) == 3:
+            key_name, param = parameters[2]
             if param.annotation in {inspect.Parameter.empty, Value}:
                 args.append(Value(URI(key_name)))
             elif issubclass(param.annotation, Value):
@@ -113,25 +114,23 @@ class GetMethod(Method):
 
 
 class PutMethod(Method):
-    __ref__ = uri(Op.Put)
+    __uri__ = uri(OpDef.Put)
 
     def __call__(self, key, value):
         return OpRef.Put(uri(self.header) + "/" + self.name, key, value)
 
     def __form__(self):
         sig = inspect.signature(self.form)
+        parameters = list(sig.parameters.items())
 
-        if num_args(sig) not in [1, 2, 4]:
+        if len(parameters) not in [1, 2, 4]:
             raise ValueError("POST method has one, two, or four arguments: "
                 + "(self, cxt, key, value)")
 
         args = [self.header]
 
         cxt = Context()
-
-        parameters = list(sig.parameters.items())
-
-        if num_args(sig) > 1:
+        if len(parameters) > 1:
             args.append(cxt)
 
         key_name = "key"
@@ -156,28 +155,29 @@ class PutMethod(Method):
 
 
 class PostMethod(Method):
-    __ref__ = uri(Op.Post)
+    __uri__ = uri(OpDef.Post)
 
     def __call__(self, **params):
         rtype = inspect.signature(self.form).return_annotation
-        rtype = State if rtype == inspect.Parameter.empty else rtype
+        rtype = Nil if rtype == inspect.Parameter.empty else rtype
         return rtype(OpRef.Post(uri(self.header).append(self.name), **params))
 
     def __form__(self):
         sig = inspect.signature(self.form)
+        parameters = list(sig.parameters.items())
 
-        if num_args(sig) == 0:
+        if len(parameters) == 0:
             raise ValueError("POST method has at least one argment: "
                 + "(self, cxt, name1=val1, ...)")
 
         args = [self.header]
-        kwargs = {}
 
         cxt = Context()
-        if num_args(sig) > 1:
+        if len(parameters) > 1:
             args.append(cxt)
 
-        for name, param in list(sig.parameters.items())[2:]:
+        kwargs = {}
+        for name, param in parameters[2:]:
             dtype = State if param.annotation == inspect.Parameter.empty else param.annotation
             kwargs[name] = dtype(URI(name))
 
@@ -186,20 +186,18 @@ class PostMethod(Method):
 
 
 class DeleteMethod(Method):
-    __ref__ = uri(Op.Delete)
+    __uri__ = uri(OpDef.Delete)
 
     def __form__(self):
         sig = inspect.signature(self.form)
+        parameters = list(sig.parameters.items())
 
-        if num_args(sig) < 1 or num_args(sig) > 3:
+        if len(parameters) < 1 or len(parameters) > 3:
             raise ValueError("DELETE method takes 1-3 arguments: (self, cxt, key)")
 
         args = [self.header]
 
         cxt = Context()
-
-        parameters = list(sig.parameters.items())
-
         if len(parameters) > 1:
             args.append(cxt)
 
@@ -219,8 +217,4 @@ Method.Get = GetMethod
 Method.Put = PutMethod
 Method.Post = PostMethod
 Method.Delete = DeleteMethod
-
-
-def num_args(sig):
-    return len(sig.parameters)
 
