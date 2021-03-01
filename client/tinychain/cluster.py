@@ -1,13 +1,17 @@
 from .annotations import *
 from .ref import OpRef
 from .reflect import gen_headers
-from .state import State
+from .state import Op, State, Tuple
 from .util import form_of, ref as get_ref, uri, URI, to_json
 
 
 class Cluster(object):
+    """A hosted Tinychain service."""
+
     @classmethod
     def __use__(cls):
+        """Return an instance of this `Cluster` with callable methods."""
+
         instance = cls()
         gen_headers(instance)
         return instance
@@ -17,12 +21,17 @@ class Cluster(object):
         self.configure()
 
     def configure(self):
+        """Initialize this `Cluster`'s :class:~`chain.Chain`s."""
         pass
 
     def authorize(self, scope):
+        """Raise an error if the current transaction has not been granted the given scope."""
+
         return OpRef.Get(uri(self) + "/authorize", scope)
 
-    def grant(self, scope, op, context={}):
+    def grant(self, scope, op: Op, context={}):
+        """Execute the given `op` after granting it the given `scope`."""
+
         params = {
             "scope": scope,
             "op": op,
@@ -34,11 +43,14 @@ class Cluster(object):
         return OpRef.Post(uri(self) + "/grant", **params)
 
     @put_method
-    def install(self):
+    def install(self, txn, cluster_link: URI, scopes: Tuple):
+        """Trust the cluster at the given link to grant the given scopes."""
         pass
 
 
 def write_cluster(cluster, config_path, overwrite=False):
+    """Write the configuration of the given :class:`Cluster` to the given path."""
+
     import json
     import pathlib
 

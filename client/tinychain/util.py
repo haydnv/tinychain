@@ -4,6 +4,8 @@ from collections import OrderedDict
 
 
 class Context(object):
+    """A transaction context."""
+
     def __init__(self, context=None):
         object.__setattr__(self, "form", OrderedDict())
 
@@ -51,6 +53,8 @@ class Context(object):
 
 
 def form_of(state):
+    """Return the form of the given state."""
+
     if hasattr(state, "__form__"):
         if callable(state.__form__):
             return state.__form__()
@@ -61,6 +65,8 @@ def form_of(state):
 
 
 def ref(subject, name):
+    """Return a named reference to the given state."""
+
     if hasattr(subject, "__ref__"):
         return subject.__ref__(name)
     else:
@@ -68,6 +74,15 @@ def ref(subject, name):
 
 
 class URI(object):
+    """
+    An absolute or relative link to a Tinychain state.
+    
+    Examples:
+        `URI("http://example.com/myservice/value_name")`
+        `URI("$other_state/method_name")`
+        `URI("/state/scalar/value/none")`
+    """
+
     def __init__(self, root, path=[]):
         assert root is not None
 
@@ -75,9 +90,17 @@ class URI(object):
         self._path = path
 
     def append(self, name):
+        """
+        Append a segment to this `URI`.
+        
+        Example:
+            `value = OpRef.Get(URI("http://example.com/myapp").append("value_name"))`
+        """ 
         return URI(str(self), [name])
 
     def host(self):
+        """Return the host segment of this `URI`, if present."""
+
         if "://" not in self._root:
             return None
 
@@ -92,8 +115,10 @@ class URI(object):
             return self._root[start:]
 
     def path(self):
+        """Return the path segment of this `URI`."""
+
         if "://" not in self._root:
-            return self._root
+            return self._root + "/".join(self._path)
 
         start = self._root.index("://")
         start = self._root.index('/', start + 3)
@@ -104,6 +129,8 @@ class URI(object):
             return self._root[start:]
 
     def port(self):
+        """Return the port of this `URI`, if present."""
+
         prefix = self.protocol() + "://" if self.protocol() else ""
         prefix += self.host() if self.host() else ""
         if prefix and self._root[len(prefix)] == ':':
@@ -111,6 +138,8 @@ class URI(object):
             return int(self._root[len(prefix) + 1:end])
 
     def protocol(self):
+        """Return the protocol of this `URI` (e.g. "http"), if present."""
+
         if "://" in self._root:
             i = self._root.index("://")
             if i > 0:
@@ -140,6 +169,8 @@ class URI(object):
 
 
 def uri(subject):
+    """Return the `URI` of the given state."""
+
     if hasattr(subject, "__uri__"):
         return subject.__uri__
     elif isinstance(subject, URI):
@@ -151,6 +182,8 @@ def uri(subject):
 
 
 def use(cls):
+    """Return an instance of the given class with callable methods."""
+
     if hasattr(cls, "__use__"):
         return cls.__use__()
     else:
@@ -158,6 +191,8 @@ def use(cls):
 
 
 def to_json(obj):
+    """Return a JSON-encodable representation of the given state or reference."""
+
     if inspect.isclass(obj):
         if hasattr(type(obj), "__json__"):
             return type(obj).__json__(obj)

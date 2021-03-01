@@ -17,6 +17,8 @@ def gen_headers(instance):
 
 
 class Meta(type):
+    """The metaclass of a :class:`State`."""
+
     def __form__(cls):
         mro = cls.mro()
         parent_members = (

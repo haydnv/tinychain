@@ -4,13 +4,13 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="tinychain-haydnv",
-    version="0.1.0",
+    name="tinychain",
+    version="0.1.5",
     author="Haydn Vestal",
     description="A Python client for Tinychain",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/haydnv/tinychain.py",
+    url="https://github.com/haydnv/tinychain",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",

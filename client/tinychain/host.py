@@ -16,6 +16,8 @@ ENCODING = "utf-8"
 
 
 class Host(object):
+    """A Tinychain host."""
+
     @staticmethod
     def encode_params(params):
         return urllib.parse.urlencode({k: json.dumps(v) for k, v in params.items()})
@@ -48,9 +50,13 @@ class Host(object):
             raise UnknownError(f"HTTP error code {status}: {response}")
 
     def link(self, path):
+        """Return a link to the given path at this host."""
+
         return "http://{}{}".format(self.address, path)
 
     def get(self, path, key=None, auth=None):
+        """Execute a GET request."""
+
         url = self.link(path)
         headers = auth_header(auth)
         if key:
@@ -62,6 +68,8 @@ class Host(object):
         return self._handle(request)
 
     def put(self, path, key, value, auth=None):
+        """Execute a PUT request."""
+
         url = self.link(path)
         headers = auth_header(auth)
         key = json.dumps(to_json(key)).encode(ENCODING)
@@ -71,6 +79,8 @@ class Host(object):
         return self._handle(request)
 
     def post(self, path, data, auth=None):
+        """Execute a POST request."""
+
         url = self.link(path)
         data = json.dumps(to_json(data)).encode(ENCODING)
         headers = auth_header(auth)
@@ -79,6 +89,8 @@ class Host(object):
         return self._handle(request)
 
     def delete(self, path, key=None, auth=None):
+        """Execute a DELETE request."""
+
         url = self.link(path)
         headers = auth_header(auth)
         if key:
@@ -90,10 +102,14 @@ class Host(object):
         return self._handle(request)
 
     def resolve(self, state, auth=None):
+        """Resove the given state."""
+
         return self.post("/transact/execute", state, auth)
 
 
 class Local(Host):
+    """A local Tinychain host."""
+
     ADDRESS = "127.0.0.1"
     STARTUP_TIME = 0.5
 
@@ -143,6 +159,8 @@ class Local(Host):
             print(f"new instance running at {self.address}: {workspace}")
 
     def stop(self):
+        """Shut down this host."""
+
         print(f"Shutting down Tinychain host {self.address}")
         self._process.terminate()
         self._process.wait()

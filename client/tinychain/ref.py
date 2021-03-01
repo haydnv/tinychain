@@ -3,10 +3,14 @@ from .util import form_of, uri, URI, to_json
 # Reference types
 
 class Ref(object):
+    """A reference to a :class:`State`."""
+
     __uri__ = URI("/state/scalar/ref")
 
 
 class After(Ref):
+    """A flow control operator used to delay execution conditionally."""
+
     __uri__ = uri(Ref) + "/after"
 
     def __init__(self, when, then):
@@ -18,8 +22,9 @@ class After(Ref):
 
 
 class Case(Ref):
-    __uri__  = uri(Ref) + "/case"
+    """A flow control operator used to branch execution conditionally."""
 
+    __uri__  = uri(Ref) + "/case"
 
     def __init__(self, cond, switch, case):
         self.cond = cond
@@ -31,6 +36,8 @@ class Case(Ref):
 
 
 class If(Ref):
+    """A flow control operator used to resolve a :class:`State` conditionally."""
+
     __uri__ = uri(Ref) + "/if"
 
     def __init__(self, cond, then, or_else):
@@ -43,6 +50,8 @@ class If(Ref):
 
 
 class OpRef(Ref):
+    """A reference to an :class:`Op`."""
+
     __uri__ = uri(Ref) + "/op"
 
     def __init__(self, subject, args):
@@ -58,6 +67,8 @@ class OpRef(Ref):
 
 
 class GetOpRef(OpRef):
+    """A reference to an instance of :class:`Op.Get`."""
+
     __uri__ = uri(OpRef) + "/get"
 
     def __init__(self, subject, key=None):
@@ -68,6 +79,8 @@ class GetOpRef(OpRef):
 
 
 class PutOpRef(OpRef):
+    """A reference to an instance of :class:`Op.Put`."""
+
     __uri__ = uri(OpRef) + "/put"
 
     def __init__(self, subject, key, value):
@@ -75,6 +88,8 @@ class PutOpRef(OpRef):
 
 
 class PostOpRef(OpRef):
+    """A reference to an instance of :class:`Op.Post`."""
+
     __uri__ = uri(OpRef) + "/post"
 
     def __init__(self, subject, **kwargs):
@@ -82,6 +97,8 @@ class PostOpRef(OpRef):
 
 
 class DeleteOpRef(OpRef):
+    """A reference to an instance of :class:`Op.Delete`."""
+
     __uri__ = uri(OpRef) + "/delete"
 
     def __init__(self, subject, key=None):
