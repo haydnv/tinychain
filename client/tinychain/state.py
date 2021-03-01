@@ -32,14 +32,21 @@ class State(object):
 class Map(State):
     __uri__ = uri(State) + "/map"
 
+    def __getitem__(self, key):
+        return OpRef.Get(uri(self), key)
+
     def __json__(self):
         return to_json(form_of(self))
+
 
 class Tuple(State):
     __uri__ = uri(State) + "/tuple"
 
     def __json__(self):
         return to_json(form_of(self))
+
+    def __getitem__(self, key):
+        return OpRef.Get(uri(self), key)
 
 
 # Scalar types

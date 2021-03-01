@@ -1,5 +1,7 @@
 import inspect
 
+from pydoc import locate
+
 from . import error
 from .ref import OpRef
 from .state import Class, Op as OpDef, Scalar, State
@@ -102,7 +104,7 @@ class GetMethod(Method):
 
     def __call__(self, key=None):
         rtype = inspect.signature(self.form).return_annotation
-        rtype = State if rtype == inspect.Parameter.empty else rtype
+        rtype = resolve_class(self.form, rtype)
         return rtype(OpRef.Get(uri(self.header).append(self.name), key))
 
     def __form__(self):
@@ -121,10 +123,8 @@ class GetMethod(Method):
         key_name = "key"
         if len(parameters) == 3:
             key_name, param = parameters[2]
-            if param.annotation == inspect.Parameter.empty:
-                args.append(Value(URI(key_name)))
-            else:
-                args.append(param.annotation(URI(key_name)))
+            dtype = resolve_class(self.form, param.annotation, Value)
+            args.append(dtype(URI(key_name)))
 
         cxt._return = self.form(*args) # populate the Context
         return (key_name, cxt)
@@ -154,17 +154,11 @@ class PutMethod(Method):
         value_name = "value"
         if len(parameters) == 4:
             key_name, param = parameters[2]
-            dtype = (Value
-                if param.annotation == inspect.Parameter.empty
-                else param.annotation)
-
+            dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
 
             value_name, param = parameters[3]
-            dtype = (State
-                if param.annotation == inspect.Parameter.empty
-                else param.annotation)
-
+            dtype = resolve_class(self.form, param.annotation)
             args.append(dtype(URI(value_name)))
 
         cxt._return = self.form(*args)
@@ -176,7 +170,7 @@ class PostMethod(Method):
 
     def __call__(self, **params):
         rtype = inspect.signature(self.form).return_annotation
-        rtype = Nil if rtype == inspect.Parameter.empty else rtype
+        rtype = resolve_class(self.form, rtype, Nil)
         return rtype(OpRef.Post(uri(self.header).append(self.name), **params))
 
     def __form__(self):
@@ -195,7 +189,7 @@ class PostMethod(Method):
 
         kwargs = {}
         for name, param in parameters[2:]:
-            dtype = State if param.annotation == inspect.Parameter.empty else param.annotation
+            dtype = resolve_class(self.form, param.annotation)
             kwargs[name] = dtype(URI(name))
 
         cxt._return = self.form(*args, **kwargs)
@@ -204,6 +198,9 @@ class PostMethod(Method):
 
 class DeleteMethod(Method):
     __uri__ = uri(OpDef.Delete)
+
+    def __call__(self, key=None):
+        return OpRef.Delete(uri(self.header).append(self.name), key)
 
     def __form__(self):
         return GetMethod.__form__(self)
@@ -250,10 +247,8 @@ class GetOp(Op):
         key_name = "key"
         if len(parameters) == 2:
             key_name, param = parameters[1]
-            if param.annotation in {inspect.Parameter.empty, Value}:
-                args.append(Value(URI(key_name)))
-            else:
-                args.append(param.annotation(URI(key_name)))
+            dtype = resolve_class(self.form, param.annotation, Value)
+            args.append(dtype(URI(key_name)))
 
         cxt._return = self.form(*args) # populate the Context
         return (key_name, cxt)
@@ -282,17 +277,11 @@ class PutOp(Op):
         value_name = "value"
         if len(parameters) == 3:
             key_name, param = parameters[1]
-            dtype = (Value
-                if param.annotation == inspect.Parameter.empty
-                else param.annotation)
-
+            dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
 
             value_name, param = parameters[2]
-            dtype = (State
-                if param.annotation == inspect.Parameter.empty
-                else param.annotation)
-
+            dtype = resolve_class(self.form, param.annotation)
             args.append(dtype(URI(value_name)))
 
         cxt._return = self.form(*args)
@@ -317,7 +306,7 @@ class PostOp(Op):
 
         kwargs = {}
         for name, param in parameters[1:]:
-            dtype = State if param.annotation == inspect.Parameter.empty else param.annotation
+            dtype = resolve_class(self.form, param.annotation)
             kwargs[name] = dtype(URI(name))
 
         cxt._return = self.form(*args, **kwargs)
@@ -342,4 +331,13 @@ Op.Get = GetOp
 Op.Put = PutOp
 Op.Post = PostOp
 Op.Delete = DeleteOp
+
+
+def resolve_class(subject, annotation, default=State):
+    if annotation == inspect.Parameter.empty:
+        return default
+    elif inspect.isclass(annotation):
+        return annotation
+    else:
+        return locate(f"{subject.__module__}.{annotation}")
 

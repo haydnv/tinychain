@@ -90,9 +90,13 @@ Now, since the program explicitly indicates that `table.count` depends on a side
 One of Tinychain's most powerful features is its object-oriented API. You can use this to define your own classes, which must inherit from exactly one class, which ultimately inherits from a native class. For example:
 
 ```python
+from __future__ import annotations # needed until Python 3.10
+
+LINK = "http://example.com/app/myservice" # <-- edit this
+
 class Distance(tc.Number, metaclass=tc.Meta):
     # make sure this is the URI which serves this class definition
-    __uri__ = uri(MyService) + "/distance"
+    __uri__ = tc.URI(LINK) + "/distance"
 
     @tc.get_method
     def to_feet(self):
@@ -103,7 +107,7 @@ class Distance(tc.Number, metaclass=tc.Meta):
         return tc.error.NotImplemented("abstract")
 
 class Feet(Distance):
-    __uri__ = uri(MyService) + "/feet"
+    __uri__ = tc.URI(LINK) + "/feet"
 
     @tc.get_method
     def to_feet(self) -> Feet:
@@ -114,7 +118,7 @@ class Feet(Distance):
         return self / 3.28
 
 class Meters(Distance):
-    __uri__ = uri(MyService) + "/meters"
+    __uri__ = tc.URI(LINK) + "/meters"
 
     @tc.get_method
     def to_feet(self) -> Feet:
@@ -141,7 +145,7 @@ DATA_DIR = "/tmp/tc/data"
 
 # define the service
 class MyService(tc.Cluster, metaclass=tc.Meta):
-    __uri__ = "http://mywebsite.com/app/myservice" # <-- edit this
+    __uri__ = tc.URI(URL)
 
     def configure(self):
         # if your clients need to access your class definitions,
@@ -181,6 +185,6 @@ class ClientService(tc.Cluster, metaclass=tc.Meta):
     @tc.get_method
     def room_area(self, txn, dimensions: Tuple) -> Meters:
         myservice = tc.use(MyService) # note: MyService is running on a *different host*
-        return myservice.area(room[0], room[1])
+        return myservice.area(length=dimensions[0], width=dimensions[1])
 ```
 
