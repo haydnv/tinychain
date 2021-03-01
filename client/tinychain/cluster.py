@@ -1,6 +1,7 @@
 from .annotations import *
+from .ref import OpRef
 from .reflect import gen_headers
-from .state import OpRef, State
+from .state import State
 from .util import form_of, ref as get_ref, uri, URI, to_json
 
 

@@ -1,7 +1,8 @@
 import inspect
 
 from . import error
-from .state import Op as OpDef, Class, OpRef, Scalar, State
+from .ref import OpRef
+from .state import Op as OpDef, Class, Scalar, State
 from .util import *
 from .value import Nil, Value
 

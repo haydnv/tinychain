@@ -36,8 +36,7 @@ class Context(object):
             elif hasattr(value, "__ref__"):
                 return ref(value, name)
             else:
-                from .state import IdRef
-                return IdRef(name)
+                return URI(name)
         else:
             raise ValueError(f"Context has no such value: {name}")
 

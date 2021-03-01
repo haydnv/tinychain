@@ -1,4 +1,5 @@
-from .state import OpRef, Scalar, State
+from .ref import OpRef
+from .state import Scalar, State
 from .util import *
 
 
