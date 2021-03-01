@@ -17,6 +17,19 @@ class After(Ref):
         return {str(uri(self)): to_json([self.when, self.then])}
 
 
+class Case(Ref):
+    __uri__  = uri(Ref) + "/case"
+
+
+    def __init__(self, cond, switch, case):
+        self.cond = cond
+        self.switch = switch
+        self.case = case
+
+    def __json__(self):
+        return {str(uri(self)): to_json([self.cond, self.switch, self.case])}
+
+
 class If(Ref):
     __uri__ = uri(Ref) + "/if"
 
