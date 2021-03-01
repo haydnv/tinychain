@@ -1,7 +1,7 @@
 import tinychain.error
 import tinychain.host
 
-from tinychain.annotations import *
+from tinychain.decorators import *
 from tinychain.chain import Chain
 from tinychain.cluster import Cluster, write_cluster
 from tinychain.ref import *

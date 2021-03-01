@@ -1,4 +1,4 @@
-from .annotations import *
+from .decorators import *
 from .ref import OpRef
 from .reflect import gen_headers
 from .state import Op, State, Tuple
