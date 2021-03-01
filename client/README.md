@@ -40,7 +40,7 @@ def example(txn) -> tc.Number:
     return txn.product
 ```
 
-The constructor of a `State` always takes exactly one argument, which is the form of that `State`. For example, `tc.Number(3)` constructs a new `Number` whose form is `3`; `txn.a * txn.b` above constructs a new `Number` whose form is `OpRef.Get("$a/mul", IdRef("b"))`. When debugging, it can be helpful to print the form of a `State` using the `form_of` function.
+The constructor of a `State` always takes exactly one argument, which is the form of that `State`. For example, `tc.Number(3)` constructs a new `Number` whose form is `3`; `txn.a * txn.b` above constructs a new `Number` whose form is `OpRef.Get("$a/mul", URI("b"))`. When debugging, it can be helpful to print the form of a `State` using the `form_of` function.
 
 When using Python to develop a Tinychain service, it's important to remember that the output of your code is a Tinychain *compute graph* which will be served by a Tinychain host; your Python code itself won't be running in production. This means that you can't use Python control flow operators like `if` or `while` the way that you're used to. For example:
 
@@ -54,7 +54,7 @@ def to_feet(txn, meters: tc.Number) -> tc.Number:
         tc.error.BadRequest("negative distance is not supported"))
 ```
 
-For the same reason, it's important to use type annotations in your Tinychain Python code. Otherwise, you and your users (and the Tinychain client itself) won't know the return types of your methods! Without the type annotation in `meters: tc.Number` above, the argument `meters` would be of type `IdRef` and would not support operators like `*` or `>`.
+For the same reason, it's important to use type annotations in your Tinychain Python code. Otherwise, you and your users (and the Tinychain client itself) won't know the return types of your methods! Without the type annotation in `meters: tc.Number` above, the argument `meters` would just be a `Value` and would not support operators like `*` or `>`.
 
 It's also important to keep in mind that Tinychain by default resolves all dependencies concurrently, and does not resolve unused dependencies. Consider this function:
 
@@ -65,7 +65,7 @@ def num_rows(txn):
     value = [("name", tc.String), ("email", tc.String)]
 
     txn.table = tc.Table((key, value))
-    txn.table.insert((123, "Bob", "bob.roberts@example.com"))
+    txn.table.insert((123,), ("Bob", "bob.roberts@example.com"))
     return txn.table.count()
 ```
 
@@ -90,19 +90,39 @@ Now, since the program explicitly indicates that `table.count` depends on a side
 One of Tinychain's most powerful features is its object-oriented API. You can use this to define your own classes, which must inherit from exactly one class, which ultimately inherits from a native class. For example:
 
 ```python
-class Car(tc.Map):
-    @tc.get_op
-    def display_name() -> tc.String:
-        return tc.String("car")
+class Distance(tc.Number, metaclass=tc.Meta):
+    # make sure this is the URI which serves this class definition
+    __uri__ = uri(MyService) + "/distance"
 
-class Sedan(Car):
-    @tc.get_op
-    def display_name() -> tc.String:
-        return tc.String("sedan")
+    @tc.get_method
+    def to_feet(self):
+        return tc.error.NotImplemented("abstract")
 
-    @tc.get_op
-    def doors() -> tc.Number:
-        return tc.Number(4)
+    @tc.get_method
+    def to_meters(self):
+        return tc.error.NotImplemented("abstract")
+
+class Feet(Distance):
+    __uri__ = uri(MyService) + "/feet"
+
+    @tc.get_method
+    def to_feet(self) -> Feet:
+        return self
+
+    @tc.get_method
+    def to_meters(self) -> Meters:
+        return self / 3.28
+
+class Meters(Distance):
+    __uri__ = uri(MyService) + "/meters"
+
+    @tc.get_method
+    def to_feet(self) -> Feet:
+        return self * 3.28
+
+    @tc.get_method
+    def to_meters(self) -> Meters:
+        return self
 ```
 
 Note that Tinychain does not have any concept of member visibility, like a "public" or "private" method. This is because Tinychain objects are meant to be sent over the network and used by client code, making a "private" method meaningless (and deceptive to the developer implementing it). If you want to hide an implementation detail from the public API of your class, use a Python function outside your class definition.
@@ -120,23 +140,47 @@ WORKSPACE = "/tmp/tc/workspace"
 DATA_DIR = "/tmp/tc/data"
 
 # define the service
-class MyService(tc.Cluster):
-    __uri__ = "/app/myservice"
+class MyService(tc.Cluster, metaclass=tc.Meta):
+    __uri__ = "http://mywebsite.com/app/myservice" # <-- edit this
 
-    @tc.get_op
-    def hello():
-        return tc.String("Hello, World!)
+    def configure(self):
+        # if your clients need to access your class definitions,
+        # make sure to list them here so that Tinychain will make them available
+        # via GET request
+
+        self.Distance = Distance
+        self.Feet = Feet
+        self.Meters = Meters
+
+    @tc.post_method
+    def area(self, txn, length: Distance, width: Distance) -> Meters:
+        return length.to_meters() * width.to_meters()
 
 if __name__ == "__main__":
-    import requests
-
     # write the definition to disk
     tc.write_cluster(CONFIG_PATH)
 
     # start a new Tinychain host to serve MyService
     host = tc.host.Local(TC_PATH, WORKSPACE, DATA_DIR, [CONFIG_PATH], force_create=True)
-    assert requests.get("http://127.0.0.1:8702/app/myservice/hello") == "Hello, World!\n"
+    area = host.post("http://127.0.0.1:8702/app/myservice/area", length=5, width=10)
+    assert area == 50
 ```
 
 You can see more in-depth examples in the [tests](http://github.com/haydnv/tinychain/tree/master/tests) directory.
+
+## Calling another service from your own
+
+Arguably the most powerful feature of Tinychain's Python client is the ability to interact with other services over the network like any other software library, using the same code that defines the service. This eliminates a huge amount of synchronization, validation, and conversion code relative to older microservice design patterns, as well as the need to write separate client and server libraries (although you're still free to do this for security purposes if you want). For example, if a client needs to call `MyService`, they can use the exact same Python class that defines the service itself:
+
+```python
+from myservice import MyService, Distance, Meters
+
+class ClientService(tc.Cluster, metaclass=tc.Meta):
+    __uri__ = "http://clientwebsite.com/app/clientservice" # <-- edit this
+
+    @tc.get_method
+    def room_area(self, txn, dimensions: Tuple) -> Meters:
+        myservice = tc.use(MyService) # note: MyService is running on a *different host*
+        return myservice.area(room[0], room[1])
+```
 

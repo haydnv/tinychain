@@ -33,6 +33,12 @@ class Nil(Value):
     __uri__ = uri(Value) + "/none"
 
 
+class String(Value):
+    """A string."""
+
+    __uri__ = uri(Value) + "/string"
+
+
 # Numeric types
 
 class Number(Value):

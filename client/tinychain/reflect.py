@@ -2,7 +2,7 @@ import inspect
 
 from . import error
 from .ref import OpRef
-from .state import Op as OpDef, Class, Scalar, State
+from .state import Class, Op as OpDef, Scalar, State
 from .util import *
 from .value import Nil, Value
 
@@ -14,6 +14,17 @@ def gen_headers(instance):
 
         if isinstance(attr, MethodStub):
             setattr(instance, name, attr.method(instance, name))
+
+
+class ClassStub(object):
+    __uri__ = uri(State) + "/object/class"
+
+    def __init__(self, name, form):
+        self.name = name
+        self.form = form
+
+    def __call__(self, form=None):
+        return self.form(form)
 
 
 class Meta(type):
@@ -219,6 +230,9 @@ class Op(object):
 
 class GetOp(Op):
     __uri__ = uri(OpDef.Get)
+
+    def __call__(self, key=None):
+        return OpRef.Get(uri(self), key)
 
     def __form__(self):
         sig = inspect.signature(self.form)

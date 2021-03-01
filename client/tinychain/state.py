@@ -23,7 +23,7 @@ class State(object):
         return self.__class__(URI(name))
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(form_of(self))"
+        return f"{self.__class__.__name__}({form_of(self)})"
 
     def dtype(self):
         return Class(OpRef.get(uri(self) + "/class"))
@@ -93,7 +93,14 @@ Op.Delete = DeleteOp
 
 # User-defined object types
 
+
 class Class(State):
     __uri__ = uri(State) + "/object/class"
 
+
+class Instance(State):
+    __uri__ = uri(State) + "/object/instance"
+
+    def __init__(self, form):
+        State.__init__(self, form)
 
