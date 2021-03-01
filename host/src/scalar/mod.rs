@@ -157,6 +157,13 @@ impl Scalar {
                     .map(Box::new)
                     .map(Scalar::Ref),
 
+                RT::Case => self
+                    .opt_cast_into()
+                    .map(Box::new)
+                    .map(TCRef::Case)
+                    .map(Box::new)
+                    .map(Scalar::Ref),
+
                 RT::Id => self
                     .opt_cast_into()
                     .map(TCRef::Id)

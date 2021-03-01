@@ -17,6 +17,7 @@ use crate::txn::Txn;
 
 use super::{Refer, TCRef};
 
+#[derive(Clone, Eq, PartialEq)]
 pub struct Case {
     cond: TCRef,
     switch: Tuple<Scalar>,
