@@ -4,7 +4,6 @@ import inspect
 
 from .decorators import *
 from .ref import OpRef
-from .reflect import gen_headers
 from .state import Op, State, Tuple
 from .util import form_of, ref as get_ref, uri, URI, to_json
 
@@ -59,7 +58,19 @@ class Cluster(object, metaclass=Meta):
     @classmethod
     def __use__(cls):
         instance = cls()
-        gen_headers(instance)
+        for name, attr in inspect.getmembers(instance):
+            if name.startswith('_'):
+                continue
+
+            if isinstance(attr, MethodStub):
+                setattr(instance, name, attr.method(instance, name))
+            elif inspect.isclass(attr) and issubclass(attr, State):
+                @get_method
+                def ctr(self, txn, form) -> attr:
+                    return attr(form)
+
+                setattr(instance, name, ctr.method(instance, name))
+
         return instance
 
     def __init__(self, form=None):
