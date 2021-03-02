@@ -3,6 +3,7 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use futures::future::TryFutureExt;
+use log::debug;
 use safecast::TryCastInto;
 use uplock::RwLock;
 
@@ -14,7 +15,7 @@ use tcgeneric::*;
 use crate::chain::{Chain, ChainType, SyncChain};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
-use crate::scalar::{Link, OpRef, Scalar, TCRef, Value};
+use crate::scalar::{Link, OpRef, Scalar, Value};
 use crate::txn::{Actor, TxnId};
 
 use super::Cluster;
@@ -34,19 +35,28 @@ pub async fn instantiate(
 
     let mut chain_schema = HashMap::new();
     let mut cluster_proto = HashMap::new();
+    let mut classes = HashMap::new();
 
     for (id, scalar) in proto.into_iter() {
+        debug!("Cluster member: {}", scalar);
+
         match scalar {
             Scalar::Ref(tc_ref) => {
-                if let TCRef::Op(OpRef::Get((subject, schema))) = *tc_ref {
-                    let classpath = TCPathBuf::try_from(subject)?;
-                    let ct = ChainType::from_path(&classpath)
-                        .ok_or_else(|| TCError::bad_request("not a Chain", classpath))?;
+                let op_ref = OpRef::try_from(*tc_ref)?;
+                match op_ref {
+                    OpRef::Get((subject, schema)) => {
+                        let classpath = TCPathBuf::try_from(subject)?;
+                        let ct = ChainType::from_path(&classpath)
+                            .ok_or_else(|| TCError::bad_request("not a Chain", classpath))?;
 
-                    let schema: Value = schema.try_into()?;
-                    chain_schema.insert(id, (ct, schema));
-                } else {
-                    return Err(TCError::bad_request("expected a Chain but found", tc_ref));
+                        let schema: Value = schema.try_into()?;
+                        chain_schema.insert(id, (ct, schema));
+                    }
+                    OpRef::Post((extends, proto)) => {
+                        let extends = extends.try_into()?;
+                        classes.insert(id, InstanceClass::new(Some(extends), proto));
+                    }
+                    other => return Err(TCError::bad_request("expected a Chain but found", other)),
                 }
             }
             Scalar::Op(op_def) => {
@@ -85,6 +95,7 @@ pub async fn instantiate(
         actor: Arc::new(Actor::new(actor_id)),
         path: path.clone(),
         chains: chains.into(),
+        classes: classes.into(),
         confirmed: RwLock::new(txn_id),
         owned: RwLock::new(HashMap::new()),
         installed: TxnLock::new(

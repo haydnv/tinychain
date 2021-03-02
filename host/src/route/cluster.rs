@@ -24,8 +24,7 @@ impl<'a> ClusterHandler<'a> {
         if key.is_some() {
             let key: Id = key.try_cast_into(|v| TCError::bad_request("invalid ID", v))?;
             self.cluster
-                .chains()
-                .get(&key)
+                .chain(&key)
                 .cloned()
                 .map(State::from)
                 .ok_or_else(|| TCError::not_found(key))
@@ -188,8 +187,10 @@ impl Route for Cluster {
 
         if path.is_empty() {
             Some(Box::new(ClusterHandler::from(self)))
-        } else if let Some(chain) = self.chains().get(&path[0]) {
+        } else if let Some(chain) = self.chain(&path[0]) {
             chain.route(&path[1..])
+        } else if let Some(class) = self.class(&path[0]) {
+            class.route(&path[1..])
         } else if path.len() == 1 {
             match path[0].as_str() {
                 "authorize" => Some(Box::new(AuthorizeHandler::from(self))),

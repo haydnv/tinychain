@@ -196,6 +196,17 @@ impl From<Link> for Subject {
     }
 }
 
+impl TryFrom<Subject> for Link {
+    type Error = TCError;
+
+    fn try_from(subject: Subject) -> TCResult<Self> {
+        match subject {
+            Subject::Link(link) => Ok(link),
+            other => Err(TCError::bad_request("expected a Link but found", other)),
+        }
+    }
+}
+
 impl TryFrom<Subject> for TCPathBuf {
     type Error = TCError;
 

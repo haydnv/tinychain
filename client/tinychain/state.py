@@ -100,14 +100,13 @@ Op.Delete = DeleteOp
 
 # User-defined object types
 
-
 class Class(State):
     __uri__ = uri(State) + "/object/class"
+
+    def __json__(self):
+        return {str(uri(Class)): to_json(form_of(self))}
 
 
 class Instance(State):
     __uri__ = uri(State) + "/object/instance"
-
-    def __init__(self, form):
-        State.__init__(self, form)
 

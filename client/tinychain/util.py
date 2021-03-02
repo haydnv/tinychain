@@ -56,7 +56,7 @@ def form_of(state):
     """Return the form of the given state."""
 
     if hasattr(state, "__form__"):
-        if callable(state.__form__):
+        if callable(state.__form__) and not inspect.isclass(state.__form__):
             return state.__form__()
         else:
             return state.__form__

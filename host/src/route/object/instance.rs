@@ -6,11 +6,10 @@ use tc_error::*;
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPath};
 
 use crate::object::InstanceExt;
+use crate::route::{GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::*;
 use crate::state::State;
 use crate::txn::Txn;
-
-use super::{GetHandler, Handler, PostHandler, PutHandler, Route};
 
 struct GetMethod<'a, T: Instance> {
     subject: &'a InstanceExt<T>,

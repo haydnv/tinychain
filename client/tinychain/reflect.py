@@ -18,17 +18,6 @@ def gen_headers(instance):
             setattr(instance, name, attr.method(instance, name))
 
 
-class ClassStub(object):
-    __uri__ = uri(State) + "/object/class"
-
-    def __init__(self, name, form):
-        self.name = name
-        self.form = form
-
-    def __call__(self, form=None):
-        return self.form(form)
-
-
 class Meta(type):
     """The metaclass of a :class:`State`."""
 
@@ -68,7 +57,7 @@ class Meta(type):
         return form
 
     def __json__(cls):
-        return {str(uri(Class)): {str(uri(cls)): to_json(form_of(cls))}}
+        return {str(uri(cls)): to_json(form_of(cls))}
 
 
 class MethodStub(object):

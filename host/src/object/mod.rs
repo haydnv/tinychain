@@ -83,6 +83,18 @@ impl tcgeneric::Instance for Object {
     }
 }
 
+impl From<InstanceClass> for Object {
+    fn from(class: InstanceClass) -> Object {
+        Object::Class(class)
+    }
+}
+
+impl From<InstanceExt<State>> for Object {
+    fn from(instance: InstanceExt<State>) -> Object {
+        Object::Instance(instance)
+    }
+}
+
 #[async_trait]
 impl de::FromStream for Object {
     type Context = ();

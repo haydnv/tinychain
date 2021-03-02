@@ -10,30 +10,19 @@ class Meters(tc.Number, metaclass=tc.Meta):
 
 class ClassTests(unittest.TestCase):
     def testJson(self):
-        expected = {'/state/object/class': {
+        expected = {
             '/state/scalar/value/number': {
                 'feet': {'/state/scalar/op/get': ['key', [
                     ['_return', {'$self/mul': [3.28]}]]
                 ]}
             }
-        }}
+        }
 
         actual = tc.to_json(Meters)
         self.assertEqual(expected, actual)
 
     def testInContext(self):
-        expected = [
-            ['M', {'/state/object/class':
-                {'/state/scalar/value/number': {
-                    'feet': {'/state/scalar/op/get': ['key', [
-                        ['_return', {'$self/mul': [3.28]}]]]}
-                    }
-                }
-            }],
-            ['m', {'$M': [2]}],
-            ['ft', {'$m/feet': [None]}]
-        ]
-
+        self.maxDiff = None
         expected = [
             ['M', {'/state/object/class':
                 {'/state/scalar/value/number': {
@@ -46,7 +35,7 @@ class ClassTests(unittest.TestCase):
             ['ft', {'$m/feet': [None]}]]
 
         cxt = tc.Context()
-        cxt.M = Meters
+        cxt.M = tc.Class(Meters)
         cxt.m = Meters(tc.OpRef.Get(cxt.M, 2))
         cxt.ft = cxt.m.feet()
 

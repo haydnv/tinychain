@@ -1,5 +1,6 @@
 /// Utilities to reference to a [`State`] within a [`Txn`], and resolve that [`TCRef`].
 use std::collections::HashSet;
+use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -158,6 +159,17 @@ impl Refer for TCRef {
     }
 }
 
+impl TryFrom<TCRef> for OpRef {
+    type Error = TCError;
+
+    fn try_from(tc_ref: TCRef) -> TCResult<Self> {
+        match tc_ref {
+            TCRef::Op(op_ref) => Ok(op_ref),
+            other => Err(TCError::bad_request("expected an OpRef but found", other)),
+        }
+    }
+}
+
 impl TryCastFrom<TCRef> for OpRef {
     fn can_cast_from(tc_ref: &TCRef) -> bool {
         match tc_ref {
@@ -270,11 +282,12 @@ impl<'en> ToStream<'en> for TCRef {
 
         map.encode_key(self.class().path().to_string())?;
         match self {
+            Self::Id(_) => unimplemented!("this should not be possible"),
+            Self::Op(_) => unimplemented!("this should not be possible"),
+
             Self::After(after) => map.encode_value(after),
             Self::Case(case) => map.encode_value(case),
-            Self::Id(_) => unimplemented!("this should not be possible"),
             Self::If(if_ref) => map.encode_value(if_ref),
-            Self::Op(_) => unimplemented!("this should not be possible"),
         }?;
 
         map.end()
@@ -293,11 +306,12 @@ impl<'en> IntoStream<'en> for TCRef {
 
         map.encode_key(self.class().path().to_string())?;
         match self {
+            Self::Id(_) => unimplemented!("this should not be possible"),
+            Self::Op(_) => unimplemented!("this should not be possible"),
+
             Self::After(after) => map.encode_value(after),
             Self::Case(case) => map.encode_value(case),
-            Self::Id(_) => unimplemented!("this should not be possible"),
             Self::If(if_ref) => map.encode_value(if_ref),
-            Self::Op(_) => unimplemented!("this should not be possible"),
         }?;
 
         map.end()

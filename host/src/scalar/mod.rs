@@ -684,7 +684,11 @@ impl ScalarVisitor {
 
     pub fn visit_subject<E: de::Error>(subject: Subject, params: Scalar) -> Result<Scalar, E> {
         debug!("ScalarVisitor::visit_subject {} {}", subject, params);
-        if params.is_none() {
+
+        if let Scalar::Map(params) = params {
+            let op_ref = OpRef::Post((subject, params));
+            Ok(Scalar::Ref(Box::new(TCRef::Op(op_ref))))
+        } else if params.is_none() {
             match subject {
                 Subject::Ref(id, path) if path.is_empty() => {
                     Ok(Scalar::Ref(Box::new(TCRef::Id(id))))
