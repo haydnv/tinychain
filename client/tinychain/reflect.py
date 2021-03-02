@@ -224,7 +224,7 @@ class GetOp(Op):
         sig = inspect.signature(self.form)
         parameters = list(sig.parameters.items())
 
-        if len(parameters) < 1 or len(parameters) > 3:
+        if len(parameters) > 2:
             raise ValueError(f"{self.dtype()} takes 0-2 arguments: (cxt, key)")
 
         args = []
@@ -253,8 +253,8 @@ class PutOp(Op):
         sig = inspect.signature(self.form)
         parameters = list(sig.parameters.items())
 
-        if len(parameters) not in [1, 3]:
-            raise ValueError("{self.dtype()} has one or three arguments: (cxt, key, value)")
+        if len(parameters) not in [0, 1, 3]:
+            raise ValueError("{self.dtype()} has 0, 1, or 3 arguments: (cxt, key, value)")
 
         args = [self.header]
 
@@ -290,7 +290,7 @@ class PostOp(Op):
         args = []
 
         cxt = Context()
-        if len(parameters) > 1:
+        if len(parameters):
             args.append(cxt)
 
         kwargs = {}
