@@ -1,6 +1,7 @@
 """Utilities for communicating with a Tinychain host."""
 
 import json
+import logging
 import os
 import pathlib
 import requests
@@ -158,15 +159,15 @@ class Local(Host):
         if self._process is None or self._process.poll() is not None:
             raise RuntimeError(f"Tinychain process at {self.address} crashed on startup")
         else:
-            print(f"new instance running at {self.address}: {workspace}")
+            logging.info(f"new instance running at {self.address}: {workspace}")
 
     def stop(self):
         """Shut down this host."""
 
-        print(f"Shutting down Tinychain host {self.address}")
+        logging.info(f"Shutting down Tinychain host {self.address}")
         self._process.terminate()
         self._process.wait()
-        print(f"Host {self.address} shut down successfully")
+        logging.info(f"Host {self.address} shut down successfully")
 
     def __del__(self):
         if self._process:

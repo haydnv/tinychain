@@ -1,6 +1,7 @@
 """Base class of a hosted service."""
 
 import inspect
+import logging
 
 from .decorators import *
 from .ref import OpRef
@@ -22,7 +23,7 @@ class Cluster(object, metaclass=Meta):
                 setattr(instance, name, attr.method(instance, name))
             elif inspect.isclass(attr) and issubclass(attr, State):
                 if not str(uri(cls)).startswith(str(uri(attr))):
-                    print(f"warning: cluster at {uri(cls)} serves class at {uri(attr)}")
+                    logging.warning(f"cluster at {uri(cls)} serves class at {uri(attr)}")
 
                 @get_method
                 def ctr(self, txn, form) -> attr:
@@ -78,7 +79,7 @@ def write_cluster(cluster, config_path, overwrite=False):
                 if json.load(f) == config:
                     return
             except json.decoder.JSONDecodeError as e:
-                print(f"warning: invalid JSON at {config_path}: {e}")
+                logging.warning(f"invalid JSON at {config_path}: {e}")
                 pass
 
         raise RuntimeError(f"There is already an entry at {config_path}")
