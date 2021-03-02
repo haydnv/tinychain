@@ -9,7 +9,7 @@ You can install the Python client using Pip:
 pip3 install tinychain
 ```
 
-If you don't have a Tinychain host already available for testing, you'll also need to download the [latest release](http://github.com/haydnv/tinychain/releases) from GitHub. Note that binary releases are only available for 64-bit x86 Linux at this time. If you have `cargo` installed, you can compile and install Tinychain for your platform by running `cargo install tinychain`. Using `cargo install` should add the `tinychain` command to your `PATH`, so you can just set `TC_PATH = "tinychain"` in the "Hello, World!" example below.
+If you don't have a Tinychain host already available for testing, you'll also need to download the [latest release](http://github.com/haydnv/tinychain/releases) from GitHub. Note that binary releases are only available for 64-bit Intel Linux at this time. If you have `cargo` installed, you can compile and install Tinychain for your platform by running `cargo install tinychain`. Using `cargo install` should add the `tinychain` command to your `PATH`, so you can just set `TC_PATH = "tinychain"` in the "Hello, World!" example below.
 
 To check that everything is working, try this "Hello, World!" program:
 
@@ -39,6 +39,8 @@ def example(txn) -> tc.Number:
     txn.product = txn.a * txn.b # this is a Ref
     return txn.product
 ```
+
+Notice the assignments to the transaction context `txn`. This is necessary to assign an addressable name to a `State`, in order to read its value or call an instance method. For example, calling `tc.Number(5) * tc.Number(10)` above would result in an error, because `Number.mul` is an instance method, and `tc.Number(5)` is not addressable. When the state `tc.Number(5)` is assigned to `txn.a`, it is addressble within the transaction context as `$a`, making it possible to resolve `OpRef.Get("$a/mul", "$b")`.
 
 The constructor of a `State` always takes exactly one argument, which is the form of that `State`. For example, `tc.Number(3)` constructs a new `Number` whose form is `3`; `txn.a * txn.b` above constructs a new `Number` whose form is `OpRef.Get("$a/mul", URI("b"))`. When debugging, it can be helpful to print the form of a `State` using the `form_of` function.
 
@@ -95,19 +97,18 @@ from __future__ import annotations # needed until Python 3.10
 LINK = "http://example.com/app/myservice" # <-- edit this
 
 class Distance(tc.Number):
-    # make sure this is the URI which serves this class definition
-    __uri__ = tc.URI(LINK) + "/distance"
+    __uri__ = tc.URI(LINK) + "/Distance"
 
     @tc.get_method
-    def to_feet(self):
+    def to_feet(self) -> Feet:
         return tc.error.NotImplemented("abstract")
 
     @tc.get_method
-    def to_meters(self):
+    def to_meters(self) -> Meters:
         return tc.error.NotImplemented("abstract")
 
 class Feet(Distance):
-    __uri__ = tc.URI(LINK) + "/feet"
+    __uri__ = tc.URI(LINK) + "/Feet"
 
     @tc.get_method
     def to_feet(self) -> Feet:
@@ -118,7 +119,7 @@ class Feet(Distance):
         return self / 3.28
 
 class Meters(Distance):
-    __uri__ = tc.URI(LINK) + "/meters"
+    __uri__ = tc.URI(LINK) + "/Meters"
 
     @tc.get_method
     def to_feet(self) -> Feet:
@@ -144,21 +145,19 @@ WORKSPACE = "/tmp/tc/workspace"
 DATA_DIR = "/tmp/tc/data"
 
 # define the service
-class MyService(tc.Cluster):
-    __uri__ = tc.URI(URL)
+class AreaService(tc.Cluster):
+    __uri__ = tc.URI(LINK)
 
     def _configure(self):
-        # if your clients need to access your class definitions,
-        # make sure to list them here so that Tinychain will make them available
-        # via GET request
-
         self.Distance = Distance
         self.Feet = Feet
         self.Meters = Meters
 
     @tc.post_method
-    def area(self, txn, length: Distance, width: Distance) -> Meters:
-        return length.to_meters() * width.to_meters()
+    def area(self, txn, length: Distance, width: Distance) -> tc.Number:
+        txn.length_m = length.to_meters()
+        txn.width_m = width.to_meters()
+        return txn.length_m * txn.width_m
 
 if __name__ == "__main__":
     # write the definition to disk
@@ -166,8 +165,6 @@ if __name__ == "__main__":
 
     # start a new Tinychain host to serve MyService
     host = tc.host.Local(TC_PATH, WORKSPACE, DATA_DIR, [CONFIG_PATH], force_create=True)
-    area = host.post("http://127.0.0.1:8702/app/myservice/area", length=5, width=10)
-    assert area == 50
 ```
 
 You can see more in-depth examples in the [tests](http://github.com/haydnv/tinychain/tree/master/tests) directory.
@@ -177,14 +174,16 @@ You can see more in-depth examples in the [tests](http://github.com/haydnv/tinyc
 Arguably the most powerful feature of Tinychain's Python client is the ability to interact with other services over the network like any other software library, using the same code that defines the service. This eliminates a huge amount of synchronization, validation, and conversion code relative to older microservice design patterns, as well as the need to write separate client and server libraries (although you're still free to do this for security purposes if you want). For example, if a client needs to call `MyService`, they can use the exact same Python class that defines the service itself:
 
 ```python
-from myservice import MyService, Distance, Meters
+from area import AreaService
 
 class ClientService(tc.Cluster):
-    __uri__ = "http://clientwebsite.com/app/clientservice" # <-- edit this
+    __uri__ = tc.URI("http://127.0.0.1:8702/app/clientservice")
 
     @tc.get_method
-    def room_area(self, txn, dimensions: Tuple) -> Meters:
-        myservice = tc.use(MyService) # note: MyService is running on a *different host*
-        return myservice.area(length=dimensions[0], width=dimensions[1])
+    def room_area(self, txn, dimensions: tc.Tuple) -> Meters:
+        area_service = tc.use(AreaService)
+        txn.length = area_service.Meters(dimensions[0])
+        txn.width = area_service.Meters(dimensions[1])
+        return area_service	.area(length=txn.length, width=txn.width)
 ```
 

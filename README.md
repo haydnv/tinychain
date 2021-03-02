@@ -8,7 +8,7 @@ If you need a feature which is not yet available, or even not yet planned, pleas
 
 ## Getting started
 
-The easiest way to get started is to download the latest release from GitHub here: https://github.com/haydnv/tinychain/releases. Binary releases are currently only available for 64-bit x86 Linux (you should be able to build from source on other architectures, but this has not been tested).
+The easiest way to get started is to download the latest release from GitHub here: https://github.com/haydnv/tinychain/releases. Binary releases are currently only available for 64-bit Intel Linux (you should be able to build from source on other architectures, but this has not been tested).
 
 If you use the Rust programming language, you can install Tinychain on any platform by running `cargo install tinychain`.
 

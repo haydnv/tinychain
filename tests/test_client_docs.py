@@ -7,7 +7,7 @@ from testutils import start_host
 
 
 ENDPOINT = "/transact/hypothetical"
-LINK = "http://127.0.0.1:8702/app/myservice"
+LINK = "http://127.0.0.1:8702/app/area"
 
 
 @tc.get_op
@@ -27,7 +27,7 @@ def to_feet(txn, meters: tc.Number) -> tc.Number:
 
 
 class Distance(tc.Number):
-    __uri__ = tc.URI(LINK) + "/distance"
+    __uri__ = tc.URI(LINK) + "/Distance"
 
     @tc.get_method
     def to_feet(self) -> Feet:
@@ -39,7 +39,7 @@ class Distance(tc.Number):
 
 
 class Feet(Distance):
-    __uri__ = tc.URI(LINK) + "/feet"
+    __uri__ = tc.URI(LINK) + "/Feet"
 
     @tc.get_method
     def to_feet(self) -> Feet:
@@ -51,7 +51,7 @@ class Feet(Distance):
 
 
 class Meters(Distance):
-    __uri__ = tc.URI(LINK) + "/meters"
+    __uri__ = tc.URI(LINK) + "/Meters"
 
     @tc.get_method
     def to_feet(self) -> Feet:
@@ -62,7 +62,7 @@ class Meters(Distance):
         return self
 
 
-class MyService(tc.Cluster):
+class AreaService(tc.Cluster):
     __uri__ = tc.URI(LINK)
 
     def _configure(self):
@@ -71,21 +71,10 @@ class MyService(tc.Cluster):
         self.Meters = Meters
 
     @tc.post_method
-    def area(self, txn, length: Distance, width: Distance) -> Meters:
-        return length.to_meters() * width.to_meters()
-
-
-class MyService(tc.Cluster):
-    __uri__ = tc.URI(LINK)
-
-    def _configure(self):
-        self.Distance = Distance
-        self.Feet = Feet
-        self.Meters = Meters
-
-    @tc.post_method
-    def area(self, txn, length: Distance, width: Distance) -> Meters:
-        return length.to_meters() * width.to_meters()
+    def area(self, txn, length: Distance, width: Distance) -> tc.Number:
+        txn.length_m = length.to_meters()
+        txn.width_m = width.to_meters()
+        return txn.length_m * txn.width_m
 
 
 class ClientService(tc.Cluster):
@@ -93,15 +82,15 @@ class ClientService(tc.Cluster):
 
     @tc.get_method
     def room_area(self, txn, dimensions: tc.Tuple) -> Meters:
-        myservice = tc.use(MyService)
-        txn.length = Meters(dimensions[0])
-        txn.width = Meters(dimensions[1])
-        return myservice.area(length=txn.length, width=txn.width)
+        area_service = tc.use(AreaService)
+        txn.length = area_service.Meters(dimensions[0])
+        txn.width = area_service.Meters(dimensions[1])
+        return area_service.area(length=txn.length, width=txn.width)
 
 
 class ClientDocTests(unittest.TestCase):
     def setUp(self):
-        self.host = start_host("test_client_docs", [MyService, ClientService])
+        self.host = start_host("test_client_docs", [AreaService, ClientService])
 
     def testHello(self):
         hello = "Hello, World!"
@@ -113,10 +102,8 @@ class ClientDocTests(unittest.TestCase):
         cxt.result = cxt.example()
         self.assertEqual(self.host.post(ENDPOINT, cxt), 50)
 
-    @unittest.skip
     def testClientService(self):
-        actual = self.host.get("/app/clientservice/room_area", (5, 10))
-        print(actual)
+        self.assertEqual(self.host.get("/app/clientservice/room_area", (5, 10)), 50)
 
     def tearDown(self):
         self.host.stop()
