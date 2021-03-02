@@ -53,7 +53,7 @@ class Number(Value):
         return self.add(other)
 
     def __div__(self, other):
-        return self.mul(other)
+        return self.div(other)
 
     def __gt__(self, other):
         return self.gt(other)
@@ -78,6 +78,9 @@ class Number(Value):
 
     def __sub__(self, other):
         return self.sub(other)
+
+    def __truediv__(self, other):
+        return self.div(other)
 
     def add(self, other):
         """Return the sum of `self` and `other`."""
