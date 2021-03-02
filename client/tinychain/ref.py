@@ -1,6 +1,6 @@
-from .util import form_of, uri, URI, to_json
+"""Reference types."""
 
-# Reference types
+from .util import form_of, uri, URI, to_json
 
 class Ref(object):
     """A reference to a :class:`State`."""

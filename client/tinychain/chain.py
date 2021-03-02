@@ -1,3 +1,5 @@
+"""Data structures responsible for keeping track of mutations to a :class:`Value`"""
+
 from .ref import OpRef
 from .state import Scalar, State
 from .util import *
@@ -23,7 +25,7 @@ class Chain(State):
 
 class SyncChain(Chain):
     """
-    A :class:`Chain` which keeps track of only the current Transaction's operations,
+    A :class:`Chain` which keeps track of only the current transaction's operations,
     in order to recover from a transaction failure (e.g. if the host crashes).
     """
 

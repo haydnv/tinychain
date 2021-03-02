@@ -99,7 +99,7 @@ class ClientService(tc.Cluster, metaclass=tc.Meta):
 
 class ClientDocTests(unittest.TestCase):
     def setUp(self):
-        self.host = start_host("test_client_docs", [])
+        self.host = start_host("test_client_docs", [MyService, ClientService])
 
     def testHello(self):
         hello = "Hello, World!"

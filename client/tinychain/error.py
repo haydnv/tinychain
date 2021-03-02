@@ -1,3 +1,5 @@
+"""Generic error types."""
+
 from .util import *
 
 

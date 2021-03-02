@@ -110,7 +110,7 @@ impl Cluster {
         )))
     }
 
-    /// Grant the given `scope` to the `txn` and use it to resolve the given [`OpRef`].
+    /// Grant the given `scope` to the `txn` and use it to resolve the given `OpRef`.
     pub async fn grant(
         &self,
         txn: Txn,
@@ -151,7 +151,7 @@ impl Cluster {
         Ok(())
     }
 
-    /// Return the [`Owner`] of the given transaction.
+    /// Return the `Owner` of the given transaction.
     pub async fn owner(&self, txn_id: &TxnId) -> TCResult<Owner> {
         self.owned
             .read()

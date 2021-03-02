@@ -1,3 +1,5 @@
+"""Utility data structures and functions."""
+
 import inspect
 
 from collections import OrderedDict

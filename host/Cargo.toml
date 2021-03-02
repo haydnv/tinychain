@@ -5,6 +5,7 @@ authors = ["haydnv"]
 edition = "2018"
 description = "A next-gen database + application server"
 license = "Apache-2.0"
+readme = "../README.md"
 repository = "http://github.com/haydnv/tinychain.git"
 
 keywords = ["distributed", "transactional", "host", "platform", "runtime"]
@@ -36,7 +37,7 @@ serde_json = { version = "1.0" }
 structopt = "0.3"
 tc-error = "0.1"
 tc-transact = "0.1"
-tc-value = { path = "value" }
+tc-value = { version = ">=0.1.2" }
 tcgeneric = "0.1"
 tokio = { version = "1.2", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "time"] }
 uplock = "0.1"

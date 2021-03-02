@@ -1,3 +1,5 @@
+"""Utilities for communicating with a Tinychain host."""
+
 import json
 import os
 import pathlib

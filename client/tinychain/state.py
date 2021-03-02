@@ -1,11 +1,13 @@
+"""Tinychain `State`s, such as `Map`, `Tuple`, and `Op`."""
+
 from . import reflect
 from .ref import OpRef
 from .util import *
 
 
-# Base type (should not be instantiated directly
-
 class State(object):
+    """A Tinychain state, such as a `Chain` or `Op` or `Value`."""
+
     __uri__ = URI("/state")
 
     def __init__(self, form):
@@ -26,10 +28,13 @@ class State(object):
         return f"{self.__class__.__name__}({form_of(self)})"
 
     def dtype(self):
+        """Return the native `Class` of this `State`."""
         return Class(OpRef.get(uri(self) + "/class"))
 
 
 class Map(State):
+    """A key-value map whose keys are `Id`s and whose values are `State`s."""
+
     __uri__ = uri(State) + "/map"
 
     def __getitem__(self, key):
@@ -40,6 +45,8 @@ class Map(State):
 
 
 class Tuple(State):
+    """A tuple of `State`s."""
+
     __uri__ = uri(State) + "/tuple"
 
     def __json__(self):
@@ -52,6 +59,8 @@ class Tuple(State):
 # Scalar types
 
 class Scalar(State):
+    """An immutable `State` which always resides entirely in the host's memory."""
+
     __uri__ = uri(State) + "/scalar"
 
     def __json__(self):
@@ -61,10 +70,14 @@ class Scalar(State):
 # User-defined Ops
 
 class Op(Scalar):
+    """A callable function."""
+
     __uri__ = uri(Scalar) + "/op"
 
 
 class GetOp(Op):
+    """A function which can be called via a GET request."""
+
     __uri__ = uri(Op) + "/get"
 
     def __call__(self, key=None):
@@ -72,6 +85,8 @@ class GetOp(Op):
 
 
 class PutOp(Op):
+    """A function which can be called via a PUT request."""
+
     __uri__ = uri(Op) + "/put"
 
     def __call__(self, key=None, value=None):
@@ -79,6 +94,8 @@ class PutOp(Op):
 
 
 class PostOp(Op):
+    """A function which can be called via a POST request."""
+
     __uri__ = uri(Op) + "/post"
 
     def __call__(self, **params):
@@ -86,6 +103,8 @@ class PostOp(Op):
 
 
 class DeleteOp(Op):
+    """A function which can be called via a DELETE request."""
+
     __uri__ = uri(Op) + "/delete"
 
     def __call__(self, key=None):
@@ -101,6 +120,8 @@ Op.Delete = DeleteOp
 # User-defined object types
 
 class Class(State):
+    """A user-defined Tinychain class."""
+
     __uri__ = uri(State) + "/object/class"
 
     def __json__(self):
@@ -108,5 +129,7 @@ class Class(State):
 
 
 class Instance(State):
+    """An instance of a user-defined :class:`Class`."""
+
     __uri__ = uri(State) + "/object/instance"
 

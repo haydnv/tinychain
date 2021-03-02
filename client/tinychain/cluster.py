@@ -1,3 +1,5 @@
+"""Base class of a hosted service."""
+
 from .decorators import *
 from .ref import OpRef
 from .reflect import gen_headers
