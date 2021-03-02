@@ -1,7 +1,7 @@
 use tc_error::TCError;
 use tcgeneric::PathSegment;
 
-use crate::object::InstanceClass;
+use crate::object::{InstanceClass, Object};
 use crate::state::State;
 
 use super::{GetHandler, Handler, Route};
@@ -32,6 +32,15 @@ impl Route for InstanceClass {
             Some(Box::new(SelfHandler { class: self }))
         } else {
             None
+        }
+    }
+}
+
+impl Route for Object {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        match self {
+            Self::Class(class) => class.route(path),
+            Self::Instance(instance) => instance.route(path),
         }
     }
 }

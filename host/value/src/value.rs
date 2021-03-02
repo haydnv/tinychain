@@ -390,26 +390,32 @@ impl<'en> IntoStream<'en> for Value {
 }
 
 impl From<bool> for Value {
-    fn from(b: bool) -> Value {
-        Value::Number(Number::from(b))
+    fn from(b: bool) -> Self {
+        Self::Number(Number::from(b))
     }
 }
 
 impl From<Bytes> for Value {
-    fn from(bytes: Bytes) -> Value {
-        Value::Bytes(bytes)
+    fn from(bytes: Bytes) -> Self {
+        Self::Bytes(bytes)
     }
 }
 
 impl From<Link> for Value {
-    fn from(link: Link) -> Value {
-        Value::Link(link)
+    fn from(link: Link) -> Self {
+        Self::Link(link)
     }
 }
 
 impl From<Number> for Value {
-    fn from(n: Number) -> Value {
-        Value::Number(n)
+    fn from(n: Number) -> Self {
+        Self::Number(n)
+    }
+}
+
+impl From<Tuple<Value>> for Value {
+    fn from(tuple: Tuple<Value>) -> Self {
+        Self::Tuple(tuple)
     }
 }
 

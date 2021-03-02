@@ -296,9 +296,27 @@ impl From<Link> for Scalar {
     }
 }
 
+impl From<Map<Scalar>> for Scalar {
+    fn from(map: Map<Scalar>) -> Self {
+        Self::Map(map)
+    }
+}
+
 impl From<TCRef> for Scalar {
     fn from(tc_ref: TCRef) -> Self {
         Self::Ref(Box::new(tc_ref))
+    }
+}
+
+impl From<Tuple<Scalar>> for Scalar {
+    fn from(tuple: Tuple<Scalar>) -> Self {
+        Self::Tuple(tuple)
+    }
+}
+
+impl From<Tuple<Value>> for Scalar {
+    fn from(tuple: Tuple<Value>) -> Self {
+        Self::Value(tuple.into())
     }
 }
 
@@ -899,7 +917,10 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
     }
 
     pub fn resolve_id(&self, id: &Id) -> TCResult<&State> {
-        self.data.get(id).ok_or_else(|| TCError::not_found(id))
+        self.data
+            .deref()
+            .get(id)
+            .ok_or_else(|| TCError::not_found(id))
     }
 
     pub async fn resolve_get(
@@ -918,7 +939,7 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
             );
 
             self.subject.get(txn, path, key).await
-        } else if let Some(subject) = self.data.get(subject) {
+        } else if let Some(subject) = self.data.deref().get(subject) {
             subject.get(txn, path, key).await
         } else {
             Err(TCError::not_found(subject))
@@ -935,7 +956,7 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
     ) -> TCResult<()> {
         if subject == &SELF {
             self.subject.put(txn, path, key, value).await
-        } else if let Some(subject) = self.data.get(subject) {
+        } else if let Some(subject) = self.data.deref().get(subject) {
             subject.put(txn, path, key, value).await
         } else {
             Err(TCError::not_found(subject))
@@ -951,7 +972,7 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
     ) -> TCResult<State> {
         if subject == &SELF {
             self.subject.post(txn, path, params).await
-        } else if let Some(subject) = self.data.get(subject) {
+        } else if let Some(subject) = self.data.deref().get(subject) {
             subject.post(txn, path, params).await
         } else {
             Err(TCError::not_found(subject))
