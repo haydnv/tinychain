@@ -14,7 +14,7 @@ use tc_error::*;
 use tcgeneric::{Id, Instance};
 
 use crate::route::Public;
-use crate::scalar::{Scope, Value};
+use crate::scalar::{Scope, Value, SELF};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -41,7 +41,9 @@ impl IdRef {
 #[async_trait]
 impl Refer for IdRef {
     fn requires(&self, deps: &mut HashSet<Id>) {
-        deps.insert(self.to.clone());
+        if self.to != SELF {
+            deps.insert(self.to.clone());
+        }
     }
 
     async fn resolve<'a, T: Instance + Public>(
@@ -50,8 +52,7 @@ impl Refer for IdRef {
         _txn: &'a Txn,
     ) -> TCResult<State> {
         debug!("IdRef::resolve {}", self);
-
-        context.resolve_id(self.id()).map(State::clone)
+        context.resolve_id(self.id())
     }
 }
 

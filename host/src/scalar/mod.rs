@@ -916,11 +916,20 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
         self.data
     }
 
-    pub fn resolve_id(&self, id: &Id) -> TCResult<&State> {
-        self.data
-            .deref()
-            .get(id)
-            .ok_or_else(|| TCError::not_found(id))
+    pub fn resolve_id(&self, id: &Id) -> TCResult<State> {
+        if id == &SELF {
+            let subject = Subject::from((IdRef::from(Id::from(SELF)), TCPathBuf::default()));
+
+            Ok(State::Scalar(Scalar::Ref(Box::new(TCRef::Op(OpRef::Get(
+                (subject, Scalar::default()),
+            ))))))
+        } else {
+            self.data
+                .deref()
+                .get(id)
+                .cloned()
+                .ok_or_else(|| TCError::not_found(id))
+        }
     }
 
     pub async fn resolve_get(
