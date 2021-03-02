@@ -5,10 +5,10 @@ import unittest
 from testutils import PORT, TC_PATH, start_host
 
 
-class ExampleCluster(tc.Cluster, metaclass=tc.Meta):
+class ExampleCluster(tc.Cluster):
     __uri__ = tc.URI("/app/example")
 
-    def configure(self):
+    def _configure(self):
         self.rev = tc.Chain.Sync(tc.Number(0))
 
 

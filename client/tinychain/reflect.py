@@ -6,7 +6,6 @@ from . import error
 from .ref import OpRef
 from .state import Class, Op as OpDef, Scalar, State
 from .util import *
-from .value import Nil, Value
 
 
 def gen_headers(instance):
@@ -23,9 +22,10 @@ class Meta(type):
 
     def __form__(cls):
         mro = cls.mro()
-        parent_members = (
-            {name for name, _ in inspect.getmembers(mro[1])}
-            if len(mro) > 1 else set())
+        if len(mro) < 2:
+            raise ValueError("Tinychain class must extend a subclass of State")
+
+        parent_members = dict(inspect.getmembers(mro[1](URI("self"))))
 
         class Header(cls):
             pass
@@ -46,7 +46,19 @@ class Meta(type):
 
         form = {}
         for name, attr in inspect.getmembers(instance):
-            if name.startswith('_') or name in parent_members:
+            if name.startswith('_'):
+                continue
+            elif name in parent_members:
+                if attr is parent_members[name]:
+                    continue
+                elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
+                    if attr.__code__ is parent_members[name].__code__:
+                        continue
+                else:
+                    print(attr, parent_members[name])
+                    if attr == parent_members[name]:
+                        continue
+
                 continue
 
             if isinstance(attr, MethodStub):
@@ -57,7 +69,12 @@ class Meta(type):
         return form
 
     def __json__(cls):
-        return {str(uri(cls)): to_json(form_of(cls))}
+        mro = cls.mro()
+        if len(mro) < 2:
+            raise ValueError("Tinychain class must extend a subclass of State")
+
+        parent = mro[1]
+        return {str(uri(parent)): to_json(form_of(cls))}
 
 
 class MethodStub(object):
@@ -111,6 +128,7 @@ class GetMethod(Method):
 
         key_name = "key"
         if len(parameters) == 3:
+            from .value import Value
             key_name, param = parameters[2]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
@@ -142,6 +160,7 @@ class PutMethod(Method):
         key_name = "key"
         value_name = "value"
         if len(parameters) == 4:
+            from .value import Value
             key_name, param = parameters[2]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
@@ -158,6 +177,8 @@ class PostMethod(Method):
     __uri__ = uri(OpDef.Post)
 
     def __call__(self, **params):
+        from .value import Nil
+
         rtype = inspect.signature(self.form).return_annotation
         rtype = resolve_class(self.form, rtype, Nil)
         return rtype(OpRef.Post(uri(self.header).append(self.name), **params))
@@ -235,6 +256,7 @@ class GetOp(Op):
 
         key_name = "key"
         if len(parameters) == 2:
+            from .value import Value
             key_name, param = parameters[1]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))
@@ -265,6 +287,7 @@ class PutOp(Op):
         key_name = "key"
         value_name = "value"
         if len(parameters) == 3:
+            from .value import Value
             key_name, param = parameters[1]
             dtype = resolve_class(self.form, param.annotation, Value)
             args.append(dtype(URI(key_name)))

@@ -94,7 +94,7 @@ from __future__ import annotations # needed until Python 3.10
 
 LINK = "http://example.com/app/myservice" # <-- edit this
 
-class Distance(tc.Number, metaclass=tc.Meta):
+class Distance(tc.Number):
     # make sure this is the URI which serves this class definition
     __uri__ = tc.URI(LINK) + "/distance"
 
@@ -144,10 +144,10 @@ WORKSPACE = "/tmp/tc/workspace"
 DATA_DIR = "/tmp/tc/data"
 
 # define the service
-class MyService(tc.Cluster, metaclass=tc.Meta):
+class MyService(tc.Cluster):
     __uri__ = tc.URI(URL)
 
-    def configure(self):
+    def _configure(self):
         # if your clients need to access your class definitions,
         # make sure to list them here so that Tinychain will make them available
         # via GET request
@@ -179,7 +179,7 @@ Arguably the most powerful feature of Tinychain's Python client is the ability t
 ```python
 from myservice import MyService, Distance, Meters
 
-class ClientService(tc.Cluster, metaclass=tc.Meta):
+class ClientService(tc.Cluster):
     __uri__ = "http://clientwebsite.com/app/clientservice" # <-- edit this
 
     @tc.get_method

@@ -8,10 +8,10 @@ IN_STOCK = 100
 SCOPE = "/buy"
 
 
-class Producer(tc.Cluster, metaclass=tc.Meta):
+class Producer(tc.Cluster):
     __uri__ = tc.URI("/app/producer")
 
-    def configure(self):
+    def _configure(self):
         self.in_stock = tc.Chain.Sync(IN_STOCK)
 
     @tc.post_method
@@ -30,7 +30,7 @@ class Producer(tc.Cluster, metaclass=tc.Meta):
         return self.in_stock.subject()
 
 
-class Wholesaler(tc.Cluster, metaclass=tc.Meta):
+class Wholesaler(tc.Cluster):
     __uri__ = tc.URI("/app/wholesaler")
 
     @tc.post_method

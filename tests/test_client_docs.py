@@ -26,7 +26,7 @@ def to_feet(txn, meters: tc.Number) -> tc.Number:
         tc.error.BadRequest("negative distance is not supported"))
 
 
-class Distance(tc.Number, metaclass=tc.Meta):
+class Distance(tc.Number):
     __uri__ = tc.URI(LINK) + "/distance"
 
     @tc.get_method
@@ -62,10 +62,10 @@ class Meters(Distance):
         return self
 
 
-class MyService(tc.Cluster, metaclass=tc.Meta):
+class MyService(tc.Cluster):
     __uri__ = tc.URI(LINK)
 
-    def configure(self):
+    def _configure(self):
         self.Distance = Distance
         self.Feet = Feet
         self.Meters = Meters
@@ -75,10 +75,10 @@ class MyService(tc.Cluster, metaclass=tc.Meta):
         return length.to_meters() * width.to_meters()
 
 
-class MyService(tc.Cluster, metaclass=tc.Meta):
+class MyService(tc.Cluster):
     __uri__ = tc.URI(LINK)
 
-    def configure(self):
+    def _configure(self):
         self.Distance = Distance
         self.Feet = Feet
         self.Meters = Meters
@@ -88,13 +88,15 @@ class MyService(tc.Cluster, metaclass=tc.Meta):
         return length.to_meters() * width.to_meters()
 
 
-class ClientService(tc.Cluster, metaclass=tc.Meta):
+class ClientService(tc.Cluster):
     __uri__ = tc.URI("http://127.0.0.1:8702/app/clientservice")
 
     @tc.get_method
     def room_area(self, txn, dimensions: tc.Tuple) -> Meters:
         myservice = tc.use(MyService)
-        return myservice.area(length=dimensions[0], width=dimensions[1])
+        txn.length = Meters(dimensions[0])
+        txn.width = Meters(dimensions[1])
+        return myservice.area(length=txn.length, width=txn.width)
 
 
 class ClientDocTests(unittest.TestCase):
@@ -110,6 +112,11 @@ class ClientDocTests(unittest.TestCase):
         cxt.example = example
         cxt.result = cxt.example()
         self.assertEqual(self.host.post(ENDPOINT, cxt), 50)
+
+    @unittest.skip
+    def testClientService(self):
+        actual = self.host.get("/app/clientservice/room_area", (5, 10))
+        print(actual)
 
     def tearDown(self):
         self.host.stop()

@@ -1,13 +1,14 @@
 """:class:`Value` types such as :class:`Nil`, :class:`Number`, and :class:`String`."""
 
 from .ref import OpRef
+from .reflect import Meta
 from .state import Scalar
 from .util import uri
 
 
 # Scalar value types
 
-class Value(Scalar):
+class Value(Scalar, metaclass=Meta):
     """A scalar `Value` which supports equality and collation."""
 
     __uri__ = uri(Scalar) + "/value"

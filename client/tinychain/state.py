@@ -6,7 +6,11 @@ from .util import *
 
 
 class State(object):
-    """A Tinychain state, such as a `Chain` or `Op` or `Value`."""
+    """
+    A Tinychain state, such as a `Chain` or `Op` or `Value`.
+
+    Do not subclass `State` directly. Use a more specific type instead.
+    """
 
     __uri__ = URI("/state")
 
@@ -59,7 +63,11 @@ class Tuple(State):
 # Scalar types
 
 class Scalar(State):
-    """An immutable `State` which always resides entirely in the host's memory."""
+    """
+    An immutable `State` which always resides entirely in the host's memory.
+
+    Do not subclass `Scalar` directly. Use :class:`Value` instead.
+    """
 
     __uri__ = uri(State) + "/scalar"
 

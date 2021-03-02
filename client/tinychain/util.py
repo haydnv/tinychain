@@ -189,11 +189,17 @@ def use(cls):
     if hasattr(cls, "__use__"):
         return cls.__use__()
     else:
-        cls
+        cls()
 
 
 def to_json(obj):
     """Return a JSON-encodable representation of the given state or reference."""
+
+    if inspect.ismethod(obj):
+        if not hasattr(obj, "__json__"):
+            raise ValueError(
+                f"Python method {obj} is not JSON serializable; "
+                + "try using a decorator like @get_method")
 
     if inspect.isclass(obj):
         if hasattr(type(obj), "__json__"):

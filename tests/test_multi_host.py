@@ -7,10 +7,10 @@ from testutils import start_host
 CONSERVED = tc.Number(20)
 
 
-class Balance(tc.Cluster, metaclass=tc.Meta):
+class Balance(tc.Cluster):
     __uri__ = tc.URI("/app/balance")
 
-    def configure(self):
+    def _configure(self):
         self.weight = tc.Chain.Sync(10)
 
 

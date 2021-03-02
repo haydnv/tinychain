@@ -1,11 +1,12 @@
 """Data structures responsible for keeping track of mutations to a :class:`Value`"""
 
 from .ref import OpRef
+from .reflect import Meta
 from .state import Scalar, State
 from .util import *
 
 
-class Chain(State):
+class Chain(State, metaclass=Meta):
     """
     Data structure responsible for keeping track of mutations to a :class:`Value`.
     """

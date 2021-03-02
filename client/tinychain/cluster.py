@@ -1,5 +1,7 @@
 """Base class of a hosted service."""
 
+import inspect
+
 from .decorators import *
 from .ref import OpRef
 from .reflect import gen_headers
@@ -7,22 +9,64 @@ from .state import Op, State, Tuple
 from .util import form_of, ref as get_ref, uri, URI, to_json
 
 
-class Cluster(object):
+class Meta(type):
+    """The metaclass of a :class:`State`."""
+
+    def __form__(cls):
+        class Header(cls):
+            pass
+
+        header = Header(URI("self"))
+        instance = cls(URI("self"))
+        parent_members = dict(inspect.getmembers(Cluster(URI("self"))))
+
+        for name, attr in inspect.getmembers(instance):
+            if name.startswith('_'):
+                continue
+
+            if isinstance(attr, MethodStub):
+                setattr(header, name, attr.method(instance, name))
+            elif isinstance(attr, State):
+                setattr(header, name, type(attr)(URI(f"self/{name}")))
+            else:
+                setattr(header, name, attr)
+
+        form = {}
+        for name, attr in inspect.getmembers(instance):
+            if name.startswith('_'):
+                continue
+            elif name in parent_members:
+                if hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
+                    if attr.__code__ is parent_members[name].__code__:
+                        continue
+                elif attr is parent_members[name] or attr == parent_members[name]:
+                    continue
+
+            if isinstance(attr, MethodStub):
+                form[name] = to_json(attr.method(header, name))
+            else:
+                form[name] = attr
+
+        return form
+
+    def __json__(cls):
+        return {str(uri(cls)): to_json(form_of(cls))}
+
+
+class Cluster(object, metaclass=Meta):
     """A hosted Tinychain service."""
 
     @classmethod
     def __use__(cls):
-        """Return an instance of this `Cluster` with callable methods."""
-
         instance = cls()
         gen_headers(instance)
         return instance
 
     def __init__(self, form=None):
         self.__form__ = form if form else uri(self)
-        self.configure()
+        self._configure()
 
-    def configure(self):
+    def _configure(self):
         """Initialize this `Cluster`'s :class:~`chain.Chain`s."""
         pass
 
