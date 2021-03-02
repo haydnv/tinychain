@@ -49,17 +49,11 @@ class Meta(type):
             if name.startswith('_'):
                 continue
             elif name in parent_members:
-                if attr is parent_members[name]:
+                if attr is parent_members[name] or attr == parent_members[name]:
                     continue
                 elif hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
                     if attr.__code__ is parent_members[name].__code__:
                         continue
-                else:
-                    print(attr, parent_members[name])
-                    if attr == parent_members[name]:
-                        continue
-
-                continue
 
             if isinstance(attr, MethodStub):
                 form[name] = to_json(attr.method(header, name))
@@ -109,8 +103,9 @@ class GetMethod(Method):
     __uri__ = uri(OpDef.Get)
 
     def __call__(self, key=None):
+        from .value import Nil
         rtype = inspect.signature(self.form).return_annotation
-        rtype = resolve_class(self.form, rtype)
+        rtype = resolve_class(self.form, rtype, Nil)
         return rtype(OpRef.Get(uri(self.header).append(self.name), key))
 
     def __form__(self):
