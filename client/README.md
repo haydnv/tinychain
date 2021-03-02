@@ -94,7 +94,7 @@ One of Tinychain's most powerful features is its object-oriented API. You can us
 ```python
 from __future__ import annotations # needed until Python 3.10
 
-LINK = "http://example.com/app/myservice" # <-- edit this
+LINK = "http://example.com/app/area" # <-- edit this
 
 class Distance(tc.Number):
     __uri__ = tc.URI(LINK) + "/Distance"
@@ -176,7 +176,7 @@ You can see more in-depth examples in the [tests](http://github.com/haydnv/tinyc
 
 ## Calling another service from your own
 
-Arguably the most powerful feature of Tinychain's Python client is the ability to interact with other services over the network like any other software library, using the same code that defines the service. This eliminates a huge amount of synchronization, validation, and conversion code relative to older microservice design patterns, as well as the need to write separate client and server libraries (although you're still free to do this for security purposes if you want). For example, if a client needs to call `MyService`, they can use the exact same Python class that defines the service itself:
+Arguably the most powerful feature of Tinychain's Python client is the ability to interact with other services over the network like any other software library, using the same code that defines the service. This eliminates a huge amount of synchronization, validation, and conversion code relative to older microservice design patterns, as well as the need to write separate client and server libraries (although you're still free to do this for security purposes if you want). For example, if a client needs to call `AreaService`, they can use the exact same Python class that defines the service itself:
 
 ```python
 from area import AreaService
@@ -189,6 +189,5 @@ class ClientService(tc.Cluster):
         area_service = tc.use(AreaService)
         txn.length = area_service.Meters(dimensions[0])
         txn.width = area_service.Meters(dimensions[1])
-        return area_service	.area(length=txn.length, width=txn.width)
+        return area_service.area(length=txn.length, width=txn.width)
 ```
-
