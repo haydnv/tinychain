@@ -4,53 +4,9 @@ import inspect
 
 from .decorators import *
 from .ref import OpRef
+from .reflect import Meta
 from .state import Op, State, Tuple
 from .util import form_of, ref as get_ref, uri, URI, to_json
-
-
-class Meta(type):
-    """The metaclass of a :class:`State`."""
-
-    def __form__(cls):
-        class Header(cls):
-            pass
-
-        header = Header(URI("self"))
-        instance = cls(URI("self"))
-        parent_members = dict(inspect.getmembers(Cluster(URI("self"))))
-
-        for name, attr in inspect.getmembers(instance):
-            if name.startswith('_'):
-                continue
-
-            if isinstance(attr, MethodStub):
-                setattr(header, name, attr.method(instance, name))
-            elif isinstance(attr, State):
-                setattr(header, name, type(attr)(URI(f"self/{name}")))
-            else:
-                setattr(header, name, attr)
-
-        form = {}
-        for name, attr in inspect.getmembers(instance):
-            if name.startswith('_'):
-                continue
-            elif name in parent_members:
-                if hasattr(attr, "__code__") and hasattr(parent_members[name], "__code__"):
-                    if attr.__code__ is parent_members[name].__code__:
-                        continue
-                elif attr is parent_members[name] or attr == parent_members[name]:
-                    continue
-
-            if isinstance(attr, MethodStub):
-                form[name] = to_json(attr.method(header, name))
-            else:
-                form[name] = attr
-
-        return form
-
-    def __json__(cls):
-        return {str(uri(cls)): to_json(form_of(cls))}
-
 
 class Cluster(object, metaclass=Meta):
     """A hosted Tinychain service."""
@@ -65,6 +21,9 @@ class Cluster(object, metaclass=Meta):
             if isinstance(attr, MethodStub):
                 setattr(instance, name, attr.method(instance, name))
             elif inspect.isclass(attr) and issubclass(attr, State):
+                if not str(uri(cls)).startswith(str(uri(attr))):
+                    print(f"warning: cluster at {uri(cls)} serves class at {uri(attr)}")
+
                 @get_method
                 def ctr(self, txn, form) -> attr:
                     return attr(form)

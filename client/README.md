@@ -163,8 +163,13 @@ if __name__ == "__main__":
     # write the definition to disk
     tc.write_cluster(CONFIG_PATH)
 
-    # start a new Tinychain host to serve MyService
+    # start a new Tinychain host to serve AreaService
     host = tc.host.Local(TC_PATH, WORKSPACE, DATA_DIR, [CONFIG_PATH], force_create=True)
+
+    # verify that it works as expected
+    service = tc.use(AreaService)
+    params = {"length": service.Meters(5), "width": service.Meters(2)}
+    assert self.host.post("/app/area/area", params) == 10
 ```
 
 You can see more in-depth examples in the [tests](http://github.com/haydnv/tinychain/tree/master/tests) directory.

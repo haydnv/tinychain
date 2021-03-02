@@ -102,6 +102,11 @@ class ClientDocTests(unittest.TestCase):
         cxt.result = cxt.example()
         self.assertEqual(self.host.post(ENDPOINT, cxt), 50)
 
+    def testAreaService(self):
+        service = tc.use(AreaService)
+        params = {"length": service.Meters(5), "width": service.Meters(2)}
+        self.assertEqual(self.host.post("/app/area/area", params), 10)
+
     def testClientService(self):
         self.assertEqual(self.host.get("/app/clientservice/room_area", (5, 10)), 50)
 
