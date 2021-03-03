@@ -1,3 +1,4 @@
+[![Documentation Status](https://readthedocs.org/projects/tinychain/badge/?version=latest)](https://tinychain.readthedocs.io/en/latest/?badge=latest)
 
 ## Getting started
 

@@ -1,4 +1,4 @@
-"""Tinychain `State`s, such as `Map`, `Tuple`, and `Op`."""
+"""Tinychain `State`\s, such as `Map`, `Tuple`, and `Op`."""
 
 from . import reflect
 from .ref import OpRef
@@ -32,12 +32,12 @@ class State(object):
         return f"{self.__class__.__name__}({form_of(self)})"
 
     def dtype(self):
-        """Return the native `Class` of this `State`."""
+        """Return the native :class:`Class` of this `State`."""
         return Class(OpRef.get(uri(self) + "/class"))
 
 
 class Map(State):
-    """A key-value map whose keys are `Id`s and whose values are `State`s."""
+    """A key-value map whose keys are `Id`\s and whose values are `State`\s."""
 
     __uri__ = uri(State) + "/map"
 
@@ -49,7 +49,7 @@ class Map(State):
 
 
 class Tuple(State):
-    """A tuple of `State`s."""
+    """A tuple of `State`\s."""
 
     __uri__ = uri(State) + "/tuple"
 
