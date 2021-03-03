@@ -114,6 +114,7 @@ impl State {
     /// Return true if this `State` is an empty [`Tuple`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {
+            Self::Map(map) => map.is_empty(),
             Self::Scalar(scalar) => scalar.is_none(),
             Self::Tuple(tuple) => tuple.is_empty(),
             _ => false,
@@ -251,6 +252,12 @@ impl From<Map<State>> for State {
     }
 }
 
+impl From<Map<Scalar>> for State {
+    fn from(map: Map<Scalar>) -> State {
+        State::Scalar(map.into())
+    }
+}
+
 impl From<OpRef> for State {
     fn from(op_ref: OpRef) -> Self {
         TCRef::Op(op_ref).into()
@@ -260,6 +267,24 @@ impl From<OpRef> for State {
 impl From<Scalar> for State {
     fn from(scalar: Scalar) -> State {
         State::Scalar(scalar)
+    }
+}
+
+impl From<Tuple<State>> for State {
+    fn from(tuple: Tuple<State>) -> Self {
+        Self::Tuple(tuple)
+    }
+}
+
+impl From<Tuple<Scalar>> for State {
+    fn from(tuple: Tuple<Scalar>) -> Self {
+        Self::Scalar(tuple.into())
+    }
+}
+
+impl From<Tuple<Value>> for State {
+    fn from(tuple: Tuple<Value>) -> Self {
+        Self::Scalar(tuple.into())
     }
 }
 

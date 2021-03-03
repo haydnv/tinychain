@@ -5,6 +5,7 @@ authors = ["haydnv"]
 edition = "2018"
 description = "A next-gen database + application server"
 license = "Apache-2.0"
+readme = "../README.md"
 repository = "http://github.com/haydnv/tinychain.git"
 
 keywords = ["distributed", "transactional", "host", "platform", "runtime"]

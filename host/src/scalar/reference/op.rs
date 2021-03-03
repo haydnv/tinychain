@@ -191,8 +191,25 @@ impl TryCastFrom<Scalar> for Subject {
 }
 
 impl From<Link> for Subject {
-    fn from(link: Link) -> Subject {
-        Subject::Link(link)
+    fn from(link: Link) -> Self {
+        Self::Link(link)
+    }
+}
+
+impl From<(IdRef, TCPathBuf)> for Subject {
+    fn from(get: (IdRef, TCPathBuf)) -> Self {
+        Self::Ref(get.0, get.1)
+    }
+}
+
+impl TryFrom<Subject> for Link {
+    type Error = TCError;
+
+    fn try_from(subject: Subject) -> TCResult<Self> {
+        match subject {
+            Subject::Link(link) => Ok(link),
+            other => Err(TCError::bad_request("expected a Link but found", other)),
+        }
     }
 }
 

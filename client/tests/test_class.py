@@ -22,21 +22,20 @@ class ClassTests(unittest.TestCase):
         self.assertEqual(expected, actual)
 
     def testInContext(self):
-        self.maxDiff=None
+        self.maxDiff = None
         expected = [
             ['M', {'/state/object/class':
                 {'/state/scalar/value/number': {
                     'feet': {'/state/scalar/op/get': ['key', [
-                        ['_return', {'$self/mul': [3.28]}]]]}
-                    }
-                }
+                        ['_return', {'$self/mul': [3.28]}]
+                    ]]}
+                }}
             }],
             ['m', {'$M': [2]}],
-            ['ft', {'$m/feet': [None]}]
-        ]
+            ['ft', {'$m/feet': [None]}]]
 
         cxt = tc.Context()
-        cxt.M = tc.Class.init(Meters)
+        cxt.M = tc.Class(Meters)
         cxt.m = Meters(tc.OpRef.Get(cxt.M, 2))
         cxt.ft = cxt.m.feet()
 

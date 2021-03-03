@@ -1,140 +1,143 @@
+"""Tinychain `State`s, such as `Map`, `Tuple`, and `Op`."""
+
 from . import reflect
+from .ref import OpRef
 from .util import *
 
 
-# Base types (should not be instantiated directly
-
 class State(object):
-    __ref__ = URI("/state")
+    """
+    A Tinychain state, such as a `Chain` or `Op` or `Value`.
 
-    def __init__(self, ref):
-        if ref is None:
-            raise ValueError("Null reference")
+    Do not subclass `State` directly. Use a more specific type instead.
+    """
 
-        self.__ref__ = ref
+    __uri__ = URI("/state")
+
+    def __init__(self, form):
+        self.__form__ = form
+
+        if isinstance(form, URI):
+            self.__uri__ = form
 
         reflect.gen_headers(self)
 
     def __json__(self):
-        return to_json(ref(self))
+        return {str(uri(self)): [to_json(form_of(self))]}
 
-    @classmethod
-    def init(cls, key=None):
-        if isinstance(ref(cls), URI):
-            return cls(OpRef.Get(uri(cls), key))
-        else:
-            return cls(OpRef.Get(cls, key))
+    def __ref__(self, name):
+        return self.__class__(URI(name))
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({ref(self)})"
+        return f"{self.__class__.__name__}({form_of(self)})"
+
+    def dtype(self):
+        """Return the native `Class` of this `State`."""
+        return Class(OpRef.get(uri(self) + "/class"))
+
+
+class Map(State):
+    """A key-value map whose keys are `Id`s and whose values are `State`s."""
+
+    __uri__ = uri(State) + "/map"
+
+    def __getitem__(self, key):
+        return OpRef.Get(uri(self), key)
+
+    def __json__(self):
+        return to_json(form_of(self))
+
+
+class Tuple(State):
+    """A tuple of `State`s."""
+
+    __uri__ = uri(State) + "/tuple"
+
+    def __json__(self):
+        return to_json(form_of(self))
+
+    def __getitem__(self, key):
+        return OpRef.Get(uri(self), key)
 
 
 # Scalar types
 
 class Scalar(State):
-    __ref__ = uri(State) + "/scalar"
+    """
+    An immutable `State` which always resides entirely in the host's memory.
 
+    Do not subclass `Scalar` directly. Use :class:`Value` instead.
+    """
 
-# Reference types
-
-class Ref(object):
-    __uri__ = uri(Scalar) + "/ref"
-
-
-class IdRef(Ref):
-    __uri__ = uri(Ref) + "/id"
-
-    def __init__(self, subject):
-        self.subject = subject
+    __uri__ = uri(State) + "/scalar"
 
     def __json__(self):
-        return {str(self): []}
-
-    def __str__(self):
-        return f"${self.subject}"
+        return to_json(form_of(self))
 
 
-class After(Ref):
-    __uri__ = uri(Ref) + "/after"
+# User-defined Ops
 
-    def __init__(self, when, then):
-        self.when = when
-        self.then = then
+class Op(Scalar):
+    """A callable function."""
 
-    def __json__(self):
-        return {str(uri(self)): to_json([self.when, self.then])}
+    __uri__ = uri(Scalar) + "/op"
 
 
-class If(Ref):
-    __uri__ = uri(Ref) + "/if"
+class GetOp(Op):
+    """A function which can be called via a GET request."""
 
-    def __init__(self, cond, then, or_else):
-        self.cond = cond
-        self.then = then
-        self.or_else = or_else
+    __uri__ = uri(Op) + "/get"
 
-    def __json__(self):
-        return {str(uri(self)): to_json([self.cond, self.then, self.or_else])}
+    def __call__(self, key=None):
+        return OpRef.Get(self, key)
 
 
-class OpRef(Ref):
-    __uri__ = uri(Ref) + "/op"
+class PutOp(Op):
+    """A function which can be called via a PUT request."""
 
-    def __init__(self, subject, args):
-        if isinstance(subject, Ref):
-            self.subject = subject
-        else:
-            self.subject = uri(subject)
+    __uri__ = uri(Op) + "/put"
 
-        self.args = args
-
-    def __json__(self):
-        return {str(self.subject): to_json(self.args)}
+    def __call__(self, key=None, value=None):
+        return OpRef.Put(self, key, value)
 
 
-class GetOpRef(OpRef):
-    __uri__ = uri(OpRef) + "/get"
+class PostOp(Op):
+    """A function which can be called via a POST request."""
 
-    def __init__(self, subject, key=None):
-        if str(uri(subject)).startswith("/state"):
-            OpRef.__init__(self, subject, key)
-        else:
-            OpRef.__init__(self, subject, (key,))
+    __uri__ = uri(Op) + "/post"
 
-
-class PutOpRef(OpRef):
-    __uri__ = uri(OpRef) + "/put"
-
-    def __init__(self, subject, key, value):
-        OpRef.__init__(self, subject, (key, value))
+    def __call__(self, **params):
+        return OpRef.Post(self, **params)
 
 
-class PostOpRef(OpRef):
-    __uri__ = uri(OpRef) + "/post"
+class DeleteOp(Op):
+    """A function which can be called via a DELETE request."""
 
-    def __init__(self, subject, **kwargs):
-        OpRef.__init__(self, subject, kwargs)
+    __uri__ = uri(Op) + "/delete"
 
-
-class DeleteOpRef(OpRef):
-    __uri__ = uri(OpRef) + "/delete"
-
-    def __init__(self, subject, key=None):
-        OpRef.__init__(self, subject, key)
-
-    def __json__(self):
-        return {str(uri(DeleteOpRef)): to_json([self.subject, self.args])}
+    def __call__(self, key=None):
+        return OpRef.Delete(self, key)
 
 
-OpRef.Get = GetOpRef
-OpRef.Put = PutOpRef
-OpRef.Post = PostOpRef
-OpRef.Delete = DeleteOpRef
+Op.Get = GetOp
+Op.Put = PutOp
+Op.Post = PostOp
+Op.Delete = DeleteOp
 
 
 # User-defined object types
 
 class Class(State):
-    __ref__ = uri(State) + "/object/class"
+    """A user-defined Tinychain class."""
 
+    __uri__ = uri(State) + "/object/class"
+
+    def __json__(self):
+        return {str(uri(Class)): to_json(form_of(self))}
+
+
+class Instance(State):
+    """An instance of a user-defined :class:`Class`."""
+
+    __uri__ = uri(State) + "/object/instance"
 

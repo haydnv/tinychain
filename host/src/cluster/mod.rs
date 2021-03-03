@@ -19,6 +19,7 @@ use tc_transact::{Transact, Transaction};
 use tcgeneric::*;
 
 use crate::chain::Chain;
+use crate::object::InstanceClass;
 use crate::scalar::{Link, OpDef};
 use crate::state::State;
 use crate::txn::{Actor, Scope, Txn, TxnId};
@@ -48,6 +49,7 @@ pub struct Cluster {
     actor: Arc<Actor>,
     path: TCPathBuf,
     chains: Map<Chain>,
+    classes: Map<InstanceClass>,
     confirmed: RwLock<TxnId>,
     owned: RwLock<HashMap<TxnId, Owner>>,
     installed: TxnLock<Mutable<HashMap<Link, HashSet<Scope>>>>,
@@ -108,7 +110,7 @@ impl Cluster {
         )))
     }
 
-    /// Grant the given `scope` to the `txn` and use it to resolve the given [`OpRef`].
+    /// Grant the given `scope` to the `txn` and use it to resolve the given `OpRef`.
     pub async fn grant(
         &self,
         txn: Txn,
@@ -149,7 +151,7 @@ impl Cluster {
         Ok(())
     }
 
-    /// Return the [`Owner`] of the given transaction.
+    /// Return the `Owner` of the given transaction.
     pub async fn owner(&self, txn_id: &TxnId) -> TCResult<Owner> {
         self.owned
             .read()
@@ -175,9 +177,14 @@ impl Hash for Cluster {
 }
 
 impl Cluster {
-    /// Borrow the [`Chain`]s which make up the mutable state of this `Cluster`.
-    pub fn chains(&self) -> &Map<Chain> {
-        &self.chains
+    /// Borrow one of this `Cluster`'s [`Chain`]s.
+    pub fn chain(&self, name: &Id) -> Option<&Chain> {
+        self.chains.get(name)
+    }
+
+    /// Borrow an [`InstanceClass`], if there is one defined with the given name.
+    pub fn class(&self, name: &Id) -> Option<&InstanceClass> {
+        self.classes.get(name)
     }
 
     /// Borrow the public key of this `Cluster`.

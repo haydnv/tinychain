@@ -1,11 +1,12 @@
 //! The host kernel, responsible for dispatching requests to the local host
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::pin::Pin;
 
+use bytes::Bytes;
 use futures::Future;
 use log::debug;
-use safecast::TryCastFrom;
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
@@ -22,8 +23,13 @@ mod hosted;
 
 use hosted::Hosted;
 
+const HYPOTHETICAL: PathLabel = path_label(&["transact", "hypothetical"]);
+
+type ExeScope<'a> = crate::scalar::Scope<'a, State>;
+
 /// The host kernel, responsible for dispatching requests to the local host
 pub struct Kernel {
+    actor: Actor,
     hosted: Hosted,
 }
 
@@ -31,15 +37,20 @@ impl Kernel {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
     pub fn new<I: IntoIterator<Item = InstanceExt<Cluster>>>(clusters: I) -> Self {
         Self {
+            actor: Actor::new(Link::default().into()),
             hosted: clusters.into_iter().collect(),
         }
     }
 
     /// Route a GET request.
     pub async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
-        nonempty_path(path)?;
-
-        if let Some(class) = StateType::from_path(path) {
+        if path.is_empty() {
+            if key.is_none() {
+                Ok(Value::from(Bytes::copy_from_slice(self.actor.public_key().as_bytes())).into())
+            } else {
+                Err(TCError::method_not_allowed(TCPath::from(path)))
+            }
+        } else if let Some(class) = StateType::from_path(path) {
             let err = format!("Cannot cast into {} from {}", class, key);
             State::Scalar(Scalar::Value(key))
                 .into_type(class)
@@ -76,9 +87,16 @@ impl Kernel {
         key: Value,
         value: State,
     ) -> TCResult<()> {
-        nonempty_path(path)?;
+        if path.is_empty() {
+            if key.is_none() {
+                if Link::can_cast_from(&value) {
+                    // It's a synchronization message for a hypothetical transaction
+                    return Ok(());
+                }
+            }
 
-        if let Some(class) = StateType::from_path(path) {
+            Err(TCError::method_not_allowed(TCPath::from(path)))
+        } else if let Some(class) = StateType::from_path(path) {
             Err(TCError::method_not_allowed(class))
         } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             debug!(
@@ -100,9 +118,24 @@ impl Kernel {
 
     /// Route a POST request.
     pub async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
-        nonempty_path(path)?;
+        if path.is_empty() {
+            if Map::try_from(data)?.is_empty() {
+                // it's a "commit" instruction for a hypothetical transaction
+                Ok(State::default())
+            } else {
+                Err(TCError::method_not_allowed(TCPath::from(path)))
+            }
+        } else if path == &HYPOTHETICAL[..] {
+            let txn = txn.clone().claim(&self.actor, TCPathBuf::default()).await?;
+            let context = Map::<State>::default();
 
-        if let Some((suffix, cluster)) = self.hosted.get(path) {
+            if PostOp::can_cast_from(&data) {
+                OpDef::call(data.opt_cast_into().unwrap(), txn, context).await
+            } else {
+                data.resolve(&ExeScope::new(&State::default(), context), &txn)
+                    .await
+            }
+        } else if let Some((suffix, cluster)) = self.hosted.get(path) {
             let params: Map<State> = data.try_into()?;
 
             debug!(
@@ -112,7 +145,7 @@ impl Kernel {
                 cluster
             );
 
-            return if suffix.is_empty() && params.is_empty() {
+            if suffix.is_empty() && params.is_empty() {
                 // it's a "commit" instruction
                 cluster.post(&txn, suffix, params).await
             } else {
@@ -120,17 +153,9 @@ impl Kernel {
                     cluster.post(&txn, suffix, params).await
                 })
                 .await
-            };
-        }
-
-        match path[0].as_str() {
-            "transact" if path.len() == 1 => Err(TCError::method_not_allowed(path[0].as_str())),
-            "transact" if path.len() == 2 => match path[1].as_str() {
-                "execute" => Err(TCError::not_implemented("/transact/execute")),
-                "hypothetical" => Err(TCError::not_implemented("hypothetical queries")),
-                other => Err(TCError::not_found(other)),
-            },
-            other => Err(TCError::not_found(other)),
+            }
+        } else {
+            Err(TCError::not_found(TCPath::from(path)))
         }
     }
 }
@@ -169,15 +194,6 @@ fn execute<
             Ok(state)
         }
     })
-}
-
-#[inline]
-fn nonempty_path(path: &[PathSegment]) -> TCResult<()> {
-    if path.is_empty() {
-        Err(TCError::method_not_allowed(TCPathBuf::default()))
-    } else {
-        Ok(())
-    }
 }
 
 fn error_type(err_type: &Id) -> Option<ErrorType> {

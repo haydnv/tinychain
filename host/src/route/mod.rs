@@ -13,6 +13,7 @@ use crate::txn::Txn;
 
 mod chain;
 mod cluster;
+mod generic;
 mod object;
 mod scalar;
 mod state;
@@ -26,6 +27,9 @@ pub type PutHandler<'a> = Box<dyn FnOnce(Txn, Value, State) -> PutFuture<'a> + S
 pub type PostFuture<'a> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
 pub type PostHandler<'a> = Box<dyn FnOnce(Txn, Map<State>) -> PostFuture<'a> + Send + 'a>;
 
+pub type DeleteFuture<'a> = Pin<Box<dyn Future<Output = TCResult<()>> + Send + 'a>>;
+pub type DeleteHandler<'a> = Box<dyn FnOnce(Txn, Value) -> DeleteFuture<'a> + Send + 'a>;
+
 pub trait Handler<'a>: Send {
     fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
         None
@@ -36,6 +40,10 @@ pub trait Handler<'a>: Send {
     }
 
     fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        None
+    }
+
+    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
         None
     }
 }

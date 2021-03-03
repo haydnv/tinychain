@@ -5,11 +5,11 @@ import unittest
 from testutils import PORT, TC_PATH, start_host
 
 
-class ExampleCluster(tc.Cluster, metaclass=tc.Meta):
-    __ref__ = tc.URI("/app/example")
+class ExampleCluster(tc.Cluster):
+    __uri__ = tc.URI("/app/example")
 
-    def configure(self):
-        self.rev = tc.Chain.Sync(tc.Number.init(0))
+    def _configure(self):
+        self.rev = tc.Chain.Sync(tc.Number(0))
 
 
 class ClusterTests(unittest.TestCase):
@@ -29,8 +29,10 @@ class ClusterTests(unittest.TestCase):
         expect(4)
 
         host.stop()
-        host.start(TC_PATH, PORT)
-        expect(4)
+
+        host = start_host("test_update", [ExampleCluster], overwrite=False)
+        actual = host.get("/app/example/rev")
+        self.assertEqual(4, actual)
 
 
 if __name__ == "__main__":

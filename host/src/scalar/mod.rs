@@ -108,6 +108,7 @@ impl Scalar {
     /// Return true if self is an empty tuple, default link, or `Value::None`.
     pub fn is_none(&self) -> bool {
         match self {
+            Self::Map(map) => map.is_empty(),
             Self::Tuple(tuple) => tuple.is_empty(),
             Self::Value(value) => value.is_none(),
             _ => false,
@@ -153,6 +154,13 @@ impl Scalar {
                     .opt_cast_into()
                     .map(Box::new)
                     .map(TCRef::After)
+                    .map(Box::new)
+                    .map(Scalar::Ref),
+
+                RT::Case => self
+                    .opt_cast_into()
+                    .map(Box::new)
+                    .map(TCRef::Case)
                     .map(Box::new)
                     .map(Scalar::Ref),
 
@@ -288,9 +296,27 @@ impl From<Link> for Scalar {
     }
 }
 
+impl From<Map<Scalar>> for Scalar {
+    fn from(map: Map<Scalar>) -> Self {
+        Self::Map(map)
+    }
+}
+
 impl From<TCRef> for Scalar {
     fn from(tc_ref: TCRef) -> Self {
         Self::Ref(Box::new(tc_ref))
+    }
+}
+
+impl From<Tuple<Scalar>> for Scalar {
+    fn from(tuple: Tuple<Scalar>) -> Self {
+        Self::Tuple(tuple)
+    }
+}
+
+impl From<Tuple<Value>> for Scalar {
+    fn from(tuple: Tuple<Value>) -> Self {
+        Self::Value(tuple.into())
     }
 }
 
@@ -676,7 +702,11 @@ impl ScalarVisitor {
 
     pub fn visit_subject<E: de::Error>(subject: Subject, params: Scalar) -> Result<Scalar, E> {
         debug!("ScalarVisitor::visit_subject {} {}", subject, params);
-        if params.is_none() {
+
+        if let Scalar::Map(params) = params {
+            let op_ref = OpRef::Post((subject, params));
+            Ok(Scalar::Ref(Box::new(TCRef::Op(op_ref))))
+        } else if params.is_none() {
             match subject {
                 Subject::Ref(id, path) if path.is_empty() => {
                     Ok(Scalar::Ref(Box::new(TCRef::Id(id))))
@@ -886,8 +916,20 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
         self.data
     }
 
-    pub fn resolve_id(&self, id: &Id) -> TCResult<&State> {
-        self.data.get(id).ok_or_else(|| TCError::not_found(id))
+    pub fn resolve_id(&self, id: &Id) -> TCResult<State> {
+        if id == &SELF {
+            let subject = Subject::from((IdRef::from(Id::from(SELF)), TCPathBuf::default()));
+
+            Ok(State::Scalar(Scalar::Ref(Box::new(TCRef::Op(OpRef::Get(
+                (subject, Scalar::default()),
+            ))))))
+        } else {
+            self.data
+                .deref()
+                .get(id)
+                .cloned()
+                .ok_or_else(|| TCError::not_found(id))
+        }
     }
 
     pub async fn resolve_get(
@@ -906,7 +948,7 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
             );
 
             self.subject.get(txn, path, key).await
-        } else if let Some(subject) = self.data.get(subject) {
+        } else if let Some(subject) = self.data.deref().get(subject) {
             subject.get(txn, path, key).await
         } else {
             Err(TCError::not_found(subject))
@@ -923,7 +965,7 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
     ) -> TCResult<()> {
         if subject == &SELF {
             self.subject.put(txn, path, key, value).await
-        } else if let Some(subject) = self.data.get(subject) {
+        } else if let Some(subject) = self.data.deref().get(subject) {
             subject.put(txn, path, key, value).await
         } else {
             Err(TCError::not_found(subject))
@@ -939,7 +981,7 @@ impl<'a, T: Instance + Public> Scope<'a, T> {
     ) -> TCResult<State> {
         if subject == &SELF {
             self.subject.post(txn, path, params).await
-        } else if let Some(subject) = self.data.get(subject) {
+        } else if let Some(subject) = self.data.deref().get(subject) {
             subject.post(txn, path, params).await
         } else {
             Err(TCError::not_found(subject))

@@ -6,15 +6,15 @@ import tinychain as tc
 CONSERVED = tc.Number(20)
 
 
-class Balance(tc.Cluster, metaclass=tc.Meta):
-    __ref__ = tc.URI("/app/balance")
+class Balance(tc.Cluster):
+    __uri__ = tc.URI("/app/balance")
 
-    def configure(self):
-        self.weight = tc.Chain.Sync(tc.Number.init(0))
+    def _configure(self):
+        self.weight = tc.Chain.Sync(tc.Number(0))
 
 
 class Left(Balance):
-    __ref__ = tc.uri(Balance) + "/left"
+    __uri__ = tc.uri(Balance) + "/left"
 
     @tc.put_method
     def weigh(self, txn, key: tc.Nil, weight: tc.Number):
@@ -25,7 +25,7 @@ class Left(Balance):
 
 
 class Right(Balance):
-    __ref__ = tc.uri(Balance) + "/right"
+    __uri__ = tc.uri(Balance) + "/right"
 
     @tc.put_method
     def weigh(self, txn, key: tc.Nil, weight: tc.Number):
@@ -37,62 +37,24 @@ class Right(Balance):
 
 class ClusterTests(unittest.TestCase):
     def testToJson(self):
-        self.maxDiff=None
+        self.maxDiff = None
         expected = {
-            "/app/balance/left": {
-                "weigh": {
-                    "/state/scalar/op/put": [
-                        "key",
-                        "weight",
-                        [
-                            ["total", 20],
-                            ["update", {
-                                "/state/scalar/ref/after": [
-                                    {
-                                        "/app/balance/right/weigh": [
-                                            None,
-                                            {
-                                                "$total/sub": [
-                                                    {
-                                                        "$weight": []
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    },
-                                    {
-                                        "$self/weight/subject": [
-                                            None,
-                                            {
-                                                "$weight": []
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }],
-                            ["_return", {
-                                "/state/scalar/ref/if": [
-                                    {"$weight/eq": [
-                                        {
-                                            "$self/weight/subject": [None]
-                                        }
-                                    ]},
-                                    None,
-                                    {"$update": []}
-                                ]
-                            }]
-                        ]
-                    ]
-                },
-                "weight": {
-                    "/state/chain/sync": [
-                        {"/state/scalar/value/number": 0}
-                    ]
-                }
-            }
+            'weigh': {'/state/scalar/op/put': ['key', 'weight', [
+                ['total', 20],
+                ['update', {'/state/scalar/ref/after': [
+                    {'/app/balance/right/weigh': [None, {'$total/sub': [{'$weight': []}]}]}, 
+                    {'$self/weight/subject': [None, {'$weight': []}]}
+                ]}],
+                ['_return', {'/state/scalar/ref/if': [
+                    {'$weight/eq': [{'$self/weight/subject': [None]}]},
+                    None,
+                    {'$update': []}
+                ]}]
+            ]]},
+            'weight': {'/state/chain/sync': [0]}
         }
 
-        actual = tc.to_json(Left)
+        actual = tc.to_json(tc.form_of(Left))
         self.assertEqual(expected, actual)
 
 

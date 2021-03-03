@@ -1,32 +1,54 @@
-from .annotations import *
-from .reflect import gen_headers
-from .state import OpRef, State
-from .util import ref as get_ref, uri, URI, to_json
+"""Base class of a hosted service."""
 
+import inspect
+import logging
 
-class Cluster(object):
+from .decorators import *
+from .ref import OpRef
+from .reflect import Meta
+from .state import Op, State, Tuple
+from .util import form_of, ref as get_ref, uri, URI, to_json
+
+class Cluster(object, metaclass=Meta):
+    """A hosted Tinychain service."""
+
     @classmethod
     def __use__(cls):
         instance = cls()
-        gen_headers(instance)
+        for name, attr in inspect.getmembers(instance):
+            if name.startswith('_'):
+                continue
+
+            if isinstance(attr, MethodStub):
+                setattr(instance, name, attr.method(instance, name))
+            elif inspect.isclass(attr) and issubclass(attr, State):
+                if not str(uri(cls)).startswith(str(uri(attr))):
+                    logging.warning(f"cluster at {uri(cls)} serves class at {uri(attr)}")
+
+                @get_method
+                def ctr(self, txn, form) -> attr:
+                    return attr(form)
+
+                setattr(instance, name, ctr.method(instance, name))
+
         return instance
 
-    def __init__(self, ref=None):
-        if ref is None:
-            ref = get_ref(self.__class__)
+    def __init__(self, form=None):
+        self.__form__ = form if form else uri(self)
+        self._configure()
 
-        self.__ref__ = ref
-
-        self.configure()
-
-    def configure(self):
+    def _configure(self):
+        """Initialize this `Cluster`'s :class:~`chain.Chain`s."""
         pass
 
-    @get_method
-    def authorize(self, txn, scope):
-        pass
+    def authorize(self, scope):
+        """Raise an error if the current transaction has not been granted the given scope."""
 
-    def grant(self, scope, op, context={}):
+        return OpRef.Get(uri(self) + "/authorize", scope)
+
+    def grant(self, scope, op: Op, context={}):
+        """Execute the given `op` after granting it the given `scope`."""
+
         params = {
             "scope": scope,
             "op": op,
@@ -38,21 +60,26 @@ class Cluster(object):
         return OpRef.Post(uri(self) + "/grant", **params)
 
     @put_method
-    def install(self):
+    def install(self, txn, cluster_link: URI, scopes: Tuple):
+        """Trust the cluster at the given link to grant the given scopes."""
         pass
 
 
 def write_cluster(cluster, config_path, overwrite=False):
+    """Write the configuration of the given :class:`Cluster` to the given path."""
+
     import json
     import pathlib
 
+    config = {str(uri(cluster)): to_json(form_of(cluster))}
     config_path = pathlib.Path(config_path)
     if config_path.exists() and not overwrite:
         with open(config_path) as f:
             try:
-                if json.load(f) == to_json(cluster):
+                if json.load(f) == config:
                     return
-            except json.decoder.JSONDecodeError:
+            except json.decoder.JSONDecodeError as e:
+                logging.warning(f"invalid JSON at {config_path}: {e}")
                 pass
 
         raise RuntimeError(f"There is already an entry at {config_path}")
@@ -63,5 +90,5 @@ def write_cluster(cluster, config_path, overwrite=False):
             os.makedirs(config_path.parent)
 
         with open(config_path, 'w') as cluster_file:
-            cluster_file.write(json.dumps(to_json(cluster), indent=4))
+            cluster_file.write(json.dumps(config, indent=4))
 
