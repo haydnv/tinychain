@@ -24,5 +24,6 @@ setuptools.setup(
         "Topic :: Software Development",
         "Topic :: Software Development :: Code Generators",
     ],
+    install_requires=["requests"],
     python_requires='>=3.7',
 )
