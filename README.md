@@ -1,5 +1,13 @@
 # TINYCHAIN
 
+[![Crates.io][crates-badge]][crates-url]
+[![Docs.rs][docs-badge]][docs-url]
+
+[crates-badge]: https://img.shields.io/crates/v/tinychain.svg
+[crates-url]: https://crates.io/crates/tinychain
+[docs-badge]: https://docs.rs/tinychain/badge.svg
+[docs-url]: https://docs.rs/tinychain/
+
 Tinychain is an all-in-one database + application server with support for blockchains, graphs, tables, and tensors.
 
 Tinychain is early alpha software and is not ready for production use. Many core features are only partially implemented, or not yet available in the public API. The API may change without notice.
