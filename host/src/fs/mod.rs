@@ -6,15 +6,18 @@ use std::io;
 use std::path::PathBuf;
 
 use futures::TryFutureExt;
+use log::debug;
 use tokio::fs;
 
 use tc_error::*;
 use tcgeneric::{label, Label, PathSegment};
 
+mod block;
 mod cache;
 mod dir;
 mod file;
 
+pub use block::*;
 pub use cache::*;
 pub use dir::*;
 pub use file::*;
@@ -46,6 +49,18 @@ async fn dir_contents(dir_path: &PathBuf) -> TCResult<Vec<(fs::DirEntry, Metadat
         .map_err(|e| io_err(e, dir_path))
         .await?
     {
+        if handle
+            .path()
+            .file_name()
+            .expect("file name")
+            .to_str()
+            .expect("file name")
+            .starts_with('.')
+        {
+            debug!("skip hidden file {:?}", handle.path());
+            continue;
+        }
+
         let meta = handle
             .metadata()
             .map_err(|e| io_err(e, handle.path()))

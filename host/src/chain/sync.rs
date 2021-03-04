@@ -32,7 +32,7 @@ pub struct SyncChain {
 impl ChainInstance for SyncChain {
     async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
         let block_id = SUBJECT.into();
-        let mut block = fs::File::get_block_mut(&self.file, txn_id, &block_id).await?;
+        let mut block = fs::File::get_block_mut(&self.file, txn_id, block_id).await?;
         block.append(op_ref);
         Ok(())
     }
@@ -65,14 +65,14 @@ impl Persist for SyncChain {
                         file.try_into()?
                     };
 
-                if !file.block_exists(&txn_id, &SUBJECT.into()).await? {
+                if !file.contains_block(&txn_id, &SUBJECT.into()).await? {
+                    debug!("sync chain writing new subject...");
+
                     let as_bytes = serde_json::to_vec(value)
                         .map_err(|e| TCError::bad_request("unable to serialize value", e))?;
 
                     file.create_block(txn_id, SUBJECT.into(), Bytes::from(as_bytes))
                         .await?;
-
-                    debug!("sync chain wrote new subject");
                 } else {
                     debug!("sync chain found existing subject");
                 }
@@ -87,6 +87,7 @@ impl Persist for SyncChain {
             let file = dir
                 .create_file(txn_id, CHAIN.into(), ChainType::Sync.into())
                 .await?;
+
             file.try_into()?
         };
 

@@ -8,7 +8,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{join_all, Future, TryFutureExt};
-use log::{debug, warn};
+use log::debug;
 
 use tc_error::*;
 use tc_transact::lock::{Mutable, TxnLock};
@@ -125,11 +125,8 @@ impl Dir {
                     let path = handle.path();
 
                     if name == super::VERSION {
-                        let path = handle.path();
-                        warn!("skipping old version file at {:?}", path);
+                        debug!("skipping old version file at {:?}", handle.path());
                         continue;
-                    } else if name.starts_with(".") {
-                        debug!("skip loading hidden file {:?}", path);
                     }
 
                     let contents = dir_contents(&path).await?;

@@ -1,14 +1,10 @@
-//! Transactional filesystem traits and data structures.
+//! Transactional filesystem traits and data structures. Unstable.
 
 use std::convert::TryFrom;
-use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::en;
-use futures::Future;
-use uplock::{RwLockReadGuard, RwLockWriteGuard};
 
 use tc_error::*;
 use tcgeneric::{Id, PathSegment};
@@ -17,6 +13,24 @@ use super::TxnId;
 
 /// An alias for [`Id`] used for code clarity.
 pub type BlockId = PathSegment;
+
+/// The contents of a [`Block`].
+pub trait BlockData: Clone + TryFrom<Bytes> + Into<Bytes> + Send + Sync {}
+
+impl BlockData for Bytes {}
+
+/// A transactional filesystem block.
+#[async_trait]
+pub trait Block<B: BlockData>: Send + Sync {
+    type ReadLock: Deref<Target = B>;
+    type WriteLock: DerefMut<Target = B>;
+
+    /// Get a read lock on this block.
+    async fn read(&self, txn_id: &TxnId) -> TCResult<Self::ReadLock>;
+
+    /// Get a write lock on this block.
+    async fn write(&self, txn_id: &TxnId) -> TCResult<Self::WriteLock>;
+}
 
 /// A transactional persistent data store.
 #[async_trait]
@@ -27,44 +41,41 @@ pub trait Store: Send + Sync {
 
 /// A transactional file.
 #[async_trait]
-pub trait File: Store + Sized {
+pub trait File<B: BlockData>: Store + Sized {
     /// The type of block which this file is divided into.
-    type Block: BlockData;
+    type Block: Block<B>;
 
     /// Return true if this file contains the given [`BlockId`] as of the given [`TxnId`].
-    async fn block_exists(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool>;
+    async fn contains_block(&self, txn_id: &TxnId, name: &BlockId) -> TCResult<bool>;
 
     /// Create a new [`Self::Block`].
     async fn create_block(
         &self,
         txn_id: TxnId,
         name: BlockId,
-        initial_value: Self::Block,
-    ) -> TCResult<BlockOwned<Self>>;
+        initial_value: B,
+    ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
 
-    /// Get the data in block `name` as of [`TxnId`].
-    async fn get_block<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        name: &'a BlockId,
-    ) -> TCResult<Block<'a, Self>>;
-
-    /// Get a mutable lock on the data in block `name` as of [`TxnId`].
-    async fn get_block_mut<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        name: &'a BlockId,
-    ) -> TCResult<BlockMut<'a, Self>>;
-
-    /// Get the data in block `name` at [`TxnId`] without borrowing.
-    async fn get_block_owned(self, txn_id: TxnId, name: BlockId) -> TCResult<BlockOwned<Self>>;
-
-    /// Get a mutable lock on the data in block `name` at [`TxnId`] without borrowing.
-    async fn get_block_owned_mut(
-        self,
-        txn_id: TxnId,
+    /// Delete the block with the given ID.
+    async fn delete_block(
+        &self,
+        txn_id: &TxnId,
         name: BlockId,
-    ) -> TCResult<BlockOwnedMut<Self>>;
+    ) -> TCResult<()>;
+
+    /// Obtain a read lock on block `name` as of [`TxnId`].
+    async fn get_block(
+        &self,
+        txn_id: &TxnId,
+        name: BlockId,
+    ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
+
+    /// Obtain a write lock on block `name` as of [`TxnId`].
+    async fn get_block_mut(
+        &self,
+        txn_id: &TxnId,
+        name: BlockId,
+    ) -> TCResult<<Self::Block as Block<B>>::WriteLock>;
 }
 
 /// A transactional directory
@@ -106,214 +117,3 @@ pub trait Persist: Sized {
     /// Load a saved state from persistent storage.
     async fn load(schema: Self::Schema, store: Self::Store, txn_id: TxnId) -> TCResult<Self>;
 }
-
-/// A read lock on one block of a [`File`].
-pub struct Block<'a, F: File> {
-    file: &'a F,
-    txn_id: &'a TxnId,
-    block_id: &'a BlockId,
-    lock: RwLockReadGuard<F::Block>,
-}
-
-impl<'a, F: File> Block<'a, F> {
-    /// Construct a new lock.
-    pub fn new(
-        file: &'a F,
-        txn_id: &'a TxnId,
-        block_id: &'a BlockId,
-        lock: RwLockReadGuard<F::Block>,
-    ) -> Block<'a, F> {
-        Block {
-            file,
-            txn_id,
-            block_id,
-            lock,
-        }
-    }
-
-    /// Upgrade this read lock to a write lock.
-    pub async fn upgrade(self) -> TCResult<BlockMut<'a, F>> {
-        let lock = self._upgrade();
-        // make sure to drop self (with its read lock) before acquiring the write lock
-        lock.await
-    }
-
-    fn _upgrade(self) -> impl Future<Output = TCResult<BlockMut<'a, F>>> {
-        self.file.get_block_mut(self.txn_id, self.block_id)
-        // self dropped here
-    }
-}
-
-impl<'a, F: File> Deref for Block<'a, F> {
-    type Target = F::Block;
-
-    fn deref(&self) -> &F::Block {
-        self.lock.deref()
-    }
-}
-
-impl<'a, F: File> fmt::Display for Block<'a, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "block {}", &self.block_id)
-    }
-}
-
-/// An exclusive mutable lock on one block of a [`File`].
-pub struct BlockMut<'a, F: File> {
-    file: &'a F,
-    txn_id: &'a TxnId,
-    block_id: &'a BlockId,
-    lock: RwLockWriteGuard<F::Block>,
-}
-
-impl<'a, F: File> BlockMut<'a, F> {
-    /// Construct a new lock.
-    pub fn new(
-        file: &'a F,
-        txn_id: &'a TxnId,
-        block_id: &'a BlockId,
-        lock: RwLockWriteGuard<F::Block>,
-    ) -> Self {
-        Self {
-            file,
-            txn_id,
-            block_id,
-            lock,
-        }
-    }
-
-    /// Downgrade this write lock to a read lock.
-    pub async fn downgrade(self) -> TCResult<Block<'a, F>> {
-        let lock = self._downgrade();
-        // make sure to drop self (with its write lock) before acquiring the read lock
-        lock.await
-    }
-
-    fn _downgrade(self) -> impl Future<Output = TCResult<Block<'a, F>>> {
-        self.file.get_block(self.txn_id, self.block_id)
-        // self dropped here
-    }
-}
-
-impl<'a, F: File> Deref for BlockMut<'a, F> {
-    type Target = F::Block;
-
-    fn deref(&self) -> &F::Block {
-        self.lock.deref()
-    }
-}
-
-impl<'a, F: File> DerefMut for BlockMut<'a, F> {
-    fn deref_mut(&mut self) -> &mut F::Block {
-        self.lock.deref_mut()
-    }
-}
-
-/// An owned read lock on one block of a [`File`].
-pub struct BlockOwned<F: File> {
-    file: F,
-    txn_id: TxnId,
-    block_id: BlockId,
-    lock: RwLockReadGuard<F::Block>,
-}
-
-impl<F: File + 'static> BlockOwned<F> {
-    /// Construct a new lock.
-    pub fn new(
-        file: F,
-        txn_id: TxnId,
-        block_id: BlockId,
-        lock: RwLockReadGuard<F::Block>,
-    ) -> BlockOwned<F> {
-        BlockOwned {
-            file,
-            txn_id,
-            block_id,
-            lock,
-        }
-    }
-
-    /// Upgrade this read lock to a write lock.
-    pub async fn upgrade(self) -> TCResult<BlockOwnedMut<F>> {
-        let lock = self._upgrade();
-        // make sure to drop self before acquiring the write lock
-        lock.await
-    }
-
-    fn _upgrade(self) -> impl Future<Output = TCResult<BlockOwnedMut<F>>> {
-        self.file.get_block_owned_mut(self.txn_id, self.block_id)
-        // self dropped here
-    }
-}
-
-impl<F: File> Deref for BlockOwned<F> {
-    type Target = F::Block;
-
-    fn deref(&'_ self) -> &'_ F::Block {
-        self.lock.deref()
-    }
-}
-
-impl<'en, F: File> en::IntoStream<'en> for BlockOwned<F>
-where
-    F::Block: en::IntoStream<'en>,
-{
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream(self.deref().clone(), encoder)
-    }
-}
-
-/// An owned exclusive write lock on one block of a [`File`].
-pub struct BlockOwnedMut<F: File> {
-    file: F,
-    txn_id: TxnId,
-    block_id: BlockId,
-    lock: RwLockWriteGuard<F::Block>,
-}
-
-impl<F: File + 'static> BlockOwnedMut<F> {
-    /// Construct a new lock.
-    pub fn new(
-        file: F,
-        txn_id: TxnId,
-        block_id: BlockId,
-        lock: RwLockWriteGuard<F::Block>,
-    ) -> Self {
-        Self {
-            file,
-            txn_id,
-            block_id,
-            lock,
-        }
-    }
-
-    /// Downgrade this write lock to a read lock.
-    pub async fn downgrade(self) -> TCResult<BlockOwned<F>> {
-        let lock = self._downgrade();
-        // make sure to drop self (with its write lock) before acquiring the read lock
-        lock.await
-    }
-
-    fn _downgrade(self) -> impl Future<Output = TCResult<BlockOwned<F>>> {
-        self.file.get_block_owned(self.txn_id, self.block_id)
-        // self dropped here
-    }
-}
-
-impl<F: File> Deref for BlockOwnedMut<F> {
-    type Target = F::Block;
-
-    fn deref(&self) -> &F::Block {
-        self.lock.deref()
-    }
-}
-
-impl<F: File> DerefMut for BlockOwnedMut<F> {
-    fn deref_mut(&mut self) -> &mut F::Block {
-        self.lock.deref_mut()
-    }
-}
-
-pub trait BlockData: Clone + TryFrom<Bytes> + Into<Bytes> + Send + Sync {}
-
-impl BlockData for Bytes {}

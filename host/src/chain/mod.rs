@@ -57,7 +57,7 @@ impl Subject {
         match self {
             Self::Value(file) => {
                 let block_id = SUBJECT.into();
-                let block = file.get_block(txn_id, &block_id).await?;
+                let block = file.get_block(txn_id, block_id).await?;
                 let value: Value = serde_json::from_slice(&block)
                     .map_err(|e| TCError::internal(format!("block corrupted! {}", e)))?;
 
@@ -82,7 +82,7 @@ impl Subject {
                     .map_err(|e| TCError::bad_request("error serializing Value", e))?;
 
                 let block_id = SUBJECT.into();
-                let mut block = file.get_block_mut(txn_id, &block_id).await?;
+                let mut block = file.get_block_mut(txn_id, block_id).await?;
                 debug!(
                     "set new Value of chain subject to {} ({}) at {}",
                     new_value, new_json, txn_id
