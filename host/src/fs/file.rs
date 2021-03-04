@@ -2,8 +2,8 @@
 
 use std::collections::HashSet;
 use std::convert::TryFrom;
-use std::io;
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -17,7 +17,7 @@ use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transact, TxnId};
 use tcgeneric::Id;
 
-use super::{create_parent, file_name, fs_path, io_err, Cache, CacheBlock, CacheLock, DirContents};
+use super::{file_name, Cache, CacheBlock, CacheLock, DirContents};
 
 /// A transactional file.
 #[derive(Clone)]
@@ -25,6 +25,7 @@ pub struct File<B> {
     cache: Cache,
     path: PathBuf,
     listing: TxnLock<Mutable<HashSet<fs::BlockId>>>,
+    // TODO: replace with a custom lock
     mutated: TxnLock<Mutable<HashSet<fs::BlockId>>>,
     phantom: PhantomData<B>,
 }
@@ -76,29 +77,18 @@ impl<B: fs::BlockData + 'static> File<B> {
         CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
         CacheBlock: From<CacheLock<B>>,
     {
-        if !fs::File::block_exists(self, txn_id, block_id).await? {
-            return Err(TCError::not_found(format!("block {}", block_id)));
-        }
-
         let path = block_path(&self.path, txn_id, block_id);
-        if !path.exists() {
-            let source_path = fs_path(&self.path, block_id);
-            assert!(source_path.exists());
-            create_parent(&path).await?;
-
-            debug!(
-                "copy canonical block {:?} to {:?}",
-                source_path,
-                source_path.exists()
-            );
-
-            tokio::fs::copy(&source_path, &path)
-                .map_err(|e| io_err(e, (&source_path, &path)))
-                .await?;
+        if let Some(lock) = self.cache.read(&path).await? {
+            Ok(Some(lock))
+        } else if let Some(block) = self.cache.read(&canonical(&self.path, block_id)).await? {
+            let contents = block.read().await;
+            self.cache
+                .write(path, contents.deref().clone())
+                .map_ok(Some)
+                .await
+        } else {
+            Ok(None)
         }
-
-        debug_assert!(path.exists());
-        self.cache.read(&path).await
     }
 }
 
@@ -131,13 +121,18 @@ where
         name: fs::BlockId,
         initial_value: Self::Block,
     ) -> TCResult<fs::BlockOwned<Self>> {
-        let path = block_path(&self.path, &txn_id, &name);
-        debug!("create block at {:?}", &path);
-
         let (mut listing, mut mutated) =
             try_join!(self.listing.write(txn_id), self.mutated.write(txn_id))?;
 
+        if listing.contains(&name) {
+            return Err(TCError::bad_request("block already exists", name));
+        }
+
+        let path = block_path(&self.path, &txn_id, &name);
+        debug!("create block at {:?}", &path);
+
         let lock = self.cache.write(path, initial_value).await?;
+
         listing.insert(name.clone());
         mutated.insert(name.clone());
 
@@ -204,35 +199,58 @@ where
 }
 
 #[async_trait]
-impl<B: fs::BlockData> Transact for File<B> {
+impl<B: fs::BlockData> Transact for File<B>
+where
+    CacheBlock: From<CacheLock<B>>,
+    CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
+{
     async fn commit(&self, txn_id: &TxnId) {
         debug!("commit file {:?} at {}", &self.path, txn_id);
 
-        if !self.path.exists() {
-            tokio::fs::create_dir(&self.path)
+        if let Some(mutated) = Some(
+            self.mutated
+                .read(txn_id)
                 .await
-                .expect("create file dir");
-        }
+                .expect("file mutated block list"),
+        ) {
+            let _listing = self.listing.read(txn_id).await.expect("lock file listing");
 
-        {
-            let mut mutated = self.mutated.write(*txn_id).await.unwrap();
-
-            let commit_blocks = mutated.drain().map(|block_id| async move {
-                let version = block_path(&self.path, txn_id, &block_id);
-                self.cache.sync(&version).await?;
-                assert!(version.exists());
-
-                let dest = canonical(&self.path, &block_id);
-                debug_assert!(dest.parent().expect("file dir").exists());
-
-                tokio::fs::copy(version, dest)
-                    .map_err(move |e| io_err(e, block_path(&self.path, txn_id, &block_id)))
+            if !self.path.exists() {
+                tokio::fs::create_dir(&self.path)
                     .await
+                    .expect("create file dir");
+            }
+
+            let backup = mutated.iter().map(|block_id| async move {
+                let version = block_path(&self.path, txn_id, block_id);
+                self.cache.sync(&version).await?;
+                debug_assert!(version.exists());
+                TCResult::Ok(())
             });
 
-            try_join_all(commit_blocks)
-                .await
-                .expect("commit block versions");
+            try_join_all(backup).await.expect("backup mutated blocks");
+
+            let commit = mutated.iter().map(|block_id| async move {
+                let version = block_path(&self.path, txn_id, block_id);
+                let dest = canonical(&self.path, block_id);
+
+                let block = self
+                    .cache
+                    .read(&version)
+                    .await?
+                    .expect("read mutated block to commit");
+
+                let contents = block.read().await;
+                self.cache
+                    .write(dest.clone(), contents.deref().clone())
+                    .await?;
+
+                self.cache.sync(&dest).await?;
+                debug_assert!(dest.exists());
+                TCResult::Ok(())
+            });
+
+            try_join_all(commit).await.expect("commit mutated blocks");
         }
 
         self.listing.commit(txn_id).await;
@@ -241,9 +259,11 @@ impl<B: fs::BlockData> Transact for File<B> {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        let listing = self.listing.write(*txn_id).await.unwrap();
         join_all(
-            listing
+            self.listing
+                .read(txn_id)
+                .await
+                .expect("lock file list")
                 .iter()
                 .map(|block_id| block_path(&self.path, txn_id, block_id))
                 .map(|path| self.cache.remove(path)),
@@ -254,12 +274,10 @@ impl<B: fs::BlockData> Transact for File<B> {
         if version.exists() {
             debug!("removing old version directory {:?}", version);
             if let Err(cause) = tokio::fs::remove_dir_all(&version).await {
-                if cause.kind() != io::ErrorKind::NotFound {
-                    error!(
-                        "failed to remove old version directory {:?}: {}",
-                        version, cause
-                    );
-                }
+                error!(
+                    "failed to remove old version directory {:?}: {}",
+                    version, cause
+                );
             }
         }
 
