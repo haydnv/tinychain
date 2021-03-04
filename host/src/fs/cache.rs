@@ -213,6 +213,8 @@ impl Cache {
     where
         CacheBlock: From<CacheLock<B>>,
     {
+        debug!("cache insert: {:?}", &path);
+
         let size = {
             let as_bytes: Bytes = block.clone().into();
             as_bytes.len()
@@ -241,13 +243,22 @@ impl Cache {
     }
 
     /// Remove a block from the cache.
-    pub async fn remove(&self, path: PathBuf) -> TCResult<()> {
+    pub async fn remove(&self, path: &PathBuf) -> TCResult<()> {
         let mut inner = self.inner.write().await;
-        inner.remove(&path).await
+        inner.remove(path).await
+    }
+
+    /// Remove a block from the cache and delete it from the filesystem.
+    pub async fn remove_and_delete(&self, path: &PathBuf) -> TCResult<()> {
+        let mut inner = self.inner.write().await;
+        inner.remove(path).await?;
+        tokio::fs::remove_file(path)
+            .map_err(|e| io_err(e, path))
+            .await
     }
 
     /// Synchronize a cached block with the filesystem.
-    pub async fn sync(&self, path: &PathBuf) -> TCResult<()> {
+    pub async fn sync(&self, path: &PathBuf) -> TCResult<bool> {
         debug!("sync block at {:?} with filesystem", &path);
 
         let inner = self.inner.read().await;
@@ -259,11 +270,12 @@ impl Cache {
             fs::write(path, as_bytes)
                 .map_err(|e| io_err(e, path))
                 .await?;
-        } else {
-            log::warn!("no such block! {:?}", path);
-        }
 
-        Ok(())
+            Ok(true)
+        } else {
+            log::info!("cache sync miss: {:?}", path);
+            Ok(path.exists())
+        }
     }
 }
 
