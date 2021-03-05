@@ -186,6 +186,10 @@ where
             let (listing, touched) = join!(self.listing.read(txn_id), self.touched.read());
             let listing = &listing.expect("file listing");
             if let Some(blocks) = touched.get(txn_id) {
+                try_join_all(blocks.values().map(|block| block.prepare(txn_id)))
+                    .await
+                    .expect("prepare blocks to commit");
+
                 let commits = blocks.iter().map(|(block_id, block)| async move {
                     if listing.contains(block_id) {
                         block.commit(txn_id).await?;
