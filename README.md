@@ -1,5 +1,7 @@
 # TINYCHAIN
 
+[![Join the chat at https://gitter.im/tinychain-host/community](https://badges.gitter.im/tinychain-host/community.svg)](https://gitter.im/tinychain-host/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 [![Crates.io][crates-badge]][crates-url]
 [![Docs.rs][docs-badge]][docs-url]
 
