@@ -4,7 +4,8 @@ use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use uplock::{RwLockReadGuard, RwLockWriteGuard};
+use futures::join;
+use uplock::*;
 
 use tc_error::*;
 use tc_transact::fs;
@@ -47,6 +48,8 @@ impl<B> DerefMut for BlockWrite<B> {
 pub struct Block<B> {
     path: PathBuf,
     cache: Cache,
+    committed: RwLock<Option<TxnId>>,
+    reserved: RwLock<Option<TxnId>>,
     phantom: PhantomData<B>,
 }
 
@@ -62,6 +65,8 @@ where
         Self {
             cache,
             path,
+            committed: RwLock::new(None),
+            reserved: RwLock::new(None),
             phantom: PhantomData,
         }
     }
@@ -70,7 +75,31 @@ where
         &self.path
     }
 
+    async fn access(&self, txn_id: &TxnId) -> TCResult<()> {
+        let (committed, reserved) = join!(self.committed.read(), self.reserved.read());
+
+        if let Some(commit_id) = committed.deref() {
+            if txn_id < commit_id {
+                return Err(TCError::conflict());
+            }
+        }
+
+        if let Some(reserved_id) = reserved.deref() {
+            if txn_id < reserved_id {
+                return Err(TCError::conflict());
+            } else {
+                *reserved.upgrade().await = Some(*txn_id);
+            }
+        } else {
+            *reserved.upgrade().await = Some(*txn_id);
+        }
+
+        Ok(())
+    }
+
     pub async fn commit(&self, txn_id: &TxnId) -> TCResult<()> {
+        let committed = self.committed.read().await;
+
         let version = version_path(&self.path, txn_id);
         if self.cache.sync(&version).await? {
             let cached = self.cache.read(&version).await?;
@@ -81,11 +110,10 @@ where
                 .await?;
 
             self.cache.sync(&self.path).await?;
-            Ok(())
-        } else {
-            // TODO: bump last commit Id of this lock
-            Ok(())
         }
+
+        *committed.upgrade().await = Some(*txn_id);
+        Ok(())
     }
 }
 
@@ -104,6 +132,8 @@ where
             let guard = lock.read().await;
             Ok(BlockRead { guard })
         } else if let Some(lock) = self.cache.read(&self.path).await? {
+            self.access(txn_id).await?;
+
             let guard = lock.read().await;
             Ok(BlockRead { guard })
         } else {
@@ -115,6 +145,8 @@ where
     }
 
     async fn write(&self, txn_id: &TxnId) -> TCResult<Self::WriteLock> {
+        self.access(txn_id).await?;
+
         let path = version_path(&self.path, txn_id);
         if let Some(lock) = self.cache.read(&path).await? {
             let guard = lock.write().await;
