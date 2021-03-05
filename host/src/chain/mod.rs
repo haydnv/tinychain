@@ -11,11 +11,10 @@ use safecast::{CastFrom, TryCastFrom};
 use tc_error::*;
 use tc_transact::fs::File;
 use tc_transact::{Transact, TxnId};
-use tc_value::Value;
 use tcgeneric::*;
 
 use crate::fs;
-use crate::scalar::OpRef;
+use crate::scalar::{Scalar, Value};
 use crate::state::State;
 
 mod block;
@@ -120,7 +119,7 @@ impl Transact for Subject {
 #[async_trait]
 pub trait ChainInstance {
     /// Append the given [`OpRef`] to the latest block in this `Chain`.
-    async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()>;
+    async fn append(&self, txn_id: TxnId, key: Value, value: Scalar) -> TCResult<()>;
 
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &Subject;
@@ -181,9 +180,9 @@ impl Instance for Chain {
 
 #[async_trait]
 impl ChainInstance for Chain {
-    async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
+    async fn append(&self, txn_id: TxnId, key: Value, value: Scalar) -> TCResult<()> {
         match self {
-            Self::Sync(chain) => chain.append(txn_id, op_ref).await,
+            Self::Sync(chain) => chain.append(txn_id, key, value).await,
         }
     }
 
