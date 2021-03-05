@@ -94,6 +94,11 @@ impl Gateway {
         })
     }
 
+    /// Set up replication between this host and the specified peers.
+    pub async fn replicate(&self, peers: Vec<IpAddr>) -> TCResult<()> {
+        self.kernel.replicate(peers).await
+    }
+
     /// Return the network address of this `Gateway`
     pub fn root(&self) -> &LinkHost {
         &self.root
@@ -138,7 +143,7 @@ impl Gateway {
         self.client.fetch(txn_id, link, key).await
     }
 
-    /// Read the [`State`] `key` at `link`.
+    /// Read the [`State`] with the given `key` at `link`.
     pub async fn get(&self, txn: &Txn, link: Link, key: Value) -> TCResult<State> {
         debug!("GET {}: {}", link, key);
         match link.host() {
@@ -152,7 +157,7 @@ impl Gateway {
         }
     }
 
-    /// Update the [`State`] `key` at `link` to `value`.
+    /// Update the [`State`] with the given `key` at `link` to `value`.
     pub fn put<'a>(
         &'a self,
         txn: &'a Txn,

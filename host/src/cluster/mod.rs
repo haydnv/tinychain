@@ -30,6 +30,7 @@ mod owner;
 use owner::Owner;
 
 pub use load::instantiate;
+use std::net::IpAddr;
 
 /// The [`Class`] of a [`Cluster`].
 pub struct ClusterType;
@@ -149,6 +150,11 @@ impl Cluster {
         let mut installed = self.installed.write(txn_id).await?;
         installed.insert(other, scopes);
         Ok(())
+    }
+
+    /// Set up replication, if any of the given peers are online replicas of this `Cluster`.
+    pub async fn replicate(&self, _peers: &[IpAddr]) -> TCResult<()> {
+        Err(TCError::not_implemented("replication"))
     }
 
     /// Return the `Owner` of the given transaction.
