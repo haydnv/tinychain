@@ -97,13 +97,32 @@ where
         Ok(())
     }
 
+    pub async fn prepare(&self, txn_id: &TxnId) -> TCResult<()> {
+        if let Some(last_commit) = &*self.committed.read().await {
+            assert!(txn_id > last_commit);
+            let version = version_path(&self.path, last_commit);
+            if !self.cache.sync(&version).await? {
+                if let Some(canonical) = self.cache.read(&self.path).await? {
+                    let data = canonical.read().await;
+
+                    self.cache
+                        .write(version.clone(), data.deref().clone())
+                        .await?;
+
+                    self.cache.sync(&version).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn commit(&self, txn_id: &TxnId) -> TCResult<()> {
         let committed = self.committed.read().await;
 
         let version = version_path(&self.path, txn_id);
-        if self.cache.sync(&version).await? {
-            let cached = self.cache.read(&version).await?;
-            let contents = cached.expect("cached block version").read().await;
+        if let Some(lock) = self.cache.read(&version).await? {
+            let contents = lock.read().await;
 
             self.cache
                 .write(self.path.clone(), contents.deref().clone())
