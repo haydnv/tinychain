@@ -4,7 +4,6 @@
 use std::fmt;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use log::debug;
 use safecast::{CastFrom, TryCastFrom};
 
@@ -21,6 +20,7 @@ mod block;
 mod sync;
 
 pub use block::ChainBlock;
+use std::ops::Deref;
 pub use sync::*;
 
 const CHAIN: Label = label("chain");
@@ -45,7 +45,7 @@ impl CastFrom<Value> for Schema {
 /// The state whose transactional integrity is protected by a [`Chain`].
 #[derive(Clone)]
 pub enum Subject {
-    Value(fs::File<Bytes>),
+    Value(fs::File<Value>),
 }
 
 impl Subject {
@@ -55,12 +55,8 @@ impl Subject {
 
         match self {
             Self::Value(file) => {
-                let block_id = SUBJECT.into();
-                let block = file.get_block(txn_id, block_id).await?;
-                let value: Value = serde_json::from_slice(&block)
-                    .map_err(|e| TCError::internal(format!("block corrupted! {}", e)))?;
-
-                Ok(value.into())
+                let value = file.get_block(txn_id, SUBJECT.into()).await?;
+                Ok(value.deref().clone().into())
             }
         }
     }
@@ -77,16 +73,12 @@ impl Subject {
                     TCError::bad_request("cannot update a Value to", v)
                 })?;
 
-                let new_json = serde_json::to_string(&new_value)
-                    .map_err(|e| TCError::bad_request("error serializing Value", e))?;
-
-                let block_id = SUBJECT.into();
-                let mut block = file.get_block_mut(txn_id, block_id).await?;
+                let mut block = file.get_block_mut(txn_id, SUBJECT.into()).await?;
                 debug!(
-                    "set new Value of chain subject to {} ({}) at {}",
-                    new_value, new_json, txn_id
+                    "set new Value of chain subject to {} at {}",
+                    new_value, txn_id
                 );
-                *block = Bytes::from(new_json);
+                *block = new_value;
 
                 Ok(())
             }

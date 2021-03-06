@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::{de, Decoder, Encoder, FromStream, IntoStream, ToStream};
+use destream::de::{self, Decoder, FromStream};
+use destream::en::{Encoder, IntoStream, ToStream};
 use regex::Regex;
 use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer, Error};

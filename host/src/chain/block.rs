@@ -1,13 +1,14 @@
 //! A [`ChainBlock`], the block type of a [`super::Chain`]
 
 use std::collections::btree_map::{BTreeMap, Entry};
-use std::convert::TryFrom;
 use std::fmt;
+use std::io;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
-use futures::TryFutureExt;
+use futures::{future, TryFutureExt, TryStreamExt};
+use tokio::io::{AsyncReadExt, AsyncWrite};
 
 use tc_error::*;
 use tc_transact::fs::BlockData;
@@ -15,6 +16,7 @@ use tc_transact::lock::Mutate;
 use tc_transact::TxnId;
 
 use crate::scalar::{Scalar, Value};
+use tokio_util::io::StreamReader;
 
 /// A single filesystem block belonging to a [`super::Chain`].
 #[derive(Clone)]
@@ -68,19 +70,47 @@ impl<'en> en::IntoStream<'en> for ChainBlock {
     }
 }
 
-impl TryFrom<Bytes> for ChainBlock {
-    type Error = TCError;
-
-    fn try_from(_bytes: Bytes) -> TCResult<Self> {
-        unimplemented!()
+impl<'en> en::ToStream<'en> for ChainBlock {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        let hash = base64::encode(&self.hash);
+        en::IntoStream::into_stream((hash, &self.contents), encoder)
     }
 }
 
-impl BlockData for ChainBlock {}
+#[async_trait]
+impl BlockData for ChainBlock {
+    async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
+        destream_json::read_from((), source)
+            .map_ok(|(hash, contents)| Self { hash, contents })
+            .map_err(|e| TCError::internal(format!("ChainBlock corrupted! {}", e)))
+            .await
+    }
 
-impl From<ChainBlock> for Bytes {
-    fn from(_block: ChainBlock) -> Bytes {
-        unimplemented!()
+    async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {
+        let encoded = destream_json::encode(self)
+            .map_err(|e| TCError::internal(format!("unable to serialize ChainBlock: {}", e)))?;
+
+        let mut reader = StreamReader::new(
+            encoded
+                .map_ok(Bytes::from)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e)),
+        );
+
+        tokio::io::copy(&mut reader, sink)
+            .map_err(|e| TCError::bad_gateway(e))
+            .await
+    }
+
+    async fn size(&self) -> TCResult<u64> {
+        let encoded = destream_json::encode(self)
+            .map_err(|e| TCError::internal(format!("unable to serialize ChainBlock: {}", e)))?;
+
+        encoded
+            .map_err(|e| TCError::bad_request("serialization error", e))
+            .try_fold(0, |size, chunk| {
+                future::ready(Ok(size + chunk.len() as u64))
+            })
+            .await
     }
 }
 

@@ -5,7 +5,6 @@
 use std::convert::TryInto;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::join;
 use log::debug;
 
@@ -58,7 +57,7 @@ impl Persist for SyncChain {
     async fn load(schema: Self::Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
         let subject = match &schema {
             Schema::Value(value) => {
-                let file: fs::File<Bytes> =
+                let file: fs::File<Value> =
                     if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
                         file.try_into()?
                     } else {
@@ -71,11 +70,7 @@ impl Persist for SyncChain {
 
                 if !file.contains_block(&txn_id, &SUBJECT.into()).await? {
                     debug!("sync chain writing new subject...");
-
-                    let as_bytes = serde_json::to_vec(value)
-                        .map_err(|e| TCError::bad_request("unable to serialize value", e))?;
-
-                    file.create_block(txn_id, SUBJECT.into(), Bytes::from(as_bytes))
+                    file.create_block(txn_id, SUBJECT.into(), value.clone())
                         .await?;
                 } else {
                     debug!("sync chain found existing subject");

@@ -289,15 +289,15 @@ impl<T: Mutate> TxnLock<T> {
             Some(current_txn) if current_txn > txn_id => Err(TCError::conflict()),
             // If there's a writer in the past, wait for it to complete.
             Some(current_txn) if current_txn < txn_id => {
-                debug!("TxnLock {} at {} blocked on {}", &self.name, txn_id, current_txn);
+                debug!(
+                    "TxnLock {} at {} blocked on {}",
+                    &self.name, txn_id, current_txn
+                );
                 Ok(None)
             }
             // If there's already a writer for the current transaction, wait for it to complete.
             Some(_) => {
-                debug!(
-                    "TxnLock {} waiting on existing write lock",
-                    &self.name
-                );
+                debug!("TxnLock {} waiting on existing write lock", &self.name);
                 Ok(None)
             }
             _ => {

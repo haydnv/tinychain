@@ -1,12 +1,16 @@
 //! Transactional filesystem traits and data structures. Unstable.
 
-use std::convert::TryFrom;
+use std::io;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::{future, TryFutureExt, TryStreamExt};
+use tokio::io::{AsyncReadExt, AsyncWrite};
+use tokio_util::io::StreamReader;
 
 use tc_error::*;
+use tc_value::Value;
 use tcgeneric::{Id, PathSegment};
 
 use super::TxnId;
@@ -15,9 +19,50 @@ use super::TxnId;
 pub type BlockId = PathSegment;
 
 /// The contents of a [`Block`].
-pub trait BlockData: Clone + TryFrom<Bytes> + Into<Bytes> + Send + Sync {}
+#[async_trait]
+pub trait BlockData: Clone + Send + Sync {
+    async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self>;
 
-impl BlockData for Bytes {}
+    async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64>;
+
+    async fn size(&self) -> TCResult<u64>;
+}
+
+#[async_trait]
+impl BlockData for Value {
+    async fn load<S: AsyncReadExt + Send + Unpin>(source: S) -> TCResult<Self> {
+        destream_json::read_from((), source)
+            .map_err(|e| TCError::internal(format!("unable to parse Value: {}", e)))
+            .await
+    }
+
+    async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {
+        let encoded = destream_json::encode(self.clone())
+            .map_err(|e| TCError::internal(format!("unable to serialize Value: {}", e)))?;
+
+        let mut reader = StreamReader::new(
+            encoded
+                .map_ok(Bytes::from)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e)),
+        );
+
+        tokio::io::copy(&mut reader, sink)
+            .map_err(|e| TCError::bad_gateway(e))
+            .await
+    }
+
+    async fn size(&self) -> TCResult<u64> {
+        let encoded = destream_json::encode(self)
+            .map_err(|e| TCError::bad_request("serialization error", e))?;
+
+        encoded
+            .map_err(|e| TCError::bad_request("serialization error", e))
+            .try_fold(0, |size, chunk| {
+                future::ready(Ok(size + chunk.len() as u64))
+            })
+            .await
+    }
+}
 
 /// A transactional filesystem block.
 #[async_trait]
@@ -57,11 +102,7 @@ pub trait File<B: BlockData>: Store + Sized {
     ) -> TCResult<<Self::Block as Block<B>>::ReadLock>;
 
     /// Delete the block with the given ID.
-    async fn delete_block(
-        &self,
-        txn_id: &TxnId,
-        name: BlockId,
-    ) -> TCResult<()>;
+    async fn delete_block(&self, txn_id: &TxnId, name: BlockId) -> TCResult<()>;
 
     /// Obtain a read lock on block `name` as of [`TxnId`].
     async fn get_block(

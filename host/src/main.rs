@@ -14,13 +14,13 @@ use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
 use tinychain::*;
 
-fn data_size(flag: &str) -> TCResult<usize> {
+fn data_size(flag: &str) -> TCResult<u64> {
     if flag.is_empty() {
         return Err(TCError::bad_request("Invalid size specified", flag));
     }
 
     let msg = "Unable to parse value";
-    let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
+    let size = u64::from_str_radix(&flag[0..flag.len() - 1], 10)
         .map_err(|_| TCError::bad_request(msg, flag))?;
 
     if flag.ends_with('K') {
@@ -50,7 +50,7 @@ struct Config {
     pub workspace: PathBuf,
 
     #[structopt(long = "cache_size", default_value = "10M", parse(try_from_str = data_size))]
-    pub cache_size: usize,
+    pub cache_size: u64,
 
     #[structopt(long = "data_dir")]
     pub data_dir: Option<PathBuf>,
@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .expect(&format!("read from {:?}", &path));
 
             let mut decoder =
-                destream_json::de::Decoder::from(stream::once(future::ready(Ok(config))));
+                destream_json::de::Decoder::from_stream(stream::once(future::ready(Ok(config))));
 
             let cluster = match InstanceClass::from_stream((), &mut decoder).await {
                 Ok(class) => cluster::instantiate(class, data_dir.clone(), txn_id).await?,

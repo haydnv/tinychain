@@ -10,6 +10,7 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
+use destream::en::{Encoder, IntoStream, ToStream};
 use safecast::*;
 
 /// A generic tuple type, based on [`Vec`]
@@ -182,6 +183,18 @@ where
     async fn from_stream<D: Decoder>(context: Self::Context, d: &mut D) -> Result<Self, D::Error> {
         let inner = Vec::<T>::from_stream(context, d).await?;
         Ok(Self { inner })
+    }
+}
+
+impl<'en, T: Clone + 'en> IntoStream<'en> for Tuple<T> where T: IntoStream<'en> {
+    fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        self.inner.into_stream(encoder)
+    }
+}
+
+impl<'en, T: Clone + 'en> ToStream<'en> for Tuple<T> where T: ToStream<'en> {
+    fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        self.inner.to_stream(encoder)
     }
 }
 

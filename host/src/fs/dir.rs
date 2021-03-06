@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::future::{join_all, Future, TryFutureExt};
 use log::debug;
 
@@ -17,19 +16,19 @@ use tc_transact::{fs, Transact};
 use tcgeneric::{Id, PathSegment};
 
 use crate::chain::{self, ChainBlock};
-use crate::scalar::ScalarType;
+use crate::scalar::{ScalarType, Value};
 use crate::state::StateType;
 
 use super::{dir_contents, file_ext, file_name, fs_path, Cache, DirContents, File};
 use crate::fs::io_err;
 
-pub const BIN_EXT: &str = "bin";
+pub const VALUE_EXT: &str = "value";
 
 /// A file in a [`Dir`].
 #[derive(Clone)]
 pub enum FileEntry {
-    Bin(File<Bytes>),
     Chain(File<ChainBlock>),
+    Value(File<Value>),
 }
 
 impl FileEntry {
@@ -37,7 +36,7 @@ impl FileEntry {
         match class {
             StateType::Chain(_) => Ok(Self::Chain(File::new(cache, path, chain::EXT))),
             StateType::Scalar(st) => match st {
-                ScalarType::Value(_) => Ok(Self::Bin(File::new(cache, path, BIN_EXT))),
+                ScalarType::Value(_) => Ok(Self::Value(File::new(cache, path, VALUE_EXT))),
                 other => Err(TCError::bad_request("cannot create file for", other)),
             },
             other => Err(TCError::bad_request("cannot create file for", other)),
@@ -49,13 +48,13 @@ impl FileEntry {
             .ok_or_else(|| TCError::unsupported(format!("file at {:?} has no extension", &path)))?;
 
         match ext {
-            BIN_EXT => {
-                let file = File::load(cache.clone(), path, contents).await?;
-                Ok(FileEntry::Bin(file))
-            }
             chain::EXT => {
                 let file = File::load(cache.clone(), path, contents).await?;
                 Ok(FileEntry::Chain(file))
+            }
+            VALUE_EXT => {
+                let file = File::load(cache.clone(), path, contents).await?;
+                Ok(FileEntry::Value(file))
             }
             other => Err(TCError::internal(format!(
                 "file at {:?} has invalid extension {}",
@@ -76,13 +75,13 @@ impl TryFrom<FileEntry> for File<ChainBlock> {
     }
 }
 
-impl TryFrom<FileEntry> for File<Bytes> {
+impl TryFrom<FileEntry> for File<Value> {
     type Error = TCError;
 
     fn try_from(file: FileEntry) -> TCResult<Self> {
         match file {
-            FileEntry::Bin(file) => Ok(file),
-            _ => Err(TCError::unsupported("this is not a binary file!")),
+            FileEntry::Value(file) => Ok(file),
+            _ => Err(TCError::unsupported("this is not a persistent Value!")),
         }
     }
 }
@@ -279,8 +278,8 @@ impl Transact for Dir {
             join_all(entries.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.commit(txn_id),
                 DirEntry::File(file) => match file {
-                    FileEntry::Bin(file) => file.commit(txn_id),
                     FileEntry::Chain(file) => file.commit(txn_id),
+                    FileEntry::Value(file) => file.commit(txn_id),
                 },
             }))
             .await;
@@ -295,8 +294,8 @@ impl Transact for Dir {
             join_all(entries.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.finalize(txn_id),
                 DirEntry::File(file) => match file {
-                    FileEntry::Bin(file) => file.finalize(txn_id),
                     FileEntry::Chain(file) => file.finalize(txn_id),
+                    FileEntry::Value(file) => file.finalize(txn_id),
                 },
             }))
             .await;
