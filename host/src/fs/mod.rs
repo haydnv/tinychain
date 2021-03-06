@@ -105,6 +105,6 @@ fn io_err<I: fmt::Debug + Send>(err: io::Error, info: I) -> TCError {
             "Tinychain does not have permission to access the host filesystem: {:?}",
             info
         )),
-        other => TCError::internal(format!("host filesystem error: {:?}", other)),
+        other => TCError::internal(format!("host filesystem error: {:?}: {}", other, err)),
     }
 }

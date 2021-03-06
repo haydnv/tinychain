@@ -6,6 +6,7 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use rand::Rng;
 
+use destream::IntoStream;
 use tc_error::*;
 use tcgeneric::{Id, NetworkTime};
 
@@ -84,7 +85,10 @@ impl PartialOrd for TxnId {
 impl destream::de::FromStream for TxnId {
     type Context = ();
 
-    async fn from_stream<D: destream::de::Decoder>(context: (), d: &mut D) -> Result<Self, D::Error> {
+    async fn from_stream<D: destream::de::Decoder>(
+        context: (),
+        d: &mut D,
+    ) -> Result<Self, D::Error> {
         let s = <String as destream::de::FromStream>::from_stream(context, d).await?;
         Self::from_str(&s).map_err(destream::de::Error::custom)
     }
@@ -92,6 +96,12 @@ impl destream::de::FromStream for TxnId {
 
 impl<'en> destream::en::IntoStream<'en> for TxnId {
     fn into_stream<E: destream::en::Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
+        self.to_string().into_stream(e)
+    }
+}
+
+impl<'en> destream::en::ToStream<'en> for TxnId {
+    fn to_stream<E: destream::en::Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
         self.to_string().into_stream(e)
     }
 }

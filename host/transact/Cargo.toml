@@ -14,12 +14,16 @@ categories = ["concurrency", "data-structures"]
 async-trait = "0.1"
 bytes = "1.0"
 destream = "0.3"
+destream_json = "0.4"
 env_logger = "0.8"
 futures = "0.3"
 log = { version = "0.4", features = [] }
 rand = "0.7"
 serde = { version = "1.0", features = []}
-tcgeneric = "0.1"
+tcgeneric = { path = "../generic" }
 tc-error = "0.1"
+tc-value = { path = "../value" }
+tokio = { version = "1.2", features = ["io-util"] }
+tokio-util = { version = "0.6", features = ["io"] }
 uplock = "0.1"
 uuid = { version = "0.8", features = ["v4"] }

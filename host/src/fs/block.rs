@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use futures::join;
+use log::debug;
 use uplock::*;
 
 use tc_error::*;
@@ -118,6 +119,8 @@ where
     }
 
     pub async fn commit(&self, txn_id: &TxnId) -> TCResult<()> {
+        debug!("commit block {:?} at {}", &self.path, txn_id);
+
         let committed = self.committed.read().await;
 
         let version = version_path(&self.path, txn_id);
