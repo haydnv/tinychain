@@ -2,11 +2,14 @@
 
 [![Crates.io][crates-badge]][crates-url]
 [![Docs.rs][docs-badge]][docs-url]
+[![Gitter][gitter-badge]][gitter-url]
 
 [crates-badge]: https://img.shields.io/crates/v/tinychain.svg
 [crates-url]: https://crates.io/crates/tinychain
 [docs-badge]: https://docs.rs/tinychain/badge.svg
 [docs-url]: https://docs.rs/tinychain/
+[gitter-badge]: https://img.shields.io/gitter/room/haydnv/tinychain.svg
+[gitter-url]: https://gitter.im/tinychain-host/community
 
 Tinychain is an all-in-one database + application server with support for blockchains, graphs, tables, and tensors.
 
@@ -35,7 +38,7 @@ You can find more in-depth examples in the [tests](https://github.com/haydnv/tin
 ### Safety
 
  * **Synchronization**: Tinychain's distributed Paxos algorithm automatically enables cross-service transactions within any set of services which support the Tinychain protocol.
- * **Hypothetical queries**: making changes to a production database is dangerous, particularly when the changes are inherently destructive (like dropping a column from a database table). Tinychain's hypothetical query feature mitigates this risk by allowing the developer to examine the state of their database *as if* a potentially-destructive change had been applied, without actually committing the change.
+ * **Hypothetical queries**: making changes to a production database is dangerous, particularly when the changes are inherently destructive (like dropping a column from a database table). Tinychain's hypothetical query feature mitigates this risk by allowing the developer to interact with their service *as if* a potentially-destructive change had been applied, without actually committing the change.
  * **Data encapsulation**: Tinychain integrates the database layer with the application layer of a cloud service, meaning that data never has to leave the application that authorizes access to it. Also, because Tinychain is a self-contained cloud-native runtime, a Tinychain service can easily be deployed to a user to run on-premises, meaning that the user never has to grant the vendor access to their data.
  * **Memory safety**: Around [70% of serious security bugs](https://www.zdnet.com/article/microsoft-70-percent-of-all-security-bugs-are-memory-safety-issues/) are memory-safety bugs. Tinychain is written in [Rust](http://www.rust-lang.org), which mitigates this risk by building memory safety into the language itself.
 

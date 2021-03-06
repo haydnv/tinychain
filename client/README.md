@@ -1,4 +1,10 @@
-[![Documentation Status](https://readthedocs.org/projects/tinychain/badge/?version=latest)](https://tinychain.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status][docs-badge]][docs-url]
+[![Gitter][gitter-badge]][gitter-url]
+
+[docs-badge]: https://readthedocs.org/projects/tinychain/badge/?version=latest
+[docs-url]: https://tinychain.readthedocs.io/en/latest/?badge=latest
+[gitter-badge]: https://img.shields.io/gitter/room/haydnv/tinychain.svg
+[gitter-url]: https://gitter.im/tinychain-host/community
 
 ## Getting started
 
