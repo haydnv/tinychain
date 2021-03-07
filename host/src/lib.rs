@@ -31,7 +31,7 @@ pub use tcgeneric as generic;
 pub async fn mount(
     workspace: PathBuf,
     data_dir: Option<PathBuf>,
-    cache_size: usize,
+    cache_size: u64,
 ) -> tc_error::TCResult<(fs::Dir, Option<fs::Dir>)> {
     let cache = fs::Cache::new(cache_size);
 

@@ -8,7 +8,7 @@
 [crates-url]: https://crates.io/crates/tinychain
 [docs-badge]: https://docs.rs/tinychain/badge.svg
 [docs-url]: https://docs.rs/tinychain/
-[gitter-badge]: https://img.shields.io/gitter/room/haydnv/tinychain.svg
+[gitter-badge]: https://badges.gitter.im/tinychain-host/community.svg
 [gitter-url]: https://gitter.im/tinychain-host/community
 
 Tinychain is an all-in-one database + application server with support for blockchains, graphs, tables, and tensors.

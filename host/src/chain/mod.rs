@@ -4,24 +4,23 @@
 use std::fmt;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use log::debug;
 use safecast::{CastFrom, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::fs::File;
 use tc_transact::{Transact, TxnId};
-use tc_value::Value;
 use tcgeneric::*;
 
 use crate::fs;
-use crate::scalar::OpRef;
+use crate::scalar::{Scalar, Value};
 use crate::state::State;
 
 mod block;
 mod sync;
 
 pub use block::ChainBlock;
+use std::ops::Deref;
 pub use sync::*;
 
 const CHAIN: Label = label("chain");
@@ -46,7 +45,7 @@ impl CastFrom<Value> for Schema {
 /// The state whose transactional integrity is protected by a [`Chain`].
 #[derive(Clone)]
 pub enum Subject {
-    Value(fs::File<Bytes>),
+    Value(fs::File<Value>),
 }
 
 impl Subject {
@@ -56,12 +55,8 @@ impl Subject {
 
         match self {
             Self::Value(file) => {
-                let block_id = SUBJECT.into();
-                let block = file.get_block(txn_id, &block_id).await?;
-                let value: Value = serde_json::from_slice(&block)
-                    .map_err(|e| TCError::internal(format!("block corrupted! {}", e)))?;
-
-                Ok(value.into())
+                let value = file.get_block(txn_id, SUBJECT.into()).await?;
+                Ok(value.deref().clone().into())
             }
         }
     }
@@ -78,16 +73,12 @@ impl Subject {
                     TCError::bad_request("cannot update a Value to", v)
                 })?;
 
-                let new_json = serde_json::to_string(&new_value)
-                    .map_err(|e| TCError::bad_request("error serializing Value", e))?;
-
-                let block_id = SUBJECT.into();
-                let mut block = file.get_block_mut(txn_id, &block_id).await?;
+                let mut block = file.get_block_mut(txn_id, SUBJECT.into()).await?;
                 debug!(
-                    "set new Value of chain subject to {} ({}) at {}",
-                    new_value, new_json, txn_id
+                    "set new Value of chain subject to {} at {}",
+                    new_value, txn_id
                 );
-                *block = Bytes::from(new_json);
+                *block = new_value;
 
                 Ok(())
             }
@@ -119,8 +110,14 @@ impl Transact for Subject {
 /// Trait defining methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]
 pub trait ChainInstance {
-    /// Append the given [`OpRef`] to the latest block in this `Chain`.
-    async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()>;
+    /// Append the given PUT op to the latest block in this `Chain`.
+    async fn append(
+        &self,
+        txn_id: TxnId,
+        path: TCPathBuf,
+        key: Value,
+        value: Scalar,
+    ) -> TCResult<()>;
 
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &Subject;
@@ -181,9 +178,15 @@ impl Instance for Chain {
 
 #[async_trait]
 impl ChainInstance for Chain {
-    async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
+    async fn append(
+        &self,
+        txn_id: TxnId,
+        path: TCPathBuf,
+        key: Value,
+        value: Scalar,
+    ) -> TCResult<()> {
         match self {
-            Self::Sync(chain) => chain.append(txn_id, op_ref).await,
+            Self::Sync(chain) => chain.append(txn_id, path, key, value).await,
         }
     }
 

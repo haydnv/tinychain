@@ -3,9 +3,10 @@
 use std::fmt;
 use std::str::FromStr;
 
+use async_trait::async_trait;
 use rand::Rng;
-use serde::de;
 
+use destream::IntoStream;
 use tc_error::*;
 use tcgeneric::{Id, NetworkTime};
 
@@ -80,13 +81,28 @@ impl PartialOrd for TxnId {
     }
 }
 
-impl<'de> de::Deserialize<'de> for TxnId {
-    fn deserialize<D>(d: D) -> Result<Self, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
-        let s = String::deserialize(d)?;
-        Self::from_str(&s).map_err(de::Error::custom)
+#[async_trait]
+impl destream::de::FromStream for TxnId {
+    type Context = ();
+
+    async fn from_stream<D: destream::de::Decoder>(
+        context: (),
+        d: &mut D,
+    ) -> Result<Self, D::Error> {
+        let s = <String as destream::de::FromStream>::from_stream(context, d).await?;
+        Self::from_str(&s).map_err(destream::de::Error::custom)
+    }
+}
+
+impl<'en> destream::en::IntoStream<'en> for TxnId {
+    fn into_stream<E: destream::en::Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
+        self.to_string().into_stream(e)
+    }
+}
+
+impl<'en> destream::en::ToStream<'en> for TxnId {
+    fn to_stream<E: destream::en::Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
+        self.to_string().into_stream(e)
     }
 }
 

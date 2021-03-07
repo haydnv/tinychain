@@ -24,7 +24,7 @@ async-trait = "0.1"
 base64 = "0.13"
 bytes = "1.0"
 destream = "0.3"
-destream_json = "0.3"
+destream_json = "0.4"
 env_logger = "0.8"
 futures = "0.3"
 http = "0.2"
@@ -36,10 +36,11 @@ serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
 structopt = "0.3"
 tc-error = "0.1"
-tc-transact = "0.1"
-tc-value = { version = ">=0.1.3" }
-tcgeneric = "0.1"
-tokio = { version = "1.2", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "time"] }
+tc-transact = { path = "transact" }
+tc-value = { path = "value" }
+tcgeneric = { path = "generic" }
+tokio = { version = "1.2", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio-util = { version = "0.6", features = ["io"] }
 uplock = "0.1"
 uuid = "0.8"
 url = { version = "2.2" }

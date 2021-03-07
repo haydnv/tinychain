@@ -59,7 +59,7 @@ impl TCError {
     /// Error indicating that the an upstream server send an invalid response.
     pub fn bad_gateway<I: fmt::Display>(cause: I) -> Self {
         Self {
-            code: ErrorType::BadRequest,
+            code: ErrorType::BadGateway,
             message: cause.to_string(),
         }
     }

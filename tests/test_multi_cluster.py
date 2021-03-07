@@ -22,12 +22,11 @@ class Left(Balance):
         right = tc.use(Right)
 
         txn.total = CONSERVED
-        txn.current = self.weight.subject()
         txn.update = tc.After(
             self.weight.set(new_value),
             right.weigh(None, txn.total - new_value))
 
-        return tc.If(txn.current == new_value, None, txn.update)
+        return tc.If(self.weight == new_value, None, txn.update)
 
 
 class Right(Balance):
@@ -38,12 +37,11 @@ class Right(Balance):
         left = tc.use(Left)
 
         txn.total = CONSERVED
-        txn.current = self.weight.subject()
         txn.update = tc.After(
             self.weight.set(new_value),
             left.weigh(None, txn.total - new_value))
 
-        return tc.If(txn.current == new_value, None, txn.update)
+        return tc.If(self.weight == new_value, None, txn.update)
 
 
 class InteractionTests(unittest.TestCase):

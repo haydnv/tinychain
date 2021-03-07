@@ -4,7 +4,7 @@ use std::convert::{TryFrom, TryInto};
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::Future;
+use futures::future::{try_join_all, Future};
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
@@ -22,6 +22,7 @@ use crate::txn::*;
 mod hosted;
 
 use hosted::Hosted;
+use std::net::IpAddr;
 
 const HYPOTHETICAL: PathLabel = path_label(&["transact", "hypothetical"]);
 
@@ -40,6 +41,22 @@ impl Kernel {
             actor: Actor::new(Link::default().into()),
             hosted: clusters.into_iter().collect(),
         }
+    }
+
+    /// Set up replication for the hosted [`Cluster`]s.
+    pub async fn replicate(&self, peers: Vec<IpAddr>) -> TCResult<()> {
+        if peers.is_empty() {
+            return Ok(());
+        }
+
+        try_join_all(
+            self.hosted
+                .clusters()
+                .map(|cluster| cluster.replicate(&peers)),
+        )
+        .await?;
+
+        Ok(())
     }
 
     /// Route a GET request.

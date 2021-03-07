@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::{de, Decoder, Encoder, FromStream, IntoStream, ToStream};
+use destream::de::{self, Decoder, FromStream};
+use destream::en::{Encoder, IntoStream, ToStream};
 use regex::Regex;
 use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer, Error};
@@ -411,6 +412,12 @@ impl FromStream for TCPathBuf {
     async fn from_stream<D: Decoder>(context: (), decoder: &mut D) -> Result<TCPathBuf, D::Error> {
         let s = String::from_stream(context, decoder).await?;
         s.parse().map_err(de::Error::custom)
+    }
+}
+
+impl<'en> IntoStream<'en> for TCPathBuf {
+    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
+        e.encode_str(&self.to_string())
     }
 }
 

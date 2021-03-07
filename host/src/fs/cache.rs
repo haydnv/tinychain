@@ -3,13 +3,13 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::hash::Hash;
-use std::io;
+use std::ops::Deref;
 use std::path::PathBuf;
 
-use bytes::Bytes;
-use futures::TryFutureExt;
+use futures::{Future, TryFutureExt};
 use log::debug;
 use tokio::fs;
+use tokio::io::AsyncWrite;
 use tokio::sync::mpsc;
 use uplock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -17,35 +17,43 @@ use tc_error::*;
 use tc_transact::fs::BlockData;
 
 use crate::chain::ChainBlock;
+use crate::scalar::Value;
 
 use super::{create_parent, io_err};
 
 /// A [`CacheLock`] representing a single filesystem block.
 #[derive(Clone)]
 pub enum CacheBlock {
-    Bin(CacheLock<Bytes>),
     Chain(CacheLock<ChainBlock>),
+    Value(CacheLock<Value>),
 }
 
 impl CacheBlock {
-    async fn into_bytes(self) -> Bytes {
+    async fn persist<W: AsyncWrite + Send + Unpin>(&self, sink: &mut W) -> TCResult<u64> {
         match self {
-            Self::Bin(block) => (*block.read().await).clone(),
-            Self::Chain(block) => (*block.read().await).clone().into(),
+            Self::Chain(block) => {
+                let contents = block.read().await;
+                contents.persist(sink).await
+            }
+            Self::Value(block) => {
+                let contents = block.read().await;
+                contents.persist(sink).await
+            }
         }
     }
 
     fn ref_count(&self) -> usize {
         match self {
-            Self::Bin(block) => block.ref_count(),
             Self::Chain(block) => block.ref_count(),
+            Self::Value(block) => block.ref_count(),
         }
     }
-}
 
-impl From<CacheLock<Bytes>> for CacheBlock {
-    fn from(lock: CacheLock<Bytes>) -> CacheBlock {
-        Self::Bin(lock)
+    async fn size(&self) -> TCResult<u64> {
+        match self {
+            Self::Chain(block) => block.read().await.deref().size().await,
+            Self::Value(block) => block.read().await.deref().size().await,
+        }
     }
 }
 
@@ -55,14 +63,9 @@ impl From<CacheLock<ChainBlock>> for CacheBlock {
     }
 }
 
-impl TryFrom<CacheBlock> for CacheLock<Bytes> {
-    type Error = TCError;
-
-    fn try_from(block: CacheBlock) -> TCResult<Self> {
-        match block {
-            CacheBlock::Bin(block) => Ok(block),
-            _ => Err(TCError::unsupported("unexpected block type")),
-        }
+impl From<CacheLock<Value>> for CacheBlock {
+    fn from(lock: CacheLock<Value>) -> CacheBlock {
+        Self::Value(lock)
     }
 }
 
@@ -72,6 +75,17 @@ impl TryFrom<CacheBlock> for CacheLock<ChainBlock> {
     fn try_from(block: CacheBlock) -> TCResult<Self> {
         match block {
             CacheBlock::Chain(block) => Ok(block),
+            _ => Err(TCError::unsupported("unexpected block type")),
+        }
+    }
+}
+
+impl TryFrom<CacheBlock> for CacheLock<Value> {
+    type Error = TCError;
+
+    fn try_from(block: CacheBlock) -> TCResult<Self> {
+        match block {
+            CacheBlock::Value(block) => Ok(block),
             _ => Err(TCError::unsupported("unexpected block type")),
         }
     }
@@ -117,24 +131,21 @@ struct Evict;
 
 struct Inner {
     tx: mpsc::UnboundedSender<Evict>,
-    size: usize,
-    max_size: usize,
+    size: u64,
+    max_size: u64,
     entries: HashMap<PathBuf, CacheBlock>,
     lfu: LFU<PathBuf>,
 }
 
 impl Inner {
     async fn remove(&mut self, path: &PathBuf) -> TCResult<()> {
-        if let Some(old_block) = self.entries.remove(path) {
-            let as_bytes = old_block.into_bytes().await;
-            let block_size = as_bytes.len();
+        if let Some(block) = self.entries.remove(path) {
+            let mut block_file = write_file(path).await?;
+            let new_size = block.persist(&mut block_file).await?;
 
-            fs::write(path, as_bytes)
-                .map_err(|e| io_err(e, &path))
-                .await?;
-
-            if self.size > block_size {
-                self.size -= block_size;
+            // TODO: keep track of the difference between new_size and old_size
+            if self.size > new_size {
+                self.size -= new_size;
             }
 
             self.lfu.remove(&path);
@@ -152,7 +163,7 @@ pub struct Cache {
 
 impl Cache {
     /// Construct a new cache with the given size.
-    pub fn new(max_size: usize) -> Self {
+    pub fn new(max_size: u64) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
 
         let cache = Self {
@@ -181,27 +192,22 @@ impl Cache {
             let lock = lock.clone().try_into()?;
             inner.lfu.bump(path);
             return Ok(Some(lock));
+        } else if !path.exists() {
+            return Ok(None);
         } else {
             log::info!("cache miss: {:?}", path);
         }
 
-        let block = match fs::read(path).await {
-            Ok(block) => Bytes::from(block),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                debug!("no such block: {:?}", path);
-                return Ok(None);
-            }
-            Err(err) => return Err(io_err(err, path)),
-        };
+        let block_file = read_file(&path).await?;
+        let metadata = block_file.metadata().map_err(|e| io_err(e, &path)).await?;
+        let block = B::load(block_file).await?;
 
         debug!("cache insert: {:?}", path);
 
-        let size = block.len();
-        let block = B::try_from(block).map_err(|_| TCError::internal("unable to decode block"))?;
         let lock = CacheLock::new(block);
         let cached = CacheBlock::from(lock.clone());
 
-        inner.size += size;
+        inner.size += metadata.len();
         inner.lfu.insert(path.clone());
         inner.entries.insert(path.clone(), cached);
 
@@ -213,24 +219,19 @@ impl Cache {
     where
         CacheBlock: From<CacheLock<B>>,
     {
-        let size = {
-            let as_bytes: Bytes = block.clone().into();
-            as_bytes.len()
-        };
+        debug!("cache insert: {:?}", &path);
 
         let mut inner = self.inner.write().await;
 
         if let Some(old_block) = inner.entries.remove(&path) {
-            let old_size = old_block.into_bytes().await.len();
-            if old_size > inner.size {
-                inner.size -= old_size;
-            }
+            inner.size -= old_block.size().await?;
+            inner.lfu.bump(&path);
         } else {
             inner.lfu.insert(path.clone());
         }
 
+        let size = block.size().await?;
         let block = CacheLock::new(block);
-        inner.lfu.bump(&path);
         inner.entries.insert(path, block.clone().into());
         inner.size += size;
         if inner.size > inner.max_size {
@@ -241,29 +242,42 @@ impl Cache {
     }
 
     /// Remove a block from the cache.
-    pub async fn remove(&self, path: PathBuf) -> TCResult<()> {
+    pub async fn remove(&self, path: &PathBuf) -> TCResult<()> {
         let mut inner = self.inner.write().await;
-        inner.remove(&path).await
+        inner.remove(path).await
+    }
+
+    /// Remove a block from the cache and delete it from the filesystem.
+    pub async fn remove_and_delete(&self, path: &PathBuf) -> TCResult<()> {
+        let mut inner = self.inner.write().await;
+        inner.remove(path).await?;
+        tokio::fs::remove_file(path)
+            .map_err(|e| io_err(e, path))
+            .await
     }
 
     /// Synchronize a cached block with the filesystem.
-    pub async fn sync(&self, path: &PathBuf) -> TCResult<()> {
+    pub async fn sync(&self, path: &PathBuf) -> TCResult<bool> {
         debug!("sync block at {:?} with filesystem", &path);
 
         let inner = self.inner.read().await;
         if let Some(block) = inner.entries.get(path) {
-            let as_bytes = block.clone().into_bytes().await;
+            let mut block_file = if path.exists() {
+                debug!("open block file at {:?} for sync", path);
+                write_file(path).await?
+            } else {
+                debug!("create new filesystem block at {:?}", path);
+                create_parent(path).await?;
+                create_file(path).await?
+            };
 
-            create_parent(path).await?;
+            block.persist(&mut block_file).await?;
 
-            fs::write(path, as_bytes)
-                .map_err(|e| io_err(e, path))
-                .await?;
+            Ok(true)
         } else {
-            log::warn!("no such block! {:?}", path);
+            log::info!("cache sync miss: {:?}", path);
+            Ok(path.exists())
         }
-
-        Ok(())
     }
 }
 
@@ -327,4 +341,28 @@ fn spawn_cleanup_thread(cache: Cache, mut rx: mpsc::UnboundedReceiver<Evict>) {
             }
         }
     });
+}
+
+#[inline]
+fn create_file(path: &PathBuf) -> impl Future<Output = TCResult<fs::File>> + '_ {
+    tokio::fs::File::create(path).map_err(move |e| io_err(e, path))
+}
+
+#[inline]
+fn read_file(path: &PathBuf) -> impl Future<Output = TCResult<fs::File>> + '_ {
+    fs::File::open(path).map_err(move |e| {
+        debug!("io error: {}", e);
+        io_err(e, path)
+    })
+}
+
+async fn write_file(path: &PathBuf) -> TCResult<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(move |e| {
+            debug!("io error: {}", e);
+            io_err(e, path)
+        })
+        .await
 }

@@ -1,47 +1,44 @@
 //! A transactional file.
 
+use std::collections::hash_map::{Entry, HashMap};
 use std::collections::HashSet;
 use std::convert::TryFrom;
-use std::marker::PhantomData;
-use std::ops::Deref;
+use std::iter;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
-use futures::try_join;
-use log::{debug, error};
+use futures::future::{try_join_all, TryFutureExt};
+use futures::join;
+use log::debug;
+use uplock::RwLock;
 
 use tc_error::*;
 use tc_transact::fs;
 use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transact, TxnId};
-use tcgeneric::Id;
 
-use super::{file_name, Cache, CacheBlock, CacheLock, DirContents};
+use super::block::*;
+use super::cache::*;
+use super::{file_name, DirContents};
 
 /// A transactional file.
 #[derive(Clone)]
 pub struct File<B> {
-    cache: Cache,
     path: PathBuf,
+    cache: Cache,
     listing: TxnLock<Mutable<HashSet<fs::BlockId>>>,
-    // TODO: replace with a custom lock
-    mutated: TxnLock<Mutable<HashSet<fs::BlockId>>>,
-    phantom: PhantomData<B>,
+    touched: RwLock<HashMap<TxnId, HashMap<fs::BlockId, Block<B>>>>,
 }
 
 impl<B: fs::BlockData + 'static> File<B> {
     fn _new(cache: Cache, path: PathBuf, listing: HashSet<fs::BlockId>) -> Self {
-        let listing = TxnLock::new(format!("File {:?} listing", &path), listing.into());
-        let mutated = TxnLock::new(format!("File {:?} mutated", &path), HashSet::new().into());
-        let phantom = PhantomData;
+        let lock_name = format!("file {:?} block list", &path);
 
         Self {
             cache,
             path,
-            listing,
-            mutated,
-            phantom,
+            listing: TxnLock::new(lock_name, listing.into()),
+            touched: RwLock::new(HashMap::new()),
         }
     }
 
@@ -67,29 +64,6 @@ impl<B: fs::BlockData + 'static> File<B> {
             )))
         }
     }
-
-    async fn get_block_lock(
-        &self,
-        txn_id: &TxnId,
-        block_id: &fs::BlockId,
-    ) -> TCResult<Option<CacheLock<B>>>
-    where
-        CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
-        CacheBlock: From<CacheLock<B>>,
-    {
-        let path = block_path(&self.path, txn_id, block_id);
-        if let Some(lock) = self.cache.read(&path).await? {
-            Ok(Some(lock))
-        } else if let Some(block) = self.cache.read(&canonical(&self.path, block_id)).await? {
-            let contents = block.read().await;
-            self.cache
-                .write(path, contents.deref().clone())
-                .map_ok(Some)
-                .await
-        } else {
-            Ok(None)
-        }
-    }
 }
 
 #[async_trait]
@@ -103,14 +77,14 @@ impl<B: Send + Sync> fs::Store for File<B> {
 }
 
 #[async_trait]
-impl<B: fs::BlockData + 'static> fs::File for File<B>
+impl<B: fs::BlockData + 'static> fs::File<B> for File<B>
 where
     CacheBlock: From<CacheLock<B>>,
     CacheLock<B>: TryFrom<CacheBlock, Error = TCError>,
 {
-    type Block = B;
+    type Block = Block<B>;
 
-    async fn block_exists(&self, txn_id: &TxnId, name: &fs::BlockId) -> TCResult<bool> {
+    async fn contains_block(&self, txn_id: &TxnId, name: &fs::BlockId) -> TCResult<bool> {
         let listing = self.listing.read(txn_id).await?;
         Ok(listing.contains(name))
     }
@@ -119,81 +93,82 @@ where
         &self,
         txn_id: TxnId,
         name: fs::BlockId,
-        initial_value: Self::Block,
-    ) -> TCResult<fs::BlockOwned<Self>> {
-        let (mut listing, mut mutated) =
-            try_join!(self.listing.write(txn_id), self.mutated.write(txn_id))?;
+        initial_value: B,
+    ) -> TCResult<BlockRead<B>> {
+        let (listing, mut touched) = join!(self.listing.write(txn_id), self.touched.write());
+        let mut listing = listing?;
 
         if listing.contains(&name) {
             return Err(TCError::bad_request("block already exists", name));
         }
 
-        let path = block_path(&self.path, &txn_id, &name);
-        debug!("create block at {:?}", &path);
+        let version = block_version_path(&self.path, &name, &txn_id);
+        self.cache.write(version, initial_value).await?;
 
-        let lock = self.cache.write(path, initial_value).await?;
+        let block = Block::new(self.cache.clone(), &self.path, &name);
+        let lock = fs::Block::read(&block, &txn_id).await?;
 
-        listing.insert(name.clone());
-        mutated.insert(name.clone());
-
-        let read_lock = lock.read().await;
-        Ok(fs::BlockOwned::new(self.clone(), txn_id, name, read_lock))
+        touch(&mut touched, txn_id, name.clone(), block);
+        listing.insert(name);
+        Ok(lock)
     }
 
-    async fn get_block<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        name: &'a fs::BlockId,
-    ) -> TCResult<fs::Block<'a, Self>> {
-        if let Some(block) = self.get_block_lock(txn_id, name).await? {
-            let lock = block.read().await;
-            Ok(fs::Block::new(self, txn_id, name, lock))
-        } else {
-            Err(TCError::not_found(format!("block {}", name)))
+    async fn delete_block(&self, txn_id: &TxnId, name: fs::BlockId) -> TCResult<()> {
+        let (listing, mut touched) = join!(self.listing.write(*txn_id), self.touched.write());
+        let mut listing = listing?;
+
+        if !listing.remove(&name) {
+            return Ok(());
         }
-    }
 
-    async fn get_block_mut<'a>(
-        &'a self,
-        txn_id: &'a TxnId,
-        name: &'a fs::BlockId,
-    ) -> TCResult<fs::BlockMut<'a, Self>> {
-        if let Some(block) = self.get_block_lock(txn_id, name).await? {
-            let (mut mutated, lock) =
-                try_join!(self.mutated.write(*txn_id), block.write().map(Ok))?;
-            if !mutated.contains(name) {
-                mutated.insert(name.clone());
+        if !touched.contains_key(txn_id) {
+            touched.insert(*txn_id, HashMap::new());
+        }
+
+        let blocks = touched.get_mut(txn_id).expect("file block changelist");
+        match blocks.entry(name) {
+            Entry::Vacant(entry) => {
+                let block = Block::new(self.cache.clone(), &self.path, entry.key());
+                entry.insert(block);
+                Ok(())
             }
-
-            Ok(fs::BlockMut::new(self, txn_id, name, lock))
-        } else {
-            Err(TCError::not_found(name))
+            Entry::Occupied(_) => Ok(()),
         }
     }
 
-    async fn get_block_owned(self, txn_id: TxnId, name: Id) -> TCResult<fs::BlockOwned<Self>> {
-        if let Some(block) = self.get_block_lock(&txn_id, &name).await? {
-            let lock = block.read().await;
-            Ok(fs::BlockOwned::new(self, txn_id, name, lock))
-        } else {
-            Err(TCError::not_found(name))
-        }
-    }
+    async fn get_block(&self, txn_id: &TxnId, name: fs::BlockId) -> TCResult<BlockRead<B>> {
+        let mut touched = self.touched.write().await;
 
-    async fn get_block_owned_mut(
-        self,
-        txn_id: TxnId,
-        name: fs::BlockId,
-    ) -> TCResult<fs::BlockOwnedMut<Self>> {
-        if let Some(block) = self.get_block_lock(&txn_id, &name).await? {
-            let (mut mutated, lock) = try_join!(self.mutated.write(txn_id), block.write().map(Ok))?;
-            if !mutated.contains(&name) {
-                mutated.insert(name.clone());
+        if !touched.contains_key(txn_id) {
+            touched.insert(*txn_id, HashMap::new());
+        }
+
+        let blocks = touched.get_mut(txn_id).expect("file block changelist");
+        match blocks.entry(name) {
+            Entry::Vacant(entry) => {
+                let block = Block::new(self.cache.clone(), &self.path, entry.key());
+                let block = entry.insert(block);
+                fs::Block::read(block, txn_id).await
             }
+            Entry::Occupied(entry) => fs::Block::read(entry.get(), txn_id).await,
+        }
+    }
 
-            Ok(fs::BlockOwnedMut::new(self, txn_id, name, lock))
-        } else {
-            Err(TCError::not_found(name))
+    async fn get_block_mut(&self, txn_id: &TxnId, name: fs::BlockId) -> TCResult<BlockWrite<B>> {
+        let mut touched = self.touched.write().await;
+
+        if !touched.contains_key(txn_id) {
+            touched.insert(*txn_id, HashMap::new());
+        }
+
+        let blocks = touched.get_mut(txn_id).expect("file block changelist");
+        match blocks.entry(name) {
+            Entry::Vacant(entry) => {
+                let block = Block::new(self.cache.clone(), &self.path, entry.key());
+                let block = entry.insert(block);
+                fs::Block::write(block, txn_id).await
+            }
+            Entry::Occupied(entry) => fs::Block::write(entry.get(), txn_id).await,
         }
     }
 }
@@ -207,95 +182,66 @@ where
     async fn commit(&self, txn_id: &TxnId) {
         debug!("commit file {:?} at {}", &self.path, txn_id);
 
-        if let Some(mutated) = Some(
-            self.mutated
-                .read(txn_id)
-                .await
-                .expect("file mutated block list"),
-        ) {
-            let _listing = self.listing.read(txn_id).await.expect("lock file listing");
-
-            if !self.path.exists() {
-                tokio::fs::create_dir(&self.path)
+        {
+            let (listing, touched) = join!(self.listing.read(txn_id), self.touched.read());
+            let listing = &listing.expect("file listing");
+            if let Some(blocks) = touched.get(txn_id) {
+                try_join_all(blocks.values().map(|block| block.prepare(txn_id)))
                     .await
-                    .expect("create file dir");
+                    .expect("prepare blocks to commit");
+
+                let commits = blocks.iter().map(|(block_id, block)| async move {
+                    if listing.contains(block_id) {
+                        block.commit(txn_id).await?;
+                    } else {
+                        self.cache.remove_and_delete(block.path()).await?;
+                    }
+
+                    TCResult::Ok(())
+                });
+
+                try_join_all(commits).await.expect("commit file blocks");
             }
-
-            let backup = mutated.iter().map(|block_id| async move {
-                let version = block_path(&self.path, txn_id, block_id);
-                self.cache.sync(&version).await?;
-                debug_assert!(version.exists());
-                TCResult::Ok(())
-            });
-
-            try_join_all(backup).await.expect("backup mutated blocks");
-
-            let commit = mutated.iter().map(|block_id| async move {
-                let version = block_path(&self.path, txn_id, block_id);
-                let dest = canonical(&self.path, block_id);
-
-                let block = self
-                    .cache
-                    .read(&version)
-                    .await?
-                    .expect("read mutated block to commit");
-
-                let contents = block.read().await;
-                self.cache
-                    .write(dest.clone(), contents.deref().clone())
-                    .await?;
-
-                self.cache.sync(&dest).await?;
-                debug_assert!(dest.exists());
-                TCResult::Ok(())
-            });
-
-            try_join_all(commit).await.expect("commit mutated blocks");
         }
 
         self.listing.commit(txn_id).await;
-        self.mutated.commit(txn_id).await;
         debug!("committed {:?} at {}", &self.path, txn_id);
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        join_all(
-            self.listing
-                .read(txn_id)
-                .await
-                .expect("lock file list")
-                .iter()
-                .map(|block_id| block_path(&self.path, txn_id, block_id))
-                .map(|path| self.cache.remove(path)),
-        )
-        .await;
-
         let version = version_path(&self.path, txn_id);
         if version.exists() {
-            debug!("removing old version directory {:?}", version);
-            if let Err(cause) = tokio::fs::remove_dir_all(&version).await {
-                error!(
-                    "failed to remove old version directory {:?}: {}",
-                    version, cause
-                );
-            }
+            tokio::fs::remove_dir_all(version)
+                .await
+                .expect("delete file version");
         }
 
+        let mut touched = self.touched.write().await;
+        touched.remove(txn_id);
+
         self.listing.finalize(txn_id).await;
-        self.mutated.finalize(txn_id).await;
         debug!("finalized {:?} at {}", &self.path, txn_id);
     }
 }
 
-#[inline]
-fn canonical(file_path: &PathBuf, block_id: &fs::BlockId) -> PathBuf {
-    let mut path = file_path.clone();
-    path.push(block_id.to_string());
-    path
+fn touch<B>(
+    touched: &mut HashMap<TxnId, HashMap<fs::BlockId, Block<B>>>,
+    txn_id: TxnId,
+    block_id: fs::BlockId,
+    block: Block<B>,
+) {
+    match touched.entry(txn_id) {
+        Entry::Occupied(mut entry) => {
+            entry.get_mut().insert(block_id, block);
+        }
+        Entry::Vacant(entry) => {
+            entry.insert(iter::once((block_id, block)).collect());
+        }
+    }
 }
 
 #[inline]
-fn block_path(file_path: &PathBuf, txn_id: &TxnId, block_id: &fs::BlockId) -> PathBuf {
+fn block_version_path(file_path: &PathBuf, block_id: &fs::BlockId, txn_id: &TxnId) -> PathBuf {
     let mut path = version_path(file_path, txn_id);
     path.push(block_id.to_string());
     path
@@ -303,7 +249,7 @@ fn block_path(file_path: &PathBuf, txn_id: &TxnId, block_id: &fs::BlockId) -> Pa
 
 #[inline]
 fn version_path(file_path: &PathBuf, txn_id: &TxnId) -> PathBuf {
-    let mut path = PathBuf::from(file_path.parent().unwrap());
+    let mut path = file_path.clone();
     path.push(super::VERSION.to_string());
     path.push(txn_id.to_string());
     path

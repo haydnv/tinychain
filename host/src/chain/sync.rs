@@ -5,19 +5,20 @@
 use std::convert::TryInto;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::join;
 use log::debug;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{Transact, TxnId};
-use tcgeneric::Instance;
+use tcgeneric::{label, Instance, Label, TCPathBuf};
 
 use crate::fs;
-use crate::scalar::OpRef;
+use crate::scalar::{Scalar, Value};
 
 use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, SUBJECT};
+
+const CHAIN_BLOCK: Label = label("sync");
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
@@ -30,10 +31,23 @@ pub struct SyncChain {
 
 #[async_trait]
 impl ChainInstance for SyncChain {
-    async fn append(&self, txn_id: &TxnId, op_ref: OpRef) -> TCResult<()> {
-        let block_id = SUBJECT.into();
-        let mut block = fs::File::get_block_mut(&self.file, txn_id, &block_id).await?;
-        block.append(op_ref);
+    async fn append(
+        &self,
+        txn_id: TxnId,
+        path: TCPathBuf,
+        key: Value,
+        value: Scalar,
+    ) -> TCResult<()> {
+        if value.is_ref() {
+            return Err(TCError::bad_request(
+                "cannot update Chain subject with reference: {}",
+                value,
+            ));
+        }
+
+        let block_id = CHAIN_BLOCK.into();
+        let mut block = fs::File::get_block_mut(&self.file, &txn_id, block_id).await?;
+        block.append(txn_id, path, key, value);
         Ok(())
     }
 
@@ -54,7 +68,7 @@ impl Persist for SyncChain {
     async fn load(schema: Self::Schema, dir: fs::Dir, txn_id: TxnId) -> TCResult<Self> {
         let subject = match &schema {
             Schema::Value(value) => {
-                let file: fs::File<Bytes> =
+                let file: fs::File<Value> =
                     if let Some(file) = dir.get_file(&txn_id, &SUBJECT.into()).await? {
                         file.try_into()?
                     } else {
@@ -65,14 +79,10 @@ impl Persist for SyncChain {
                         file.try_into()?
                     };
 
-                if !file.block_exists(&txn_id, &SUBJECT.into()).await? {
-                    let as_bytes = serde_json::to_vec(value)
-                        .map_err(|e| TCError::bad_request("unable to serialize value", e))?;
-
-                    file.create_block(txn_id, SUBJECT.into(), Bytes::from(as_bytes))
+                if !file.contains_block(&txn_id, &SUBJECT.into()).await? {
+                    debug!("sync chain writing new subject...");
+                    file.create_block(txn_id, SUBJECT.into(), value.clone())
                         .await?;
-
-                    debug!("sync chain wrote new subject");
                 } else {
                     debug!("sync chain found existing subject");
                 }
@@ -87,7 +97,14 @@ impl Persist for SyncChain {
             let file = dir
                 .create_file(txn_id, CHAIN.into(), ChainType::Sync.into())
                 .await?;
-            file.try_into()?
+
+            let file: fs::File<ChainBlock> = file.try_into()?;
+            if !file.contains_block(&txn_id, &CHAIN_BLOCK.into()).await? {
+                file.create_block(txn_id, CHAIN_BLOCK.into(), ChainBlock::new())
+                    .await?;
+            }
+
+            file
         };
 
         Ok(SyncChain {

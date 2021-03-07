@@ -88,6 +88,10 @@ impl Hosted {
         }
     }
 
+    pub fn clusters(&self) -> impl Iterator<Item = &InstanceExt<Cluster>> {
+        self.hosted.values()
+    }
+
     pub fn get<'a>(
         &self,
         path: &'a [PathSegment],
