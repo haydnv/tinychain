@@ -110,7 +110,7 @@ impl Transact for Subject {
 /// Trait defining methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]
 pub trait ChainInstance {
-    /// Append the given [`OpRef`] to the latest block in this `Chain`.
+    /// Append the given PUT op to the latest block in this `Chain`.
     async fn append(
         &self,
         txn_id: TxnId,
