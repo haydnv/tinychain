@@ -415,6 +415,12 @@ impl FromStream for TCPathBuf {
     }
 }
 
+impl<'en> IntoStream<'en> for TCPathBuf {
+    fn into_stream<E: Encoder<'en>>(self, e: E) -> Result<E::Ok, E::Error> {
+        e.encode_str(&self.to_string())
+    }
+}
+
 impl<'en> ToStream<'en> for TCPathBuf {
     fn to_stream<E: Encoder<'en>>(&'en self, e: E) -> Result<E::Ok, E::Error> {
         e.encode_str(&self.to_string())

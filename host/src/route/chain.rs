@@ -1,39 +1,40 @@
 use log::debug;
+use safecast::TryCastFrom;
 
+use tc_error::TCError;
 use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
-use crate::chain::{Chain, ChainInstance, Subject};
+use crate::chain::{Chain, ChainInstance};
+use crate::scalar::Scalar;
 
-use super::{GetHandler, Handler, PostHandler, PutHandler, Route};
-use crate::route::Public;
+use super::{GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 
 impl Route for Chain {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Chain::route {}", TCPath::from(path));
 
-        let subject = self.subject();
         if path.is_empty() {
             // TODO: chain methods
-            subject.route(path)
-        } else if path[0].as_str() == "subject" {
-            subject.route(&path[1..])
-        } else {
+            Some(Box::new(SubjectHandler::new(self, path)))
+        } else if path[0].as_str() == "chain" {
             // TODO: chain methods
-            subject.route(path)
+            None
+        } else {
+            None
         }
     }
 }
 
 struct SubjectHandler<'a> {
-    subject: &'a Subject,
+    chain: &'a Chain,
     path: &'a [PathSegment],
 }
 
 impl<'a> SubjectHandler<'a> {
-    fn new(subject: &'a Subject, path: &'a [PathSegment]) -> Self {
+    fn new(chain: &'a Chain, path: &'a [PathSegment]) -> Self {
         debug!("SubjectHandler {}", TCPath::from(path));
-        Self { subject, path }
+        Self { chain, path }
     }
 }
 
@@ -42,7 +43,7 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 debug!("Subject::get {} {}", TCPath::from(self.path), key);
-                let subject = self.subject.at(txn.id()).await?;
+                let subject = self.chain.subject().at(txn.id()).await?;
                 debug!("Subject is {}", subject);
                 subject.get(&txn, self.path, key).await
             })
@@ -52,11 +53,26 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("Subject::put {} <- {}", key, value);
+                let subject = self.chain.subject();
+
+                // let scalar_value = Scalar::try_cast_from(value.clone(), |v| {
+                //     TCError::not_implemented(format!("update Chain with value {}", v))
+                // })?;
+                //
+                // debug!("Subject::put {} <- {}", key, value);
+                // self.chain
+                //     .append(
+                //         *txn.id(),
+                //         self.path.to_vec().into(),
+                //         key.clone(),
+                //         scalar_value,
+                //     )
+                //     .await?;
+
                 if self.path.is_empty() {
-                    self.subject.put(txn.id(), key, value).await
+                    subject.put(txn.id(), key, value).await
                 } else {
-                    let subject = self.subject.at(txn.id()).await?;
+                    let subject = self.chain.subject().at(txn.id()).await?;
                     subject.put(&txn, self.path, key, value).await
                 }
             })
@@ -67,16 +83,9 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
         Some(Box::new(|txn, params| {
             Box::pin(async move {
                 debug!("Subject::post {}", params);
-                let subject = self.subject.at(txn.id()).await?;
+                let subject = self.chain.subject().at(txn.id()).await?;
                 subject.post(&txn, self.path, params).await
             })
         }))
-    }
-}
-
-impl Route for Subject {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("Subject::route {}", TCPath::from(path));
-        Some(Box::new(SubjectHandler::new(self, path)))
     }
 }

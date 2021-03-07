@@ -111,7 +111,13 @@ impl Transact for Subject {
 #[async_trait]
 pub trait ChainInstance {
     /// Append the given [`OpRef`] to the latest block in this `Chain`.
-    async fn append(&self, txn_id: TxnId, key: Value, value: Scalar) -> TCResult<()>;
+    async fn append(
+        &self,
+        txn_id: TxnId,
+        path: TCPathBuf,
+        key: Value,
+        value: Scalar,
+    ) -> TCResult<()>;
 
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &Subject;
@@ -172,9 +178,15 @@ impl Instance for Chain {
 
 #[async_trait]
 impl ChainInstance for Chain {
-    async fn append(&self, txn_id: TxnId, key: Value, value: Scalar) -> TCResult<()> {
+    async fn append(
+        &self,
+        txn_id: TxnId,
+        path: TCPathBuf,
+        key: Value,
+        value: Scalar,
+    ) -> TCResult<()> {
         match self {
-            Self::Sync(chain) => chain.append(txn_id, key, value).await,
+            Self::Sync(chain) => chain.append(txn_id, path, key, value).await,
         }
     }
 

@@ -9,31 +9,32 @@ use bytes::Bytes;
 use destream::{de, en};
 use futures::{future, TryFutureExt, TryStreamExt};
 use tokio::io::{AsyncReadExt, AsyncWrite};
+use tokio_util::io::StreamReader;
 
 use tc_error::*;
 use tc_transact::fs::BlockData;
 use tc_transact::lock::Mutate;
 use tc_transact::TxnId;
+use tcgeneric::TCPathBuf;
 
 use crate::scalar::{Scalar, Value};
-use tokio_util::io::StreamReader;
 
 /// A single filesystem block belonging to a [`super::Chain`].
 #[derive(Clone)]
 pub struct ChainBlock {
     hash: Bytes,
-    contents: BTreeMap<TxnId, Vec<(Value, Scalar)>>,
+    contents: BTreeMap<TxnId, Vec<(TCPathBuf, Value, Scalar)>>,
 }
 
 impl ChainBlock {
     /// Append an op to the contents of this `ChainBlock`.
-    pub fn append(&mut self, txn_id: TxnId, key: Value, value: Scalar) {
+    pub fn append(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value, value: Scalar) {
         match self.contents.entry(txn_id) {
             Entry::Vacant(entry) => {
-                entry.insert(vec![(key, value)]);
+                entry.insert(vec![(path, key, value)]);
             }
             Entry::Occupied(mut entry) => {
-                entry.get_mut().push((key, value));
+                entry.get_mut().push((path, key, value));
             }
         }
     }

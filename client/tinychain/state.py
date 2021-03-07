@@ -1,7 +1,7 @@
 """Tinychain `State`\s, such as `Map`, `Tuple`, and `Op`."""
 
 from . import reflect
-from .ref import OpRef
+from .ref import Ref, OpRef
 from .util import *
 
 
@@ -23,7 +23,11 @@ class State(object):
         reflect.gen_headers(self)
 
     def __json__(self):
-        return {str(uri(self)): [to_json(form_of(self))]}
+        form = form_of(self)
+        if isinstance(form, URI):
+            return to_json(form)
+        else:
+            return {str(uri(self)): [to_json(form)]}
 
     def __ref__(self, name):
         return self.__class__(URI(name))

@@ -16,12 +16,7 @@ class Chain(State, metaclass=Meta):
     def set(self, value):
         """Update the value of this `Chain`."""
 
-        return OpRef.Put(uri(self).append("subject"), None, value)
-
-    def subject(self, key=None):
-        """Return a reference to the subject of this `Chain`."""
-
-        return OpRef.Get(uri(self).append("subject"), key)
+        return OpRef.Put(uri(self), None, value)
 
 
 class SyncChain(Chain):

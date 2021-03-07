@@ -27,7 +27,7 @@ class Producer(tc.Cluster):
 
     @tc.get_method
     def inventory(self) -> tc.Number:
-        return self.in_stock.subject()
+        return self.in_stock
 
 
 class Wholesaler(tc.Cluster):

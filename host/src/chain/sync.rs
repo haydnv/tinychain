@@ -11,7 +11,7 @@ use log::debug;
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{Transact, TxnId};
-use tcgeneric::Instance;
+use tcgeneric::{Instance, TCPathBuf};
 
 use crate::fs;
 use crate::scalar::{Scalar, Value};
@@ -29,14 +29,23 @@ pub struct SyncChain {
 
 #[async_trait]
 impl ChainInstance for SyncChain {
-    async fn append(&self, txn_id: TxnId, key: Value, value: Scalar) -> TCResult<()> {
+    async fn append(
+        &self,
+        txn_id: TxnId,
+        path: TCPathBuf,
+        key: Value,
+        value: Scalar,
+    ) -> TCResult<()> {
         if value.is_ref() {
-            return Err(TCError::not_implemented("save State to ChainBlock"));
+            return Err(TCError::bad_request(
+                "cannot update Chain subject with reference: {}",
+                value,
+            ));
         }
 
         let block_id = SUBJECT.into();
         let mut block = fs::File::get_block_mut(&self.file, &txn_id, block_id).await?;
-        block.append(txn_id, key, value);
+        block.append(txn_id, path, key, value);
         Ok(())
     }
 
