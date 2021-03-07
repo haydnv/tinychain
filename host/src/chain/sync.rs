@@ -1,5 +1,6 @@
 //! A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 //! event of a transaction failure.
+//!
 //! INCOMPLETE AND UNSTABLE.
 
 use std::convert::TryInto;
@@ -10,11 +11,12 @@ use log::debug;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
-use tc_transact::{Transact, TxnId};
+use tc_transact::{Transact, Transaction, TxnId};
 use tcgeneric::{label, Instance, Label, TCPathBuf};
 
 use crate::fs;
-use crate::scalar::{Scalar, Value};
+use crate::scalar::{Link, Scalar, Value};
+use crate::txn::Txn;
 
 use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, SUBJECT};
 
@@ -53,6 +55,11 @@ impl ChainInstance for SyncChain {
 
     fn subject(&self) -> &Subject {
         &self.subject
+    }
+
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let subject = txn.get(source, Value::None).await?;
+        self.subject.put(txn.id(), Value::None, subject).await
     }
 }
 

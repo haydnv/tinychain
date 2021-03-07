@@ -9,7 +9,7 @@ use std::iter::FromIterator;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all};
 use log::{debug, info};
 use uplock::RwLock;
 
@@ -18,9 +18,9 @@ use tc_transact::lock::{Mutable, TxnLock};
 use tc_transact::{Transact, Transaction};
 use tcgeneric::*;
 
-use crate::chain::Chain;
+use crate::chain::{Chain, ChainInstance};
 use crate::object::InstanceClass;
-use crate::scalar::{Link, OpDef};
+use crate::scalar::{Link, LinkHost, OpDef, Value};
 use crate::state::State;
 use crate::txn::{Actor, Scope, Txn, TxnId};
 
@@ -30,7 +30,6 @@ mod owner;
 use owner::Owner;
 
 pub use load::instantiate;
-use std::net::IpAddr;
 
 /// The [`Class`] of a [`Cluster`].
 pub struct ClusterType;
@@ -153,8 +152,31 @@ impl Cluster {
     }
 
     /// Set up replication, if any of the given peers are online replicas of this `Cluster`.
-    pub async fn replicate(&self, _peers: &[IpAddr]) -> TCResult<()> {
-        Err(TCError::not_implemented("replication"))
+    pub async fn replicate(&self, txn: &Txn, peers: &[LinkHost]) -> TCResult<()> {
+        for peer in peers {
+            match txn
+                .get((peer.clone(), self.path.clone()).into(), Value::None)
+                .await
+            {
+                Ok(_) => {
+                    let replication = self.chains.iter().map(|(name, chain)| {
+                        let mut path = self.path.to_vec();
+                        path.push(name.clone());
+
+                        let source = (peer.clone(), path.into()).into();
+                        chain.replicate(txn, source)
+                    });
+
+                    try_join_all(replication).await?;
+                }
+                Err(cause) => match cause.code() {
+                    ErrorType::NotFound | ErrorType::Unauthorized | ErrorType::Forbidden => {}
+                    _ => return Err(cause),
+                },
+            }
+        }
+
+        Ok(())
     }
 
     /// Return the `Owner` of the given transaction.

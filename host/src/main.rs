@@ -65,7 +65,7 @@ struct Config {
     pub http_port: u16,
 
     #[structopt(long = "peer")]
-    pub peers: Vec<IpAddr>,
+    pub peers: Vec<tc_value::LinkHost>,
 }
 
 impl Config {

@@ -22,7 +22,6 @@ use crate::txn::*;
 mod hosted;
 
 use hosted::Hosted;
-use std::net::IpAddr;
 
 const HYPOTHETICAL: PathLabel = path_label(&["transact", "hypothetical"]);
 
@@ -44,7 +43,7 @@ impl Kernel {
     }
 
     /// Set up replication for the hosted [`Cluster`]s.
-    pub async fn replicate(&self, peers: Vec<IpAddr>) -> TCResult<()> {
+    pub async fn replicate(&self, txn: Txn, peers: Vec<LinkHost>) -> TCResult<()> {
         if peers.is_empty() {
             return Ok(());
         }
@@ -52,7 +51,7 @@ impl Kernel {
         try_join_all(
             self.hosted
                 .clusters()
-                .map(|cluster| cluster.replicate(&peers)),
+                .map(|cluster| cluster.replicate(&txn, &peers)),
         )
         .await?;
 

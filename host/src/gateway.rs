@@ -95,8 +95,9 @@ impl Gateway {
     }
 
     /// Set up replication between this host and the specified peers.
-    pub async fn replicate(&self, peers: Vec<IpAddr>) -> TCResult<()> {
-        self.kernel.replicate(peers).await
+    pub async fn replicate(self: &Arc<Self>, peers: Vec<LinkHost>) -> TCResult<()> {
+        let txn = self.new_txn(TxnId::new(Self::time()), None).await?;
+        self.kernel.replicate(txn, peers).await
     }
 
     /// Return the network address of this `Gateway`
