@@ -1,7 +1,7 @@
 use log::debug;
 use safecast::TryCastFrom;
 
-use tc_error::TCError;
+use tc_error::*;
 use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
@@ -55,19 +55,19 @@ impl<'a> Handler<'a> for SubjectHandler<'a> {
             Box::pin(async move {
                 let subject = self.chain.subject();
 
-                // let scalar_value = Scalar::try_cast_from(value.clone(), |v| {
-                //     TCError::not_implemented(format!("update Chain with value {}", v))
-                // })?;
-                //
-                // debug!("Subject::put {} <- {}", key, value);
-                // self.chain
-                //     .append(
-                //         *txn.id(),
-                //         self.path.to_vec().into(),
-                //         key.clone(),
-                //         scalar_value,
-                //     )
-                //     .await?;
+                let scalar_value = Scalar::try_cast_from(value.clone(), |v| {
+                    TCError::not_implemented(format!("update Chain with value {}", v))
+                })?;
+
+                debug!("Subject::put {} <- {}", key, value);
+                self.chain
+                    .append(
+                        *txn.id(),
+                        self.path.to_vec().into(),
+                        key.clone(),
+                        scalar_value,
+                    )
+                    .await?;
 
                 if self.path.is_empty() {
                     subject.put(txn.id(), key, value).await

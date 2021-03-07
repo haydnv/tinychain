@@ -11,12 +11,14 @@ use log::debug;
 use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{Transact, TxnId};
-use tcgeneric::{Instance, TCPathBuf};
+use tcgeneric::{label, Instance, Label, TCPathBuf};
 
 use crate::fs;
 use crate::scalar::{Scalar, Value};
 
 use super::{ChainBlock, ChainInstance, ChainType, Schema, Subject, CHAIN, SUBJECT};
+
+const CHAIN_BLOCK: Label = label("sync");
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
@@ -43,7 +45,7 @@ impl ChainInstance for SyncChain {
             ));
         }
 
-        let block_id = SUBJECT.into();
+        let block_id = CHAIN_BLOCK.into();
         let mut block = fs::File::get_block_mut(&self.file, &txn_id, block_id).await?;
         block.append(txn_id, path, key, value);
         Ok(())
@@ -96,7 +98,13 @@ impl Persist for SyncChain {
                 .create_file(txn_id, CHAIN.into(), ChainType::Sync.into())
                 .await?;
 
-            file.try_into()?
+            let file: fs::File<ChainBlock> = file.try_into()?;
+            if !file.contains_block(&txn_id, &CHAIN_BLOCK.into()).await? {
+                file.create_block(txn_id, CHAIN_BLOCK.into(), ChainBlock::new())
+                    .await?;
+            }
+
+            file
         };
 
         Ok(SyncChain {

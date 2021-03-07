@@ -27,6 +27,14 @@ pub struct ChainBlock {
 }
 
 impl ChainBlock {
+    /// Return a new, empty block.
+    pub fn new() -> Self {
+        Self {
+            hash: Bytes::from(vec![]),
+            contents: BTreeMap::new(),
+        }
+    }
+
     /// Append an op to the contents of this `ChainBlock`.
     pub fn append(&mut self, txn_id: TxnId, path: TCPathBuf, key: Value, value: Scalar) {
         match self.contents.entry(txn_id) {
