@@ -125,6 +125,14 @@ impl Persist for SyncChain {
 #[async_trait]
 impl Transact for SyncChain {
     async fn commit(&self, txn_id: &TxnId) {
+        {
+            let mut block = fs::File::get_block_mut(&self.file, &txn_id, CHAIN_BLOCK.into())
+                .await
+                .unwrap();
+
+            *block = ChainBlock::new();
+        }
+
         join!(self.subject.commit(txn_id), self.file.commit(txn_id));
     }
 

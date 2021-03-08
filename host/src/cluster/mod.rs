@@ -262,10 +262,9 @@ impl Transact for Cluster {
         let mut confirmed = self.confirmed.write().await;
 
         join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
+        self.installed.commit(txn_id).await;
 
         *confirmed = *txn_id;
-
-        self.installed.commit(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
