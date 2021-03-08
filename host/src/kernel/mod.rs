@@ -174,6 +174,30 @@ impl Kernel {
             Err(TCError::not_found(TCPath::from(path)))
         }
     }
+
+    /// Route a DELETE request.
+    pub async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
+        if path.is_empty() || StateType::from_path(path).is_some() {
+            Err(TCError::method_not_allowed(TCPath::from(path)))
+        } else if let Some((suffix, cluster)) = self.hosted.get(path) {
+            debug!(
+                "DELETE {}: {} from cluster {}",
+                TCPath::from(suffix),
+                key,
+                cluster
+            );
+
+            cluster.delete(&txn, suffix, key).await
+        } else if &path[0] == "error" && path.len() == 2 {
+            if error_type(&path[1]).is_some() {
+                Err(TCError::method_not_allowed(TCPath::from(path)))
+            } else {
+                Err(TCError::not_found(TCPath::from(path)))
+            }
+        } else {
+            Err(TCError::not_found(TCPath::from(path)))
+        }
+    }
 }
 
 fn execute<

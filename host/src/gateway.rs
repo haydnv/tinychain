@@ -190,6 +190,16 @@ impl Gateway {
         }
     }
 
+    /// Delete the [`State`] with the given `key` at `link`.
+    pub async fn delete(&self, txn: &Txn, link: Link, key: Value) -> TCResult<()> {
+        debug!("DELETE {}: {}", link, key);
+        match link.host() {
+            None => self.kernel.delete(txn, link.path(), key).await,
+            Some(host) if host == self.root() => self.kernel.delete(txn, link.path(), key).await,
+            _ => self.client.delete(txn, link, key).await,
+        }
+    }
+
     /// Start this `Gateway`'s server
     pub fn listen(
         self: Arc<Self>,

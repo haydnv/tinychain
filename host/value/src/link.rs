@@ -298,6 +298,12 @@ impl Link {
     }
 }
 
+impl Extend<PathSegment> for Link {
+    fn extend<T: IntoIterator<Item = PathSegment>>(&mut self, iter: T) {
+        self.path.extend(iter)
+    }
+}
+
 impl PartialEq<TCPathBuf> for Link {
     fn eq(&self, other: &TCPathBuf) -> bool {
         self.host.is_none() && &self.path == other

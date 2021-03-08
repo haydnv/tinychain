@@ -59,6 +59,8 @@ pub trait Public {
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()>;
 
     async fn post(&self, txn: &Txn, path: &[PathSegment], params: Map<State>) -> TCResult<State>;
+
+    async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()>;
 }
 
 #[async_trait]
@@ -102,6 +104,22 @@ impl<T: Route + fmt::Display> Public for T {
 
         if let Some(post_handler) = handler.post() {
             post_handler(txn.clone(), params).await
+        } else {
+            Err(TCError::method_not_allowed(format!(
+                "{} {}",
+                self,
+                TCPath::from(path)
+            )))
+        }
+    }
+
+    async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
+        let handler = self
+            .route(path)
+            .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
+
+        if let Some(delete_handler) = handler.delete() {
+            delete_handler(txn.clone(), key).await
         } else {
             Err(TCError::method_not_allowed(format!(
                 "{} {}",

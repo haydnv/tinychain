@@ -30,6 +30,7 @@ mod owner;
 use owner::Owner;
 
 pub use load::instantiate;
+use std::ops::Deref;
 
 pub const REPLICAS: Label = label("replicas");
 
@@ -59,7 +60,7 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    /// Borrow one of this `Cluster`'s [`Chain`]s.
+    /// Borrow one of this cluster's [`Chain`]s.
     pub fn chain(&self, name: &Id) -> Option<&Chain> {
         self.chains.get(name)
     }
@@ -69,7 +70,7 @@ impl Cluster {
         self.classes.get(name)
     }
 
-    /// Borrow the public key of this `Cluster`.
+    /// Borrow the public key of this cluster.
     pub fn public_key(&self) -> &[u8] {
         self.actor.public_key().as_bytes()
     }
@@ -77,6 +78,12 @@ impl Cluster {
     /// Return the path of this cluster, relative to this host.
     pub fn path(&'_ self) -> &'_ [PathSegment] {
         &self.path
+    }
+
+    /// Iterate over a list of replicas of this cluster.
+    pub async fn replicas(&self, txn_id: &TxnId) -> TCResult<HashSet<Link>> {
+        let replicas = self.replicas.read(txn_id).await?;
+        Ok(replicas.deref().clone())
     }
 
     /// Claim ownership of the given [`Txn`].

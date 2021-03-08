@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use futures::{future, TryFutureExt};
+use futures::future::{self, try_join_all, TryFutureExt};
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
@@ -207,26 +207,119 @@ impl<'a> From<&'a Cluster> for ReplicaHandler<'a> {
     }
 }
 
+struct ReplicateHandler<'a> {
+    cluster: &'a Cluster,
+    path: &'a [PathSegment],
+}
+
+impl<'a> ReplicateHandler<'a> {
+    fn new(cluster: &'a Cluster, path: &'a [PathSegment]) -> Self {
+        Self { cluster, path }
+    }
+
+    fn handler(&self) -> Option<Box<dyn Handler<'a> + 'a>> {
+        if let Some(chain) = self.cluster.chain(&self.path[0]) {
+            chain.route(&self.path[1..])
+        } else if let Some(class) = self.cluster.class(&self.path[0]) {
+            class.route(&self.path[1..])
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Handler<'a> for ReplicateHandler<'a> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        let handler = self.handler()?.get()?;
+
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if txn.is_owner(self.cluster.path()) {
+                    handler(txn, key).await
+                } else if let Some(owner) = txn.owner() {
+                    if &owner.path()[..] == self.cluster.path() {
+                        let mut link = owner.clone();
+                        link.extend(self.path.to_vec());
+
+                        debug!("route GET request to transaction owner {}", link);
+                        txn.get(link, key).await
+                    } else {
+                        handler(txn, key).await
+                    }
+                } else {
+                    handler(txn, key).await
+                }
+            })
+        }))
+    }
+
+    fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
+        let handler = self.handler()?.put()?;
+
+        Some(Box::new(|txn, key, value| {
+            Box::pin(async move {
+                if !txn.is_owner(self.cluster.path()) {
+                    return handler(txn, key, value).await;
+                }
+
+                let replicas = self.cluster.replicas(txn.id()).await?;
+                try_join_all(replicas.into_iter().map(|mut replica_link| {
+                    replica_link.extend(self.path.to_vec());
+                    txn.put(replica_link, key.clone(), value.clone())
+                }))
+                .await?;
+
+                handler(txn, key, value).await
+            })
+        }))
+    }
+
+    fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
+        self.handler()?.post()
+    }
+
+    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+        let handler = self.handler()?.delete()?;
+
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if !txn.is_owner(self.cluster.path()) {
+                    return handler(txn, key).await;
+                }
+
+                let replicas = self.cluster.replicas(txn.id()).await?;
+                try_join_all(replicas.into_iter().map(|mut replica_link| {
+                    replica_link.extend(self.path.to_vec());
+                    txn.delete(replica_link, key.clone())
+                }))
+                .await?;
+
+                handler(txn, key).await
+            })
+        }))
+    }
+}
+
 impl Route for Cluster {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Cluster::route {}", TCPath::from(path));
 
         if path.is_empty() {
-            Some(Box::new(ClusterHandler::from(self)))
-        } else if let Some(chain) = self.chain(&path[0]) {
-            chain.route(&path[1..])
-        } else if let Some(class) = self.class(&path[0]) {
-            class.route(&path[1..])
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "authorize" => Some(Box::new(AuthorizeHandler::from(self))),
-                "grant" => Some(Box::new(GrantHandler::from(self))),
-                "install" => Some(Box::new(InstallHandler::from(self))),
-                "replica" => Some(Box::new(ReplicaHandler::from(self))),
-                _ => None,
-            }
+            return Some(Box::new(ClusterHandler::from(self)));
+        }
+
+        let handler: Option<Box<dyn Handler<'a>>> = match path[0].as_str() {
+            "authorize" => Some(Box::new(AuthorizeHandler::from(self))),
+            "grant" => Some(Box::new(GrantHandler::from(self))),
+            "install" => Some(Box::new(InstallHandler::from(self))),
+            "replicas" => Some(Box::new(ReplicaHandler::from(self))),
+            _ => None,
+        };
+
+        if handler.is_some() {
+            handler
         } else {
-            None
+            Some(Box::new(ReplicateHandler::new(self, path)))
         }
     }
 }

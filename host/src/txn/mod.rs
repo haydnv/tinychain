@@ -170,6 +170,11 @@ impl Txn {
     pub async fn post(&self, link: Link, params: State) -> TCResult<State> {
         self.gateway.post(self, link, params).await
     }
+
+    /// Resolve a DELETE op within this transaction context.
+    pub async fn delete(&self, link: Link, key: Value) -> TCResult<()> {
+        self.gateway.delete(self, link, key).await
+    }
 }
 
 #[async_trait]
