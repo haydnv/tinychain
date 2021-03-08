@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
@@ -102,6 +102,7 @@ pub async fn instantiate(
             format!("Cluster {} installed deps", path),
             HashMap::new().into(),
         ),
+        replicas: TxnLock::new(format!("Cluster {} replicas", path), HashSet::new().into()),
     };
 
     let class = InstanceClass::new(Some(path.into()), cluster_proto.into());

@@ -31,6 +31,8 @@ use owner::Owner;
 
 pub use load::instantiate;
 
+pub const REPLICAS: Label = label("replicas");
+
 /// The [`Class`] of a [`Cluster`].
 pub struct ClusterType;
 
@@ -53,9 +55,30 @@ pub struct Cluster {
     confirmed: RwLock<TxnId>,
     owned: RwLock<HashMap<TxnId, Owner>>,
     installed: TxnLock<Mutable<HashMap<Link, HashSet<Scope>>>>,
+    replicas: TxnLock<Mutable<HashSet<Link>>>,
 }
 
 impl Cluster {
+    /// Borrow one of this `Cluster`'s [`Chain`]s.
+    pub fn chain(&self, name: &Id) -> Option<&Chain> {
+        self.chains.get(name)
+    }
+
+    /// Borrow an [`InstanceClass`], if there is one defined with the given name.
+    pub fn class(&self, name: &Id) -> Option<&InstanceClass> {
+        self.classes.get(name)
+    }
+
+    /// Borrow the public key of this `Cluster`.
+    pub fn public_key(&self) -> &[u8] {
+        self.actor.public_key().as_bytes()
+    }
+
+    /// Return the path of this cluster, relative to this host.
+    pub fn path(&'_ self) -> &'_ [PathSegment] {
+        &self.path
+    }
+
     /// Claim ownership of the given [`Txn`].
     pub async fn claim(&self, txn: &Txn) -> TCResult<Txn> {
         let last_commit = self.confirmed.read().await;
@@ -151,6 +174,13 @@ impl Cluster {
         Ok(())
     }
 
+    /// Add a replica to this cluster.
+    pub async fn add_replica(&self, txn_id: TxnId, replica: Link) -> TCResult<()> {
+        let mut replicas = self.replicas.write(txn_id).await?;
+        replicas.insert(replica);
+        Ok(())
+    }
+
     /// Set up replication, if any of the given peers are online replicas of this `Cluster`.
     pub async fn replicate(&self, txn: &Txn, peers: &[LinkHost]) -> TCResult<()> {
         for peer in peers {
@@ -168,6 +198,13 @@ impl Cluster {
                     });
 
                     try_join_all(replication).await?;
+
+                    let mut path = self.path.to_vec();
+                    path.push(REPLICAS.into());
+
+                    let peer_link = (peer.clone(), path.into()).into();
+                    let self_link = txn.link(self.path.clone()).into();
+                    return txn.put(peer_link, Value::None, self_link).await;
                 }
                 Err(cause) => match cause.code() {
                     ErrorType::NotFound | ErrorType::Unauthorized | ErrorType::Forbidden => {}
@@ -201,28 +238,6 @@ impl PartialEq for Cluster {
 impl Hash for Cluster {
     fn hash<H: Hasher>(&self, h: &mut H) {
         self.path.hash(h)
-    }
-}
-
-impl Cluster {
-    /// Borrow one of this `Cluster`'s [`Chain`]s.
-    pub fn chain(&self, name: &Id) -> Option<&Chain> {
-        self.chains.get(name)
-    }
-
-    /// Borrow an [`InstanceClass`], if there is one defined with the given name.
-    pub fn class(&self, name: &Id) -> Option<&InstanceClass> {
-        self.classes.get(name)
-    }
-
-    /// Borrow the public key of this `Cluster`.
-    pub fn public_key(&self) -> &[u8] {
-        self.actor.public_key().as_bytes()
-    }
-
-    /// Return the path of this cluster, relative to this host.
-    pub fn path(&'_ self) -> &'_ [PathSegment] {
-        &self.path
     }
 }
 

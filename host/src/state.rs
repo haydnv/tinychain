@@ -242,7 +242,7 @@ impl From<Chain> for State {
 
 impl From<Link> for State {
     fn from(link: Link) -> Self {
-        Scalar::from(link).into()
+        Self::Scalar(Scalar::from(link))
     }
 }
 
