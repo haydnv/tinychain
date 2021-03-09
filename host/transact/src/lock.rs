@@ -369,7 +369,7 @@ impl<T: Mutate> Transact for TxnLock<T> {
 
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("TxnLock {} finalize {}", &self.name, txn_id);
-        self.write(*txn_id).await.unwrap(); // make sure there's no active write lock
+        self.write(*txn_id).await.unwrap(); // make sure there are no active locks
         let lock = &mut self.inner.lock().unwrap();
         lock.value_at.remove(txn_id);
     }

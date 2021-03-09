@@ -44,10 +44,10 @@ You can find more in-depth examples in the [tests](https://github.com/haydnv/tin
 
 ### Performance
 
- * **Concurrency**: Tinychain **Op**s are automatically executed concurrently, although a developer can use the **After** flow control to modify this behavior.
- * **Hardware acceleration**: The **Tensor** and **Graph** data types support automatic hardware acceleration on CUDA and OpenCL backends, no extra code needed.
+ * **Concurrency**: Tinychain ops are automatically executed concurrently, although a developer can use the provided flow control operators to modify this behavior.
+ * **Hardware acceleration**: The Tensor and Graph data types support automatic hardware acceleration on CUDA and OpenCL backends, no extra code needed.
  * **Native speed**: The Tinychain runtime itself is written in [Rust][rust-lang], a systems programming language with native support for memory-safe multithreading and compute performance comparable to C. All user-defined Tinychain classes must extend a native class implemented in Rust so that basic operations will benefit from native speed.
- * **Transactional filesystem cache**: Tinychain's transactional filesystem layer has a built-in memory cache with least-frequently used (LFU) eviction. Every **Chain** and **Collection** is built on top of this transactional filesystem, providing the benefits of in-memory speed for small collections and automatic filesystem caching for large collections. This means that, for example, you can write the same code to process a 1MB **Tensor** or a 1TB **Tensor**, without worrying about chunking the data to load it into memory.
+ * **Transactional filesystem cache**: Tinychain's transactional filesystem layer has a built-in memory cache with least-frequently used (LFU) eviction. Every Chain and Collection is built on top of this transactional filesystem, providing the benefits of in-memory speed for small collections and automatic filesystem caching for large collections. This means that, for example, you can write the same code to process a 1MB tensor or a 1TB tensor, without worrying about chunking the data to load it into memory.
 
 [rust-lang]:http://www.rust-lang.org/
 
@@ -108,7 +108,7 @@ You can look in the [tests](https://github.com/haydnv/tinychain/tree/master/test
 
 ### Replication
 
-A Tinychain **Cluster** uses a variation on [fast Byzantine multi-Paxos consensus](https://en.wikipedia.org/wiki/Paxos_(computer_science)#Message_flow:_Fast_Byzantine_Multi-Paxos,_steady_state).
+A Tinychain cluster uses a variation on [fast Byzantine multi-Paxos consensus](https://en.wikipedia.org/wiki/Paxos_(computer_science)#Message_flow:_Fast_Byzantine_Multi-Paxos,_steady_state).
 
 The life of a replica *R* of a cluster *C* is:
 
@@ -122,10 +122,9 @@ The flow of operations within a single transaction is:
 1. A replica *R* of cluster *C* with *N* total replicas receives a new transaction request *T*
 1. *R* claims ownership of the transaction
 1. For every write operation which is part of *T*, *R* notifies all other replica hosts
-1. If any replica responds with error 409: conflict, the transaction is dropped and error 409 is returned to the host.
+1. If any replica responds with error 409: conflict, the transaction is rolled back and error 409 is returned to the host.
 1. Otherwise, if at least (*N* / 2) + 1 replicas respond with success, *R* removes the unsuccessful replicas from *C*, commits the transaction, and responds to the end-user
-1. Otherwise, if the transaction results in a retriable error (e.g. 409: conflict or 503: unavailable), and the caller did not specify a transaction ID, *R*'s host will retry up to three times, generating a new transaction ID each time
-1. Otherwise, the transaction is dropped and the error is returned to the end-user
+1. Otherwise, the transaction is rolled back and an error is returned to the end-user
 
 *Important note*: the Tinychain protocol does not support trustless replication. Do not allow untrusted replicas to join your cluster. A single malicious replica can significantly degrade performance, or even halt all updates entirely, by creating extra work to reach consensus; it can also lie to your clients and introduce false information into the network as a whole.
 
@@ -172,7 +171,7 @@ The concurrency control flow of this sequence of operations, starting from trans
 
 This functionality is implemented automatically for any service using the Tinychain host software.
 
-*Important note*: this cross-service consensus algorithm trusts each service to a) recover from a crash without losing state\*, and b) communicate that it has committed a transaction honestly and correctly. In other words, it is not a new and trustless protocol, but a new formalization of an existing ad-hoc procedure. An application which requires completely trustless transactions, like a distributed cryptocurrency, should use a single replicated **Cluster**.
+*Important note*: this cross-service consensus algorithm trusts each service to a) recover from a crash without losing state, and b) communicate that it has committed a transaction honestly and correctly. In other words, it is not a new and trustless protocol, but a new formalization of an existing ad-hoc procedure. An application which requires completely trustless transactions, like a distributed cryptocurrency, should use a single replicated **Cluster**.
 
 \* Not yet implemented
 

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all};
 use futures::join;
-use log::{debug, info};
+use log::{debug, info, warn};
 use uplock::RwLock;
 
 use tc_error::*;
@@ -265,6 +265,27 @@ impl Cluster {
         self.commit(txn.id()).await;
 
         Ok(())
+    }
+
+    pub async fn distribute_rollback(&self, txn: Txn) {
+        let replicas = self.replicas.read(txn.id()).await;
+
+        if let Some(owner) = self.owned.read().await.get(txn.id()) {
+            if let Err(cause) = owner.rollback(&txn).await {
+                warn!("failed to rollback transaction: {}", cause);
+            }
+        }
+
+        if let Ok(replicas) = replicas {
+            join_all(
+                replicas
+                    .iter()
+                    .map(|replica| txn.post(replica.clone(), State::Map(Map::default()))),
+            )
+            .await;
+        }
+
+        self.finalize(txn.id()).await;
     }
 }
 

@@ -104,6 +104,17 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
             })
         }))
     }
+
+    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+
+                self.cluster.finalize(txn.id()).await;
+                Ok(())
+            })
+        }))
+    }
 }
 
 impl<'a> From<&'a Cluster> for ClusterHandler<'a> {
@@ -329,6 +340,9 @@ impl<'a> Handler<'a> for ReplicateHandler<'a> {
 
                 if !txn.is_owner(self.cluster.path()) {
                     return Ok(());
+                } else if self.path.is_empty() {
+                    // it's a synchronization message
+                    return Ok(());
                 }
 
                 Self::replicate_write(self.cluster, &txn, |txn, replica_link| {
@@ -357,6 +371,9 @@ impl<'a> Handler<'a> for ReplicateHandler<'a> {
                 handler(txn.clone(), key.clone()).await?;
 
                 if !txn.is_owner(self.cluster.path()) {
+                    return Ok(());
+                } else if self.path.is_empty() {
+                    // it's a synchronization message
                     return Ok(());
                 }
 

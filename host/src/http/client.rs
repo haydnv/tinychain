@@ -163,7 +163,7 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = url(&link, txn.id(), &key)?;
-        let req = req_builder("GET", uri, Some(txn.request().token()));
+        let req = req_builder("DELETE", uri, Some(txn.request().token()));
 
         let response = self
             .client

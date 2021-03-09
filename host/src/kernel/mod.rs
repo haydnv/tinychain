@@ -211,9 +211,15 @@ fn execute<
         } else {
             // Claim and execute the transaction
             let txn = cluster.claim(&txn).await?;
-            let state = handler(txn.clone(), cluster).await?;
-            cluster.distribute_commit(txn).await?;
-            Ok(state)
+            let result = handler(txn.clone(), cluster).await;
+
+            if result.is_ok() {
+                cluster.distribute_commit(txn).await?;
+            } else {
+                cluster.distribute_rollback(txn).await;
+            }
+
+            result
         }
     })
 }
