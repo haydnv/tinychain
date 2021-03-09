@@ -17,16 +17,7 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None):
     config = []
     for cluster in clusters:
         cluster_config = f"config/{name}"
-
-        cluster_uri = tc.uri(cluster)
-
-        if cluster_uri.host():
-            cluster_config += f"/{cluster_uri.host()}"
-
-        if cluster_uri.port():
-            cluster_config += f"/{cluster_uri.port()}"
-
-        cluster_config += str(cluster_uri.path())
+        cluster_config += str(tc.uri(cluster).path())
 
         tc.write_cluster(cluster, cluster_config, overwrite)
         config.append(cluster_config)
