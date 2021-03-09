@@ -15,6 +15,7 @@ use serde::de::DeserializeOwned;
 use tc_error::*;
 use tcgeneric::{Map, NetworkTime, TCPathBuf};
 
+use crate::cluster::REPLICAS;
 use crate::http;
 use crate::kernel::Kernel;
 use crate::route::Route;
@@ -226,7 +227,7 @@ impl Gateway {
                     .client
                     .put(
                         txn.clone(),
-                        cluster_link.clone(),
+                        cluster_link.append(REPLICAS.into()),
                         Value::None,
                         self_link.into(),
                     )
