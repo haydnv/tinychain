@@ -271,7 +271,10 @@ impl<'a> ReplicateHandler<'a> {
     where
         'a: 'b,
     {
-        let replicas = cluster.replicas(txn.id()).await?;
+        let mut replicas = cluster.replicas(txn.id()).await?;
+        replicas.remove(&txn.link(cluster.link().path().clone()));
+        debug!("replicating write to {} replicas", replicas.len());
+
         let max_failures = replicas.len() / 2;
         let mut failed = HashSet::with_capacity(replicas.len());
         let mut succeeded = HashSet::with_capacity(replicas.len());
@@ -283,8 +286,14 @@ impl<'a> ReplicateHandler<'a> {
             while let Some((replica, result)) = results.next().await {
                 match result {
                     Err(cause) if cause.code() == ErrorType::Conflict => return Err(cause),
-                    Err(_) => failed.insert(replica),
-                    Ok(()) => succeeded.insert(replica),
+                    Err(ref cause) => {
+                        debug!("replica at {} failed: {}", replica, cause);
+                        failed.insert(replica);
+                    }
+                    Ok(()) => {
+                        debug!("replica at {} succeded", replica);
+                        succeeded.insert(replica);
+                    }
                 };
 
                 if failed.len() > max_failures {
@@ -294,13 +303,15 @@ impl<'a> ReplicateHandler<'a> {
             }
         }
 
-        let failed = Value::from_iter(failed);
-        try_join_all(
-            succeeded
-                .into_iter()
-                .map(|replica| txn.delete(replica.append(REPLICAS.into()), failed.clone())),
-        )
-        .await?;
+        if !failed.is_empty() {
+            let failed = Value::from_iter(failed);
+            try_join_all(
+                succeeded
+                    .into_iter()
+                    .map(|replica| txn.delete(replica.append(REPLICAS.into()), failed.clone())),
+            )
+            .await?;
+        }
 
         Ok(())
     }
@@ -333,12 +344,19 @@ impl<'a> Handler<'a> for ReplicateHandler<'a> {
 
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         let handler = self.handler()?.put()?;
+        debug!("ReplicateHandler wrapped PUT request");
 
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 handler(txn.clone(), key.clone(), value.clone()).await?;
 
                 if !txn.is_owner(self.cluster.path()) {
+                    debug!(
+                        "{} will not replicate PUT {} since it's not the owner",
+                        self.cluster,
+                        TCPath::from(self.path)
+                    );
+
                     return Ok(());
                 } else if self.path.is_empty() {
                     // it's a synchronization message

@@ -100,7 +100,12 @@ where
 
     pub async fn prepare(&self, txn_id: &TxnId) -> TCResult<()> {
         if let Some(last_commit) = &*self.committed.read().await {
+            debug!(
+                "prepare block {:?} at {} (last commit {})",
+                self.path, txn_id, last_commit
+            );
             assert!(txn_id > last_commit);
+
             let version = version_path(&self.path, last_commit);
             if !self.cache.sync(&version).await? {
                 if let Some(canonical) = self.cache.read(&self.path).await? {

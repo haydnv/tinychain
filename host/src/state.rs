@@ -111,7 +111,7 @@ pub enum State {
 }
 
 impl State {
-    /// Return true if this `State` is an empty [`Tuple`], default [`Link`], or `Value::None`
+    /// Return true if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {
             Self::Map(map) => map.is_empty(),
@@ -119,6 +119,11 @@ impl State {
             Self::Tuple(tuple) => tuple.is_empty(),
             _ => false,
         }
+    }
+
+    /// Return false if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
+    pub fn is_some(&self) -> bool {
+        !self.is_none()
     }
 
     /// Return true if this `State` is a reference that needs to be resolved.

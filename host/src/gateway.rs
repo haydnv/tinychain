@@ -15,7 +15,6 @@ use serde::de::DeserializeOwned;
 use tc_error::*;
 use tcgeneric::{Map, NetworkTime, TCPathBuf};
 
-use crate::cluster::REPLICAS;
 use crate::http;
 use crate::kernel::Kernel;
 use crate::route::Route;
@@ -223,17 +222,8 @@ impl Gateway {
                 let txn = gateway.new_txn(TxnId::new(Self::time()), None).await?;
                 let txn = cluster.claim(&txn).await?;
 
-                let cluster_link = cluster.link().clone();
-                let self_link = txn.link(cluster_link.path().clone());
-                gateway
-                    .client
-                    .put(
-                        txn.clone(),
-                        cluster_link.append(REPLICAS.into()),
-                        Value::None,
-                        self_link.into(),
-                    )
-                    .await?;
+                let self_link = txn.link(cluster.link().path().clone());
+                cluster.add_replica(&txn, self_link).await?;
 
                 // send a commit message
                 cluster.route(&[]).unwrap().post().unwrap()(txn, Map::default()).await?;

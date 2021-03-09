@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use futures::future::{join_all, try_join_all};
 use futures::join;
 use log::{debug, info, warn};
+use safecast::TryCastFrom;
 use uplock::RwLock;
 
 use tc_error::*;
@@ -22,7 +23,7 @@ use tcgeneric::*;
 
 use crate::chain::{Chain, ChainInstance};
 use crate::object::InstanceClass;
-use crate::scalar::{Link, OpDef};
+use crate::scalar::{Link, OpDef, Value};
 use crate::state::State;
 use crate::txn::{Actor, Scope, Txn, TxnId};
 
@@ -193,12 +194,41 @@ impl Cluster {
     /// Add a replica to this cluster.
     pub async fn add_replica(&self, txn: &Txn, replica: Link) -> TCResult<()> {
         if replica == txn.link(self.link.path().clone()) {
-            if self.link.host().is_some() {
-                self.replicate(txn).await?;
+            if &replica == &self.link || self.link.host().is_none() {
+                return Ok(());
             }
+
+            let replicas = txn
+                .get(self.link.clone().append(REPLICAS.into()), Value::None)
+                .await?;
+
+            if replicas.is_some() {
+                let replicas = Tuple::<Link>::try_cast_from(replicas, |s| {
+                    TCError::bad_request("invalid replica set", s)
+                })?;
+
+                let mut replicas: HashSet<Link> = HashSet::from_iter(replicas);
+                replicas.remove(self.link());
+
+                debug!("{} has {} other replicas", self, replicas.len());
+
+                try_join_all(replicas.iter().map(|replica| {
+                    txn.put(
+                        replica.clone().append(REPLICAS.into()),
+                        Value::None,
+                        self.link.clone().into(),
+                    )
+                }))
+                .await?;
+
+                (*self.replicas.write(*txn.id()).await?).extend(replicas);
+            } else {
+                warn!("{} has no other replicas", self);
+            }
+
+            self.replicate(txn).await?;
         } else {
-            let mut replicas = self.replicas.write(*txn.id()).await?;
-            replicas.insert(replica);
+            (*self.replicas.write(*txn.id()).await?).insert(replica);
         }
 
         Ok(())
@@ -255,9 +285,11 @@ impl Cluster {
             owner.commit(&txn).await?;
         }
 
+        let self_link = txn.link(self.link.path().clone());
         join_all(
             replicas
                 .iter()
+                .filter(|replica| *replica != &self_link)
                 .map(|replica| txn.post(replica.clone(), State::Map(Map::default()))),
         )
         .await;
@@ -277,9 +309,11 @@ impl Cluster {
         }
 
         if let Ok(replicas) = replicas {
+            let self_link = txn.link(self.link.path().clone());
             join_all(
                 replicas
                     .iter()
+                    .filter(|replica| *replica != &self_link)
                     .map(|replica| txn.post(replica.clone(), State::Map(Map::default()))),
             )
             .await;
