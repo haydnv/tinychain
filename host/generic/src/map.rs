@@ -9,6 +9,8 @@ use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
+use tc_error::*;
+
 use super::{Id, Tuple};
 
 /// A generic map whose keys are [`Id`]s, based on [`HashMap`]
@@ -18,8 +20,32 @@ pub struct Map<T: Clone> {
 }
 
 impl<T: Clone> Map<T> {
+    #[inline]
+    pub fn expect_empty(&self) -> TCResult<()> where T: fmt::Display {
+        if self.is_empty() {
+            Ok(())
+        } else {
+            Err(TCError::bad_request("unexpected parameters", self))
+        }
+    }
+
     pub fn into_inner(self) -> HashMap<Id, T> {
         self.inner
+    }
+
+    pub fn or_default<P: Default + TryCastFrom<T>>(&mut self, name: &Id) -> TCResult<P> where T: fmt::Display {
+        if let Some(param) = self.remove(name) {
+            P::try_cast_from(param, |p| {
+                TCError::bad_request(format!("invalid value for {}", name), p)
+            })
+        } else {
+            Ok(P::default())
+        }
+    }
+
+    pub fn require<P: TryCastFrom<T>>(&mut self, name: &Id) -> TCResult<P> where T: fmt::Display {
+        let param = self.remove(name).ok_or_else(|| TCError::bad_request("missing required parameter", name))?;
+        P::try_cast_from(param, |p| TCError::bad_request(format!("invalid value for {}", name), p))
     }
 }
 

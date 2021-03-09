@@ -7,15 +7,17 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::{try_join_all, Future, TryFutureExt};
+use futures::future::{Future, TryFutureExt};
+use futures::try_join;
 use log::debug;
 use serde::de::DeserializeOwned;
 
 use tc_error::*;
-use tcgeneric::{NetworkTime, TCPathBuf};
+use tcgeneric::{Map, NetworkTime, TCPathBuf};
 
 use crate::http;
 use crate::kernel::Kernel;
+use crate::route::Route;
 use crate::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
 use crate::txn::*;
@@ -92,12 +94,6 @@ impl Gateway {
             client: http::Client::new(),
             actor: Actor::new(Link::default().into()),
         })
-    }
-
-    /// Set up replication between this host and the specified peers.
-    pub async fn replicate(self: &Arc<Self>, peers: Vec<LinkHost>) -> TCResult<()> {
-        let txn = self.new_txn(TxnId::new(Self::time()), None).await?;
-        self.kernel.replicate(txn, peers).await
     }
 
     /// Return the network address of this `Gateway`
@@ -204,15 +200,52 @@ impl Gateway {
     pub fn listen(
         self: Arc<Self>,
     ) -> Pin<Box<impl Future<Output = Result<(), Box<dyn std::error::Error>>> + 'static>> {
-        let servers = vec![self.clone().http_listen()];
-        let txn_server = self.txn_server.clone();
+        Box::pin(async move {
+            match try_join!(self.clone().http_listen(), self.clone().replicate()) {
+                Ok(_) => Ok(()),
+                Err(cause) => Err(cause),
+            }
+        })
+    }
 
-        Box::pin(try_join_all(servers).map_ok(|_| ()).and_then(move |_| {
-            txn_server.shutdown().map_err(|e| {
-                let err: Box<dyn std::error::Error> = Box::new(e);
-                err
-            })
-        }))
+    async fn replicate(self: Arc<Self>) -> Result<(), Box<dyn std::error::Error>> {
+        let result = async move {
+            for cluster in self.kernel.hosted() {
+                let gateway = self.clone();
+
+                if cluster.link().host().is_none() {
+                    continue;
+                }
+
+                let txn = gateway.new_txn(TxnId::new(Self::time()), None).await?;
+                let txn = cluster.claim(&txn).await?;
+
+                let cluster_link = cluster.link().clone();
+                let self_link = txn.link(cluster_link.path().clone());
+                gateway
+                    .client
+                    .put(
+                        txn.clone(),
+                        cluster_link.clone(),
+                        Value::None,
+                        self_link.into(),
+                    )
+                    .await?;
+
+                // send a commit message
+                cluster.route(&[]).unwrap().post().unwrap()(txn, Map::default()).await?;
+            }
+
+            TCResult::Ok(())
+        };
+
+        match result.await {
+            Ok(()) => Result::<(), Box<dyn std::error::Error>>::Ok(()),
+            Err(cause) => {
+                let e: Box<dyn std::error::Error> = Box::new(cause);
+                Err(e)
+            }
+        }
     }
 
     fn http_listen(

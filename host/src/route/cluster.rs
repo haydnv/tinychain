@@ -1,5 +1,9 @@
+use std::collections::HashSet;
+use std::iter::FromIterator;
+
 use bytes::Bytes;
-use futures::future::{self, try_join_all, TryFutureExt};
+use futures::future::{self, try_join_all, FutureExt, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt};
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
@@ -7,7 +11,7 @@ use tc_error::*;
 use tc_transact::{Transact, Transaction};
 use tcgeneric::{label, Id, TCPath, Tuple};
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, REPLICAS};
 use crate::route::*;
 use crate::scalar::{Link, Value};
 use crate::state::State;
@@ -121,24 +125,10 @@ impl<'a> Handler<'a> for GrantHandler<'a> {
     fn post(self: Box<Self>) -> Option<PostHandler<'a>> {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let scope = params
-                    .remove(&label("scope").into())
-                    .ok_or_else(|| TCError::bad_request("missing required parameter", "scope"))?
-                    .try_cast_into(|s| TCError::bad_request("invalid auth scope", s))?;
-
-                let op = params
-                    .remove(&label("op").into())
-                    .ok_or_else(|| TCError::bad_request("missing required parameter", "op"))?
-                    .try_cast_into(|s| TCError::bad_request("grantee must be an OpRef, not", s))?;
-
-                let context = if let Some(context) = params.remove(&label("context").into()) {
-                    context.try_cast_into(|v| {
-                        TCError::bad_request("expected a Map of parameters, not", v)
-                    })?
-                } else {
-                    Map::default()
-                };
-
+                let scope = params.require(&label("scope").into())?;
+                let op = params.require(&label("op").into())?;
+                let context = params.or_default(&label("context").into())?;
+                params.expect_empty()?;
                 self.cluster.grant(txn, scope, op, context).await
             })
         }))
@@ -186,16 +176,42 @@ struct ReplicaHandler<'a> {
 }
 
 impl<'a> Handler<'a> for ReplicaHandler<'a> {
+    fn get(self: Box<Self>) -> Option<GetHandler<'a>> {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                key.expect_none()?;
+
+                self.cluster
+                    .replicas(txn.id())
+                    .map_ok(Value::from_iter)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+
     fn put(self: Box<Self>) -> Option<PutHandler<'a>> {
         Some(Box::new(|txn, key, link| {
             Box::pin(async move {
-                assert!(key.is_none());
+                key.expect_none()?;
 
                 let link = link.try_cast_into(|v| {
                     TCError::bad_request("expected a Link to a Cluster, not", v)
                 })?;
 
-                self.cluster.add_replica(*txn.id(), link).await
+                self.cluster.add_replica(&txn, link).await
+            })
+        }))
+    }
+
+    fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
+        Some(Box::new(|txn, link| {
+            Box::pin(async move {
+                let link = link.try_cast_into(|v| {
+                    TCError::bad_request("expected a Link to a Cluster, not", v)
+                })?;
+
+                self.cluster.remove_replica(*txn.id(), &link).await
             })
         }))
     }
@@ -218,13 +234,69 @@ impl<'a> ReplicateHandler<'a> {
     }
 
     fn handler(&self) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if let Some(chain) = self.cluster.chain(&self.path[0]) {
+        if self.path.is_empty() {
+            Some(Box::new(ClusterHandler::from(self.cluster)))
+        } else if let Some(chain) = self.cluster.chain(&self.path[0]) {
             chain.route(&self.path[1..])
         } else if let Some(class) = self.cluster.class(&self.path[0]) {
             class.route(&self.path[1..])
+        } else if self.path.len() == 1 {
+            match self.path[0].as_str() {
+                "authorize" => Some(Box::new(AuthorizeHandler::from(self.cluster))),
+                "grant" => Some(Box::new(GrantHandler::from(self.cluster))),
+                "install" => Some(Box::new(InstallHandler::from(self.cluster))),
+                "replicas" => Some(Box::new(ReplicaHandler::from(self.cluster))),
+                _ => None,
+            }
         } else {
             None
         }
+    }
+
+    async fn replicate_write<
+        'b,
+        F: Future<Output = (Link, TCResult<()>)>,
+        W: Fn(&'b Txn, Link) -> F,
+    >(
+        cluster: &'a Cluster,
+        txn: &'b Txn,
+        write: W,
+    ) -> TCResult<()>
+    where
+        'a: 'b,
+    {
+        let replicas = cluster.replicas(txn.id()).await?;
+        let max_failures = replicas.len() / 2;
+        let mut failed = HashSet::with_capacity(replicas.len());
+        let mut succeeded = HashSet::with_capacity(replicas.len());
+
+        {
+            let mut results =
+                FuturesUnordered::from_iter(replicas.into_iter().map(|link| write(txn, link)));
+
+            while let Some((replica, result)) = results.next().await {
+                match result {
+                    Err(cause) if cause.code() == ErrorType::Conflict => return Err(cause),
+                    Err(_) => failed.insert(replica),
+                    Ok(()) => succeeded.insert(replica),
+                };
+
+                if failed.len() > max_failures {
+                    assert!(result.is_err());
+                    return result;
+                }
+            }
+        }
+
+        let failed = Value::from_iter(failed);
+        try_join_all(
+            succeeded
+                .into_iter()
+                .map(|replica| txn.delete(replica.append(REPLICAS.into()), failed.clone())),
+        )
+        .await?;
+
+        Ok(())
     }
 }
 
@@ -258,18 +330,22 @@ impl<'a> Handler<'a> for ReplicateHandler<'a> {
 
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
+                handler(txn.clone(), key.clone(), value.clone()).await?;
+
                 if !txn.is_owner(self.cluster.path()) {
-                    return handler(txn, key, value).await;
+                    return Ok(());
                 }
 
-                let replicas = self.cluster.replicas(txn.id()).await?;
-                try_join_all(replicas.into_iter().map(|mut replica_link| {
-                    replica_link.extend(self.path.to_vec());
-                    txn.put(replica_link, key.clone(), value.clone())
-                }))
+                Self::replicate_write(self.cluster, &txn, |txn, replica_link| {
+                    let mut target = replica_link.clone();
+                    target.extend(self.path.to_vec());
+
+                    txn.put(target, key.clone(), value.clone())
+                        .map(|r| (replica_link, r))
+                })
                 .await?;
 
-                handler(txn, key, value).await
+                Ok(())
             })
         }))
     }
@@ -283,18 +359,21 @@ impl<'a> Handler<'a> for ReplicateHandler<'a> {
 
         Some(Box::new(|txn, key| {
             Box::pin(async move {
+                handler(txn.clone(), key.clone()).await?;
+
                 if !txn.is_owner(self.cluster.path()) {
-                    return handler(txn, key).await;
+                    return Ok(());
                 }
 
-                let replicas = self.cluster.replicas(txn.id()).await?;
-                try_join_all(replicas.into_iter().map(|mut replica_link| {
-                    replica_link.extend(self.path.to_vec());
-                    txn.delete(replica_link, key.clone())
-                }))
+                Self::replicate_write(self.cluster, &txn, |txn, replica_link| {
+                    let mut target = replica_link.clone();
+                    target.extend(self.path.to_vec());
+
+                    txn.delete(target, key.clone()).map(|r| (replica_link, r))
+                })
                 .await?;
 
-                handler(txn, key).await
+                Ok(())
             })
         }))
     }
@@ -304,22 +383,6 @@ impl Route for Cluster {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("Cluster::route {}", TCPath::from(path));
 
-        if path.is_empty() {
-            return Some(Box::new(ClusterHandler::from(self)));
-        }
-
-        let handler: Option<Box<dyn Handler<'a>>> = match path[0].as_str() {
-            "authorize" => Some(Box::new(AuthorizeHandler::from(self))),
-            "grant" => Some(Box::new(GrantHandler::from(self))),
-            "install" => Some(Box::new(InstallHandler::from(self))),
-            "replicas" => Some(Box::new(ReplicaHandler::from(self))),
-            _ => None,
-        };
-
-        if handler.is_some() {
-            handler
-        } else {
-            Some(Box::new(ReplicateHandler::new(self, path)))
-        }
+        Some(Box::new(ReplicateHandler::new(self, path)))
     }
 }

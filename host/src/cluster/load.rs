@@ -26,12 +26,10 @@ pub async fn instantiate(
     data_dir: fs::Dir,
     txn_id: TxnId,
 ) -> TCResult<InstanceExt<Cluster>> {
-    let (path, proto) = class.into_inner();
-    let path = path.ok_or_else(|| {
-        TCError::unsupported("cluster config must specify the path of the cluster to host")
+    let (link, proto) = class.into_inner();
+    let link = link.ok_or_else(|| {
+        TCError::unsupported("cluster config must specify a Link to the cluster to host")
     })?;
-
-    let path = path.into_path();
 
     let mut chain_schema = HashMap::new();
     let mut cluster_proto = HashMap::new();
@@ -71,7 +69,7 @@ pub async fn instantiate(
         }
     }
 
-    let dir = get_or_create_dir(data_dir, txn_id, &path).await?;
+    let dir = get_or_create_dir(data_dir, txn_id, link.path()).await?;
 
     let mut chains = HashMap::<Id, Chain>::new();
     for (id, (class, schema)) in chain_schema.into_iter() {
@@ -92,20 +90,20 @@ pub async fn instantiate(
 
     let actor_id = Value::from(Link::default());
     let cluster = Cluster {
+        link: link.clone(),
         actor: Arc::new(Actor::new(actor_id)),
-        path: path.clone(),
         chains: chains.into(),
         classes: classes.into(),
         confirmed: RwLock::new(txn_id),
         owned: RwLock::new(HashMap::new()),
         installed: TxnLock::new(
-            format!("Cluster {} installed deps", path),
+            format!("Cluster {} installed deps", link),
             HashMap::new().into(),
         ),
-        replicas: TxnLock::new(format!("Cluster {} replicas", path), HashSet::new().into()),
+        replicas: TxnLock::new(format!("Cluster {} replicas", link), HashSet::new().into()),
     };
 
-    let class = InstanceClass::new(Some(path.into()), cluster_proto.into());
+    let class = InstanceClass::new(Some(link), cluster_proto.into());
 
     Ok(InstanceExt::new(cluster, class))
 }

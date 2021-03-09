@@ -63,9 +63,6 @@ struct Config {
 
     #[structopt(long = "http_port", default_value = "8702")]
     pub http_port: u16,
-
-    #[structopt(long = "peer")]
-    pub peers: Vec<tc_value::LinkHost>,
 }
 
 impl Config {
@@ -120,8 +117,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let kernel = tinychain::Kernel::new(clusters);
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
-
-    gateway.replicate(config.peers).await?;
 
     if let Err(cause) = gateway.listen().await {
         log::error!("server error: {}", cause);

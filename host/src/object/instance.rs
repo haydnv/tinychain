@@ -108,7 +108,7 @@ where
 
 impl<T: tcgeneric::Instance> fmt::Display for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} Object", tcgeneric::Instance::class(self))
+        write!(f, "{} instance", tcgeneric::Instance::class(self))
     }
 }
 

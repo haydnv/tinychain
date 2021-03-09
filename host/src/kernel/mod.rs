@@ -4,7 +4,7 @@ use std::convert::{TryFrom, TryInto};
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::future::{try_join_all, Future};
+use futures::future::Future;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
@@ -42,20 +42,9 @@ impl Kernel {
         }
     }
 
-    /// Set up replication for the hosted [`Cluster`]s.
-    pub async fn replicate(&self, txn: Txn, peers: Vec<LinkHost>) -> TCResult<()> {
-        if peers.is_empty() {
-            return Ok(());
-        }
-
-        try_join_all(
-            self.hosted
-                .clusters()
-                .map(|cluster| cluster.replicate(&txn, &peers)),
-        )
-        .await?;
-
-        Ok(())
+    /// Return a list of hosted clusters
+    pub fn hosted(&self) -> impl Iterator<Item = &InstanceExt<Cluster>> {
+        self.hosted.clusters()
     }
 
     /// Route a GET request.

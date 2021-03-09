@@ -296,6 +296,11 @@ impl Link {
     pub fn path(&'_ self) -> &'_ TCPathBuf {
         &self.path
     }
+
+    pub fn append(mut self, segment: PathSegment) -> Self {
+        self.path = self.path.append(segment);
+        self
+    }
 }
 
 impl Extend<PathSegment> for Link {

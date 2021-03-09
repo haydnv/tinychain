@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -20,7 +21,7 @@ use tcgeneric::*;
 
 use crate::chain::{Chain, ChainInstance};
 use crate::object::InstanceClass;
-use crate::scalar::{Link, LinkHost, OpDef, Value};
+use crate::scalar::{Link, OpDef};
 use crate::state::State;
 use crate::txn::{Actor, Scope, Txn, TxnId};
 
@@ -30,7 +31,6 @@ mod owner;
 use owner::Owner;
 
 pub use load::instantiate;
-use std::ops::Deref;
 
 pub const REPLICAS: Label = label("replicas");
 
@@ -49,8 +49,8 @@ impl fmt::Display for ClusterType {
 
 /// The data structure responsible for maintaining consensus per-transaction.
 pub struct Cluster {
+    link: Link,
     actor: Arc<Actor>,
-    path: TCPathBuf,
     chains: Map<Chain>,
     classes: Map<InstanceClass>,
     confirmed: RwLock<TxnId>,
@@ -75,9 +75,14 @@ impl Cluster {
         self.actor.public_key().as_bytes()
     }
 
+    /// Return the canonical [`Link`] to this cluster (probably not on this host).
+    pub fn link(&self) -> &Link {
+        &self.link
+    }
+
     /// Return the path of this cluster, relative to this host.
     pub fn path(&'_ self) -> &'_ [PathSegment] {
-        &self.path
+        self.link.path()
     }
 
     /// Iterate over a list of replicas of this cluster.
@@ -92,18 +97,21 @@ impl Cluster {
         if txn.id() <= &*last_commit {
             return Err(TCError::unsupported(format!(
                 "cluster at {} cannot claim transaction {} because the last commit is at {}",
-                &self.path,
+                self.link,
                 txn.id(),
-                &*last_commit
+                *last_commit
             )));
         }
 
         let mut owned = self.owned.write().await;
         if owned.contains_key(txn.id()) {
-            return Err(TCError::bad_request("received an unclaimed transaction, but there is a record of an owner for this transaction at cluster", &self.path));
+            return Err(TCError::bad_request("received an unclaimed transaction, but there is a record of an owner for this transaction at cluster", self.link.path()));
         }
 
-        let txn = txn.clone().claim(&self.actor, self.path.clone()).await?;
+        let txn = txn
+            .clone()
+            .claim(&self.actor, self.link.path().clone())
+            .await?;
         owned.insert(*txn.id(), Owner::new());
         Ok(txn)
     }
@@ -152,7 +160,7 @@ impl Cluster {
 
         // TODO: require `SCOPE_EXECUTE` in order to grant a scope
         let txn = txn
-            .grant(&self.actor, self.path.clone(), vec![scope])
+            .grant(&self.actor, self.link.path().clone(), vec![scope])
             .await?;
 
         OpDef::call(op.into_def(), txn, context).await
@@ -182,43 +190,35 @@ impl Cluster {
     }
 
     /// Add a replica to this cluster.
-    pub async fn add_replica(&self, txn_id: TxnId, replica: Link) -> TCResult<()> {
-        let mut replicas = self.replicas.write(txn_id).await?;
-        replicas.insert(replica);
+    pub async fn add_replica(&self, txn: &Txn, replica: Link) -> TCResult<()> {
+        if replica == txn.link(self.link.path().clone()) {
+            if self.link.host().is_some() {
+                self.replicate(txn).await?;
+            }
+        } else {
+            let mut replicas = self.replicas.write(*txn.id()).await?;
+            replicas.insert(replica);
+        }
+
         Ok(())
     }
 
-    /// Set up replication, if any of the given peers are online replicas of this `Cluster`.
-    pub async fn replicate(&self, txn: &Txn, peers: &[LinkHost]) -> TCResult<()> {
-        for peer in peers {
-            match txn
-                .get((peer.clone(), self.path.clone()).into(), Value::None)
-                .await
-            {
-                Ok(_) => {
-                    let replication = self.chains.iter().map(|(name, chain)| {
-                        let mut path = self.path.to_vec();
-                        path.push(name.clone());
+    /// Remove a replica from this cluster.
+    pub async fn remove_replica(&self, txn_id: TxnId, replica: &Link) -> TCResult<()> {
+        let mut replicas = self.replicas.write(txn_id).await?;
+        replicas.remove(replica);
+        Ok(())
+    }
 
-                        let source = (peer.clone(), path.into()).into();
-                        chain.replicate(txn, source)
-                    });
+    async fn replicate(&self, txn: &Txn) -> TCResult<()> {
+        let replication = self.chains.iter().map(|(name, chain)| {
+            let mut path = self.link.path().to_vec();
+            path.push(name.clone());
 
-                    try_join_all(replication).await?;
+            chain.replicate(txn, self.link.clone().append(name.clone()))
+        });
 
-                    let mut path = self.path.to_vec();
-                    path.push(REPLICAS.into());
-
-                    let peer_link = (peer.clone(), path.into()).into();
-                    let self_link = txn.link(self.path.clone()).into();
-                    return txn.put(peer_link, Value::None, self_link).await;
-                }
-                Err(cause) => match cause.code() {
-                    ErrorType::NotFound | ErrorType::Unauthorized | ErrorType::Forbidden => {}
-                    _ => return Err(cause),
-                },
-            }
-        }
+        try_join_all(replication).await?;
 
         Ok(())
     }
@@ -238,13 +238,13 @@ impl Eq for Cluster {}
 
 impl PartialEq for Cluster {
     fn eq(&self, other: &Self) -> bool {
-        self.path == other.path
+        self.path() == other.path()
     }
 }
 
 impl Hash for Cluster {
     fn hash<H: Hasher>(&self, h: &mut H) {
-        self.path.hash(h)
+        self.path().hash(h)
     }
 }
 
@@ -276,6 +276,6 @@ impl Transact for Cluster {
 
 impl fmt::Display for Cluster {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Cluster at {}", self.path)
+        write!(f, "Cluster at {}", self.link)
     }
 }

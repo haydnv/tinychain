@@ -2,6 +2,7 @@
 
 use std::cmp::Ordering;
 use std::fmt;
+use std::iter::FromIterator;
 use std::str::FromStr;
 
 use async_trait::async_trait;
@@ -13,6 +14,7 @@ use safecast::{CastFrom, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
+use tc_error::*;
 use tcgeneric::*;
 
 use super::Link;
@@ -239,6 +241,15 @@ pub enum Value {
 }
 
 impl Value {
+    #[inline]
+    pub fn expect_none(&self) -> TCResult<()> {
+        if self.is_none() {
+            Ok(())
+        } else {
+            Err(TCError::bad_request("expected None but found", self))
+        }
+    }
+
     pub fn is_none(&self) -> bool {
         match self {
             Self::Link(link) => link == &TCPathBuf::default(),
@@ -329,6 +340,13 @@ impl Serialize for Value {
             Self::String(s) => s.serialize(serializer),
             Self::Tuple(t) => t.as_slice().serialize(serializer),
         }
+    }
+}
+
+impl<T> FromIterator<T> for Value where Value: From<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let tuple = Tuple::<Value>::from_iter(iter.into_iter().map(Value::from));
+        Self::Tuple(tuple)
     }
 }
 
