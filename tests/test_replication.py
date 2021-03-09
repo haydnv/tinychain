@@ -4,7 +4,7 @@ import unittest
 from testutils import PORT, start_host
 
 
-NUM_HOSTS = 4
+NUM_HOSTS = 2
 
 
 class Rev(tc.Cluster):
@@ -31,18 +31,34 @@ class ReplicationTests(unittest.TestCase):
             host_uri = f"http://127.0.0.1:{port}" + tc.uri(Rev).path()
             host = start_host(f"test_replication_{i}", [Rev], host_uri=tc.URI(host_uri))
             hosts.append(host)
+            printlines(5)
 
         self.hosts = hosts
 
     def testReplication(self):
+        cluster_path = tc.uri(Rev).path()
+
+        expected = set("http://" + tc.uri(host) + cluster_path for host in self.hosts)
         for host in self.hosts:
-            rev = host.get(tc.uri(Rev).path() + "/version")
-            self.assertEqual(rev, 0)
+            actual = {}
+            for link in host.get(cluster_path + "/replicas"):
+                actual.update(link)
+            actual = set(actual.keys())
+
+            print("expect", expected)
+            print("actual", actual)
+            self.assertEqual(expected, actual)
+
+        return
 
     def tearDown(self):
         for host in self.hosts:
             host.stop()
 
+
+def printlines(n):
+    for _ in range(n):
+        print()
 
 if __name__ == "__main__":
     unittest.main()

@@ -226,7 +226,8 @@ impl Gateway {
                 cluster.add_replica(&txn, self_link).await?;
 
                 // send a commit message
-                cluster.route(&[]).unwrap().post().unwrap()(txn, Map::default()).await?;
+                cluster.distribute_commit(txn).await?;
+                // cluster.route(&[]).unwrap().post().unwrap()(txn, Map::default()).await?;
 
                 log::info!("{} is now online", cluster);
             }
