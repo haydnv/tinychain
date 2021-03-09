@@ -24,10 +24,9 @@ impl Owner {
         }
     }
 
-    pub async fn mutate(&self, peer: Link) -> TCResult<()> {
+    pub async fn mutate(&self, participant: Link) {
         let mut mutated = self.mutated.write().await;
-        mutated.insert(peer);
-        Ok(())
+        mutated.insert(participant);
     }
 
     pub async fn commit(&self, txn: &Txn) -> TCResult<()> {

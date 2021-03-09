@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all};
+use futures::join;
 use log::{debug, info};
 use uplock::RwLock;
 
@@ -223,14 +224,47 @@ impl Cluster {
         Ok(())
     }
 
-    /// Return the `Owner` of the given transaction.
-    pub async fn owner(&self, txn_id: &TxnId) -> TCResult<Owner> {
-        self.owned
-            .read()
-            .await
-            .get(txn_id)
-            .cloned()
-            .ok_or_else(|| TCError::bad_request("cluster does not own transaction", txn_id))
+    pub async fn mutate(&self, txn: &Txn, participant: Link) -> TCResult<()> {
+        if participant.path() == self.link.path() {
+            log::warn!(
+                "got participant message within Cluster {}",
+                self.link.path()
+            );
+            return Ok(());
+        }
+
+        let owned = self.owned.write().await;
+        let owner = owned.get(txn.id()).ok_or_else(|| {
+            TCError::bad_request(
+                format!(
+                    "{} does not own transaction",
+                    txn.link(self.link.path().clone())
+                ),
+                txn.id(),
+            )
+        })?;
+
+        owner.mutate(participant).await;
+        Ok(())
+    }
+
+    pub async fn distribute_commit(&self, txn: Txn) -> TCResult<()> {
+        let replicas = self.replicas.read(txn.id()).await?;
+
+        if let Some(owner) = self.owned.read().await.get(txn.id()) {
+            owner.commit(&txn).await?;
+        }
+
+        join_all(
+            replicas
+                .iter()
+                .map(|replica| txn.post(replica.clone(), State::Map(Map::default()))),
+        )
+        .await;
+
+        self.commit(txn.id()).await;
+
+        Ok(())
     }
 }
 
@@ -262,7 +296,7 @@ impl Transact for Cluster {
         let mut confirmed = self.confirmed.write().await;
 
         join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
-        self.installed.commit(txn_id).await;
+        join!(self.installed.commit(txn_id), self.replicas.commit(txn_id));
 
         *confirmed = *txn_id;
     }
@@ -270,7 +304,10 @@ impl Transact for Cluster {
     async fn finalize(&self, txn_id: &TxnId) {
         join_all(self.chains.values().map(|chain| chain.finalize(txn_id))).await;
         self.owned.write().await.remove(txn_id);
-        self.installed.finalize(txn_id).await;
+        join!(
+            self.installed.finalize(txn_id),
+            self.replicas.finalize(txn_id)
+        );
     }
 }
 

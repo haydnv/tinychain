@@ -9,7 +9,6 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::{Transact, Transaction};
 use tcgeneric::*;
 
 use crate::cluster::Cluster;
@@ -200,12 +199,11 @@ fn execute<
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
-        if let Some(owner_link) = txn.owner() {
-            let link = txn.link(cluster.path().to_vec().into());
-            if txn.is_owner(cluster.path()) {
-                debug!("{} owns this transaction, no need to notify", link);
+        if let Some(owner) = txn.owner() {
+            if cluster.path() == &owner.path()[..] {
+                debug!("{} owns this transaction, no need to notify", cluster);
             } else {
-                txn.put(owner_link.clone(), Value::default(), link.into())
+                txn.put(owner.clone(), Value::None, cluster.link().clone().into())
                     .await?;
             }
 
@@ -214,12 +212,7 @@ fn execute<
             // Claim and execute the transaction
             let txn = cluster.claim(&txn).await?;
             let state = handler(txn.clone(), cluster).await?;
-
-            let owner = cluster.owner(txn.id()).await?;
-
-            owner.commit(&txn).await?;
-            cluster.commit(txn.id()).await;
-
+            cluster.distribute_commit(txn).await?;
             Ok(state)
         }
     })

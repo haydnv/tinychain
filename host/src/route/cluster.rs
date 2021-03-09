@@ -63,11 +63,6 @@ impl<'a> ClusterHandler<'a> {
             Ok(Value::from(public_key).into())
         }
     }
-
-    async fn handle_put(self, txn: Txn, peer: Link) -> TCResult<()> {
-        let owner = self.cluster.owner(txn.id()).await?;
-        owner.mutate(peer).await
-    }
 }
 
 impl<'a> Handler<'a> for ClusterHandler<'a> {
@@ -84,10 +79,10 @@ impl<'a> Handler<'a> for ClusterHandler<'a> {
                     return Err(TCError::unsupported("a Cluster itself is immutable"));
                 }
 
-                let peer =
+                let participant =
                     value.try_cast_into(|s| TCError::bad_request("expected a Link, not", s))?;
 
-                self.handle_put(txn, peer).await
+                self.cluster.mutate(&txn, participant).await
             })
         }))
     }
