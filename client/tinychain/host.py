@@ -26,7 +26,7 @@ class Host(object):
         return urllib.parse.urlencode({k: json.dumps(v) for k, v in params.items()})
 
     def __init__(self, address):
-        self.address = address
+        self.__uri__ = address
 
     def _handle(self, req):
         response = req()
@@ -55,7 +55,7 @@ class Host(object):
     def link(self, path):
         """Return a link to the given path at this host."""
 
-        return "http://{}{}".format(self.address, path)
+        return "http://{}{}".format(uri(self), path)
 
     def get(self, path, key=None, auth=None):
         """Execute a GET request."""
@@ -81,7 +81,7 @@ class Host(object):
 
         return self._handle(request)
 
-    def post(self, path, data, auth=None):
+    def post(self, path, data={}, auth=None):
         """Execute a POST request."""
 
         url = self.link(path)
@@ -157,17 +157,17 @@ class Local(Host):
         time.sleep(self.STARTUP_TIME)
 
         if self._process is None or self._process.poll() is not None:
-            raise RuntimeError(f"Tinychain process at {self.address} crashed on startup")
+            raise RuntimeError(f"Tinychain process at {uri(self)} crashed on startup")
         else:
-            logging.info(f"new instance running at {self.address}: {workspace}")
+            logging.info(f"new instance running at {uri(self)}: {workspace}")
 
     def stop(self):
         """Shut down this host."""
 
-        logging.info(f"Shutting down Tinychain host {self.address}")
+        logging.info(f"Shutting down Tinychain host {uri(self)}")
         self._process.terminate()
         self._process.wait()
-        logging.info(f"Host {self.address} shut down successfully")
+        logging.info(f"Host {uri(self)} shut down successfully")
 
     def __del__(self):
         if self._process:
