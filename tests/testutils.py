@@ -7,19 +7,18 @@ TC_PATH = "host/target/debug/tinychain"
 PORT = 8702
 
 
-def start_host(name, clusters=[], overwrite=True):
+def start_host(name, clusters=[], overwrite=True, host_uri=None):
     port = PORT
-    if clusters:
+    if host_uri is not None and host_uri.port():
+        port = host_uri.port()
+    elif clusters and tc.uri(clusters[0]).port():
         port = tc.uri(clusters[0]).port()
-        port = port if port else PORT
 
     config = []
     for cluster in clusters:
         cluster_config = f"config/{name}"
 
         cluster_uri = tc.uri(cluster)
-        if cluster_uri.port() is not None and cluster_uri.port() != port:
-            raise ValueError(f"invalid port {cluster_uri.port()}, expected {port}")
 
         if cluster_uri.host():
             cluster_config += f"/{cluster_uri.host()}"

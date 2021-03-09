@@ -45,13 +45,13 @@ pub trait Client {
     async fn get(&self, txn: Txn, link: Link, key: Value) -> TCResult<State>;
 
     /// Set `key` = `value` within the state referred to by `link`.
-    async fn put(&self, txn_id: Txn, link: Link, key: Value, value: State) -> TCResult<()>;
+    async fn put(&self, txn: Txn, link: Link, key: Value, value: State) -> TCResult<()>;
 
     /// Execute a remote POST op.
     async fn post(&self, txn: Txn, link: Link, params: State) -> TCResult<State>;
 
     /// Delete `key` from the state referred to by `link`.
-    async fn delete(&self, txn_id: &Txn, link: Link, key: Value) -> TCResult<()>;
+    async fn delete(&self, txn: &Txn, link: Link, key: Value) -> TCResult<()>;
 }
 
 /// A server used by [`Gateway`].
@@ -218,6 +218,8 @@ impl Gateway {
                     continue;
                 }
 
+                log::info!("replicating {}", cluster);
+
                 let txn = gateway.new_txn(TxnId::new(Self::time()), None).await?;
                 let txn = cluster.claim(&txn).await?;
 
@@ -235,6 +237,8 @@ impl Gateway {
 
                 // send a commit message
                 cluster.route(&[]).unwrap().post().unwrap()(txn, Map::default()).await?;
+
+                log::info!("{} is now online", cluster);
             }
 
             TCResult::Ok(())

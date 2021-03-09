@@ -128,7 +128,7 @@ class Local(Host):
         # set _process first so it's available to __del__ in case of an exception
         self._process = None
 
-        if not int(port) or int(port) < 0:
+        if port is None or not int(port) or int(port) < 0:
             raise ValueError(f"invalid port: {port}")
 
         if clusters and data_dir is None:

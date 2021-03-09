@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::iter::FromIterator;
 
 use log::debug;
 
 use tc_error::*;
-use tcgeneric::{Id, Instance, Map, PathSegment, TCPath};
+use tcgeneric::{Id, Instance, Map, PathSegment, TCPath, Tuple};
 
 use crate::object::InstanceExt;
 use crate::route::{GetHandler, Handler, PostHandler, PutHandler, Route};
@@ -115,9 +116,11 @@ impl<T: Instance + Route> Route for InstanceExt<T> {
             }
         } else {
             debug!(
-                "{} not found in instance prototype, routing to parent",
-                &path[0]
+                "{} not found in instance prototype (contents: {}), routing to parent",
+                &path[0],
+                Tuple::<&Id>::from_iter(self.proto().keys()),
             );
+
             self.parent().route(path)
         }
     }
