@@ -13,11 +13,10 @@ use log::debug;
 use serde::de::DeserializeOwned;
 
 use tc_error::*;
-use tcgeneric::{Map, NetworkTime, TCPathBuf};
+use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::http;
 use crate::kernel::Kernel;
-use crate::route::Route;
 use crate::scalar::{Link, LinkHost, LinkProtocol, Value};
 use crate::state::State;
 use crate::txn::*;
@@ -226,7 +225,7 @@ impl Gateway {
                 cluster.add_replica(&txn, self_link).await?;
 
                 // send a commit message
-                cluster.route(&[]).unwrap().post().unwrap()(txn, Map::default()).await?;
+                cluster.distribute_commit(txn).await?;
 
                 log::info!("{} is now online", cluster);
             }

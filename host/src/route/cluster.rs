@@ -187,11 +187,11 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
             Box::pin(async move {
                 key.expect_none()?;
 
-                self.cluster
-                    .replicas(txn.id())
-                    .map_ok(Value::from_iter)
-                    .map_ok(State::from)
-                    .await
+                let replicas = self.cluster.replicas(txn.id()).await?;
+                assert!(replicas.contains(&txn.link(self.cluster.link().path().clone())));
+                let replicas = Value::from_iter(replicas);
+                debug!("return replicas {} from {}", replicas, self.cluster);
+                Ok(replicas.into())
             })
         }))
     }
@@ -217,7 +217,7 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
                     TCError::bad_request("expected a Link to a Cluster, not", v)
                 })?;
 
-                self.cluster.remove_replica(*txn.id(), &link).await
+                self.cluster.remove_replica(&txn, &link).await
             })
         }))
     }
@@ -323,21 +323,22 @@ impl<'a> Handler<'a> for ReplicateHandler<'a> {
 
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if txn.is_owner(self.cluster.path()) {
-                    handler(txn, key).await
-                } else if let Some(owner) = txn.owner() {
-                    if &owner.path()[..] == self.cluster.path() {
-                        let mut link = owner.clone();
-                        link.extend(self.path.to_vec());
+                if self.path.is_empty() {
+                    // it's a key fetch
+                    if !txn.is_owner(self.cluster.path()) {
+                        if let Some(owner) = txn.owner() {
+                            if &owner.path()[..] == self.cluster.path() {
+                                let mut link = owner.clone();
+                                link.extend(self.path.to_vec());
 
-                        debug!("route GET request to transaction owner {}", link);
-                        txn.get(link, key).await
-                    } else {
-                        handler(txn, key).await
+                                debug!("route GET request to transaction owner {}", link);
+                                return txn.get(link, key).await;
+                            }
+                        }
                     }
-                } else {
-                    handler(txn, key).await
                 }
+
+                handler(txn, key).await
             })
         }))
     }

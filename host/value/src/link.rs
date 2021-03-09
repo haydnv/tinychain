@@ -309,12 +309,6 @@ impl Extend<PathSegment> for Link {
     }
 }
 
-impl PartialEq<TCPathBuf> for Link {
-    fn eq(&self, other: &TCPathBuf) -> bool {
-        self.host.is_none() && &self.path == other
-    }
-}
-
 impl From<LinkHost> for Link {
     fn from(host: LinkHost) -> Link {
         Link {
@@ -479,5 +473,26 @@ impl fmt::Display for Link {
         }
 
         write!(f, "{}", self.path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_eq() {
+        let a = LinkHost {
+            protocol: LinkProtocol::HTTP,
+            address: Ipv4Addr::new(1, 2, 3, 4).into(),
+            port: Some(123),
+        };
+
+        let b = LinkHost {
+            protocol: LinkProtocol::HTTP,
+            address: Ipv4Addr::new(1, 2, 3, 4).into(),
+            port: Some(234),
+        };
+
+        assert_ne!(a, b);
     }
 }

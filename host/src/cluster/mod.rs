@@ -114,6 +114,7 @@ impl Cluster {
             .clone()
             .claim(&self.actor, self.link.path().clone())
             .await?;
+
         owned.insert(*txn.id(), Owner::new());
         Ok(txn)
     }
@@ -193,10 +194,17 @@ impl Cluster {
 
     /// Add a replica to this cluster.
     pub async fn add_replica(&self, txn: &Txn, replica: Link) -> TCResult<()> {
-        if replica == txn.link(self.link.path().clone()) {
-            if &replica == &self.link || self.link.host().is_none() {
+        let self_link = txn.link(self.link.path().clone());
+
+        debug!("{} adding replica {}...", self, replica);
+
+        if replica == self_link {
+            if self.link.host().is_none() || self.link == self_link {
+                debug!("{} cannot replicate itself", self);
                 return Ok(());
             }
+
+            debug!("{} replica at {} got add request for self: {}", self, replica, self_link);
 
             let replicas = txn
                 .get(self.link.clone().append(REPLICAS.into()), Value::None)
@@ -207,16 +215,16 @@ impl Cluster {
                     TCError::bad_request("invalid replica set", s)
                 })?;
 
-                let mut replicas: HashSet<Link> = HashSet::from_iter(replicas);
-                replicas.remove(self.link());
+                debug!("{} has replicas: {}", self, replicas);
 
-                debug!("{} has {} other replicas", self, replicas.len());
+                let mut replicas: HashSet<Link> = HashSet::from_iter(replicas);
+                replicas.remove(&self_link);
 
                 try_join_all(replicas.iter().map(|replica| {
                     txn.put(
                         replica.clone().append(REPLICAS.into()),
                         Value::None,
-                        self.link.clone().into(),
+                        self_link.clone().into(),
                     )
                 }))
                 .await?;
@@ -228,6 +236,7 @@ impl Cluster {
 
             self.replicate(txn).await?;
         } else {
+            debug!("add replica {}", replica);
             (*self.replicas.write(*txn.id()).await?).insert(replica);
         }
 
@@ -235,8 +244,13 @@ impl Cluster {
     }
 
     /// Remove a replica from this cluster.
-    pub async fn remove_replica(&self, txn_id: TxnId, replica: &Link) -> TCResult<()> {
-        let mut replicas = self.replicas.write(txn_id).await?;
+    pub async fn remove_replica(&self, txn: &Txn, replica: &Link) -> TCResult<()> {
+        let self_link = txn.link(self.link.path().clone());
+        if replica == &self_link {
+            panic!("{} received remove replica request for itself", self);
+        }
+
+        let mut replicas = self.replicas.write(*txn.id()).await?;
         replicas.remove(replica);
         Ok(())
     }
@@ -290,7 +304,10 @@ impl Cluster {
             replicas
                 .iter()
                 .filter(|replica| *replica != &self_link)
-                .map(|replica| txn.post(replica.clone(), State::Map(Map::default()))),
+                .map(|replica| {
+                    debug!("commit replica {}...", replica);
+                    txn.post(replica.clone(), State::Map(Map::default()))
+                }),
         )
         .await;
 

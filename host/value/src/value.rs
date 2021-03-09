@@ -252,7 +252,7 @@ impl Value {
 
     pub fn is_none(&self) -> bool {
         match self {
-            Self::Link(link) => link == &TCPathBuf::default(),
+            Self::Link(link) => link.host().is_none() && link.path() == &TCPathBuf::default(),
             Self::None => true,
             Self::Tuple(tuple) => tuple.is_empty(),
             _ => false,
