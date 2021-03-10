@@ -211,13 +211,13 @@ impl<'a> Handler<'a> for ReplicaHandler<'a> {
     }
 
     fn delete(self: Box<Self>) -> Option<DeleteHandler<'a>> {
-        Some(Box::new(|txn, link| {
+        Some(Box::new(|txn, replicas| {
             Box::pin(async move {
-                let link = link.try_cast_into(|v| {
+                let replicas = Tuple::<Link>::try_cast_from(replicas, |v| {
                     TCError::bad_request("expected a Link to a Cluster, not", v)
                 })?;
 
-                self.cluster.remove_replica(&txn, &link).await
+                self.cluster.remove_replicas(&txn, &replicas).await
             })
         }))
     }

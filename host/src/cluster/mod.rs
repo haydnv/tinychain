@@ -248,14 +248,18 @@ impl Cluster {
     }
 
     /// Remove a replica from this cluster.
-    pub async fn remove_replica(&self, txn: &Txn, replica: &Link) -> TCResult<()> {
+    pub async fn remove_replicas(&self, txn: &Txn, to_remove: &[Link]) -> TCResult<()> {
         let self_link = txn.link(self.link.path().clone());
-        if replica == &self_link {
-            panic!("{} received remove replica request for itself", self);
+        let mut replicas = self.replicas.write(*txn.id()).await?;
+
+        for replica in to_remove {
+            if replica == &self_link {
+                panic!("{} received remove replica request for itself", self);
+            }
+
+            replicas.remove(replica);
         }
 
-        let mut replicas = self.replicas.write(*txn.id()).await?;
-        replicas.remove(replica);
         Ok(())
     }
 

@@ -1,3 +1,4 @@
+import time
 import tinychain as tc
 import unittest
 
@@ -35,9 +36,13 @@ class ReplicationTests(unittest.TestCase):
 
         self.hosts = hosts
 
+        time.sleep(1)
+
     def testReplication(self):
+
         cluster_path = tc.uri(Rev).path()
 
+        # check that the replica set is correctly updated across the cluster
         expected = set("http://" + tc.uri(host) + cluster_path for host in self.hosts)
         for host in self.hosts:
             actual = {}
@@ -47,10 +52,18 @@ class ReplicationTests(unittest.TestCase):
 
             self.assertEqual(expected, actual)
 
+        # test a distributed write
         self.hosts[-1].post(cluster_path + "/bump")
         for host in self.hosts:
             actual = host.get(cluster_path + "/rev")
             self.assertEqual(actual, 1)
+
+        # test a commit with one failed host
+        self.hosts[-1].stop()
+        self.hosts[-2].post(cluster_path + "/bump")
+        for host in self.hosts[:-1]:
+            actual = host.get(cluster_path + "/rev")
+            self.assertEqual(actual, 2)
 
     def tearDown(self):
         for host in self.hosts:
