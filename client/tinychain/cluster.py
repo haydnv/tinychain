@@ -46,7 +46,7 @@ class Cluster(object, metaclass=Meta):
 
         return OpRef.Get(uri(self) + "/authorize", scope)
 
-    def grant(self, scope, op: Op, context={}):
+    def grant(self, scope, op: Op, **context):
         """Execute the given `op` after granting it the given `scope`."""
 
         params = {

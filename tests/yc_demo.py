@@ -36,12 +36,8 @@ class Wholesaler(tc.Cluster):
     @tc.post_method
     def buy(self, txn, quantity: tc.Number):
         producer = tc.use(Producer)
-
-        return self.grant(
-            SCOPE,
-            {"/state/scalar/op/post": [("buy_result", producer.buy(quantity=quantity))]},
-            {"quantity": quantity},
-        )
+        op = tc.Op.Post(lambda txn, quantity: producer.buy(quantity=quantity))
+        return self.grant(SCOPE, op, quantity=quantity)
 
 
 class InteractionTests(unittest.TestCase):
