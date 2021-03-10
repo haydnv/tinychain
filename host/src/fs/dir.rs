@@ -217,7 +217,7 @@ impl fs::Dir for Dir {
         let mut entries = self.entries.write(txn_id).await?;
         if entries.contains_key(&name) {
             return Err(TCError::bad_request(
-                "there is already a directory at {}",
+                "there is already a directory at",
                 &name,
             ));
         }

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all};
-use futures::join;
+use futures::{join, StreamExt};
 use log::{debug, info, warn};
 use safecast::TryCastFrom;
 use uplock::RwLock;
@@ -32,6 +32,7 @@ mod owner;
 
 use owner::Owner;
 
+use futures::stream::FuturesUnordered;
 pub use load::instantiate;
 
 pub const REPLICAS: Label = label("replicas");
@@ -196,7 +197,7 @@ impl Cluster {
     pub async fn add_replica(&self, txn: &Txn, replica: Link) -> TCResult<()> {
         let self_link = txn.link(self.link.path().clone());
 
-        debug!("{} adding replica {}...", self, replica);
+        debug!("cluster at {} adding replica {}...", self_link, replica);
 
         if replica == self_link {
             if self.link.host().is_none() || self.link == self_link {
@@ -204,7 +205,7 @@ impl Cluster {
                 return Ok(());
             }
 
-            debug!("{} replica at {} got add request for self: {}", self, replica, self_link);
+            debug!("{} got add request for self: {}", replica, self_link);
 
             let replicas = txn
                 .get(self.link.clone().append(REPLICAS.into()), Value::None)
@@ -236,8 +237,8 @@ impl Cluster {
 
             self.replicate(txn).await?;
         } else {
-            debug!("add replica {}", replica);
-            (*self.replicas.write(*txn.id()).await?).insert(replica);
+            (*self.replicas.write(*txn.id()).await?).insert(replica.clone());
+            debug!("cluster at {} added replica {}", self_link, replica);
         }
 
         Ok(())
@@ -300,7 +301,7 @@ impl Cluster {
         }
 
         let self_link = txn.link(self.link.path().clone());
-        join_all(
+        let mut replica_commits = FuturesUnordered::from_iter(
             replicas
                 .iter()
                 .filter(|replica| *replica != &self_link)
@@ -308,8 +309,14 @@ impl Cluster {
                     debug!("commit replica {}...", replica);
                     txn.post(replica.clone(), State::Map(Map::default()))
                 }),
-        )
-        .await;
+        );
+
+        while let Some(result) = replica_commits.next().await {
+            match result {
+                Ok(_) => {}
+                Err(cause) => log::error!("commit failure: {}", cause),
+            }
+        }
 
         self.commit(txn.id()).await;
 
@@ -331,7 +338,7 @@ impl Cluster {
                 replicas
                     .iter()
                     .filter(|replica| *replica != &self_link)
-                    .map(|replica| txn.post(replica.clone(), State::Map(Map::default()))),
+                    .map(|replica| txn.delete(replica.clone(), Value::None)),
             )
             .await;
         }
@@ -366,9 +373,22 @@ impl Instance for Cluster {
 impl Transact for Cluster {
     async fn commit(&self, txn_id: &TxnId) {
         let mut confirmed = self.confirmed.write().await;
+        {
+            debug!(
+                "replicas at commit: {}",
+                Value::from_iter(self.replicas.read(txn_id).await.unwrap().iter().cloned())
+            );
+        }
 
         join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
         join!(self.installed.commit(txn_id), self.replicas.commit(txn_id));
+
+        {
+            debug!(
+                "replicas after commit: {}",
+                Value::from_iter(self.replicas.read(txn_id).await.unwrap().iter().cloned())
+            );
+        }
 
         *confirmed = *txn_id;
     }
@@ -385,6 +405,6 @@ impl Transact for Cluster {
 
 impl fmt::Display for Cluster {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Cluster at {}", self.link)
+        write!(f, "Cluster {}", self.link.path())
     }
 }
