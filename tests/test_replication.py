@@ -47,6 +47,11 @@ class ReplicationTests(unittest.TestCase):
 
             self.assertEqual(expected, actual)
 
+        self.hosts[-1].post(cluster_path + "/bump")
+        for host in self.hosts:
+            actual = host.get(cluster_path + "/rev")
+            self.assertEqual(actual, 1)
+
     def tearDown(self):
         for host in self.hosts:
             host.stop()
