@@ -1,4 +1,6 @@
 
+Python API documentation: [http://tinychain.readthedocs.io/en/latest/](http://tinychain.readthedocs.io/en/latest/)
+
 ## Getting started
 
 This guide assumes that you are familiar with the basic concepts of hosting a Tinychain service. If not, please read the Tinychain [project README](http://github.com/haydnv/tinychain) first.
