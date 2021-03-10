@@ -201,7 +201,7 @@ fn execute<
     Box::pin(async move {
         if let Some(owner) = txn.owner() {
             if cluster.path() == &owner.path()[..] {
-                debug!("{} owns this transaction, no need to notify", cluster);
+                debug!("{} owns this transaction, no need to notify", TCPath::from(cluster.path()));
             } else {
                 txn.put(owner.clone(), Value::None, cluster.link().clone().into())
                     .await?;

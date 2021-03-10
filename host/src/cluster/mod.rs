@@ -205,7 +205,7 @@ impl Cluster {
                 return Ok(());
             }
 
-            debug!("{} got add request for self: {}", replica, self_link);
+            debug!("{} replica at {} got add request for self: {}", self, replica, self_link);
 
             let replicas = txn
                 .get(self.link.clone().append(REPLICAS.into()), Value::None)
@@ -237,8 +237,8 @@ impl Cluster {
 
             self.replicate(txn).await?;
         } else {
-            (*self.replicas.write(*txn.id()).await?).insert(replica.clone());
-            debug!("cluster at {} added replica {}", self_link, replica);
+            debug!("add replica {}", replica);
+            (*self.replicas.write(*txn.id()).await?).insert(replica);
         }
 
         Ok(())
