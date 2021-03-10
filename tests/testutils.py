@@ -26,8 +26,7 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None):
     if overwrite and os.path.exists(data_dir):
         shutil.rmtree(data_dir)
 
-    print(f"start host on port {port}")
-    return tc.host.Local(
+    host = tc.host.Local(
         TC_PATH,
         workspace="/tmp/tc/tmp/" + name,
         data_dir=data_dir,
@@ -35,4 +34,8 @@ def start_host(name, clusters=[], overwrite=True, host_uri=None):
         port=port,
         log_level="debug",
         force_create=True)
+
+    print(f"start host on port {port}")
+    host.start()
+    return host
 

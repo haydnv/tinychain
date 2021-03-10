@@ -153,13 +153,19 @@ class Local(Host):
 
         args.extend([f"--cluster={cluster}" for cluster in clusters])
 
-        self._process = subprocess.Popen(args)
+        self._args = args
+
+    def start(self):
+        if self._process:
+            raise RuntimeError("tried to start a host that's already running")
+
+        self._process = subprocess.Popen(self._args)        
         time.sleep(self.STARTUP_TIME)
 
         if self._process is None or self._process.poll() is not None:
             raise RuntimeError(f"Tinychain process at {uri(self)} crashed on startup")
         else:
-            logging.info(f"new instance running at {uri(self)}: {workspace}")
+            logging.info(f"new instance running at {uri(self)}")
 
     def stop(self):
         """Shut down this host."""
@@ -168,6 +174,7 @@ class Local(Host):
         self._process.terminate()
         self._process.wait()
         logging.info(f"Host {uri(self)} shut down successfully")
+        self._process = None
 
     def __del__(self):
         if self._process:

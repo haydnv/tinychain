@@ -65,6 +65,17 @@ class ReplicationTests(unittest.TestCase):
             actual = host.get(cluster_path + "/rev")
             self.assertEqual(actual, 2)
 
+        # test restarting the failed host
+        self.hosts[-1].start()
+        actual = self.hosts[-1].get(cluster_path + "/rev")
+        self.assertEqual(actual, 2)
+
+        # test a distributed write after recovering
+        self.hosts[0].post(cluster_path + "/bump")
+        for host in self.hosts:
+            actual = host.get(cluster_path + "/rev")
+            self.assertEqual(actual, 3)
+
     def tearDown(self):
         for host in self.hosts:
             host.stop()

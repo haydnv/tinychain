@@ -29,8 +29,8 @@ class ClusterTests(unittest.TestCase):
         expect(4)
 
         host.stop()
+        host.start()
 
-        host = start_host("test_update", [ExampleCluster], overwrite=False)
         actual = host.get("/app/example/rev")
         self.assertEqual(4, actual)
 
