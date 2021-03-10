@@ -84,6 +84,7 @@ impl crate::gateway::Client for Client {
         let uri = url(&link, txn.id(), &key)?;
         let req = req_builder("GET", uri, Some(txn.request().token()));
 
+        let txn = txn.subcontext_tmp().await?;
         let response = self
             .client
             .request(req.body(Body::empty()).unwrap())
@@ -110,6 +111,7 @@ impl crate::gateway::Client for Client {
         let uri = url(&link, txn.id(), &key)?;
         let req = req_builder("PUT", uri, Some(txn.request().token()));
 
+        let txn = txn.subcontext_tmp().await?;
         let body = destream_json::encode(value.into_view(txn))
             .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
 
@@ -135,6 +137,7 @@ impl crate::gateway::Client for Client {
         let uri = url(&link, txn.id(), &Value::default())?;
         let req = req_builder("POST", uri, Some(txn.request().token()));
 
+        let txn = txn.subcontext_tmp().await?;
         let subcontext = txn.subcontext(label("_params").into()).await?;
         let body = destream_json::encode(params.into_view(subcontext))
             .map_err(|e| TCError::bad_request("unable to encode stream", e))?;

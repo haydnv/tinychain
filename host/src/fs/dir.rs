@@ -213,6 +213,11 @@ impl fs::Dir for Dir {
     type File = FileEntry;
     type FileClass = StateType;
 
+    async fn contains(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<bool> {
+        let entries = self.entries.read(txn_id).await?;
+        Ok(entries.contains_key(name))
+    }
+
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self> {
         let mut entries = self.entries.write(txn_id).await?;
         if entries.contains_key(&name) {

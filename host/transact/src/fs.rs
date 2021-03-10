@@ -128,6 +128,9 @@ pub trait Dir: Store + Sized {
     /// The `Class` of a file stored in this `Dir`
     type FileClass;
 
+    /// Return `true` if this directory has an entry at the given [`PathSegment`].
+    async fn contains(&self, txn_id: &TxnId, name: &PathSegment) -> TCResult<bool>;
+
     /// Create a new [`Dir`].
     async fn create_dir(&self, txn_id: TxnId, name: PathSegment) -> TCResult<Self>;
 

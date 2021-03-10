@@ -205,7 +205,10 @@ impl Cluster {
                 return Ok(());
             }
 
-            debug!("{} replica at {} got add request for self: {}", self, replica, self_link);
+            debug!(
+                "{} replica at {} got add request for self: {}",
+                self, replica, self_link
+            );
 
             let replicas = txn
                 .get(self.link.clone().append(REPLICAS.into()), Value::None)

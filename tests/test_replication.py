@@ -4,7 +4,7 @@ import unittest
 from testutils import PORT, start_host
 
 
-NUM_HOSTS = 2
+NUM_HOSTS = 4
 
 
 class Rev(tc.Cluster):
@@ -45,11 +45,7 @@ class ReplicationTests(unittest.TestCase):
                 actual.update(link)
             actual = set(actual.keys())
 
-            print("expect", expected)
-            print("actual", actual)
             self.assertEqual(expected, actual)
-
-        return
 
     def tearDown(self):
         for host in self.hosts:
