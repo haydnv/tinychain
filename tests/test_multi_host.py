@@ -15,7 +15,7 @@ class Balance(tc.Cluster):
 
 
 class Left(Balance):
-    __uri__ = "http://127.0.0.1:8702" + tc.uri(Balance)
+    __uri__ = "http://127.0.0.1:8702" + tc.uri(Balance) + "/left"
 
     @tc.put_method
     def weigh(self, txn, key: tc.Nil, new_value: tc.Number):
@@ -30,7 +30,7 @@ class Left(Balance):
 
 
 class Right(Balance):
-    __uri__ = "http://127.0.0.1:8703" + tc.uri(Balance)
+    __uri__ = "http://127.0.0.1:8703" + tc.uri(Balance) + "/right"
 
     @tc.put_method
     def weigh(self, txn, key: tc.Nil, new_value: tc.Number):
@@ -46,15 +46,13 @@ class Right(Balance):
 
 class InteractionTests(unittest.TestCase):
     def testUpdate(self):
-        print(tc.uri(Right).port())
-        assert tc.uri(Right).port() == 8703
         left = start_host("test_multi_host_left", [Left])
         right = start_host("test_multi_host_right", [Right])
 
-        left.put("/app/balance/weigh", None, 5)
+        left.put("/app/balance/left/weigh", None, 5)
         print_lines(5)
-        self.assertEqual(left.get("/app/balance/weight"), 5)
-        self.assertEqual(right.get("/app/balance/weight"), 15)
+        self.assertEqual(left.get("/app/balance/left/weight"), 5)
+        self.assertEqual(right.get("/app/balance/right/weight"), 15)
 
 
 def print_lines(n):

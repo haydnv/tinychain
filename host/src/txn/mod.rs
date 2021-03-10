@@ -170,6 +170,11 @@ impl Txn {
     pub async fn post(&self, link: Link, params: State) -> TCResult<State> {
         self.gateway.post(self, link, params).await
     }
+
+    /// Resolve a DELETE op within this transaction context.
+    pub async fn delete(&self, link: Link, key: Value) -> TCResult<()> {
+        self.gateway.delete(self, link, key).await
+    }
 }
 
 #[async_trait]
@@ -191,6 +196,17 @@ impl Transaction<fs::Dir> for Txn {
             request: self.request.clone(),
             dir,
         })
+    }
+
+    async fn subcontext_tmp(&self) -> TCResult<Self> {
+        let id = loop {
+            let id = uuid::Uuid::new_v4().to_string().parse()?;
+            if !self.dir.contains(self.id(), &id).await? {
+                break id;
+            }
+        };
+
+        self.subcontext(id).await
     }
 }
 

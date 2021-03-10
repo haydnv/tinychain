@@ -1,6 +1,6 @@
 [package]
 name = "tinychain"
-version = "0.1.5"
+version = "0.1.6"
 authors = ["haydnv"]
 edition = "2018"
 description = "A next-gen database + application server"
@@ -36,9 +36,9 @@ serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
 structopt = "0.3"
 tc-error = "0.1"
-tc-transact = { path = "transact" }
-tc-value = { path = "value" }
-tcgeneric = { path = "generic" }
+tc-transact = "0.2"
+tc-value = ">=0.1.4"
+tcgeneric = ">=0.1.1"
 tokio = { version = "1.2", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
 tokio-util = { version = "0.6", features = ["io"] }
 uplock = "0.1"

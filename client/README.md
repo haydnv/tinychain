@@ -40,7 +40,7 @@ def example(txn) -> tc.Number:
     return txn.product
 ```
 
-Notice the assignments to the transaction context `txn`. This is necessary to assign an addressable name to a `State`, in order to read its value or call an instance method. For example, calling `tc.Number(5) * tc.Number(10)` above would result in an error, because `Number.mul` is an instance method, and `tc.Number(5)` is not addressable. When the state `tc.Number(5)` is assigned to `txn.a`, it is addressble within the transaction context as `$a`, making it possible to resolve `OpRef.Get("$a/mul", "$b")`.
+Notice the assignments to the transaction context `txn`. This is necessary to assign an addressable name to a `State`, in order to read its value or call an instance method. For example, calling `tc.Number(5) * tc.Number(10)` above would result in an error, because `Number.mul` is an instance method, and `tc.Number(5)` is not addressable. When the state `tc.Number(5)` is assigned to `txn.a`, it becomes addressable within the transaction context as `$a`, making it possible to resolve `OpRef.Get("$a/mul", "$b")`.
 
 The constructor of a `State` always takes exactly one argument, which is the form of that `State`. For example, `tc.Number(3)` constructs a new `Number` whose form is `3`; `txn.a * txn.b` above constructs a new `Number` whose form is `OpRef.Get("$a/mul", URI("b"))`. When debugging, it can be helpful to print the form of a `State` using the `form_of` function.
 
@@ -61,6 +61,8 @@ For the same reason, it's important to use type annotations in your Tinychain Py
 It's also important to keep in mind that Tinychain by default resolves all dependencies concurrently, and does not resolve unused dependencies. Consider this function:
 
 ```python
+# note: the `Table` structure used in this example is not yet available in the public API
+
 @tc.post_op
 def num_rows(txn):
     key = [("user_id", tc.Number)]
@@ -74,6 +76,8 @@ def num_rows(txn):
 This Op will *always* resolve to *zero*. This may seem counterintuitive at first, because you can obviously see the `table.insert` statement, but notice that the return value `table.count` does not actually depend on `table.insert`; `table.insert` is only intended to create a side-effect, so its result is unused. To handle situations like this, use the `After` flow control:
 
 ```python
+# note: the `Table` structure used in this example is not yet available in the public API
+
 @tc.post_op
 def num_rows(txn):
     key = [("user_id", tc.Number)]
@@ -131,6 +135,37 @@ class Meters(Distance):
 ```
 
 Note that Tinychain does not have any concept of member visibility, like a "public" or "private" method. This is because Tinychain objects are meant to be sent over the network and used by client code, making a "private" method meaningless (and deceptive to the developer implementing it). If you want to hide an implementation detail from the public API of your class, use a Python function outside your class definition.
+
+## Chain: persistent mutable state
+
+In order to serve a dynamic application, you'll have to have a way of updating your service's persistent state. To do this you can use a `Chain`, a data structure which keeps track of mutations to a `Collection` or `Value` in order to maintain the consistency of that `State` across every replica of a `Cluster` (see below for details on `Cluster`).
+
+
+```python
+# from the example in test_replication.py
+
+class Rev(tc.Cluster):
+    __uri__ = tc.URI(f"http://127.0.0.1:8702/app/test/replication")
+
+    def _configure(self):
+        # this cluster has a SyncChain called "rev"
+        self.rev = tc.Chain.Sync(0)
+
+    # this method looks up the value of "rev" within a transaction
+    @tc.get_method
+    def version(self) -> tc.Number:
+        return self.rev
+
+    # this method updates the value of "rev" within a transaction
+    @tc.post_method
+    def bump(self, txn):
+        # note: the value of "version()" must be assigned a name
+        # in order to be addressable by the instance method __add__ below
+        txn.rev = self.version()
+        return self.rev.set(txn.rev + 1)
+```
+
+When you start a Tinychain host with a cluster definition, it will assume that there is a hosted cluster with the given URI ("http://.../app/test/replication" in the example above) and attempt to join that cluster as a replica. If the cluster URI has no host address, or is the same as the address of the running host, the host will serve a single replica of a new cluster. Watch out for versioning issues! In production, it's best to end your cluster URI with a version number which you can update in order to release a new, non-backwards-compatible version with different data and methods.
 
 ## Cluster: hosting your service
 

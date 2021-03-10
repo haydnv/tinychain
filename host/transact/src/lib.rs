@@ -43,4 +43,7 @@ pub trait Transaction<D: fs::Dir>: Sized {
 
     /// A transaction subcontext with its own [`fs::Dir`].
     async fn subcontext(&self, id: Id) -> TCResult<Self>;
+
+    /// A transaction subcontext with its own unique [`fs::Dir`].
+    async fn subcontext_tmp(&self) -> TCResult<Self>;
 }

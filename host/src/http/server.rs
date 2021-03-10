@@ -129,6 +129,14 @@ impl HTTPServer {
                 self.gateway.post(txn, path.into(), data).await
             }
 
+            &hyper::Method::DELETE => {
+                let key = get_param(&mut params, "key")?.unwrap_or_default();
+                self.gateway
+                    .delete(txn, path.into(), key)
+                    .map_ok(State::from)
+                    .await
+            }
+
             other => Err(TCError::method_not_allowed(other)),
         }
     }

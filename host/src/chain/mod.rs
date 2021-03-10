@@ -2,6 +2,7 @@
 //! INCOMPLETE AND UNSTABLE.
 
 use std::fmt;
+use std::ops::Deref;
 
 use async_trait::async_trait;
 use log::debug;
@@ -13,14 +14,14 @@ use tc_transact::{Transact, TxnId};
 use tcgeneric::*;
 
 use crate::fs;
-use crate::scalar::{Scalar, Value};
+use crate::scalar::{Link, Scalar, Value};
 use crate::state::State;
+use crate::txn::Txn;
 
 mod block;
 mod sync;
 
 pub use block::ChainBlock;
-use std::ops::Deref;
 pub use sync::*;
 
 const CHAIN: Label = label("chain");
@@ -121,6 +122,9 @@ pub trait ChainInstance {
 
     /// Borrow the [`Subject`] of this [`Chain`] immutably.
     fn subject(&self) -> &Subject;
+
+    /// Replicate this [`Chain`] from the [`Chain`] at the given [`Link`].
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
 }
 
 /// The type of a [`Chain`].
@@ -193,6 +197,12 @@ impl ChainInstance for Chain {
     fn subject(&self) -> &Subject {
         match self {
             Self::Sync(chain) => chain.subject(),
+        }
+    }
+
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        match self {
+            Self::Sync(chain) => chain.replicate(txn, source).await,
         }
     }
 }

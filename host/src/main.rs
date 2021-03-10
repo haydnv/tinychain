@@ -10,6 +10,7 @@ use tokio::time::Duration;
 use tc_error::*;
 use tc_transact::{Transact, TxnId};
 
+use tc_value::{LinkHost, LinkProtocol};
 use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
 use tinychain::*;
@@ -63,9 +64,6 @@ struct Config {
 
     #[structopt(long = "http_port", default_value = "8702")]
     pub http_port: u16,
-
-    #[structopt(long = "peer")]
-    pub peers: Vec<IpAddr>,
 }
 
 impl Config {
@@ -99,6 +97,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             TCError::internal("the --data_dir option is required to host a Cluster")
         })?;
 
+        let host = LinkHost::from((
+            LinkProtocol::HTTP,
+            config.address.clone(),
+            Some(config.http_port),
+        ));
+
         for path in config.clusters {
             let config = tokio::fs::read(&path)
                 .await
@@ -108,7 +112,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 destream_json::de::Decoder::from_stream(stream::once(future::ready(Ok(config))));
 
             let cluster = match InstanceClass::from_stream((), &mut decoder).await {
-                Ok(class) => cluster::instantiate(class, data_dir.clone(), txn_id).await?,
+                Ok(class) => {
+                    cluster::instantiate(host.clone(), class, data_dir.clone(), txn_id).await?
+                }
                 Err(cause) => panic!("error parsing cluster config {:?}: {}", path, cause),
             };
 
@@ -120,8 +126,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let kernel = tinychain::Kernel::new(clusters);
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
-
-    gateway.replicate(config.peers).await?;
 
     if let Err(cause) = gateway.listen().await {
         log::error!("server error: {}", cause);

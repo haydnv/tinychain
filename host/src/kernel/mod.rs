@@ -4,12 +4,11 @@ use std::convert::{TryFrom, TryInto};
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::future::{try_join_all, Future};
+use futures::future::Future;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::{Transact, Transaction};
 use tcgeneric::*;
 
 use crate::cluster::Cluster;
@@ -22,7 +21,6 @@ use crate::txn::*;
 mod hosted;
 
 use hosted::Hosted;
-use std::net::IpAddr;
 
 const HYPOTHETICAL: PathLabel = path_label(&["transact", "hypothetical"]);
 
@@ -43,20 +41,9 @@ impl Kernel {
         }
     }
 
-    /// Set up replication for the hosted [`Cluster`]s.
-    pub async fn replicate(&self, peers: Vec<IpAddr>) -> TCResult<()> {
-        if peers.is_empty() {
-            return Ok(());
-        }
-
-        try_join_all(
-            self.hosted
-                .clusters()
-                .map(|cluster| cluster.replicate(&peers)),
-        )
-        .await?;
-
-        Ok(())
+    /// Return a list of hosted clusters
+    pub fn hosted(&self) -> impl Iterator<Item = &InstanceExt<Cluster>> {
+        self.hosted.clusters()
     }
 
     /// Route a GET request.
@@ -175,6 +162,30 @@ impl Kernel {
             Err(TCError::not_found(TCPath::from(path)))
         }
     }
+
+    /// Route a DELETE request.
+    pub async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
+        if path.is_empty() || StateType::from_path(path).is_some() {
+            Err(TCError::method_not_allowed(TCPath::from(path)))
+        } else if let Some((suffix, cluster)) = self.hosted.get(path) {
+            debug!(
+                "DELETE {}: {} from cluster {}",
+                TCPath::from(suffix),
+                key,
+                cluster
+            );
+
+            cluster.delete(&txn, suffix, key).await
+        } else if &path[0] == "error" && path.len() == 2 {
+            if error_type(&path[1]).is_some() {
+                Err(TCError::method_not_allowed(TCPath::from(path)))
+            } else {
+                Err(TCError::not_found(TCPath::from(path)))
+            }
+        } else {
+            Err(TCError::not_found(TCPath::from(path)))
+        }
+    }
 }
 
 fn execute<
@@ -188,12 +199,14 @@ fn execute<
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
-        if let Some(owner_link) = txn.owner() {
-            let link = txn.link(cluster.path().to_vec().into());
-            if txn.is_owner(cluster.path()) {
-                debug!("{} owns this transaction, no need to notify", link);
+        if let Some(owner) = txn.owner() {
+            if cluster.path() == &owner.path()[..] {
+                debug!(
+                    "{} owns this transaction, no need to notify",
+                    TCPath::from(cluster.path())
+                );
             } else {
-                txn.put(owner_link.clone(), Value::default(), link.into())
+                txn.put(owner.clone(), Value::None, cluster.link().clone().into())
                     .await?;
             }
 
@@ -201,14 +214,15 @@ fn execute<
         } else {
             // Claim and execute the transaction
             let txn = cluster.claim(&txn).await?;
-            let state = handler(txn.clone(), cluster).await?;
+            let result = handler(txn.clone(), cluster).await;
 
-            let owner = cluster.owner(txn.id()).await?;
+            if result.is_ok() {
+                cluster.distribute_commit(txn).await?;
+            } else {
+                cluster.distribute_rollback(txn).await;
+            }
 
-            owner.commit(&txn).await?;
-            cluster.commit(txn.id()).await;
-
-            Ok(state)
+            result
         }
     })
 }

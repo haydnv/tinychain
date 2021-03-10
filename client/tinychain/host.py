@@ -26,7 +26,7 @@ class Host(object):
         return urllib.parse.urlencode({k: json.dumps(v) for k, v in params.items()})
 
     def __init__(self, address):
-        self.address = address
+        self.__uri__ = address
 
     def _handle(self, req):
         response = req()
@@ -55,7 +55,7 @@ class Host(object):
     def link(self, path):
         """Return a link to the given path at this host."""
 
-        return "http://{}{}".format(self.address, path)
+        return "http://{}{}".format(uri(self), path)
 
     def get(self, path, key=None, auth=None):
         """Execute a GET request."""
@@ -81,7 +81,7 @@ class Host(object):
 
         return self._handle(request)
 
-    def post(self, path, data, auth=None):
+    def post(self, path, data={}, auth=None):
         """Execute a POST request."""
 
         url = self.link(path)
@@ -128,7 +128,7 @@ class Local(Host):
         # set _process first so it's available to __del__ in case of an exception
         self._process = None
 
-        if not int(port) or int(port) < 0:
+        if port is None or not int(port) or int(port) < 0:
             raise ValueError(f"invalid port: {port}")
 
         if clusters and data_dir is None:
@@ -153,21 +153,28 @@ class Local(Host):
 
         args.extend([f"--cluster={cluster}" for cluster in clusters])
 
-        self._process = subprocess.Popen(args)
+        self._args = args
+
+    def start(self):
+        if self._process:
+            raise RuntimeError("tried to start a host that's already running")
+
+        self._process = subprocess.Popen(self._args)        
         time.sleep(self.STARTUP_TIME)
 
         if self._process is None or self._process.poll() is not None:
-            raise RuntimeError(f"Tinychain process at {self.address} crashed on startup")
+            raise RuntimeError(f"Tinychain process at {uri(self)} crashed on startup")
         else:
-            logging.info(f"new instance running at {self.address}: {workspace}")
+            logging.info(f"new instance running at {uri(self)}")
 
     def stop(self):
         """Shut down this host."""
 
-        logging.info(f"Shutting down Tinychain host {self.address}")
+        logging.info(f"Shutting down Tinychain host {uri(self)}")
         self._process.terminate()
         self._process.wait()
-        logging.info(f"Host {self.address} shut down successfully")
+        logging.info(f"Host {uri(self)} shut down successfully")
+        self._process = None
 
     def __del__(self):
         if self._process:

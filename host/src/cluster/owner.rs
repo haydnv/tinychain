@@ -8,7 +8,7 @@ use uplock::RwLock;
 use tc_error::*;
 use tcgeneric::Map;
 
-use crate::scalar::Link;
+use crate::scalar::{Link, Value};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -24,10 +24,9 @@ impl Owner {
         }
     }
 
-    pub async fn mutate(&self, peer: Link) -> TCResult<()> {
+    pub async fn mutate(&self, participant: Link) {
         let mut mutated = self.mutated.write().await;
-        mutated.insert(peer);
-        Ok(())
+        mutated.insert(participant);
     }
 
     pub async fn commit(&self, txn: &Txn) -> TCResult<()> {
@@ -41,6 +40,23 @@ impl Owner {
         try_join_all(mutated.into_iter().map(|link| {
             debug!("sending commit message to dependency at {}", link);
             txn.post(link, Map::<State>::default().into())
+        }))
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn rollback(&self, txn: &Txn) -> TCResult<()> {
+        let mut mutated = self.mutated.write().await;
+
+        if mutated.is_empty() {
+            debug!("no dependencies to roll back");
+        }
+
+        let mutated = mutated.drain();
+        try_join_all(mutated.into_iter().map(|link| {
+            debug!("sending commit message to dependency at {}", link);
+            txn.delete(link, Value::None)
         }))
         .await?;
 

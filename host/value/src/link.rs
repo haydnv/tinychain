@@ -296,11 +296,16 @@ impl Link {
     pub fn path(&'_ self) -> &'_ TCPathBuf {
         &self.path
     }
+
+    pub fn append(mut self, segment: PathSegment) -> Self {
+        self.path = self.path.append(segment);
+        self
+    }
 }
 
-impl PartialEq<TCPathBuf> for Link {
-    fn eq(&self, other: &TCPathBuf) -> bool {
-        self.host.is_none() && &self.path == other
+impl Extend<PathSegment> for Link {
+    fn extend<T: IntoIterator<Item = PathSegment>>(&mut self, iter: T) {
+        self.path.extend(iter)
     }
 }
 
@@ -468,5 +473,26 @@ impl fmt::Display for Link {
         }
 
         write!(f, "{}", self.path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_eq() {
+        let a = LinkHost {
+            protocol: LinkProtocol::HTTP,
+            address: Ipv4Addr::new(1, 2, 3, 4).into(),
+            port: Some(123),
+        };
+
+        let b = LinkHost {
+            protocol: LinkProtocol::HTTP,
+            address: Ipv4Addr::new(1, 2, 3, 4).into(),
+            port: Some(234),
+        };
+
+        assert_ne!(a, b);
     }
 }

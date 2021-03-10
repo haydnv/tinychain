@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::future::{try_join_all, Future, TryFutureExt};
+use futures::future::{Future, TryFutureExt};
+use futures::try_join;
 use log::debug;
 use serde::de::DeserializeOwned;
 
@@ -42,13 +43,13 @@ pub trait Client {
     async fn get(&self, txn: Txn, link: Link, key: Value) -> TCResult<State>;
 
     /// Set `key` = `value` within the state referred to by `link`.
-    async fn put(&self, txn_id: Txn, link: Link, key: Value, value: State) -> TCResult<()>;
+    async fn put(&self, txn: Txn, link: Link, key: Value, value: State) -> TCResult<()>;
 
     /// Execute a remote POST op.
     async fn post(&self, txn: Txn, link: Link, params: State) -> TCResult<State>;
 
     /// Delete `key` from the state referred to by `link`.
-    async fn delete(&self, txn_id: &Txn, link: Link, key: Value) -> TCResult<()>;
+    async fn delete(&self, txn: &Txn, link: Link, key: Value) -> TCResult<()>;
 }
 
 /// A server used by [`Gateway`].
@@ -92,11 +93,6 @@ impl Gateway {
             client: http::Client::new(),
             actor: Actor::new(Link::default().into()),
         })
-    }
-
-    /// Set up replication between this host and the specified peers.
-    pub async fn replicate(&self, peers: Vec<IpAddr>) -> TCResult<()> {
-        self.kernel.replicate(peers).await
     }
 
     /// Return the network address of this `Gateway`
@@ -189,19 +185,61 @@ impl Gateway {
         }
     }
 
+    /// Delete the [`State`] with the given `key` at `link`.
+    pub async fn delete(&self, txn: &Txn, link: Link, key: Value) -> TCResult<()> {
+        debug!("DELETE {}: {}", link, key);
+        match link.host() {
+            None => self.kernel.delete(txn, link.path(), key).await,
+            Some(host) if host == self.root() => self.kernel.delete(txn, link.path(), key).await,
+            _ => self.client.delete(txn, link, key).await,
+        }
+    }
+
     /// Start this `Gateway`'s server
     pub fn listen(
         self: Arc<Self>,
     ) -> Pin<Box<impl Future<Output = Result<(), Box<dyn std::error::Error>>> + 'static>> {
-        let servers = vec![self.clone().http_listen()];
-        let txn_server = self.txn_server.clone();
+        Box::pin(async move {
+            match try_join!(self.clone().http_listen(), self.clone().replicate()) {
+                Ok(_) => Ok(()),
+                Err(cause) => Err(cause),
+            }
+        })
+    }
 
-        Box::pin(try_join_all(servers).map_ok(|_| ()).and_then(move |_| {
-            txn_server.shutdown().map_err(|e| {
-                let err: Box<dyn std::error::Error> = Box::new(e);
-                err
-            })
-        }))
+    async fn replicate(self: Arc<Self>) -> Result<(), Box<dyn std::error::Error>> {
+        let result = async move {
+            for cluster in self.kernel.hosted() {
+                let gateway = self.clone();
+
+                if cluster.link().host().is_none() {
+                    continue;
+                }
+
+                log::info!("replicating {}", cluster);
+
+                let txn = gateway.new_txn(TxnId::new(Self::time()), None).await?;
+                let txn = cluster.claim(&txn).await?;
+
+                let self_link = txn.link(cluster.link().path().clone());
+                cluster.add_replica(&txn, self_link).await?;
+
+                // send a commit message
+                cluster.distribute_commit(txn).await?;
+
+                log::info!("{} is now online", cluster);
+            }
+
+            TCResult::Ok(())
+        };
+
+        match result.await {
+            Ok(()) => Result::<(), Box<dyn std::error::Error>>::Ok(()),
+            Err(cause) => {
+                let e: Box<dyn std::error::Error> = Box::new(cause);
+                Err(e)
+            }
+        }
     }
 
     fn http_listen(
