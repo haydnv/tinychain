@@ -13,6 +13,8 @@
 
 Tinychain is an all-in-one database + application server with support for blockchains, graphs, tables, and tensors.
 
+Tinychain is useful in any situation which requires developing and deploying a cloud service. Anytime you consider developing a service with, for example, MySQL or MongoDB or Neo4j and Apache or Nginx or Django, you can probably get the same thing done faster and more scalably with Tinychain. The major advantage of Tinychain is its automatic, out-of-the-box support for cross-service transactions--meaning that it brings the transactionality of a traditional database up to, and across, the application layer.
+
 Tinychain is early beta software. Many features are only partially implemented, or not fully tested, or not yet available in the public API. You should not assume that Tinychain is secure, and you should make regular backups of your data.
 
 If you need a feature which is not yet available, or even not yet planned, please [start a discussion](https://github.com/haydnv/tinychain/discussions)!
