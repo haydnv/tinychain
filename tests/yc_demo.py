@@ -8,8 +8,8 @@ IN_STOCK = 100
 SCOPE = "/buy"
 
 
-class Producer(tc.Cluster):
-    __uri__ = tc.URI("/app/producer")
+class Wholesaler(tc.Cluster):
+    __uri__ = tc.URI("/app/wholesaler")
 
     def _configure(self):
         self.in_stock = tc.Chain.Sync(IN_STOCK)
@@ -30,30 +30,30 @@ class Producer(tc.Cluster):
         return self.in_stock
 
 
-class Wholesaler(tc.Cluster):
-    __uri__ = tc.URI("/app/wholesaler")
+class Retailer(tc.Cluster):
+    __uri__ = tc.URI("/app/retailer")
 
     @tc.post_method
     def buy(self, txn, quantity: tc.Number):
-        producer = tc.use(Producer)
-        op = tc.Op.Post(lambda txn, quantity: producer.buy(quantity=quantity))
+        wholesaler = tc.use(Wholesaler)
+        op = tc.Op.Post(lambda txn, quantity: wholesaler.buy(quantity=quantity))
         return self.grant(SCOPE, op, quantity=quantity)
 
 
 class InteractionTests(unittest.TestCase):
     def testWorkflow(self):
-        host = start_host("test_yc_demo", [Producer, Wholesaler])
+        host = start_host("test_yc_demo", [Wholesaler, Retailer])
 
-        actual = host.get("/app/producer/inventory")
+        actual = host.get("/app/wholesaler/inventory")
         self.assertEqual(IN_STOCK, actual)
 
         with self.assertRaises(tc.error.Unauthorized):
-            host.post("/app/wholesaler/buy", {"quantity": 10})
+            host.post("/app/retailer/buy", {"quantity": 10})
 
-        host.put("/app/producer/install", "http://127.0.0.1:8702" + tc.uri(Wholesaler), ["buy"])
+        host.put("/app/wholesaler/install", "http://127.0.0.1:8702" + tc.uri(Retailer), ["buy"])
 
-        host.post("/app/wholesaler/buy", {"quantity": 10})
-        self.assertEqual(90, host.get("/app/producer/inventory"))
+        host.post("/app/retailer/buy", {"quantity": 10})
+        self.assertEqual(90, host.get("/app/wholesaler/inventory"))
 
 
 if __name__ == "__main__":
