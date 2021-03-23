@@ -2,6 +2,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use bytes::Bytes;
 use destream::de::FromStream;
 use futures::{future, stream};
 use structopt::StructOpt;
@@ -108,8 +109,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .await
                 .expect(&format!("read from {:?}", &path));
 
-            let mut decoder =
-                destream_json::de::Decoder::from_stream(stream::once(future::ready(Ok(config))));
+            let mut decoder = destream_json::de::Decoder::from_stream(stream::once(future::ready(
+                Ok(Bytes::from(config)),
+            )));
 
             let cluster = match InstanceClass::from_stream((), &mut decoder).await {
                 Ok(class) => {

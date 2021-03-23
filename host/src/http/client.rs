@@ -92,7 +92,7 @@ impl crate::gateway::Client for Client {
             .await?;
 
         if response.status().is_success() {
-            destream_json::try_decode(txn, response.into_body().map_ok(|bytes| bytes.to_vec()))
+            destream_json::try_decode(txn, response.into_body())
                 .map_err(|e| {
                     TCError::bad_request(format!("error decoding response from {}", link), e)
                 })
@@ -149,7 +149,7 @@ impl crate::gateway::Client for Client {
             .await?;
 
         if response.status().is_success() {
-            destream_json::try_decode(txn, response.into_body().map_ok(|bytes| bytes.to_vec()))
+            destream_json::try_decode(txn, response.into_body())
                 .map_err(|e| {
                     TCError::bad_request(format!("error decoding response from {}", link), e)
                 })

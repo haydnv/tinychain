@@ -3,7 +3,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::{future, stream, StreamExt, TryFutureExt, TryStreamExt};
+use bytes::Bytes;
+use futures::{future, stream, StreamExt, TryFutureExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response};
 use log::debug;
@@ -44,7 +45,7 @@ impl HTTPServer {
             Ok(state) => match destream_json::encode(state.into_view(txn)) {
                 Ok(response) => {
                     let mut response = Response::new(Body::wrap_stream(
-                        response.chain(stream::once(future::ready(Ok(b"\n".to_vec())))),
+                        response.chain(stream::once(future::ready(Ok(Bytes::from_static(b"\n"))))),
                     ));
 
                     response
@@ -168,7 +169,7 @@ impl crate::gateway::Server for HTTPServer {
 }
 
 async fn destream_body(body: hyper::Body, txn: Txn) -> TCResult<State> {
-    destream_json::try_decode(txn, body.map_ok(|bytes| bytes.to_vec()))
+    destream_json::try_decode(txn, body)
         .map_err(|e| TCError::bad_request("error deserializing HTTP request body", e))
         .await
 }
